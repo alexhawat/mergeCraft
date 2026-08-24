@@ -114,6 +114,19 @@ def has_credentials_for_slug(slug: str) -> bool:
     except ValueError:
         return False
 
+    from mergecraft.config.runtime_provider_registry import (
+        _legacy_nous_api_key_present,
+        indexed_credential_for_entry,
+        lookup_registry_entry,
+        warn_legacy_nous_api_key_once,
+    )
+    from mergecraft.config.settings import load_repo_settings
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    entry = lookup_registry_entry(settings, provider)
+    if entry is not None and indexed_credential_for_entry(entry):
+        return True
+
     if provider == "anthropic":
         return _has_claude_code_auth()
     if provider == "openai":
@@ -127,27 +140,9 @@ def has_credentials_for_slug(slug: str) -> bool:
     if provider == "vertex":
         return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
 
-    from mergecraft.config.runtime_provider_registry import (
-        _indexed_credential_for_entry,
-        lookup_registry_entry,
-    )
-    from mergecraft.config.settings import load_repo_settings
-
-    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
-    entry = lookup_registry_entry(settings, provider)
-    if entry is not None:
-        if _indexed_credential_for_entry(entry):
-            return True
-        if provider == "nous":
-            from mergecraft.config.runtime_provider_registry import (
-                _legacy_nous_api_key_present,
-                warn_legacy_nous_api_key_once,
-            )
-
-            if _legacy_nous_api_key_present():
-                warn_legacy_nous_api_key_once()
-                return True
-        return False
+    if provider == "nous" and _legacy_nous_api_key_present():
+        warn_legacy_nous_api_key_once()
+        return True
     return False
 
 
@@ -1356,37 +1351,54 @@ def resolve_runtime_agent(
         return agents["claude"] if is_vertex_anthropic_id(model) else agents["opencode"]
 
     if model:
+        from mergecraft.config.runtime_provider_registry import (
+            indexed_credential_for_entry,
+            lookup_registry_entry,
+        )
+        from mergecraft.config.settings import load_repo_settings
+
         try:
             provider = get_model_provider(model)
         except ValueError:
             provider = None
 
+        resolved_settings = settings or load_repo_settings(
+            root=Path.cwd(), load_learnings_files=False
+        )
+
         if provider == "openai":
             if _has_codex_subscription_auth() or _has_openai_api_key_auth():
                 return agents["codex"]
+            openai_entry = lookup_registry_entry(resolved_settings, provider)
+            if openai_entry is not None and indexed_credential_for_entry(openai_entry):
+                return resolve_agent(openai_entry.harness)
             _fail_loud_for_openai(model=model)
 
         if provider == "google":
             if _has_gemini_auth():
                 return agents["gemini"]
+            google_entry = lookup_registry_entry(resolved_settings, provider)
+            if google_entry is not None and indexed_credential_for_entry(google_entry):
+                return resolve_agent(google_entry.harness)
             _fail_loud_for_google(model=model)
 
         if provider == "cursor":
             if _has_cursor_auth():
                 return agents["cursor"]
+            cursor_entry = lookup_registry_entry(resolved_settings, provider)
+            if cursor_entry is not None and indexed_credential_for_entry(cursor_entry):
+                return resolve_agent(cursor_entry.harness)
             _fail_loud_for_cursor(model=model)
 
-        if provider == "anthropic" and _has_claude_code_auth():
-            return agents["claude"]
+        if provider == "anthropic":
+            if _has_claude_code_auth():
+                return agents["claude"]
+            anthropic_entry = lookup_registry_entry(resolved_settings, provider)
+            if anthropic_entry is not None and indexed_credential_for_entry(anthropic_entry):
+                return resolve_agent(anthropic_entry.harness)
 
-        from mergecraft.config.runtime_provider_registry import lookup_registry_entry
-        from mergecraft.config.settings import load_repo_settings
-
-        resolved_settings = settings or load_repo_settings(
-            root=Path.cwd(), load_learnings_files=False
-        )
         entry = lookup_registry_entry(resolved_settings, provider) if provider else None
-        if entry is not None:
+        if entry is not None and indexed_credential_for_entry(entry):
             return resolve_agent(entry.harness)
 
         if provider is not None:

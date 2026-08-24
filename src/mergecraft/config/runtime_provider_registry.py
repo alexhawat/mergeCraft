@@ -90,10 +90,12 @@ def _credential_suffixes_for_entry(entry: ProviderRegistryEntry) -> tuple[str, .
             return _VERTEX_CLOUD_SUFFIXES
         return _BEDROCK_CLOUD_SUFFIXES
     suffix = _AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
+    if suffix != "API_KEY":
+        return ("API_KEY", suffix)
     return (suffix,)
 
 
-def _indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
+def indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
     """Return the first indexed credential value present for *entry*."""
     for suffix in _credential_suffixes_for_entry(entry):
         value = _read_env_value(indexed_env_key(entry.env_index, suffix))
@@ -101,6 +103,11 @@ def _indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
             return value
     workflow_key = f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{entry.env_index}"
     return _read_env_value(workflow_key)
+
+
+def _indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
+    """Backward-compatible alias for :func:`indexed_credential_for_entry`."""
+    return indexed_credential_for_entry(entry)
 
 
 def has_registry_credentials(
@@ -193,6 +200,7 @@ __all__ = [
     "SEED_PROVIDER_URLS",
     "has_registry_credentials",
     "indexed_api_key_for_entry",
+    "indexed_credential_for_entry",
     "indexed_env_key",
     "infer_harness_for_slug",
     "lookup_registry_entry",

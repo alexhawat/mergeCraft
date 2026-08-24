@@ -72,9 +72,7 @@ VERTEX_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("GOOGLE_CLOUD_PROJECT", "VERTEX_LO
 
 STRUCTURE_KEYS_IN_ENV: frozenset[str] = frozenset({"harness", "envIndex", "modelChain", "authKind"})
 
-ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset(
-    {NOUS_BASE_URL_ENV, *VERTEX_LEGACY_CONFIG_KEYS, *BEDROCK_LEGACY_CONFIG_KEYS}
-)
+ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset({NOUS_BASE_URL_ENV})
 
 CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
     "api_key",
@@ -1057,10 +1055,8 @@ def apply_provider_migration(
             label = str(provider_entry.get("label", "")).lower()
             if label == "nous":
                 keys_to_remove.add(NOUS_BASE_URL_ENV)
-            if label == "vertex":
-                keys_to_remove.update(VERTEX_LEGACY_CONFIG_KEYS)
-            if label == "bedrock":
-                keys_to_remove.update(BEDROCK_LEGACY_CONFIG_KEYS)
+            if label == "vertex" and provider_entry.get("region"):
+                keys_to_remove.add("VERTEX_LOCATION")
         if keys_to_remove and env_path.is_file():
             lines = env_path.read_text(encoding="utf-8").splitlines()
             kept = [
