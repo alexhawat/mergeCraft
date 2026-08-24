@@ -1,15 +1,15 @@
-# Test plan — open-issues-sweep-2026-08-24-a (AA–AD GREEN + AE #459 RED)
+# Test plan — open-issues-sweep-2026-08-24-a (AA–AE GREEN + AF #460 RED)
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-24-a-analyzers-ci-wave-plan.md`
 Worktree: `/Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a`
 Branch: `wave/open-issues-sweep-2026-08-24-a`
-Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466), [#459](https://github.com/alexhawat/mergeCraft/issues/459)
+Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466), [#459](https://github.com/alexhawat/mergeCraft/issues/459), [#460](https://github.com/alexhawat/mergeCraft/issues/460)
 
-Authoring: **AA–AD GREEN**. **AE RED** (this update). Implementation: AE impl (D6, reporting only). AF–AH not authored here.
+Authoring: **AA–AE GREEN**. **AF RED** (this update). Implementation: AF impl (D7). AG–AH not authored here.
 
 ## xfail schedule
 
-None. AE contracts are the next impl wave; tests are **plain FAIL** until D6 lands. Do not `xfail` (would hide RED).
+None. AF contracts are the next impl wave; tests are **plain FAIL** until D7 lands. Do not `xfail` (would hide RED).
 
 ## Contract matrix
 
@@ -53,6 +53,18 @@ None. AE contracts are the next impl wave; tests are **plain FAIL** until D6 lan
 | AE459j | Packet has one `name=analyzers` deterministic check with `status=unavailable` | integration | error — packet | `test_packet_states_skipped_catalog_as_unavailable_not_clean` |
 | AE459k | Packet clean scan does not mark catalog unavailable | integration | happy — contrast | `test_packet_clean_scan_does_not_mark_catalog_unavailable` |
 
+| AF460a | `build_run_packet` includes agent findings; `decide_approval(packet)` is `failure` for agent Critical/Major | unit | happy — agent blocker | `tests/agents/test_approval_gate_agent_findings_460.py::test_packet_from_run_carries_agent_blocker_into_decide_approval` |
+| AF460b | Packet `decision.action` is `request_changes` when the agent raised a blocker | unit | happy — packet action | `test_packet_request_changes_for_agent_blocker` |
+| AF460c | Packet unions agent + analyzer findings; CI not required | unit | happy — union | `test_packet_unions_agent_and_analyzer_findings` |
+| AF460d | Trusted + succeeded + empty findings stays `neutral` (not silent success) | unit | pin — empty-list guard | `test_empty_findings_stay_neutral_not_success` |
+| AF460e | Untrusted tier never `success` even with an agent Minor | unit | pin — untrusted guard | `test_untrusted_tier_never_succeeds_even_with_agent_minor` |
+| AF460f | `report_status_checks` posts `mergecraft-approval` `failure` for agent Critical/Major | functional | happy — check-run | `tests/utils/test_approval_check_agent_findings_460.py::test_agent_blocker_makes_approval_check_failure` |
+| AF460g | Packet `request_changes` and check `failure` agree | integration | happy — match | `test_packet_request_changes_matches_approval_check` |
+| AF460h | Empty analyzer list + agent Major still fails the check (not findings=0 freeze) | integration | error — #460 log shape | `test_gate_reads_agent_findings_when_analyzer_list_is_empty` |
+| AF460i | Analyzer Major still fails the gate | integration | pin — analyzer path | `test_analyzer_major_still_fails_the_gate` |
+| AF460j | Empty findings do not silently succeed on the check | functional | pin — empty-list guard | `test_empty_findings_do_not_silently_succeed` |
+| AF460k | Untrusted check never `success` | functional | pin — untrusted guard | `test_untrusted_tier_does_not_silently_succeed` |
+
 Sibling: empty stdout still raises for other JSON-object parsers (`cargo-audit`, `knip`, `jscpd`, `bundler-audit`) in `tests/analyzers/parsers/test_auto_enabled_native.py::test_json_object_parser_raises_on_empty_stdout`. Non-empty garbage still raises for bandit there.
 
 ## Notes for the impl wave (D3)
@@ -94,17 +106,30 @@ Re-repro (2026-08-24): self-review log on PR #457 is `analyzers: ran=False tools
 - **MCP:** `run_analyzers` `reason` and the catalog log line must say unavailable. Do not present `findings=0` as the glanceable signal.
 - **Do not** grant `trusted` on `pull_request_target`. Do not run catalog tools in the privileged Action job. Participation is #464 / AG (CI SARIF). Do not change the approval-gate conclusion contract (that is #460 / AF).
 
-## How to run (AE: expect FAIL until impl)
+
+## Notes for the impl wave (D7)
+
+Re-repro (2026-08-24): `report_status_checks` loads `_load_structural_findings` from `tool_state.analyzer_run.findings` only. With `agent_findings` holding a Critical Finding dump and an empty skipped catalog, the approval check is `neutral` (`findings=0`). `build_run_packet` uses the same loader, so `packet.findings` is empty and `decision.verdict` is `neutral` with `action=block` (schema-failure default), not `request_changes`.
+
+`decide_approval(packet)` already returns `failure` when the packet *already contains* agent Critical/Major findings. The gap is assembling that packet (and the check) from the findings the review produced.
+
+- **Consume review findings:** agent (`tool_state.agent_findings`) + analyzer (`analyzer_run.findings`). Prefer `decide_approval` on the `MergeEvidencePacket` already built in `agents/gates.py` / `build_run_packet`.
+- **Wire the check:** `mergecraft-approval` `failure` when the agent raised Critical or Major, even if the catalog did not run.
+- **Match the packet:** `decision.verdict=failure` and `decision.action=request_changes` must agree with the check conclusion.
+- **Guards stay:** empty findings on trusted → `neutral` (not `success`). Untrusted → never `success`.
+- **Do not** ingest CI SARIF here (AG #464 / D8). Do not diagnose 422 inline comments or dual-verdict / `semantic_rejection`.
+
+## How to run (AF: expect FAIL until impl)
 
 ```bash
 cd /Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/analyzers/test_skipped_catalog_reporting_459.py tests/utils/test_skipped_catalog_surfaces_459.py -q
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/agents/test_approval_gate_agent_findings_460.py tests/utils/test_approval_check_agent_findings_460.py -q
 make lint
 make typecheck
 ```
 
-Expect RED until D6 (`catalog_scan_status` missing; check-run/packet have no catalog-level unavailable). Trust-tier pin and clean-scan contrast (no `name=analyzers` unavailable row today) already pass.
+Expect RED until D7 (agent findings never reach `_load_structural_findings` / the packet). Empty-list and untrusted pins, and the analyzer-Major pin, already pass.
 
 ## Out of scope
 
-AF #460, AG #464, AH #485. Product code under `src/mergecraft/`. Weakening `pull_request_target` trust. Running analyzers inside the privileged Action job. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`).
+AG #464, AH #485. Product code under `src/mergecraft/`. Weakening `pull_request_target` trust. Running analyzers inside the privileged Action job. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`). 422 / dual-verdict anomalies.
