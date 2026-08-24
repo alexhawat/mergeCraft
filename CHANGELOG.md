@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `validate_http_url` rejects whitespace and control characters anywhere in a
+  provider URL, not just at the ends. A stored URL is written verbatim into the
+  consumer workflow YAML, so an interior newline could open a new key or step
+  there. `workflow provider add` also re-validates a stored row before wiring it
 - `mergecraft workflow` resolves a relative `--workflow` against `--cwd` on every
   subcommand. The registry config was scoped by `--cwd` while the workflow path
   stayed against the process working directory, so invoking from outside the
