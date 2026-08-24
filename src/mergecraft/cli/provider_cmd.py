@@ -446,9 +446,10 @@ def _persist_indexed_credentials(
     scope: str,
     credential_map: Mapping[str, str],
 ) -> None:
-    """Write ``LLM_PROVIDER_<N>`` label plus indexed credential suffixes to ``.env``."""
+    """Write ``LLM_PROVIDER_<N>`` label plus indexed credential suffixes."""
     from mergecraft.cli.auth_cmd import (
         _resolve_auth_target,
+        _set_gh_secret,
         _single_line_credential,
         _write_env_value,
     )
@@ -456,22 +457,53 @@ def _persist_indexed_credentials(
     env_index = int(entry["envIndex"])
     label = str(entry["label"])
     target = _resolve_auth_target(scope)
-    if not target.local:
-        cli_bail("indexed provider auth requires --scope local or --scope both")
 
     env_path = _env_path()
     label_key = _indexed_label_key(env_index)
-    if not _write_env_value(env_path, label_key, label):
-        cli_bail(f"could not write {label_key} to {env_path}")
+    any_local_written = False
 
-    for suffix, raw_value in credential_map.items():
-        key = f"LLM_PROVIDER_{env_index}_{suffix}"
-        value = _single_line_credential(name=key, value=raw_value)
-        if not _write_env_value(env_path, key, value):
-            cli_bail(f"could not write {key} to {env_path}")
+    if target.local:
+        if not _write_env_value(env_path, label_key, label):
+            cli_bail(f"could not write {label_key} to {env_path}")
+        for suffix, raw_value in credential_map.items():
+            key = f"LLM_PROVIDER_{env_index}_{suffix}"
+            value = _single_line_credential(name=key, value=raw_value)
+            if not _write_env_value(env_path, key, value):
+                cli_bail(f"could not write {key} to {env_path}")
+        landed = ", ".join([label_key, *credential_map.keys()])
+        console.print(f"[green]wrote {landed}[/green] to {env_path}")
+        any_local_written = True
 
-    landed = ", ".join([label_key, *credential_map.keys()])
-    console.print(f"[green]wrote {landed}[/green] to {env_path}")
+    if target.github is not None:
+        wrote_any_github = False
+        for suffix, raw_value in credential_map.items():
+            key = f"LLM_PROVIDER_{env_index}_{suffix}"
+            console.print(f"saving [cyan]{key}[/cyan] via gh secret set...")
+            if _set_gh_secret(name=key, value=raw_value, repo_slug=target.github.repo_slug):
+                console.print(f"[green]saved {key}[/green] to GitHub Actions secrets")
+                wrote_any_github = True
+            elif not target.local:
+                secrets_url = (
+                    f"https://github.com/{target.github.repo_slug}/settings/secrets/actions"
+                )
+                cli_bail(f"could not set secret {key!r} — set it manually at:\n  {secrets_url}")
+            else:
+                secrets_url = (
+                    f"https://github.com/{target.github.repo_slug}/settings/secrets/actions"
+                )
+                console.print(
+                    f"[yellow]warning:[/yellow] gh secret set failed for {key!r} — "
+                    f"set it manually at:\n  {secrets_url}"
+                )
+        if not wrote_any_github and not any_local_written:
+            cli_bail(
+                "nothing was written — both local and github scopes failed. "
+                "retry with --scope local or --scope github to isolate the failure."
+            )
+        return
+
+    if not any_local_written:
+        cli_bail("nothing was written — could not save indexed credentials locally.")
 
 
 def _cancelable_getpass(prompt: str) -> str | None:
@@ -901,13 +933,13 @@ def plan_provider_migration(
                 region_value = env_map.get(region_key, "").strip()
                 if region_value:
                     entry["region"] = region_value
-                    entry[region_key] = region_value
                     break
         if label == "vertex":
             for config_key in VERTEX_LEGACY_CONFIG_KEYS:
                 config_value = env_map.get(config_key, "").strip()
-                if config_value:
-                    entry[config_key] = config_value
+                if config_value and config_key == "VERTEX_LOCATION":
+                    entry["region"] = config_value
+                    break
         providers_out.append(entry)
         label_to_entry[label] = entry
         next_index = _next_migration_index(tuple(label_to_entry.values()), next_index + 1)
@@ -1105,7 +1137,13 @@ def persist_legacy_indexed_auth(
     entry = registry.lookup(label)
     if entry is None:
         return False
-    run_provider_auth(entry, scope, credential_map=credential_map)
+    mapped = dict(credential_map)
+    if "API_KEY" in mapped and len(mapped) == 1:
+        auth_kind = _entry_auth_kind(entry)
+        suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
+        if suffix != "API_KEY":
+            mapped = {suffix: mapped["API_KEY"]}
+    run_provider_auth(entry, scope, credential_map=mapped)
     return True
 
 

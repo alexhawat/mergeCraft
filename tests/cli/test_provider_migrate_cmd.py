@@ -21,7 +21,6 @@ from tests.cli.support_provider_registry import (
     LEGACY_API_KEY_MIGRATIONS,
     LEGACY_STRUCTURE_IN_ENV,
     NOUS_BASE_URL,
-    VERTEX_LEGACY_CONFIG_KEYS,
     VERTEX_LEGACY_SECRET_KEYS,
     assert_output_never_contains_secret,
     config_text,
@@ -449,7 +448,7 @@ def test_provider_migrate_vertex_maps_credentials_under_one_index(
     assert indexed_env_key(env_index, "API_KEY") not in env
 
     cfg_text = config_text(tmp_path)
-    assert any(key.lower() in cfg_text.lower() for key in VERTEX_LEGACY_CONFIG_KEYS)
+    assert vertex.get("region") == "us-central1" or "us-central1" in cfg_text
 
 
 # ---------------------------------------------------------------------------

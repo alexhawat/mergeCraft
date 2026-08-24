@@ -128,7 +128,7 @@ def has_credentials_for_slug(slug: str) -> bool:
         return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
 
     from mergecraft.config.runtime_provider_registry import (
-        indexed_api_key_for_entry,
+        _indexed_credential_for_entry,
         lookup_registry_entry,
     )
     from mergecraft.config.settings import load_repo_settings
@@ -136,7 +136,7 @@ def has_credentials_for_slug(slug: str) -> bool:
     settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
     entry = lookup_registry_entry(settings, provider)
     if entry is not None:
-        if indexed_api_key_for_entry(entry):
+        if _indexed_credential_for_entry(entry):
             return True
         if provider == "nous":
             from mergecraft.config.runtime_provider_registry import (

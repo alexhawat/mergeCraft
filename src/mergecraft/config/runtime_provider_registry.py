@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import warnings
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mergecraft.config.provider_registry import BUILTIN_HARNESS_DEFAULTS
@@ -15,19 +14,30 @@ if TYPE_CHECKING:
 _LEGACY_NOUS_API_KEY = "NOUS_API_KEY"
 _LEGACY_NOUS_WARNED = False
 
+_AUTH_KIND_API_KEY = "api_key"
+_AUTH_KIND_OAUTH = "oauth"
+_AUTH_KIND_DEVICE_CODE = "device_code"
+_AUTH_KIND_CLOUD_CHAIN = "cloud_chain"
+
+_AUTH_KIND_PRIMARY_SUFFIX: dict[str, str] = {
+    _AUTH_KIND_API_KEY: "API_KEY",
+    _AUTH_KIND_OAUTH: "CLAUDE_CODE_OAUTH_TOKEN",
+    _AUTH_KIND_DEVICE_CODE: "CODEX_AUTH_JSON",
+}
+
+_BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+)
+
+_VERTEX_CLOUD_SUFFIXES: tuple[str, ...] = ("GOOGLE_APPLICATION_CREDENTIALS",)
+
 # Seed-only default URLs for ``provider seed`` — not used at runtime (BE / D4).
 SEED_PROVIDER_URLS: dict[str, str] = {
     "nous": "https://inference-api.nousresearch.com/v1",
     "tokenhub": "https://tokenhub-intl.tencentcloudmaas.com/v1",
     "minimax": "https://api.minimax.io/v1",
 }
-
-
-def _env_path() -> Path:
-    configured = os.environ.get("MERGECRAFT_ENV")
-    if configured:
-        return Path(configured).resolve()
-    return Path.cwd() / ".env"
 
 
 def _read_env_value(key: str) -> str | None:
@@ -70,6 +80,29 @@ def indexed_api_key_for_entry(entry: ProviderRegistryEntry) -> str | None:
     return _read_env_value(indexed_env_key(entry.env_index, "API_KEY"))
 
 
+def _credential_suffixes_for_entry(entry: ProviderRegistryEntry) -> tuple[str, ...]:
+    auth_kind = (entry.auth_kind or _AUTH_KIND_API_KEY).strip().lower()
+    if auth_kind == _AUTH_KIND_CLOUD_CHAIN:
+        label = entry.label.strip().lower()
+        if label == "bedrock":
+            return _BEDROCK_CLOUD_SUFFIXES
+        if label == "vertex":
+            return _VERTEX_CLOUD_SUFFIXES
+        return _BEDROCK_CLOUD_SUFFIXES
+    suffix = _AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
+    return (suffix,)
+
+
+def _indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
+    """Return the first indexed credential value present for *entry*."""
+    for suffix in _credential_suffixes_for_entry(entry):
+        value = _read_env_value(indexed_env_key(entry.env_index, suffix))
+        if value:
+            return value
+    workflow_key = f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{entry.env_index}"
+    return _read_env_value(workflow_key)
+
+
 def has_registry_credentials(
     settings: RepoSettings | None,
     provider: str,
@@ -78,7 +111,7 @@ def has_registry_credentials(
     entry = lookup_registry_entry(settings, provider)
     if entry is None:
         return False
-    if indexed_api_key_for_entry(entry):
+    if _indexed_credential_for_entry(entry):
         return True
     if provider == "nous":
         return _legacy_nous_api_key_present()
@@ -117,6 +150,8 @@ def resolve_registry_gateway_endpoint(
     if entry is None or not entry.url:
         return None
     api_key = indexed_api_key_for_entry(entry)
+    if not api_key:
+        api_key = _indexed_credential_for_entry(entry)
     if not api_key and provider_id == "nous":
         api_key = _read_env_value(_LEGACY_NOUS_API_KEY)
         if api_key:
