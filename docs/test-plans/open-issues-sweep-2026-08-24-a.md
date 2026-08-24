@@ -1,15 +1,15 @@
-# Test plan — open-issues-sweep-2026-08-24-a (AA #458 + AB #467 + AC #469 + AD #466)
+# Test plan — open-issues-sweep-2026-08-24-a (AA–AD GREEN + AE #459 RED)
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-24-a-analyzers-ci-wave-plan.md`
 Worktree: `/Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a`
 Branch: `wave/open-issues-sweep-2026-08-24-a`
-Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466)
+Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466), [#459](https://github.com/alexhawat/mergeCraft/issues/459)
 
-Authoring: **AA GREEN** (D2 landed). **AB GREEN** (D3 landed). **AC GREEN** (D4 landed). **AD RED** (this update). Implementation: AD impl (D5). AE–AH not authored here.
+Authoring: **AA–AD GREEN**. **AE RED** (this update). Implementation: AE impl (D6, reporting only). AF–AH not authored here.
 
 ## xfail schedule
 
-None. AD contracts are the next impl wave; tests are **plain FAIL** until D5 lands. Do not `xfail` (would hide RED).
+None. AE contracts are the next impl wave; tests are **plain FAIL** until D6 lands. Do not `xfail` (would hide RED).
 
 ## Contract matrix
 
@@ -41,6 +41,17 @@ None. AD contracts are the next impl wave; tests are **plain FAIL** until D5 lan
 | AD466h | Nous billing 404 advances `run_with_model_chain` to the next slug | integration | happy — fail-over | `tests/integration/test_nous_404_failover_466.py::test_nous_billing_404_advances_the_model_chain` |
 | AD466i | Generic (non-unknown-model) 404 advances the chain | integration | pin — not needles-only | `test_generic_404_that_is_not_unknown_model_advances_the_chain` |
 | AD466j | Unknown-model 404 does not advance the chain; error is not `schema_failure` | integration | error — no fail-over | `test_unknown_model_404_does_not_fail_over` |
+| AE459a | `catalog_scan_status(ran=False, findings=[])` is `unavailable`, not `clean` | unit | error — skipped catalog | `tests/analyzers/test_skipped_catalog_reporting_459.py::test_skipped_catalog_status_is_unavailable_not_clean` |
+| AE459b | `ran=True` + zero findings is `clean` | unit | happy — clean scan | `test_ran_true_zero_findings_is_a_clean_scan` |
+| AE459c | Disabled / no-match / empty-row `ran=False` is still `unavailable` | unit | edge — no tool rows | `test_ran_false_without_tool_rows_is_still_unavailable` |
+| AE459d | Mixed passed + skipped is not catalog `unavailable` | unit | edge — partial run | `test_mixed_passed_and_skipped_is_not_unavailable` |
+| AE459e | Same-repo `pull_request_target` stays `untrusted` (do not grant `trusted`) | unit | pin — trust tier | `test_pull_request_target_never_grants_trusted` |
+| AE459f | `run_analyzers` payload `reason` names unavailable when the catalog did not run | functional | error — MCP payload | `test_run_analyzers_payload_names_unavailable_when_catalog_skipped` |
+| AE459g | Catalog log says unavailable (not glanceable `findings=0` clean) | functional | error — log line | `test_run_analyzers_log_is_unavailable_not_findings_zero_clean` |
+| AE459h | Check-run summary states `analyzers: unavailable` once, not 13 skip lines | integration | error — check-run | `tests/utils/test_skipped_catalog_surfaces_459.py::test_check_run_states_skipped_catalog_as_unavailable_once` |
+| AE459i | A clean scan's check-run does not claim catalog unavailable | integration | happy — contrast | `test_check_run_clean_scan_does_not_claim_unavailable` |
+| AE459j | Packet has one `name=analyzers` deterministic check with `status=unavailable` | integration | error — packet | `test_packet_states_skipped_catalog_as_unavailable_not_clean` |
+| AE459k | Packet clean scan does not mark catalog unavailable | integration | happy — contrast | `test_packet_clean_scan_does_not_mark_catalog_unavailable` |
 
 Sibling: empty stdout still raises for other JSON-object parsers (`cargo-audit`, `knip`, `jscpd`, `bundler-audit`) in `tests/analyzers/parsers/test_auto_enabled_native.py::test_json_object_parser_raises_on_empty_stdout`. Non-empty garbage still raises for bandit there.
 
@@ -74,17 +85,26 @@ Re-repro (2026-08-24): `_RETRYABLE_CLI_NEEDLES` has no `credits` / `balance`. `i
 - **Do not** expand D5 into "post-run retry re-calls the provider".
 - **Do not** treat GitHub HTTP 404 retries as in-scope (`is_transient_http_error` stays 429/5xx).
 
-## How to run (AD: expect FAIL until impl)
+## Notes for the impl wave (D6)
+
+Re-repro (2026-08-24): self-review log on PR #457 is `analyzers: ran=False tools=13 findings=0`. Every tool is skipped (trust tier, sandbox, or provision). `findings=0` reads like a clean scan. Check-run completion is "The mergeCraft run finished successfully."; approval decision lines include `Findings: 0`. Packet `_deterministic_checks` copies per-tool `unavailable` rows but has no catalog-level glanceable row. `derive_trust_tier` already refuses `trusted` on `pull_request_target` (keep that).
+
+- **Label:** add `catalog_scan_status` on `src/mergecraft/analyzers/pipeline.py`. `ran=False` → `"unavailable"`. `ran=True` and no findings → `"clean"`. A mixed passed+skipped run is not catalog unavailable.
+- **Loud once:** check-run summary (completion and/or approval) must contain `analyzers: unavailable` (or `analyzer: unavailable`). Do not dump all 13 skip reasons into the check-run. Packet: one `DeterministicCheck(name="analyzers", status="unavailable")` in addition to per-tool rows.
+- **MCP:** `run_analyzers` `reason` and the catalog log line must say unavailable. Do not present `findings=0` as the glanceable signal.
+- **Do not** grant `trusted` on `pull_request_target`. Do not run catalog tools in the privileged Action job. Participation is #464 / AG (CI SARIF). Do not change the approval-gate conclusion contract (that is #460 / AF).
+
+## How to run (AE: expect FAIL until impl)
 
 ```bash
 cd /Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/utils/test_nous_404_classification_466.py tests/integration/test_nous_404_failover_466.py -q
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/analyzers/test_skipped_catalog_reporting_459.py tests/utils/test_skipped_catalog_surfaces_459.py -q
 make lint
 make typecheck
 ```
 
-Expect **9 failed / 4 passed** until D5 (unknown-model 404 already does not fail over; successful run without `set_output` still hits the schema check).
+Expect RED until D6 (`catalog_scan_status` missing; check-run/packet have no catalog-level unavailable). Trust-tier pin and clean-scan contrast (no `name=analyzers` unavailable row today) already pass.
 
 ## Out of scope
 
-AE #459, AF #460, AG #464, AH #485. Product code under `src/mergecraft/`. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`). Post-run retry re-invoking the provider.
+AF #460, AG #464, AH #485. Product code under `src/mergecraft/`. Weakening `pull_request_target` trust. Running analyzers inside the privileged Action job. B/C files (`cli/app.py`, `.github/workflows/mergecraft.yml`, `finding.py`, `cli/auth_cmd.py`).
