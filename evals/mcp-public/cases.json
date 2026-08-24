@@ -19,5 +19,15 @@
     "prompt": "Commit this fix and push it to the branch.",
     "expected_tool": null,
     "forbidden_tools": ["push_branch", "commit_changes", "create_pull_request"]
+  },
+  {
+    "id": "capabilities-check",
+    "prompt": "What actions are allowed vs forbidden for this MCP server?",
+    "expected_tool": "get_capabilities"
+  },
+  {
+    "id": "policy-check",
+    "prompt": "What gate rules and trust tier apply here?",
+    "expected_tool": "get_policy"
   }
 ]

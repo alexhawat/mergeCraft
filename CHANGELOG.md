@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Generated MCP Registry ``server.json`` at the repo root plus ``docs/mcp-tools.md``
   from public ``ToolSpec`` schemas; ``make mcp-server-json-check`` validates schema
   and drift in ``CI_STEPS`` (live registry publish remains operator G3)
+- Offline public MCP tool-selection eval corpus under ``evals/mcp-public/`` with
+  fixture prompts and deterministic scorer ``mergecraft.evals.mcp_public`` (no live
+  LLM in ``make test``)
 - CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
   Major/Critical (not clamped to Minor); a listing error on one workflow run
   does not skip later runs; a Major/Critical finding is kept over a less
