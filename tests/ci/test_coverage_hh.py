@@ -139,14 +139,13 @@ def test_repo_coverage_report_passes_floor_check_at_target() -> None:
     """W16 must produce ``coverage.json`` with global line ≥ the bumped floor."""
     report = REPO_ROOT / "coverage.json"
     if not report.is_file():
-        pytest.skip("coverage.json missing — run make coverage-gate after W16")
+        pytest.skip("coverage.json missing — run make coverage-gate first")
     payload = json.loads(report.read_text(encoding="utf-8"))
     measured = float(payload.get("totals", {}).get("percent_covered", 0.0))
-    if measured < HH431_TARGET_FAIL_UNDER:
-        pytest.skip(
-            f"coverage.json reports {measured:.2f}% — stale or mid-session; "
-            "make coverage-gate runs check_coverage_floors.py on the fresh report"
-        )
+    assert measured >= HH431_TARGET_FAIL_UNDER, (
+        f"coverage.json reports {measured:.2f}% — below floor "
+        f"{HH431_TARGET_FAIL_UNDER:.0f}% (stale or incomplete; run make coverage-gate)"
+    )
     proc = subprocess.run(
         [sys.executable, "scripts/check_coverage_floors.py", str(report)],
         cwd=REPO_ROOT,

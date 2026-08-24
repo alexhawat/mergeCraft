@@ -7,8 +7,6 @@ TH2 measures base coverage without the floor gate so inherited drift is attribut
 
 from __future__ import annotations
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT
 
 
@@ -19,10 +17,6 @@ def _base_worktree_block(script_text: str) -> str:
     return script_text[start:end]
 
 
-@pytest.mark.xfail(
-    reason="green after TH2: base tree must measure coverage without floor pre-check",
-    strict=False,
-)
 def test_delta_wrapper_base_measures_without_floor_gate() -> None:
     """The base-side subshell must not run ``make coverage-gate`` before the delta."""
     script_path = REPO_ROOT / "scripts" / "ci_coverage_delta_gate.sh"

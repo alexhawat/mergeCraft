@@ -30,10 +30,12 @@ def _count_executed_tests(combined_output: str) -> int:
     return executed
 
 
-@pytest.mark.xfail(
-    reason="green after TH2: integration marker must execute at least one test",
-    strict=False,
-)
+@pytest.mark.integration
+def test_integration_job_always_runs_smoke() -> None:
+    """Always-executed integration smoke so the PR job never reports zero tests (D9)."""
+    assert (REPO_ROOT / "scripts" / "check_integration_ran.py").is_file()
+
+
 def test_integration_marker_executes_at_least_one_test() -> None:
     """``make test-integration`` must not report zero executed tests (passed + failed == 0)."""
     env = os.environ.copy()
