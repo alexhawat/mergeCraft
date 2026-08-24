@@ -314,4 +314,4 @@ uv run pytest -q tests/cli/test_agents_setmodel_cmd.py  # RED: xfails expected
 
 ## BD RED evidence
 
-- BD test-author wave: pending — 15 collected, 15 xfails expected
+- BD test-author wave: `6618dba3` — 15 collected, 15 xfails; lint+typecheck clean
