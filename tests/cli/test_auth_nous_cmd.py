@@ -126,14 +126,7 @@ def test_auth_nous_prompts_with_getpass_and_writes_secret(
 # ── W1.11 — fails closed when ``gh`` is unauthenticated ─────────────────────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "structural assertion incompatible with click.testing.CliRunner — SystemExit "
-        "is captured into result.exception rather than propagating; the subcommand "
-        "does fail closed, but the W1 test uses pytest.raises(SystemExit) (#276)"
-    ),
-    strict=True,
-)
+@pytest.mark.xfail(reason="TH5", strict=True)
 def test_auth_nous_fails_closed_when_gh_is_unauthenticated(
     monkeypatch: MonkeyPatch,
 ) -> None:

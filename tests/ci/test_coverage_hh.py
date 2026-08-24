@@ -8,6 +8,7 @@ coverage-gate scripts enforce the bumped floor. Measured coverage reaching
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import subprocess
 import sys
@@ -111,6 +112,27 @@ def test_check_coverage_floors_accepts_measured_at_target(
     monkeypatch.setattr(sys, "argv", ["check_coverage_floors", str(report)])
     rc = int(module.main())
     assert rc == 0
+
+
+def test_repo_coverage_report_fails_on_stale_low_coverage(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Stale ``coverage.json`` below the floor must fail the gate — never skip (D8, TH2).
+
+    TH2 removes the ``measured < HH431_TARGET_FAIL_UNDER`` skip from the sibling
+    meta-test; this contract pins the correct behaviour using a ``tmp_path`` report.
+    """
+    report = _coverage_json(tmp_path, 70.0)
+    monkeypatch.setattr(sys, "argv", ["check_coverage_floors", str(report)])
+    module = _load_coverage_floors()
+    rc = int(module.main())
+    assert rc != 0, "stale 70% coverage must fail check_coverage_floors"
+
+    sibling_source = inspect.getsource(test_repo_coverage_report_passes_floor_check_at_target)
+    assert "measured < HH431_TARGET_FAIL_UNDER" not in sibling_source, (
+        "sibling meta-test still skips on stale low coverage — remove skip in TH2 (D8)"
+    )
 
 
 def test_repo_coverage_report_passes_floor_check_at_target() -> None:

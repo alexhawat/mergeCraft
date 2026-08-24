@@ -83,22 +83,23 @@ def test_self_assessment_alone_blocks_auto_merge() -> None:
 
     Concretely, when the packet carries an approving self-assessment and **no**
     other positive evidence (no findings, no deterministic checks passing, no
-    CI check runs passing), the decision function must return a verdict that
-    is not ``auto_merge``.
+    CI check runs passing), the decision function must return ``verdict == neutral``
+    and the gate action must not be ``auto_merge`` (D3 — never ``verdict != auto_merge``).
     """
     packet_mod = import_module("mergecraft.evidence.packet")
     gates_mod = import_module("mergecraft.agents.gates")
+    gate_policy_mod = import_module("mergecraft.evidence.gate_policy")
 
     payload = _packet_with_self_assessment(approved=True, no_findings=True)
+    payload.pop("decision", None)
     packet = packet_mod.MergeEvidencePacket(**payload)
 
-    # The decision function lives in ``mergecraft.agents.gates`` — the
-    # security plan's Batch D lands ``decide_approval`` there (D5). The
-    # outcome is pinned: it must not be ``auto_merge`` for a
-    # self-assessment-only run.
     decision = gates_mod.decide_approval(packet, run_succeeded=True, tier="trusted")
-    verdict = getattr(decision, "verdict", None) or getattr(decision, "value", None)
-    assert verdict != "auto_merge", (
+    assert decision.verdict == "neutral", (
+        "self-assessment-only run must reach neutral verdict per #41 (D3)"
+    )
+    action = gates_mod.decide_action(packet, policy=gate_policy_mod.DEFAULT_GATE_POLICIES)
+    assert str(action) != "auto_merge", (
         "self-assessment-only run reached auto_merge; #41 acceptance criterion violated"
     )
 

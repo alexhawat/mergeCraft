@@ -105,3 +105,67 @@ scope:
     assert effective[0].rule.id == "shared-rule"
     assert effective[0].source_layer == "path"
     assert effective[0].rule.enforcement == "blocking"
+
+
+def test_branch_mismatch_excludes_scoped_rule() -> None:
+    """A rule scoped to ``branch: main`` must not apply on ``feature/foo`` (D5)."""
+    from mergecraft.policy.schema import parse_rule
+    from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
+
+    rule = parse_rule(
+        """
+id: main-only
+owner: platform
+version: 1
+rationale: Main branch guardrail.
+severity: Major
+enforcement: blocking
+scope:
+  org: acme-corp
+  repo: payments-api
+  branch: main
+"""
+    )
+    context = ScopeContext(
+        org="acme-corp",
+        repo="payments-api",
+        branch="feature/token-rotation",
+        path="src/handlers/pay.py",
+        language="python",
+    )
+
+    effective = resolve_effective_rules([rule], context=context)
+
+    assert effective == []
+
+
+def test_language_mismatch_excludes_scoped_rule() -> None:
+    """A rule scoped to ``language: python`` must not apply to ``typescript`` files (D5)."""
+    from mergecraft.policy.schema import parse_rule
+    from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
+
+    rule = parse_rule(
+        """
+id: python-only
+owner: platform
+version: 1
+rationale: Python-only lint policy.
+severity: Minor
+enforcement: advisory
+scope:
+  org: acme-corp
+  repo: payments-api
+  language: python
+"""
+    )
+    context = ScopeContext(
+        org="acme-corp",
+        repo="payments-api",
+        branch="main",
+        path="src/handlers/pay.ts",
+        language="typescript",
+    )
+
+    effective = resolve_effective_rules([rule], context=context)
+
+    assert effective == []

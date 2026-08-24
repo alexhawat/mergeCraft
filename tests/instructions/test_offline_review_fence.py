@@ -107,16 +107,7 @@ def _build_stub_agent(monkeypatch: pytest.MonkeyPatch, capture_path: Path) -> No
 # ── W3.1 — the issue's primary acceptance criterion. ────────────────────────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "W3 stub infrastructure issue: the test's stub agent uses "
-        "name='stub', but run_offline_agent_review calls compute_modes(agent.name, "
-        "...) which requires a real agent id. The test was meant to mock "
-        "compute_modes too, but does not. Deferred to B-Final: patch the "
-        "stub to monkeypatch compute_modes or use a real agent id (#276)."
-    ),
-    strict=True,
-)
+@pytest.mark.xfail(reason="TH5", strict=True)
 def test_injected_pr_body_does_not_change_findings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -250,14 +241,7 @@ def _extract_fenced(prompt: str) -> str:
 # ── W3.6 (continued from `test_prompt_fencing.py`) — full-path stub. ───────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "W3 stub infrastructure issue: see test_injected_pr_body_does_not_change_findings "
-        "for details. The stub agent uses name='stub' which fails in compute_modes(). "
-        "Deferred to B-Final (#276)."
-    ),
-    strict=True,
-)
+@pytest.mark.xfail(reason="TH5", strict=True)
 def test_offline_diff_review_fences_commit_messages_and_patch_headers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
