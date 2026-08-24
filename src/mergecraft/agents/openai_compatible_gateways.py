@@ -333,6 +333,21 @@ def _provider_config_from_env_pair(
     )
 
 
+def _indexed_api_key_env(n: int) -> str | None:
+    """Return the env-var name holding the API key for index *n*, if any.
+
+    ``LLM_PROVIDER_<N>_API_KEY`` wins when both indexed key surfaces are set;
+    otherwise fall back to ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>`` (D16).
+    """
+    llm_key = f"LLM_PROVIDER_{n}_API_KEY"
+    if os.environ.get(llm_key, "").strip():
+        return llm_key
+    workflow_key = f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}"
+    if os.environ.get(workflow_key, "").strip():
+        return workflow_key
+    return None
+
+
 def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
     """Enumerate ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` pairs.
 
@@ -341,38 +356,19 @@ def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
     dropped, never half-emitted. The numeric ordering of indices is
     preserved — gaps are not renumbered.
     """
-    by_index: dict[int, tuple[str, str]] = {}
+    by_index: dict[int, str] = {}
     for key, value in os.environ.items():
         match = INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(key)
         if match is not None:
             n = int(match.group(1))
             stripped = value.strip()
-            if not stripped:
-                continue
-            base_url, api_key = by_index.get(n, ("", ""))
-            by_index[n] = (stripped, api_key)
-            continue
-        match = INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(key)
-        if match is not None:
-            n = int(match.group(1))
-            stripped = value.strip()
-            if not stripped:
-                continue
-            base_url, api_key = by_index.get(n, ("", ""))
-            by_index[n] = (base_url, stripped)
-            continue
-        match = INDEXED_LLM_PROVIDER_API_KEY_RE.match(key)
-        if match is not None:
-            n = int(match.group(1))
-            stripped = value.strip()
-            if not stripped:
-                continue
-            base_url, api_key = by_index.get(n, ("", ""))
-            by_index[n] = (base_url, stripped)
+            if stripped:
+                by_index[n] = stripped
     out: dict[str, ProviderConfig] = {}
     for n in sorted(by_index):
-        base_url, api_key = by_index[n]
-        if not base_url or not api_key:
+        base_url = by_index[n]
+        api_key_env = _indexed_api_key_env(n)
+        if not base_url or api_key_env is None:
             # Partial pair — drop silently.
             continue
         from mergecraft.config.runtime_provider_registry import _provider_id_for_env_index
@@ -381,7 +377,7 @@ def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
         out[provider_id] = _provider_config_from_env_pair(
             provider_id=provider_id,
             base_url=base_url,
-            api_key_env=f"LLM_PROVIDER_{n}_API_KEY",
+            api_key_env=api_key_env,
             extra_options_env=INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT.format(n=n),
         )
     return out

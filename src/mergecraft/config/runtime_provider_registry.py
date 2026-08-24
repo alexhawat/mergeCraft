@@ -327,6 +327,10 @@ def infer_harness_for_slug(
     if builtin is not None:
         return builtin
 
+    legacy_harness = legacy_opencode_harness_for_unregistered_provider(settings, provider)
+    if legacy_harness is not None:
+        return legacy_harness
+
     msg = (
         f"configuration error: provider {provider!r} is not registered — "
         "add it with `mergecraft provider add`"
