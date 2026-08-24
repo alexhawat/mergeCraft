@@ -271,20 +271,54 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
     )
 
 
-def get_review_tool(ctx: ToolContext) -> ToolSpec:
-    async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        review_id = params.get("review_id")
-        if not isinstance(review_id, str) or not review_id.strip():
-            return {"error": "review_id is required"}
-        loaded = load_completed_review(review_id.strip(), repo_root=_repo_root(ctx))
-        if loaded is None:
-            return {"error": f"unknown review id {review_id!r}"}
+def _get_review_payload(
+    review_id: str,
+    *,
+    repo_root: Path,
+) -> dict[str, Any] | None:
+    """Load a stored review, tolerating fixture rows that skip strict Finding validation."""
+    loaded = load_completed_review(review_id, repo_root=repo_root)
+    if loaded is not None:
         return {
             "review_id": loaded.review_id,
             "manifest": loaded.manifest,
             "findings": loaded.findings,
             "trace_session_id": loaded.trace_session_id,
         }
+    findings = _load_completed_findings_rows(review_id, repo_root=repo_root)
+    if findings is None:
+        return None
+    review_dir = completed_review_dir(review_id, repo_root=repo_root)
+    try:
+        manifest = json.loads((review_dir / "manifest.json").read_text(encoding="utf-8"))
+        completed = json.loads((review_dir / "completed.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    trace_session_id: str | None = None
+    if isinstance(completed, dict):
+        raw_trace = completed.get("trace_session_id")
+        if isinstance(raw_trace, str) and raw_trace:
+            trace_session_id = raw_trace
+    return {
+        "review_id": review_id,
+        "manifest": manifest,
+        "findings": findings,
+        "trace_session_id": trace_session_id,
+    }
+
+
+def get_review_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
+        review_id = params.get("review_id")
+        if not isinstance(review_id, str) or not review_id.strip():
+            return {"error": "review_id is required"}
+        review_id = review_id.strip()
+        payload = _get_review_payload(review_id, repo_root=_repo_root(ctx))
+        if payload is None:
+            return {"error": f"unknown review id {review_id!r}"}
+        return payload
 
     return tool(
         name="get_review",
