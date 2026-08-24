@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -103,8 +104,14 @@ def _plan_provider_for_workflow(
     url: str | None,
     harness: str | None,
     persist: bool,
-) -> tuple[dict[str, Any], int]:
-    """Resolve or register a provider; optionally persist config changes."""
+) -> tuple[dict[str, Any], int, Callable[[], None] | None]:
+    """Resolve or register a provider, returning a deferred config write.
+
+    The third element writes the config (and any ``.env`` label) when *persist*
+    is set. It is deliberately not run here: the caller must invoke it only
+    after the workflow file has been written, so a failure partway through
+    cannot leave config pointing at one endpoint and the workflow at another.
+    """
     config_path = _config_path(repo_root)
     data = _load_config_dict(config_path)
     entries = _provider_entries(data)
@@ -133,12 +140,17 @@ def _plan_provider_for_workflow(
             # Carry the validated override onto the row that gets wired and
             # persisted; returning the untouched entry would silently keep the
             # old endpoint after accepting --url.
-            if resolved_url != entry.get("url"):
-                entry["url"] = resolved_url
-                if persist:
-                    data["providers"] = entries
-                    _write_config_dict(config_path, data)
-            return entry, env_index
+            if resolved_url == entry.get("url"):
+                return entry, env_index, None
+            entry["url"] = resolved_url
+            if not persist:
+                return entry, env_index, None
+
+            def _commit_url_change() -> None:
+                data["providers"] = entries
+                _write_config_dict(config_path, data)
+
+            return entry, env_index, _commit_url_change
 
     try:
         resolved_harness = resolve_provider_harness(normalised_label, harness=harness)
@@ -161,12 +173,16 @@ def _plan_provider_for_workflow(
         "envIndex": env_index,
         "url": new_provider_url,
     }
-    if persist:
+    if not persist:
+        return entry, env_index, None
+
+    def _commit_new_provider() -> None:
         entries.append(entry)
         data["providers"] = entries
         _write_config_dict(config_path, data)
         _write_env_label(env_index, normalised_label, repo_root)
-    return entry, env_index
+
+    return entry, env_index, _commit_new_provider
 
 
 def _primary_secret_name(entry: dict[str, Any]) -> str:
@@ -313,7 +329,7 @@ def provider_add_cmd(
     """Register a provider and wire indexed custom-provider env keys into the workflow."""
     repo_root = cwd.resolve()
     workflow = _resolve_workflow_path(workflow, repo_root)
-    entry, env_index = _plan_provider_for_workflow(
+    entry, env_index, commit_config = _plan_provider_for_workflow(
         repo_root,
         label=label,
         url=url,
@@ -340,6 +356,10 @@ def provider_add_cmd(
 
     _print_missing_secret_guidance(entry)
     _emit_workflow_change(workflow, change, apply=apply)
+    # Only now is the workflow on disk. Persisting earlier would strand config
+    # on the new endpoint while Actions still ran the old one.
+    if commit_config is not None:
+        commit_config()
 
 
 @model_app.command("add")

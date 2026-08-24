@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stayed against the process working directory, so invoking from outside the
   target repository could read config from one repo and rewrite another repo's
   workflow
+- `mergecraft workflow provider add --apply` writes the registry config only
+  after the workflow file lands. Persisting first meant a failed workflow write
+  exited nonzero with config on the new endpoint and Actions still running the
+  old one
 - `mergecraft workflow provider add --url` on an already-registered provider now
   applies the validated endpoint to the row that is wired and persisted. The
   override was validated and then discarded, leaving the workflow on the

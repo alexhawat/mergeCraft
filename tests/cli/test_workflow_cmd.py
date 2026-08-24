@@ -674,3 +674,46 @@ def test_existing_provider_url_override_is_applied_and_persisted(
     assert NOUS_BASE_URL not in workflow_text(workflow), (
         "the workflow must not stay wired to the superseded endpoint"
     )
+
+
+def test_apply_failure_leaves_provider_config_unchanged(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A failed workflow write must not leave config on the new endpoint.
+
+    Config and the workflow have to move together: persisting first would exit
+    nonzero with the registry pointing at one URL and Actions running another.
+    """
+    workflow = _setup_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    _register_nous_provider(tmp_path)
+    before = read_config(tmp_path)
+
+    real_write_text = Path.write_text
+
+    def _explode_on_workflow(self: Path, *args: object, **kwargs: object) -> int:
+        # Fail only the workflow write; a global patch would block the config
+        # write too and the assertion below would hold vacuously.
+        if self == workflow:
+            raise OSError("disk full")
+        return real_write_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "write_text", _explode_on_workflow)
+    result = _invoke(
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "nous",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+    monkeypatch.undo()
+
+    assert result.exit_code != CLI_SUCCESS_EXIT_CODE, _plain(result.stdout + result.stderr)
+    assert read_config(tmp_path) == before, (
+        "config must not be persisted when the workflow write fails"
+    )
