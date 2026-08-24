@@ -1164,10 +1164,16 @@ def _attempt_harness_label(settings: RepoSettings | None, slug: str) -> str:
     follow-ons must not re-validate (an unused tail slug can be an
     unsupported combo) but still stamp the operator's explicit ``harness:``
     so the trace does not mix override labels with inferred ones.
+
+    When inference fails (unregistered provider, missing credentials), degrade
+    to ``opencode`` so best-effort follow-on spans never abort a completed run.
     """
     if settings is not None and settings.harness is not None:
         return settings.harness
-    return _agent_mode_for_slug(slug, settings=settings)
+    try:
+        return _agent_mode_for_slug(slug, settings=settings)
+    except ModelFallbackPolicyError:
+        return "opencode"
 
 
 def _emit_advanced_attempt(

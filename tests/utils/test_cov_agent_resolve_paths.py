@@ -653,6 +653,41 @@ def test_attempt_harness_label_prefers_the_explicit_override() -> None:
     assert ar._attempt_harness_label(RepoSettings.model_validate({}), "openai/gpt") == "codex"
 
 
+def test_attempt_harness_label_degrades_for_unregistered_follow_on_slug() -> None:
+    """Synthetic follow-on spans must not raise when inference fails."""
+    with pytest.raises(ar.ModelFallbackPolicyError):
+        ar._agent_mode_for_slug("custom/unregistered-model")
+    assert ar._attempt_harness_label(None, "custom/unregistered-model") == "opencode"
+
+
+def test_follow_on_spans_do_not_crash_on_unregistered_tail() -> None:
+    """A successful run must not crash while emitting not_visited follow-on spans."""
+    import asyncio
+
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.tracing.sinks import sink_factory
+
+    settings = RepoSettings.model_validate(
+        {
+            "harness": "opencode",
+            "models": ["openai/gpt", "custom/unregistered-model"],
+            "tracing": {"enabled": True, "sinks": [{"type": "memory"}]},
+        }
+    )
+    wrapper = sink_factory(settings.tracing)
+    memory = wrapper.inner.sinks[0]
+
+    async def run_once(_slug: str) -> AgentResult:
+        return AgentResult(success=True, terminal_submission_received=True)
+
+    slug, _ = asyncio.run(ar.run_with_model_chain(settings=settings, run_once=run_once))
+    assert slug == "openai/gpt"
+
+    attempts = [event for event in memory.events if getattr(event, "kind", None) == "agent.attempt"]
+    assert len(attempts) >= 2
+    assert any(getattr(event, "status", None) == "not_visited" for event in attempts)
+
+
 # ---------------------------------------------------------------------------
 # cost attrs
 # ---------------------------------------------------------------------------
