@@ -11,8 +11,8 @@ Detects:
 Scans top-level function bodies only; nested scopes (inner functions, lambdas)
 are not walked.
 
-Advisory mode (``--advisory``) prints findings but exits 0 so existing
-grandfathered sites do not block ``make lint``.
+By default the gate **blocks** (exit 1 on errors). Pass ``--advisory`` to print
+findings but exit 0 so grandfathered sites do not block ``make lint``.
 
 Module: scripts.check_test_cheat_signatures
 Depends: argparse, ast, pathlib, sys, typing
@@ -315,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--advisory",
         action="store_true",
-        help="Print findings but exit 0 (for make lint).",
+        help="Print findings but exit 0 (opt-out from the default blocking gate).",
     )
     args = parser.parse_args(argv)
 

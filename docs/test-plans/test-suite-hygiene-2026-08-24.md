@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/test-suite-hygiene-2026-08-24-wave-plan.md`
 Branch: `wave/test-suite-hygiene-2026-08-24`
 Base SHA: `ef7e70d8` (PR #495, lane A merged)
-**Final SHA:** `10eadd3f` (2026-08-25 — Thermos round-3: bash shell + last-line log parse)
+**Final SHA:** `58811966` (2026-08-25 — Thermos info hygiene: cheat lint doc + fence path normalize)
 
 **Status:** ✅ **Complete** — TH1–TH9 implemented; Final CI gate passed. Awaiting Thermos review / merge.
 

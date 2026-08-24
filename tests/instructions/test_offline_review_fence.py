@@ -230,7 +230,8 @@ def _normalize_ephemeral_paths(prompt: str) -> str:
     import re
 
     prompt = re.sub(r"/(?:private/)?var/folders/[^\s`\"']+", "<EPHEMERAL_ABS_PATH>", prompt)
-    prompt = re.sub(r"ff-review-[a-z0-9]+(?:_[a-z0-9]+)?", "<EPHEMERAL_REVIEW_DIR>", prompt)
+    prompt = re.sub(r"/tmp/[^\s`\"']+", "<EPHEMERAL_ABS_PATH>", prompt)
+    prompt = re.sub(r"mergecraft-diff-review-[a-z0-9]+", "<EPHEMERAL_REVIEW_DIR>", prompt)
     return re.sub(r"nonce=[0-9a-f]{16}", "nonce=<NORMALIZED>", prompt)
 
 
