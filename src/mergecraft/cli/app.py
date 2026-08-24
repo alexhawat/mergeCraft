@@ -35,11 +35,13 @@ from mergecraft.cli import (
     lens_cmd,
     mcp_cmd,
     memory_cmd,
+    model_cmd,
     models_cmd,
     pipeline_cmd,
     plan_cmd,
     policy_cmd,
     profile_cmd,
+    provider_cmd,
     replay_cmd,
     requirements_cmd,
     run_cmd,
@@ -48,6 +50,7 @@ from mergecraft.cli import (
     tracing_logfire_cmd,
     update_cmd,
     watch_cmd,
+    workflow_cmd,
     xrepo_cmd,
 )
 from mergecraft.cli.exits import (
@@ -99,6 +102,9 @@ app.add_typer(mcp_cmd.app, name="mcp")
 app.add_typer(cache_cmd.app, name="cache")
 app.add_typer(context_cmd.app, name="context")
 app.add_typer(auth_cmd.app, name="auth")
+app.add_typer(provider_cmd.app, name="provider")
+app.add_typer(model_cmd.app, name="model")
+app.add_typer(workflow_cmd.app, name="workflow")
 app.add_typer(models_cmd.app, name="models")
 app.add_typer(analyzers_cmd.app, name="analyzers")
 app.command("init")(init_cmd.run)

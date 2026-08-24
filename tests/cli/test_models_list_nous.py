@@ -14,11 +14,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.cli.support_provider_registry import bootstrap_nous_registry
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from _pytest.monkeypatch import MonkeyPatch
 
 runner = CliRunner()
@@ -60,11 +63,12 @@ def test_mergecraft_models_list_renders_nous_row_without_credentials(
 
 
 def test_mergecraft_models_list_renders_nous_row_with_credentials(
+    tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """``mergecraft models list`` flips credentials ``no`` → ``yes`` when ``NOUS_API_KEY`` is set."""
+    """``mergecraft models list`` flips credentials ``no`` → ``yes`` when indexed creds exist."""
     _clear_provider_env(monkeypatch)
-    monkeypatch.setenv(NOUS_API_KEY_ENV, "nous-test-key")
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
 
     result = runner.invoke(app, ["models", "list"])
 

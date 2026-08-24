@@ -70,19 +70,27 @@ def _configuration_error_types() -> tuple[type[BaseException], ...]:
 # ── Pins that pass today (harness unset → existing inference) ────────────────
 
 
-def test_existing_nous_config_still_selects_opencode(tmp_path: Path) -> None:
-    """Compatibility pin — a ``nous/deepseek-*`` YAML with harness unset
-    still resolves to the opencode harness via today's inference.
+def test_existing_nous_config_still_selects_opencode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compatibility pin — a registered ``nous/deepseek-*`` YAML with harness unset
+    still resolves to the opencode harness via registry + inference.
 
-    Guard: deleting ``_agent_mode_for_slug``'s else-opencode path (or
-    special-casing ``nous`` away from opencode) fails this test.
+    Guard: deleting registry lookup or special-casing ``nous`` away from opencode
+    fails this test.
     """
+    from tests.cli.support_provider_registry import bootstrap_nous_registry, read_config
+
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
+    config = read_config(tmp_path)
+    config["model"] = NOUS_CATALOG_SLUG
+    config_path = tmp_path / ".mergecraft" / "config.yaml"
+    import yaml
+
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     from mergecraft.config.settings import load_repo_settings
 
-    config = tmp_path / ".mergecraft" / "config.yaml"
-    config.parent.mkdir(parents=True)
-    config.write_text(f"model: {NOUS_CATALOG_SLUG}\n", encoding="utf-8")
-    settings = load_repo_settings(path=config, root=tmp_path, load_learnings_files=False)
+    settings = load_repo_settings(path=config_path, root=tmp_path, load_learnings_files=False)
 
     assert settings.model == NOUS_CATALOG_SLUG
     assert getattr(settings, "harness", None) is None
@@ -125,13 +133,18 @@ def test_claude_gemini_cursor_remain_selectable() -> None:
     } == _NATIVE_HARNESS_PROVIDERS
 
 
-def test_inference_path_unchanged_when_harness_unset() -> None:
+def test_inference_path_unchanged_when_harness_unset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Regression pin over today's model-slug → harness inference matrix.
 
-    ``harness`` omitted (or default ``None``) must keep ``_agent_mode_for_slug``
-    behaviour byte-for-byte: anthropic→claude, openai→codex, google→gemini,
-    cursor→cursor, else opencode.
+    ``harness`` omitted (or default ``None``) must keep inference behaviour for
+    built-in providers; registered custom providers use registry harness rows.
     """
+    from tests.cli.support_provider_registry import bootstrap_nous_registry
+
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
     for slug, expected in _INFERENCE_MATRIX:
         settings = RepoSettings.model_validate({"model": slug})
         assert getattr(settings, "harness", None) is None, (
@@ -152,10 +165,7 @@ def test_explicit_harness_overrides_inference() -> None:
     ``_agent_mode_for_slug`` alone: openai infers ``codex``, anthropic infers
     ``claude``; explicit ``opencode`` must win in both cases (vice versa).
     """
-    assert (
-        frozenset({"nous", "tokenhub", "minimax", "openai", "anthropic"})
-        == _OPENCODE_NATIVE_PROVIDERS
-    )
+    assert frozenset({"openai", "anthropic"}) == _OPENCODE_NATIVE_PROVIDERS
     assert _harness_supports_provider("opencode", "openai") is True
     assert _harness_supports_provider("opencode", "anthropic") is True
     cases = (

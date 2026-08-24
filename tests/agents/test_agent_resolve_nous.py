@@ -27,6 +27,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.cli.support_provider_registry import (
+    bootstrap_nous_registry,
+    scaffold_mergecraft_home,
+)
 
 from mergecraft.models import MODEL_ALIASES, PROVIDERS, get_model_provider
 from mergecraft.utils.agent_resolve import (
@@ -36,6 +40,8 @@ from mergecraft.utils.agent_resolve import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from _pytest.monkeypatch import MonkeyPatch
 
 NOUS_SLUG = "nous/deepseek/deepseek-v4-flash"
@@ -100,35 +106,38 @@ def test_get_model_provider_for_nous_slug() -> None:
 # ── W1.3 / W1.4 / W1.5 — credential detection honours D4 ─────────────────────
 
 
-def test_has_credentials_for_slug_nous_with_nous_api_key(monkeypatch: MonkeyPatch) -> None:
-    """``NOUS_API_KEY`` set, alias unset → ``has_credentials_for_slug`` is ``True`` (D4).
-
-    First-class precedence: the operator-owned secret name wins.
-    """
+def test_has_credentials_for_slug_nous_with_nous_api_key(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``NOUS_API_KEY`` set with registry row → ``has_credentials_for_slug`` is ``True`` (D7)."""
     _clear_provider_env(monkeypatch)
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
+    monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
     monkeypatch.setenv(NOUS_API_KEY_ENV, "nous-test-key")
 
     assert has_credentials_for_slug(NOUS_SLUG) is True
 
 
 def test_has_credentials_for_slug_nous_with_only_custom_provider_alias(
+    tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Alias-only path: ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` set → ``True`` (D4 back-compat)."""
+    """Indexed registry key without legacy alias → ``True`` when registered."""
     _clear_provider_env(monkeypatch)
-    monkeypatch.setenv(CUSTOM_PROVIDER_API_KEY_ENV, "custom-provider-test-key")
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
 
     assert has_credentials_for_slug(NOUS_SLUG) is True
 
 
-def test_has_credentials_for_slug_nous_with_no_keys(monkeypatch: MonkeyPatch) -> None:
-    """Both env vars unset → ``has_credentials_for_slug`` is ``False`` (structural).
-
-    Not marked xfail: the current code already returns ``False`` for any slug
-    whose provider arm is unimplemented, so this is a regression pin rather than
-    a contract that needs W2 to satisfy.
-    """
+def test_has_credentials_for_slug_nous_with_no_keys(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Unregistered nous slug → ``has_credentials_for_slug`` is ``False``."""
     _clear_provider_env(monkeypatch)
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
 
     assert has_credentials_for_slug(NOUS_SLUG) is False
 
@@ -136,14 +145,13 @@ def test_has_credentials_for_slug_nous_with_no_keys(monkeypatch: MonkeyPatch) ->
 # ── W1.6 / W1.7 — binary gate is short-circuited (D5) ────────────────────────
 
 
-def test_is_runnable_model_slug_nous_with_credentials(monkeypatch: MonkeyPatch) -> None:
-    """Both gates green: ``is_runnable_model_slug`` returns ``True`` for the nous slug.
-
-    Pins against a silent regression where a future refactor reintroduces a
-    ``shutil.which("nous")`` lookup that would always fail.
-    """
+def test_is_runnable_model_slug_nous_with_credentials(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Both gates green: ``is_runnable_model_slug`` returns ``True`` for the nous slug."""
     _clear_provider_env(monkeypatch)
-    monkeypatch.setenv(NOUS_API_KEY_ENV, "nous-test-key")
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
 
     assert is_runnable_model_slug(NOUS_SLUG) is True
 

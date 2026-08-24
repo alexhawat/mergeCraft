@@ -263,9 +263,12 @@ def test_resolve_model_params_from_singleton_extra_options_env(
 
 
 def test_resolve_model_params_from_nous_preset_provider_map(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#295 — named preset path resolves applied ModelParams."""
+    """#295 — registered nous path resolves applied ModelParams."""
+    from tests.cli.support_provider_registry import bootstrap_nous_registry
+
     for key in (
         "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",
         "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
@@ -273,7 +276,7 @@ def test_resolve_model_params_from_nous_preset_provider_map(
         "MERGECRAFT_PROVIDER_EXTRA_OPTIONS",
     ):
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("NOUS_API_KEY", "test-nous-key")
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
     monkeypatch.setenv(
         "MERGECRAFT_PROVIDER_EXTRA_OPTIONS",
         '{"nous": {"max_tokens": 8192, "temperature": 0.2, "context_limit": 64000}}',

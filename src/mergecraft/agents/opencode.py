@@ -250,8 +250,8 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
        This preserves the W1.1 single-provider regression pin's emitted
        shape: a singleton + ``nous/...`` model still produces a
        ``provider.nous`` block, not a ``provider.default`` one.
-    3. **Named presets**: ``nous/*`` via ``NOUS_API_KEY``, ``tokenhub/*`` via
-       ``TOKENHUB_API_KEY`` (optional ``NOUS_BASE_URL`` / ``TOKENHUB_BASE_URL``).
+    3. **Registry rows**: indexed ``LLM_PROVIDER_<N>_*`` credentials plus optional
+       ``MERGECRAFT_CUSTOM_PROVIDER_*`` workflow env (GHA injects secrets there).
     """
     providers = resolve_gateway_endpoints()
     slash = model.find("/") if model else -1

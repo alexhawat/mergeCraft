@@ -29,6 +29,8 @@ from mergecraft.utils.workspace import git_repo_root
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+_LEGACY_AUTH_WARNED = False
+
 app = typer.Typer(
     help="Manage provider credentials for the current repository.", no_args_is_help=True
 )
@@ -275,6 +277,7 @@ def _persist_credential(
 @app.command("codex")
 def auth_codex(scope: str = _SCOPE_OPTION) -> None:
     """Mint a Codex subscription credential and save it as CODEX_AUTH_JSON."""
+    _legacy_auth_hint("codex")
     target = _resolve_auth_target(scope)
 
     if not shutil.which("codex"):
@@ -304,12 +307,16 @@ def auth_codex(scope: str = _SCOPE_OPTION) -> None:
         # anything to persist (#221).
         value = auth_path.read_text(encoding="utf-8")
 
+    if _legacy_auth_shim("codex", scope, {"API_KEY": value}):
+        return
+
     _persist_credential(target=target, name=CODEX_AUTH_SECRET, value=value)
 
 
 @app.command("claude")
 def auth_claude(scope: str = _SCOPE_OPTION) -> None:
     """Save a Claude Code OAuth token as CLAUDE_CODE_OAUTH_TOKEN."""
+    _legacy_auth_hint("claude")
     target = _resolve_auth_target(scope)
     console.print(
         "mint a token with [cyan]claude setup-token[/cyan], then paste it below "
@@ -328,6 +335,9 @@ def auth_claude(scope: str = _SCOPE_OPTION) -> None:
             f"[yellow]warning:[/yellow] that doesn't look like a claude setup-token "
             f"(expected {CLAUDE_OAUTH_TOKEN_PREFIX}…). saving it anyway."
         )
+
+    if _legacy_auth_shim("claude", scope, {"API_KEY": oauth_token}):
+        return
 
     _persist_credential(target=target, name=CLAUDE_OAUTH_SECRET, value=oauth_token)
 
@@ -355,6 +365,7 @@ def _validate_gemini_api_key(api_key: str) -> bool:
 @app.command("gemini")
 def auth_gemini(scope: str = _SCOPE_OPTION) -> None:
     """Save a Gemini API key as GEMINI_API_KEY."""
+    _legacy_auth_hint("gemini")
     target = _resolve_auth_target(scope)
     console.print(
         "create an API key at [cyan]https://aistudio.google.com/apikey[/cyan], then paste it below."
@@ -369,6 +380,9 @@ def auth_gemini(scope: str = _SCOPE_OPTION) -> None:
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_gemini_api_key(api_key):
         cli_bail("Gemini API key validation failed (401/403). Check the key and retry.")
+
+    if _legacy_auth_shim("gemini", scope, {"API_KEY": api_key}):
+        return
 
     _persist_credential(target=target, name=GEMINI_API_SECRET, value=api_key)
 
@@ -403,6 +417,7 @@ def _validate_cursor_api_key(api_key: str) -> bool:
 @app.command("cursor")
 def auth_cursor(scope: str = _SCOPE_OPTION) -> None:
     """Save a Cursor API key as CURSOR_API_KEY."""
+    _legacy_auth_hint("cursor")
     target = _resolve_auth_target(scope)
     console.print(
         "create an API key in the Cursor dashboard, then paste it below "
@@ -418,6 +433,9 @@ def auth_cursor(scope: str = _SCOPE_OPTION) -> None:
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if not _validate_cursor_api_key(api_key):
         cli_bail("Cursor API key validation failed (401/403). Check the key and retry.")
+
+    if _legacy_auth_shim("cursor", scope, {"API_KEY": api_key}):
+        return
 
     _persist_credential(target=target, name=CURSOR_API_SECRET, value=api_key)
 
@@ -485,6 +503,7 @@ def _validate_nous_api_key(api_key: str) -> bool:
 @app.command("nous")
 def auth_nous(scope: str = _SCOPE_OPTION) -> None:
     """Save a Nous Portal API key as NOUS_API_KEY."""
+    _legacy_auth_hint("nous")
     target = _resolve_auth_target(scope)
     console.print(
         "create an API key at [cyan]https://portal.nousresearch.com[/cyan], then paste it below."
@@ -500,6 +519,9 @@ def auth_nous(scope: str = _SCOPE_OPTION) -> None:
     if not _validate_nous_api_key(api_key):
         cli_bail("Nous API key validation failed (401/403). Check the key and retry.")
 
+    if _legacy_auth_shim("nous", scope, {"API_KEY": api_key}):
+        return
+
     _persist_credential(target=target, name=NOUS_API_SECRET, value=api_key)
     console.print(
         "use model [cyan]nous/deepseek/deepseek-v4-flash[/cyan] "
@@ -510,6 +532,7 @@ def auth_nous(scope: str = _SCOPE_OPTION) -> None:
 @app.command("tokenhub")
 def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
     """Save a Tencent TokenHub API key as TOKENHUB_API_KEY."""
+    _legacy_auth_hint("tokenhub")
     target = _resolve_auth_target(scope)
     console.print(
         "create an API key in the TokenHub console, then paste it below "
@@ -528,6 +551,9 @@ def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
         api_key=api_key, base_url=DEFAULT_TOKENHUB, label="tokenhub"
     ):
         cli_bail("TokenHub API key validation failed (401/403). Check the key and retry.")
+
+    if _legacy_auth_shim("tokenhub", scope, {"API_KEY": api_key}):
+        return
 
     _persist_credential(target=target, name=TOKENHUB_API_SECRET, value=api_key)
     console.print(
@@ -752,6 +778,36 @@ def _normalise_scope(value: str) -> CredentialScope:
     raise AssertionError("unreachable")
 
 
+def _warn_legacy_auth_once(message: str) -> None:
+    """Emit the yellow-box deprecation line (shim calls this once per process)."""
+    console.print(f"[yellow]warning:[/yellow] {message}")
+
+
+def _legacy_deprecation_message(label: str) -> str:
+    return (
+        f"mergecraft auth {label} is deprecated — use "
+        f"mergecraft provider auth {label} (unified provider auth)."
+    )
+
+
+def _legacy_auth_hint(label: str) -> None:
+    """Print deprecation guidance; yellow warning box only once per process (D7)."""
+    global _LEGACY_AUTH_WARNED
+    message = _legacy_deprecation_message(label)
+    if not _LEGACY_AUTH_WARNED:
+        _warn_legacy_auth_once(message)
+        _LEGACY_AUTH_WARNED = True
+    else:
+        console.print(message, markup=False)
+
+
+def _legacy_auth_shim(label: str, scope: str, credential_map: Mapping[str, str]) -> bool:
+    """Try indexed provider auth; return whether delegation succeeded."""
+    from mergecraft.cli.provider_cmd import persist_legacy_indexed_auth
+
+    return persist_legacy_indexed_auth(label, scope, credential_map)
+
+
 @app.command("logfire")
 def auth_logfire(
     scope: str = typer.Option(
@@ -912,6 +968,7 @@ def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
     operator may override, or rely on the preset's default
     ``https://api.minimax.io/v1``).
     """
+    _legacy_auth_hint("minimax")
     target = _resolve_auth_target(scope)
     console.print(
         "create an API key on the MiniMax platform "
@@ -927,6 +984,9 @@ def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
     if not _validate_minimax_api_key(api_key):
         cli_bail("MiniMax API key validation failed (401/403). Check the key and retry.")
+
+    if _legacy_auth_shim("minimax", scope, {"API_KEY": api_key}):
+        return
 
     _persist_credential(target=target, name=MINIMAX_API_SECRET, value=api_key)
     console.print(

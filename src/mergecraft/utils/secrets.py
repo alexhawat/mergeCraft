@@ -195,11 +195,17 @@ _VERTEX_AGENT_ENV_VARS: tuple[str, ...] = (
 )
 
 
-def build_agent_env(agent_id: str, extras: dict[str, str] | None = None) -> dict[str, str]:
+def build_agent_env(
+    agent_id: str,
+    extras: dict[str, str] | None = None,
+    model: str | None = None,
+) -> dict[str, str]:
     """Build an explicit allowlist env for agent CLI subprocesses (D2 / W2.1).
 
     Starts from :func:`filter_env` (default-deny), strips credential-shaped
     names, then re-injects only the active provider key for ``agent_id``.
+    When *model* is set, indexed registry credentials for that slug are mapped
+    into the legacy harness env names the native CLI consumes.
     """
     env = filter_env()
     for key in ALWAYS_STRIP_FROM_AGENT_ENV:
@@ -208,6 +214,14 @@ def build_agent_env(agent_id: str, extras: dict[str, str] | None = None) -> dict
         env.pop(key, None)
     for key in (*_BEDROCK_AGENT_ENV_VARS, *_VERTEX_AGENT_ENV_VARS):
         env.pop(key, None)
+
+    if model:
+        from mergecraft.config.runtime_provider_registry import harness_env_for_active_provider
+
+        for key, value in harness_env_for_active_provider(model, agent_id).items():
+            if value.strip():
+                env[key] = value.strip()
+
     active_key = ACTIVE_PROVIDER_KEY_BY_AGENT.get(agent_id)
     if active_key:
         raw = os.environ.get(active_key, "").strip()
