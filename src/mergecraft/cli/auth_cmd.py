@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,8 +30,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _LEGACY_AUTH_WARNED = False
-# BB #478 — pytest ``monkeypatch.setattr(module, "shutil.which", ...)`` needs a flat name.
-setattr(sys.modules[__name__], "shutil.which", shutil.which)
 
 app = typer.Typer(
     help="Manage provider credentials for the current repository.", no_args_is_help=True
@@ -283,8 +280,7 @@ def auth_codex(scope: str = _SCOPE_OPTION) -> None:
     _legacy_auth_hint("codex")
     target = _resolve_auth_target(scope)
 
-    which = getattr(sys.modules[__name__], "shutil.which", shutil.which)
-    if not which("codex"):
+    if not shutil.which("codex"):
         cli_bail(
             "codex CLI not found on PATH.\n"
             "  install: npm i -g @openai/codex\n"

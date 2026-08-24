@@ -143,7 +143,9 @@ def has_credentials_for_slug(slug: str) -> bool:
     if provider == "nous" and _legacy_nous_api_key_present():
         warn_legacy_nous_api_key_once()
         return True
-    return False
+    from mergecraft.agents.openai_compatible_gateways import _legacy_gateway_preset_credentials
+
+    return _legacy_gateway_preset_credentials(provider)
 
 
 def _ctx_tmpdir_fallback() -> str:

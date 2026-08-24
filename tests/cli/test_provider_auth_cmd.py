@@ -450,7 +450,7 @@ def test_legacy_auth_commands_warn_and_write_indexed_secret(
             monkeypatch.setattr(module, validator_name, lambda _key: True)
 
     if legacy_cmd == "codex":
-        monkeypatch.setattr(module, "shutil.which", lambda _name: "/usr/bin/codex")
+        monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/codex")
         monkeypatch.setattr(
             module.subprocess,
             "run",

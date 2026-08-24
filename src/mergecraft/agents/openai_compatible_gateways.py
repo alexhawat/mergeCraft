@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
@@ -131,6 +132,62 @@ class GatewayPreset:
 # in config instead. The dict remains for typing/back-compat imports.
 GATEWAY_PRESETS: dict[str, GatewayPreset] = {}
 
+# Deprecated compatibility window: legacy ``mergecraft auth tokenhub`` /
+# ``mergecraft auth minimax`` still write singleton env keys that must resolve
+# until operators migrate to the registry. Constants stay module-private (BE #481).
+_LEGACY_TOKENHUB_API_KEY_ENV = "TOKENHUB_API_KEY"
+_LEGACY_TOKENHUB_BASE_URL_ENV = "TOKENHUB_BASE_URL"
+_LEGACY_DEFAULT_TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
+_LEGACY_DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1"
+
+_LEGACY_GATEWAY_PRESETS: dict[str, GatewayPreset] = {
+    "tokenhub": GatewayPreset(
+        provider_id="tokenhub",
+        api_key_env=_LEGACY_TOKENHUB_API_KEY_ENV,
+        base_url_env=_LEGACY_TOKENHUB_BASE_URL_ENV,
+        default_base_url=_LEGACY_DEFAULT_TOKENHUB_BASE_URL,
+    ),
+    "minimax": GatewayPreset(
+        provider_id="minimax",
+        api_key_env=CUSTOM_PROVIDER_API_KEY_ENV,
+        base_url_env=CUSTOM_PROVIDER_BASE_URL_ENV,
+        default_base_url=_LEGACY_DEFAULT_MINIMAX_BASE_URL,
+    ),
+}
+
+_LEGACY_PRESET_WARNED: set[str] = set()
+
+
+def _warn_legacy_gateway_preset_once(provider_id: str) -> None:
+    if provider_id in _LEGACY_PRESET_WARNED:
+        return
+    _LEGACY_PRESET_WARNED.add(provider_id)
+    warnings.warn(
+        f"{provider_id} legacy env credentials are deprecated; use "
+        f"`mergecraft provider auth {provider_id}` to write indexed secrets.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _legacy_gateway_preset_credentials(provider_id: str) -> bool:
+    preset = _LEGACY_GATEWAY_PRESETS.get(provider_id.lower())
+    if preset is None:
+        return False
+    return _has_env(preset.api_key_env)
+
+
+def _resolve_legacy_gateway_preset(provider_id: str) -> tuple[str, str, str] | None:
+    preset = _LEGACY_GATEWAY_PRESETS.get(provider_id)
+    if preset is None:
+        return None
+    api_key = os.environ.get(preset.api_key_env, "").strip()
+    if not api_key:
+        return None
+    base_url = os.environ.get(preset.base_url_env, "").strip() or preset.default_base_url
+    _warn_legacy_gateway_preset_once(provider_id)
+    return provider_id, base_url, api_key
+
 
 def require_capabilities(config: ProviderConfig, required: frozenset[str]) -> None:
     """Fail closed when ``config`` lacks a declared capability (D12).
@@ -165,7 +222,9 @@ def has_gateway_credentials(provider_id: str) -> bool:
     from mergecraft.config.settings import load_repo_settings
 
     settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
-    return has_registry_credentials(settings, provider_id.lower())
+    if has_registry_credentials(settings, provider_id.lower()):
+        return True
+    return _legacy_gateway_preset_credentials(provider_id)
 
 
 def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
@@ -200,6 +259,10 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     custom_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
     if custom_base and custom_key:
         return provider_id, custom_base, custom_key
+
+    legacy_endpoint = _resolve_legacy_gateway_preset(provider_id)
+    if legacy_endpoint is not None:
+        return legacy_endpoint
 
     return None
 

@@ -595,7 +595,6 @@ def test_a_rejected_provider_key_bails_before_writing_the_env(
 def test_codex_bails_when_the_cli_is_not_on_path(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     _local_env(monkeypatch, tmp_path)
     monkeypatch.setattr(auth_cmd.shutil, "which", lambda _name: None)
-    monkeypatch.setattr(auth_cmd, "shutil.which", lambda _name: None)
     result = runner.invoke(app, ["auth", "codex", "--scope", "local"], env=_ENV_WIDE)
     combined = result.stdout + result.stderr
     assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
