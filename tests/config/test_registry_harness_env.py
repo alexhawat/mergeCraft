@@ -155,3 +155,96 @@ def test_harness_env_maps_only_active_provider(
     env = build_agent_env("codex", model="openai/gpt-5.3-codex")
     assert env.get("OPENAI_API_KEY") == "openai-only"
     assert "GEMINI_API_KEY" not in env
+
+
+# ---------------------------------------------------------------------------
+# PR #498 review — registry credentials outrank legacy env when both are set
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "harness", "suffix", "legacy_key", "indexed_value", "legacy_value"),
+    [
+        ("openai", "codex", "API_KEY", "OPENAI_API_KEY", "sk-openai-indexed", "sk-openai-legacy"),
+        ("google", "gemini", "API_KEY", "GEMINI_API_KEY", "gemini-indexed", "gemini-legacy"),
+        ("cursor", "cursor", "API_KEY", "CURSOR_API_KEY", "cursor-indexed", "cursor-legacy"),
+        ("anthropic", "claude", "API_KEY", "ANTHROPIC_API_KEY", "sk-ant-indexed", "sk-ant-legacy"),
+    ],
+)
+def test_indexed_api_key_wins_over_legacy_when_both_present(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    label: str,
+    harness: str,
+    suffix: str,
+    legacy_key: str,
+    indexed_value: str,
+    legacy_value: str,
+) -> None:
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    write_registry_provider_row(
+        tmp_path,
+        label=label,
+        harness=harness,
+        env_index=1,
+        auth_kind="api_key",
+    )
+    write_indexed_provider_secret(
+        tmp_path,
+        env_index=1,
+        label=label,
+        api_key=indexed_value,
+    )
+    monkeypatch.setenv(f"LLM_PROVIDER_1_{suffix}", indexed_value)
+    monkeypatch.setenv(legacy_key, legacy_value)
+
+    env = build_agent_env(harness, model=f"{label}/demo-model")
+    assert env.get(legacy_key) == indexed_value, (
+        f"registry credential must outrank legacy {legacy_key}; got {env.get(legacy_key)!r}"
+    )
+
+
+def test_indexed_oauth_wins_over_legacy_when_both_present(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    write_registry_provider_row(
+        tmp_path,
+        label="anthropic",
+        harness="claude",
+        env_index=1,
+        auth_kind="oauth",
+    )
+    monkeypatch.setenv("LLM_PROVIDER_1_CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oauth-indexed")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oauth-legacy")
+
+    env = build_agent_env("claude", model="anthropic/claude-sonnet")
+    assert env.get("CLAUDE_CODE_OAUTH_TOKEN") == "sk-ant-oauth-indexed"
+
+
+def test_indexed_cloud_chain_wins_over_legacy_when_both_present(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    write_registry_provider_row(
+        tmp_path,
+        label="bedrock",
+        harness="claude",
+        env_index=1,
+        auth_kind="cloud_chain",
+    )
+    monkeypatch.setenv("LLM_PROVIDER_1_AWS_ACCESS_KEY_ID", "AKIA-indexed")
+    monkeypatch.setenv("LLM_PROVIDER_1_AWS_SECRET_ACCESS_KEY", "secret-indexed")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIA-legacy")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret-legacy")
+    # Without this flag the legacy re-injection loop never runs at all.
+    monkeypatch.setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+
+    env = build_agent_env("claude", model="bedrock/us.anthropic.claude-sonnet")
+    assert env.get("AWS_ACCESS_KEY_ID") == "AKIA-indexed"
+    assert env.get("AWS_SECRET_ACCESS_KEY") == "secret-indexed"
