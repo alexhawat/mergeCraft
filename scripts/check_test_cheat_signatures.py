@@ -8,6 +8,9 @@ Detects:
   assertion on the result is ``assert result.passed``.
 * ``verdict != "auto_merge"`` comparisons (warning only).
 
+Scans top-level function bodies only; nested scopes (inner functions, lambdas)
+are not walked.
+
 Advisory mode (``--advisory``) prints findings but exits 0 so existing
 grandfathered sites do not block ``make lint``.
 
@@ -102,22 +105,22 @@ def _is_getattr_tautology_compare(node: ast.Compare) -> str | None:
 
 
 def _is_verdict_auto_merge_tautology(node: ast.Compare) -> str | None:
-    """Return detail when ``node`` compares ``verdict`` to ``auto_merge`` with ``!=``."""
+    """Return detail when ``node`` compares a verdict field to ``auto_merge`` with ``!=``."""
     if len(node.ops) != 1 or not isinstance(node.ops[0], ast.NotEq):
         return None
     if len(node.comparators) != 1:
         return None
-    left_name: str | None = None
+    target: str | None = None
     if isinstance(node.left, ast.Attribute) and node.left.attr == "verdict":
-        left_name = "verdict"
-    elif isinstance(node.left, ast.Name):
-        left_name = node.left.id
+        target = "verdict"
+    elif isinstance(node.left, ast.Name) and node.left.id in {"verdict", "decision"}:
+        target = node.left.id
+    if target is None:
+        return None
     comparator = _const_value(node.comparators[0])
     if comparator != "auto_merge":
         return None
-    if left_name == "verdict":
-        return 'verdict != "auto_merge" is tautological for self-assessment packets'
-    return None
+    return f'{target} != "auto_merge" is tautological for self-assessment packets'
 
 
 def _is_expected_answer_kwarg(call: ast.Call) -> bool:
@@ -246,9 +249,17 @@ class _ModuleCheatVisitor(ast.NodeVisitor):
         self.warnings.extend(visitor.warnings)
 
 
+def _relative_path(file_path: Path, *, repo: Path) -> str:
+    """Return a repo-relative path when possible, else an absolute path string."""
+    try:
+        return file_path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return file_path.resolve().as_posix()
+
+
 def scan_file(path: Path, *, repo: Path = REPO) -> ScanResult:
     """Scan one Python file for cheat signatures."""
-    rel = path.resolve().relative_to(repo.resolve()).as_posix()
+    rel = _relative_path(path, repo=repo)
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
     except SyntaxError as exc:
@@ -273,7 +284,7 @@ def scan_paths(paths: list[Path], *, repo: Path = REPO) -> ScanResult:
 
     combined = ScanResult()
     for file_path in files:
-        rel = file_path.resolve().relative_to(repo.resolve()).as_posix()
+        rel = _relative_path(file_path, repo=repo)
         if not _should_scan(rel):
             continue
         result = scan_file(file_path, repo=repo)
@@ -284,15 +295,10 @@ def scan_paths(paths: list[Path], *, repo: Path = REPO) -> ScanResult:
 
 def _print_findings(result: ScanResult, *, stream: TextIO = sys.stderr) -> None:
     """Print errors and warnings."""
-    for finding in result.errors:
+    for finding in [*result.errors, *result.warnings]:
+        prefix = "ERROR" if finding.level == "error" else "WARN"
         print(
-            f"cheat-signature ERROR {finding.path}:{finding.line_no}: "
-            f"{finding.kind}: {finding.detail}",
-            file=stream,
-        )
-    for finding in result.warnings:
-        print(
-            f"cheat-signature WARN {finding.path}:{finding.line_no}: "
+            f"cheat-signature {prefix} {finding.path}:{finding.line_no}: "
             f"{finding.kind}: {finding.detail}",
             file=stream,
         )

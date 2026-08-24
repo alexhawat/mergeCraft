@@ -45,13 +45,13 @@ class XpassInventory(NamedTuple):
         return len(self.records)
 
     @property
-    def allowed_records(self) -> tuple[XpassRecord, ...]:
-        """Return xpasses this program treats as gate failures."""
+    def xpass_records(self) -> tuple[XpassRecord, ...]:
+        """Return every parsed XPASS line (all are gate failures)."""
         return self.records
 
     @property
-    def allowed_count(self) -> int:
-        """Return the xpass count (the fail condition)."""
+    def xpass_count(self) -> int:
+        """Return the number of XPASS lines (the fail condition)."""
         return len(self.records)
 
 
@@ -89,14 +89,14 @@ def check_xpass(inventory: XpassInventory, *, stream: TextIO | None = None) -> i
         Process exit code (0 ok, 1 xpasses remain).
     """
     out: TextIO = sys.stderr if stream is None else stream
-    allowed = inventory.allowed_records
-    summary = f"{inventory.allowed_count} xpassed ({inventory.total} total)"
-    if not allowed:
+    records = inventory.xpass_records
+    summary = f"{inventory.xpass_count} xpassed ({inventory.total} total)"
+    if not records:
         print(f"xpass-check OK: {summary}", file=out)
         return 0
 
     print(f"xpass-check FAILED: {summary}", file=out)
-    for record in allowed:
+    for record in records:
         print(f"  {record.nodeid}", file=out)
     return 1
 
