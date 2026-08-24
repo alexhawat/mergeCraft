@@ -22,7 +22,6 @@ from tests.cli.support_provider_registry import (
     AUTH_KIND_API_KEY,
     AUTH_KIND_CLOUD_CHAIN,
     AUTH_KIND_PRIMARY_SUFFIX,
-    BB_XFAIL,
     BEDROCK_INDEXED_KEYS,
     CUSTOM_BASE_URL,
     LEGACY_AUTH_SUBCOMMANDS,
@@ -88,7 +87,6 @@ def _stub_scope_local(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@BB_XFAIL
 def test_provider_help_lists_auth_verb() -> None:
     result = _invoke("provider", "--help")
     output = _plain(result.stdout + result.stderr).lower()
@@ -96,7 +94,6 @@ def test_provider_help_lists_auth_verb() -> None:
     assert "auth" in output
 
 
-@BB_XFAIL
 def test_provider_auth_help_documents_scope_flag() -> None:
     result = _invoke("provider", "auth", "--help")
     output = _plain(result.stdout + result.stderr).lower()
@@ -110,7 +107,6 @@ def test_provider_auth_help_documents_scope_flag() -> None:
 # ---------------------------------------------------------------------------
 
 
-@BB_XFAIL
 def test_provider_auth_nous_writes_indexed_api_key(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -139,7 +135,6 @@ def test_provider_auth_nous_writes_indexed_api_key(
     assert "NOUS_API_KEY" not in env
 
 
-@BB_XFAIL
 def test_provider_auth_unknown_label_exits_nonzero(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -154,7 +149,6 @@ def test_provider_auth_unknown_label_exits_nonzero(
     assert "not-registered" in output or "unknown" in output
 
 
-@BB_XFAIL
 def test_provider_auth_reauth_overwrites_indexed_key_in_place(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -192,7 +186,6 @@ def test_provider_auth_reauth_overwrites_indexed_key_in_place(
 # ---------------------------------------------------------------------------
 
 
-@BB_XFAIL
 def test_provider_auth_interactive_picker_selects_provider(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -233,7 +226,6 @@ def test_provider_auth_interactive_picker_selects_provider(
     assert indexed_env_key(1, "API_KEY") not in env
 
 
-@BB_XFAIL
 def test_provider_auth_picker_lists_registered_labels_and_urls(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -270,7 +262,6 @@ def test_auth_logfire_remains_under_auth_namespace() -> None:
     assert "logfire" in _plain(result.stdout).lower()
 
 
-@BB_XFAIL
 def test_provider_auth_logfire_is_rejected(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -288,7 +279,6 @@ def test_provider_auth_logfire_is_rejected(
     )
 
 
-@BB_XFAIL
 def test_provider_auth_picker_excludes_logfire(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -315,7 +305,6 @@ def test_provider_auth_picker_excludes_logfire(
 # ---------------------------------------------------------------------------
 
 
-@BB_XFAIL
 @pytest.mark.parametrize("suffix", BEDROCK_INDEXED_KEYS)
 def test_provider_auth_bedrock_cloud_chain_writes_indexed_aws_keys(
     tmp_path: Path,
@@ -355,7 +344,6 @@ def test_provider_auth_bedrock_cloud_chain_writes_indexed_aws_keys(
     assert indexed_env_key(3, "API_KEY") not in env
 
 
-@BB_XFAIL
 def test_provider_auth_vertex_writes_credentials_path_not_api_key(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -387,7 +375,6 @@ def test_provider_auth_vertex_writes_credentials_path_not_api_key(
     assert indexed_env_key(4, "API_KEY") not in env
 
 
-@BB_XFAIL
 def test_provider_auth_vertex_refuses_multiline_json_for_local_scope(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -427,7 +414,6 @@ def test_provider_auth_vertex_refuses_multiline_json_for_local_scope(
 # ---------------------------------------------------------------------------
 
 
-@BB_XFAIL
 @pytest.mark.parametrize("legacy_cmd", LEGACY_AUTH_SUBCOMMANDS)
 def test_legacy_auth_commands_warn_and_write_indexed_secret(
     tmp_path: Path,
@@ -514,7 +500,6 @@ class _FakeCodexHome:
         shutil.rmtree(self._dir, ignore_errors=True)
 
 
-@BB_XFAIL
 def test_legacy_auth_warning_emitted_once_per_process(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

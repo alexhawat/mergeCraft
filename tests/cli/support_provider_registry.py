@@ -26,7 +26,6 @@ CUSTOM_BASE_URL = "https://gateway.example.invalid/v1"
 EXPECTED_BUILTIN_PROVIDER_COUNT = 14
 
 # BB #478 — unified ``provider auth`` contracts (D6-D7, D10).
-BB_XFAIL = pytest.mark.xfail(reason="green after BB impl", strict=False)
 
 AUTH_KIND_API_KEY = "api_key"
 AUTH_KIND_OAUTH = "oauth"

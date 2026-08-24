@@ -13,7 +13,6 @@ from tests.cli.support_provider_registry import (
     AUTH_KIND_DEVICE_CODE,
     AUTH_KIND_OAUTH,
     AUTH_KIND_PRIMARY_SUFFIX,
-    BB_XFAIL,
     BEDROCK_INDEXED_KEYS,
     EXPECTED_SEEDED_AUTH_KINDS,
     VERTEX_INDEXED_KEYS,
@@ -28,7 +27,6 @@ from tests.cli.support_provider_registry import (
     ("auth_kind", "suffix"),
     sorted(AUTH_KIND_PRIMARY_SUFFIX.items()),
 )
-@BB_XFAIL
 def test_indexed_credential_keys_for_auth_kind(auth_kind: str, suffix: str) -> None:
     module = require_provider_auth_symbols()
     keys_fn = module.indexed_credential_keys
@@ -37,7 +35,6 @@ def test_indexed_credential_keys_for_auth_kind(auth_kind: str, suffix: str) -> N
     assert indexed_env_key(2, suffix) in keys
 
 
-@BB_XFAIL
 def test_cloud_chain_bedrock_keys_exclude_api_key_suffix() -> None:
     module = require_provider_auth_symbols()
     keys_fn = module.indexed_credential_keys
@@ -48,7 +45,6 @@ def test_cloud_chain_bedrock_keys_exclude_api_key_suffix() -> None:
     assert indexed_env_key(3, "API_KEY") not in keys
 
 
-@BB_XFAIL
 def test_cloud_chain_vertex_keys_prefer_credentials_path() -> None:
     module = require_provider_auth_symbols()
     keys_fn = module.indexed_credential_keys
@@ -63,7 +59,6 @@ def test_cloud_chain_vertex_keys_prefer_credentials_path() -> None:
     "auth_kind",
     [AUTH_KIND_API_KEY, AUTH_KIND_OAUTH, AUTH_KIND_DEVICE_CODE, AUTH_KIND_CLOUD_CHAIN],
 )
-@BB_XFAIL
 def test_resolve_auth_strategy_returns_handler_per_kind(auth_kind: str) -> None:
     module = require_provider_auth_symbols()
     strategy = module.resolve_auth_strategy(auth_kind)
@@ -74,7 +69,6 @@ def test_resolve_auth_strategy_returns_handler_per_kind(auth_kind: str) -> None:
     ("label", "expected_kind"),
     sorted(EXPECTED_SEEDED_AUTH_KINDS.items()),
 )
-@BB_XFAIL
 def test_seeded_builtin_auth_kind_defaults(label: str, expected_kind: str) -> None:
     registry = import_provider_registry()
     kind_fn = getattr(registry, "default_auth_kind_for_label", None)
@@ -83,7 +77,6 @@ def test_seeded_builtin_auth_kind_defaults(label: str, expected_kind: str) -> No
     assert kind_fn(label) == expected_kind
 
 
-@BB_XFAIL
 def test_provider_auth_cmd_registered_on_provider_app() -> None:
     module = import_provider_cmd()
     app = module.app

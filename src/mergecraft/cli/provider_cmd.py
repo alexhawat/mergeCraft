@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import getpass
 import os
+import shutil
+import subprocess
+import tempfile
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +18,7 @@ import yaml
 from mergecraft.agents.openai_compatible_gateways import GATEWAY_PRESETS
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
 from mergecraft.config.provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,
     allocate_env_index,
@@ -25,6 +31,34 @@ from mergecraft.config.provider_registry import (
 )
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import PROVIDERS
+
+AUTH_KIND_API_KEY = "api_key"
+AUTH_KIND_OAUTH = "oauth"
+AUTH_KIND_DEVICE_CODE = "device_code"
+AUTH_KIND_CLOUD_CHAIN = "cloud_chain"
+
+AUTH_KIND_PRIMARY_SUFFIX: dict[str, str] = {
+    AUTH_KIND_API_KEY: "API_KEY",
+    AUTH_KIND_OAUTH: "CLAUDE_CODE_OAUTH_TOKEN",
+    AUTH_KIND_DEVICE_CODE: "CODEX_AUTH_JSON",
+}
+
+BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+)
+
+VERTEX_CLOUD_SUFFIXES: tuple[str, ...] = ("GOOGLE_APPLICATION_CREDENTIALS",)
+
+_PROVIDER_AUTH_SCOPE_OPTION: str = typer.Option(
+    "github",
+    "--scope",
+    "-s",
+    help=(
+        "Where to persist credentials: 'local' (.env only), 'github' "
+        "(gh secret set, the default), or 'both'."
+    ),
+)
 
 app = typer.Typer(
     help="Add, list, edit, and delete LLM providers in the operator registry.",
@@ -317,11 +351,352 @@ def delete_cmd(
     console.print(f"deleted provider [green]{label}[/green]")
 
 
+def indexed_credential_keys(entry: Mapping[str, Any]) -> Sequence[str]:
+    """Return indexed ``LLM_PROVIDER_<N>_<SUFFIX>`` keys for *entry* (#478)."""
+    env_index = int(entry["envIndex"])
+    auth_kind = str(entry.get("authKind") or AUTH_KIND_API_KEY)
+    label = str(entry.get("label", "")).lower()
+
+    if auth_kind == AUTH_KIND_CLOUD_CHAIN:
+        if label == "bedrock":
+            suffixes = BEDROCK_CLOUD_SUFFIXES
+        elif label == "vertex":
+            suffixes = VERTEX_CLOUD_SUFFIXES
+        else:
+            suffixes = BEDROCK_CLOUD_SUFFIXES
+    else:
+        suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
+        suffixes = (suffix,)
+
+    return [f"LLM_PROVIDER_{env_index}_{suffix}" for suffix in suffixes]
+
+
+@dataclass(frozen=True, slots=True)
+class AuthStrategy:
+    """Dispatch target for one provider ``authKind`` (#478)."""
+
+    run: Callable[..., None]
+
+
+def _entry_auth_kind(entry: Mapping[str, Any]) -> str:
+    explicit = entry.get("authKind")
+    if explicit is not None:
+        return str(explicit)
+    label = str(entry.get("label", ""))
+    default = default_auth_kind_for_label(label)
+    return default or AUTH_KIND_API_KEY
+
+
+def resolve_auth_strategy(auth_kind: str) -> AuthStrategy:
+    """Return the credential collector for *auth_kind*."""
+    normalised = auth_kind.strip().lower()
+    handlers: dict[str, Callable[..., None]] = {
+        AUTH_KIND_API_KEY: _run_api_key_strategy,
+        AUTH_KIND_OAUTH: _run_oauth_strategy,
+        AUTH_KIND_DEVICE_CODE: _run_device_code_strategy,
+        AUTH_KIND_CLOUD_CHAIN: _run_cloud_chain_strategy,
+    }
+    handler = handlers.get(normalised)
+    if handler is None:
+        cli_bail(f"unknown auth kind {auth_kind!r}")
+    return AuthStrategy(run=handler)
+
+
+def _indexed_label_key(env_index: int) -> str:
+    return f"LLM_PROVIDER_{env_index}"
+
+
+def _persist_indexed_credentials(
+    entry: Mapping[str, Any],
+    scope: str,
+    credential_map: Mapping[str, str],
+) -> None:
+    """Write ``LLM_PROVIDER_<N>`` label plus indexed credential suffixes to ``.env``."""
+    from mergecraft.cli.auth_cmd import (
+        _resolve_auth_target,
+        _single_line_credential,
+        _write_env_value,
+    )
+
+    env_index = int(entry["envIndex"])
+    label = str(entry["label"])
+    target = _resolve_auth_target(scope)
+    if not target.local:
+        cli_bail("indexed provider auth requires --scope local or --scope both")
+
+    env_path = _env_path()
+    label_key = _indexed_label_key(env_index)
+    if not _write_env_value(env_path, label_key, label):
+        cli_bail(f"could not write {label_key} to {env_path}")
+
+    for suffix, raw_value in credential_map.items():
+        key = f"LLM_PROVIDER_{env_index}_{suffix}"
+        value = _single_line_credential(name=key, value=raw_value)
+        if not _write_env_value(env_path, key, value):
+            cli_bail(f"could not write {key} to {env_path}")
+
+    landed = ", ".join([label_key, *credential_map.keys()])
+    console.print(f"[green]wrote {landed}[/green] to {env_path}")
+
+
+def _cancelable_getpass(prompt: str) -> str | None:
+    try:
+        value = getpass.getpass(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        console.print("canceled.")
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
+    if not value:
+        console.print("canceled.")
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
+    return value
+
+
+def _validate_api_key_for_label(label: str, api_key: str, url: str | None) -> bool:
+    from mergecraft.cli.auth_cmd import (
+        DEFAULT_TOKENHUB,
+        _validate_cursor_api_key,
+        _validate_gemini_api_key,
+        _validate_minimax_api_key,
+        _validate_nous_api_key,
+        _validate_openai_compatible_key,
+    )
+
+    lowered = label.lower()
+    if lowered in {"nous", "google", "gemini"}:
+        if lowered == "nous":
+            return _validate_nous_api_key(api_key)
+        return _validate_gemini_api_key(api_key)
+    if lowered == "cursor":
+        return _validate_cursor_api_key(api_key)
+    if lowered == "minimax":
+        return _validate_minimax_api_key(api_key)
+    if lowered == "tokenhub":
+        return _validate_openai_compatible_key(
+            api_key=api_key,
+            base_url=DEFAULT_TOKENHUB,
+            label="tokenhub",
+        )
+    if url:
+        return _validate_openai_compatible_key(api_key=api_key, base_url=url, label=label)
+    return True
+
+
+def _run_api_key_strategy(entry: Mapping[str, Any], scope: str) -> None:
+    label = str(entry["label"])
+    url = entry.get("url")
+    url_str = str(url) if url is not None else None
+    console.print(f"paste the API key for provider [cyan]{label}[/cyan] below.")
+    api_key = _cancelable_getpass(f"{label} API key (Enter to cancel): ")
+    if api_key is None:
+        return
+    if not _validate_api_key_for_label(label, api_key, url_str):
+        cli_bail(f"{label} API key validation failed (401/403). Check the key and retry.")
+    _persist_indexed_credentials(
+        entry,
+        scope,
+        {AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_API_KEY]: api_key},
+    )
+
+
+def _run_oauth_strategy(entry: Mapping[str, Any], scope: str) -> None:
+    from mergecraft.cli.auth_cmd import CLAUDE_OAUTH_TOKEN_PREFIX
+
+    console.print(
+        "mint a token with [cyan]claude setup-token[/cyan], then paste it below "
+        f"(expected prefix [cyan]{CLAUDE_OAUTH_TOKEN_PREFIX}…[/cyan])."
+    )
+    oauth_token = _cancelable_getpass("Claude Code OAuth token (Enter to cancel): ")
+    if oauth_token is None:
+        return
+    if not oauth_token.startswith(CLAUDE_OAUTH_TOKEN_PREFIX):
+        console.print(
+            f"[yellow]warning:[/yellow] that doesn't look like a claude setup-token "
+            f"(expected {CLAUDE_OAUTH_TOKEN_PREFIX}…). saving it anyway."
+        )
+    suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_OAUTH]
+    _persist_indexed_credentials(entry, scope, {suffix: oauth_token})
+
+
+def _run_device_code_strategy(entry: Mapping[str, Any], scope: str) -> None:
+    if not shutil.which("codex"):
+        cli_bail(
+            "codex CLI not found on PATH.\n"
+            "  install: npm i -g @openai/codex\n"
+            "  then:    mergecraft provider auth openai"
+        )
+
+    with tempfile.TemporaryDirectory(prefix="mergecraft-codex-") as tmp:
+        env = {**os.environ, "CODEX_HOME": tmp}
+        console.print("running [cyan]codex login --device-auth[/cyan] (isolated CODEX_HOME)...")
+        try:
+            subprocess.run(
+                ["codex", "login", "--device-auth"],
+                env=env,
+                check=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            cli_bail(f"codex login failed (exit {exc.returncode})")
+
+        auth_path = Path(tmp) / "auth.json"
+        if not auth_path.is_file():
+            cli_bail("no auth.json was written — enable device-code auth and retry")
+        value = auth_path.read_text(encoding="utf-8")
+
+    suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_DEVICE_CODE]
+    _persist_indexed_credentials(entry, scope, {suffix: value})
+
+
+def _run_cloud_chain_strategy(entry: Mapping[str, Any], scope: str) -> None:
+    label = str(entry.get("label", "")).lower()
+    if label == "bedrock":
+        credentials: dict[str, str] = {}
+        for suffix in BEDROCK_CLOUD_SUFFIXES:
+            prompt_label = suffix.replace("_", " ")
+            value = _cancelable_getpass(f"{prompt_label} (Enter to cancel): ")
+            if value is None:
+                return
+            credentials[suffix] = value
+        _persist_indexed_credentials(entry, scope, credentials)
+        return
+
+    if label == "vertex":
+        path_or_empty = typer.prompt(
+            "Path to service account JSON (Enter to paste inline)",
+            default="",
+            show_default=False,
+        ).strip()
+        if path_or_empty:
+            _persist_indexed_credentials(
+                entry,
+                scope,
+                {VERTEX_CLOUD_SUFFIXES[0]: path_or_empty},
+            )
+            return
+
+        pasted = _cancelable_getpass("Paste service account JSON (Enter to cancel): ")
+        if pasted is None:
+            return
+        if "\n" in pasted:
+            cli_bail(
+                "VERTEX_SERVICE_ACCOUNT_JSON spans multiple lines — refusing to write a "
+                "broken .env entry. Provide a path via GOOGLE_APPLICATION_CREDENTIALS, "
+                "use --scope github, or store base64 in a GitHub secret."
+            )
+        suffix = VERTEX_CLOUD_SUFFIXES[0]
+        _persist_indexed_credentials(entry, scope, {suffix: pasted})
+        return
+
+    cli_bail(f"cloud_chain auth is not configured for provider {label!r}")
+
+
+def _interactive_provider_picker(registry: ProviderRegistry) -> dict[str, Any]:
+    entries = [dict(entry) for entry in registry.entries if entry.get("label")]
+    if not entries:
+        cli_bail("no providers registered — run mergecraft provider add first")
+
+    console.print("select a provider to authenticate:")
+    for idx, entry in enumerate(entries, start=1):
+        label = str(entry.get("label", ""))
+        url = entry.get("url")
+        if url:
+            console.print(f"  {idx}. {label}  ({url})")
+        else:
+            console.print(f"  {idx}. {label}")
+
+    choice = typer.prompt("Selection (Enter to cancel)", default="", show_default=False).strip()
+    if not choice:
+        console.print("canceled.")
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
+    try:
+        selected = int(choice)
+    except ValueError:
+        cli_bail(f"invalid selection {choice!r}")
+    if selected < 1 or selected > len(entries):
+        cli_bail(f"selection {selected} out of range (1-{len(entries)})")
+    return entries[selected - 1]
+
+
+def run_provider_auth(
+    entry: Mapping[str, Any],
+    scope: str,
+    *,
+    credential_map: Mapping[str, str] | None = None,
+) -> None:
+    """Execute unified provider auth for one registry row (#478)."""
+    if credential_map is not None:
+        _persist_indexed_credentials(entry, scope, credential_map)
+        return
+    auth_kind = _entry_auth_kind(entry)
+    strategy = resolve_auth_strategy(auth_kind)
+    strategy.run(entry, scope)
+
+
+def persist_legacy_indexed_auth(
+    label: str,
+    scope: str,
+    credential_map: Mapping[str, str],
+) -> bool:
+    """Write *credential_map* via the indexed provider path when *label* is registered."""
+    config_path = _config_path(Path.cwd())
+    registry = load_provider_registry(config_path)
+    entry = registry.lookup(label)
+    if entry is None:
+        return False
+    run_provider_auth(entry, scope, credential_map=credential_map)
+    return True
+
+
+@app.command("auth")
+def provider_auth_cmd(
+    label: str | None = typer.Argument(
+        None,
+        help="Provider label (interactive picker when omitted).",
+    ),
+    scope: str = _PROVIDER_AUTH_SCOPE_OPTION,
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+) -> None:
+    """Authenticate one registered provider into indexed ``LLM_PROVIDER_*`` secrets."""
+    repo_root = cwd.resolve()
+    config_path = _config_path(repo_root)
+    registry = load_provider_registry(config_path)
+
+    if label is not None:
+        normalised = label.strip()
+        if not normalised:
+            cli_bail("provider label must not be empty", code=CLI_USAGE_EXIT_CODE)
+        if normalised.lower() == "logfire":
+            cli_bail(
+                "logfire is telemetry, not an LLM provider — use "
+                "[cyan]mergecraft auth logfire[/cyan] instead."
+            )
+        entry = registry.lookup(normalised)
+        if entry is None:
+            cli_bail(f"unknown provider label {normalised!r}")
+        console.print(f"authenticating provider [cyan]{entry.get('label', normalised)}[/cyan]")
+        run_provider_auth(entry, scope)
+        return
+
+    picked = _interactive_provider_picker(registry)
+    console.print(f"authenticating provider [cyan]{picked.get('label')}[/cyan]")
+    run_provider_auth(picked, scope)
+
+
 __all__ = [
+    "AUTH_KIND_API_KEY",
+    "AUTH_KIND_CLOUD_CHAIN",
+    "AUTH_KIND_DEVICE_CODE",
+    "AUTH_KIND_OAUTH",
+    "AUTH_KIND_PRIMARY_SUFFIX",
+    "AuthStrategy",
     "ProviderRegistry",
     "app",
+    "indexed_credential_keys",
     "list_supported_harnesses",
     "load_provider_registry",
+    "persist_legacy_indexed_auth",
+    "provider_auth_cmd",
+    "resolve_auth_strategy",
     "resolve_provider_harness",
+    "run_provider_auth",
     "seed_builtin_providers",
 ]
