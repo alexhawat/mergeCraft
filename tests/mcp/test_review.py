@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -14,7 +15,7 @@ from mergecraft.mcp.context import (
     ResolvedPayload,
     ToolContext,
 )
-from mergecraft.mcp.review import create_pull_request_review_tool
+from mergecraft.mcp.review import create_pull_request_review_tool, format_analyzer_inline_body
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_taxonomy import (
@@ -92,6 +93,83 @@ async def test_inline_comments_include_batch_resolved_short_id(ctx: ToolContext)
     fingerprint = finding_fingerprint(path=path, body=body)
     short_id = finding_short_id(fingerprint)
     assert short_id in inline[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_analyzer_inline_body_keeps_single_short_id_and_fingerprint(
+    ctx: ToolContext,
+) -> None:
+    """Analyzer inline bodies already stamped with ``MC-…`` must not double-prefix."""
+    from mergecraft.analyzers.finding import make_finding, resolve_finding_short_ids
+
+    finding = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="unused import",
+        path="src/demo.py",
+        start_line=3,
+        end_line=3,
+        source="analyzer",
+    )
+    short_ids = resolve_finding_short_ids([finding.fingerprint])
+    short_id = short_ids[finding.fingerprint]
+    body = format_analyzer_inline_body(finding, short_id=short_id)
+    inline = await _submit(
+        ctx,
+        [
+            {
+                "path": finding.path,
+                "line": finding.start_line,
+                "body": body,
+                "fingerprint": finding.fingerprint,
+            }
+        ],
+    )
+    published = inline[0]["body"]
+    assert published.count(f"**{short_id}**") == 1
+    assert f"{FINDING_MARKER_PREFIX}{finding.fingerprint} -->" in published
+    assert len(re.findall(r"MC-[0-9a-f]{6,}", published)) == 1
+
+
+@pytest.mark.asyncio
+async def test_analyzer_inline_body_nested_finding_fingerprint_is_preserved(
+    ctx: ToolContext,
+) -> None:
+    """Nested ``finding.fingerprint`` wins over body-derived hashing at publish."""
+    from mergecraft.analyzers.finding import make_finding, resolve_finding_short_ids
+
+    finding = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="unused import",
+        path="src/demo.py",
+        start_line=3,
+        end_line=3,
+        source="analyzer",
+    )
+    short_ids = resolve_finding_short_ids([finding.fingerprint])
+    short_id = short_ids[finding.fingerprint]
+    body = format_analyzer_inline_body(finding, short_id=short_id)
+    inline = await _submit(
+        ctx,
+        [
+            {
+                "path": finding.path,
+                "line": finding.start_line,
+                "body": body,
+                "finding": {"fingerprint": finding.fingerprint},
+            }
+        ],
+    )
+    published = inline[0]["body"]
+    assert published.count(f"**{short_id}**") == 1
+    assert f"{FINDING_MARKER_PREFIX}{finding.fingerprint} -->" in published
 
 
 @pytest.mark.asyncio

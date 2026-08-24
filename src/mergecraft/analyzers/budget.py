@@ -33,6 +33,7 @@ class FindingPlacement:
     mechanical_section: str | None = None
     deferred: list[Finding] = field(default_factory=list)
     deferred_section: str | None = None
+    short_ids: dict[str, str] = field(default_factory=dict)
 
 
 def default_inline_budget() -> int:
@@ -69,6 +70,32 @@ def _sort_key(item: Finding | dict[str, Any]) -> tuple[int, int, str, int]:
     else:
         line = int(item.get("line", item.get("start_line", 0)))
     return (_source_rank(item), _severity_rank(item), path, line)
+
+
+def _fingerprint_from_inline_item(item: Finding | dict[str, Any]) -> str | None:
+    if isinstance(item, Finding):
+        return item.fingerprint
+    supplied = str(item.get("fingerprint", "") or "").strip()
+    if supplied:
+        return supplied
+    path = str(item.get("path", ""))
+    message = str(item.get("message", item.get("body", "")))
+    return _overflow_fingerprint(item, path=path, message=message)
+
+
+def _placement_fingerprints(
+    inline: list[Any],
+    mechanical: list[Finding],
+    deferred: list[Finding],
+) -> list[str]:
+    fingerprints: list[str] = []
+    for item in inline:
+        fingerprint = _fingerprint_from_inline_item(item)
+        if fingerprint:
+            fingerprints.append(fingerprint)
+    fingerprints.extend(row.fingerprint for row in mechanical)
+    fingerprints.extend(row.fingerprint for row in deferred)
+    return fingerprints
 
 
 def _overflow_fingerprint(item: dict[str, Any], *, path: str, message: str) -> str:
@@ -212,18 +239,15 @@ def place_findings(
         elif not _is_body_only_finding(item):
             deferred.append(agent_dict_to_finding(item))
 
+    short_ids = resolve_finding_short_ids(_placement_fingerprints(inline, mechanical, deferred))
+
     return FindingPlacement(
         inline=inline,
         mechanical=mechanical,
-        mechanical_section=_render_mechanical_section(
-            mechanical,
-            short_ids=resolve_finding_short_ids([row.fingerprint for row in mechanical]),
-        ),
+        mechanical_section=_render_mechanical_section(mechanical, short_ids=short_ids),
         deferred=deferred,
-        deferred_section=render_deferred_section(
-            deferred,
-            short_ids=resolve_finding_short_ids([row.fingerprint for row in deferred]),
-        ),
+        deferred_section=render_deferred_section(deferred, short_ids=short_ids),
+        short_ids=short_ids,
     )
 
 
@@ -238,19 +262,33 @@ def finding_to_deferred_row(finding: Finding) -> dict[str, Any]:
     }
 
 
-def render_deferred_section_from_rows(rows: list[dict[str, Any]]) -> str | None:
+def render_deferred_section_from_rows(
+    rows: list[dict[str, Any]],
+    *,
+    short_ids: dict[str, str] | None = None,
+    all_fingerprints: list[str] | None = None,
+) -> str | None:
     """Render the deferred HTML section from serialized analyzer-run rows."""
     findings = [agent_dict_to_finding(row) for row in rows if isinstance(row, dict)]
     if not findings:
         return None
-    short_ids = resolve_finding_short_ids([row.fingerprint for row in findings])
-    return render_deferred_section(findings, short_ids=short_ids)
+    resolved_short_ids = short_ids
+    if resolved_short_ids is None:
+        fingerprint_batch = all_fingerprints or [row.fingerprint for row in findings]
+        resolved_short_ids = resolve_finding_short_ids(fingerprint_batch)
+    return render_deferred_section(findings, short_ids=resolved_short_ids)
 
 
 def sync_deferred_section(analyzer_run: AnalyzerRunState) -> None:
     """Re-render ``deferred_section`` from ``deferred_findings`` rows."""
+    all_fingerprints = [
+        str(row.get("fingerprint", ""))
+        for row in analyzer_run.findings
+        if isinstance(row, dict) and row.get("fingerprint")
+    ]
     analyzer_run.deferred_section = render_deferred_section_from_rows(
-        analyzer_run.deferred_findings
+        analyzer_run.deferred_findings,
+        all_fingerprints=all_fingerprints,
     )
 
 

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from loguru import logger
 
-from mergecraft.analyzers.finding import resolve_finding_short_ids
+from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX, resolve_finding_short_ids
 from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.convergence_runtime import (
     collateral_by_fingerprint,
@@ -68,23 +69,50 @@ def enrich_analyzer_comment_body(body: str) -> str:
     return body
 
 
+_SHORT_ID_LINE_RE = re.compile(
+    rf"^\*\*{re.escape(FINDING_SHORT_ID_PREFIX)}[0-9a-f]{{6,}}\*\*\s*\n?",
+    re.MULTILINE,
+)
+
+
+def _body_without_short_id_line(body: str) -> str:
+    """Strip a leading publication short-id line before content fingerprinting."""
+    return _SHORT_ID_LINE_RE.sub("", body, count=1).lstrip()
+
+
+def _comment_fingerprint(comment: dict[str, Any]) -> str:
+    """Return the stable fingerprint for one inline comment row."""
+    explicit = str(comment.get("fingerprint") or "").strip()
+    if explicit:
+        return explicit
+    finding = comment.get("finding")
+    if isinstance(finding, dict):
+        nested = str(finding.get("fingerprint") or "").strip()
+        if nested:
+            return nested
+    path = str(comment.get("path", ""))
+    body = str(comment.get("body") or "")
+    return finding_fingerprint(path=path, body=_body_without_short_id_line(body))
+
+
 def _comment_fingerprints(comments: list[dict[str, Any]]) -> list[str]:
-    fingerprints: list[str] = []
-    for comment in comments:
-        path = str(comment.get("path", ""))
-        body = str(comment.get("body") or "")
-        fingerprint = str(comment.get("fingerprint") or "") or finding_fingerprint(
-            path=path,
-            body=body,
+    return [_comment_fingerprint(comment) for comment in comments]
+
+
+def _body_has_short_id_line(body: str) -> bool:
+    first_line = body.lstrip().split("\n", 1)[0]
+    return bool(
+        re.fullmatch(
+            rf"\*\*{re.escape(FINDING_SHORT_ID_PREFIX)}[0-9a-f]{{6,}}\*\*",
+            first_line,
         )
-        fingerprints.append(fingerprint)
-    return fingerprints
+    )
 
 
 def _prepend_short_id(body: str, short_id: str) -> str:
-    marker = f"**{short_id}**"
-    if marker in body:
+    if _body_has_short_id_line(body):
         return body
+    marker = f"**{short_id}**"
     if body.strip():
         return f"{marker}\n\n{body}"
     return marker
@@ -336,10 +364,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             else None
         )
         comment_body = str(c.get("body") or "")
-        raw_fingerprint = str(c.get("fingerprint") or "") or finding_fingerprint(
-            path=path,
-            body=comment_body,
-        )
+        raw_fingerprint = _comment_fingerprint(c)
         short_id = inline_short_ids.get(raw_fingerprint)
         prepared_body = prepare_inline_comment_for_publish(
             ctx,
