@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Public MCP stdio transport: ``mergecraft mcp serve --role public --transport stdio``
   serves the same six-tool public profile over newline-delimited JSON-RPC on
   stdin/stdout without Bearer auth (HTTP public still requires the per-serve token)
+- Generated MCP Registry ``server.json`` at the repo root plus ``docs/mcp-tools.md``
+  from public ``ToolSpec`` schemas; ``make mcp-server-json-check`` validates schema
+  and drift in ``CI_STEPS`` (live registry publish remains operator G3)
 - CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
   Major/Critical (not clamped to Minor); a listing error on one workflow run
   does not skip later runs; a Major/Critical finding is kept over a less

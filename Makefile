@@ -15,7 +15,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
-	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check pins-check action-pin-check
@@ -194,6 +194,12 @@ llms: ## Regenerate llms-full.txt concatenation
 llms-check: ## Fail when llms-full.txt drifts
 	$(UV) run python scripts/gen_llms_full.py --check
 
+mcp-server-json: ## Regenerate MCP Registry server.json and docs/mcp-tools.md
+	$(UV) run python scripts/gen_mcp_server_json.py
+
+mcp-server-json-check: ## Fail when server.json or docs/mcp-tools.md drift
+	$(UV) run python scripts/gen_mcp_server_json.py --check
+
 diagrams: ## Regenerate architecture SVGs from D2 source (requires d2 on PATH)
 	@command -v d2 >/dev/null 2>&1 || { echo "d2 not found — install from https://d2lang.com" >&2; exit 1; }
 	d2 --theme 0 $(PIPELINE_D2) $(PIPELINE_LIGHT)
@@ -223,7 +229,7 @@ ci-static: lockcheck lint typecheck pyright catalog-check agents-check build exa
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check security coverage-gate
+CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check security coverage-gate mcp-server-json-check
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)

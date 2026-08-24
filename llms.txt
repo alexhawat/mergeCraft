@@ -23,6 +23,7 @@
 
 ## Docs
 
+- docs/mcp-tools.md — generated public MCP tool reference (six-tool profile)
 - docs/README.md — generated index from docs/manifest.yaml
 - docs/cli.md — full mergecraft CLI reference
 - docs/cli-examples.md — runnable offline CLI example trees (examples/cli/)
