@@ -311,6 +311,60 @@ def test_replay_unknown_review_id_fails_closed_without_global_fallback(
     assert trace_calls == []
 
 
+def test_explain_single_arg_hex_review_id_steers_to_two_arg_form(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Error — a stored uuid hex review id alone steers to two-arg explain, not unknown finding."""
+    review_id = "b1c2d3e4f5a6789012345678abcdef90"
+    seed_completed_review(tmp_path, review_id=review_id)
+    _guard_against_review_rerun(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["explain", review_id, "--repo-root", str(tmp_path)],
+        env=_DUMB_ENV,
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
+    assert "stored review id" in combined.casefold()
+    assert "explain <review-id> <finding-id>" in combined
+    assert "unknown finding id" not in combined.casefold()
+
+
+def test_replay_review_without_trace_distinguishes_from_unknown_review_id(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Error — replay names a stored review missing trace.jsonl with a distinct message."""
+    review_id = sample_review_id()
+    seed_completed_review(tmp_path, review_id=review_id, trace_events=[])
+    _guard_against_review_rerun(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["replay", review_id, "--repo-root", str(tmp_path)],
+        env=_DUMB_ENV,
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
+    assert "no stored trace.jsonl" in combined.casefold()
+    assert "unknown review run" not in combined.casefold()
+
+
+def test_findings_subcommand_typo_surfaces_typer_error_not_unknown_review_id(
+    tmp_path: Path,
+) -> None:
+    """Error — subcommand typos like ``expor`` fail as Typer usage, not durable lookup."""
+    result = runner.invoke(
+        app,
+        ["findings", "expor", "--repo-root", str(tmp_path)],
+        env=_DUMB_ENV,
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
+    assert "no such command" in combined.casefold()
+    assert "unknown review" not in combined.casefold()
+
+
 def test_review_with_unsafe_review_id_still_succeeds_and_persists_safely(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

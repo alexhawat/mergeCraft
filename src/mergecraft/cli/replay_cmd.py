@@ -22,7 +22,10 @@ from mergecraft.cli.trace_jsonl import (
     load_trace_jsonl_events,
     session_ids_in_trace_order,
 )
-from mergecraft.review.completed import load_completed_review_trace_events
+from mergecraft.review.completed import (
+    completed_review_exists,
+    load_completed_review_trace_events,
+)
 
 
 def _payload(*, run_id: str | None, events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -73,6 +76,11 @@ def run(
     if run_id:
         events = load_completed_review_trace_events(run_id, repo_root=root)
         if not events:
+            if completed_review_exists(run_id, repo_root=root):
+                cli_bail(
+                    f"review {run_id} has no stored trace.jsonl",
+                    code=CLI_USAGE_EXIT_CODE,
+                )
             cli_bail(f"unknown review run id {run_id}", code=CLI_USAGE_EXIT_CODE)
     else:
         target = trace_dir if trace_dir is not None else default_trace_dir()

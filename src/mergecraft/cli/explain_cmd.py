@@ -24,7 +24,6 @@ from mergecraft.review.completed import (
     completed_review_exists,
     lookup_finding_packet_in_review,
 )
-from mergecraft.review.finding_lookup import is_safe_path_stem
 
 _FINGERPRINT_HEX_RE = re.compile(r"^[0-9a-f]+$")
 
@@ -137,14 +136,14 @@ def run(
         resolved_finding_id = finding_id
     elif review_id_or_finding is not None:
         token = review_id_or_finding
-        if _is_finding_id_token(token):
-            resolved_finding_id = token
-        elif is_safe_path_stem(token) and completed_review_exists(token, repo_root=root):
+        if completed_review_exists(token, repo_root=root):
             cli_bail(
                 f"{token!r} is a stored review id — pass a finding id (MC-…) "
                 "or use: explain <review-id> <finding-id>",
                 code=CLI_USAGE_EXIT_CODE,
             )
+        elif _is_finding_id_token(token):
+            resolved_finding_id = token
         else:
             resolved_finding_id = token
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -67,6 +68,16 @@ def _looks_like_review_id(token: str) -> bool:
     return len(token) >= 4 and _REVIEW_ID_PATTERN.fullmatch(token) is not None
 
 
+def _looks_like_subcommand_typo(cmd_name: str) -> bool:
+    """Return whether ``cmd_name`` is likely a misspelling of a reserved subcommand."""
+    for reserved in _FINDINGS_SUBCOMMANDS:
+        if len(cmd_name) >= 3 and reserved.startswith(cmd_name):
+            return True
+        if SequenceMatcher(None, cmd_name, reserved).ratio() >= 0.75:
+            return True
+    return False
+
+
 class _FindingsTyperGroup(MergecraftTyperGroup):
     """Route unknown subcommands to durable review lookup (#453)."""
 
@@ -75,6 +86,8 @@ class _FindingsTyperGroup(MergecraftTyperGroup):
         if command is not None:
             return command
         if cmd_name in _FINDINGS_SUBCOMMANDS:
+            return None
+        if _looks_like_subcommand_typo(cmd_name):
             return None
         if not _looks_like_review_id(cmd_name):
             return None
