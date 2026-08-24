@@ -11,7 +11,6 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.cli.support_init_audit_jsonl import (
     AUDIT_JSONL_GITIGNORE_LINE,
     audit_jsonl_path,
@@ -54,7 +53,6 @@ def _init_git_repo(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after CI", strict=False)
 def test_init_scaffolds_explicit_audit_jsonl_gitignore_line(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -70,7 +68,6 @@ def test_init_scaffolds_explicit_audit_jsonl_gitignore_line(
     )
 
 
-@pytest.mark.xfail(reason="green after CI", strict=False)
 def test_init_appends_audit_jsonl_when_gitignore_preexists(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -85,7 +82,6 @@ def test_init_appends_audit_jsonl_when_gitignore_preexists(
     assert AUDIT_JSONL_GITIGNORE_LINE in text
 
 
-@pytest.mark.xfail(reason="green after CI", strict=False)
 def test_audit_jsonl_is_gitignored_after_init(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Functional — ``git check-ignore`` accepts audit.jsonl after init."""
     _init_git_repo(tmp_path)
@@ -100,7 +96,6 @@ def test_audit_jsonl_is_gitignored_after_init(tmp_path: Path, monkeypatch: Monke
     )
 
 
-@pytest.mark.xfail(reason="green after CI", strict=False)
 def test_audit_jsonl_not_listed_as_untracked_after_init(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -118,7 +113,6 @@ def test_audit_jsonl_not_listed_as_untracked_after_init(
     )
 
 
-@pytest.mark.xfail(reason="green after CI", strict=False)
 def test_init_does_not_duplicate_audit_jsonl_gitignore_line(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
