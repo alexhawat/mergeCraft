@@ -269,6 +269,48 @@ CLI (`src/mergecraft/cli/app.py`):
 | Wave greens | Remove xfail from |
 | --- | --- |
 | CF | all tests in `tests/cli/test_update_version_cmd.py` |
+| CF | ✅ reconciled 2026-08-24 — 13/13 CF cases pass without `--runxfail` |
+
+## CG #465 — review timeout budget composition → CG RED
+
+Source: D8, issue #465. One declared per-attempt budget; job
+``timeout-minutes`` must exceed the sum of sequential review attempts plus
+checkout/setup slack. Do **not** shorten per-attempt timeouts to make room for
+Codex fallback — retries do not accumulate progress.
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Single declared attempt budget env | `tests/ci/test_mergecraft_workflow_timeout_budget.py::test_workflow_declares_single_review_attempt_timeout_budget` | unit |
+| Nous + Codex steps derive ``with.timeout`` | `…::test_mergecraft_review_steps_reference_declared_attempt_timeout` | integration |
+| Job budget > 2× attempt + slack | `…::test_review_job_timeout_composes_from_attempt_budget` | functional |
+| Full budget per attempt (not shortened) | `…::test_per_attempt_timeout_not_shortened_below_declared_budget` | edge |
+
+### Pinned public contract (implementation wave CG)
+
+Workflow (``.github/workflows/mergecraft.yml`` only — lane C scope):
+
+- ``env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES`` — single declared per-attempt
+  budget (whole minutes)
+- Both ``alexhawat/mergeCraft`` review steps use
+  ``timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m`` (or
+  equivalent env wiring — no independent ``25m`` literals)
+- ``review`` job ``timeout-minutes`` strictly greater than
+  ``2 × attempt + CHECKOUT_AND_SETUP_SLACK`` (10 minutes per
+  ``tests/ci/support_review_timeout_budget.py``)
+
+Helpers under ``tests/ci/support_review_timeout_budget.py`` encode the
+composition rule for pytest; implementation may mirror the same constants in
+workflow comments.
+
+Observability (D8): promote enough agent logs that a 25m stall is diagnosable —
+**out of lane C YAML scope**; tracked separately from these workflow-timeout
+tests.
+
+## xfail reconciliation (CG)
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| CG | all tests in `tests/ci/test_mergecraft_workflow_timeout_budget.py` |
 
 ## Verification commands
 
@@ -286,7 +328,8 @@ uv run pytest --collect-only -q \
   tests/cli/test_durable_review_by_id_cmd.py \
   tests/evals/test_lens_routing_capability.py \
   tests/evals/test_lens_capability_json.py \
-  tests/cli/test_update_version_cmd.py
+  tests/cli/test_update_version_cmd.py \
+  tests/ci/test_mergecraft_workflow_timeout_budget.py
 uv run pytest -q \
   tests/analyzers/test_finding_short_id.py \
   tests/findings/test_finding_short_id_outputs.py \
@@ -298,5 +341,6 @@ uv run pytest -q \
   tests/cli/test_durable_review_by_id_cmd.py \
   tests/evals/test_lens_routing_capability.py \
   tests/evals/test_lens_capability_json.py \
-  tests/cli/test_update_version_cmd.py
+  tests/cli/test_update_version_cmd.py \
+  tests/ci/test_mergecraft_workflow_timeout_budget.py
 ```
