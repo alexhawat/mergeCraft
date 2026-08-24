@@ -33,8 +33,6 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-pytestmark = pytest.mark.xfail(reason="green after BA impl", strict=False)
-
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}

@@ -16,8 +16,6 @@ from tests.cli.support_provider_registry import (
 from mergecraft.models import PROVIDERS
 from mergecraft.utils import agent_resolve as ar
 
-_XFAIL = pytest.mark.xfail(reason="green after BA impl", strict=False)
-
 
 def test_providers_catalog_has_fourteen_builtin_entries() -> None:
     """Seed source ``PROVIDERS`` must expose exactly 14 built-in catalog rows."""
@@ -28,7 +26,6 @@ def test_providers_catalog_has_fourteen_builtin_entries() -> None:
     ("label", "expected_harness"),
     sorted(BUILTIN_HARNESS_DEFAULTS.items()),
 )
-@_XFAIL
 def test_builtin_harness_defaults_match_agent_resolve_table(
     label: str,
     expected_harness: str,
@@ -41,7 +38,6 @@ def test_builtin_harness_defaults_match_agent_resolve_table(
     assert ar._harness_supports_provider(expected_harness, label)
 
 
-@_XFAIL
 def test_allocate_env_index_returns_max_plus_one() -> None:
     registry = import_provider_registry()
     allocate = getattr(registry, "allocate_env_index", None)
@@ -53,7 +49,6 @@ def test_allocate_env_index_returns_max_plus_one() -> None:
     assert allocate([]) == 1
 
 
-@_XFAIL
 def test_allocate_env_index_never_reuses_gaps() -> None:
     registry = import_provider_registry()
     allocate = getattr(registry, "allocate_env_index", None)
@@ -64,7 +59,6 @@ def test_allocate_env_index_never_reuses_gaps() -> None:
     assert allocate([{"envIndex": 1}, {"envIndex": 5}]) == 6
 
 
-@_XFAIL
 def test_harness_support_predicate_is_reused_not_duplicated() -> None:
     registry = import_provider_registry()
     supports = getattr(registry, "harness_supports_provider", None)
@@ -73,7 +67,6 @@ def test_harness_support_predicate_is_reused_not_duplicated() -> None:
     assert supports is ar._harness_supports_provider
 
 
-@_XFAIL
 def test_list_supported_harnesses_is_generated_from_code() -> None:
     registry = import_provider_registry()
     list_fn = getattr(registry, "list_supported_harnesses", None)

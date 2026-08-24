@@ -40,6 +40,7 @@ from mergecraft.cli import (
     plan_cmd,
     policy_cmd,
     profile_cmd,
+    provider_cmd,
     replay_cmd,
     requirements_cmd,
     run_cmd,
@@ -99,6 +100,7 @@ app.add_typer(mcp_cmd.app, name="mcp")
 app.add_typer(cache_cmd.app, name="cache")
 app.add_typer(context_cmd.app, name="context")
 app.add_typer(auth_cmd.app, name="auth")
+app.add_typer(provider_cmd.app, name="provider")
 app.add_typer(models_cmd.app, name="models")
 app.add_typer(analyzers_cmd.app, name="analyzers")
 app.command("init")(init_cmd.run)

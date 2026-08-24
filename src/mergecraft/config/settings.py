@@ -110,6 +110,17 @@ class StaticCheckDefinition(_OptionalFeatureModel):
     suffixes: list[str] = Field(default_factory=list)
 
 
+class ProviderRegistryEntry(_OptionalFeatureModel):
+    """One operator-registered LLM provider (#477 / BA)."""
+
+    label: str
+    url: str | None = None
+    harness: str
+    env_index: int = Field(alias="envIndex")
+    auth_kind: str | None = Field(default=None, alias="authKind")
+    region: str | None = None
+
+
 class CiEvidenceSettings(_OptionalFeatureModel):
     """Which of the repo's *own* CI results mergeCraft may treat as evidence (#36).
 
@@ -529,6 +540,9 @@ class RepoSettings(BaseModel):
     tracing: TracingSettings = Field(default_factory=TracingSettings)
     run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
     enterprise: EnterpriseSettings = Field(default_factory=EnterpriseSettings)
+    # #477 / BA — operator provider registry (structure only; secrets in ``.env``).
+    providers: list[ProviderRegistryEntry] = Field(default_factory=list)
+    providers_seeded: bool = Field(default=False, alias="providersSeeded")
 
     @field_validator("push", "shell", mode="before")
     @classmethod
