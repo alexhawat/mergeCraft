@@ -173,6 +173,116 @@ async def test_analyzer_inline_body_nested_finding_fingerprint_is_preserved(
 
 
 @pytest.mark.asyncio
+async def test_mixed_source_collision_refreshes_pre_rendered_analyzer_short_id(
+    ctx: ToolContext,
+) -> None:
+    """Agent + analyzer inline comments share one publish batch for ``MC-…`` ids."""
+    from tests.analyzers.support_short_id import collision_fingerprints
+
+    from mergecraft.analyzers.finding import (
+        finding_short_id,
+        make_finding,
+        resolve_finding_short_ids,
+    )
+    from mergecraft.review.finding_lookup import fingerprint_for_short_id
+
+    fp1, fp2 = collision_fingerprints()
+    analyzer_finding = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Major",
+        confidence="likely",
+        message="Analyzer finding with collision.",
+        path="src/analyzer.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+        fingerprint=fp2,
+    )
+    pre_rendered = finding_short_id(fp2)
+    analyzer_body = format_analyzer_inline_body(analyzer_finding, short_id=pre_rendered)
+    inline = await _submit(
+        ctx,
+        [
+            {
+                "path": "src/agent.py",
+                "line": 1,
+                "body": "Agent finding with collision.",
+                "fingerprint": fp1,
+            },
+            {
+                "path": analyzer_finding.path,
+                "line": analyzer_finding.start_line,
+                "body": analyzer_body,
+                "fingerprint": fp2,
+            },
+        ],
+    )
+    expected = resolve_finding_short_ids([fp1, fp2])
+    assert expected[fp1] != expected[fp2]
+    analyzer_published = inline[1]["body"]
+    assert f"**{expected[fp2]}**" in analyzer_published
+    assert f"**{pre_rendered}**" not in analyzer_published
+    assert fingerprint_for_short_id(expected[fp2], (fp1, fp2)) == fp2
+    assert len(re.findall(r"MC-[0-9a-f]{6,}", analyzer_published)) == 1
+
+
+@pytest.mark.asyncio
+async def test_mixed_source_collision_refreshes_title_path_short_id(
+    ctx: ToolContext,
+) -> None:
+    """Title-path agent comments also pick up batch-resolved ``MC-…`` ids."""
+    from tests.analyzers.support_short_id import collision_fingerprints
+
+    from mergecraft.analyzers.finding import (
+        finding_short_id,
+        make_finding,
+        render_finding_pr_comment,
+        resolve_finding_short_ids,
+    )
+
+    fp1, fp2 = collision_fingerprints()
+    agent_finding = make_finding(
+        tool="mergecraft",
+        rule_id="logic",
+        category="Functional Correctness",
+        severity="Major",
+        confidence="likely",
+        message="Agent finding with collision.",
+        path="src/agent.py",
+        start_line=1,
+        end_line=1,
+        source="agent",
+        fingerprint=fp2,
+    )
+    pre_rendered = finding_short_id(fp2)
+    agent_body = render_finding_pr_comment(agent_finding, short_id=pre_rendered)
+    inline = await _submit(
+        ctx,
+        [
+            {
+                "path": agent_finding.path,
+                "line": agent_finding.start_line,
+                "body": agent_body,
+                "fingerprint": fp2,
+            },
+            {
+                "path": "src/other.py",
+                "line": 2,
+                "body": "Second finding forces collision resolution.",
+                "fingerprint": fp1,
+            },
+        ],
+    )
+    expected = resolve_finding_short_ids([fp1, fp2])
+    agent_published = inline[0]["body"]
+    assert agent_published.startswith(f"**{expected[fp2]}**")
+    assert f"**{pre_rendered}**" not in agent_published
+    assert len(re.findall(r"MC-[0-9a-f]{6,}", agent_published)) == 1
+
+
+@pytest.mark.asyncio
 async def test_identical_findings_share_a_fingerprint(ctx: ToolContext) -> None:
     inline = await _submit(
         ctx,

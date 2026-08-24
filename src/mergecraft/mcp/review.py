@@ -110,12 +110,26 @@ def _body_has_short_id_line(body: str) -> bool:
 
 
 def _prepend_short_id(body: str, short_id: str) -> str:
-    if _body_has_short_id_line(body):
-        return body
+    """Stamp or refresh the publication short-id line with batch-resolved ``short_id``."""
     marker = f"**{short_id}**"
-    if body.strip():
-        return f"{marker}\n\n{body}"
-    return marker
+    if not body.strip():
+        return marker
+    if _body_has_short_id_line(body):
+        content = _body_without_short_id_line(body)
+        if content.strip():
+            return f"{marker}\n\n{content}"
+        return marker
+    title_match = re.match(
+        rf"^\*\*{re.escape(FINDING_SHORT_ID_PREFIX)}[0-9a-f]{{6,}}\*\*(\s*\([^)]+\))\s*\n?",
+        body.lstrip(),
+    )
+    if title_match:
+        rest = body.lstrip()[title_match.end() :].lstrip()
+        first_line = f"{marker}{title_match.group(1)}"
+        if rest:
+            return f"{first_line}\n\n{rest}"
+        return first_line
+    return f"{marker}\n\n{body}"
 
 
 _FRESH_PR_TRIGGERS: frozenset[str] = frozenset(
