@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   semantic tools at ``/mcp/public`` (``review_change``, ``get_review``,
   ``inspect_finding``, ``explain_finding``, ``get_capabilities``, ``get_policy``)
   over the completed-review store without extending ``ReviewEntry``
+- Public MCP stdio transport: ``mergecraft mcp serve --role public --transport stdio``
+  serves the same six-tool public profile over newline-delimited JSON-RPC on
+  stdin/stdout without Bearer auth (HTTP public still requires the per-serve token)
 - CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
   Major/Critical (not clamped to Minor); a listing error on one workflow run
   does not skip later runs; a Major/Critical finding is kept over a less
