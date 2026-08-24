@@ -12,7 +12,7 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.server import build_common_tools
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
-from mergecraft.utils.github import GitHubClient
+from mergecraft.utils.github import GitHubClient, GitHubListedItems
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,11 +38,10 @@ class _RecordingGitHub(GitHubClient):
         repo: str,
         ref: str,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> GitHubListedItems:
         self.run_calls.append((owner, repo, ref))
-        return {
-            "total_count": 1,
-            "check_runs": [
+        return GitHubListedItems(
+            items=[
                 {
                     "id": RUN_ID,
                     "name": RUN_NAME,
@@ -52,7 +51,9 @@ class _RecordingGitHub(GitHubClient):
                     "check_suite": {"id": SUITE_ID},
                 }
             ],
-        }
+            incomplete=False,
+            total_count=1,
+        )
 
     async def list_check_suites_for_ref(
         self,

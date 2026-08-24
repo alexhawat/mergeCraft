@@ -369,12 +369,13 @@ async def test_protocol_list_check_runs_alias_reaches_the_check_runs_endpoint(
     github = RecordingGitHubClient(transport=github_snapshot_transport())
     adapter = GitHubScmAdapter(github)
 
-    payload = await adapter.list_check_runs("acme", "demo", "main")
+    listed = await adapter.list_check_runs("acme", "demo", "main")
 
     assert [path for _method, path, _payload in github.calls] == [
         "/repos/acme/demo/commits/main/check-runs"
     ]
-    assert "check_runs" in payload
+    assert listed.incomplete is False
+    assert listed.items
 
 
 def test_checkout_and_diff_semantics_are_preserved() -> None:

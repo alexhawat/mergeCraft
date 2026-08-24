@@ -53,9 +53,13 @@ class _CheckRunGitHub(GitHubClient):
         repo: str,
         ref: str,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> GitHubListedItems:
         self.refs.append(ref)
-        return {"total_count": len(self._check_runs), "check_runs": self._check_runs}
+        return GitHubListedItems(
+            items=list(self._check_runs),
+            incomplete=False,
+            total_count=len(self._check_runs),
+        )
 
 
 def _ctx(
@@ -145,11 +149,13 @@ async def test_incomplete_check_run_listing_does_not_substitute_the_gate(
             repo: str,
             ref: str,
             **kwargs: Any,
-        ) -> dict[str, Any]:
-            payload = await super().list_check_runs_for_ref(owner, repo, ref, **kwargs)
-            payload["incomplete"] = True
-            payload["total_count"] = 500
-            return payload
+        ) -> GitHubListedItems:
+            listed = await super().list_check_runs_for_ref(owner, repo, ref, **kwargs)
+            return GitHubListedItems(
+                items=listed.items,
+                incomplete=True,
+                total_count=500,
+            )
 
     github = _IncompleteCheckRuns([_check_run("Verify (drift gates)", "success")])
     ctx = _ctx(
@@ -162,6 +168,36 @@ async def test_incomplete_check_run_listing_does_not_substitute_the_gate(
     payload = await _run_static_checks(ctx)
 
     assert github.refs == [HEAD_SHA]
+    statuses = [check["status"] for check in payload["checks"]]
+    assert "satisfied-by-ci" not in statuses
+    assert "declared-but-cannot-run" in statuses
+
+
+@pytest.mark.asyncio
+async def test_check_run_listing_without_incomplete_does_not_substitute(
+    tmp_path: Path,
+) -> None:
+    """A dict payload that omits ``incomplete`` must not look complete."""
+
+    class _DictCheckRuns(GitHubClient):
+        async def list_check_runs_for_ref(
+            self, owner: str, repo: str, ref: str, **kwargs: Any
+        ) -> dict[str, Any]:
+            _ = (owner, repo, kwargs)
+            return {
+                "total_count": 1,
+                "check_runs": [_check_run("Verify (drift gates)", "success")],
+            }
+
+    ctx = _ctx(
+        tmp_path,
+        github=_DictCheckRuns(token=""),
+        ci_gate_checks={"lint": "Verify (drift gates)"},
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'pass'")],
+    )
+
+    payload = await _run_static_checks(ctx)
+
     statuses = [check["status"] for check in payload["checks"]]
     assert "satisfied-by-ci" not in statuses
     assert "declared-but-cannot-run" in statuses

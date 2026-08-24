@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.utils.github import require_github_listed
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -28,11 +29,13 @@ def _with_suite_id(run: dict[str, Any]) -> dict[str, Any]:
 def list_check_runs_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         ref = str(params["ref"])
-        data = await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
+        listed = require_github_listed(
+            await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
+        )
         return {
             "ref": ref,
-            "total_count": data.get("total_count"),
-            "check_runs": [_with_suite_id(run) for run in data.get("check_runs") or []],
+            "total_count": listed.total_count,
+            "check_runs": [_with_suite_id(run) for run in listed.items],
         }
 
     return tool(

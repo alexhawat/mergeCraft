@@ -215,7 +215,7 @@ async def collect_ci_sarif_findings(
             continue
         try:
             listed = require_github_listed(
-                await client.list_workflow_run_artifacts(ctx.repo.owner, ctx.repo.name, run_id)
+                await ctx.scm.list_workflow_run_artifacts(ctx.repo.owner, ctx.repo.name, run_id)
             )
         except Exception as listing_err:
             logger.warning(

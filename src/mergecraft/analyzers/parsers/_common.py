@@ -175,6 +175,8 @@ def iter_json_objects(raw: str) -> Iterator[dict[str, Any]]:
         yield loaded
         return
     if isinstance(loaded, list):
+        if loaded and not all(isinstance(item, dict) for item in loaded):
+            return
         for item in loaded:
             if isinstance(item, dict):
                 yield item
@@ -184,13 +186,14 @@ def load_jsonl_objects(raw: str) -> list[dict[str, Any]]:
     """Return JSON objects from JSONL (or a JSON array/object), else raise.
 
     Empty stdout is a valid empty document. Non-JSON tool error text is not.
+    A JSON array of non-dicts is not an empty document.
     """
     stripped = raw.strip()
     if not stripped:
         return []
-    objects = list(iter_json_objects(raw))
-    if objects:
-        return objects
+    parsed = list(iter_json_objects(raw))
+    if parsed:
+        return parsed
     payload = try_load_json(raw)
     if payload is None:
         msg = "expected JSONL objects"
@@ -198,7 +201,13 @@ def load_jsonl_objects(raw: str) -> list[dict[str, Any]]:
     if payload in ({}, []):
         return []
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
+        rows: list[dict[str, Any]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                msg = "expected JSONL objects"
+                raise ValueError(msg)
+            rows.append(item)
+        return rows
     msg = "expected JSONL objects"
     raise ValueError(msg)
 

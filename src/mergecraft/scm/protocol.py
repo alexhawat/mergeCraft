@@ -5,7 +5,10 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from mergecraft.utils.github import GitHubListedItems
 
 # GitHub REST helpers exercised today (mirrors tests/scm/test_protocol.py).
 _GITHUB_REST_OPERATIONS: frozenset[str] = frozenset(
@@ -235,10 +238,10 @@ class ScmProvider(Protocol):
     ) -> dict[str, Any]: ...
     async def list_check_runs_for_ref(
         self, owner: str, repo: str, ref: str, **kwargs: Any
-    ) -> dict[str, Any]: ...
+    ) -> GitHubListedItems: ...
     async def list_workflow_run_artifacts(
         self, owner: str, repo: str, run_id: int
-    ) -> list[dict[str, Any]]: ...
+    ) -> GitHubListedItems: ...
     async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes: ...
     async def download_workflow_run_logs(self, owner: str, repo: str, run_id: int) -> bytes: ...
 
@@ -253,7 +256,7 @@ class ScmProvider(Protocol):
     ) -> list[dict[str, Any]]: ...
     async def list_check_runs(
         self, owner: str, repo: str, ref: str, **kwargs: Any
-    ) -> dict[str, Any]: ...
+    ) -> GitHubListedItems: ...
 
     async def edit_issue_comment(
         self, owner: str, repo: str, comment_id: int, body: str

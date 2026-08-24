@@ -289,6 +289,18 @@ async def test_paginate_object_missing_item_key_is_incomplete() -> None:
 
 
 @pytest.mark.asyncio
+async def test_paginate_array_page_is_incomplete_when_object_expected() -> None:
+    from mergecraft.utils.github import paginate_github_list_pages
+
+    async def _array(_page: int) -> list[dict[str, object]]:
+        return [{"id": 1}]
+
+    listed = await paginate_github_list_pages(_array, item_key="artifacts", page_size=100)
+    assert listed.items == []
+    assert listed.incomplete is True
+
+
+@pytest.mark.asyncio
 async def test_paginate_non_list_item_key_is_incomplete() -> None:
     from mergecraft.utils.github import paginate_github_list_pages
 
@@ -317,6 +329,19 @@ def test_require_github_listed_rejects_bare_list() -> None:
 
     with pytest.raises(TypeError, match="GitHubListedItems"):
         require_github_listed([{"id": 1}])
+
+
+@pytest.mark.asyncio
+async def test_list_issue_comments_rejects_non_array_payload() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/issues/1/comments")
+        return httpx.Response(200, json={"message": "not a list"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.github.com") as raw:
+        client = GitHubClient("t", client=raw)
+        with pytest.raises(TypeError, match="JSON array"):
+            await client.list_issue_comments("acme", "widgets", 1)
 
 
 @pytest.mark.asyncio

@@ -207,22 +207,17 @@ class GitHubScmAdapter:
 
     async def list_check_runs_for_ref(
         self, owner: str, repo: str, ref: str, **kwargs: Any
-    ) -> dict[str, Any]:
-        result = await self._client.list_check_runs_for_ref(owner, repo, ref, **kwargs)
-        if isinstance(result, GitHubListedItems):
-            return result.as_check_runs_payload()
-        if isinstance(result, dict):
-            return result
-        msg = f"expected GitHubListedItems or dict, got {type(result).__name__}"
-        raise TypeError(msg)
+    ) -> GitHubListedItems:
+        return require_github_listed(
+            await self._client.list_check_runs_for_ref(owner, repo, ref, **kwargs)
+        )
 
     async def list_workflow_run_artifacts(
         self, owner: str, repo: str, run_id: int
-    ) -> list[dict[str, Any]]:
-        listed = require_github_listed(
+    ) -> GitHubListedItems:
+        return require_github_listed(
             await self._client.list_workflow_run_artifacts(owner, repo, run_id)
         )
-        return listed.items
 
     async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes:
         return await self._client.download_artifact_zip(owner, repo, artifact_id)
@@ -250,7 +245,7 @@ class GitHubScmAdapter:
 
     async def list_check_runs(
         self, owner: str, repo: str, ref: str, **kwargs: Any
-    ) -> dict[str, Any]:
+    ) -> GitHubListedItems:
         return await self.list_check_runs_for_ref(owner, repo, ref, **kwargs)
 
     async def edit_issue_comment(

@@ -115,6 +115,13 @@ def test_jsonl_parser_raises_on_garbage(tool_id: str, parser_id: str, raw: str) 
 
 
 @pytest.mark.parametrize(("tool_id", "parser_id"), _JSONL_TOOLS)
+@pytest.mark.parametrize("raw", ["[1, 2]", '["skip"]', "[null]"])
+def test_jsonl_parser_raises_on_non_dict_array(tool_id: str, parser_id: str, raw: str) -> None:
+    with pytest.raises(ValueError, match="JSON"):
+        _parse(parser_id, raw, tool_id=tool_id)
+
+
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSONL_TOOLS)
 @pytest.mark.parametrize("raw", ["", "   ", "[]", "{}"])
 def test_jsonl_parser_empty_document_is_clean(tool_id: str, parser_id: str, raw: str) -> None:
     assert _parse(parser_id, raw, tool_id=tool_id) == []

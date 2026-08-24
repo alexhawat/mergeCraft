@@ -40,7 +40,8 @@ def _as_dict(data: Any) -> dict[str, Any]:
 
 def _as_list(data: Any) -> list[dict[str, Any]]:
     if not isinstance(data, list):
-        return []
+        msg = f"expected JSON array, got {type(data).__name__}"
+        raise TypeError(msg)
     return [item for item in data if isinstance(item, dict)]
 
 
@@ -53,16 +54,6 @@ class GitHubListedItems(NamedTuple):
     items: list[dict[str, Any]]
     incomplete: bool
     total_count: int | None = None
-
-    def as_check_runs_payload(self) -> dict[str, Any]:
-        """SCM/MCP dict shape (``check_runs`` + optional ``total_count``)."""
-        payload: dict[str, Any] = {
-            "check_runs": self.items,
-            "incomplete": self.incomplete,
-        }
-        if self.total_count is not None:
-            payload["total_count"] = self.total_count
-        return payload
 
 
 def require_github_listed(result: object) -> GitHubListedItems:
@@ -82,14 +73,14 @@ async def paginate_github_list_pages(
 ) -> GitHubListedItems:
     """Follow GitHub list pages until a short page or ``max_pages``.
 
-    Each ``fetch_page(page)`` should return a JSON object with ``item_key``
-    (or a bare list). A full page of ``page_size`` continues; a shorter
-    page ends the walk so items past 100 are not silently dropped.
+    Each ``fetch_page(page)`` should return a JSON object with ``item_key``.
+    A full page of ``page_size`` continues; a shorter page ends the walk so
+    items past 100 are not silently dropped.
 
     ``incomplete`` is True when the walk hit ``max_pages`` on a full page,
-    the payload was not a list/object, ``item_key`` was missing or not a
-    list, or non-dict rows were dropped — callers must not treat that as
-    a complete catalog.
+    the payload was not an object, ``item_key`` was missing or not a list,
+    a JSON array was returned where an object was expected, or non-dict
+    rows were dropped — callers must not treat that as a complete catalog.
     """
     collected: list[dict[str, Any]] = []
     incomplete = False
@@ -102,10 +93,8 @@ async def paginate_github_list_pages(
             and total_count is None
         ):
             total_count = payload["total_count"]
-        if isinstance(payload, list):
-            raw_items: Any = payload
-        elif isinstance(payload, dict):
-            raw_items = payload.get(item_key)
+        if isinstance(payload, dict):
+            raw_items: Any = payload.get(item_key)
             if not isinstance(raw_items, list):
                 logger.warning(
                     "github list pagination: missing or non-list {} on object payload; "
