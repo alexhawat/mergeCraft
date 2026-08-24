@@ -14,6 +14,7 @@ from loguru import logger
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.security.egress import guard_external_url
+from mergecraft.utils.github import usable_github_token
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -55,7 +56,7 @@ def upload_file_tool(ctx: ToolContext):
         filename = path.name
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         api_base = os.environ.get("MERGECRAFT_API_URL", "").rstrip("/")
-        api_token = ctx.api_token.strip()
+        api_token = usable_github_token(ctx.api_token)
         if not api_base or not api_token:
             # Standalone BYOK: copy into tmpdir artifacts and return a file:// URL.
             dest_dir = Path(ctx.tmpdir) / "uploads"

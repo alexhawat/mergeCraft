@@ -23,7 +23,7 @@ trajectory). W9 (#46) fills the thermostat's action vocabulary on the
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
@@ -163,7 +163,7 @@ class Decision(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    verdict: str
+    verdict: Literal["success", "failure", "neutral"]
     reason: str
     decided_by: str
     action: str | None = None

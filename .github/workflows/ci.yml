@@ -110,15 +110,11 @@ jobs:
           fi
       # First-wave CI SARIF for mergeCraft ingest (#464 / D8). Upload even when
       # the static tier failed so the review still sees the tool's findings.
-      - name: Emit ruff SARIF
+      - name: Emit ruff and mypy SARIF
         if: always() && matrix.python == '3.14'
         run: |
           mkdir -p .sarif
           uv run ruff check src tests scripts --output-format sarif --output-file .sarif/ruff.sarif || true
-      - name: Emit mypy SARIF
-        if: always() && matrix.python == '3.14'
-        run: |
-          mkdir -p .sarif
           uv run mypy src/mergecraft --output json > .sarif/mypy.json || true
           uv run python scripts/native_output_to_sarif.py mypy .sarif/mypy.json .sarif/mypy.sarif
       - name: Upload ruff SARIF
@@ -156,13 +152,14 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: bandit + pip-audit (OSV.dev)
-        run: make security
-      - name: Emit bandit SARIF
-        if: always() && matrix.python == '3.14'
+        env:
+          BANDIT_JSON: .sarif/bandit.json
         run: |
           mkdir -p .sarif
-          uv run bandit -c pyproject.toml -ll -r src/mergecraft -f json -o .sarif/bandit.json || true
-          uv run python scripts/native_output_to_sarif.py bandit .sarif/bandit.json .sarif/bandit.sarif
+          make security
+      - name: Convert bandit SARIF
+        if: always() && matrix.python == '3.14'
+        run: uv run python scripts/native_output_to_sarif.py bandit .sarif/bandit.json .sarif/bandit.sarif
       - name: Upload bandit SARIF
         if: always() && matrix.python == '3.14'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

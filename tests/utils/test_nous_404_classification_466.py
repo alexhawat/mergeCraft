@@ -136,9 +136,16 @@ class TestNous404Failover:
         """#466 — credits/balance 404 with ``isRetryable: false`` still fails over."""
         assert _is_retryable_failure(_failed(_NOUS_BILLING_404)) is True
 
-    def test_generic_http_404_without_billing_prose_is_retryable_for_failover(self) -> None:
-        """Needle-list-only cannot pass: no credits/balance/quota/rate-limit wording."""
-        assert _is_retryable_failure(_failed(_GENERIC_404)) is True
+    def test_unrelated_asset_404_is_not_retryable_for_model_failover(self) -> None:
+        stderr = "GET https://cdn.example/models/weights.bin HTTP/1.1 404 Not Found"
+        assert _is_retryable_failure(_failed(stderr)) is False
+
+    def test_banner_prefixed_json_404_is_classified(self) -> None:
+        bannered = "Nous CLI v1.2\n" + _GENERIC_404
+        generic = _classify(bannered, status_code=404)
+        unknown = _classify(_UNKNOWN_MODEL_404, status_code=404)
+        assert generic != unknown
+        assert _is_retryable_failure(_failed(bannered)) is True
 
     def test_unknown_model_404_does_not_fail_over(self) -> None:
         assert _is_retryable_failure(_failed(_UNKNOWN_MODEL_404)) is False

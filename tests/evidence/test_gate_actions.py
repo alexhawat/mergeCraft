@@ -168,6 +168,30 @@ def test_policy_changed_unread_file_maps_to_request_changes() -> None:
     assert _find_action(action) == "request_changes"
 
 
+def test_policy_has_blockers_maps_to_request_changes() -> None:
+    """Critical/Major findings use the ``has_blockers`` policy key, not unread-file."""
+    from mergecraft.agents.gates import decide_action, select_rule_id
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+
+    finding = make_finding(
+        tool="agent",
+        rule_id="SEC-1",
+        category="Security & Privacy",
+        severity="Critical",
+        confidence="certain",
+        message="blocker",
+        path="src/auth.py",
+        start_line=1,
+        end_line=1,
+        source="agent",
+        introduced_by_pr="true",
+    )
+    packet = _packet(findings=[finding])
+    assert select_rule_id(packet) == "has_blockers"
+    action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
+    assert _find_action(action) == "request_changes"
+
+
 def test_policy_low_risk_passing_maps_to_auto_merge() -> None:
     """A clean low-risk PR routes to ``auto_merge`` (#46 acceptance)."""
     from mergecraft.agents.gates import decide_action

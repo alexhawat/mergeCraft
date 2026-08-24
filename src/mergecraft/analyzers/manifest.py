@@ -168,7 +168,12 @@ def validate_manifest(
                 raise ManifestValidationError(msg)
 
 
-def load_manifest_yaml(raw: str, *, strict_severity_map: bool | None = None) -> AnalyzerManifest:
+def load_manifest_yaml(
+    raw: str,
+    *,
+    strict_severity_map: bool | None = None,
+    check_provenance: bool = False,
+) -> AnalyzerManifest:
     """Parse and validate one manifest YAML document."""
     try:
         data = yaml.safe_load(raw)
@@ -181,13 +186,24 @@ def load_manifest_yaml(raw: str, *, strict_severity_map: bool | None = None) -> 
         manifest = AnalyzerManifest.model_validate(data)
     except ValueError as exc:
         raise ManifestValidationError(str(exc)) from exc
-    validate_manifest(manifest, strict_severity_map=strict_severity_map, check_provenance=False)
+    validate_manifest(
+        manifest,
+        strict_severity_map=strict_severity_map,
+        check_provenance=check_provenance,
+    )
     return manifest
 
 
-def load_manifest_file(path: Path, *, strict_severity_map: bool | None = None) -> AnalyzerManifest:
+def load_manifest_file(
+    path: Path,
+    *,
+    strict_severity_map: bool | None = None,
+    check_provenance: bool = False,
+) -> AnalyzerManifest:
     return load_manifest_yaml(
-        path.read_text(encoding="utf-8"), strict_severity_map=strict_severity_map
+        path.read_text(encoding="utf-8"),
+        strict_severity_map=strict_severity_map,
+        check_provenance=check_provenance,
     )
 
 

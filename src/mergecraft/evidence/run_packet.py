@@ -247,37 +247,17 @@ def _structural_findings(
 ) -> list[Finding]:
     """Return the typed findings the approval gate reads, plus any extras.
 
-    Reuses ``status_checks._load_structural_findings`` so the packet and the
-    ``mergecraft-approval`` check-run can never disagree about what the run
-    found — one loader, one answer.
+    Uses :func:`mergecraft.evidence.findings.load_run_findings` so the packet
+    and the ``mergecraft-approval`` check-run share one loader — agent,
+    analyzer, and CI SARIF findings merged once.
 
     ``extra`` carries findings a caller already holds in typed form (the
     offline path parses the agent's ``set_output`` payload). Merging is
-    deduplicated on ``Finding.fingerprint`` — the model's own stable content
-    hash — because an analyzer finding the agent also reported must not be
-    counted twice by a gate that is monotone in blockers.
-
-    CI evidence (#36) joins here rather than in ``_load_structural_findings``
-    on purpose. The packet is evidence *for this merge*, so a failure the
-    consumer's CI already proved belongs in it; the ``mergecraft-approval``
-    check-run keeps its existing, narrower input set. Flaky and pre-existing
-    CI failures arrive annotated ``Minor`` / ``introduced_by_pr="false"``, so
-    they are recorded without ever reaching the packet's blocker set (D11).
+    deduplicated on ``Finding.fingerprint``.
     """
-    from mergecraft.ci.evidence import ci_evidence_findings
-    from mergecraft.utils.status_checks import _load_structural_findings
+    from mergecraft.evidence.findings import load_run_findings
 
-    merged: list[Finding] = list(_load_structural_findings(ctx))
-    incoming = [*ci_evidence_findings(ctx.tool_state), *(extra or [])]
-    if not incoming:
-        return merged
-    seen = {item.fingerprint for item in merged}
-    for item in incoming:
-        if item.fingerprint in seen:
-            continue
-        seen.add(item.fingerprint)
-        merged.append(item)
-    return merged
+    return load_run_findings(ctx, extra=extra)
 
 
 def build_run_packet(

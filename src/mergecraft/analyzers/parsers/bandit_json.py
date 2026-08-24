@@ -48,7 +48,8 @@ def parse_bandit_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) 
     findings: list[Finding] = []
     results = payload.get("results")
     if not isinstance(results, list):
-        return findings
+        msg = "bandit JSON output missing a results array"
+        raise ValueError(msg)
     for result in results:
         if not isinstance(result, dict):
             continue

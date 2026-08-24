@@ -88,9 +88,10 @@ def validate_manifest_ship_gate(
     doc_path: Path | None = None,
 ) -> None:
     """Validate one manifest satisfies fixture, doc row, and severity_map requirements."""
-    manifest = load_manifest_file(manifest_path, strict_severity_map=False)
     try:
-        validate_manifest(manifest, strict_severity_map=False, check_provenance=True)
+        manifest = load_manifest_file(
+            manifest_path, strict_severity_map=False, check_provenance=True
+        )
     except ManifestValidationError as exc:
         raise CatalogIntegrityError(str(exc)) from exc
     root = fixture_root or _DEFAULT_FIXTURE_ROOT

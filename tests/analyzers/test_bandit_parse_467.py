@@ -128,7 +128,8 @@ def test_garbage_bandit_stdout_skip_reason_includes_a_snippet(
     assert result.findings == []
     reason = result.skip_reason or ""
     assert "failed to parse" in reason, reason
-    assert _GARBAGE_SNIPPET in reason, reason
+    assert _GARBAGE_SNIPPET not in reason, reason
+    assert _GARBAGE_STDOUT.strip() not in reason
 
 
 def test_bandit_catalog_command_does_not_add_quiet() -> None:

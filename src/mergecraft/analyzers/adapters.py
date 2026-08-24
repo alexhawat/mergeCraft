@@ -523,10 +523,9 @@ def run_adapter(
                 "likely sandbox unavailable outside CI)"
             )
         else:
-            snippet = raw[:64]
             reason = (
                 f"skipped {tool_id}: failed to parse analyzer output ({exc}); "
-                f"first bytes: {snippet!r}"
+                "unparsable analyzer output omitted"
             )
         logger.info("{}", reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)

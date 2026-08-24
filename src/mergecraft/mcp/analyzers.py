@@ -112,11 +112,9 @@ def run_analyzers_tool(ctx: ToolContext):
         from mergecraft.analyzers.pipeline import catalog_scan_status
 
         scan_status = catalog_scan_status(run_state)
+        payload["catalogScanStatus"] = str(scan_status)
         if not run_state.ran:
-            reason = run_state.reason or "analyzer catalog unavailable"
-            if "unavailable" not in reason.lower():
-                reason = f"{reason} (catalog unavailable)"
-            payload["reason"] = reason
+            payload["reason"] = run_state.reason or "analyzer catalog unavailable"
         if run_state.mechanical_section:
             payload["mechanicalSection"] = run_state.mechanical_section
         if run_state.deferred_section:

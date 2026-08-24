@@ -455,9 +455,9 @@ def select_rule_id(packet: MergeEvidencePacket) -> str:
     if _has_tool_loop(packet):
         return "tool_loop"
     if _has_blocker(packet.findings):
-        # Blocking agent/analyzer findings request changes. Distinct from
-        # schema_failure (no evidence) which still maps to block.
-        return "changed-unread-file"
+        # Blocking agent/analyzer findings request changes under their own
+        # policy key — not aliased onto unread-file trajectory findings.
+        return "has_blockers"
     if _is_schema_failure(packet):
         return "schema_failure"
     # Default: no rule matched; the policy lookup falls through to the

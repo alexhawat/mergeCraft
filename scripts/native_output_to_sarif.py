@@ -5,11 +5,8 @@ CI uploads ruff's native SARIF; mypy and Bandit do not emit SARIF in the
 pinned versions, so this adapter produces artifacts named ``mypy-sarif`` /
 ``bandit-sarif`` for #464 first-wave ingest.
 
-Module: scripts.native_output_to_sarif
-Depends: json, pathlib, sys
-
-Exports:
-    main — CLI: ``mypy|bandit INPUT OUTPUT``.
+Malformed or missing native input is a converter failure — not an empty
+clean SARIF document.
 """
 
 from __future__ import annotations
@@ -19,7 +16,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from mergecraft.analyzers.parsers._common import iter_json_objects, require_json_object
+
 _BANDIT_LEVEL = {"HIGH": "error", "MEDIUM": "warning", "LOW": "note"}
+
+
+class ConverterError(ValueError):
+    """Native tool output could not be converted to SARIF."""
 
 
 def _sarif(*, tool: str, results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -56,18 +59,16 @@ def _result(
 
 
 def mypy_to_sarif(raw: str) -> dict[str, Any]:
-    """Convert mypy ``--output json`` NDJSON into SARIF."""
+    """Convert mypy ``--output json`` NDJSON into SARIF.
+
+    An empty file is treated as no diagnostics (mypy writes nothing on a
+    clean run). Non-empty input with no JSON objects is a converter failure.
+    """
+    stripped = raw.strip()
     results: list[dict[str, Any]] = []
-    for line in raw.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            item = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(item, dict):
-            continue
+    matched = False
+    for item in iter_json_objects(raw):
+        matched = True
         severity = str(item.get("severity") or "error")
         level = "error" if severity == "error" else "warning"
         start = int(item.get("line") or 1)
@@ -82,20 +83,29 @@ def mypy_to_sarif(raw: str) -> dict[str, Any]:
                 end_line=max(end, start, 1),
             )
         )
+    if stripped and not matched:
+        msg = "mypy native output is not JSON lines"
+        raise ConverterError(msg)
     return _sarif(tool="mypy", results=results)
 
 
 def bandit_to_sarif(raw: str) -> dict[str, Any]:
-    """Convert Bandit JSON (``-f json``) into SARIF."""
+    """Convert Bandit JSON (``-f json``) into SARIF.
+
+    Empty input and invalid JSON are converter failures. A valid document
+    with ``"results": []`` is a real clean scan.
+    """
     if not raw.strip():
-        return _sarif(tool="bandit", results=[])
+        msg = "bandit native output is empty"
+        raise ConverterError(msg)
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return _sarif(tool="bandit", results=[])
-    rows = payload.get("results") if isinstance(payload, dict) else None
+        payload = require_json_object(raw, what="bandit JSON output")
+    except ValueError as exc:
+        raise ConverterError(str(exc)) from exc
+    rows = payload.get("results")
     if not isinstance(rows, list):
-        return _sarif(tool="bandit", results=[])
+        msg = "bandit JSON output missing a results array"
+        raise ConverterError(msg)
     results: list[dict[str, Any]] = []
     for item in rows:
         if not isinstance(item, dict):
@@ -122,8 +132,16 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("usage: native_output_to_sarif.py mypy|bandit INPUT OUTPUT\n")
         return 2
     kind, src, dest = args
-    raw = Path(src).read_text(encoding="utf-8") if Path(src).is_file() else ""
-    document = mypy_to_sarif(raw) if kind == "mypy" else bandit_to_sarif(raw)
+    src_path = Path(src)
+    if not src_path.is_file():
+        sys.stderr.write(f"native_output_to_sarif: missing input {src}\n")
+        return 1
+    raw = src_path.read_text(encoding="utf-8")
+    try:
+        document = mypy_to_sarif(raw) if kind == "mypy" else bandit_to_sarif(raw)
+    except ConverterError as exc:
+        sys.stderr.write(f"native_output_to_sarif: {exc}\n")
+        return 1
     out = Path(dest)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")

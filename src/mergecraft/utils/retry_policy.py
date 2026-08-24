@@ -103,46 +103,58 @@ def classify_provider_failure(
 ) -> ProviderFailureClass:
     """Classify a provider refusal for failover — not GitHub HTTP retry.
 
-    Unknown-model 404 (``does not exist``) is permanent for this slug. Any other
-    HTTP 404 — including a generic ``Not Found`` with no billing prose — is
-    retryable so the chain can advance. Provider ``isRetryable: false`` is
-    ignored: Nous billing 404s used that flag while the refusal was factually
-    wrong (#466).
+    Structured JSON fields (statusCode, message) win. ``does not exist`` is
+    consulted last and only together with HTTP 404 (unknown-model). Billing
+    404s fail over. A structured JSON 404 that is not unknown-model fails
+    over (D5). Unrelated unstructured 404s (missing asset / proxy) are
+    permanent and do not advance the model chain.
     """
     payload = _provider_json_payload(stderr)
     haystack = f"{stderr} {_message_from_payload(payload)}".lower()
-    if _UNKNOWN_MODEL_MARKER in haystack:
-        return ProviderFailureClass.UNKNOWN_MODEL
     http_404 = _is_http_404(stderr=stderr, status_code=status_code, payload=payload)
     billing = any(marker in haystack for marker in _BILLING_MARKERS)
-    if http_404 and billing:
-        return ProviderFailureClass.BILLING
-    if http_404:
-        return ProviderFailureClass.HTTP_404
     if billing:
         return ProviderFailureClass.BILLING
+    if http_404 and _UNKNOWN_MODEL_MARKER in haystack:
+        return ProviderFailureClass.UNKNOWN_MODEL
+    if http_404 and payload is not None:
+        return ProviderFailureClass.HTTP_404
+    if http_404:
+        return ProviderFailureClass.PERMANENT
     if any(needle in haystack for needle in _RETRYABLE_CLI_NEEDLES):
         return ProviderFailureClass.RETRYABLE
     return ProviderFailureClass.PERMANENT
 
 
-def is_retryable_cli_failure(*, returncode: int | None, stderr: str = "") -> bool:
+def is_retryable_cli_failure(
+    *,
+    returncode: int | None,
+    stderr: str = "",
+    status_code: int | None = None,
+) -> bool:
     """Classify CLI rate-limit / overload / quota / transient-404 failures as retryable."""
     if returncode is not None and returncode in RATE_LIMIT_EXIT_CODES:
         return True
-    kind = classify_provider_failure(stderr)
+    if status_code is None:
+        status_code = _status_code_from_payload(_provider_json_payload(stderr))
+    kind = classify_provider_failure(stderr, status_code=status_code)
     return kind in _RETRYABLE_FAILURE_CLASSES
 
 
 def _provider_json_payload(stderr: str) -> dict[str, Any] | None:
     text = stderr.strip()
-    if not text.startswith("{"):
+    if not text:
         return None
-    try:
-        parsed: object = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            parsed, _end = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            continue
+        return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 def _message_from_payload(payload: dict[str, Any] | None) -> str:

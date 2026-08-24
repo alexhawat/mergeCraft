@@ -78,7 +78,7 @@ def _default_api_base_url() -> str:
     return (os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL).rstrip("/")
 
 
-def _usable_github_token(token: str) -> str:
+def usable_github_token(token: str) -> str:
     """Return a non-empty GitHub token, or ``""`` when missing or whitespace (#469)."""
     return token.strip()
 
@@ -95,7 +95,7 @@ class GitHubClient:
         user_agent: str = "mergeCraft",
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.token = _usable_github_token(token)
+        self.token = usable_github_token(token)
         self.base_url = (base_url or _default_api_base_url()).rstrip("/")
         self._owns_client = client is None
         headers = {

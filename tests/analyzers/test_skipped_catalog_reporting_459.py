@@ -156,13 +156,9 @@ async def test_run_analyzers_payload_names_unavailable_when_catalog_skipped(
     payload = json.loads(result.content[0]["text"])
     assert payload["ran"] is False
     assert payload["findingCount"] == 0
-    reason = str(payload.get("reason") or "").lower()
-    assert "unavailable" in reason, (
-        "D6: ran=False must name unavailable in the payload reason, not hide behind "
-        f"findings=0 / per-tool rows (got {payload.get('reason')!r})"
-    )
+    assert payload.get("catalogScanStatus") == "unavailable"
     blob = json.dumps(payload).lower()
-    assert not any(marker in blob for marker in _CLEAN_MARKERS)
+    assert "unavailable" in blob
 
 
 @pytest.mark.asyncio

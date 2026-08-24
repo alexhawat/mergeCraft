@@ -61,68 +61,47 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
     base_percent = _percent_covered(base)
     delta = head_percent - base_percent
     breach_depth = resolved_floor - head_percent
+    inherited = False
+    caused_by_change = False
 
     if base_percent + 1e-9 < resolved_floor:
-        return CoverageDeltaResult(
-            head_percent=head_percent,
-            base_percent=base_percent,
-            floor=resolved_floor,
-            delta=delta,
-            inherited=True,
-            caused_by_change=False,
-            message=(
-                f"inherited drop: base branch {base_percent:.2f}% is below floor "
-                f"{resolved_floor:.2f}% (head {head_percent:.2f}%, delta {delta:+.2f}pp)"
-            ),
+        inherited = True
+        message = (
+            f"inherited drop: base branch {base_percent:.2f}% is below floor "
+            f"{resolved_floor:.2f}% (head {head_percent:.2f}%, delta {delta:+.2f}pp)"
         )
-
-    # Attribution (3) must run before the generic head < base caused branch.
-    # When the base is already at the floor, a head breach of
-    # INHERITED_BREACH_MARGIN or more is inherited cumulative drift (#485).
-    base_at_floor = abs(base_percent - resolved_floor) <= 1e-9
-    if (
-        base_at_floor
-        and head_percent + 1e-9 < resolved_floor
-        and breach_depth + 1e-9 >= INHERITED_BREACH_MARGIN
-    ):
-        return CoverageDeltaResult(
-            head_percent=head_percent,
-            base_percent=base_percent,
-            floor=resolved_floor,
-            delta=delta,
-            inherited=True,
-            caused_by_change=False,
-            message=(
+    else:
+        base_at_floor = abs(base_percent - resolved_floor) <= 1e-9
+        if (
+            base_at_floor
+            and head_percent + 1e-9 < resolved_floor
+            and breach_depth + 1e-9 >= INHERITED_BREACH_MARGIN
+        ):
+            inherited = True
+            message = (
                 f"inherited drop: head {head_percent:.2f}% is {breach_depth:.2f}pp below floor "
                 f"{resolved_floor:.2f}% vs base {base_percent:.2f}%"
-            ),
-        )
-
-    if head_percent + 1e-9 < base_percent:
-        return CoverageDeltaResult(
-            head_percent=head_percent,
-            base_percent=base_percent,
-            floor=resolved_floor,
-            delta=delta,
-            inherited=False,
-            caused_by_change=True,
-            message=(
+            )
+        elif head_percent + 1e-9 < base_percent:
+            caused_by_change = True
+            message = (
                 f"caused drop: head {head_percent:.2f}% vs base {base_percent:.2f}% "
                 f"(delta {delta:+.2f}pp)"
-            ),
-        )
+            )
+        else:
+            message = (
+                f"coverage delta OK: head {head_percent:.2f}% vs base {base_percent:.2f}% "
+                f"(delta {delta:+.2f}pp, floor {resolved_floor:.2f}%)"
+            )
 
     return CoverageDeltaResult(
         head_percent=head_percent,
         base_percent=base_percent,
         floor=resolved_floor,
         delta=delta,
-        inherited=False,
-        caused_by_change=False,
-        message=(
-            f"coverage delta OK: head {head_percent:.2f}% vs base {base_percent:.2f}% "
-            f"(delta {delta:+.2f}pp, floor {resolved_floor:.2f}%)"
-        ),
+        inherited=inherited,
+        caused_by_change=caused_by_change,
+        message=message,
     )
 
 

@@ -31,9 +31,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
+from mergecraft.evidence.findings import load_run_findings, typed_findings_from_rows
 from mergecraft.run_outcome import CompletionConclusion
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
+    from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.mcp.context import ToolContext
 
 COMPLETION_CHECK = "mergecraft"
@@ -41,52 +44,18 @@ APPROVAL_CHECK = "mergecraft-approval"
 Conclusion = Literal["success", "failure", "neutral"]
 
 
-def _typed_findings_from_rows(raw: list[Any]) -> list[Any]:
+def _typed_findings_from_rows(raw: list[Any]) -> list[Finding]:
     """Validate dict rows as ``Finding`` objects, skipping malformed ones."""
-    from mergecraft.analyzers.finding import Finding, FindingValidationError
-
-    typed: list[Any] = []
-    for row in raw:
-        if not isinstance(row, dict):
-            continue
-        try:
-            typed.append(Finding.model_validate(row))
-        except FindingValidationError as err:
-            logger.debug("status checks: dropping malformed finding row: {}", err)
-    return typed
+    return typed_findings_from_rows(raw)
 
 
-def _load_structural_findings(ctx: ToolContext) -> list[Any]:
-    """Return the typed ``Finding`` objects the approval gate reads.
+def _load_structural_findings(ctx: ToolContext) -> list[Finding]:
+    """Return the typed findings the approval gate and packet share.
 
-    Unions agent findings (``ctx.tool_state.agent_findings``) with analyzer
-    findings (``ctx.tool_state.analyzer_run.findings``). CI SARIF is #464 /
-    AG and is not loaded here. Validation errors are logged at debug level
-    and skipped — a malformed row must not crash the run. Deduplicates on
-    ``fingerprint`` so an analyzer finding the agent also reported is not
-    counted twice.
+    Delegates to :func:`mergecraft.evidence.findings.load_run_findings`.
+    This module only posts check-runs.
     """
-    raw: list[Any] = []
-    agent_rows = getattr(ctx.tool_state, "agent_findings", None)
-    if agent_rows:
-        raw.extend(list(agent_rows))
-    run_state = getattr(ctx.tool_state, "analyzer_run", None)
-    if run_state is not None:
-        raw.extend(list(getattr(run_state, "findings", []) or []))
-    if not raw:
-        return []
-
-    typed = _typed_findings_from_rows(raw)
-    seen: set[str] = set()
-    unique: list[Any] = []
-    for finding in typed:
-        fingerprint = getattr(finding, "fingerprint", None)
-        if isinstance(fingerprint, str) and fingerprint:
-            if fingerprint in seen:
-                continue
-            seen.add(fingerprint)
-        unique.append(finding)
-    return unique
+    return load_run_findings(ctx)
 
 
 async def _create_check_run(
@@ -208,34 +177,31 @@ async def report_status_checks(
     # from typed findings + run state + tier only.
     from mergecraft.agents.gates import (
         approval_decision_inputs,
-        decide_approval,
         decision_summary_lines,
         log_decision,
     )
     from mergecraft.evidence.run_packet import build_run_packet
 
-    # D7 / #460: prefer ``decide_approval`` on the evidence packet so the
-    # check-run and packet.decision.verdict cannot diverge. Agent findings
-    # reach the packet through ``_load_structural_findings``.
+    # D7 / #460: the packet already ran ``decide_approval``. Reuse
+    # ``packet.decision.verdict`` so this layer only posts check-runs.
     change_id = f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"
     packet = build_run_packet(ctx, change_id=change_id, run_succeeded=run_succeeded)
-    tier = getattr(ctx, "trust_tier", "trusted")
-    packet_decision = decide_approval(
-        packet,
-        run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
-    )
-    approval_conclusion: Conclusion = packet_decision.verdict  # type: ignore[assignment]  # — Decision.verdict is the success/failure/neutral wire shape Conclusion uses
+    tier: TrustTier = ctx.trust_tier
+    if packet.decision is None:
+        logger.debug("status checks: packet has no decision; posting neutral approval")
+        approval_conclusion: Conclusion = "neutral"
+    else:
+        approval_conclusion = packet.decision.verdict
     findings = list(packet.findings)
     decision_inputs = approval_decision_inputs(
         findings,
         run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
+        tier=tier,
     )
     log_decision(
         findings,
         run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
+        tier=tier,
         conclusion=approval_conclusion,
     )
 

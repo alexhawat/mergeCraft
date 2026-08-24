@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -53,6 +54,16 @@ if TYPE_CHECKING:
     from mergecraft.config.settings import AnalyzersSettings
 
 TrustTier = Literal["trusted", "untrusted"]
+
+
+class CatalogScanStatus(StrEnum):
+    """Glanceable catalog-level scan label (D6 / #459)."""
+
+    UNAVAILABLE = "unavailable"
+    CLEAN = "clean"
+    FINDINGS = "findings"
+
+
 AnalyzersMode = Literal["off", "auto", "full", "untrusted-only"]
 
 
@@ -112,25 +123,19 @@ def _build_pre_merge_summary(
     return "; ".join(parts)
 
 
-def catalog_scan_status(state: AnalyzerRunState) -> str:
+def catalog_scan_status(state: AnalyzerRunState) -> CatalogScanStatus:
     """Return the glanceable catalog-level scan label (D6 / #459).
 
-    ``ran=False`` is always ``"unavailable"`` — including disabled catalogs,
+    ``ran=False`` is always ``unavailable`` — including disabled catalogs,
     no-match diffs, and empty tool rows — even when ``findings`` is empty.
-    A catalog that executed and produced no findings is ``"clean"``. Mixed
+    A catalog that executed and produced no findings is ``clean``. Mixed
     passed + skipped rows with ``ran=True`` are not catalog-unavailable.
-
-    Args:
-        state: Completed (or skipped) analyzer-pipeline run.
-
-    Returns:
-        ``"unavailable"``, ``"clean"``, or ``"findings"``.
     """
     if not state.ran:
-        return "unavailable"
+        return CatalogScanStatus.UNAVAILABLE
     if state.findings:
-        return "findings"
-    return "clean"
+        return CatalogScanStatus.FINDINGS
+    return CatalogScanStatus.CLEAN
 
 
 def _apply_baseline_suppression(
@@ -488,6 +493,7 @@ def analyzer_run_metadata(*, tool_id: str, result: object) -> dict[str, str]:
 
 
 __all__ = [
+    "CatalogScanStatus",
     "analyzer_run_metadata",
     "catalog_scan_status",
     "filter_for_review",
