@@ -206,6 +206,8 @@ def _osv_package_names_by_file(raw: str) -> dict[str, str]:
         payload = json.loads(raw)
     except ValueError:
         return package_names
+    if not isinstance(payload, dict):
+        return package_names
     for result in payload.get("results") or []:
         if not isinstance(result, dict):
             continue

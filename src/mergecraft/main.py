@@ -1521,13 +1521,14 @@ async def main() -> MainResult:
             if ctx.tool_context:
                 try:
                     await persist_learnings(ctx.tool_context)
+                    run_ok = run_succeeded_for_outcome(error_outcome)
                     prepared = prepare_run_packet(
                         ctx.tool_context,
-                        run_succeeded=run_succeeded_for_outcome(error_outcome),
+                        run_succeeded=run_ok,
                     )
                     await report_status_checks(
                         ctx.tool_context,
-                        run_succeeded=run_succeeded_for_outcome(error_outcome),
+                        run_succeeded=run_ok,
                         failure_reason=error_message,
                         conclusion=RUN_OUTCOME_CONCLUSION[error_outcome],
                         packet=prepared,

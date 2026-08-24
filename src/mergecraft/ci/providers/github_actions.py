@@ -17,6 +17,7 @@ from mergecraft.scm.github import github_client_from_scm
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.utils.github import GitHubClient
 
 
 class GitHubActionsProvider:
@@ -38,9 +39,12 @@ class GitHubActionsProvider:
         *,
         check_suite_id: int,
         truncation_cap: int = DEFAULT_TRUNCATION_CAP,
+        client: GitHubClient | None = None,
+        runs: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Download failed workflow logs for a check suite (legacy MCP contract)."""
-        client = github_client_from_scm(ctx.scm)
+        if client is None:
+            client = github_client_from_scm(ctx.scm)
         if client is None:
             return {
                 "check_suite_id": check_suite_id,
@@ -48,9 +52,10 @@ class GitHubActionsProvider:
                 "jobs": [],
                 "skipped": True,
             }
-        runs = await client.list_workflow_runs_for_check_suite(
-            ctx.repo.owner, ctx.repo.name, check_suite_id
-        )
+        if runs is None:
+            runs = await client.list_workflow_runs_for_check_suite(
+                ctx.repo.owner, ctx.repo.name, check_suite_id
+            )
         failed = [run for run in runs if run.get("conclusion") == "failure"]
         if not failed:
             return {
@@ -64,9 +69,11 @@ class GitHubActionsProvider:
         jobs_out: list[dict[str, Any]] = []
         selected, overflow = apply_truncation(failed, cap=truncation_cap)
         for run in selected:
-            run_id = run["id"]
+            run_id = run.get("id")
+            if not isinstance(run_id, int):
+                continue
             try:
-                raw = await ctx.scm.download_workflow_run_logs(
+                raw = await client.download_workflow_run_logs(
                     ctx.repo.owner,
                     ctx.repo.name,
                     run_id,

@@ -373,8 +373,8 @@ def _ci_sarif_manifest(artifact: str) -> AnalyzerManifest:
     )
 
 
-def _as_unblamed_ci_finding(finding: Finding, *, tool: str) -> Finding:
-    """Re-stamp an analyzer-shaped finding as unblamed CI evidence.
+def _as_unattributed_ci_finding(finding: Finding, *, tool: str) -> Finding:
+    """Re-stamp an analyzer-shaped finding as CI evidence without PR attribution.
 
     Native SARIF severity is preserved (D8 / #464): a mapped Major/Critical
     ``error`` must be able to reach the approval gate. Attribution stays
@@ -404,7 +404,7 @@ def sarif_findings(raw: str, *, artifact: str, repo_root: Path) -> list[Finding]
     """
     tool = f"{CI_TOOL}:{artifact}"
     parsed = parse_sarif(raw, manifest=_ci_sarif_manifest(artifact), repo_root=repo_root)
-    return [_as_unblamed_ci_finding(finding, tool=tool) for finding in parsed]
+    return [_as_unattributed_ci_finding(finding, tool=tool) for finding in parsed]
 
 
 # ── recording on the run's state ──────────────────────────────────────────────

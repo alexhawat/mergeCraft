@@ -459,7 +459,7 @@ class TestModePromptVersions:
 def test_merge_findings_empty_fingerprint_does_not_duplicate() -> None:
     """Empty fingerprints must not always append; use a stable fallback key."""
     from mergecraft.analyzers.finding import Finding
-    from mergecraft.evidence.findings import merge_findings
+    from mergecraft.evidence.merge import merge_findings
 
     shared = {
         "tool": "agent",
@@ -488,7 +488,7 @@ def test_merge_findings_empty_fingerprint_does_not_duplicate() -> None:
 def test_merge_findings_keeps_higher_severity_on_fingerprint_collision() -> None:
     """A Major/Critical CI row must not lose to an earlier Minor agent duplicate."""
     from mergecraft.analyzers.finding import make_finding
-    from mergecraft.evidence.findings import merge_findings
+    from mergecraft.evidence.merge import merge_findings
 
     agent = make_finding(
         tool="agent",
@@ -526,7 +526,7 @@ def test_typed_findings_from_rows_skips_pydantic_validation_error() -> None:
     from pydantic import ValidationError
 
     from mergecraft.analyzers.finding import Finding
-    from mergecraft.evidence.findings import typed_findings_from_rows
+    from mergecraft.evidence.merge import typed_findings_from_rows
 
     valid = make_finding(
         tool="ruff",

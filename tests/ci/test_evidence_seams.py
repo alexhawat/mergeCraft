@@ -335,11 +335,13 @@ async def test_recorded_finding_count_is_merged_evidence_length(
     )
     clustered = shared.model_copy(update={"severity": "Major"})
 
-    async def _sarif(ctx: ToolContext, *, check_suite_id: int) -> list[Any]:
+    async def _sarif(ctx: ToolContext, *, check_suite_id: int, **_: object) -> list[Any]:
         _ = ctx, check_suite_id
         return [shared]
 
-    async def _suite(_self: object, ctx: ToolContext, *, check_suite_id: int) -> dict[str, Any]:
+    async def _suite(
+        _self: object, ctx: ToolContext, *, check_suite_id: int, **_: object
+    ) -> dict[str, Any]:
         _ = ctx, check_suite_id
         return {
             "jobs": [
@@ -370,6 +372,7 @@ async def test_recorded_finding_count_is_merged_evidence_length(
         )
         return [report], stats, 0
 
+    monkeypatch.setattr("mergecraft.ci.intelligence.github_client_from_scm", lambda _scm: None)
     monkeypatch.setattr("mergecraft.ci.intelligence.collect_ci_sarif_findings", _sarif)
     monkeypatch.setattr(
         "mergecraft.ci.providers.github_actions.GitHubActionsProvider.fetch_check_suite_logs",

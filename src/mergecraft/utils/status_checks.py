@@ -102,9 +102,8 @@ async def report_status_checks(
     GitHub conclusion — pass ``mergecraft.run_outcome.RUN_OUTCOME_CONCLUSION
     [outcome]`` once a caller has a ``RunOutcome`` rather than a bare bool.
     Omitted, it falls back to the pre-W5 ``success``/``failure`` split driven
-    by ``run_succeeded`` alone. The ``mergecraft-approval`` check is
-    unaffected either way — it is always computed from ``run_succeeded`` via
-    ``decide_approval`` (D12-D14).
+    by ``run_succeeded`` alone. The ``mergecraft-approval`` check uses
+    ``packet.decision.verdict`` and is skipped when ``packet`` is None.
     """
     payload = ctx.payload
     status_enabled = getattr(payload, "status_checks", False) or (

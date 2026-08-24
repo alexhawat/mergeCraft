@@ -126,6 +126,11 @@ def _has_blocker(findings: list[Finding]) -> bool:
     return any(f.severity in BLOCKING_SEVERITIES for f in findings)
 
 
+def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
+    """True iff ``packet`` carries any blocking finding."""
+    return _has_blocker(packet.findings)
+
+
 def has_failed_required_static_check(static_checks: list[dict[str, str]]) -> bool:
     """True when any ``run_static_checks`` row reports ``status: failed``.
 
@@ -419,7 +424,7 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
 _RULE_PREDICATES: Final[tuple[tuple[Callable[[MergeEvidencePacket], bool], str], ...]] = (
     (_is_high_risk_migration, "high_risk_migration"),
     (_is_low_risk_passing, "low_risk_passing"),
-    (lambda packet: _has_blocker(packet.findings), "has_blockers"),
+    (_packet_has_blockers, "has_blockers"),
     (_has_changed_unread_file, "changed-unread-file"),
     (_has_tool_loop, "tool_loop"),
 )

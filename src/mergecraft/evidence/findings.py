@@ -12,11 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.ci.evidence import ci_evidence_findings
-from mergecraft.evidence.merge import (
-    finding_dedupe_key,
-    merge_findings,
-    typed_findings_from_rows,
-)
+from mergecraft.evidence.merge import merge_findings, typed_findings_from_rows
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -30,7 +26,7 @@ def load_run_findings(
     """Return agent, analyzer, and CI findings the gate and packet both read.
 
     Validation errors are logged at debug and skipped. Deduplicates on
-    :func:`finding_dedupe_key` (fingerprint when present, otherwise
+    :func:`mergecraft.evidence.merge.finding_dedupe_key` (fingerprint when present, otherwise
     tool/rule/path/line/message), keeping the more severe row on a collision.
     CI SARIF recorded on tool state is included so the approval check and
     the packet cannot diverge on #464 evidence.
@@ -48,8 +44,5 @@ def load_run_findings(
 
 
 __all__ = [
-    "finding_dedupe_key",
     "load_run_findings",
-    "merge_findings",
-    "typed_findings_from_rows",
 ]

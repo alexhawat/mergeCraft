@@ -23,6 +23,12 @@ from typing import Any, NamedTuple
 # more below ``fail_under`` is treated as inherited cumulative drift rather than a
 # marginal regression caused solely by the current change (#432 / D6).
 INHERITED_BREACH_MARGIN = 1.0
+_EPS = 1e-9
+
+
+def _below(left: float, right: float) -> bool:
+    """True when ``left`` is strictly below ``right`` outside float noise."""
+    return left + _EPS < right
 
 
 def _fail_under_from_pyproject() -> float:
@@ -86,10 +92,10 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
         f"caused drop: head {head_percent:.2f}% vs base {base_percent:.2f}% (delta {delta:+.2f}pp)"
     )
 
-    if base_percent + 1e-9 < resolved_floor:
-        if head_percent + 1e-9 >= resolved_floor:
+    if _below(base_percent, resolved_floor):
+        if not _below(head_percent, resolved_floor):
             return _result(message=ok_message)
-        if head_percent + 1e-9 < base_percent:
+        if _below(head_percent, base_percent):
             return _result(caused_by_change=True, message=caused_message)
         return _result(
             inherited=True,
@@ -99,11 +105,11 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
             ),
         )
 
-    base_at_floor = abs(base_percent - resolved_floor) <= 1e-9
+    base_at_floor = abs(base_percent - resolved_floor) <= _EPS
     if (
         base_at_floor
-        and head_percent + 1e-9 < resolved_floor
-        and breach_depth + 1e-9 >= INHERITED_BREACH_MARGIN
+        and _below(head_percent, resolved_floor)
+        and not _below(breach_depth, INHERITED_BREACH_MARGIN)
     ):
         return _result(
             inherited=True,
@@ -112,7 +118,7 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
                 f"{resolved_floor:.2f}% vs base {base_percent:.2f}%"
             ),
         )
-    if head_percent + 1e-9 < base_percent:
+    if _below(head_percent, base_percent):
         return _result(caused_by_change=True, message=caused_message)
     return _result(message=ok_message)
 
@@ -149,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    if result.caused_by_change and result.head_percent + 1e-9 < result.floor:
+    if result.caused_by_change and _below(result.head_percent, result.floor):
         print(
             f"Coverage gate: caused drop — head {result.head_percent:.2f}% is below floor "
             f"{result.floor:.2f}% and regressed from base {result.base_percent:.2f}%.",

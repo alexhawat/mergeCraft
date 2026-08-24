@@ -82,7 +82,7 @@ def classify_provider_failure(
     permanent and do not advance the model chain.
     """
     if payload is None:
-        payload = _provider_json_object(stderr)
+        payload = try_load_json_object(stderr)
     haystack = f"{stderr} {_message_from_payload(payload)}"
     http_404 = _is_http_404(stderr=stderr, status_code=status_code, payload=payload)
     if _looks_like_billing(stderr=haystack, payload=payload):
@@ -108,7 +108,7 @@ def is_retryable_cli_failure(
     """Classify CLI rate-limit / overload / quota / transient-404 failures as retryable."""
     if returncode is not None and returncode in RATE_LIMIT_EXIT_CODES:
         return True
-    payload = _provider_json_object(stderr)
+    payload = try_load_json_object(stderr)
     if status_code is None:
         status_code = _status_code_from_payload(payload)
     kind = classify_provider_failure(stderr, status_code=status_code, payload=payload)
@@ -135,10 +135,6 @@ def _looks_like_billing(
                 if isinstance(value, str):
                     parts.append(value)
     return _BILLING_TOKEN_RE.search(" ".join(parts)) is not None
-
-
-def _provider_json_object(stderr: str) -> dict[str, Any] | None:
-    return try_load_json_object(stderr)
 
 
 def _message_from_payload(payload: dict[str, Any] | None) -> str:
