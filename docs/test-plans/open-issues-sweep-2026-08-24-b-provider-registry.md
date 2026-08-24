@@ -241,10 +241,14 @@ LLM_PROVIDER_1_MODEL_1=deepseek/deepseek-v4-flash
 | --- | --- |
 | BC | all `@pytest.mark.xfail(reason="green after BC impl")` in `tests/cli/test_model_cmd.py` |
 
+## BC RED evidence
+
+- BC test-author wave: `a97b2664` — 15 collected, 15 xfails; BC test files lint clean; `make typecheck` clean
+
 ### BC RED verification
 
 ```bash
-make lint
+uv run ruff check tests/cli/test_model_cmd.py tests/cli/support_provider_registry.py
 make typecheck
 uv run pytest --collect-only -q tests/cli/test_model_cmd.py
 uv run pytest -q tests/cli/test_model_cmd.py  # RED: xfails expected

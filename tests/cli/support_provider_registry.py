@@ -25,6 +25,49 @@ NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1"
 CUSTOM_BASE_URL = "https://gateway.example.invalid/v1"
 EXPECTED_BUILTIN_PROVIDER_COUNT = 14
 
+# BB #478 — unified ``provider auth`` contracts (D6-D7, D10).
+BB_XFAIL = pytest.mark.xfail(reason="green after BB impl", strict=False)
+
+AUTH_KIND_API_KEY = "api_key"
+AUTH_KIND_OAUTH = "oauth"
+AUTH_KIND_DEVICE_CODE = "device_code"
+AUTH_KIND_CLOUD_CHAIN = "cloud_chain"
+
+LEGACY_AUTH_SUBCOMMANDS: tuple[str, ...] = (
+    "codex",
+    "claude",
+    "gemini",
+    "cursor",
+    "nous",
+    "tokenhub",
+    "minimax",
+)
+
+AUTH_KIND_PRIMARY_SUFFIX: dict[str, str] = {
+    AUTH_KIND_API_KEY: "API_KEY",
+    AUTH_KIND_OAUTH: "CLAUDE_CODE_OAUTH_TOKEN",
+    AUTH_KIND_DEVICE_CODE: "CODEX_AUTH_JSON",
+}
+
+BEDROCK_INDEXED_KEYS: tuple[str, ...] = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+)
+
+VERTEX_INDEXED_KEYS: tuple[str, ...] = ("GOOGLE_APPLICATION_CREDENTIALS",)
+
+EXPECTED_SEEDED_AUTH_KINDS: dict[str, str] = {
+    "openai": AUTH_KIND_DEVICE_CODE,
+    "anthropic": AUTH_KIND_OAUTH,
+    "google": AUTH_KIND_API_KEY,
+    "cursor": AUTH_KIND_API_KEY,
+    "nous": AUTH_KIND_API_KEY,
+    "tokenhub": AUTH_KIND_API_KEY,
+    "minimax": AUTH_KIND_API_KEY,
+    "bedrock": AUTH_KIND_CLOUD_CHAIN,
+    "vertex": AUTH_KIND_CLOUD_CHAIN,
+}
+
 
 def import_provider_cmd() -> Any:
     """Import ``mergecraft.cli.provider_cmd`` or fail with a clear message."""
@@ -98,6 +141,50 @@ def provider_entries(config: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     assert isinstance(providers, list)
     return [entry for entry in providers if isinstance(entry, dict)]
+
+
+def indexed_env_key(env_index: int, suffix: str) -> str:
+    """Return ``LLM_PROVIDER_<N>_<SUFFIX>`` per #478."""
+    return f"LLM_PROVIDER_{env_index}_{suffix}"
+
+
+def write_provider_entry(
+    tmp_path: Path,
+    *,
+    label: str,
+    env_index: int,
+    harness: str = "opencode",
+    auth_kind: str = AUTH_KIND_API_KEY,
+    url: str | None = None,
+) -> None:
+    """Append one provider row to ``.mergecraft/config.yaml`` (BB auth fixtures)."""
+    config = read_config(tmp_path)
+    entries = provider_entries(config)
+    entry: dict[str, Any] = {
+        "label": label,
+        "harness": harness,
+        "envIndex": env_index,
+        "authKind": auth_kind,
+    }
+    if url is not None:
+        entry["url"] = url
+    entries.append(entry)
+    config["providers"] = entries
+    path = tmp_path / ".mergecraft" / "config.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
+def require_provider_auth_symbols() -> Any:
+    """Import ``provider_cmd`` and require BB auth helpers to exist."""
+    module = import_provider_cmd()
+    for name in (
+        "indexed_credential_keys",
+        "resolve_auth_strategy",
+        "provider_auth_cmd",
+    ):
+        if not hasattr(module, name):
+            pytest.fail(f"{PROVIDER_CMD_MODULE}.{name} is not implemented")
+    return module
 
 
 def provider_entry(config: dict[str, Any], label: str) -> dict[str, Any] | None:
