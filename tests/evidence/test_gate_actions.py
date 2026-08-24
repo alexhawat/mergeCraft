@@ -490,7 +490,7 @@ def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -
     """``_RULE_PREDICATES`` drives ``select_rule_id`` and lists ``has_blockers``."""
     from mergecraft.agents.gates import _RULE_PREDICATES, select_rule_id
 
-    rule_ids = [rule_id for _predicate, rule_id in _RULE_PREDICATES]
+    rule_ids = [rule_id for _predicate, rule_id, _action in _RULE_PREDICATES]
     assert "has_blockers" in rule_ids
     assert rule_ids.index("has_blockers") < rule_ids.index("changed-unread-file")
     assert inspect.unwrap(select_rule_id).__code__.co_names  # smoke: function exists
@@ -500,7 +500,13 @@ def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -
     assert "schema_failure" not in rule_ids
     assert 'return "schema_failure"' in source
     from mergecraft.evidence import gate_policy
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES, GateAction
 
     assert gate_policy.__doc__ is not None
     assert "six" in gate_policy.__doc__
     assert "has_blockers" in gate_policy.__doc__
+    assert DEFAULT_GATE_POLICIES["schema_failure"] is GateAction.BLOCK
+    assert {
+        "schema_failure": GateAction.BLOCK,
+        **{rule_id: action for _predicate, rule_id, action in _RULE_PREDICATES},
+    } == DEFAULT_GATE_POLICIES

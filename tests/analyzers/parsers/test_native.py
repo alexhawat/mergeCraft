@@ -127,11 +127,18 @@ exclusive_group: dependency-vuln
     assert findings[0].rule_id == "CVE-2024-0001"
 
 
-def test_require_json_array_skips_leading_object() -> None:
+def test_require_json_array_skips_progress_object() -> None:
     from mergecraft.analyzers.parsers._common import require_json_array
 
-    raw = '{"banner": true}\n[{"file": "a.css"}]'
+    raw = '{"type": "progress"}\n[{"file": "a.css"}]'
     assert require_json_array(raw, what="stylelint JSON output") == [{"file": "a.css"}]
+
+
+def test_require_json_array_rejects_error_object_then_empty_array() -> None:
+    from mergecraft.analyzers.parsers._common import require_json_array
+
+    with pytest.raises(ValueError, match="must be a JSON array"):
+        require_json_array('{"error":"x"}\n[]', what="stylelint JSON output")
 
 
 def test_trivy_parser_skips_leading_empty_array_before_report() -> None:

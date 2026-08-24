@@ -65,6 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `list_check_runs` omits `check_runs` when the listing is truncated, instead
+  of returning a partial catalog with `total_count`. Analyzer JSON arrays no
+  longer treat a leading `{"error": ...}` then `[]` as a clean scan
 - Check-suite log fetch skips with a distinct unavailable payload when no
   GitHub client is bound, instead of looking like “no failed runs”
 - Catalog-check rejects all-zero `sha256` provenance pins (placeholders that

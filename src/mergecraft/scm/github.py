@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mergecraft.scm.protocol import ScmCapability, ScmProvider
-from mergecraft.utils.github import GitHubClient, GitHubListedItems, require_github_listed
+from mergecraft.utils.github import GitHubClient, ListedItems, require_github_listed
 
 
 class GitHubScmAdapter:
@@ -207,14 +207,12 @@ class GitHubScmAdapter:
 
     async def list_check_runs_for_ref(
         self, owner: str, repo: str, ref: str, **kwargs: Any
-    ) -> GitHubListedItems:
+    ) -> ListedItems:
         return require_github_listed(
             await self._client.list_check_runs_for_ref(owner, repo, ref, **kwargs)
         )
 
-    async def list_workflow_run_artifacts(
-        self, owner: str, repo: str, run_id: int
-    ) -> GitHubListedItems:
+    async def list_workflow_run_artifacts(self, owner: str, repo: str, run_id: int) -> ListedItems:
         return require_github_listed(
             await self._client.list_workflow_run_artifacts(owner, repo, run_id)
         )
@@ -243,9 +241,7 @@ class GitHubScmAdapter:
     ) -> list[dict[str, Any]]:
         return await self.list_reviews(owner, repo, pull_number, **kwargs)
 
-    async def list_check_runs(
-        self, owner: str, repo: str, ref: str, **kwargs: Any
-    ) -> GitHubListedItems:
+    async def list_check_runs(self, owner: str, repo: str, ref: str, **kwargs: Any) -> ListedItems:
         return await self.list_check_runs_for_ref(owner, repo, ref, **kwargs)
 
     async def edit_issue_comment(

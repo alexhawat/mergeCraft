@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, Final, Union, overload
 
 from loguru import logger
 
-from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES, GateAction
+from mergecraft.evidence.gate_policy import (
+    _NAMED_GATE_POLICY_ROWS,
+    DEFAULT_GATE_POLICIES,
+    GateAction,
+)
 from mergecraft.evidence.gate_policy import GateActionPolicy as GateActionPolicy
 from mergecraft.evidence.packet import Decision as PacketDecision
 from mergecraft.evidence.packet import MergeEvidencePacket
@@ -413,20 +417,29 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     return packet.decision is None or packet.decision.verdict != "failure"
 
 
-# Ordered ``(callable, rule_id)`` pairs the policy engine walks; first match
-# wins. This is not a dict mapping — each predicate is a callable.
-# Lookup order (not ``DEFAULT_GATE_POLICIES`` insertion order):
-# high_risk_migration, low_risk_passing, has_blockers, changed-unread-file,
-# tool_loop, then ``schema_failure`` as the catch-all. Tests pin
-# ``has_blockers`` before ``changed-unread-file`` / ``tool_loop``; do not
-# reorder the table to put ``tool_loop`` first.
-_RULE_PREDICATES: Final[tuple[tuple[Callable[[MergeEvidencePacket], bool], str], ...]] = (
-    (_is_high_risk_migration, "high_risk_migration"),
-    (_is_low_risk_passing, "low_risk_passing"),
-    (_packet_has_blockers, "has_blockers"),
-    (_has_changed_unread_file, "changed-unread-file"),
-    (_has_tool_loop, "tool_loop"),
+# Ordered ``(predicate, rule_id, action)`` rows; first match wins.
+# Keys and actions come from ``_NAMED_GATE_POLICY_ROWS`` so
+# ``DEFAULT_GATE_POLICIES`` cannot drift from this table.
+# Catch-all ``schema_failure`` is not listed (see ``select_rule_id``).
+# Tests pin ``has_blockers`` before ``changed-unread-file`` / ``tool_loop``.
+_PREDICATE_BY_RULE: Final[dict[str, Callable[[MergeEvidencePacket], bool]]] = {
+    "high_risk_migration": _is_high_risk_migration,
+    "low_risk_passing": _is_low_risk_passing,
+    "has_blockers": _packet_has_blockers,
+    "changed-unread-file": _has_changed_unread_file,
+    "tool_loop": _has_tool_loop,
+}
+_RULE_PREDICATES: Final[
+    tuple[tuple[Callable[[MergeEvidencePacket], bool], str, GateAction], ...]
+] = tuple(
+    (_PREDICATE_BY_RULE[rule_id], rule_id, action) for rule_id, action in _NAMED_GATE_POLICY_ROWS
 )
+if {
+    "schema_failure": GateAction.BLOCK,
+    **{rule_id: action for _predicate, rule_id, action in _RULE_PREDICATES},
+} != DEFAULT_GATE_POLICIES:
+    msg = "DEFAULT_GATE_POLICIES drifted from _RULE_PREDICATES"
+    raise RuntimeError(msg)
 
 
 def select_rule_id(packet: MergeEvidencePacket) -> str:
@@ -436,7 +449,7 @@ def select_rule_id(packet: MergeEvidencePacket) -> str:
     the packet. ``"schema_failure"`` is the catch-all — it matches a
     packet whose evidence is structurally absent.
     """
-    for predicate, rule_id in _RULE_PREDICATES:
+    for predicate, rule_id, _action in _RULE_PREDICATES:
         if predicate(packet):
             return rule_id
     # Catch-all only — do not also list ``schema_failure`` in the table;

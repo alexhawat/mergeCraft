@@ -34,15 +34,21 @@ def test_try_load_json_object_skips_nested_progress_array_then_schema() -> None:
     assert try_load_json_object(raw) == {"SchemaVersion": 2}
 
 
-def test_try_load_json_array_skips_leading_object() -> None:
-    raw = '{"ok": true}\n[{"file": "a.css"}]'
-    assert try_load_json(raw) == {"ok": True}
+def test_try_load_json_array_skips_progress_object_then_findings() -> None:
+    raw = '{"type":"progress"}\n[{"file": "a.css"}]'
+    assert try_load_json(raw) == {"type": "progress"}
     assert try_load_json_array(raw) == [{"file": "a.css"}]
 
 
 def test_try_load_json_array_skips_progress_object_then_array() -> None:
     raw = '{"type":"progress"}\n[]'
     assert try_load_json_array(raw) == []
+
+
+def test_try_load_json_array_does_not_skip_error_object_then_empty_array() -> None:
+    raw = '{"error":"x"}\n[]'
+    assert try_load_json(raw) == {"error": "x"}
+    assert try_load_json_array(raw) is None
 
 
 def test_try_load_json_whole_string_fallback_is_kind_any_only() -> None:

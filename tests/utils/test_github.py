@@ -327,7 +327,7 @@ async def test_paginate_mixed_non_dict_rows_is_incomplete() -> None:
 def test_require_github_listed_rejects_bare_list() -> None:
     from mergecraft.utils.github import require_github_listed
 
-    with pytest.raises(TypeError, match="GitHubListedItems"):
+    with pytest.raises(TypeError, match="ListedItems"):
         require_github_listed([{"id": 1}])
 
 

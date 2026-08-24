@@ -134,8 +134,9 @@ def require_json_object(raw: str, *, what: str) -> dict[str, Any]:
 def require_json_array(raw: str, *, what: str) -> list[Any]:
     """Parse ``raw`` as a JSON array or raise ``ValueError``.
 
-    Leading JSON objects are skipped (same resume-at-``_end`` path as
-    ``try_load_json_array``) so a banner object cannot hide a later array.
+    Progress-token objects may precede the array (same resume-at-``_end``
+    path as ``try_load_json_array``). Other leading objects — including
+    ``{"error": ...}`` — fail parse so they cannot hide a later ``[]``.
     """
     payload = try_load_json_array(raw)
     if payload is None:

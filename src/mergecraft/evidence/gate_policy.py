@@ -74,19 +74,22 @@ RuleId = str
 GateActionPolicy = dict[RuleId, GateAction]
 
 
-# Default policies #46 ships, plus ``has_blockers`` so Critical/Major
-# findings request changes under their own key instead of borrowing
-# ``changed-unread-file``. Dict insertion order is not match priority:
-# ``select_rule_id`` chooses the key (high_risk_migration, then
-# low_risk_passing, then has_blockers over changed-unread-file / tool_loop,
-# then schema_failure). ``decide_action`` looks that key up here.
+# Named rules in ``select_rule_id`` order (not including the catch-all).
+# ``agents.gates._RULE_PREDICATES`` walks the same keys; ``schema_failure``
+# is appended below and is never listed in the predicate table.
+_NAMED_GATE_POLICY_ROWS: Final[tuple[tuple[str, GateAction], ...]] = (
+    ("high_risk_migration", GateAction.REQUIRE_HUMAN_REVIEW),
+    ("low_risk_passing", GateAction.AUTO_MERGE),
+    ("has_blockers", GateAction.REQUEST_CHANGES),
+    ("changed-unread-file", GateAction.REQUEST_CHANGES),
+    ("tool_loop", GateAction.REQUIRE_MORE_TESTS),
+)
+
+# Catch-all ``schema_failure`` stays outside the named rows. Dict insertion
+# order is not match priority; ``select_rule_id`` chooses the key.
 DEFAULT_GATE_POLICIES: Final[GateActionPolicy] = {
     "schema_failure": GateAction.BLOCK,
-    "changed-unread-file": GateAction.REQUEST_CHANGES,
-    "has_blockers": GateAction.REQUEST_CHANGES,
-    "low_risk_passing": GateAction.AUTO_MERGE,
-    "tool_loop": GateAction.REQUIRE_MORE_TESTS,
-    "high_risk_migration": GateAction.REQUIRE_HUMAN_REVIEW,
+    **{rule_id: action for rule_id, action in _NAMED_GATE_POLICY_ROWS},
 }
 
 

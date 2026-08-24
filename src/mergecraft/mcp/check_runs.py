@@ -32,6 +32,16 @@ def list_check_runs_tool(ctx: ToolContext):
         listed = require_github_listed(
             await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
         )
+        if listed.incomplete:
+            # Same fail-closed policy as check-suite logs / CI intelligence /
+            # gate substitution: a truncated walk must not look like a complete
+            # catalog (silent total_count + partial check_runs).
+            return {
+                "ref": ref,
+                "incomplete": True,
+                "error": "check-run listing incomplete",
+                "total_count": listed.total_count,
+            }
         return {
             "ref": ref,
             "total_count": listed.total_count,

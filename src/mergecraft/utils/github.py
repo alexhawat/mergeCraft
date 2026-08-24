@@ -45,8 +45,8 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
     return [item for item in data if isinstance(item, dict)]
 
 
-class GitHubListedItems(NamedTuple):
-    """One GitHub list walk for workflow runs, artifacts, or check-runs.
+class ListedItems(NamedTuple):
+    """One SCM list walk: items plus whether the catalog is complete.
 
     ``total_count`` is the API's reported total when present (optional).
     """
@@ -56,11 +56,14 @@ class GitHubListedItems(NamedTuple):
     total_count: int | None = None
 
 
-def require_github_listed(result: object) -> GitHubListedItems:
+GitHubListedItems = ListedItems
+
+
+def require_github_listed(result: object) -> ListedItems:
     """Reject a bare list: that must not look like a complete catalog."""
-    if isinstance(result, GitHubListedItems):
+    if isinstance(result, ListedItems):
         return result
-    msg = f"expected GitHubListedItems, got {type(result).__name__}"
+    msg = f"expected ListedItems, got {type(result).__name__}"
     raise TypeError(msg)
 
 
@@ -128,7 +131,7 @@ async def paginate_github_list_pages(
                 item_key,
             )
             incomplete = True
-    return GitHubListedItems(items=collected, incomplete=incomplete, total_count=total_count)
+    return ListedItems(items=collected, incomplete=incomplete, total_count=total_count)
 
 
 class RepoContext:
