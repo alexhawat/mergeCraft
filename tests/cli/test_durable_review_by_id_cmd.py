@@ -13,9 +13,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from tests.review.support_durable_review import (
+    require_callable,
     sample_fingerprint,
+    sample_manifest,
     sample_review_id,
     sample_short_finding_id,
+    sample_snapshot,
+    sample_trace_events,
     seed_completed_review,
 )
 from typer.testing import CliRunner
@@ -127,6 +131,52 @@ def test_review_persists_completed_review_id_on_success(
     loaded = require_callable("load_completed_review")(review_id, repo_root=tmp_path)
     assert loaded is not None
     assert loaded.review_id == review_id
+
+
+def test_findings_by_review_id_markdown_includes_short_id_and_severity(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Happy — stored rows with export-only short ids still render full markdown."""
+    from mergecraft.cli.review_output import finding_json_records
+
+    review_id = sample_review_id()
+    finding_mod = __import__("mergecraft.analyzers.finding", fromlist=["make_finding"])
+    finding = finding_mod.make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="unused import os",
+        path="demo.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+        introduced_by_pr="unknown",
+        fingerprint=sample_fingerprint(),
+    )
+    completed_cls = require_callable("CompletedReview")
+    persist = require_callable("persist_completed_review")
+    review = completed_cls(
+        review_id=review_id,
+        snapshot=sample_snapshot(),
+        manifest=sample_manifest(),
+        findings=finding_json_records([finding]),
+        trace_session_id=review_id,
+    )
+    persist(review, repo_root=tmp_path, trace_events=sample_trace_events(review_id=review_id))
+    _guard_against_review_rerun(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["findings", review_id, "--repo-root", str(tmp_path)],
+        env=_DUMB_ENV,
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
+    assert sample_short_finding_id() in combined
+    assert "Minor" in combined
+    assert "F401" in combined
 
 
 def test_findings_by_review_id_returns_stored_findings_without_rerun(

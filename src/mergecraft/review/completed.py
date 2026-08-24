@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-from mergecraft.analyzers.finding import Finding
+from mergecraft.analyzers.finding import Finding, finding_record_without_short_id
 from mergecraft.evidence.minimal_packet import minimal_evidence_packet
 from mergecraft.review.finding_lookup import (
     is_safe_path_stem,
@@ -30,6 +30,7 @@ from mergecraft.review.snapshot import ReviewSnapshot
 
 COMPLETED_REVIEW_SCHEMA_VERSION = "1.0.0"
 _REVIEWS_SUBDIR = ".mergecraft/reviews"
+COMPLETED_REVIEWS_GITIGNORE_LINE = f"{_REVIEWS_SUBDIR}/"
 _REVIEW_ARTIFACT_SKIP = frozenset(
     {"snapshot.json", "manifest.json", "findings.json", "completed.json"}
 )
@@ -116,7 +117,7 @@ def _validate_loaded_findings(raw_findings: list[Any]) -> list[dict[str, Any]] |
         if not isinstance(row, dict):
             return None
         short_id = row.get("short_id")
-        payload = {key: value for key, value in row.items() if key != "short_id"}
+        payload = finding_record_without_short_id(row)
         try:
             record = Finding.model_validate(payload).model_dump(mode="json")
         except ValueError:
@@ -255,6 +256,7 @@ def load_completed_review_trace_events(
 
 
 __all__ = [
+    "COMPLETED_REVIEWS_GITIGNORE_LINE",
     "COMPLETED_REVIEW_SCHEMA_VERSION",
     "CompletedReview",
     "completed_review_dir",

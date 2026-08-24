@@ -125,6 +125,26 @@ def test_json_format_writes_output_path(tmp_path: Path, monkeypatch: pytest.Monk
     assert json_out.is_file(), combined
     payload = json.loads(json_out.read_text(encoding="utf-8"))
     assert payload["findings"][0]["rule_id"] == finding["rule_id"]
+    assert isinstance(payload["findings"][0].get("short_id"), str)
+    assert payload["findings"][0]["short_id"].startswith("MC-")
+
+
+def test_json_flag_writes_short_ids_to_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--json PATH`` writes batch-resolved short ids into the findings file."""
+    finding = _agent_finding_dict()
+    _install_fake_review(monkeypatch, findings=[finding])
+    json_out = tmp_path / "findings.json"
+    result = runner.invoke(
+        app,
+        _review_argv(tmp_path, "--json", str(json_out)),
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 10, combined
+    payload = json.loads(json_out.read_text(encoding="utf-8"))
+    assert payload["findings"][0]["short_id"].startswith("MC-")
 
 
 def test_json_format_matches_existing_findings_schema(

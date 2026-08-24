@@ -12,6 +12,7 @@ from loguru import logger
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.pins import action_pin_minimal
+from mergecraft.review.completed import COMPLETED_REVIEWS_GITIGNORE_LINE
 
 DEFAULT_CONFIG: dict[str, object] = {
     "models": ["anthropic/claude-sonnet"],
@@ -80,9 +81,12 @@ def _audit_jsonl_gitignore_line() -> str:
     return DEFAULT_AUDIT_REL.as_posix()
 
 
-def _ensure_audit_jsonl_gitignore(root: Path) -> None:
-    """Ensure consumer ``.gitignore`` ignores enterprise audit JSONL (D10 / #487)."""
-    line = _audit_jsonl_gitignore_line()
+def _reviews_gitignore_line() -> str:
+    return COMPLETED_REVIEWS_GITIGNORE_LINE
+
+
+def _ensure_gitignore_line(root: Path, line: str) -> None:
+    """Ensure consumer ``.gitignore`` contains ``line`` once."""
     gitignore_path = root / ".gitignore"
     if gitignore_path.is_file():
         text = gitignore_path.read_text(encoding="utf-8")
@@ -93,6 +97,16 @@ def _ensure_audit_jsonl_gitignore(root: Path) -> None:
     else:
         gitignore_path.write_text(f"{line}\n", encoding="utf-8")
     console.print(f"wrote [green]{gitignore_path.relative_to(root)}[/green]")
+
+
+def _ensure_audit_jsonl_gitignore(root: Path) -> None:
+    """Ensure consumer ``.gitignore`` ignores enterprise audit JSONL (D10 / #487)."""
+    _ensure_gitignore_line(root, _audit_jsonl_gitignore_line())
+
+
+def _ensure_reviews_gitignore(root: Path) -> None:
+    """Ensure consumer ``.gitignore`` ignores durable local review artifacts."""
+    _ensure_gitignore_line(root, _reviews_gitignore_line())
 
 
 def _parse_git_remote() -> tuple[str, str] | None:
@@ -156,6 +170,7 @@ def run(
         console.print(f"wrote [green]{learnings.relative_to(root)}[/green]")
 
     _ensure_audit_jsonl_gitignore(root)
+    _ensure_reviews_gitignore(root)
 
     console.print("\n[bold]next steps[/bold]")
     console.print(

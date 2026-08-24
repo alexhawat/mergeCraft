@@ -17,6 +17,7 @@ import typer
 from mergecraft.analyzers.finding import (
     finding_json_record,
     resolve_finding_short_ids,
+    write_findings_json,
 )
 from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.consoles import err_console as console
@@ -98,6 +99,11 @@ def dispatch_review_output(
                 output_text=text or None,
             )
         target = json_output or output
+        if target is not None and findings:
+            write_findings_json(
+                target,
+                [row.model_dump(mode="json") for row in findings],
+            )
         if target is not None and target.is_file():
             console.print(f"[green]wrote[/green] {target}")
         return

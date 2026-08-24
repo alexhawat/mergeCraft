@@ -185,10 +185,18 @@ def parse_findings_payload(raw: str) -> list[dict[str, Any]]:
     return [finding.model_dump() for finding in payload.findings]
 
 
+def finding_record_without_short_id(record: dict[str, Any]) -> dict[str, Any]:
+    """Strip export-only fields before validating a stored or exported finding row."""
+    return {key: value for key, value in record.items() if key != "short_id"}
+
+
 def write_findings_json(json_path: Path, findings: list[dict[str, Any]]) -> None:
-    """Write validated findings to a pretty-printed JSON file."""
+    """Write validated findings to a pretty-printed JSON file with stable short ids."""
+    models = [Finding.model_validate(finding_record_without_short_id(row)) for row in findings]
+    short_ids = resolve_finding_short_ids([row.fingerprint for row in models])
+    records = [finding_json_record(row, short_id=short_ids[row.fingerprint]) for row in models]
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps({"findings": findings}, indent=2, ensure_ascii=False)
+    payload = json.dumps({"findings": records}, indent=2, ensure_ascii=False)
     json_path.write_text(f"{payload}\n", encoding="utf-8")
 
 
@@ -288,6 +296,7 @@ __all__ = [
     "FindingsPayload",
     "IntroducedByPr",
     "finding_json_record",
+    "finding_record_without_short_id",
     "finding_short_id",
     "findings_output_schema",
     "make_finding",

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 from mergecraft.analyzers.finding import (
     Finding,
+    finding_record_without_short_id,
     finding_short_id,
     render_finding_markdown,
     resolve_finding_short_ids,
@@ -118,7 +119,7 @@ def _render_durable_findings_markdown(
     lines = [f"# Stored findings — {review_id}", ""]
     for row in findings:
         try:
-            finding = Finding.model_validate(row)
+            finding = Finding.model_validate(finding_record_without_short_id(row))
         except ValueError:
             path = str(row.get("path") or "(no file)")
             lines.append(f"## {path}")

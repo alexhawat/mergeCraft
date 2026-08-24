@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -192,3 +195,37 @@ def test_update_run_uses_check_true(monkeypatch: MonkeyPatch) -> None:
     assert result.exit_code != CLI_SUCCESS_EXIT_CODE
     combined = _plain(result.stdout + result.stderr).lower()
     assert "uv" in combined or "missing" in combined or "error" in combined
+
+
+def test_resolve_build_commit_reads_git_head_from_checkout() -> None:
+    """Unit — editable/source checkouts resolve ``__commit__`` from git HEAD."""
+    from mergecraft.build_metadata import resolve_build_commit
+
+    resolve_build_commit.cache_clear()
+    commit = resolve_build_commit()
+    head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=Path(__file__).resolve().parents[2],
+        text=True,
+    ).strip()
+    assert commit == head
+
+
+def test_installed_wheel_reports_build_commit(tmp_path: Path) -> None:
+    """Functional — installed artifacts resolve commit from git or MERGECRAFT_BUILD_COMMIT."""
+    repo_root = Path(__file__).resolve().parents[2]
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_root, text=True).strip()
+    dist_dir = tmp_path / "dist"
+    env_dir = tmp_path / "venv"
+    subprocess.run(["uv", "build", "--out-dir", str(dist_dir)], cwd=repo_root, check=True)
+    wheels = sorted(dist_dir.glob("merge_craft-*.whl"))
+    assert wheels, "uv build must produce a wheel"
+    subprocess.run([sys.executable, "-m", "venv", str(env_dir)], check=True)
+    python = env_dir / "bin" / "python"
+    subprocess.run([str(python), "-m", "pip", "install", str(wheels[-1])], check=True)
+    output = subprocess.check_output(
+        [str(python), "-c", "import mergecraft; print(mergecraft.__commit__ or '')"],
+        env={"MERGECRAFT_BUILD_COMMIT": head},
+        text=True,
+    ).strip()
+    assert output == head

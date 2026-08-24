@@ -13,7 +13,7 @@ from typing import Any, NoReturn
 import typer
 from loguru import logger
 
-from mergecraft.analyzers.finding import Finding
+from mergecraft.analyzers.finding import Finding, finding_short_id, write_findings_json
 from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
@@ -156,9 +156,14 @@ def _safe_review_id_for_persist(review_id: str) -> str:
 
 
 def _agent_finding_record(finding: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a streamed finding without attaching a per-row short id."""
-    if finding.get("fingerprint"):
-        return finding
+    """Normalize a streamed finding with a provisional short id when possible."""
+    fingerprint = finding.get("fingerprint")
+    if fingerprint:
+        record = dict(finding)
+        if "short_id" not in record:
+            with contextlib.suppress(ValueError, TypeError):
+                record["short_id"] = finding_short_id(str(fingerprint))
+        return record
     try:
         model = Finding.model_validate(finding)
     except ValueError:
@@ -244,11 +249,13 @@ def _finish_agent_protocol(
     exit_code: int,
     findings: Sequence[Finding],
     seen: set[str],
+    streamed_short_ids: dict[str, str],
 ) -> None:
     notify_findings(
         stream.finding,
         finding_json_records(findings),
         seen=seen,
+        streamed_short_ids=streamed_short_ids,
         refresh=True,
     )
     stream.verdict(outcome.value, exit_code)
@@ -612,6 +619,7 @@ def run(
 
     stream: AgentProtocolStream | None = None
     seen: set[str] = set()
+    streamed_short_ids: dict[str, str] = {}
     phases_emitted = False
     if agent_mode:
         agent_stream = _start_agent_protocol()
@@ -627,7 +635,12 @@ def run(
     def _on_finding(finding: dict[str, Any]) -> None:
         if stream is None:
             return
-        notify_findings(stream.finding, [_agent_finding_record(finding)], seen=seen)
+        notify_findings(
+            stream.finding,
+            [_agent_finding_record(finding)],
+            seen=seen,
+            streamed_short_ids=streamed_short_ids,
+        )
 
     read_cache = use_cache or resume
 
@@ -681,6 +694,12 @@ def run(
         findings = parse_offline_review_findings(result)
         exit_code = cli_exit_code_for_review(outcome, findings)
 
+        if result.success and json_output is not None and findings:
+            write_findings_json(
+                json_output,
+                [row.model_dump(mode="json") for row in findings],
+            )
+
         if result.success and not dry_run:
             _persist_completed_cli_review(
                 review_id=review_id,
@@ -702,6 +721,7 @@ def run(
                     exit_code=exit_code,
                     findings=findings,
                     seen=seen,
+                    streamed_short_ids=streamed_short_ids,
                 )
             _exit_with_message(result.error or "diff-review failed", exit_code)
 
@@ -712,6 +732,7 @@ def run(
                 exit_code=exit_code,
                 findings=findings,
                 seen=seen,
+                streamed_short_ids=streamed_short_ids,
             )
             raise typer.Exit(exit_code)
 

@@ -16,8 +16,10 @@ try:
 except PackageNotFoundError:  # pragma: no cover — source tree with nothing installed
     __version__ = "0.0.0+unknown"
 
+from mergecraft.build_metadata import resolve_build_commit
+
 # Optional full build commit SHA baked in at release time; ``None`` when unknown.
-__commit__: str | None = None
+__commit__: str | None = resolve_build_commit()
 
 from mergecraft.version_info import (
     format_version_display,
