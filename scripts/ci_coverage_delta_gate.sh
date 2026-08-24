@@ -32,6 +32,9 @@ git worktree add "$worktree" "$base_ref"
   # `make coverage-gate` died with "Failed to spawn: pytest" before measuring
   # anything. Sync the extra explicitly.
   "${UV:-uv}" sync --extra dev
+  # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
+  # only runs on the PR checkout, not this detached base worktree.
+  make setup-local-analyzers
   make coverage-gate
   cp coverage.json "${GITHUB_WORKSPACE}/coverage-base.json"
 )
