@@ -126,7 +126,6 @@ def test_auth_nous_prompts_with_getpass_and_writes_secret(
 # ── W1.11 — fails closed when ``gh`` is unauthenticated ─────────────────────
 
 
-@pytest.mark.xfail(reason="TH5", strict=True)
 def test_auth_nous_fails_closed_when_gh_is_unauthenticated(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -145,10 +144,10 @@ def test_auth_nous_fails_closed_when_gh_is_unauthenticated(
         module, "_validate_nous_api_key", lambda key: validator_calls.append(key) or True
     )
 
-    with pytest.raises(SystemExit) as exc_info:
-        runner.invoke(app, ["auth", "nous"], catch_exceptions=False)
+    result = runner.invoke(app, ["auth", "nous"])
 
-    assert "gh" in str(exc_info.value).lower()
+    assert result.exit_code != 0
+    assert "gh" in (result.stdout + result.stderr).lower()
     assert validator_calls == []
 
 
