@@ -17,7 +17,10 @@ from mergecraft.mcp.convergence_runtime import (
     recall_publish_sets,
     strip_recall_inline_comments,
 )
-from mergecraft.mcp.deferred_publish import merge_analyzer_sections_into_review_body
+from mergecraft.mcp.deferred_publish import (
+    merge_analyzer_sections_into_review_body,
+    refresh_analyzer_sections_for_publish,
+)
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
@@ -97,6 +100,28 @@ def _comment_fingerprint(comment: dict[str, Any]) -> str:
 
 def _comment_fingerprints(comments: list[dict[str, Any]]) -> list[str]:
     return [_comment_fingerprint(comment) for comment in comments]
+
+
+def _analyzer_publish_fingerprints(ctx: ToolContext) -> list[str]:
+    """Return analyzer-run finding fingerprints merged into the review body."""
+    analyzer_run = ctx.tool_state.analyzer_run
+    if analyzer_run is None:
+        return []
+    fingerprints: list[str] = []
+    for row in analyzer_run.findings:
+        if isinstance(row, dict):
+            fp = str(row.get("fingerprint", "")).strip()
+            if fp:
+                fingerprints.append(fp)
+    return fingerprints
+
+
+def _publish_fingerprint_batch(
+    comments: list[dict[str, Any]],
+    ctx: ToolContext,
+) -> list[str]:
+    """Collect inline and body-appended fingerprints for one publish batch."""
+    return _comment_fingerprints(comments) + _analyzer_publish_fingerprints(ctx)
 
 
 def _body_has_short_id_line(body: str) -> bool:
@@ -336,6 +361,15 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     repo_root = Path(primary.dir or Path.cwd())
     review_settings = load_repo_settings(root=repo_root, load_learnings_files=False).review
 
+    publish_short_ids = resolve_finding_short_ids(_publish_fingerprint_batch(comments, ctx))
+    analyzer_run = ctx.tool_state.analyzer_run
+    if analyzer_run is not None:
+        refresh_analyzer_sections_for_publish(
+            analyzer_run,
+            short_ids=publish_short_ids,
+            inline_comment_fingerprints=set(_comment_fingerprints(comments)),
+        )
+
     payload: dict[str, Any] = {"event": event}
     if body:
         await ensure_learnings_review_delta(ctx.tool_state)
@@ -365,7 +399,6 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             incremental_diff_text = Path(incremental_path).read_text(encoding="utf-8")
 
     collateral_map = collateral_by_fingerprint(ctx)
-    inline_short_ids = resolve_finding_short_ids(_comment_fingerprints(comments))
 
     inline: list[dict[str, Any]] = []
     for c in comments:
@@ -379,7 +412,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
         )
         comment_body = str(c.get("body") or "")
         raw_fingerprint = _comment_fingerprint(c)
-        short_id = inline_short_ids.get(raw_fingerprint)
+        short_id = publish_short_ids.get(raw_fingerprint)
         prepared_body = prepare_inline_comment_for_publish(
             ctx,
             path=path,

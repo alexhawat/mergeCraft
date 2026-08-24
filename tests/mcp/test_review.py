@@ -283,6 +283,89 @@ async def test_mixed_source_collision_refreshes_title_path_short_id(
 
 
 @pytest.mark.asyncio
+async def test_body_only_analyzer_collision_refreshes_mechanical_short_id(
+    ctx: ToolContext,
+) -> None:
+    """Body-only analyzer + agent inline share one publish batch for ``MC-…`` ids."""
+    from tests.analyzers.support_short_id import collision_fingerprints
+    from tests.support.tool_context import github_client_from_ctx
+
+    from mergecraft.analyzers.budget import place_findings
+    from mergecraft.analyzers.finding import (
+        finding_short_id,
+        make_finding,
+        resolve_finding_short_ids,
+    )
+    from mergecraft.mcp.tool_state import AnalyzerRunState
+    from mergecraft.review.finding_lookup import fingerprint_for_short_id
+
+    fp1, fp2 = collision_fingerprints()
+    inline_finding = make_finding(
+        tool="actionlint",
+        rule_id="inline",
+        category="Maintainability & Code Quality",
+        severity="Major",
+        confidence="likely",
+        message="inline collision",
+        path="src/inline.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+        fingerprint=fp1,
+    )
+    mechanical_finding = make_finding(
+        tool="actionlint",
+        rule_id="overflow",
+        category="Maintainability & Code Quality",
+        severity="Major",
+        confidence="likely",
+        message="mechanical collision",
+        path="src/mechanical.py",
+        start_line=2,
+        end_line=2,
+        source="analyzer",
+        fingerprint=fp2,
+    )
+    placement = place_findings([inline_finding, mechanical_finding], inline_budget=1)
+    pre_rendered = finding_short_id(fp2)
+
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        findings=[inline_finding.model_dump(), mechanical_finding.model_dump()],
+        mechanical_section=placement.mechanical_section,
+        deferred_findings=[],
+    )
+
+    spec = create_pull_request_review_tool(ctx)
+    await spec.execute(
+        {
+            "pull_number": 7,
+            "body": "Review body.",
+            "comments": [
+                {
+                    "path": "src/agent.py",
+                    "line": 1,
+                    "body": "Agent finding with collision.",
+                    "fingerprint": fp1,
+                }
+            ],
+        }
+    )
+
+    payload = github_client_from_ctx(ctx).review_payload  # type: ignore[attr-defined]
+    published_body = str(payload.get("body") or "")
+    expected = resolve_finding_short_ids([fp1, fp2])
+    assert expected[fp1] != expected[fp2]
+    assert f"**{expected[fp2]}**" in published_body
+    assert f"**{pre_rendered}**" not in published_body
+    assert fingerprint_for_short_id(expected[fp2], (fp1, fp2)) == fp2
+
+    inline = list(payload.get("comments") or [])
+    assert f"**{expected[fp1]}**" in inline[0]["body"]
+    assert fingerprint_for_short_id(expected[fp1], (fp1, fp2)) == fp1
+
+
+@pytest.mark.asyncio
 async def test_identical_findings_share_a_fingerprint(ctx: ToolContext) -> None:
     inline = await _submit(
         ctx,
