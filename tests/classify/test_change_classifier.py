@@ -165,7 +165,7 @@ def test_is_trivial_exact_bool_per_fixture(
                 "docs/readme.md",
                 files_changed=1,
                 lines_added=2,
-                lines_deleted=3,
+                lines_deleted=2,
                 diff="@@ small edit @@",
             ),
             True,
