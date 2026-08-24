@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 from mergecraft.analyzers.parsers._common import iter_json_objects, require_json_object
 
@@ -25,12 +25,69 @@ class ConverterError(ValueError):
     """Native tool output could not be converted to SARIF."""
 
 
-def _sarif(*, tool: str, results: list[dict[str, Any]]) -> dict[str, Any]:
+class SarifMessage(TypedDict):
+    text: str
+
+
+class SarifArtifactLocation(TypedDict):
+    uri: str
+
+
+class SarifRegion(TypedDict):
+    startLine: int
+    endLine: int
+
+
+class SarifPhysicalLocation(TypedDict):
+    artifactLocation: SarifArtifactLocation
+    region: SarifRegion
+
+
+class SarifLocation(TypedDict):
+    physicalLocation: SarifPhysicalLocation
+
+
+class SarifResult(TypedDict):
+    ruleId: str
+    level: str
+    message: SarifMessage
+    locations: list[SarifLocation]
+
+
+class SarifDriver(TypedDict):
+    name: str
+
+
+class SarifTool(TypedDict):
+    driver: SarifDriver
+
+
+class SarifRun(TypedDict):
+    tool: SarifTool
+    results: list[SarifResult]
+
+
+class SarifLog(TypedDict):
+    version: str
+    runs: list[SarifRun]
+
+
+def _sarif(*, tool: str, results: list[SarifResult]) -> SarifLog:
     """Return a minimal SARIF 2.1.0 document for ``tool``."""
     return {
         "version": "2.1.0",
         "runs": [{"tool": {"driver": {"name": tool}}, "results": results}],
     }
+
+
+def _as_line(value: object, *, default: int = 1) -> int:
+    """Parse a SARIF line number, wrapping conversion errors."""
+    try:
+        parsed = int(default if value is None else value)
+    except (TypeError, ValueError) as exc:
+        msg = f"invalid line number: {value!r}"
+        raise ConverterError(msg) from exc
+    return parsed
 
 
 def _result(
@@ -41,7 +98,7 @@ def _result(
     uri: str,
     start_line: int,
     end_line: int,
-) -> dict[str, Any]:
+) -> SarifResult:
     """Return one SARIF result object."""
     return {
         "ruleId": rule_id,
@@ -58,21 +115,26 @@ def _result(
     }
 
 
-def mypy_to_sarif(raw: str) -> dict[str, Any]:
+def mypy_to_sarif(raw: str) -> SarifLog:
     """Convert mypy ``--output json`` NDJSON into SARIF.
 
-    An empty file is treated as no diagnostics (mypy writes nothing on a
-    clean run). Non-empty input with no JSON objects is a converter failure.
+    Empty or missing native output is a converter failure (same as Bandit).
+    An explicit JSON array ``[]`` is a real clean run with no diagnostics.
     """
     stripped = raw.strip()
-    results: list[dict[str, Any]] = []
+    if not stripped:
+        msg = "mypy native output is empty"
+        raise ConverterError(msg)
+    if stripped == "[]":
+        return _sarif(tool="mypy", results=[])
+    results: list[SarifResult] = []
     matched = False
     for item in iter_json_objects(raw):
         matched = True
         severity = str(item.get("severity") or "error")
         level = "error" if severity == "error" else "warning"
-        start = int(item.get("line") or 1)
-        end = int(item.get("end_line") or start)
+        start = _as_line(item.get("line"), default=1)
+        end = _as_line(item.get("end_line"), default=start)
         results.append(
             _result(
                 rule_id=str(item.get("code") or "mypy"),
@@ -83,13 +145,13 @@ def mypy_to_sarif(raw: str) -> dict[str, Any]:
                 end_line=max(end, start, 1),
             )
         )
-    if stripped and not matched:
+    if not matched:
         msg = "mypy native output is not JSON lines"
         raise ConverterError(msg)
     return _sarif(tool="mypy", results=results)
 
 
-def bandit_to_sarif(raw: str) -> dict[str, Any]:
+def bandit_to_sarif(raw: str) -> SarifLog:
     """Convert Bandit JSON (``-f json``) into SARIF.
 
     Empty input and invalid JSON are converter failures. A valid document
@@ -106,12 +168,12 @@ def bandit_to_sarif(raw: str) -> dict[str, Any]:
     if not isinstance(rows, list):
         msg = "bandit JSON output missing a results array"
         raise ConverterError(msg)
-    results: list[dict[str, Any]] = []
+    results: list[SarifResult] = []
     for item in rows:
         if not isinstance(item, dict):
             continue
         native = str(item.get("issue_severity") or "LOW").upper()
-        line = int(item.get("line_number") or 1)
+        line = _as_line(item.get("line_number"), default=1)
         results.append(
             _result(
                 rule_id=str(item.get("test_id") or "bandit"),

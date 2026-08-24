@@ -57,7 +57,10 @@ def upload_file_tool(ctx: ToolContext):
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         api_base = os.environ.get("MERGECRAFT_API_URL", "").rstrip("/")
         api_token = usable_github_token(ctx.api_token)
-        if not api_base or not api_token:
+        if api_base and not api_token:
+            msg = "upload_file: missing API token"
+            raise ValueError(msg)
+        if not api_base:
             # Standalone BYOK: copy into tmpdir artifacts and return a file:// URL.
             dest_dir = Path(ctx.tmpdir) / "uploads"
             dest_dir.mkdir(parents=True, exist_ok=True)

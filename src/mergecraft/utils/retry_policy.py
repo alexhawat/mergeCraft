@@ -100,6 +100,7 @@ def classify_provider_failure(
     stderr: str = "",
     *,
     status_code: int | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> ProviderFailureClass:
     """Classify a provider refusal for failover — not GitHub HTTP retry.
 
@@ -109,7 +110,8 @@ def classify_provider_failure(
     over (D5). Unrelated unstructured 404s (missing asset / proxy) are
     permanent and do not advance the model chain.
     """
-    payload = _provider_json_payload(stderr)
+    if payload is None:
+        payload = _provider_json_payload(stderr)
     haystack = f"{stderr} {_message_from_payload(payload)}".lower()
     http_404 = _is_http_404(stderr=stderr, status_code=status_code, payload=payload)
     billing = any(marker in haystack for marker in _BILLING_MARKERS)
@@ -135,9 +137,10 @@ def is_retryable_cli_failure(
     """Classify CLI rate-limit / overload / quota / transient-404 failures as retryable."""
     if returncode is not None and returncode in RATE_LIMIT_EXIT_CODES:
         return True
+    payload = _provider_json_payload(stderr)
     if status_code is None:
-        status_code = _status_code_from_payload(_provider_json_payload(stderr))
-    kind = classify_provider_failure(stderr, status_code=status_code)
+        status_code = _status_code_from_payload(payload)
+    kind = classify_provider_failure(stderr, status_code=status_code, payload=payload)
     return kind in _RETRYABLE_FAILURE_CLASSES
 
 

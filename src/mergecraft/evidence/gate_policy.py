@@ -74,8 +74,10 @@ GateActionPolicy = dict[RuleId, GateAction]
 
 # Default policies #46 ships, plus ``has_blockers`` so Critical/Major
 # findings request changes under their own key instead of borrowing
-# ``changed-unread-file``. Order is lookup priority: ``decide_action``
-# walks the policy in dict insertion order.
+# ``changed-unread-file``. Dict insertion order is not match priority:
+# ``select_rule_id`` chooses the key (high_risk_migration, then
+# low_risk_passing, then has_blockers over changed-unread-file / tool_loop,
+# then schema_failure). ``decide_action`` looks that key up here.
 DEFAULT_GATE_POLICIES: Final[GateActionPolicy] = {
     "schema_failure": GateAction.BLOCK,
     "changed-unread-file": GateAction.REQUEST_CHANGES,

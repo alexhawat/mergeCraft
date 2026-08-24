@@ -166,11 +166,11 @@ def _deterministic_checks(state: ToolState) -> list[DeterministicCheck]:
     """
     run_state = getattr(state, "analyzer_run", None)
     rows = list(getattr(run_state, "analyzers", []) or [])
-    from mergecraft.analyzers.pipeline import catalog_scan_status
+    from mergecraft.analyzers.pipeline import CatalogScanStatus, catalog_scan_status
     from mergecraft.analyzers.registry import get_manifest
 
     checks: list[DeterministicCheck] = []
-    if run_state is not None and catalog_scan_status(run_state) == "unavailable":
+    if run_state is not None and catalog_scan_status(run_state) == CatalogScanStatus.UNAVAILABLE:
         checks.append(DeterministicCheck(name="analyzers", status="unavailable", command="catalog"))
     elif not rows:
         return []

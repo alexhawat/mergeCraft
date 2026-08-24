@@ -446,3 +446,40 @@ def test_unrecognised_gate_mode_falls_back_to_shadow() -> None:
     assert valid.gate_action == "shadow"
     enforced = RepoSettings.model_validate({"gates": {"gate_action": "enforce"}}).gates
     assert enforced.gate_action == "enforce"
+
+
+def test_has_blockers_wins_over_changed_unread_file() -> None:
+    """Critical/Major findings beat changed-unread-file / tool-loop telemetry."""
+    from mergecraft.agents.gates import decide_action, select_rule_id
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+
+    blocker = make_finding(
+        tool="agent",
+        rule_id="SEC-1",
+        category="Security & Privacy",
+        severity="Critical",
+        confidence="certain",
+        message="blocker",
+        path="src/auth.py",
+        start_line=1,
+        end_line=1,
+        source="agent",
+        introduced_by_pr="true",
+    )
+    unread = make_finding(
+        tool="trajectory",
+        rule_id="changed-unread-file",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="certain",
+        message="src/x.py was modified but never read",
+        path="src/x.py",
+        start_line=1,
+        end_line=1,
+        source="agent",
+        introduced_by_pr="true",
+    )
+    packet = _packet(findings=[unread, blocker])
+    assert select_rule_id(packet) == "has_blockers"
+    action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
+    assert _find_action(action) == "request_changes"

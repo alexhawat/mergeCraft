@@ -20,7 +20,7 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.tool_state import ApprovalRecord, init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
-from mergecraft.utils.status_checks import APPROVAL_CHECK, report_status_checks
+from mergecraft.utils.status_checks import APPROVAL_CHECK, COMPLETION_CHECK, report_status_checks
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -160,3 +160,22 @@ async def test_report_status_checks_anchors_approval_to_pr_head_sha(
     assert check["head_sha"] == PR_HEAD_SHA
     summary = check["output"]["summary"]
     assert REVIEWED_SHA in summary or REVIEWED_SHA[:7] in summary
+
+
+@pytest.mark.asyncio
+async def test_report_status_checks_skips_approval_when_packet_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """build_run_packet failures must not fail the run after completion posted."""
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        msg = "packet assembly failed"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
+    await report_status_checks(ctx, run_succeeded=True)
+    names = [run.get("name") for run in github.check_runs]
+    assert COMPLETION_CHECK in names
+    assert APPROVAL_CHECK not in names

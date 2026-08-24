@@ -229,3 +229,31 @@ def test_no_third_attribution_flags(tmp_path: Path) -> None:
         head = _coverage_json(tmp_path / f"head-{base_pct}-{head_pct}.json", head_pct)
         result = compare(head, base, floor=_FLOOR)
         assert not (result.inherited and result.caused_by_change)
+
+
+def test_recovered_head_above_floor_is_not_inherited(tmp_path: Path) -> None:
+    """Recovered HEAD (base under floor, head above) must not fail as inherited."""
+    module = _load_module()
+    compare = _compare_fn(module)
+    base = _coverage_json(tmp_path / "base.json", 81.0)
+    head = _coverage_json(tmp_path / "head.json", 90.0)
+
+    result = compare(head, base, floor=_FLOOR)
+
+    assert result.inherited is False
+    assert result.caused_by_change is False
+    assert "inherited" not in result.message.lower()
+
+
+def test_further_drop_on_low_base_is_caused_not_inherited(tmp_path: Path) -> None:
+    """A PR that tanks coverage while base is slightly under is caused, not inherited."""
+    module = _load_module()
+    compare = _compare_fn(module)
+    base = _coverage_json(tmp_path / "base.json", 81.0)
+    head = _coverage_json(tmp_path / "head.json", 80.0)
+
+    result = compare(head, base, floor=_FLOOR)
+
+    assert result.inherited is False
+    assert result.caused_by_change is True
+    assert "inherited" not in result.message.lower()

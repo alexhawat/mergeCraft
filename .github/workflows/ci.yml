@@ -115,7 +115,18 @@ jobs:
         run: |
           mkdir -p .sarif
           uv run ruff check src tests scripts --output-format sarif --output-file .sarif/ruff.sarif || true
-          uv run mypy src/mergecraft --output json > .sarif/mypy.json || true
+          set +e
+          uv run mypy src/mergecraft --output json > .sarif/mypy.json
+          mypy_rc=$?
+          set -e
+          if [ ! -s .sarif/mypy.json ]; then
+            if [ "$mypy_rc" -eq 0 ]; then
+              printf '%s\n' '[]' > .sarif/mypy.json
+            else
+              echo "mypy produced no JSON (exit ${mypy_rc})" >&2
+              exit 1
+            fi
+          fi
           uv run python scripts/native_output_to_sarif.py mypy .sarif/mypy.json .sarif/mypy.sarif
       - name: Upload ruff SARIF
         if: always() && matrix.python == '3.14'

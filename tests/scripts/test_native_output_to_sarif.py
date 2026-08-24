@@ -85,3 +85,31 @@ def test_valid_bandit_finding_writes_sarif(tmp_path: Path) -> None:
     assert main(["bandit", str(src), str(dest)]) == 0
     doc = json.loads(dest.read_text(encoding="utf-8"))
     assert doc["runs"][0]["results"][0]["ruleId"] == "B201"
+
+
+def test_empty_mypy_input_is_converter_failure() -> None:
+    with pytest.raises(ConverterError):
+        mypy_to_sarif("  \n")
+
+
+def test_explicit_empty_mypy_array_is_clean_sarif() -> None:
+    doc = mypy_to_sarif("[]")
+    assert doc["runs"][0]["results"] == []
+
+
+def test_invalid_mypy_line_number_is_converter_failure() -> None:
+    with pytest.raises(ConverterError, match="line number"):
+        mypy_to_sarif(
+            '{"file": "a.py", "line": "not-a-line", "message": "x", "code": "attr-defined"}\n'
+        )
+
+
+def test_invalid_line_number_does_not_write_clean_sarif(tmp_path: Path) -> None:
+    src = tmp_path / "mypy.json"
+    dest = tmp_path / "mypy.sarif"
+    src.write_text(
+        '{"file": "a.py", "line": "nope", "message": "x", "code": "attr-defined"}\n',
+        encoding="utf-8",
+    )
+    assert main(["mypy", str(src), str(dest)]) == 1
+    assert not dest.exists()

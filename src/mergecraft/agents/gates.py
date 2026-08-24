@@ -450,14 +450,14 @@ def select_rule_id(packet: MergeEvidencePacket) -> str:
         return "high_risk_migration"
     if _is_low_risk_passing(packet):
         return "low_risk_passing"
+    if _has_blocker(packet.findings):
+        # Blocking agent/analyzer findings request changes under their own
+        # policy key — wins over unread-file / tool-loop telemetry.
+        return "has_blockers"
     if _has_changed_unread_file(packet):
         return "changed-unread-file"
     if _has_tool_loop(packet):
         return "tool_loop"
-    if _has_blocker(packet.findings):
-        # Blocking agent/analyzer findings request changes under their own
-        # policy key — not aliased onto unread-file trajectory findings.
-        return "has_blockers"
     if _is_schema_failure(packet):
         return "schema_failure"
     # Default: no rule matched; the policy lookup falls through to the

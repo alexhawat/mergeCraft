@@ -407,3 +407,32 @@ class TestModePromptVersions:
         # boundary (``build_packet`` and the existing schema contract); this
         # matches what the pre-S5 envelope returns when no mode ran.
         assert packet.mode_prompt_versions is None or (len(packet.mode_prompt_versions) == 0)
+
+
+def test_merge_findings_empty_fingerprint_does_not_duplicate() -> None:
+    """Empty fingerprints must not always append; use a stable fallback key."""
+    from mergecraft.analyzers.finding import Finding
+    from mergecraft.evidence.findings import merge_findings
+
+    shared = {
+        "tool": "agent",
+        "rule_id": "X",
+        "category": "Security & Privacy",
+        "severity": "Major",
+        "confidence": "certain",
+        "message": "same issue",
+        "path": "src/a.py",
+        "start_line": 3,
+        "end_line": 3,
+        "fingerprint": "",
+        "evidence": [],
+        "remediation": None,
+        "autofix": None,
+        "introduced_by_pr": "true",
+        "source": "agent",
+        "cluster_id": None,
+    }
+    left = Finding.model_validate(shared)
+    right = Finding.model_validate(shared)
+    merged = merge_findings([left], [right])
+    assert len(merged) == 1

@@ -121,10 +121,10 @@ async def test_upload_does_not_send_empty_bearer_when_api_url_set(
     _assert_no_empty_bearer(captured)
     assert "illegal header" not in text.lower()
     assert "bearer " not in text.lower()
-    if result.is_error:
-        assert "token" in text.lower(), f"error must name the missing token, got {text!r}"
-    else:
-        assert captured == [], f"empty token must not POST to the upload API, got {captured!r}"
+    assert result.is_error, f"empty token with API URL must error, got success {text!r}"
+    assert "token" in text.lower(), f"error must name the missing token, got {text!r}"
+    assert "file://" not in text.lower()
+    assert captured == []
 
 
 async def test_upload_whitespace_token_does_not_interpolate_bearer(
@@ -151,5 +151,6 @@ async def test_upload_whitespace_token_does_not_interpolate_bearer(
         raise AssertionError(msg)
     text = _result_text(result).lower()
     assert "illegal header" not in text
-    if result.is_error:
-        assert "token" in text
+    assert result.is_error
+    assert "token" in text
+    assert "file://" not in text

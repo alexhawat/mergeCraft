@@ -33,17 +33,32 @@ def typed_findings_from_rows(raw: list[Any]) -> list[Finding]:
     return typed
 
 
+def _dedupe_key(finding: Finding) -> str:
+    """Stable identity for merge: fingerprint, else tool/rule/path/line/message."""
+    fingerprint = finding.fingerprint.strip() if finding.fingerprint else ""
+    if fingerprint:
+        return fingerprint
+    return "|".join(
+        (
+            finding.tool,
+            finding.rule_id,
+            finding.path,
+            str(finding.start_line or 0),
+            finding.message,
+        )
+    )
+
+
 def merge_findings(*groups: list[Finding]) -> list[Finding]:
-    """Concatenate finding groups, dropping duplicate fingerprints."""
+    """Concatenate finding groups, dropping duplicate identity keys."""
     unique: list[Finding] = []
     seen: set[str] = set()
     for group in groups:
         for finding in group:
-            fingerprint = finding.fingerprint
-            if fingerprint and fingerprint in seen:
+            key = _dedupe_key(finding)
+            if key in seen:
                 continue
-            if fingerprint:
-                seen.add(fingerprint)
+            seen.add(key)
             unique.append(finding)
     return unique
 

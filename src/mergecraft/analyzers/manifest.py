@@ -172,7 +172,7 @@ def load_manifest_yaml(
     raw: str,
     *,
     strict_severity_map: bool | None = None,
-    check_provenance: bool = False,
+    check_provenance: bool = True,
 ) -> AnalyzerManifest:
     """Parse and validate one manifest YAML document."""
     try:
@@ -198,7 +198,7 @@ def load_manifest_file(
     path: Path,
     *,
     strict_severity_map: bool | None = None,
-    check_provenance: bool = False,
+    check_provenance: bool = True,
 ) -> AnalyzerManifest:
     return load_manifest_yaml(
         path.read_text(encoding="utf-8"),
