@@ -116,7 +116,7 @@ jobs:
           mkdir -p .sarif
           uv run ruff check src tests scripts --output-format sarif --output-file .sarif/ruff.sarif || true
           set +e
-          uv run mypy src/mergecraft --output json > .sarif/mypy.json
+          uv run mypy src/mergecraft --output json --no-error-summary > .sarif/mypy.json
           mypy_rc=$?
           set -e
           if [ ! -s .sarif/mypy.json ]; then

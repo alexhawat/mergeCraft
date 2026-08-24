@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -46,6 +48,30 @@ def test_bandit_object_without_results_array_is_converter_failure() -> None:
 def test_garbage_mypy_input_is_converter_failure() -> None:
     with pytest.raises(ConverterError):
         mypy_to_sarif("this is not json\n")
+
+
+def test_mypy_clean_success_summary_is_empty_sarif() -> None:
+    doc = mypy_to_sarif("Success: no issues found in 477 source files\n")
+    assert doc["runs"][0]["results"] == []
+
+
+def test_clean_mypy_cli_json_output_converts_to_empty_sarif(tmp_path: Path) -> None:
+    """OpenAI review: convert the real clean CLI stdout, not a hand-written []."""
+    src = tmp_path / "ok.py"
+    src.write_text("x: int = 1\n", encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-m", "mypy", str(src), "--output", "json"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    stdout = proc.stdout
+    assert "Success:" in stdout or stdout.strip() == ""
+    payload = stdout if stdout.strip() else "[]"
+    doc = mypy_to_sarif(payload)
+    assert doc["runs"][0]["results"] == []
 
 
 def test_missing_input_file_does_not_write_clean_sarif(tmp_path: Path) -> None:

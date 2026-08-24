@@ -172,10 +172,10 @@ async def test_report_status_checks_anchors_approval_to_pr_head_sha(
 
 
 @pytest.mark.asyncio
-async def test_report_status_checks_skips_approval_when_packet_omitted(
+async def test_report_status_checks_posts_neutral_when_packet_omitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Omitted ``None`` skips approval without assembling."""
+    """Omitted ``None`` posts ``neutral`` without assembling."""
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
     calls = {"n": 0}
@@ -189,7 +189,9 @@ async def test_report_status_checks_skips_approval_when_packet_omitted(
     await report_status_checks(ctx, run_succeeded=True)
     names = [run.get("name") for run in github.check_runs]
     assert COMPLETION_CHECK in names
-    assert APPROVAL_CHECK not in names
+    assert APPROVAL_CHECK in names
+    approval = _approval_checks(github)[0]
+    assert approval["conclusion"] == "neutral"
     assert calls["n"] == 0
 
 
@@ -215,7 +217,7 @@ async def test_report_status_checks_does_not_rebuild_when_packet_ready(
 
 
 @pytest.mark.asyncio
-async def test_report_status_checks_skips_approval_without_rebuilding_failed_packet(
+async def test_report_status_checks_posts_neutral_without_rebuilding_failed_packet(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     github = _RecordingGitHub()
@@ -232,4 +234,5 @@ async def test_report_status_checks_skips_approval_without_rebuilding_failed_pac
     assert calls["n"] == 0
     names = [run.get("name") for run in github.check_runs]
     assert COMPLETION_CHECK in names
-    assert APPROVAL_CHECK not in names
+    assert APPROVAL_CHECK in names
+    assert _approval_checks(github)[0]["conclusion"] == "neutral"

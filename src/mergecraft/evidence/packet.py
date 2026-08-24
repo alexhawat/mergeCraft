@@ -73,7 +73,10 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 # - 1.8.0 — W5 (review convergence) records ``dispatched_lens_ids`` on
 #   ``AgentMetadata`` so each run's evidence names which lenses actually
 #   executed (RC7).
-PACKET_SCHEMA_VERSION = "1.8.0"
+# - 1.9.0 — ``Decision.verdict`` is the GitHub check-run conclusion
+#   (``success`` / ``failure`` / ``neutral``). Gate actions such as
+#   ``block`` live on ``action``, not ``verdict``.
+PACKET_SCHEMA_VERSION = "1.9.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional

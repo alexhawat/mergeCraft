@@ -1,7 +1,6 @@
 # Test plan — open-issues-sweep-2026-08-24-a (AA–AG GREEN + AH #485 RED)
 
 Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-24-a-analyzers-ci-wave-plan.md`
-Worktree: `/Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a`
 Branch: `wave/open-issues-sweep-2026-08-24-a`
 Issues: [#458](https://github.com/alexhawat/mergeCraft/issues/458), [#467](https://github.com/alexhawat/mergeCraft/issues/467), [#469](https://github.com/alexhawat/mergeCraft/issues/469), [#466](https://github.com/alexhawat/mergeCraft/issues/466), [#459](https://github.com/alexhawat/mergeCraft/issues/459), [#460](https://github.com/alexhawat/mergeCraft/issues/460), [#464](https://github.com/alexhawat/mergeCraft/issues/464), [#485](https://github.com/alexhawat/mergeCraft/issues/485)
 
@@ -176,7 +175,7 @@ Do not implement a third attribution class.
 ## How to run (AH: expect FAIL until impl)
 
 ```bash
-cd /Users/alex/Documents/code/sevn.bot/mergecraft-open-issues-sweep-2026-08-24-a
+# from the repo root of this branch
 MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/ci/test_coverage_inherited_drift_485.py tests/ci/test_coverage_delta_exit_policy.py -q
 make lint
 make typecheck

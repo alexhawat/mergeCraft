@@ -107,8 +107,8 @@ class TestRetryShape:
     """Structural pins on the retry policy objects (no wall-clock asserts)."""
 
     def test_github_client_wait_is_exponential_with_jitter(self) -> None:
-        retrying = getattr(GitHubClient.request, "retry", None)
-        assert retrying is not None, "GitHubClient.request lost its retry decorator"
+        retrying = getattr(GitHubClient._send, "retry", None)
+        assert retrying is not None, "GitHubClient._send lost its retry decorator"
         wait = retrying.wait
         assert not isinstance(wait, tenacity.wait_fixed), (
             "wait_fixed does not backoff — 429/5xx bursts hammer the API"
@@ -123,8 +123,8 @@ class TestRetryShape:
         )
 
     def test_github_client_stop_is_bounded(self) -> None:
-        retrying = getattr(GitHubClient.request, "retry", None)
-        assert retrying is not None
+        retrying = getattr(GitHubClient._send, "retry", None)
+        assert retrying is not None, "GitHubClient._send lost its retry decorator"
         assert isinstance(retrying.stop, tenacity.stop_after_attempt)
         assert retrying.stop.max_attempt_number <= 5
 

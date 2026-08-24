@@ -179,6 +179,7 @@ def test_no_third_attribution_flags(tmp_path: Path) -> None:
     compare = _compare_fn(module)
     cases = (
         (81.0, 81.0),
+        (81.0, 80.5),
         (83.0, 82.5),
         (_FLOOR, _FLOOR - 1.5),
         (84.0, 84.0),
@@ -205,15 +206,15 @@ def test_recovered_head_above_floor_is_not_inherited(tmp_path: Path) -> None:
     assert "inherited" not in result.message.lower()
 
 
-def test_further_drop_on_low_base_is_caused_not_inherited(tmp_path: Path) -> None:
-    """A PR that tanks coverage while base is slightly under is caused, not inherited."""
+def test_further_drop_on_low_base_is_still_inherited(tmp_path: Path) -> None:
+    """AH485a: head < base < floor stays inherited, not caused by the PR."""
     module = _load_module()
     compare = _compare_fn(module)
     base = _coverage_json(tmp_path / "base.json", 81.0)
-    head = _coverage_json(tmp_path / "head.json", 80.0)
+    head = _coverage_json(tmp_path / "head.json", 80.5)
 
     result = compare(head, base, floor=_FLOOR)
 
-    assert result.inherited is False
-    assert result.caused_by_change is True
-    assert "inherited" not in result.message.lower()
+    assert result.inherited is True
+    assert result.caused_by_change is False
+    assert "inherited" in result.message.lower()

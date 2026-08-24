@@ -1,7 +1,8 @@
 """Opt-in commit-status check-runs (``mergecraft`` / ``mergecraft-approval``).
 
-The approval check-run posts ``packet.decision.verdict`` (W8). Skip the
-approval check when ``packet`` is None. Narrative
+The approval check-run posts ``packet.decision.verdict`` (W8). When
+``packet`` is None, post ``neutral`` without assembling a packet.
+Narrative
 (``ApprovalRecord.would_approve``, ``result.output``, anything the model
 wrote) is recorded separately as an advisory input and is never the sole
 positive input — see ``decide_approval`` in ``mergecraft.agents.gates`` for
@@ -157,7 +158,8 @@ async def report_status_checks(
 
     # --- Approval gate (W8.2): post ``packet.decision.verdict``. -------------
     # The agent's boolean is still in ApprovalRecord.would_approve (W8.3) as an
-    # advisory input the merge-evidence plan reads. Skip when packet is None.
+    # advisory input the merge-evidence plan reads. A missing packet posts
+    # ``neutral`` so the check still lands; do not rebuild the packet.
     from mergecraft.agents.gates import (
         approval_decision_inputs,
         decision_summary_lines,
@@ -168,7 +170,21 @@ async def report_status_checks(
     # ``packet.decision.verdict`` so this layer only posts check-runs.
     # Best-effort: never raise after the completion check-run has posted.
     if packet is None:
-        logger.debug("status checks: no packet; skipping approval check")
+        logger.debug("status checks: no packet; posting neutral approval")
+        try:
+            await _create_check_run(
+                ctx,
+                name=APPROVAL_CHECK,
+                head_sha=head_sha,
+                conclusion="neutral",
+                title="mergeCraft review did not complete",
+                summary=(
+                    "The mergeCraft evidence packet was not assembled, so no "
+                    "approval decision was recorded."
+                ),
+            )
+        except Exception as err:
+            logger.debug("status checks: {} post failed: {}", APPROVAL_CHECK, err)
         return
 
     try:

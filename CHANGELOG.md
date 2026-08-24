@@ -85,9 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent Critical or Major finding fails ``mergecraft-approval`` and the
   evidence packet's ``request_changes`` action. An empty finding list still
   stays ``neutral``; untrusted runs still never ``success`` (#460)
-- Coverage delta vs the base branch now attributes a drop of 1.0pp or more
-  below `fail_under` as inherited drift when the base is already at the floor,
-  instead of always treating `head < base` as caused by the PR (#485)
+- Coverage already below `fail_under` on the base branch stays inherited
+  drift even if HEAD drops further; a drop of 1.0pp or more below the floor
+  when the base is already at the floor is also inherited, instead of always
+  treating `head < base` as caused by the PR (#485)
+- A clean mypy JSON typecheck no longer fails the SARIF convert step, so the
+  mypy artifact still uploads for review evidence
+- Evidence packet `decision.verdict` is a GitHub check conclusion
+  (`success` / `failure` / `neutral`); schema version 1.9.0
+- `mergecraft-approval` posts `neutral` when the evidence packet was not
+  assembled, instead of omitting the check
 - Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
   the checkout did not provide a tool, resolution fell through to
   `shutil.which`, so a system copy ran against the consumer's code at an

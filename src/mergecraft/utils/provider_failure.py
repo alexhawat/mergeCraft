@@ -75,21 +75,22 @@ def classify_provider_failure(
 ) -> ProviderFailureClass:
     """Classify a provider refusal for failover — not GitHub HTTP retry.
 
-    Structured JSON fields (statusCode, message) win. ``does not exist`` is
-    consulted last and only together with HTTP 404 (unknown-model). Billing
-    404s fail over. A structured JSON 404 that is not unknown-model fails
-    over (D5). Unrelated unstructured 404s (missing asset / proxy) are
-    permanent and do not advance the model chain.
+    Structured JSON fields (statusCode, message) win. An HTTP 404 whose
+    message contains ``does not exist`` is unknown-model and is classified
+    before billing, so a misconfigured slug that also mentions credits does
+    not fail over (AD466e). Billing 404s fail over. A structured JSON 404
+    that is not unknown-model fails over (D5). Unrelated unstructured 404s
+    (missing asset / proxy) are permanent and do not advance the model chain.
     """
     if payload is None:
         payload = try_load_json_object(stderr)
     haystack = f"{stderr} {_message_from_payload(payload)}"
     http_404 = _is_http_404(stderr=stderr, status_code=status_code, payload=payload)
-    if _looks_like_billing(stderr=haystack, payload=payload):
-        return ProviderFailureClass.BILLING
     lowered = haystack.lower()
     if http_404 and _UNKNOWN_MODEL_MARKER in lowered:
         return ProviderFailureClass.UNKNOWN_MODEL
+    if _looks_like_billing(stderr=haystack, payload=payload):
+        return ProviderFailureClass.BILLING
     if http_404 and payload is not None:
         return ProviderFailureClass.HTTP_404
     if http_404:

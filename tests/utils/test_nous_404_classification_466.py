@@ -142,8 +142,25 @@ class TestNous404Failover:
         assert generic != unknown
         assert _is_retryable_failure(_failed(bannered)) is True
 
-    def test_unknown_model_404_does_not_fail_over(self) -> None:
-        assert _is_retryable_failure(_failed(_UNKNOWN_MODEL_404)) is False
+    def test_unknown_model_404_wins_over_billing_prose(self) -> None:
+        """AD466e: ``does not exist`` is classified before billing tokens."""
+        from mergecraft.utils.provider_failure import ProviderFailureClass
+
+        stderr = json.dumps(
+            {
+                "name": "APIError",
+                "data": {
+                    "message": (
+                        "Not Found: Model 'totally/not-a-real' does not exist; "
+                        "add credits at the portal"
+                    ),
+                    "statusCode": 404,
+                    "isRetryable": False,
+                },
+            }
+        )
+        assert _classify(stderr, status_code=404) == ProviderFailureClass.UNKNOWN_MODEL
+        assert _is_retryable_failure(_failed(stderr)) is False
 
     def test_plain_does_not_exist_prose_is_not_retryable(self) -> None:
         stderr = "HTTP 404: model 'foo/bar' does not exist"

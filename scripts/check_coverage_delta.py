@@ -95,8 +95,6 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
     if _below(base_percent, resolved_floor):
         if not _below(head_percent, resolved_floor):
             return _result(message=ok_message)
-        if _below(head_percent, base_percent):
-            return _result(caused_by_change=True, message=caused_message)
         return _result(
             inherited=True,
             message=(

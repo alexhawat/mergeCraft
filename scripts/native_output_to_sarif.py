@@ -12,6 +12,7 @@ clean SARIF document.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -24,6 +25,7 @@ from mergecraft.analyzers.parsers.bandit_json import (
 )
 
 _BANDIT_LEVEL = {"high": "error", "medium": "warning", "low": "note", "undefined": "note"}
+_MYPY_CLEAN_SUMMARY = re.compile(r"^Success: no issues found in \d+ source files\.?$")
 
 
 class ConverterError(ValueError):
@@ -157,8 +159,17 @@ def mypy_to_sarif(raw: str) -> SarifLog:
             )
         )
     if not matched:
-        msg = "mypy native output is not JSON lines"
-        raise ConverterError(msg)
+        leftover = [
+            line.strip()
+            for line in raw.splitlines()
+            if line.strip()
+            and line.strip()[0] not in "{["
+            and _MYPY_CLEAN_SUMMARY.match(line.strip()) is None
+        ]
+        if leftover:
+            msg = "mypy native output is not JSON lines"
+            raise ConverterError(msg)
+        return _sarif(tool="mypy", results=[])
     return _sarif(tool="mypy", results=results)
 
 

@@ -70,7 +70,7 @@ def sample_minimal_packet_dict() -> dict[str, Any]:
         "trajectory": None,
         "evals": None,
         "decision": {
-            "verdict": "block",
+            "verdict": "neutral",
             "reason": "self-assessment-only run",
             "decided_by": "mergecraft.agents.gates.decide_approval",
         },
