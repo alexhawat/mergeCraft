@@ -464,3 +464,87 @@ uv run pytest -q tests/cli/test_provider_migrate_cmd.py tests/cli/test_provider_
 ## BF RED evidence
 
 - BF test-author wave: `6aafe11c` — 35 collected, 35 xfails; lint+typecheck clean
+
+## BG #484 — ``workflow`` CLI mutates Action ``with:``/``env:``
+
+Maps **BG RED** contracts for #484 (``workflow`` authoring namespace, surgical YAML
+mutation, ``--dry-run`` diff, byte-stable comments, hygiene gate, missing-secret
+reporting) to the test suite.
+
+### D9 — ``workflow`` namespace, authoring vs runtime → BG
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Root ``workflow`` Typer group (not ``gha``) | `tests/cli/test_workflow_cmd.py::test_workflow_namespace_registered_on_root_app`, `…::test_workflow_help_lists_provider_model_agents_and_list_verbs` | functional |
+| ``gha`` does not expose authoring verbs | `…::test_gha_namespace_does_not_expose_workflow_authoring_verbs` | functional |
+| Runs without ``GITHUB_*`` runner env | `…::test_workflow_runs_without_github_actions_env` | E2E |
+| Authoring failures are ordinary CLI errors (no ``::error::``) | `…::test_workflow_failure_is_ordinary_cli_error_not_action_annotation` | error |
+
+### Surgical ``with:``/``env:`` mutation → BG
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Owned ``with:`` key is ``model`` only | `tests/cli/test_workflow_wf_yaml.py::test_workflow_owned_key_constants_match_registry_contract`, `…::test_apply_model_wiring_updates_with_model_key` | unit |
+| Owned ``env:`` keys are indexed ``MERGECRAFT_CUSTOM_PROVIDER_{BASE_URL,API_KEY}_<N>`` | `…::test_apply_provider_env_wiring_writes_indexed_custom_provider_keys`, `tests/cli/test_workflow_cmd.py::test_workflow_provider_add_apply_writes_owned_env_keys` | unit / E2E |
+| Byte-stable comments and timeout literals (#486 / #465) | `…::test_apply_provider_env_wiring_preserves_surrounding_comments`, `tests/cli/test_workflow_cmd.py::test_workflow_provider_add_apply_writes_owned_env_keys` | unit / E2E |
+| Only owned keys move (line-diff guard) | `tests/cli/support_provider_registry.py::assert_only_owned_workflow_keys_changed`, workflow cmd/wf_yaml apply tests | unit / E2E |
+| Refuses when no ``uses: alexhawat/mergeCraft`` step | `tests/cli/test_workflow_wf_yaml.py::test_apply_provider_env_wiring_raises_when_no_mergecraft_step`, `tests/cli/test_workflow_cmd.py::test_workflow_mutate_refuses_when_no_mergecraft_step` | error |
+| PyYAML parse-verify after surgery | implied by mutator tests + idempotency | unit |
+| No ``ruamel.yaml`` | implementation constraint (extend `tracing_logfire_wf_yaml.py` pattern) | — |
+
+### ``--dry-run`` / ``--apply`` → BG
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Default dry-run prints diff, writes nothing | `tests/cli/test_workflow_cmd.py::test_workflow_provider_add_default_dry_run_shows_diff_without_writing` | E2E |
+| ``--apply`` writes workflow file | `…::test_workflow_provider_add_apply_writes_owned_env_keys`, `…::test_workflow_model_add_updates_with_model_key` | E2E |
+| Unified diff rendering | `tests/cli/test_workflow_wf_yaml.py::test_render_workflow_diff_emits_unified_diff` | unit |
+| Default ``--workflow`` is ``.github/workflows/mergecraft.yml`` | `tests/cli/test_workflow_cmd.py::test_workflow_default_path_targets_mergecraft_yml` | functional |
+
+### Registry parity + operator guidance → BG
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| ``workflow provider harnesses`` lists harnesses from code (#477) | `tests/cli/test_workflow_cmd.py::test_workflow_provider_harnesses_lists_supported_values_from_code` | E2E |
+| Unknown harness rejected | `…::test_workflow_provider_add_rejects_unknown_harness` | error |
+| Reports GitHub secrets still required | `…::test_workflow_provider_add_reports_missing_github_secrets` | E2E |
+| ``workflow model add`` / ``agents setmodel`` / ``model prioritize`` round-trip | `…::test_workflow_model_add_updates_with_model_key`, `…::test_workflow_agents_setmodel_updates_primary_step_model`, `…::test_workflow_model_prioritize_reorders_fallback_steps` | E2E |
+| ``workflow list`` surfaces workflow state | `…::test_workflow_list_shows_provider_model_state` | E2E |
+| ``scripts/check_action_yml_hygiene.py`` stays green | `…::test_workflow_mutated_repo_passes_action_yml_hygiene_check` | integration |
+
+### Pinned public API (implementation wave BG)
+
+New module `src/mergecraft/cli/workflow_cmd.py`:
+
+- Typer app registered as ``workflow`` (not under ``gha``)
+- Subcommands: ``list``, ``provider add`` / ``provider harnesses``, ``model add`` / ``model prioritize``, ``agents setmodel``
+- ``--dry-run`` default; ``--apply`` writes; ``--workflow`` path option
+
+New module `src/mergecraft/cli/workflow_wf_yaml.py` (extend `tracing_logfire_wf_yaml.py` helpers):
+
+- ``WORKFLOW_OWNED_WITH_KEYS``, ``WORKFLOW_OWNED_ENV_PREFIXES``
+- ``WorkflowYamlError``, ``WorkflowChange``
+- ``apply_provider_env_wiring``, ``apply_model_wiring``, ``render_workflow_diff``
+
+Shared fixtures in `tests/cli/support_provider_registry.py`:
+
+- ``BG_XFAIL``, workflow templates, ``scaffold_workflow_file``, ``require_workflow_*_symbols``, ``assert_only_owned_workflow_keys_changed``
+
+### xfail reconciliation
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| BG | all `@BG_XFAIL` / `@pytest.mark.xfail(reason="green after BG impl")` in `tests/cli/test_workflow_cmd.py` and `tests/cli/test_workflow_wf_yaml.py` |
+
+### BG verification commands
+
+```bash
+make lint
+make typecheck
+uv run pytest --collect-only -q tests/cli/test_workflow_cmd.py tests/cli/test_workflow_wf_yaml.py
+uv run pytest -q tests/cli/test_workflow_cmd.py tests/cli/test_workflow_wf_yaml.py  # RED: xfails expected
+```
+
+## BG RED evidence
+
+- BG test-author wave: pending — 26 collected, 26 xfails expected; lint+typecheck clean

@@ -486,3 +486,187 @@ def env_text(tmp_path: Path) -> str:
     """Return raw ``.env`` text."""
     path = tmp_path / ".env"
     return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+# BG #484 — ``workflow`` CLI authoring + surgical workflow YAML mutator (D9).
+
+BG_XFAIL = pytest.mark.xfail(reason="green after BG impl", strict=False)
+
+WORKFLOW_CMD_MODULE = "mergecraft.cli.workflow_cmd"
+WORKFLOW_WF_YAML_MODULE = "mergecraft.cli.workflow_wf_yaml"
+
+WORKFLOW_DEFAULT_RELATIVE_PATH = ".github/workflows/mergecraft.yml"
+
+# Owned keys the workflow mutator may insert/replace inside mergeCraft steps.
+WORKFLOW_OWNED_WITH_KEYS: tuple[str, ...] = ("model",)
+
+WORKFLOW_OWNED_ENV_PREFIXES: tuple[str, ...] = (
+    "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_",
+    "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_",
+)
+
+WORKFLOW_ONE_STEP_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request_target:
+jobs:
+  review:
+    name: mergecraft review
+    runs-on: ubuntu-latest
+    # === PRESERVE: header comment block (#486) ===
+    timeout-minutes: 65
+    steps:
+      - name: mergeCraft PR review
+        id: mergecraft_nous
+        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
+          model: openai/gpt-codex
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+"""
+
+WORKFLOW_TWO_STEP_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request_target:
+jobs:
+  review:
+    name: mergecraft review
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - name: mergeCraft PR review (Nous primary)
+        id: mergecraft_nous
+        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
+          model: nous/tencent/hy3
+        env:
+          MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
+          MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+
+      - name: mergeCraft PR review (Codex fallback)
+        id: mergecraft_codex
+        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
+          model: openai/gpt-codex
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+"""
+
+
+def import_workflow_cmd() -> Any:
+    """Import ``mergecraft.cli.workflow_cmd`` or fail with a clear message."""
+    try:
+        return importlib.import_module(WORKFLOW_CMD_MODULE)
+    except ImportError as exc:
+        pytest.fail(f"{WORKFLOW_CMD_MODULE} is not implemented yet: {exc}")
+
+
+def import_workflow_wf_yaml() -> Any:
+    """Import ``mergecraft.cli.workflow_wf_yaml`` or fail with a clear message."""
+    try:
+        return importlib.import_module(WORKFLOW_WF_YAML_MODULE)
+    except ImportError as exc:
+        pytest.fail(f"{WORKFLOW_WF_YAML_MODULE} is not implemented yet: {exc}")
+
+
+def require_workflow_cmd_symbols() -> Any:
+    """Import workflow CLI and require BG subcommands/helpers."""
+    module = import_workflow_cmd()
+    for name in (
+        "app",
+        "list_cmd",
+        "provider_add_cmd",
+        "provider_harnesses_cmd",
+        "model_add_cmd",
+        "model_prioritize_cmd",
+        "agents_setmodel_cmd",
+    ):
+        if not hasattr(module, name):
+            pytest.fail(f"{WORKFLOW_CMD_MODULE}.{name} is not implemented")
+    return module
+
+
+def require_workflow_wf_yaml_symbols() -> Any:
+    """Import workflow YAML mutator and require BG owned-key helpers."""
+    module = import_workflow_wf_yaml()
+    for name in (
+        "WORKFLOW_OWNED_WITH_KEYS",
+        "WORKFLOW_OWNED_ENV_PREFIXES",
+        "WorkflowYamlError",
+        "WorkflowChange",
+        "apply_provider_env_wiring",
+        "apply_model_wiring",
+        "render_workflow_diff",
+    ):
+        if not hasattr(module, name):
+            pytest.fail(f"{WORKFLOW_WF_YAML_MODULE}.{name} is not implemented")
+    return module
+
+
+def scaffold_workflow_file(
+    tmp_path: Path,
+    body: str,
+    *,
+    relative_path: str = WORKFLOW_DEFAULT_RELATIVE_PATH,
+) -> Path:
+    """Write a consumer workflow YAML under *tmp_path*."""
+    workflow_path = tmp_path / relative_path
+    workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    workflow_path.write_text(body, encoding="utf-8")
+    return workflow_path
+
+
+def workflow_text(tmp_path: Path, *, relative_path: str = WORKFLOW_DEFAULT_RELATIVE_PATH) -> str:
+    """Return raw workflow YAML text."""
+    path = tmp_path / relative_path
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def indexed_custom_provider_base_url(env_index: int) -> str:
+    """Return ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_<N>`` for workflow env blocks."""
+    return f"MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{env_index}"
+
+
+def indexed_custom_provider_api_key(env_index: int) -> str:
+    """Return ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>`` for workflow env blocks."""
+    return f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{env_index}"
+
+
+def _line_is_owned_workflow_mutation(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return False
+    for key in WORKFLOW_OWNED_WITH_KEYS:
+        if stripped.startswith(f"{key}:"):
+            return True
+    for prefix in WORKFLOW_OWNED_ENV_PREFIXES:
+        if stripped.split(":", 1)[0].strip().startswith(prefix):
+            return True
+    return False
+
+
+def assert_only_owned_workflow_keys_changed(before: str, after: str) -> None:
+    """Assert byte-stable surgery: only owned ``with:``/``env:`` keys may differ."""
+    before_lines = before.splitlines()
+    after_lines = after.splitlines()
+    max_len = max(len(before_lines), len(after_lines))
+    for index in range(max_len):
+        old = before_lines[index] if index < len(before_lines) else None
+        new = after_lines[index] if index < len(after_lines) else None
+        if old == new:
+            continue
+        if old is not None and _line_is_owned_workflow_mutation(old):
+            continue
+        if new is not None and _line_is_owned_workflow_mutation(new):
+            continue
+        raise AssertionError(
+            f"non-owned workflow line changed at line {index + 1}: before={old!r} after={new!r}"
+        )
