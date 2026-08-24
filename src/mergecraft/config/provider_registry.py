@@ -73,8 +73,16 @@ def allocate_env_index(entries: Sequence[Mapping[str, Any]]) -> int:
 
 
 def validate_http_url(url: str) -> str:
-    """Require an absolute ``http`` or ``https`` URL (reuses gateway urlparse rule)."""
+    """Require an absolute ``http`` or ``https`` URL (reuses gateway urlparse rule).
+
+    Interior control characters are rejected: ``strip()`` only clears the ends,
+    and a stored URL is written verbatim into workflow YAML, so an embedded
+    newline would open a new key or step there.
+    """
     stripped = url.strip()
+    if any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7F for char in stripped):
+        msg = "url must not contain whitespace or control characters"
+        raise ValueError(msg)
     parsed = urlparse(stripped)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         msg = "url must be an absolute http(s) URL"

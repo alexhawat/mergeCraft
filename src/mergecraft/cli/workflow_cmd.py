@@ -123,6 +123,13 @@ def _plan_provider_for_workflow(
                     cli_bail(str(exc))
             if resolved_url is None:
                 cli_bail(f"provider {normalised_label!r} requires --url (absolute http(s) URL)")
+            elif url is None:
+                # A stored row is written into workflow YAML verbatim, so it has
+                # to clear the same bar as a freshly supplied --url.
+                try:
+                    resolved_url = validate_http_url(str(resolved_url))
+                except ValueError as exc:
+                    cli_bail(f"provider {normalised_label!r} has an invalid stored url: {exc}")
             # Carry the validated override onto the row that gets wired and
             # persisted; returning the untouched entry would silently keep the
             # old endpoint after accepting --url.
