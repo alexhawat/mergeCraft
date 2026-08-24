@@ -30,7 +30,8 @@ if TYPE_CHECKING:
 
 REPO = Path(__file__).resolve().parents[1]
 
-# Module paths (repo-relative) → pytest targets from evaluation §2.6.
+# Evaluation §2.6 module → pytest targets. Omit modules with zero eligible mutants
+# (checked at runtime via ``_enumerate_line_mutants``).
 MODULE_TEST_DIRS: dict[str, tuple[str, ...]] = {
     "classify/change_classifier.py": ("tests/classify",),
     "classify/blast_radius.py": ("tests/classify", "tests/evidence/test_blast_radius.py"),
@@ -162,6 +163,37 @@ def _prepare_mutation_sandbox() -> tuple[Path, Path, Callable[[], None]]:
     return tmp, work_dir, cleanup
 
 
+def _string_spans(line: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for tok in tokenize.generate_tokens(io.StringIO(line).readline):
+        if tok.type == tokenize.STRING:
+            spans.append((tok.start[1], tok.end[1]))
+    return spans
+
+
+def _match_outside_strings(line: str, needle: str, start: int = 0) -> int | None:
+    spans = _string_spans(line)
+    idx = start
+    while True:
+        pos = line.find(needle, idx)
+        if pos == -1:
+            return None
+        end = pos + len(needle)
+        if not any(pos < s_end and end > s_start for s_start, s_end in spans):
+            return pos
+        idx = pos + 1
+
+
+def _replace_outside_strings(line: str, old: str, new: str) -> str | None:
+    pos = _match_outside_strings(line, old)
+    if pos is None:
+        return None
+    mutated = line[:pos] + new + line[pos + len(old) :]
+    if mutated == line:
+        return None
+    return mutated
+
+
 def _code_line_numbers(source: str) -> set[int]:
     """Return 1-based line numbers that contain non-comment, non-string tokens."""
     lines: set[int] = set()
@@ -216,8 +248,10 @@ def _enumerate_line_mutants(source: str) -> list[Mutant]:
         for old, new in _LINE_MUTATORS:
             if old not in original:
                 continue
-            mutated = original.replace(old, new, 1)
-            if mutated == original:
+            if _match_outside_strings(original, old) is None:
+                continue
+            mutated = _replace_outside_strings(original, old, new)
+            if mutated is None:
                 continue
             mutants.append(
                 Mutant(
@@ -253,7 +287,7 @@ def _apply_mutant(source: str, mutant: Mutant) -> str:
         for old, new in _LINE_MUTATORS:
             token = f"{old!r}->{new!r}"
             if token in mutant.label:
-                lines[idx] = line.replace(old, new, 1)
+                lines[idx] = _replace_outside_strings(line, old, new) or line
                 break
     return "".join(lines)
 
@@ -284,16 +318,17 @@ def _run_pytest(test_targets: Sequence[str], *, repo_root: Path) -> tuple[int, s
 def _mutate_module(
     module: str,
     *,
+    sandbox_root: Path,
     max_mutants: int,
     seed: int,
     verbose: int,
 ) -> ModuleResult:
-    """Run up to ``max_mutants`` mutants for ``module`` in an isolated worktree."""
+    """Run up to ``max_mutants`` mutants for ``module`` in ``sandbox_root``."""
     canonical_path = resolve_module_path(module)
     test_dirs = MODULE_TEST_DIRS[module]
     original = canonical_path.read_text(encoding="utf-8")
     candidates = _enumerate_line_mutants(original)
-    rng = random.Random(seed)
+    rng = random.Random(seed + hash(module))
     rng.shuffle(candidates)
     selected = candidates[:max_mutants]
 
@@ -315,30 +350,26 @@ def _mutate_module(
             errors=0,
         )
 
-    _tmp, sandbox_root, cleanup = _prepare_mutation_sandbox()
     mutate_path = resolve_module_path(module, repo_root=sandbox_root)
-    try:
-        for mutant in selected:
-            mutated_source = _apply_mutant(original, mutant)
-            if mutated_source == original:
-                errors += 1
-                if verbose:
-                    print(f"  SKIP {mutant.label} (no-op apply)")
-                continue
-            mutate_path.write_text(mutated_source, encoding="utf-8")
-            code, output = _run_pytest(test_dirs, repo_root=sandbox_root)
-            if code == 0:
-                survived += 1
-                status = "SURVIVED"
-            else:
-                killed += 1
-                status = "KILLED"
+    for mutant in selected:
+        mutated_source = _apply_mutant(original, mutant)
+        if mutated_source == original:
+            errors += 1
             if verbose:
-                print(f"  {status} {mutant.label}")
-                if verbose >= 2 and output.strip():
-                    print(output.strip().splitlines()[-1])
-    finally:
-        cleanup()
+                print(f"  SKIP {mutant.label} (no-op apply)")
+            continue
+        mutate_path.write_text(mutated_source, encoding="utf-8")
+        code, output = _run_pytest(test_dirs, repo_root=sandbox_root)
+        if code == 0:
+            survived += 1
+            status = "SURVIVED"
+        else:
+            killed += 1
+            status = "KILLED"
+        if verbose:
+            print(f"  {status} {mutant.label}")
+            if verbose >= 2 and output.strip():
+                print(output.strip().splitlines()[-1])
 
     return ModuleResult(
         module=module,
@@ -432,15 +463,20 @@ def main(argv: list[str] | None = None) -> int:
     threshold = _resolve_threshold(args.threshold)
 
     results: list[ModuleResult] = []
-    for module in modules:
-        results.append(
-            _mutate_module(
-                module,
-                max_mutants=args.max_mutants,
-                seed=args.seed,
-                verbose=args.verbose,
-            ),
-        )
+    _tmp, sandbox_root, cleanup = _prepare_mutation_sandbox()
+    try:
+        for module in modules:
+            results.append(
+                _mutate_module(
+                    module,
+                    sandbox_root=sandbox_root,
+                    max_mutants=args.max_mutants,
+                    seed=args.seed,
+                    verbose=args.verbose,
+                ),
+            )
+    finally:
+        cleanup()
 
     _print_table(results)
 

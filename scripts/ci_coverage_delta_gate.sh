@@ -25,6 +25,7 @@ git worktree prune 2>/dev/null || true
 
 git fetch origin "${GITHUB_BASE_REF}"
 git worktree add "$worktree" "$base_ref"
+# BASE_WORKTREE_MEASURE_BLOCK — parsed by tests/ci/test_coverage_delta_wrapper.py (D10).
 (
   cd "$worktree"
   # The base worktree gets its own fresh .venv. `dev` is a

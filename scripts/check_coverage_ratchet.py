@@ -66,7 +66,9 @@ def _fail_under_from_git_ref(repo_root: Path, ref: str) -> float | None:
     return float(floor)
 
 
-def _merge_base_ref(repo_root: Path) -> str | None:
+def _merge_base_ref(repo_root: Path, *, base_ref: str | None = None) -> str | None:
+    if base_ref is not None:
+        return base_ref
     base_branch = os.environ.get("GITHUB_BASE_REF", "pre-0.0.1")
     remote_base = f"origin/{base_branch}"
     result = subprocess.run(
@@ -92,15 +94,15 @@ def _fail_under_from_merge_base(
     repo_root: Path | None = None,
     *,
     allow_no_merge_base: bool = False,
+    base_ref: str | None = None,
 ) -> tuple[float | None, str | None]:
-    """Return merge-base ``fail_under`` and an error message when lookup fails in CI."""
     root = _repo_root(repo_root)
     base_branch = os.environ.get("GITHUB_BASE_REF", "pre-0.0.1")
     remote_base = f"origin/{base_branch}"
-    merge_base = _merge_base_ref(root)
+    merge_base = _merge_base_ref(root, base_ref=base_ref)
     if merge_base is None:
         detail = (
-            f"merge-base lookup failed for HEAD vs {remote_base} "
+            f"merge-base lookup failed for HEAD vs {base_ref or remote_base} "
             f"(git merge-base returned non-zero or empty output)"
         )
         if _in_ci() and not allow_no_merge_base:
@@ -131,6 +133,7 @@ def check_coverage_ratchet(
     repo_root: Path | None = None,
     hard_ceiling: bool = False,
     allow_no_merge_base: bool = False,
+    base_ref: str | None = None,
 ) -> int:
     """Return 0 when coverage is acceptable; 1 on hard failures."""
     report_path = Path(report)
@@ -145,6 +148,7 @@ def check_coverage_ratchet(
     baseline_floor, merge_base_error = _fail_under_from_merge_base(
         root,
         allow_no_merge_base=allow_no_merge_base,
+        base_ref=base_ref,
     )
     if merge_base_error is not None:
         failures.append(merge_base_error)
@@ -208,6 +212,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip merge-base ratchet when git history is unavailable (tests only).",
     )
+    parser.add_argument(
+        "--base-ref",
+        metavar="REF",
+        help=(
+            "Git ref for merge-base floor comparison "
+            "(default: merge-base of HEAD and origin/$GITHUB_BASE_REF)."
+        ),
+    )
     args = parser.parse_args(argv)
     try:
         return check_coverage_ratchet(
@@ -215,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             margin=args.margin,
             hard_ceiling=args.hard_ceiling,
             allow_no_merge_base=args.allow_no_merge_base,
+            base_ref=args.base_ref,
         )
     except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError) as exc:
         print(f"coverage ratchet error: {exc}", file=sys.stderr)

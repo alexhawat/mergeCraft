@@ -60,6 +60,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
         env:
+          # Tracing extra only on the test job: exporter unit tests need logfire/otel
+          # installed, but static/toolchain jobs must not pay the sync cost (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
       - name: Unit tests (shard ${{ matrix.group }} of 2)
         env:

@@ -41,8 +41,8 @@ XPASS tests/cli/test_models_list_minimax.py::test_mergecraft_models_list_renders
 """
     inventory = module.parse_xpass_log(log)
     assert inventory.total == 3
-    assert inventory.xpass_count == 3
-    assert [r.nodeid for r in inventory.xpass_records] == [
+    assert inventory.failing_count == 3
+    assert [r.nodeid for r in inventory.failing_records] == [
         "tests/agents/test_codex_custom_provider.py::test_codex_indexed_wins_singleton_ignored",
         "tests/evidence/test_gate_actions.py::test_new_gates_default_to_shadow",
         "tests/cli/test_models_list_minimax.py::test_mergecraft_models_list_renders_minimax_row_with_credentials",
@@ -53,7 +53,7 @@ def test_parse_xpass_log_empty_is_zero() -> None:
     module = _load_check_xpass()
     inventory = module.parse_xpass_log("2989 passed, 30 skipped in 1.00s\n")
     assert inventory.total == 0
-    assert inventory.xpass_count == 0
+    assert inventory.failing_count == 0
 
 
 def test_check_xpass_fails_on_any_xpass() -> None:

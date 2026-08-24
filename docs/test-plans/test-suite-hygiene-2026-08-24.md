@@ -3,7 +3,7 @@
 Wave plan: `.ignorelocal/waves/test-suite-hygiene-2026-08-24-wave-plan.md`
 Branch: `wave/test-suite-hygiene-2026-08-24`
 Base SHA: `ef7e70d8` (PR #495, lane A merged)
-**Final SHA:** `3b130a0e` (2026-08-25 — Thermos info hygiene: cheat lint doc + fence path normalize)
+**Final SHA:** `421b26b9` (2026-08-25 — Thermos round-2 hygiene; zero deferred)
 
 **Status:** ✅ **Complete** — TH1–TH9 implemented; Final CI gate passed. Awaiting Thermos review / merge.
 
@@ -57,7 +57,7 @@ Regression audit after PR #491 (#468 / #470 closed). Every precedence-named test
 | TH1.5a | Lowering fail_under fails ratchet | `tests/ci/test_coverage_ratchet_honesty.py::test_lowering_fail_under_without_baseline_commit_fails` | ✅ green |
 | TH1.5b | Above-ceiling warns not fails | `…::test_raising_coverage_above_ceiling_warns_not_fails` | ✅ green |
 | TH1.6 | Cheat-signature lint rejects tautology | `tests/ci/test_cheat_signature_lint.py::test_lint_script_flags_getattr_tautology_fixture` | ✅ green |
-| TH1.7 | Tracing extra collects exporter tests | `tests/tracing/exporters/test_optional_extra.py::test_subprocess_with_tracing_extra_collects_exporter_tests` | ✅ green |
+| TH1.7 | Tracing extra collects exporter tests | `tests/ci/test_tracing_extra_collect.py::test_subprocess_with_tracing_extra_collects_exporter_tests` | ✅ green |
 
 ## Preserve (D20)
 

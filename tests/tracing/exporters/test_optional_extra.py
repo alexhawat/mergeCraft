@@ -203,53 +203,6 @@ def test_logfire_extra_installed_factory_returns_live_sink() -> None:
     assert hasattr(sink, "flush")
 
 
-def test_subprocess_without_tracing_extra_still_collects_repo() -> None:
-    """``uv run pytest --collect-only`` succeeds without the tracing extra installed."""
-    proc = subprocess.run(
-        [
-            "uv",
-            "run",
-            "python",
-            "-m",
-            "pytest",
-            "tests/tracing/exporters",
-            "--collect-only",
-            "-q",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr + proc.stdout
-
-
-def test_subprocess_with_tracing_extra_collects_exporter_tests() -> None:
-    """With ``--extra tracing``, exporter tests must collect (> 0) instead of all-skipping."""
-    proc = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--extra",
-            "tracing",
-            "python",
-            "-m",
-            "pytest",
-            "tests/tracing/exporters",
-            "--collect-only",
-            "-q",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr + proc.stdout
-    combined = proc.stdout + proc.stderr
-    assert "no tests collected" not in combined.lower(), combined
-    assert " collected" in combined or " test" in combined, combined
-
-
 def test_otel_extra_installed_factory_returns_live_sink() -> None:
     """When ``opentelemetry`` is installed, the sink is a live exporter."""
     pytest.importorskip("opentelemetry")

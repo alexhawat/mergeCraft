@@ -14,6 +14,17 @@ from pathlib import Path
 from tests.ci.workflow_support import REPO_ROOT
 
 
+def test_make_lint_test_hygiene_exits_zero_on_clean_tree() -> None:
+    proc = subprocess.run(
+        ["make", "lint-test-hygiene"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_lint_script_flags_getattr_tautology_fixture(tmp_path: Path) -> None:
     """A temp file with the getattr tautology pattern must make the lint script exit non-zero."""
     cheat_file = tmp_path / "test_cheat_fixture.py"
