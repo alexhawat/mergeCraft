@@ -34,7 +34,7 @@ ensure-uv: ## Install uv on PATH when missing
 	@test -x "$(HOME)/.local/bin/uv" || (echo "uv install failed" >&2; exit 1)
 
 setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
-	$(UV) sync --extra dev
+	$(UV) sync --extra dev $(if $(MERGECRAFT_UV_EXTRAS),--extra $(MERGECRAFT_UV_EXTRAS),)
 	@$(MAKE) setup-local-analyzers
 	@if [ -n "$${CI}$${MERGECRAFT_SKIP_PRECOMMIT}" ]; then \
 	  echo "skipping pre-commit install (CI / MERGECRAFT_SKIP_PRECOMMIT)"; \

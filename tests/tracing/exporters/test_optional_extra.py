@@ -223,10 +223,6 @@ def test_subprocess_without_tracing_extra_still_collects_repo() -> None:
     assert proc.returncode == 0, proc.stderr + proc.stdout
 
 
-@pytest.mark.xfail(
-    reason="green after TH8: tracing extra must collect exporter tests on PR CI",
-    strict=False,
-)
 def test_subprocess_with_tracing_extra_collects_exporter_tests() -> None:
     """With ``--extra tracing``, exporter tests must collect (> 0) instead of all-skipping."""
     proc = subprocess.run(

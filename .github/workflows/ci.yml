@@ -59,6 +59,8 @@ jobs:
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
+        env:
+          MERGECRAFT_UV_EXTRAS: tracing
       - name: Unit tests (shard ${{ matrix.group }} of 2)
         env:
           MERGECRAFT_TEST_SPLITS: "2"
