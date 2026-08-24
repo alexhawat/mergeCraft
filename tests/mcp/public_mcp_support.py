@@ -98,6 +98,8 @@ def require_generator_script() -> Any:
 
 
 def init_git_repo(tmp_path: Path) -> None:
+    if (tmp_path / ".git").exists():
+        return
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "mcp@test.local"],

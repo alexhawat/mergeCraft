@@ -122,6 +122,12 @@ Corpus: `evals/mcp-public/cases.json`. Scorer module: `mergecraft.evals.mcp_publ
 | MP6 | all `tests/evals/test_mcp_public_tool_selection.py` |
 | MP7 | all `tests/docs/test_mcp_docs.py` |
 
+### MP1–MP7 post-impl reconciliation (2026-08-25)
+
+- **Removed (1):** `test_get_policy_is_read_only` — green after MP2; xfail masked a helper bug.
+- **Kept (0):** no remaining `@pytest.mark.xfail(strict=False)` on MP1 public-MCP paths.
+- **Helper fix:** `init_git_repo` in `tests/mcp/public_mcp_support.py` is now idempotent (early return when `.git` exists) so `build_public_http_client` and direct callers can both initialize the same `tmp_path` without a second empty `git commit` failure.
+
 Guard tests without xfail (should pass on trunk before MP2):
 
 - `test_list_role_reviewer_still_includes_runtime_primitives`

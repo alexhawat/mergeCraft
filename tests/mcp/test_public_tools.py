@@ -227,7 +227,6 @@ def test_get_capabilities_matches_capabilities_manifest(
         assert payload.get(key) == expected[key], (key, payload)
 
 
-@pytest.mark.xfail(strict=False, reason="green after MP2: get_policy read-only")
 def test_get_policy_is_read_only(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
