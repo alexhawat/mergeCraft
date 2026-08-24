@@ -97,3 +97,45 @@ async def test_get_commit_info_without_token_reports_unavailable_naming_token(
     assert http_calls == [], (
         f"no request must be built with an empty Bearer header, got {http_calls!r}"
     )
+
+
+@pytest.mark.parametrize("token", _EMPTY_TOKENS)
+async def test_download_artifact_zip_fail_closed_without_token(
+    token: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = GitHubClient(token)
+    http_calls: list[tuple[str, str]] = []
+
+    async def _spy(method: str, url: str, **kwargs: object) -> object:
+        http_calls.append((method, str(url)))
+        msg = "GitHub HTTP must not run without a token"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(github._client, "request", _spy)
+    try:
+        with pytest.raises(ValueError, match="token"):
+            await github.download_artifact_zip("acme", "demo", 1)
+    finally:
+        await github.aclose()
+    assert http_calls == []
+
+
+@pytest.mark.parametrize("token", _EMPTY_TOKENS)
+async def test_download_workflow_run_logs_fail_closed_without_token(
+    token: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = GitHubClient(token)
+    http_calls: list[tuple[str, str]] = []
+
+    async def _spy(method: str, url: str, **kwargs: object) -> object:
+        http_calls.append((method, str(url)))
+        msg = "GitHub HTTP must not run without a token"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(github._client, "request", _spy)
+    try:
+        with pytest.raises(ValueError, match="token"):
+            await github.download_workflow_run_logs("acme", "demo", 1)
+    finally:
+        await github.aclose()
+    assert http_calls == []

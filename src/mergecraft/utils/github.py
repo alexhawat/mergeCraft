@@ -175,6 +175,33 @@ class GitHubClient:
         stop=DEFAULT_STOP,
         reraise=True,
     )
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        headers: dict[str, str] | None = None,
+        follow_redirects: bool = False,
+    ) -> httpx.Response:
+        """Token-gated HTTP send with the same retry policy as :meth:`request`."""
+        if not self.token:
+            msg = "GitHub token is missing; cannot call the GitHub API"
+            raise ValueError(msg)
+        response = await self._client.request(
+            method,
+            path,
+            params=params,
+            json=json,
+            headers=headers,
+            follow_redirects=follow_redirects,
+        )
+        if response.status_code >= 400:
+            logger.debug("GitHub {} {} -> {}", method, path, response.status_code)
+            response.raise_for_status()
+        return response
+
     async def request(
         self,
         method: str,
@@ -190,19 +217,7 @@ class GitHubClient:
         errors with bounded exponential backoff + jitter. Mutations
         (POST/PATCH/PUT/DELETE) are never retried blindly (W9.3 / ``#34``).
         """
-        if not self.token:
-            msg = "GitHub token is missing; cannot call the GitHub API"
-            raise ValueError(msg)
-        response = await self._client.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            headers=headers,
-        )
-        if response.status_code >= 400:
-            logger.debug("GitHub {} {} -> {}", method, path, response.status_code)
-            response.raise_for_status()
+        response = await self._send(method, path, params=params, json=json, headers=headers)
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
@@ -609,14 +624,12 @@ class GitHubClient:
         artifact_id: int,
     ) -> bytes:
         """Download one artifact's zip archive, following GitHub's redirect."""
-        response = await self._client.get(
+        response = await self._send(
+            "GET",
             f"/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip",
             headers={"Accept": DEFAULT_ACCEPT},
             follow_redirects=True,
         )
-        if response.status_code >= 400:
-            msg = f"artifact download failed: {response.status_code}"
-            raise RuntimeError(msg)
         return response.content
 
     async def download_workflow_run_logs(
@@ -626,14 +639,12 @@ class GitHubClient:
         run_id: int,
     ) -> bytes:
         """Download one workflow run's log archive, following GitHub's redirect."""
-        response = await self._client.get(
+        response = await self._send(
+            "GET",
             f"/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
             headers={"Accept": DEFAULT_ACCEPT},
             follow_redirects=True,
         )
-        if response.status_code >= 400:
-            msg = f"log download failed: {response.status_code}"
-            raise RuntimeError(msg)
         return response.content
 
 

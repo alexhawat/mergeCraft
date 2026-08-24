@@ -372,7 +372,15 @@ async def test_recorded_finding_count_is_merged_evidence_length(
         )
         return [report], stats, 0
 
-    monkeypatch.setattr("mergecraft.ci.intelligence.github_client_from_scm", lambda _scm: None)
+    class _DummyClient:
+        async def list_workflow_runs_for_check_suite(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return [{"id": 1}]
+
+    monkeypatch.setattr(
+        "mergecraft.ci.intelligence.github_client_from_scm", lambda _scm: _DummyClient()
+    )
     monkeypatch.setattr("mergecraft.ci.intelligence.collect_ci_sarif_findings", _sarif)
     monkeypatch.setattr(
         "mergecraft.ci.providers.github_actions.GitHubActionsProvider.fetch_check_suite_logs",

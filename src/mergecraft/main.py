@@ -337,29 +337,25 @@ async def _publish(
     *,
     outcome: RunOutcome,
     failure_reason: str | None,
-    attrs_source: Callable[[], dict[str, Any]],
+    attrs_source: Callable[[], dict[str, Any]] | None = None,
     verdict_prediction: VerdictProtocolPrediction | None = None,
     actual_outcome: str | None = None,
+    emit: bool = True,
 ) -> str | None:
-    """Tracer span + status check + evidence packet — the run's publish block.
+    """Prepare packet + persist learnings + status checks, then optionally emit.
 
-    Shared by the setup-script "inconclusive" short-circuit (G4.2 —
-    previously a duplicated inline block) and the normal post-agent
-    completion path in ``_finalize``, so both write the run's evidence
-    packet identically. Only the tracer span's ``attrs_source`` differs
-    between the two call sites, hence it stays a parameter rather than
-    being derived here.
+    Shared by the setup-script "inconclusive" short-circuit (G4.2), the
+    normal post-agent path in ``_finalize``, and the exception cleanup path
+    (``emit=False`` — failure still reports status but skips SARIF/packet
+    emit). Tracer span wraps the emit path only.
     """
     tool_context = ctx.tool_context
     if tool_context is None:
         return None
-    from mergecraft.tracing.tracer import get_tracer_from_settings
-
-    assert ctx.settings is not None
-    tracer = get_tracer_from_settings(ctx.settings)
     run_ok = run_succeeded_for_outcome(outcome)
     prepared = prepare_run_packet(tool_context, run_succeeded=run_ok)
-    with tracer.start_span("mergecraft.publish", attrs_source=attrs_source) as _span:
+
+    async def _learnings_and_status() -> None:
         await persist_learnings(tool_context)
         await report_status_checks(
             tool_context,
@@ -368,12 +364,21 @@ async def _publish(
             conclusion=RUN_OUTCOME_CONCLUSION[outcome],
             packet=prepared,
         )
+
+    if not emit:
+        await _learnings_and_status()
+        return None
+
+    from mergecraft.tracing.tracer import get_tracer_from_settings
+
+    assert ctx.settings is not None
+    assert attrs_source is not None
+    tracer = get_tracer_from_settings(ctx.settings)
+    with tracer.start_span("mergecraft.publish", attrs_source=attrs_source) as _span:
+        await _learnings_and_status()
         # #39 — opt-in, off by default, and never a gate: with `sarif_upload`
         # unset this returns before making any request.
         await report_sarif_upload(tool_context)
-        # Emit the merge evidence packet last, so it records the run's
-        # final state. A blocked or failed run is exactly when the
-        # evidence matters most, so this runs on both branches below.
         written = await asyncio.to_thread(
             emit_run_packet,
             tool_context,
@@ -1520,18 +1525,11 @@ async def main() -> MainResult:
                 kill_all_active_process_groups()
             if ctx.tool_context:
                 try:
-                    await persist_learnings(ctx.tool_context)
-                    run_ok = run_succeeded_for_outcome(error_outcome)
-                    prepared = prepare_run_packet(
-                        ctx.tool_context,
-                        run_succeeded=run_ok,
-                    )
-                    await report_status_checks(
-                        ctx.tool_context,
-                        run_succeeded=run_ok,
+                    await _publish(
+                        ctx,
+                        outcome=error_outcome,
                         failure_reason=error_message,
-                        conclusion=RUN_OUTCOME_CONCLUSION[error_outcome],
-                        packet=prepared,
+                        emit=False,
                     )
                 except Exception as cleanup_exc:
                     logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)

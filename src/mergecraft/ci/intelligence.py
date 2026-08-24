@@ -162,16 +162,17 @@ async def collect_ci_sarif_findings(
     ctx: ToolContext,
     *,
     check_suite_id: int,
-    client: GitHubClient | None = None,
-    runs: list[dict[str, Any]] | None = None,
+    client: GitHubClient,
+    runs: list[dict[str, Any]],
 ) -> list[Finding]:
     """Ingest SARIF the consumer's CI already produced, for declared artifacts only.
 
     Opt-in by construction: with no ``ciEvidence.sarifArtifacts`` declared this
     makes no API call at all. Every failure is logged and swallowed — SARIF is a
     supplementary evidence source and must never take a review down with it.
-    Pass ``client`` and ``runs`` from ``run_ci_intelligence`` so the check-suite
-    listing is not repeated; omitted, this lists once for standalone callers.
+    ``client`` and ``runs`` are required: ``run_ci_intelligence`` lists the
+    check suite once and passes both in. This function does not re-bind a
+    client or re-list runs.
     """
     wanted = {name.strip() for name in ctx.ci_sarif_artifacts if name.strip()}
     if not wanted:
@@ -180,21 +181,9 @@ async def collect_ci_sarif_findings(
     from mergecraft.ci.evidence import sarif_findings
     from mergecraft.mcp.tool_state import primary_repo_state
 
+    _ = check_suite_id
     repo_root = Path(primary_repo_state(ctx.tool_state).dir)
     findings: list[Finding] = []
-    try:
-        if client is None:
-            client = github_client_from_scm(ctx.scm)
-        if client is None:
-            logger.warning("ci evidence: SARIF listing requires GitHub")
-            return []
-        if runs is None:
-            runs = await client.list_workflow_runs_for_check_suite(
-                ctx.repo.owner, ctx.repo.name, check_suite_id
-            )
-    except Exception as err:
-        logger.warning("ci evidence: SARIF listing failed — {}", err)
-        return []
 
     for run in runs:
         run_id = run.get("id")
@@ -251,29 +240,45 @@ async def run_ci_intelligence(
     flaky failure stays ``Minor`` / ``introduced_by_pr="false"`` and cannot block
     (D11).
     """
-    from mergecraft.ci.evidence import record_ci_findings
+    from mergecraft.ci.evidence import ci_evidence_findings, record_ci_findings
+    from mergecraft.ci.providers.github_actions import unbound_check_suite_logs
     from mergecraft.ci.review import analyze_ci_failures
 
     client = github_client_from_scm(ctx.scm)
-    runs: list[dict[str, Any]] | None = None
-    if client is not None:
+    if client is None:
+        sarif: list[Finding] = []
+        suite = unbound_check_suite_logs(check_suite_id)
+    else:
         try:
             runs = await client.list_workflow_runs_for_check_suite(
                 ctx.repo.owner, ctx.repo.name, check_suite_id
             )
         except Exception as err:
-            logger.warning("ci evidence: check-suite run listing failed — {}", err)
-            raise
-
-    sarif = await collect_ci_sarif_findings(
-        ctx, check_suite_id=check_suite_id, client=client, runs=runs
-    )
-    if sarif:
-        record_ci_findings(ctx.tool_state, sarif)
-
-    suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(
-        ctx, check_suite_id=check_suite_id, client=client, runs=runs
-    )
+            return {
+                "available": False,
+                "reason": str(err) or "check-suite run listing failed",
+                "section": "",
+                "preMergeSummary": "",
+                "comments": [],
+                "sarifFindingCount": 0,
+                "stats": {
+                    "failureCount": 0,
+                    "clusterCount": 0,
+                    "flakyCount": 0,
+                    "prAttributedCount": 0,
+                    "truncated": False,
+                    "overflow": 0,
+                },
+                "clusters": [],
+            }
+        sarif = await collect_ci_sarif_findings(
+            ctx, check_suite_id=check_suite_id, client=client, runs=runs
+        )
+        if sarif:
+            record_ci_findings(ctx.tool_state, sarif)
+        suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(
+            ctx, check_suite_id=check_suite_id, client=client, runs=runs
+        )
     jobs = suite.get("jobs") or []
     provider_overflow = int(suite.get("overflow") or 0)
     total_failed_runs = int(suite.get("total_failed_runs") or len(jobs))
@@ -317,8 +322,6 @@ async def run_ci_intelligence(
     record_ci_findings(ctx.tool_state, [report.finding for report in reports])
     payload["available"] = True
     payload["checkSuiteId"] = check_suite_id
-    from mergecraft.ci.evidence import ci_evidence_findings
-
     payload["recordedFindingCount"] = len(ci_evidence_findings(ctx.tool_state))
     payload["sarifFindingCount"] = len(sarif)
     return payload

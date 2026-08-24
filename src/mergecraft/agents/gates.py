@@ -415,8 +415,8 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     return packet.decision is None or packet.decision.verdict != "failure"
 
 
-# Maps an evidence signal to the rule key the policy engine looks up.
-# Each rule is a tuple ``(predicate, rule_id)``; the first match wins.
+# Ordered ``(callable, rule_id)`` pairs the policy engine walks; first match
+# wins. This is not a dict mapping — each predicate is a callable.
 # The list is lookup order, so anything more specific must appear before
 # anything more general (a high-risk migration is checked before the
 # generic low-risk pass). ``has_blockers`` is in this table — it is not a

@@ -36,6 +36,18 @@ from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
 from tests.ci.workflow_support import REPO_ROOT, as_list, load_workflow, read_text
 
+_DEFAULT_RUNS = [{"id": 88}]
+
+
+async def _collect(ctx: Any, github: GitHubClient, runs: list[dict[str, Any]] | None = None):
+    return await collect_ci_sarif_findings(
+        ctx,
+        check_suite_id=123,
+        client=github,
+        runs=_DEFAULT_RUNS if runs is None else runs,
+    )
+
+
 _FIRST_WAVE = ("ruff-sarif", "mypy-sarif", "bandit-sarif")
 _BLOCKING = frozenset({"Critical", "Major"})
 _CATALOG_NOT_IN_FIRST_WAVE = ("semgrep", "eslint", "clippy", "golangci-lint")
@@ -249,7 +261,7 @@ async def test_collect_ingests_declared_ruff_sarif_artifact(tmp_path: Path) -> N
     )
     ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
 
-    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+    findings = await _collect(ctx, github)
 
     assert any(item.source == "ci" and item.severity in _BLOCKING for item in findings), (
         "D8: collected ruff SARIF must keep a blocking finding, not clamp to Minor"
@@ -266,7 +278,7 @@ async def test_collect_ignores_undeclared_artifact(tmp_path: Path) -> None:
     )
     ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
 
-    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+    findings = await _collect(ctx, github)
 
     assert findings == []
 
@@ -276,7 +288,7 @@ async def test_collect_makes_no_api_call_when_ci_evidence_is_empty(tmp_path: Pat
     github = _ArtifactGitHub(artifacts=[], archives={})
     ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=[])
 
-    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+    findings = await _collect(ctx, github)
 
     assert findings == []
     assert github.get_paths == []
@@ -312,7 +324,8 @@ async def test_collect_paginates_workflow_runs_past_first_page(tmp_path: Path) -
         archives={7: _zip_sarif("ruff.sarif", _sarif(tool="ruff", rule_id="F401", level="error"))},
     )
     ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
-    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+    runs = await github.list_workflow_runs_for_check_suite("acme", "demo", 123)
+    findings = await _collect(ctx, github, runs)
     assert github.pages == [1, 2]
     assert any(item.severity in _BLOCKING for item in findings)
 
@@ -343,7 +356,7 @@ async def test_collect_continues_after_one_run_listing_failure(tmp_path: Path) -
     )
     ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
 
-    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+    findings = await _collect(ctx, github, [{"id": 1}, {"id": 2}])
 
     assert any(item.source == "ci" and item.severity in _BLOCKING for item in findings), (
         "later workflow run must still be ingested after an earlier listing failure"
@@ -359,7 +372,7 @@ async def test_collect_swallows_artifact_download_failure(tmp_path: Path) -> Non
     github = _BrokenZip(artifacts=[{"id": 3, "name": "ruff-sarif"}], archives={})
     ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
 
-    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+    findings = await _collect(ctx, github)
 
     assert findings == []
 
@@ -385,7 +398,7 @@ async def test_collect_continues_after_one_artifact_failure(tmp_path: Path) -> N
     )
     ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif", "mypy-sarif"])
 
-    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+    findings = await _collect(ctx, github)
 
     assert any(item.source == "ci" and item.severity in _BLOCKING for item in findings), (
         "later declared SARIF artifact must still be ingested after an earlier failure"

@@ -1,11 +1,11 @@
 """Opt-in commit-status check-runs (``mergecraft`` / ``mergecraft-approval``).
 
-The approval check-run is computed structurally (W8): the conclusion is a pure
-function of the typed ``Finding`` list, the run's completion state, and the
-trust tier. Narrative (``ApprovalRecord.would_approve``, ``result.output``,
-anything the model wrote) is recorded separately as an advisory input and is
-never the sole positive input — see ``decide_approval`` in
-``mergecraft.agents.gates`` for the full contract (D12, D13, D14).
+The approval check-run posts ``packet.decision.verdict`` (W8). Skip the
+approval check when ``packet`` is None. Narrative
+(``ApprovalRecord.would_approve``, ``result.output``, anything the model
+wrote) is recorded separately as an advisory input and is never the sole
+positive input — see ``decide_approval`` in ``mergecraft.agents.gates`` for
+the full contract (D12, D13, D14).
 
 Wire-shape semantics:
 
@@ -156,10 +156,9 @@ async def report_status_checks(
     except Exception as err:
         logger.debug("status checks: {} post failed: {}", COMPLETION_CHECK, err)
 
-    # --- Approval gate (W8.2): structural conclusion, not narrative. ---------
+    # --- Approval gate (W8.2): post ``packet.decision.verdict``. -------------
     # The agent's boolean is still in ApprovalRecord.would_approve (W8.3) as an
-    # advisory input the merge-evidence plan reads; the conclusion is computed
-    # from typed findings + run state + tier only.
+    # advisory input the merge-evidence plan reads. Skip when packet is None.
     from mergecraft.agents.gates import (
         approval_decision_inputs,
         decision_summary_lines,

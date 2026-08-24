@@ -239,25 +239,6 @@ def _self_assessment(state: ToolState) -> dict[str, Any] | None:
     return {"would_approve": approval.would_approve, "sha": approval.sha}
 
 
-def _structural_findings(
-    ctx: ToolContext,
-    extra: list[Finding] | None = None,
-) -> list[Finding]:
-    """Return the typed findings the approval gate reads, plus any extras.
-
-    Uses :func:`mergecraft.evidence.findings.load_run_findings` so the packet
-    and the ``mergecraft-approval`` check-run share one loader — agent,
-    analyzer, and CI SARIF findings merged once.
-
-    ``extra`` carries findings a caller already holds in typed form (the
-    offline path parses the agent's ``set_output`` payload). Merging is
-    deduplicated on ``Finding.fingerprint``.
-    """
-    from mergecraft.evidence.findings import load_run_findings
-
-    return load_run_findings(ctx, extra=extra)
-
-
 def build_run_packet(
     ctx: ToolContext,
     *,
@@ -274,6 +255,7 @@ def build_run_packet(
     ``change_id`` defaults to the PR-derived identifier on ``ctx``.
     """
     from mergecraft.agents.gates import decide_action, decide_approval
+    from mergecraft.evidence.findings import load_run_findings
     from mergecraft.mcp.tool_state import primary_repo_state
 
     resolved_change_id = change_id or _change_id(ctx)
@@ -317,7 +299,7 @@ def build_run_packet(
         fallback_index=fallback_index,
         fallback_occurred=fallback_occurred,
         files_changed=changed_paths,
-        findings=[*_structural_findings(ctx, extra_findings), *trajectory_findings],
+        findings=[*load_run_findings(ctx, extra=extra_findings), *trajectory_findings],
         deterministic_checks=_deterministic_checks(state),
         self_assessment=_self_assessment(state),
         blast_radius=blast_radius,
