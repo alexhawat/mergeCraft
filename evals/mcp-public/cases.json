@@ -1,0 +1,23 @@
+[
+  {
+    "id": "review-this-change",
+    "prompt": "Please review this change and tell me what needs fixing.",
+    "expected_tool": "review_change"
+  },
+  {
+    "id": "what-does-mc-abc-mean",
+    "prompt": "What does MC-abc123 mean in the last review?",
+    "expected_tool": "inspect_finding"
+  },
+  {
+    "id": "reload-review",
+    "prompt": "Reload review rev-2024-08-24 and summarize the outcome.",
+    "expected_tool": "get_review"
+  },
+  {
+    "id": "commit-this-fix",
+    "prompt": "Commit this fix and push it to the branch.",
+    "expected_tool": null,
+    "forbidden_tools": ["push_branch", "commit_changes", "create_pull_request"]
+  }
+]

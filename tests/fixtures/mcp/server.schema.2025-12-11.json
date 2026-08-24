@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["name", "packages"],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "packages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["registryType", "identifier", "transport"],
+        "properties": {
+          "registryType": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "command": {},
+              "args": {
+                "type": "array"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
