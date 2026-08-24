@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import tokenize
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,23 +30,17 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 REPO = Path(__file__).resolve().parents[1]
+_MUTATION_MODULES_PATH = Path(__file__).with_name("mutation_modules.toml")
 
-# Evaluation §2.6 module → pytest targets. Omit modules with zero eligible mutants
-# (checked at runtime via ``_enumerate_line_mutants``).
-MODULE_TEST_DIRS: dict[str, tuple[str, ...]] = {
-    "classify/change_classifier.py": ("tests/classify",),
-    "classify/blast_radius.py": ("tests/classify", "tests/evidence/test_blast_radius.py"),
-    "evidence/shadow.py": ("tests/evidence",),
-    "scripts/check_coverage_delta.py": ("tests/ci",),
-    "agents/gates.py": (
-        "tests/agents/test_gate_rule_selection.py",
-        "tests/evidence/test_gate_actions.py",
-    ),
-    "policy/scoping.py": ("tests/policy",),
-    "policy/enforcement.py": ("tests/policy/test_enforcement.py",),
-    "utils/status_checks.py": ("tests/utils/test_status_checks.py", "tests/status_checks"),
-    "findings/dedup.py": ("tests/findings/test_dedup.py",),
-}
+
+def _load_module_test_dirs() -> dict[str, tuple[str, ...]]:
+    """Load module → pytest target map from ``mutation_modules.toml``."""
+    data = tomllib.loads(_MUTATION_MODULES_PATH.read_text(encoding="utf-8"))
+    modules = data.get("modules", {})
+    return {module: tuple(tests) for module, tests in modules.items()}
+
+
+MODULE_TEST_DIRS = _load_module_test_dirs()
 
 DEFAULT_MAX_MUTANTS = 12
 DEFAULT_SEED = 42

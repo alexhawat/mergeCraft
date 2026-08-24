@@ -1,0 +1,16 @@
+# Decision-module mutation harness — module path → pytest targets (evaluation §2.6).
+# Omit modules with zero eligible mutants (checked at runtime).
+
+[modules]
+"classify/change_classifier.py" = ["tests/classify"]
+"classify/blast_radius.py" = ["tests/classify", "tests/evidence/test_blast_radius.py"]
+"evidence/shadow.py" = ["tests/evidence"]
+"scripts/check_coverage_delta.py" = ["tests/ci"]
+"agents/gates.py" = [
+    "tests/agents/test_gate_rule_selection.py",
+    "tests/evidence/test_gate_actions.py",
+]
+"policy/scoping.py" = ["tests/policy"]
+"policy/enforcement.py" = ["tests/policy/test_enforcement.py"]
+"utils/status_checks.py" = ["tests/utils/test_status_checks.py", "tests/status_checks"]
+"findings/dedup.py" = ["tests/findings/test_dedup.py"]

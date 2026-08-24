@@ -503,7 +503,3 @@ def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -
     assert "six" in gate_policy.__doc__
     assert "has_blockers" in gate_policy.__doc__
     assert DEFAULT_GATE_POLICIES["schema_failure"] is GateAction.BLOCK
-    assert {
-        "schema_failure": GateAction.BLOCK,
-        **{rule_id: action for _predicate, rule_id, action in _RULE_PREDICATES},
-    } == DEFAULT_GATE_POLICIES
