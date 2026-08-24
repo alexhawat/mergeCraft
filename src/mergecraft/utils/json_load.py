@@ -55,18 +55,15 @@ def _first_json_value(raw: str, *, kind: _JsonKind) -> object | None:
             index = _end if _end > index else index + 1
             continue
         return cast("object", payload)  # json.JSONDecoder.raw_decode is typed Any
+    if kind != "any":
+        return None
     stripped = raw.strip()
     if not stripped:
         return None
     try:
-        payload = json.loads(stripped)
+        return cast("object", json.loads(stripped))  # json.loads is typed Any
     except json.JSONDecodeError:
         return None
-    if kind == "object" and not isinstance(payload, dict):
-        return None
-    if kind == "array" and not isinstance(payload, list):
-        return None
-    return cast("object", payload)  # json.loads is typed Any
 
 
 __all__ = ["try_load_json", "try_load_json_array", "try_load_json_object"]

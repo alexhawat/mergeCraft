@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
-    bandit_native_severity,
-    bandit_row_span,
-    iter_bandit_result_rows,
+    coerce_line,
     map_confidence,
     map_native_severity,
     require_json_object,
@@ -17,9 +15,64 @@ from mergecraft.analyzers.parsers._common import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from mergecraft.analyzers.manifest import AnalyzerManifest
+
+
+class _ParseLine(Protocol):
+    def __call__(self, value: object, *, default: int = ...) -> int: ...
+
+
+_BANDIT_NATIVE_LEVELS: dict[str, str] = {
+    "high": "high",
+    "medium": "medium",
+    "low": "low",
+    "undefined": "undefined",
+}
+
+
+def iter_bandit_result_rows(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield Bandit ``results`` objects, or raise on a missing/non-object row.
+
+    Empty ``results: []`` is a clean scan. A missing array or a non-object
+    row is a parse failure — same contract as ``bandit_to_sarif``.
+    """
+    results = payload.get("results")
+    if not isinstance(results, list):
+        msg = "bandit JSON output missing a results array"
+        raise ValueError(msg)
+    for item in results:
+        if not isinstance(item, dict):
+            msg = "bandit JSON results array contains a non-object row"
+            raise ValueError(msg)
+        yield item
+
+
+def bandit_native_severity(result: dict[str, Any]) -> str:
+    """Normalize Bandit ``issue_severity`` for the parser and SARIF converter."""
+    return _BANDIT_NATIVE_LEVELS.get(
+        str(result.get("issue_severity") or "medium").casefold(), "medium"
+    )
+
+
+def bandit_row_span(
+    result: dict[str, Any],
+    *,
+    parse_line: _ParseLine = coerce_line,
+) -> tuple[int, int]:
+    """Return ``(start_line, end_line)`` from ``line_number`` / ``line_range``.
+
+    In-repo Bandit parse stays lenient (``coerce_line``). SARIF conversion
+    passes ``parse_line=require_line`` so invalid lines raise like mypy.
+    """
+    start = parse_line(result.get("line_number"), default=1)
+    line_range = result.get("line_range")
+    if isinstance(line_range, list) and line_range:
+        end = parse_line(line_range[-1], default=start)
+        return start, max(end, start)
+    return start, start
 
 
 def parse_bandit_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
@@ -51,4 +104,9 @@ def parse_bandit_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) 
     return findings
 
 
-__all__ = ["parse_bandit_json"]
+__all__ = [
+    "bandit_native_severity",
+    "bandit_row_span",
+    "iter_bandit_result_rows",
+    "parse_bandit_json",
+]

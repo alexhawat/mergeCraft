@@ -156,7 +156,8 @@ def test_sarif_converters_use_require_line_not_as_line() -> None:
     source = inspect.getsource(_MOD)
     assert "def _as_line" not in source
     assert "require_line" in source
-    assert "fail_closed=True" in source
+    assert "parse_line=require_line" in source
+    assert "fail_closed" not in source
     assert require_line(None) == 1
     assert coerce_line("nope") == 1
     with pytest.raises(ValueError, match="line number"):

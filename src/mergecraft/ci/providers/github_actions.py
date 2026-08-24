@@ -44,8 +44,9 @@ class GitHubActionsProvider:
         if client is None:
             return {
                 "check_suite_id": check_suite_id,
-                "message": "no failed workflow runs found for this check suite",
+                "message": "check-suite logs unavailable: GitHub client not bound",
                 "jobs": [],
+                "skipped": True,
             }
         runs = await client.list_workflow_runs_for_check_suite(
             ctx.repo.owner, ctx.repo.name, check_suite_id

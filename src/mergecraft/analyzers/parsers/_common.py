@@ -131,23 +131,6 @@ def require_json_object(raw: str, *, what: str) -> dict[str, Any]:
     return payload
 
 
-def iter_bandit_result_rows(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    """Yield Bandit ``results`` objects, or raise on a missing/non-object row.
-
-    Empty ``results: []`` is a clean scan. A missing array or a non-object
-    row is a parse failure — same contract as ``bandit_to_sarif``.
-    """
-    results = payload.get("results")
-    if not isinstance(results, list):
-        msg = "bandit JSON output missing a results array"
-        raise ValueError(msg)
-    for item in results:
-        if not isinstance(item, dict):
-            msg = "bandit JSON results array contains a non-object row"
-            raise ValueError(msg)
-        yield item
-
-
 def require_json_array(raw: str, *, what: str) -> list[Any]:
     """Parse ``raw`` as a JSON array or raise ``ValueError``.
 
@@ -265,36 +248,6 @@ def _line_number(value: object, *, default: int, fail_closed: bool, clamp: bool 
     if clamp:
         return max(parsed, 1)
     return parsed
-
-
-_BANDIT_NATIVE_LEVELS: dict[str, str] = {
-    "high": "high",
-    "medium": "medium",
-    "low": "low",
-    "undefined": "undefined",
-}
-
-
-def bandit_native_severity(result: dict[str, Any]) -> str:
-    """Normalize Bandit ``issue_severity`` for the parser and SARIF converter."""
-    return _BANDIT_NATIVE_LEVELS.get(
-        str(result.get("issue_severity") or "medium").casefold(), "medium"
-    )
-
-
-def bandit_row_span(result: dict[str, Any], *, fail_closed: bool = False) -> tuple[int, int]:
-    """Return ``(start_line, end_line)`` from ``line_number`` / ``line_range``.
-
-    In-repo Bandit parse stays lenient (``coerce_line``). SARIF conversion
-    passes ``fail_closed=True`` so invalid lines raise like mypy.
-    """
-    parse = require_line if fail_closed else coerce_line
-    start = parse(result.get("line_number"), default=1)
-    line_range = result.get("line_range")
-    if isinstance(line_range, list) and line_range:
-        end = parse(line_range[-1], default=start)
-        return start, max(end, start)
-    return start, start
 
 
 def coerce_optional_line(value: object) -> int | None:

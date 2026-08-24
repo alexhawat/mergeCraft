@@ -121,6 +121,26 @@ async def test_get_check_suite_logs_no_failures_message(tmp_path: Path) -> None:
     assert payload["check_suite_id"] == 42
     assert "no failed workflow runs" in payload["message"]
     assert payload["jobs"] == []
+    assert "skipped" not in payload
+
+
+@pytest.mark.asyncio
+async def test_get_check_suite_logs_skips_when_github_client_unavailable(tmp_path: Path) -> None:
+    from mergecraft.ci.providers.github_actions import GitHubActionsProvider
+    from mergecraft.scm.gitlab import GitLabScmAdapter
+
+    ctx = _ctx(tmp_path)
+    object.__setattr__(
+        ctx,
+        "scm",
+        GitLabScmAdapter(token="test-token", base_url="https://gitlab.example/api/v4"),
+    )
+    payload = await GitHubActionsProvider().fetch_check_suite_logs(ctx, check_suite_id=42)
+    assert payload["check_suite_id"] == 42
+    assert payload["jobs"] == []
+    assert payload["skipped"] is True
+    assert "unavailable" in payload["message"]
+    assert "no failed workflow runs" not in payload["message"]
 
 
 @pytest.mark.asyncio

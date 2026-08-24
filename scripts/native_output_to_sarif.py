@@ -16,12 +16,11 @@ import sys
 from pathlib import Path
 from typing import TypedDict
 
-from mergecraft.analyzers.parsers._common import (
+from mergecraft.analyzers.parsers._common import require_json_object, require_line
+from mergecraft.analyzers.parsers.bandit_json import (
     bandit_native_severity,
     bandit_row_span,
     iter_bandit_result_rows,
-    require_json_object,
-    require_line,
 )
 
 _BANDIT_LEVEL = {"high": "error", "medium": "warning", "low": "note", "undefined": "note"}
@@ -153,8 +152,8 @@ def mypy_to_sarif(raw: str) -> SarifLog:
                 level=level,
                 message=str(item.get("message") or "mypy finding"),
                 uri=str(item.get("file") or "unknown"),
-                start_line=max(start, 1),
-                end_line=max(end, start, 1),
+                start_line=start,
+                end_line=max(end, start),
             )
         )
     if not matched:
@@ -184,7 +183,7 @@ def bandit_to_sarif(raw: str) -> SarifLog:
     for item in rows:
         native = bandit_native_severity(item)
         try:
-            start, end = bandit_row_span(item, fail_closed=True)
+            start, end = bandit_row_span(item, parse_line=require_line)
         except ValueError as exc:
             raise ConverterError(str(exc)) from exc
         results.append(
@@ -193,8 +192,8 @@ def bandit_to_sarif(raw: str) -> SarifLog:
                 level=_BANDIT_LEVEL.get(native, "note"),
                 message=str(item.get("issue_text") or "bandit finding"),
                 uri=str(item.get("filename") or "unknown"),
-                start_line=max(start, 1),
-                end_line=max(end, start, 1),
+                start_line=start,
+                end_line=end,
             )
         )
     return _sarif(tool="bandit", results=results)

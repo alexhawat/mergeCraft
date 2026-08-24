@@ -63,15 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Packet emit and status-check paths write or skip the assemble-once
-  `prepare_run_packet` result (`MergeEvidencePacket | None`); malformed finding
-  rows skip pydantic ``ValidationError`` instead of aborting the loader; GitHub
-  check-run listing paginates with the shared pager
+- Packet emit and the approval check share one `prepare_run_packet` assembly
+  (`MergeEvidencePacket | None`); a failed assembly is skipped, not rebuilt;
+  malformed finding rows skip pydantic ``ValidationError``; GitHub check-run
+  listing paginates with the shared pager; `build_run_packet` still resolves
+  `change_id`
 - GitHub workflow-run artifact (and run) listing follows pages past the first
   100 items; CI evidence recording keeps the more severe duplicate fingerprint
-- Packet emit and the approval check share one `prepare_run_packet` assembly
-  (`MergeEvidencePacket | None`); a failed assembly is not rebuilt on the check;
-  `build_run_packet` still resolves `change_id`
+- Check-suite log fetch skips with a distinct unavailable payload when no
+  GitHub client is bound, instead of looking like “no failed runs”
 - Agent CLI failover classifies via `provider_failure` (not `retry_policy`
   re-exports); Bandit parser and SARIF converter share `end_line` / severity
   mapping

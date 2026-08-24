@@ -43,3 +43,10 @@ def test_try_load_json_array_skips_leading_object() -> None:
 def test_try_load_json_array_skips_progress_object_then_array() -> None:
     raw = '{"type":"progress"}\n[]'
     assert try_load_json_array(raw) == []
+
+
+def test_try_load_json_whole_string_fallback_is_kind_any_only() -> None:
+    """Non-container JSON is only recovered for ``kind=any``."""
+    assert try_load_json("true") is True
+    assert try_load_json_object("true") is None
+    assert try_load_json_array("true") is None

@@ -37,7 +37,7 @@ def typed_findings_from_rows(raw: list[Any]) -> list[Finding]:
     return typed
 
 
-def _dedupe_key(finding: Finding) -> str:
+def finding_dedupe_key(finding: Finding) -> str:
     """Stable identity for merge: fingerprint, else tool/rule/path/line/message."""
     fingerprint = finding.fingerprint.strip() if finding.fingerprint else ""
     if fingerprint:
@@ -69,7 +69,7 @@ def merge_findings(*groups: list[Finding]) -> list[Finding]:
     order: list[str] = []
     for group in groups:
         for finding in group:
-            key = _dedupe_key(finding)
+            key = finding_dedupe_key(finding)
             existing = unique.get(key)
             if existing is None:
                 unique[key] = finding
@@ -87,7 +87,7 @@ def load_run_findings(
     """Return agent, analyzer, and CI findings the gate and packet both read.
 
     Validation errors are logged at debug and skipped. Deduplicates on
-    :func:`_dedupe_key` (fingerprint when present, otherwise
+    :func:`finding_dedupe_key` (fingerprint when present, otherwise
     tool/rule/path/line/message), keeping the more severe row on a collision.
     CI SARIF recorded on tool state is included so the approval check and
     the packet cannot diverge on #464 evidence.
@@ -107,6 +107,7 @@ def load_run_findings(
 
 
 __all__ = [
+    "finding_dedupe_key",
     "load_run_findings",
     "merge_findings",
     "typed_findings_from_rows",
