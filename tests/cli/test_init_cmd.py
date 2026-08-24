@@ -16,6 +16,7 @@ from tests.ci.workflow_support import REPO_ROOT, read_text
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.models import PROVIDERS
 from mergecraft.pins import action_pin_minimal
 
 if TYPE_CHECKING:
@@ -159,3 +160,19 @@ def test_scaffolded_workflow_pin_matches_defaults_yaml(
         assert init_pin == readme_pin, (
             f"init pin {init_pin!r} must match README Example 1 {readme_pin!r}"
         )
+
+
+def test_init_seeds_builtin_provider_registry(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Init must register built-in provider rows once for registry-backed runtime."""
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init", "--force"])
+    assert result.exit_code == 0, result.stdout + result.stderr
+
+    config = yaml.safe_load((tmp_path / ".mergecraft" / "config.yaml").read_text(encoding="utf-8"))
+    assert isinstance(config, dict)
+    assert config.get("providersSeeded") is True
+    providers = config.get("providers")
+    assert isinstance(providers, list)
+    labels = {str(entry.get("label")) for entry in providers if isinstance(entry, dict)}
+    assert labels == set(PROVIDERS.keys())

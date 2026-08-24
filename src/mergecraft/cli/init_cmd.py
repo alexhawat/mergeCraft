@@ -10,6 +10,7 @@ import yaml
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.provider_cmd import seed_builtin_providers
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.pins import action_pin_minimal
 from mergecraft.review.completed import COMPLETED_REVIEWS_GITIGNORE_LINE
@@ -171,6 +172,9 @@ def run(
 
     _ensure_audit_jsonl_gitignore(root)
     _ensure_reviews_gitignore(root)
+
+    if config_path.is_file():
+        seed_builtin_providers(config_path)
 
     console.print("\n[bold]next steps[/bold]")
     console.print(
