@@ -717,3 +717,47 @@ def test_apply_failure_leaves_provider_config_unchanged(
     assert read_config(tmp_path) == before, (
         "config must not be persisted when the workflow write fails"
     )
+
+
+def test_config_write_failure_rolls_the_workflow_back(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A failed config write must not leave the workflow on the new endpoint.
+
+    The two files cannot be written atomically with each other, so the workflow
+    is restored when the config write that follows it fails.
+    """
+    workflow = _setup_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    _register_nous_provider(tmp_path)
+    config_before = read_config(tmp_path)
+    workflow_before = workflow.read_text(encoding="utf-8")
+
+    config_path = tmp_path / ".mergecraft" / "config.yaml"
+    real_write_text = Path.write_text
+
+    def _explode_on_config(self: Path, *args: object, **kwargs: object) -> int:
+        if self == config_path:
+            raise OSError("disk full")
+        return real_write_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "write_text", _explode_on_config)
+    result = _invoke(
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "nous",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+    monkeypatch.undo()
+
+    assert result.exit_code != CLI_SUCCESS_EXIT_CODE, _plain(result.stdout + result.stderr)
+    assert read_config(tmp_path) == config_before
+    assert workflow.read_text(encoding="utf-8") == workflow_before, (
+        "the workflow must be rolled back when the config write fails"
+    )

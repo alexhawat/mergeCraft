@@ -97,6 +97,17 @@ def _emit_workflow_change(
     console.print(f"[green]wrote[/green] {workflow}")
 
 
+def _restore_workflow(workflow: Path, previous: str | None) -> None:
+    """Put *workflow* back to *previous* after a failed config write."""
+    try:
+        if previous is None:
+            workflow.unlink(missing_ok=True)
+        else:
+            workflow.write_text(previous, encoding="utf-8")
+    except OSError as exc:
+        console.print(f"[red]could not restore {workflow} after a failed config write: {exc}[/red]")
+
+
 def _plan_provider_for_workflow(
     repo_root: Path,
     *,
@@ -355,11 +366,18 @@ def provider_add_cmd(
         cli_bail(str(exc))
 
     _print_missing_secret_guidance(entry)
+    workflow_before = workflow.read_text(encoding="utf-8") if workflow.is_file() else None
     _emit_workflow_change(workflow, change, apply=apply)
     # Only now is the workflow on disk. Persisting earlier would strand config
-    # on the new endpoint while Actions still ran the old one.
+    # on the new endpoint while Actions still ran the old one. Neither file can
+    # be written atomically with the other, so roll the workflow back if the
+    # config write then fails, leaving both sides on their previous state.
     if commit_config is not None:
-        commit_config()
+        try:
+            commit_config()
+        except OSError as exc:
+            _restore_workflow(workflow, workflow_before)
+            cli_bail(f"could not write provider config: {exc}")
 
 
 @model_app.command("add")
