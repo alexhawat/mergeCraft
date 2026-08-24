@@ -53,8 +53,8 @@ Regression audit after PR #491 (#468 / #470 closed). Every precedence-named test
 | TH1.3b | Language mismatch excludes rule | `…::test_language_mismatch_excludes_scoped_rule` | pass |
 | TH1.3c | Change classifier exact bool fixtures | `tests/classify/test_change_classifier.py` (parametrised) | pass |
 | TH1.4 | Four security xfails tagged TH5 | offline fence ×2, fence, auth_nous | xfail TH5 |
-| TH1.5a | Lowering fail_under fails ratchet | `tests/ci/test_coverage_ratchet_honesty.py::test_lowering_fail_under_without_baseline_commit_fails` | RED |
-| TH1.5b | Above-ceiling warns not fails | `…::test_raising_coverage_above_ceiling_warns_not_fails` | RED |
+| TH1.5a | Lowering fail_under fails ratchet | `tests/ci/test_coverage_ratchet_honesty.py::test_lowering_fail_under_without_baseline_commit_fails` | pass |
+| TH1.5b | Above-ceiling warns not fails | `…::test_raising_coverage_above_ceiling_warns_not_fails` | pass |
 | TH1.6 | Cheat-signature lint rejects tautology | `tests/ci/test_cheat_signature_lint.py::test_lint_script_flags_getattr_tautology_fixture` | RED |
 | TH1.7 | Tracing extra collects exporter tests | `tests/tracing/exporters/test_optional_extra.py::test_subprocess_with_tracing_extra_collects_exporter_tests` | xfail TH8 |
 
@@ -64,5 +64,25 @@ Do not weaken: `tests/test/coverage-431`, `tests/mcp/test_git_tool.py`, `tests/i
 
 ## Measurement notes (TH6 / TH9 — fill on impl)
 
-- Coverage floors: re-measure with `make coverage-gate` on merged tip (after MP4 when applicable).
+### TH6 coverage floors (2026-08-24, HEAD `34cd99f9`, MP4 not merged)
+
+Measured via `make coverage-measure` on `wave/test-suite-hygiene-2026-08-24` @ `34cd99f9`.
+`mcp/public.py` absent on this tree; floors baselined against current tip per D21.
+
+| Target | Measured line | Measured branch | Floor line (m−2) | Floor branch (m−2) |
+| --- | ---: | ---: | ---: | ---: |
+| **global** | 83.04 | — | 82.00 (`fail_under`) | — |
+| `utils/token.py` | 53.9 | 41.2 | 51.9 | 39.2 |
+| `utils/git_setup.py` | 93.5 | 88.9 | 91.5 | 86.9 |
+| `main.py` | 87.3 | 77.3 | 85.3 | 75.3 |
+| `mcp/` | 82.6 | 68.9 | 80.6 | 66.9 |
+| `action/` | 91.1 | 85.7 | 89.1 | 83.7 |
+| `security/` | 82.4 | 73.3 | 80.4 | 71.3 |
+| `analyzers/` | 86.9 | 74.0 | 84.9 | 72.0 |
+| `agents/` | 87.8 | 78.1 | 85.8 | 76.1 |
+| `review/` | 89.4 | 68.8 | 87.4 | 66.8 |
+
+Ratchet (D12): merge-base `fail_under` comparison via `git merge-base HEAD origin/pre-0.0.1`;
+`measured > floor + 5` warns (exit 0); `--hard-ceiling` opts into legacy fail.
+
 - Mutation escape rate: measure on `ef7e70d8` before setting TH9 threshold.

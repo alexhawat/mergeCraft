@@ -4,9 +4,9 @@
 Reads a ``coverage.json`` produced by ``pytest --cov --cov-report=json`` and
 fails when global or critical-path floors drop below the locked thresholds.
 
-Floors are set from a measured baseline (2026-08-11, ~70% global line) with a
-small buffer so the gate fails on decreases without flaking on noise. Critical
-paths listed in the punch list get their own line/branch floors.
+Floors are set from a measured baseline (2026-08-24, post lane A) with a
+2-point buffer so the gate fails on decreases without flaking on noise.
+Critical paths listed in the punch list get their own line/branch floors.
 """
 
 from __future__ import annotations
@@ -30,13 +30,24 @@ def _fail_under_from_pyproject() -> float:
     return mod.fail_under_from_pyproject()
 
 
-# Critical-path floors (line %, branch %). Values are ratchet floors just
-# under the 2026-08-11 measured baseline so decreases fail the gate.
+# Critical-path floors (line %, branch %). Values are measured - 2 on
+# 2026-08-24 @ wave/test-suite-hygiene-2026-08-24 (HEAD 34cd99f9).
 MODULE_FLOORS: dict[str, tuple[float, float]] = {
-    "utils/token.py": (15.0, 0.0),
-    "utils/git_setup.py": (80.0, 80.0),
-    "main.py": (60.0, 40.0),
+    "utils/token.py": (51.9, 39.2),
+    "utils/git_setup.py": (91.5, 86.9),
+    "main.py": (85.3, 75.3),
 }
+
+# Prefix aggregates (line %, branch %). Branch floors for security/, analyzers/,
+# agents/, and review/ are ≥ 60 per D11.
+PREFIX_FLOORS: tuple[tuple[str, str, float, float], ...] = (
+    ("mcp/", "/mcp/", 80.6, 66.9),
+    ("action/", "/action/", 89.1, 83.7),
+    ("security/", "/security/", 80.4, 71.3),
+    ("analyzers/", "/analyzers/", 84.9, 72.0),
+    ("agents/", "/agents/", 85.8, 76.1),
+    ("review/", "/review/", 87.4, 66.8),
+)
 
 
 def _pct(covered: int, total: int) -> float:
@@ -108,10 +119,7 @@ def main() -> int:
         if branch_pct + 1e-9 < branch_floor:
             failures.append(f"{suffix} branch {branch_pct:.1f}% < floor {branch_floor:.1f}%")
 
-    for label, needle, line_floor, branch_floor in (
-        ("mcp/", "/mcp/", 55.0, 35.0),
-        ("action/", "/action/", 35.0, 35.0),
-    ):
+    for label, needle, line_floor, branch_floor in PREFIX_FLOORS:
         line_pct, branch_pct = _aggregate_prefix(files, needle)
         if line_pct + 1e-9 < line_floor:
             failures.append(f"{label} line {line_pct:.1f}% < floor {line_floor:.1f}%")

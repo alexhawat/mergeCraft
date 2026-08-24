@@ -54,12 +54,14 @@ def _load_coverage_floors() -> Any:
 
 
 def _coverage_json(tmp_path: Path, percent: float) -> Path:
+    # Per-module summaries must satisfy tightened TH6 floors even when global is 82%.
+    module_percent = max(percent, 96.0)
     summary = {
-        "percent_covered": percent,
+        "percent_covered": module_percent,
         "num_statements": 100,
-        "covered_lines": int(percent),
+        "covered_lines": int(module_percent),
         "num_branches": 10,
-        "covered_branches": int(percent * 0.1),
+        "covered_branches": int(module_percent * 0.1),
     }
     files: dict[str, dict[str, Any]] = {}
     for suffix in ("utils/token.py", "utils/git_setup.py", "main.py"):
