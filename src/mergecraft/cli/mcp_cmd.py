@@ -32,7 +32,7 @@ def list_cmd(
         "reviewer",
         "--role",
         "-r",
-        help="Agent role whose tool surface to print (orchestrator, reviewer, verifier).",
+        help="Agent role whose tool surface to print (orchestrator, reviewer, verifier, public).",
     ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository workspace root."),
     trust: str | None = typer.Option(
@@ -76,7 +76,7 @@ def serve_cmd(
         "reviewer",
         "--role",
         "-r",
-        help="Primary role endpoint to advertise (orchestrator, reviewer, verifier).",
+        help="Primary role endpoint to advertise (orchestrator, reviewer, verifier, public).",
     ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository workspace root."),
     host: str = typer.Option(MCP_HOST, "--host", help="Bind address."),
@@ -118,9 +118,10 @@ def serve_cmd(
         console.print(f"MERGECRAFT_MCP_BEARER={ctx.mcp_auth_token}")
 
         listen_port = port if port is not None else read_env_port() or select_port()
+        parsed_role = role.strip().lower()
         endpoint = _role_endpoint(
-            role.strip().lower()  # type: ignore[arg-type]  # — role.strip().lower() is str; callee expects Literal["orchestrator","reviewer","verifier"]
-            if role.strip().lower() in {"orchestrator", "reviewer", "verifier"}
+            parsed_role  # type: ignore[arg-type]  # — parsed_role verified against ServeRole literals
+            if parsed_role in {"orchestrator", "reviewer", "verifier", "public"}
             else "reviewer"
         )
         auth_token = ctx.mcp_auth_token

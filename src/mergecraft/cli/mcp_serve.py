@@ -13,6 +13,8 @@ from mergecraft.config.settings import (
     parse_cli_trust_override,
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
+from mergecraft.mcp.endpoints import MCP_PUBLIC_ENDPOINT
+from mergecraft.mcp.public import build_public_tools
 from mergecraft.mcp.server import (
     MCP_ENDPOINT,
     MCP_REVIEWER_ENDPOINT,
@@ -34,7 +36,7 @@ if TYPE_CHECKING:
 
     from mergecraft.mcp.shared import ToolSpec
 
-ServeRole = Literal["orchestrator", "reviewer", "verifier"]
+ServeRole = Literal["orchestrator", "reviewer", "verifier", "public"]
 
 
 def _role_endpoint(role: ServeRole) -> str:
@@ -42,15 +44,17 @@ def _role_endpoint(role: ServeRole) -> str:
         return MCP_REVIEWER_ENDPOINT
     if role == "verifier":
         return MCP_VERIFIER_ENDPOINT
+    if role == "public":
+        return MCP_PUBLIC_ENDPOINT
     return MCP_ENDPOINT
 
 
 def _parse_role(role: str) -> ServeRole:
     key = role.strip().lower()
-    if key not in {"orchestrator", "reviewer", "verifier"}:
-        msg = f"unknown role {role!r} (expected orchestrator, reviewer, or verifier)"
+    if key not in {"orchestrator", "reviewer", "verifier", "public"}:
+        msg = f"unknown role {role!r} (expected orchestrator, reviewer, verifier, or public)"
         raise ValueError(msg)
-    return key  # type: ignore[return-value]  # — key verified against {"orchestrator","reviewer","verifier"} above
+    return key  # type: ignore[return-value]  # — key verified against ServeRole literals above
 
 
 def _resolve_serve_auth_token() -> str:
@@ -148,6 +152,8 @@ def resolve_served_tool_specs(
         return build_orchestrator_tools(ctx)
     if parsed_role == "reviewer":
         return build_reviewer_tools(ctx)
+    if parsed_role == "public":
+        return build_public_tools(ctx)
     return build_verifier_tools(ctx)
 
 
@@ -176,7 +182,7 @@ def build_mcp_app_from_ctx(role: str, ctx: ToolContext) -> FastAPI:
     the returned app must present it as ``Authorization: Bearer <token>``.
 
     Args:
-        role: Agent role — ``orchestrator``, ``reviewer``, or ``verifier``.
+        role: Agent role — ``orchestrator``, ``reviewer``, ``verifier``, or ``public``.
         ctx: Pre-resolved :class:`~mergecraft.mcp.context.ToolContext` whose
             ``mcp_auth_token`` was set by the caller (e.g.
             :func:`build_mcp_tool_context`).
@@ -193,6 +199,13 @@ def build_mcp_app_from_ctx(role: str, ctx: ToolContext) -> FastAPI:
             [],
             ctx,
             role_tools={"reviewer": build_reviewer_tools(ctx)},
+            auth_token=ctx.mcp_auth_token,
+        )
+    if parsed_role == "public":
+        return create_mcp_app(
+            [],
+            ctx,
+            role_tools={"public": build_public_tools(ctx)},
             auth_token=ctx.mcp_auth_token,
         )
     return create_mcp_app(

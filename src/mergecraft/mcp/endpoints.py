@@ -12,6 +12,7 @@ from mergecraft.types import VERIFIER_AGENT_NAME
 MCP_ENDPOINT: str = "/mcp"
 MCP_REVIEWER_ENDPOINT: str = "/mcp/reviewer"
 MCP_VERIFIER_ENDPOINT: str = "/mcp/verifier"
+MCP_PUBLIC_ENDPOINT: str = "/mcp/public"
 
 
 def mcp_role_url(base: str, agent_id: str | None) -> str:
