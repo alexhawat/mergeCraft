@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlparse
 
 from mergecraft.analyzers.manifest import ManifestValidationError
 from mergecraft.review_taxonomy import FINDING_CATEGORIES
+from mergecraft.utils.json_load import try_load_json
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -101,26 +102,6 @@ def resolve_repo_relative_path(
     if cleaned.startswith("./"):
         return cleaned[2:]
     return cleaned
-
-
-def try_load_json(raw: str) -> object | None:
-    """Return the first JSON value in ``raw``, or ``None`` when none parse."""
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(raw):
-        if char not in "{[":
-            continue
-        try:
-            payload, _end = decoder.raw_decode(raw, index)
-        except json.JSONDecodeError:
-            continue
-        return cast("object", payload)  # json.JSONDecoder.raw_decode is typed Any
-    stripped = raw.strip()
-    if not stripped:
-        return None
-    try:
-        return cast("object", json.loads(stripped))  # json.loads is typed Any
-    except json.JSONDecodeError:
-        return None
 
 
 def load_json(raw: str) -> object:

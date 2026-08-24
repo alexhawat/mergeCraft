@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from mergecraft.evidence.run_packet import build_run_packet
+from mergecraft.evidence.run_packet import build_run_packet, prepare_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import ApprovalRecord, init_tool_state
 from mergecraft.modes import compute_modes
@@ -80,6 +80,14 @@ def _approval_checks(github: _RecordingGitHub) -> list[dict[str, Any]]:
     return [run for run in github.check_runs if run.get("name") == APPROVAL_CHECK]
 
 
+async def _report(ctx: ToolContext, *, run_succeeded: bool) -> None:
+    await report_status_checks(
+        ctx,
+        run_succeeded=run_succeeded,
+        packet=prepare_run_packet(ctx, run_succeeded=run_succeeded),
+    )
+
+
 @pytest.mark.parametrize(
     ("run_succeeded", "approval"),
     [
@@ -97,7 +105,7 @@ async def test_report_status_checks_posts_neutral_approval_when_review_incomplet
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github, approval=approval)
 
-    await report_status_checks(ctx, run_succeeded=run_succeeded)
+    await _report(ctx, run_succeeded=run_succeeded)
 
     approval_checks = _approval_checks(github)
     assert len(approval_checks) == 1
@@ -128,7 +136,7 @@ async def test_report_status_checks_neutral_for_crashed_run_with_recorded_approv
         approval=ApprovalRecord(would_approve=False, sha=REVIEWED_SHA),
     )
 
-    await report_status_checks(ctx, run_succeeded=False)
+    await _report(ctx, run_succeeded=False)
 
     approval_checks = _approval_checks(github)
     assert len(approval_checks) == 1
@@ -153,7 +161,7 @@ async def test_report_status_checks_anchors_approval_to_pr_head_sha(
         approval=ApprovalRecord(would_approve=True, sha=REVIEWED_SHA),
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx, run_succeeded=True)
 
     approval_checks = _approval_checks(github)
     assert len(approval_checks) == 1
@@ -164,15 +172,17 @@ async def test_report_status_checks_anchors_approval_to_pr_head_sha(
 
 
 @pytest.mark.asyncio
-async def test_report_status_checks_skips_approval_when_packet_raises(
+async def test_report_status_checks_skips_approval_when_packet_omitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """build_run_packet failures must not fail the run after completion posted."""
+    """Omitted ``None`` skips approval without assembling, same as PreparedPacket(None)."""
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
+    calls = {"n": 0}
 
     def _boom(*args: object, **kwargs: object) -> None:
-        msg = "packet assembly failed"
+        calls["n"] += 1
+        msg = "must not rebuild"
         raise RuntimeError(msg)
 
     monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
@@ -180,6 +190,7 @@ async def test_report_status_checks_skips_approval_when_packet_raises(
     names = [run.get("name") for run in github.check_runs]
     assert COMPLETION_CHECK in names
     assert APPROVAL_CHECK not in names
+    assert calls["n"] == 0
 
 
 @pytest.mark.asyncio

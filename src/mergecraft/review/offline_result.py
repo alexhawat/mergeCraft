@@ -98,7 +98,7 @@ def _emit_offline_packet(
     caller reports that error separately, and a packet with analyzer evidence
     only still beats no packet.
     """
-    from mergecraft.evidence.run_packet import emit_run_packet
+    from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
 
     extra: list[Finding] = []
     if structured_output:
@@ -111,12 +111,19 @@ def _emit_offline_packet(
         except ValueError as exc:
             logger.debug("offline evidence packet: unparsable structured output — {}", exc)
 
+    change_id = _offline_change_id(cwd, materialization)
+    prepared = prepare_run_packet(
+        tool_context,
+        run_succeeded=run_succeeded,
+        change_id=change_id,
+        extra_findings=extra,
+    )
     written = emit_run_packet(
         tool_context,
         run_succeeded=run_succeeded,
-        change_id=_offline_change_id(cwd, materialization),
-        extra_findings=extra,
+        change_id=change_id,
         output_path=output_path,
+        packet=prepared,
     )
     from mergecraft.evidence.run_manifest import build_run_manifest
 

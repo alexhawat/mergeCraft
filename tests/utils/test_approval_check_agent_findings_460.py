@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from mergecraft.analyzers.finding import Finding, make_finding
-from mergecraft.evidence.run_packet import build_run_packet
+from mergecraft.evidence.run_packet import build_run_packet, prepare_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state
 from mergecraft.modes import compute_modes
@@ -102,6 +102,14 @@ def _approval_run(github: _RecordingGitHub) -> dict[str, Any]:
     return matches[0]
 
 
+async def _report(ctx: ToolContext, *, run_succeeded: bool = True) -> None:
+    await report_status_checks(
+        ctx,
+        run_succeeded=run_succeeded,
+        packet=prepare_run_packet(ctx, run_succeeded=run_succeeded),
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("severity", _BLOCKING)
 async def test_agent_blocker_makes_approval_check_failure(tmp_path: Path, severity: str) -> None:
@@ -110,7 +118,7 @@ async def test_agent_blocker_makes_approval_check_failure(tmp_path: Path, severi
     agent = _finding(severity=severity, source="agent", rule_id="AGENT-GATE", path="src/auth.py")
     ctx = _ctx(tmp_path, github=github, agent_findings=[agent], analyzer_ran=False)
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     approval = _approval_run(github)
     assert approval["conclusion"] == "failure", (
@@ -127,7 +135,7 @@ async def test_packet_request_changes_matches_approval_check(tmp_path: Path, sev
     agent = _finding(severity=severity, source="agent", rule_id="AGENT-MATCH", path="src/auth.py")
     ctx = _ctx(tmp_path, github=github, agent_findings=[agent], analyzer_ran=False)
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
     packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
     approval = _approval_run(github)
@@ -151,7 +159,7 @@ async def test_gate_reads_agent_findings_when_analyzer_list_is_empty(tmp_path: P
         analyzer_ran=False,
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     approval = _approval_run(github)
     summary = str((approval.get("output") or {}).get("summary") or "")
@@ -173,7 +181,7 @@ async def test_analyzer_major_still_fails_the_gate(tmp_path: Path) -> None:
         trust_tier="trusted",
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     assert _approval_run(github)["conclusion"] == "failure"
 
@@ -184,7 +192,7 @@ async def test_empty_findings_do_not_silently_succeed(tmp_path: Path) -> None:
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github, agent_findings=[], analyzer_ran=True, trust_tier="trusted")
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     assert _approval_run(github)["conclusion"] != "success"
     assert _approval_run(github)["conclusion"] == "neutral"
@@ -202,6 +210,6 @@ async def test_untrusted_tier_does_not_silently_succeed(tmp_path: Path) -> None:
         trust_tier="untrusted",
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     assert _approval_run(github)["conclusion"] != "success"

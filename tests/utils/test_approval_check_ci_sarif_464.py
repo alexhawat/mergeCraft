@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from mergecraft.ci.evidence import record_ci_findings, sarif_findings
-from mergecraft.evidence.run_packet import build_run_packet
+from mergecraft.evidence.run_packet import build_run_packet, prepare_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state
 from mergecraft.modes import compute_modes
@@ -102,6 +102,14 @@ def _approval_run(github: _RecordingGitHub) -> dict[str, Any]:
     return matches[0]
 
 
+async def _report(ctx: ToolContext, *, run_succeeded: bool = True) -> None:
+    await report_status_checks(
+        ctx,
+        run_succeeded=run_succeeded,
+        packet=prepare_run_packet(ctx, run_succeeded=run_succeeded),
+    )
+
+
 @pytest.mark.asyncio
 async def test_ruff_ci_sarif_makes_approval_check_failure(tmp_path: Path) -> None:
     """D8: a ruff finding from CI SARIF can reach the approval gate as failure."""
@@ -112,7 +120,7 @@ async def test_ruff_ci_sarif_makes_approval_check_failure(tmp_path: Path) -> Non
         sarif_findings(_sarif(level="error"), artifact="ruff-sarif", repo_root=tmp_path),
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     assert _approval_run(github)["conclusion"] == "failure", (
         "D8: CI SARIF ruff error must fail mergecraft-approval; clamping to "
@@ -129,7 +137,7 @@ async def test_packet_request_changes_matches_ci_sarif_approval_check(tmp_path: 
         sarif_findings(_sarif(level="error"), artifact="ruff-sarif", repo_root=tmp_path),
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
     packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
     assert packet.decision is not None
@@ -149,7 +157,7 @@ async def test_warning_ci_sarif_does_not_fail_the_gate(tmp_path: Path) -> None:
         ),
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     assert _approval_run(github)["conclusion"] != "failure"
 
@@ -159,7 +167,7 @@ async def test_empty_ci_evidence_does_not_silently_succeed(tmp_path: Path) -> No
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     assert _approval_run(github)["conclusion"] != "success"
     assert _approval_run(github)["conclusion"] == "neutral"
@@ -174,6 +182,6 @@ async def test_untrusted_tier_does_not_succeed_with_ci_sarif(tmp_path: Path) -> 
         sarif_findings(_sarif(level="error"), artifact="ruff-sarif", repo_root=tmp_path),
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     assert _approval_run(github)["conclusion"] != "success"

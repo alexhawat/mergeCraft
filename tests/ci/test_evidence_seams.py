@@ -25,7 +25,7 @@ import pytest
 
 from mergecraft.ci.evidence import check_run_to_finding, record_ci_findings
 from mergecraft.ci.verification import annotate_caused_by_pr, annotate_not_caused_by_pr
-from mergecraft.evidence.run_packet import emit_run_packet
+from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
@@ -204,6 +204,7 @@ def _packet(ctx: ToolContext, tmp_path: Path) -> dict[str, Any]:
         ctx,
         run_succeeded=True,
         output_path=tmp_path / "packet.json",
+        packet=prepare_run_packet(ctx, run_succeeded=True),
     )
     assert written is not None
     return json.loads(written.read_text(encoding="utf-8"))
@@ -308,3 +309,81 @@ async def test_analyze_ci_failures_records_its_clusters_as_ci_evidence(tmp_path:
     # No diff paths were supplied, so nothing may be attributed to this PR.
     assert {row["introduced_by_pr"] for row in recorded} == {"false"}
     assert {row["severity"] for row in recorded}.isdisjoint({"Critical", "Major"})
+
+
+@pytest.mark.asyncio
+async def test_recorded_finding_count_is_merged_evidence_length(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.analyzers.finding import make_finding
+    from mergecraft.ci.blame import BlameVerdict
+    from mergecraft.ci.flaky import FlakyVerdict
+    from mergecraft.ci.intelligence import run_ci_intelligence
+    from mergecraft.ci.review import CiClusterReport, CiReviewStats
+
+    shared = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="unused",
+        path="src/app.py",
+        start_line=1,
+        end_line=1,
+        source="ci",
+        fingerprint="shared-ci",
+    )
+    clustered = shared.model_copy(update={"severity": "Major"})
+
+    async def _sarif(ctx: ToolContext, *, check_suite_id: int) -> list[Any]:
+        _ = ctx, check_suite_id
+        return [shared]
+
+    async def _suite(_self: object, ctx: ToolContext, *, check_suite_id: int) -> dict[str, Any]:
+        _ = ctx, check_suite_id
+        return {
+            "jobs": [
+                {
+                    "job_name": "lint",
+                    "job_id": 1,
+                    "excerpt": {"content": "fail"},
+                    "log_index": [],
+                }
+            ],
+            "overflow": 0,
+            "total_failed_runs": 1,
+        }
+
+    def _analyze(*_args: object, **_kwargs: object) -> tuple[list[Any], CiReviewStats, int]:
+        report = CiClusterReport(
+            finding=clustered,
+            flaky=FlakyVerdict(classification="stable", summary="stable"),
+            blame=BlameVerdict(attribution="unknown", summary="unknown"),
+            excerpt="fail",
+        )
+        stats = CiReviewStats(
+            failure_count=1,
+            cluster_count=1,
+            flaky_count=0,
+            pr_attributed_count=0,
+            truncated=False,
+        )
+        return [report], stats, 0
+
+    monkeypatch.setattr("mergecraft.ci.intelligence.collect_ci_sarif_findings", _sarif)
+    monkeypatch.setattr(
+        "mergecraft.ci.providers.github_actions.GitHubActionsProvider.fetch_check_suite_logs",
+        _suite,
+    )
+    monkeypatch.setattr("mergecraft.ci.review.analyze_ci_failures", _analyze)
+
+    ctx = _ctx(tmp_path)
+    payload = await run_ci_intelligence(ctx, check_suite_id=9)
+    from mergecraft.ci.evidence import ci_evidence_findings
+
+    merged = ci_evidence_findings(ctx.tool_state)
+    assert payload["recordedFindingCount"] == len(merged)
+    assert payload["recordedFindingCount"] == 1
+    assert payload["recordedFindingCount"] != 1 + 1
+    assert merged[0].severity == "Major"

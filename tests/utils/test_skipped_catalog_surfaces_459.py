@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from mergecraft.evidence.run_packet import build_run_packet
+from mergecraft.evidence.run_packet import build_run_packet, prepare_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow, init_tool_state
 from mergecraft.modes import compute_modes
@@ -127,13 +127,21 @@ def _catalog_check(packet: Any) -> dict[str, Any] | None:
     return None
 
 
+async def _report(ctx: ToolContext, *, run_succeeded: bool = True) -> None:
+    await report_status_checks(
+        ctx,
+        run_succeeded=run_succeeded,
+        packet=prepare_run_packet(ctx, run_succeeded=run_succeeded),
+    )
+
+
 @pytest.mark.asyncio
 async def test_check_run_states_skipped_catalog_as_unavailable_once(tmp_path: Path) -> None:
     """D6: glanceable unavailable on the check-run, once — not 13 skip lines."""
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github, analyzer_run=_skipped_catalog_state())
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     names = {run.get("name") for run in github.check_runs}
     assert COMPLETION_CHECK in names
@@ -163,7 +171,7 @@ async def test_check_run_clean_scan_does_not_claim_unavailable(tmp_path: Path) -
         trust_tier="trusted",
     )
 
-    await report_status_checks(ctx, run_succeeded=True)
+    await _report(ctx)
 
     text = _summary_text(github)
     assert not _CATALOG_UNAVAILABLE.search(text), (

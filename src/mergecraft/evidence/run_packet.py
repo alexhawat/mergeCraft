@@ -62,13 +62,16 @@ class PreparedPacket:
 
 def take_prepared_packet(
     packet: MergeEvidencePacket | PreparedPacket | None,
-) -> tuple[MergeEvidencePacket | None, bool]:
-    """Return ``(packet, already_attempted)`` from a collapsed assembly argument."""
+) -> MergeEvidencePacket | None:
+    """Return the assembled packet, or ``None`` to skip write/approval.
+
+    Omitted ``None`` and ``PreparedPacket(None)`` mean the same thing: do not
+    assemble. Callers that need a packet must pass ``prepare_run_packet`` /
+    ``build_run_packet`` output.
+    """
     if isinstance(packet, PreparedPacket):
-        return packet.packet, True
-    if packet is not None:
-        return packet, True
-    return None, False
+        return packet.packet
+    return packet
 
 
 def resolve_packet_path(*, tmpdir: str, change_slug: str) -> Path:
@@ -243,8 +246,8 @@ def _mode_prompt_versions(modes: Sequence[Mode]) -> list[ModePromptVersion]:
     """
     rows: list[ModePromptVersion] = []
     for m in modes:
-        name = getattr(m, "name", "")
-        version = getattr(m, "version", "") or ""
+        name = m.name
+        version = m.version or ""
         if not name:
             continue
         rows.append(ModePromptVersion(mode_name=name, prompt_version=version))
@@ -489,44 +492,25 @@ def emit_run_packet(
     actual_outcome: str | None = None,
     packet: MergeEvidencePacket | PreparedPacket | None = None,
 ) -> Path | None:
-    """Build and write this run's evidence packet; return its path.
+    """Write this run's evidence packet; return its path.
 
     Best-effort by construction: a packet is an audit artifact, so failing
     to write one must never turn a successful review into a failed run. All
     failures are logged and swallowed, and ``None`` means "no packet", never
     "the run is broken".
 
-    ``change_id`` overrides the PR-derived identifier — the offline
-    ``diff-review`` path has a real change to attest to but no pull request.
-    ``output_path`` overrides the resolved destination.
-    Pass a :class:`PreparedPacket` (or a built :class:`MergeEvidencePacket`)
-    when assembly already ran; ``PreparedPacket(None)`` skips without rebuild.
-
-    Returns ``None`` when the run has no change to attest to.
+    Assembly belongs on :func:`prepare_run_packet` / :func:`build_run_packet`.
+    ``run_succeeded`` and ``extra_findings`` are accepted for call-site
+    compatibility and ignored here.
     """
-    assembled, already_attempted = take_prepared_packet(packet)
-    if already_attempted:
-        if assembled is None:
-            return None
-        resolved_change_id = change_id or assembled.change_id or _change_id(ctx)
-        if resolved_change_id is None:
-            logger.debug("evidence packet: run has no pull request — nothing to attest")
-            return None
-    else:
-        resolved_change_id = change_id or _change_id(ctx)
-        if resolved_change_id is None:
-            logger.debug("evidence packet: run has no pull request — nothing to attest")
-            return None
-        try:
-            assembled = build_run_packet(
-                ctx,
-                change_id=resolved_change_id,
-                run_succeeded=run_succeeded,
-                extra_findings=extra_findings,
-            )
-        except Exception as err:  # an audit artifact never fails the run
-            logger.warning("evidence packet: assembly failed — {}", err)
-            return None
+    _ = (run_succeeded, extra_findings)
+    assembled = take_prepared_packet(packet)
+    if assembled is None:
+        return None
+    resolved_change_id = change_id or assembled.change_id or _change_id(ctx)
+    if resolved_change_id is None:
+        logger.debug("evidence packet: run has no pull request — nothing to attest")
+        return None
 
     try:
         path = output_path or resolve_packet_path(

@@ -81,9 +81,14 @@ def test_json_object_parser_raises_on_empty_stdout(tool_id: str, parser_id: str,
         _parse(parser_id, raw, tool_id=tool_id)
 
 
-@pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS)
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS_EXCEPT_BANDIT)
 def test_json_object_parser_empty_object_is_clean(tool_id: str, parser_id: str) -> None:
     assert _parse(parser_id, "{}", tool_id=tool_id) == []
+
+
+def test_bandit_empty_object_is_missing_results_not_clean() -> None:
+    with pytest.raises(ValueError, match="results array"):
+        _parse("bandit_json", "{}", tool_id="bandit")
 
 
 @pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS)

@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Packet emit and status-check paths write or skip a prepared packet only;
+  malformed finding rows skip pydantic ``ValidationError`` instead of aborting
+  the loader; GitHub check-run listing paginates with the shared pager
 - GitHub workflow-run artifact (and run) listing follows pages past the first
   100 items; CI evidence recording keeps the more severe duplicate fingerprint
 - Packet publish uses one assembly result (`PreparedPacket`) so a failed

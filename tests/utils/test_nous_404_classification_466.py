@@ -228,10 +228,13 @@ def test_provider_failure_class_is_not_owned_by_http_retry_module() -> None:
 
 
 def test_provider_failure_reuses_try_load_json() -> None:
-    import inspect
+    from mergecraft.utils.json_load import try_load_json
+    from mergecraft.utils.provider_failure import ProviderFailureClass, classify_provider_failure
 
-    from mergecraft.utils import provider_failure
-
-    source = inspect.getsource(provider_failure)
-    assert "try_load_json" in source
-    assert "JSONDecoder" not in source
+    parsed = try_load_json('prefix {"error":{"message":"out of credits"}}')
+    assert parsed == {"error": {"message": "out of credits"}}
+    classified = classify_provider_failure(
+        'HTTP 404 {"error":{"message":"Your account balance is too low"}}',
+        status_code=404,
+    )
+    assert classified == ProviderFailureClass.BILLING

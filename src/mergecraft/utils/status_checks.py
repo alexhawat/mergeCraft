@@ -173,21 +173,11 @@ async def report_status_checks(
     # Best-effort: never raise after the completion check-run has posted.
     from mergecraft.evidence.run_packet import take_prepared_packet
 
-    assembled, already_attempted = take_prepared_packet(packet)
-    if already_attempted:
-        packet = assembled
-    else:
-        from mergecraft.evidence.run_packet import build_run_packet
-
-        change_id = f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"
-        try:
-            packet = build_run_packet(ctx, change_id=change_id, run_succeeded=run_succeeded)
-        except Exception as err:
-            logger.debug("status checks: approval path failed: {}", err)
-            return
-    if packet is None:
+    assembled = take_prepared_packet(packet)
+    if assembled is None:
         logger.debug("status checks: no packet; skipping approval check")
         return
+    packet = assembled
 
     try:
         tier: TrustTier = ctx.trust_tier

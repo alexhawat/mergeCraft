@@ -13,7 +13,6 @@ from loguru import logger
 from mergecraft.ci.log_excerpt import analyze_log
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
 from mergecraft.scm.github import GitHubScmAdapter
-from mergecraft.utils.github import paginate_github_list_pages
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
@@ -41,14 +40,13 @@ class GitHubActionsProvider:
         truncation_cap: int = DEFAULT_TRUNCATION_CAP,
     ) -> dict[str, Any]:
         """Download failed workflow logs for a check suite (legacy MCP contract)."""
-
-        async def _fetch_runs(page: int) -> Any:
-            return await ctx.scm.get(
-                f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
-                params={"check_suite_id": check_suite_id, "per_page": 100, "page": page},
-            )
-
-        runs = await paginate_github_list_pages(_fetch_runs, item_key="workflow_runs")
+        scm = ctx.scm
+        if not isinstance(scm, GitHubScmAdapter):
+            msg = "log download requires a GitHub SCM adapter"
+            raise RuntimeError(msg)
+        runs = await scm.list_workflow_runs_for_check_suite(
+            ctx.repo.owner, ctx.repo.name, check_suite_id
+        )
         failed = [run for run in runs if run.get("conclusion") == "failure"]
         if not failed:
             return {
@@ -64,9 +62,6 @@ class GitHubActionsProvider:
         for run in selected:
             run_id = run["id"]
             try:
-                scm = ctx.scm
-                if not isinstance(scm, GitHubScmAdapter):
-                    raise RuntimeError("log download requires a GitHub SCM adapter")
                 raw = await scm.download_workflow_run_logs(
                     ctx.repo.owner,
                     ctx.repo.name,

@@ -11,7 +11,7 @@ import re
 from enum import StrEnum
 from typing import Any, Final
 
-from mergecraft.analyzers.parsers._common import try_load_json
+from mergecraft.utils.json_load import try_load_json
 
 # CLI wrappers: treat these exit codes as rate-limit / overloaded (retryable
 # for model-chain advance — never blindly re-issue a mutating CLI invoke).

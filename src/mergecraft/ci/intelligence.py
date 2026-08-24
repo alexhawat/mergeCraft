@@ -173,19 +173,18 @@ async def collect_ci_sarif_findings(
 
     from mergecraft.ci.evidence import sarif_findings
     from mergecraft.mcp.tool_state import primary_repo_state
-    from mergecraft.utils.github import paginate_github_list_pages
+    from mergecraft.scm.github import GitHubScmAdapter
 
     repo_root = Path(primary_repo_state(ctx.tool_state).dir)
     findings: list[Finding] = []
     try:
-
-        async def _fetch_runs(page: int) -> Any:
-            return await ctx.scm.get(
-                f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
-                params={"check_suite_id": check_suite_id, "per_page": 100, "page": page},
-            )
-
-        runs = await paginate_github_list_pages(_fetch_runs, item_key="workflow_runs")
+        scm = ctx.scm
+        if not isinstance(scm, GitHubScmAdapter):
+            msg = "SARIF listing requires a GitHub SCM adapter"
+            raise RuntimeError(msg)
+        runs = await scm.list_workflow_runs_for_check_suite(
+            ctx.repo.owner, ctx.repo.name, check_suite_id
+        )
     except Exception as err:
         logger.warning("ci evidence: SARIF listing failed — {}", err)
         return []
@@ -293,10 +292,12 @@ async def run_ci_intelligence(
         raw_failures=raw_failures,
         fix_suggestions=fix_suggestions,
     )
-    recorded = record_ci_findings(ctx.tool_state, [report.finding for report in reports])
+    record_ci_findings(ctx.tool_state, [report.finding for report in reports])
     payload["available"] = True
     payload["checkSuiteId"] = check_suite_id
-    payload["recordedFindingCount"] = len(recorded) + len(sarif)
+    from mergecraft.ci.evidence import ci_evidence_findings
+
+    payload["recordedFindingCount"] = len(ci_evidence_findings(ctx.tool_state))
     payload["sarifFindingCount"] = len(sarif)
     return payload
 

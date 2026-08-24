@@ -305,6 +305,30 @@ def test_recording_keeps_higher_severity_on_fingerprint_collision() -> None:
     assert restored[0].severity == "Major"
 
 
+def test_recording_changed_uses_dedupe_key_when_fingerprint_empty() -> None:
+    """A second empty-fingerprint finding with a different identity is new."""
+    from mergecraft.analyzers.finding import make_finding
+
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    first = make_finding(
+        tool="ci",
+        rule_id="X",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="one",
+        path="a.py",
+        start_line=1,
+        end_line=1,
+        source="ci",
+    ).model_copy(update={"fingerprint": ""})
+    second = first.model_copy(update={"path": "b.py", "message": "two"})
+    record_ci_findings(state, [first])
+    changed = record_ci_findings(state, [second])
+    assert len(changed) == 1
+    assert len(ci_evidence_findings(state)) == 2
+
+
 def test_declared_gate_findings_report_a_failing_mapped_check_run() -> None:
     """A declared gate CI proved *broken* is reported — unblamed — not hidden."""
     findings = declared_gate_findings(

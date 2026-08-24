@@ -210,6 +210,11 @@ class GitHubScmAdapter:
     ) -> dict[str, Any]:
         return await self._client.list_check_runs_for_ref(owner, repo, ref, **kwargs)
 
+    async def list_workflow_runs_for_check_suite(
+        self, owner: str, repo: str, check_suite_id: int
+    ) -> list[dict[str, Any]]:
+        return await self._client.list_workflow_runs_for_check_suite(owner, repo, check_suite_id)
+
     async def list_workflow_run_artifacts(
         self, owner: str, repo: str, run_id: int
     ) -> list[dict[str, Any]]:

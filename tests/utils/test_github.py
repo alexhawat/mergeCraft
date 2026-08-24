@@ -181,13 +181,92 @@ async def test_list_workflow_run_artifacts_follows_pages() -> None:
     assert artifacts[-1]["name"] == "last"
 
 
+@pytest.mark.asyncio
+async def test_list_check_runs_for_ref_follows_pages() -> None:
+    pages: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/commits/abc/check-runs")
+        page = int(request.url.params.get("page") or "1")
+        pages.append(page)
+        if page == 1:
+            runs = [{"id": i, "name": f"c{i}"} for i in range(100)]
+        else:
+            runs = [{"id": 100, "name": "last"}]
+        return httpx.Response(200, json={"total_count": 101, "check_runs": runs})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.github.com") as raw:
+        client = GitHubClient("t", client=raw)
+        payload = await client.list_check_runs_for_ref("acme", "widgets", "abc")
+
+    assert pages == [1, 2]
+    assert payload["total_count"] == 101
+    assert payload["check_runs"][-1]["name"] == "last"
+
+
+@pytest.mark.asyncio
+async def test_list_workflow_runs_for_check_suite_follows_pages() -> None:
+    pages: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/actions/runs")
+        assert request.url.params.get("check_suite_id") == "7"
+        page = int(request.url.params.get("page") or "1")
+        pages.append(page)
+        runs = [{"id": i} for i in range(100)] if page == 1 else [{"id": 100}]
+        return httpx.Response(200, json={"total_count": 101, "workflow_runs": runs})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.github.com") as raw:
+        client = GitHubClient("t", client=raw)
+        runs = await client.list_workflow_runs_for_check_suite("acme", "widgets", 7)
+
+    assert pages == [1, 2]
+    assert len(runs) == 101
+
+
+@pytest.mark.asyncio
+async def test_paginate_logs_when_max_pages_is_full() -> None:
+    from loguru import logger
+
+    from mergecraft.utils.github import paginate_github_list_pages
+
+    async def _full(_page: int) -> dict[str, object]:
+        return {"items": [{"id": 1}, {"id": 2}]}
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)))
+    try:
+        items = await paginate_github_list_pages(_full, item_key="items", page_size=2, max_pages=1)
+    finally:
+        logger.remove(sink_id)
+    assert len(items) == 2
+    assert any("max_pages" in item for item in messages)
+
+
+@pytest.mark.asyncio
+async def test_paginate_logs_unexpected_non_object_payload() -> None:
+    from loguru import logger
+
+    from mergecraft.utils.github import paginate_github_list_pages
+
+    async def _weird(_page: int) -> str:
+        return "nope"
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)))
+    try:
+        items = await paginate_github_list_pages(_weird, item_key="items", page_size=100)
+    finally:
+        logger.remove(sink_id)
+    assert items == []
+    assert any("unexpected" in item for item in messages)
+
+
 def test_provider_agents_import_failure_taxonomy_from_provider_failure() -> None:
-    import inspect
-
     from mergecraft.agents import claude, codex, gemini, opencode
-    from mergecraft.utils import agent_resolve
+    from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
-    for module in (claude, codex, gemini, opencode, agent_resolve):
-        source = inspect.getsource(module)
-        assert "mergecraft.utils.provider_failure" in source
-        assert "from mergecraft.utils.retry_policy import is_retryable_cli_failure" not in source
+    for module in (claude, codex, gemini, opencode):
+        assert module.is_retryable_cli_failure is is_retryable_cli_failure

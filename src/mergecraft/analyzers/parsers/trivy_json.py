@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any, cast
 
 from mergecraft.analyzers.finding import Finding, make_finding
@@ -12,6 +11,7 @@ from mergecraft.analyzers.parsers._common import (
     resolve_repo_relative_path,
     taxonomy_category,
 )
+from mergecraft.utils.json_load import try_load_json
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,18 +26,9 @@ def loads_trivy_object(raw: str) -> dict[str, Any]:
     report. ``json.loads`` then treats the leading year (e.g. ``2026``) as a
     complete value and raises ``Extra data`` at column 5.
     """
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(raw):
-        if char != "{":
-            continue
-        try:
-            payload, _end = decoder.raw_decode(raw, index)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            return cast(  # json.loads returns Any; isinstance(payload, dict) confirmed above
-                "dict[str, Any]", payload
-            )
+    payload = try_load_json(raw)
+    if isinstance(payload, dict):
+        return cast("dict[str, Any]", payload)  # try_load_json returns object
     msg = "trivy JSON output must be an object"
     raise ValueError(msg)
 

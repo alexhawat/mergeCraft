@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+from pydantic import ValidationError
 
 from mergecraft.analyzers.finding import Finding, FindingValidationError
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
@@ -31,7 +32,7 @@ def typed_findings_from_rows(raw: list[Any]) -> list[Finding]:
             continue
         try:
             typed.append(Finding.model_validate(row))
-        except FindingValidationError as err:
+        except (FindingValidationError, ValidationError, ValueError) as err:
             logger.debug("findings loader: dropping malformed finding row: {}", err)
     return typed
 

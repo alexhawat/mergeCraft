@@ -58,6 +58,7 @@ async def paginate_github_list_pages(
     page ends the walk so items past 100 are not silently dropped.
     """
     collected: list[dict[str, Any]] = []
+    last_batch_len = 0
     for page in range(1, max_pages + 1):
         payload = await fetch_page(page)
         if isinstance(payload, list):
@@ -65,10 +66,24 @@ async def paginate_github_list_pages(
         elif isinstance(payload, dict):
             batch = _as_list(payload.get(item_key))
         else:
+            logger.warning(
+                "github list pagination: unexpected {} payload for {}, treating as end of list",
+                type(payload).__name__,
+                item_key,
+            )
             batch = []
+        last_batch_len = len(batch)
         collected.extend(batch)
-        if len(batch) < page_size:
+        if last_batch_len < page_size:
             break
+        if page == max_pages:
+            logger.warning(
+                "github list pagination: hit max_pages={} with a full page of {} {}; "
+                "results may be truncated",
+                max_pages,
+                page_size,
+                item_key,
+            )
     return collected
 
 
@@ -534,12 +549,42 @@ class GitHubClient:
         a repo declaring ``lint: "Verify (lint)"`` is pointing at one job, not
         at whether the whole suite went green.
         """
-        params = {"per_page": 100, **(kwargs.pop("params", None) or {})}
-        return _as_dict(
-            await self.get(
-                f"/repos/{owner}/{repo}/commits/{ref}/check-runs", params=params, **kwargs
+        extra = kwargs.pop("params", None) or {}
+
+        async def _fetch_page(page: int) -> Any:
+            params = {
+                **extra,
+                "per_page": GITHUB_LIST_PAGE_SIZE,
+                "page": page,
+            }
+            return await self.get(
+                f"/repos/{owner}/{repo}/commits/{ref}/check-runs",
+                params=params,
+                **kwargs,
             )
-        )
+
+        runs = await paginate_github_list_pages(_fetch_page, item_key="check_runs")
+        return {"total_count": len(runs), "check_runs": runs}
+
+    async def list_workflow_runs_for_check_suite(
+        self,
+        owner: str,
+        repo: str,
+        check_suite_id: int,
+    ) -> list[dict[str, Any]]:
+        """List workflow runs for a check suite (every page, not only the first 100)."""
+
+        async def _fetch_page(page: int) -> Any:
+            return await self.get(
+                f"/repos/{owner}/{repo}/actions/runs",
+                params={
+                    "check_suite_id": check_suite_id,
+                    "per_page": GITHUB_LIST_PAGE_SIZE,
+                    "page": page,
+                },
+            )
+
+        return await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
 
     async def list_workflow_run_artifacts(
         self,

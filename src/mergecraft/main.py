@@ -1522,11 +1522,18 @@ async def main() -> MainResult:
             if ctx.tool_context:
                 try:
                     await persist_learnings(ctx.tool_context)
+                    from mergecraft.evidence.run_packet import prepare_run_packet
+
+                    prepared = prepare_run_packet(
+                        ctx.tool_context,
+                        run_succeeded=run_succeeded_for_outcome(error_outcome),
+                    )
                     await report_status_checks(
                         ctx.tool_context,
                         run_succeeded=run_succeeded_for_outcome(error_outcome),
                         failure_reason=error_message,
                         conclusion=RUN_OUTCOME_CONCLUSION[error_outcome],
+                        packet=prepared,
                     )
                 except Exception as cleanup_exc:
                     logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
