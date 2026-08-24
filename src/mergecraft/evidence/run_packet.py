@@ -20,7 +20,6 @@ Exports:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,32 +45,6 @@ PACKET_FILENAME = "merge-evidence-packet.json"
 
 _PACKET_DIR_ENV = "MERGECRAFT_EVIDENCE_DIR"
 """Operator override for the packet's parent directory."""
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedPacket:
-    """Result of one packet assembly attempt.
-
-    ``packet`` is the assembled evidence, or ``None`` when the run has no
-    change to attest or assembly failed. Passing this type means assembly
-    already ran — emit and status-check paths must not rebuild.
-    """
-
-    packet: MergeEvidencePacket | None
-
-
-def take_prepared_packet(
-    packet: MergeEvidencePacket | PreparedPacket | None,
-) -> MergeEvidencePacket | None:
-    """Return the assembled packet, or ``None`` to skip write/approval.
-
-    Omitted ``None`` and ``PreparedPacket(None)`` mean the same thing: do not
-    assemble. Callers that need a packet must pass ``prepare_run_packet`` /
-    ``build_run_packet`` output.
-    """
-    if isinstance(packet, PreparedPacket):
-        return packet.packet
-    return packet
 
 
 def resolve_packet_path(*, tmpdir: str, change_slug: str) -> Path:
@@ -462,35 +435,31 @@ def prepare_run_packet(
     run_succeeded: bool,
     change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
-) -> PreparedPacket:
-    """Assemble once. ``None`` packet means skip write/approval, never rebuild."""
+) -> MergeEvidencePacket | None:
+    """Assemble once. ``None`` means skip write/approval, never rebuild."""
     resolved = change_id or _change_id(ctx)
     if resolved is None:
-        return PreparedPacket(None)
+        return None
     try:
-        return PreparedPacket(
-            build_run_packet(
-                ctx,
-                change_id=resolved,
-                run_succeeded=run_succeeded,
-                extra_findings=extra_findings,
-            )
+        return build_run_packet(
+            ctx,
+            change_id=resolved,
+            run_succeeded=run_succeeded,
+            extra_findings=extra_findings,
         )
     except Exception as err:
         logger.warning("evidence packet: assembly failed — {}", err)
-        return PreparedPacket(None)
+        return None
 
 
 def emit_run_packet(
     ctx: ToolContext,
     *,
-    run_succeeded: bool,
     change_id: str | None = None,
-    extra_findings: list[Finding] | None = None,
     output_path: Path | None = None,
     verdict_prediction: Any | None = None,
     actual_outcome: str | None = None,
-    packet: MergeEvidencePacket | PreparedPacket | None = None,
+    packet: MergeEvidencePacket | None = None,
 ) -> Path | None:
     """Write this run's evidence packet; return its path.
 
@@ -500,11 +469,9 @@ def emit_run_packet(
     "the run is broken".
 
     Assembly belongs on :func:`prepare_run_packet` / :func:`build_run_packet`.
-    ``run_succeeded`` and ``extra_findings`` are accepted for call-site
-    compatibility and ignored here.
+    Pass that result as ``packet``; this function does not rebuild.
     """
-    _ = (run_succeeded, extra_findings)
-    assembled = take_prepared_packet(packet)
+    assembled = packet
     if assembled is None:
         return None
     resolved_change_id = change_id or assembled.change_id or _change_id(ctx)
@@ -577,12 +544,10 @@ def emit_run_packet(
 
 __all__ = [
     "PACKET_FILENAME",
-    "PreparedPacket",
     "build_run_packet",
     "changed_paths_from_diff",
     "classify_run_blast_radius",
     "emit_run_packet",
     "prepare_run_packet",
     "resolve_packet_path",
-    "take_prepared_packet",
 ]

@@ -175,7 +175,7 @@ async def test_report_status_checks_anchors_approval_to_pr_head_sha(
 async def test_report_status_checks_skips_approval_when_packet_omitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Omitted ``None`` skips approval without assembling, same as PreparedPacket(None)."""
+    """Omitted ``None`` skips approval without assembling."""
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
     calls = {"n": 0}
@@ -228,9 +228,7 @@ async def test_report_status_checks_skips_approval_without_rebuilding_failed_pac
         raise RuntimeError(msg)
 
     monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
-    from mergecraft.evidence.run_packet import PreparedPacket
-
-    await report_status_checks(ctx, run_succeeded=True, packet=PreparedPacket(None))
+    await report_status_checks(ctx, run_succeeded=True, packet=None)
     assert calls["n"] == 0
     names = [run.get("name") for run in github.check_runs]
     assert COMPLETION_CHECK in names

@@ -36,7 +36,6 @@ from mergecraft.run_outcome import CompletionConclusion
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.evidence.packet import MergeEvidencePacket
-    from mergecraft.evidence.run_packet import PreparedPacket
     from mergecraft.mcp.context import ToolContext
 
 COMPLETION_CHECK = "mergecraft"
@@ -95,7 +94,7 @@ async def report_status_checks(
     run_succeeded: bool,
     failure_reason: str | None = None,
     conclusion: CompletionConclusion | None = None,
-    packet: MergeEvidencePacket | PreparedPacket | None = None,
+    packet: MergeEvidencePacket | None = None,
 ) -> None:
     """Post opt-in status checks. Best-effort; never raises into the run outcome.
 
@@ -171,13 +170,9 @@ async def report_status_checks(
     # D7 / #460: the packet already ran ``decide_approval``. Reuse
     # ``packet.decision.verdict`` so this layer only posts check-runs.
     # Best-effort: never raise after the completion check-run has posted.
-    from mergecraft.evidence.run_packet import take_prepared_packet
-
-    assembled = take_prepared_packet(packet)
-    if assembled is None:
+    if packet is None:
         logger.debug("status checks: no packet; skipping approval check")
         return
-    packet = assembled
 
     try:
         tier: TrustTier = ctx.trust_tier

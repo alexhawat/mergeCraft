@@ -238,3 +238,13 @@ def test_provider_failure_reuses_try_load_json() -> None:
         status_code=404,
     )
     assert classified == ProviderFailureClass.BILLING
+
+
+def test_provider_failure_skips_leading_json_array_before_404_object() -> None:
+    """A leading ``[1]`` must not make a later structured 404 look unstructured."""
+    from mergecraft.utils.provider_failure import ProviderFailureClass, classify_provider_failure
+
+    stderr = '[1]\n{"statusCode":404,"message":"Not Found"}'
+    classified = classify_provider_failure(stderr)
+    assert classified == ProviderFailureClass.HTTP_404
+    assert _is_retryable_failure(_failed(stderr)) is True

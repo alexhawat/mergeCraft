@@ -173,15 +173,11 @@ async def collect_ci_sarif_findings(
 
     from mergecraft.ci.evidence import sarif_findings
     from mergecraft.mcp.tool_state import primary_repo_state
-    from mergecraft.scm.github import GitHubScmAdapter
 
     repo_root = Path(primary_repo_state(ctx.tool_state).dir)
     findings: list[Finding] = []
     try:
         scm = ctx.scm
-        if not isinstance(scm, GitHubScmAdapter):
-            msg = "SARIF listing requires a GitHub SCM adapter"
-            raise RuntimeError(msg)
         runs = await scm.list_workflow_runs_for_check_suite(
             ctx.repo.owner, ctx.repo.name, check_suite_id
         )

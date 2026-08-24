@@ -428,7 +428,6 @@ def test_trajectory_findings_reach_the_packet_from_a_real_run(tmp_path: Any) -> 
 
     written = emit_run_packet(
         ctx,
-        run_succeeded=True,
         packet=prepare_run_packet(ctx, run_succeeded=True),
     )
     assert written is not None

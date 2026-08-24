@@ -120,7 +120,6 @@ def _emit_offline_packet(
     )
     written = emit_run_packet(
         tool_context,
-        run_succeeded=run_succeeded,
         change_id=change_id,
         output_path=output_path,
         packet=prepared,

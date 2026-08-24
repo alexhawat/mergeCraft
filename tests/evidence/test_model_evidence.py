@@ -68,7 +68,6 @@ def _emit(tmp_path: Path, **kwargs: Any) -> dict[str, Any]:
     ctx = _make_ctx(tmp_path, **kwargs)
     written = emit_run_packet(
         ctx,
-        run_succeeded=True,
         packet=prepare_run_packet(ctx, run_succeeded=True),
     )
     assert written is not None

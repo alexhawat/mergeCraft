@@ -146,3 +146,23 @@ def test_truncated_mypy_jsonl_is_converter_failure_not_partial_scan() -> None:
 def test_bandit_non_object_results_row_is_converter_failure() -> None:
     with pytest.raises(ConverterError, match="non-object"):
         bandit_to_sarif('{"results": ["not-an-object"]}')
+
+
+def test_as_line_uses_coerce_line_strict_not_a_second_type_ladder() -> None:
+    import inspect
+
+    from mergecraft.analyzers.parsers._common import coerce_line
+
+    source = inspect.getsource(_MOD._as_line)
+    assert "isinstance" not in source
+    assert "strict=True" in source
+    assert coerce_line(None, strict=True) == 1
+    assert coerce_line("nope") == 1
+    with pytest.raises(ValueError, match="line number"):
+        coerce_line("nope", strict=True)
+    with pytest.raises(ValueError, match="line number"):
+        coerce_line(True, strict=True)
+    with pytest.raises(ConverterError, match="line number"):
+        _MOD._as_line("nope")
+    with pytest.raises(ConverterError, match="line number"):
+        _MOD._as_line(True)

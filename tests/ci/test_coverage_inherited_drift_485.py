@@ -1,24 +1,18 @@
-"""#485 — inherited-drift attribution is reachable, or the dead branch is gone (D9).
+"""#485 — inherited-drift attribution is reachable (D9 Fork A).
 
 Locked D9 (open-issues-sweep-2026-08-24-a):
 
 - Attribution (1): base already below the floor → inherited.
 - Attribution (2): head dropped versus a base at/above the floor → caused.
-- Attribution (3): ``INHERITED_BREACH_MARGIN`` / ``INHERITED_DRIFT_THRESHOLD``
-  inherited-drift when the base is already at the floor and head is at least
-  that many points below the floor.
+- Attribution (3): ``INHERITED_BREACH_MARGIN`` inherited-drift when the base is
+  already at the floor and head is at least that many points below the floor.
 
-Today (3) is dead: ``compare_to_base`` classifies ``head < base`` first, so the
-margin branch never runs. Impl may **either** reorder so a fixture can hit (3)
-**or** delete the dead branch and the constant. No third attribution.
-
-These assertions fail until one of those forks lands. Do not xfail.
+Impl kept Fork A: reorder so the margin branch runs. Pin that behavior.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import json
 import re
 import sys
@@ -100,7 +94,7 @@ def test_attribution_2_drop_staying_above_floor_is_caused_and_non_fatal(
 
 
 def test_attribution_2_drop_shallower_than_margin_stays_caused(tmp_path: Path) -> None:
-    """Edge (2): below-floor drop shallower than the 1.0pp margin stays caused under both D9 forks."""
+    """Edge (2): below-floor drop shallower than the 1.0pp margin stays caused."""
     module = _load_module()
     compare = _compare_fn(module)
     base = _coverage_json(tmp_path / "base.json", 83.0)
@@ -137,55 +131,29 @@ def test_missing_coverage_report_raises_file_not_found(tmp_path: Path) -> None:
         compare(missing, base, floor=_FLOOR)
 
 
-def test_d9_inherited_drift_is_reachable_or_dead_branch_and_constant_removed(
-    tmp_path: Path,
-) -> None:
-    """D9 XOR: fixture hits inherited-drift (3), or the constant and dead branch are gone.
-
-    Fixture: base already at the floor, head ≥ 1.0pp below the floor (also below base).
-    Today this is classified as caused (2) while ``INHERITED_BREACH_MARGIN`` still
-    exists — that is the bug. Green after either D9 fork; no third attribution.
-    """
+def test_d9_inherited_drift_margin_branch_is_reachable(tmp_path: Path) -> None:
+    """D9 Fork A: base at floor and head ≥ 1.0pp below the floor is inherited-drift."""
     module = _load_module()
     compare = _compare_fn(module)
     base = _coverage_json(tmp_path / "base.json", _FLOOR)
     head = _coverage_json(tmp_path / "head.json", _FLOOR - 1.5)
 
     result = compare(head, base, floor=_FLOOR)
-    constant_name = _drift_constant_name(module)
-    source = inspect.getsource(compare)
-    inherited_true = len(re.findall(r"inherited\s*=\s*True", source))
 
-    if constant_name is not None:
-        assert result.inherited is True, (
-            f"D9: {constant_name} is still defined but base-at-floor / "
-            f"head {_FLOOR - 1.5:.1f}% vs floor {_FLOOR:.1f}% did not take "
-            "the inherited-drift branch. Reorder compare_to_base so the "
-            "margin can fire, or delete the constant and the dead branch."
-        )
-        assert result.caused_by_change is False
-        assert result.base_percent + 1e-9 >= result.floor
-        assert "base branch" not in result.message.lower()
-        assert "inherited" in result.message.lower()
-        return
-
-    assert result.inherited is False
-    assert result.caused_by_change is True
-    assert inherited_true == 1, (
-        "D9 delete-fork: with the margin constant gone, compare_to_base must "
-        "keep only attribution (1) as inherited=True (dead branch removed). "
-        f"Found {inherited_true} inherited=True assignments."
-    )
-    for name in _MARGIN_NAMES:
-        assert name not in source
+    assert _drift_constant_name(module) is not None
+    assert result.inherited is True
+    assert result.caused_by_change is False
+    assert result.base_percent + 1e-9 >= result.floor
+    assert "base branch" not in result.message.lower()
+    assert "inherited" in result.message.lower()
 
 
-def test_d9_cli_matches_inherited_drift_or_caused_remaining_attribution(
+def test_d9_cli_reports_inherited_drift_for_margin_fixture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Functional: main() exit 1 for the D9 fixture; message follows the chosen fork."""
+    """Functional: main() exit 1 and inherited-drift for the D9 Fork A fixture."""
     module = _load_module()
     fail_under = getattr(module, "_fail_under_from_pyproject", None)
     if callable(fail_under):
@@ -198,19 +166,11 @@ def test_d9_cli_matches_inherited_drift_or_caused_remaining_attribution(
     code = module.main([str(head.name), "--base", str(base.name)])
     captured = capsys.readouterr()
     combined = f"{captured.out}\n{captured.err}".lower()
-    constant_name = _drift_constant_name(module)
 
     assert code == 1
-    if constant_name is not None:
-        assert "inherited" in combined, (
-            "D9 reorder-fork: CLI must report inherited-drift for base-at-floor "
-            f"head {_FLOOR - 1.5:.1f}% (constant {constant_name} still present)."
-        )
-        assert "base branch" not in captured.out.lower()
-        return
-
-    assert "caused" in combined
-    assert "inherited" not in combined
+    assert _drift_constant_name(module) is not None
+    assert "inherited" in combined
+    assert "base branch" not in captured.out.lower()
 
 
 def test_no_third_attribution_flags(tmp_path: Path) -> None:

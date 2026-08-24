@@ -88,21 +88,10 @@ def _sarif(*, tool: str, results: list[SarifResult]) -> SarifLog:
 
 def _as_line(value: object, *, default: int = 1) -> int:
     """Parse a SARIF line number, wrapping conversion errors."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        msg = f"invalid line number: {value!r}"
-        raise ConverterError(msg)
-    if isinstance(value, str):
-        try:
-            int(value.strip())
-        except ValueError as exc:
-            msg = f"invalid line number: {value!r}"
-            raise ConverterError(msg) from exc
-    elif not isinstance(value, (int, float)):
-        msg = f"invalid line number: {value!r}"
-        raise ConverterError(msg)
-    return coerce_line(value, default=default)
+    try:
+        return coerce_line(value, default=default, strict=True)
+    except ValueError as exc:
+        raise ConverterError(str(exc)) from exc
 
 
 def _result(

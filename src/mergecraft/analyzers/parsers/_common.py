@@ -212,8 +212,18 @@ def load_jsonl_objects(raw: str) -> list[dict[str, Any]]:
     raise ValueError(msg)
 
 
-def coerce_line(value: object, *, default: int = 1) -> int:
+def coerce_line(value: object, *, default: int = 1, strict: bool = False) -> int:
+    """Return a 1-based line number.
+
+    ``strict=False`` (parsers) maps unusable values to ``default``.
+    ``strict=True`` (SARIF converter) raises ``ValueError`` instead.
+    """
+    if value is None:
+        return default
     if isinstance(value, bool):
+        if strict:
+            msg = f"invalid line number: {value!r}"
+            raise ValueError(msg)
         return default
     if isinstance(value, int):
         return max(value, 1)
@@ -223,7 +233,13 @@ def coerce_line(value: object, *, default: int = 1) -> int:
         try:
             return max(int(value.strip()), 1)
         except ValueError:
+            if strict:
+                msg = f"invalid line number: {value!r}"
+                raise ValueError(msg) from None
             return default
+    if strict:
+        msg = f"invalid line number: {value!r}"
+        raise ValueError(msg)
     return default
 
 

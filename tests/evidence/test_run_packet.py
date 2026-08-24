@@ -19,7 +19,6 @@ import pytest
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION
 from mergecraft.evidence.run_packet import (
-    PreparedPacket,
     build_run_packet,
     changed_paths_from_diff,
     classify_run_blast_radius,
@@ -144,8 +143,6 @@ def _emit(
         )
     return emit_run_packet(
         ctx,
-        run_succeeded=run_succeeded,
-        extra_findings=extra_findings,
         packet=packet,
         **kwargs,
     )
@@ -223,7 +220,7 @@ def test_self_assessment_alone_never_yields_auto_merge(tmp_path: Path) -> None:
 
 def test_non_pr_run_emits_nothing(tmp_path: Path) -> None:
     """A run with no proposed merge has no change to attest to."""
-    assert emit_run_packet(_make_ctx(tmp_path, is_pr=False), run_succeeded=True) is None
+    assert emit_run_packet(_make_ctx(tmp_path, is_pr=False)) is None
 
 
 def test_emission_never_raises_into_the_run(tmp_path: Path) -> None:
@@ -232,8 +229,8 @@ def test_emission_never_raises_into_the_run(tmp_path: Path) -> None:
     ctx.tool_state.repos.clear()  # primary_repo_state() will raise
 
     prepared = prepare_run_packet(ctx, run_succeeded=True)
-    assert prepared.packet is None
-    assert emit_run_packet(ctx, run_succeeded=True, packet=prepared) is None
+    assert prepared is None
+    assert emit_run_packet(ctx, packet=prepared) is None
 
 
 def test_emit_run_packet_does_not_rebuild_when_packet_ready(
@@ -249,7 +246,7 @@ def test_emit_run_packet_does_not_rebuild_when_packet_ready(
         raise RuntimeError(msg)
 
     monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
-    written = emit_run_packet(ctx, run_succeeded=True, packet=packet)
+    written = emit_run_packet(ctx, packet=packet)
     assert calls["n"] == 0
     assert written is not None
     assert json.loads(written.read_text(encoding="utf-8"))["change_id"] == packet.change_id
@@ -630,9 +627,22 @@ def test_emit_run_packet_skips_without_rebuild_when_packet_omitted(
         raise RuntimeError(msg)
 
     monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
-    assert emit_run_packet(ctx, run_succeeded=True) is None
-    assert emit_run_packet(ctx, run_succeeded=True, packet=PreparedPacket(None)) is None
+    assert emit_run_packet(ctx) is None
+    assert emit_run_packet(ctx, packet=None) is None
     assert calls["n"] == 0
+
+
+def test_emit_and_status_do_not_accept_unused_assembly_kwargs() -> None:
+    import inspect
+
+    from mergecraft.utils.status_checks import report_status_checks
+
+    emit_params = inspect.signature(emit_run_packet).parameters
+    assert "run_succeeded" not in emit_params
+    assert "extra_findings" not in emit_params
+    status_params = inspect.signature(report_status_checks).parameters
+    assert "extra_findings" not in status_params
+    assert "run_succeeded" in status_params
 
 
 def test_deterministic_checks_unknown_id_is_keyerror_only(

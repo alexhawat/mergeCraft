@@ -202,7 +202,6 @@ async def test_github_failure_leaves_the_gate_report_unchanged(tmp_path: Path) -
 def _packet(ctx: ToolContext, tmp_path: Path) -> dict[str, Any]:
     written = emit_run_packet(
         ctx,
-        run_succeeded=True,
         output_path=tmp_path / "packet.json",
         packet=prepare_run_packet(ctx, run_succeeded=True),
     )

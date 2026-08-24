@@ -12,7 +12,6 @@ from loguru import logger
 
 from mergecraft.ci.log_excerpt import analyze_log
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
-from mergecraft.scm.github import GitHubScmAdapter
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
@@ -41,9 +40,6 @@ class GitHubActionsProvider:
     ) -> dict[str, Any]:
         """Download failed workflow logs for a check suite (legacy MCP contract)."""
         scm = ctx.scm
-        if not isinstance(scm, GitHubScmAdapter):
-            msg = "log download requires a GitHub SCM adapter"
-            raise RuntimeError(msg)
         runs = await scm.list_workflow_runs_for_check_suite(
             ctx.repo.owner, ctx.repo.name, check_suite_id
         )

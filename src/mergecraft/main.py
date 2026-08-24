@@ -377,7 +377,6 @@ async def _publish(
         written = await asyncio.to_thread(
             emit_run_packet,
             tool_context,
-            run_succeeded=run_ok,
             packet=prepared,
             verdict_prediction=verdict_prediction,
             actual_outcome=actual_outcome,

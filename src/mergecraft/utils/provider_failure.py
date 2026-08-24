@@ -11,7 +11,7 @@ import re
 from enum import StrEnum
 from typing import Any, Final
 
-from mergecraft.utils.json_load import try_load_json
+from mergecraft.utils.json_load import try_load_json_object
 
 # CLI wrappers: treat these exit codes as rate-limit / overloaded (retryable
 # for model-chain advance — never blindly re-issue a mutating CLI invoke).
@@ -138,8 +138,7 @@ def _looks_like_billing(
 
 
 def _provider_json_object(stderr: str) -> dict[str, Any] | None:
-    parsed = try_load_json(stderr)
-    return parsed if isinstance(parsed, dict) else None
+    return try_load_json_object(stderr)
 
 
 def _message_from_payload(payload: dict[str, Any] | None) -> str:
