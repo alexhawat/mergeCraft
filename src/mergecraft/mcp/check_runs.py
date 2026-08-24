@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.utils.github import require_github_listed
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -29,9 +28,7 @@ def _with_suite_id(run: dict[str, Any]) -> dict[str, Any]:
 def list_check_runs_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         ref = str(params["ref"])
-        listed = require_github_listed(
-            await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
-        )
+        listed = await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
         if listed.incomplete:
             # Same fail-closed policy as check-suite logs / CI intelligence /
             # gate substitution: a truncated walk must not look like a complete

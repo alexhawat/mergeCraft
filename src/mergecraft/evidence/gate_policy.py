@@ -77,7 +77,7 @@ GateActionPolicy = dict[RuleId, GateAction]
 # Named rules in ``select_rule_id`` order (not including the catch-all).
 # ``agents.gates._RULE_PREDICATES`` walks the same keys; ``schema_failure``
 # is appended below and is never listed in the predicate table.
-_NAMED_GATE_POLICY_ROWS: Final[tuple[tuple[str, GateAction], ...]] = (
+NAMED_GATE_POLICY_ROWS: Final[tuple[tuple[str, GateAction], ...]] = (
     ("high_risk_migration", GateAction.REQUIRE_HUMAN_REVIEW),
     ("low_risk_passing", GateAction.AUTO_MERGE),
     ("has_blockers", GateAction.REQUEST_CHANGES),
@@ -89,13 +89,14 @@ _NAMED_GATE_POLICY_ROWS: Final[tuple[tuple[str, GateAction], ...]] = (
 # order is not match priority; ``select_rule_id`` chooses the key.
 DEFAULT_GATE_POLICIES: Final[GateActionPolicy] = {
     "schema_failure": GateAction.BLOCK,
-    **{rule_id: action for rule_id, action in _NAMED_GATE_POLICY_ROWS},
+    **{rule_id: action for rule_id, action in NAMED_GATE_POLICY_ROWS},
 }
 
 
 __all__ = [
     "DEFAULT_GATE_POLICIES",
     "GATE_ACTIONS",
+    "NAMED_GATE_POLICY_ROWS",
     "GateAction",
     "GateActionPolicy",
     "RuleId",

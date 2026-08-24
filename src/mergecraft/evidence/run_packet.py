@@ -392,7 +392,8 @@ def _shadow_run_id(ctx: ToolContext) -> str:
     run_id = os.environ.get("GITHUB_RUN_ID")
     if run_id:
         return run_id
-    delivery_id = getattr(getattr(ctx, "payload", None), "delivery_id", None)
+    extra = ctx.payload.extra
+    delivery_id = extra.get("delivery_id") or extra.get("deliveryId")
     if isinstance(delivery_id, str) and delivery_id:
         return delivery_id
     return "local"

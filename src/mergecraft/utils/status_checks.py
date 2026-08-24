@@ -106,9 +106,8 @@ async def report_status_checks(
     ``packet.decision.verdict`` and is skipped when ``packet`` is None.
     """
     payload = ctx.payload
-    status_enabled = getattr(payload, "status_checks", False) or (
-        isinstance(getattr(payload, "extra", None), dict)
-        and bool(payload.extra.get("statusChecks") or payload.extra.get("status_checks"))
+    status_enabled = payload.status_checks or bool(
+        payload.extra.get("statusChecks") or payload.extra.get("status_checks")
     )
     if not status_enabled:
         return

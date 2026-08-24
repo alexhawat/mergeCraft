@@ -16,7 +16,8 @@ from mergecraft.mcp.ci_intelligence import analyze_ci_failures_tool
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
-from mergecraft.utils.github import GitHubClient, GitHubListedItems
+from mergecraft.scm.types import ListedItems
+from mergecraft.utils.github import GitHubClient
 
 
 class _FakeGitHub(GitHubClient):
@@ -146,7 +147,7 @@ async def test_analyze_ci_failures_listing_failure_is_unavailable_not_an_error(
     class _ListingFailGitHub(GitHubClient):
         async def list_workflow_runs_for_check_suite(
             self, *_args: object, **_kwargs: object
-        ) -> GitHubListedItems:
+        ) -> ListedItems:
             msg = "check-suite run listing failed"
             raise RuntimeError(msg)
 
@@ -172,8 +173,8 @@ async def test_analyze_ci_failures_incomplete_listing_is_unavailable(
     class _IncompleteGitHub(GitHubClient):
         async def list_workflow_runs_for_check_suite(
             self, *_args: object, **_kwargs: object
-        ) -> GitHubListedItems:
-            return GitHubListedItems(
+        ) -> ListedItems:
+            return ListedItems(
                 items=[{"id": 1, "conclusion": "failure", "name": "ci"}],
                 incomplete=True,
             )

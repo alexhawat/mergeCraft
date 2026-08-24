@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from mergecraft.config.settings import default_settings
+from mergecraft.scm.types import ListedItems
 from mergecraft.utils.github import (
     DEFAULT_API_URL,
     GitHubClient,
@@ -324,11 +325,24 @@ async def test_paginate_mixed_non_dict_rows_is_incomplete() -> None:
     assert listed.incomplete is True
 
 
-def test_require_github_listed_rejects_bare_list() -> None:
-    from mergecraft.utils.github import require_github_listed
+def test_require_listed_rejects_bare_list() -> None:
+    from mergecraft.scm.types import require_listed
 
     with pytest.raises(TypeError, match="ListedItems"):
-        require_github_listed([{"id": 1}])
+        require_listed([{"id": 1}])
+
+
+@pytest.mark.asyncio
+async def test_list_issue_comments_rejects_non_dict_rows() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/issues/1/comments")
+        return httpx.Response(200, json=[{"id": 1}, "skip"])
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://api.github.com") as raw:
+        client = GitHubClient("t", client=raw)
+        with pytest.raises(TypeError, match="object rows"):
+            await client.list_issue_comments("acme", "widgets", 1)
 
 
 @pytest.mark.asyncio
@@ -354,12 +368,12 @@ async def test_list_check_runs_for_ref_keeps_api_total_when_walk_is_incomplete(
     async def _truncated(
         fetch_page: Any,
         **_kwargs: Any,
-    ) -> github_mod.GitHubListedItems:
+    ) -> ListedItems:
         payload = await fetch_page(1)
         assert isinstance(payload, dict)
         runs = payload["check_runs"]
         assert isinstance(runs, list)
-        return github_mod.GitHubListedItems(items=runs, incomplete=True, total_count=500)
+        return ListedItems(items=runs, incomplete=True, total_count=500)
 
     monkeypatch.setattr(github_mod, "paginate_github_list_pages", _truncated)
 

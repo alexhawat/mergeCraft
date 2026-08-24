@@ -12,7 +12,8 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.server import build_common_tools
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
-from mergecraft.utils.github import GitHubClient, GitHubListedItems
+from mergecraft.scm.types import ListedItems
+from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,9 +39,9 @@ class _RecordingGitHub(GitHubClient):
         repo: str,
         ref: str,
         **kwargs: Any,
-    ) -> GitHubListedItems:
+    ) -> ListedItems:
         self.run_calls.append((owner, repo, ref))
-        return GitHubListedItems(
+        return ListedItems(
             items=[
                 {
                     "id": RUN_ID,
@@ -206,9 +207,9 @@ async def test_list_check_runs_incomplete_omits_partial_catalog(tmp_path: Path) 
             repo: str,
             ref: str,
             **kwargs: Any,
-        ) -> GitHubListedItems:
+        ) -> ListedItems:
             self.run_calls.append((owner, repo, ref))
-            return GitHubListedItems(
+            return ListedItems(
                 items=[{"id": RUN_ID, "name": RUN_NAME, "check_suite": {"id": SUITE_ID}}],
                 incomplete=True,
                 total_count=500,

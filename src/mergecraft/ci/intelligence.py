@@ -12,7 +12,6 @@ from loguru import logger
 
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 from mergecraft.scm.github import github_client_from_scm
-from mergecraft.utils.github import require_github_listed
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -214,8 +213,8 @@ async def collect_ci_sarif_findings(
         if not isinstance(run_id, int):
             continue
         try:
-            listed = require_github_listed(
-                await ctx.scm.list_workflow_run_artifacts(ctx.repo.owner, ctx.repo.name, run_id)
+            listed = await ctx.scm.list_workflow_run_artifacts(
+                ctx.repo.owner, ctx.repo.name, run_id
             )
         except Exception as listing_err:
             logger.warning(
@@ -280,10 +279,8 @@ async def run_ci_intelligence(
         suite = unbound_check_suite_logs(check_suite_id)
     else:
         try:
-            listed = require_github_listed(
-                await client.list_workflow_runs_for_check_suite(
-                    ctx.repo.owner, ctx.repo.name, check_suite_id
-                )
+            listed = await client.list_workflow_runs_for_check_suite(
+                ctx.repo.owner, ctx.repo.name, check_suite_id
             )
         except Exception as err:
             return _unavailable_ci_intelligence(

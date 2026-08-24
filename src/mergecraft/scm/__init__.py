@@ -12,8 +12,10 @@ from mergecraft.scm.protocol import (
     protocol_supports_github_operations,
     validate_provider,
 )
+from mergecraft.scm.types import ListedItems
 
 __all__ = [
+    "ListedItems",
     "ScmCapability",
     "ScmProvider",
     "UnsupportedScmCapability",

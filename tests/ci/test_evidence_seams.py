@@ -31,7 +31,8 @@ from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
-from mergecraft.utils.github import GitHubClient, GitHubListedItems
+from mergecraft.scm.types import ListedItems
+from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,9 +54,9 @@ class _CheckRunGitHub(GitHubClient):
         repo: str,
         ref: str,
         **kwargs: Any,
-    ) -> GitHubListedItems:
+    ) -> ListedItems:
         self.refs.append(ref)
-        return GitHubListedItems(
+        return ListedItems(
             items=list(self._check_runs),
             incomplete=False,
             total_count=len(self._check_runs),
@@ -149,9 +150,9 @@ async def test_incomplete_check_run_listing_does_not_substitute_the_gate(
             repo: str,
             ref: str,
             **kwargs: Any,
-        ) -> GitHubListedItems:
+        ) -> ListedItems:
             listed = await super().list_check_runs_for_ref(owner, repo, ref, **kwargs)
-            return GitHubListedItems(
+            return ListedItems(
                 items=listed.items,
                 incomplete=True,
                 total_count=500,
@@ -444,8 +445,8 @@ async def test_recorded_finding_count_is_merged_evidence_length(
     class _DummyClient:
         async def list_workflow_runs_for_check_suite(
             self, *_args: object, **_kwargs: object
-        ) -> GitHubListedItems:
-            return GitHubListedItems(items=[{"id": 1}], incomplete=False)
+        ) -> ListedItems:
+            return ListedItems(items=[{"id": 1}], incomplete=False)
 
     monkeypatch.setattr(
         "mergecraft.ci.intelligence.github_client_from_scm", lambda _scm: _DummyClient()

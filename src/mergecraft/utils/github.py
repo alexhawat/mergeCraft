@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Final, NamedTuple
+from typing import TYPE_CHECKING, Any, Final
 
 import httpx
 from loguru import logger
@@ -14,6 +14,7 @@ from mergecraft.config.settings import (
     RunContextData,
     load_repo_settings,
 )
+from mergecraft.scm.types import ListedItems
 from mergecraft.utils.retry_policy import (
     DEFAULT_STOP,
     DEFAULT_WAIT,
@@ -42,29 +43,13 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         msg = f"expected JSON array, got {type(data).__name__}"
         raise TypeError(msg)
-    return [item for item in data if isinstance(item, dict)]
-
-
-class ListedItems(NamedTuple):
-    """One SCM list walk: items plus whether the catalog is complete.
-
-    ``total_count`` is the API's reported total when present (optional).
-    """
-
-    items: list[dict[str, Any]]
-    incomplete: bool
-    total_count: int | None = None
-
-
-GitHubListedItems = ListedItems
-
-
-def require_github_listed(result: object) -> ListedItems:
-    """Reject a bare list: that must not look like a complete catalog."""
-    if isinstance(result, ListedItems):
-        return result
-    msg = f"expected ListedItems, got {type(result).__name__}"
-    raise TypeError(msg)
+    items: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            msg = f"expected JSON object rows, got {type(item).__name__}"
+            raise TypeError(msg)
+        items.append(item)
+    return items
 
 
 async def paginate_github_list_pages(
@@ -73,7 +58,7 @@ async def paginate_github_list_pages(
     item_key: str,
     page_size: int = GITHUB_LIST_PAGE_SIZE,
     max_pages: int = GITHUB_LIST_MAX_PAGES,
-) -> GitHubListedItems:
+) -> ListedItems:
     """Follow GitHub list pages until a short page or ``max_pages``.
 
     Each ``fetch_page(page)`` should return a JSON object with ``item_key``.
@@ -603,7 +588,7 @@ class GitHubClient:
         repo: str,
         ref: str,
         **kwargs: Any,
-    ) -> GitHubListedItems:
+    ) -> ListedItems:
         """List individual check runs for a commit ref (#36 gate evidence).
 
         ``list_check_suites_for_ref`` returns suites, whose conclusion is the
@@ -631,7 +616,7 @@ class GitHubClient:
         total = listed.total_count
         if total is None and not listed.incomplete:
             total = len(listed.items)
-        return GitHubListedItems(
+        return ListedItems(
             items=listed.items,
             incomplete=listed.incomplete,
             total_count=total,
@@ -642,7 +627,7 @@ class GitHubClient:
         owner: str,
         repo: str,
         check_suite_id: int,
-    ) -> GitHubListedItems:
+    ) -> ListedItems:
         """List workflow runs for a check suite (every page, not only the first 100)."""
 
         async def _fetch_page(page: int) -> Any:
@@ -662,7 +647,7 @@ class GitHubClient:
         owner: str,
         repo: str,
         run_id: int,
-    ) -> GitHubListedItems:
+    ) -> ListedItems:
         """List artifacts a workflow run uploaded (every page, not only the first 100)."""
 
         async def _fetch_page(page: int) -> Any:

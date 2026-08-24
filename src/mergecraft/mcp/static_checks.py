@@ -16,7 +16,6 @@ from mergecraft.ci.evidence import (
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.review_checks import declared_cannot_run_outcomes, plan_checks, run_checks
-from mergecraft.utils.github import require_github_listed
 
 if TYPE_CHECKING:
     from mergecraft.ci.evidence import GateSubstitution
@@ -104,9 +103,7 @@ async def _apply_ci_evidence(
         logger.debug("ci evidence: no checkout SHA on this run — skipping gate substitution")
         return outcomes, []
     try:
-        listed = require_github_listed(
-            await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
-        )
+        listed = await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
     except Exception as err:
         logger.warning("ci evidence: could not read check runs for {} — {}", ref, err)
         return outcomes, []
@@ -118,7 +115,7 @@ async def _apply_ci_evidence(
         )
         return outcomes, []
 
-    check_runs = [run for run in listed.items if isinstance(run, dict)]
+    check_runs = listed.items
     if not check_runs:
         return outcomes, []
 

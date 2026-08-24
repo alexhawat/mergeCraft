@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Final, Union, overload
 from loguru import logger
 
 from mergecraft.evidence.gate_policy import (
-    _NAMED_GATE_POLICY_ROWS,
     DEFAULT_GATE_POLICIES,
+    NAMED_GATE_POLICY_ROWS,
     GateAction,
 )
 from mergecraft.evidence.gate_policy import GateActionPolicy as GateActionPolicy
@@ -418,7 +418,7 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
 
 
 # Ordered ``(predicate, rule_id, action)`` rows; first match wins.
-# Keys and actions come from ``_NAMED_GATE_POLICY_ROWS`` so
+# Keys and actions come from ``NAMED_GATE_POLICY_ROWS`` so
 # ``DEFAULT_GATE_POLICIES`` cannot drift from this table.
 # Catch-all ``schema_failure`` is not listed (see ``select_rule_id``).
 # Tests pin ``has_blockers`` before ``changed-unread-file`` / ``tool_loop``.
@@ -432,14 +432,8 @@ _PREDICATE_BY_RULE: Final[dict[str, Callable[[MergeEvidencePacket], bool]]] = {
 _RULE_PREDICATES: Final[
     tuple[tuple[Callable[[MergeEvidencePacket], bool], str, GateAction], ...]
 ] = tuple(
-    (_PREDICATE_BY_RULE[rule_id], rule_id, action) for rule_id, action in _NAMED_GATE_POLICY_ROWS
+    (_PREDICATE_BY_RULE[rule_id], rule_id, action) for rule_id, action in NAMED_GATE_POLICY_ROWS
 )
-if {
-    "schema_failure": GateAction.BLOCK,
-    **{rule_id: action for _predicate, rule_id, action in _RULE_PREDICATES},
-} != DEFAULT_GATE_POLICIES:
-    msg = "DEFAULT_GATE_POLICIES drifted from _RULE_PREDICATES"
-    raise RuntimeError(msg)
 
 
 def select_rule_id(packet: MergeEvidencePacket) -> str:

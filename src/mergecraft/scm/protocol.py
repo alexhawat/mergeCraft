@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from mergecraft.utils.github import ListedItems
+    from mergecraft.scm.types import ListedItems
 
 # GitHub REST helpers exercised today (mirrors tests/scm/test_protocol.py).
 _GITHUB_REST_OPERATIONS: frozenset[str] = frozenset(
