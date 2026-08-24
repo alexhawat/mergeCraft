@@ -39,8 +39,6 @@ runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
 
-BD_XFAIL = pytest.mark.xfail(reason="green after BD impl", strict=False)
-
 DEEPSEEK_V4 = "deepseek/deepseek-v4-flash"
 TENCENT_HY3 = "tencent/hy3"
 ACME_MODEL = "gateway-model-1"
@@ -112,7 +110,6 @@ def _resolved_chain(tmp_path: Path, role: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_help_lists_setmodel_and_addbackupmodel_verbs() -> None:
     _require_setmodel_commands()
     result = _invoke("agents", "--help")
@@ -122,7 +119,6 @@ def test_agents_help_lists_setmodel_and_addbackupmodel_verbs() -> None:
     assert "addbackupmodel" in output
 
 
-@BD_XFAIL
 def test_agents_setmodel_help_documents_flags() -> None:
     _require_setmodel_commands()
     result = _invoke("agents", "setmodel", "--help")
@@ -138,7 +134,6 @@ def test_agents_setmodel_help_documents_flags() -> None:
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_setmodel_replaces_primary_preserves_backups(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -175,7 +170,6 @@ def test_agents_setmodel_replaces_primary_preserves_backups(
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_addbackupmodel_appends_to_chain(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -204,7 +198,6 @@ def test_agents_addbackupmodel_appends_to_chain(
     assert agents_model_chain(config, "reviewer") == [primary, backup]
 
 
-@BD_XFAIL
 def test_agents_addbackupmodel_twice_yields_two_distinct_backups_in_order(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -245,7 +238,6 @@ def test_agents_addbackupmodel_twice_yields_two_distinct_backups_in_order(
     assert agents_model_chain(config, "reviewer") == [primary, backup_one, backup_two]
 
 
-@BD_XFAIL
 def test_agents_addbackupmodel_rejects_duplicate_backup(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -280,7 +272,6 @@ def test_agents_addbackupmodel_rejects_duplicate_backup(
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_setmodel_unregistered_provider_fails_at_write_time(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -310,7 +301,6 @@ def test_agents_setmodel_unregistered_provider_fails_at_write_time(
     assert agents_model_chain(config, "reviewer") == [primary]
 
 
-@BD_XFAIL
 def test_agents_setmodel_unregistered_model_fails_at_write_time(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -340,7 +330,6 @@ def test_agents_setmodel_unregistered_model_fails_at_write_time(
     assert agents_model_chain(config, "reviewer") == [primary]
 
 
-@BD_XFAIL
 def test_agents_addbackupmodel_unregistered_pair_fails_at_write_time(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -375,7 +364,6 @@ def test_agents_addbackupmodel_unregistered_pair_fails_at_write_time(
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_set_preserves_backup_chain_after_model_override(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -408,7 +396,6 @@ def test_agents_set_preserves_backup_chain_after_model_override(
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_setmodel_rejects_unknown_role_lists_valid_roles(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -438,7 +425,6 @@ def test_agents_setmodel_rejects_unknown_role_lists_valid_roles(
     assert "senior-reviewer" not in before
 
 
-@BD_XFAIL
 def test_agents_addbackupmodel_rejects_unknown_role(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -467,7 +453,6 @@ def test_agents_addbackupmodel_rejects_unknown_role(
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_setmodel_interactive_picker_when_flags_omitted(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -504,7 +489,6 @@ def test_agents_setmodel_interactive_picker_when_flags_omitted(
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_setmodel_all_lists_targets_before_overwrite(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -543,7 +527,6 @@ def test_agents_setmodel_all_lists_targets_before_overwrite(
 # ---------------------------------------------------------------------------
 
 
-@BD_XFAIL
 def test_agents_setmodel_validates_binding_before_write(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
