@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The approval gate now unions agent findings with analyzer findings, so an
+  agent Critical or Major finding fails ``mergecraft-approval`` and the
+  evidence packet's ``request_changes`` action. An empty finding list still
+  stays ``neutral``; untrusted runs still never ``success``. CI SARIF is not
+  ingested here (#460)
 - A transient Nous HTTP 404 (including a false billing/credits refusal) now
   fails over to the next model instead of stopping the run and reporting a
   missing `set_output` schema failure (#466)

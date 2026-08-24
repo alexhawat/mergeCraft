@@ -41,22 +41,8 @@ APPROVAL_CHECK = "mergecraft-approval"
 Conclusion = Literal["success", "failure", "neutral"]
 
 
-def _load_structural_findings(ctx: ToolContext) -> list[Any]:
-    """Return the typed ``Finding`` objects the approval gate reads.
-
-    Reads ``ctx.tool_state.analyzer_run.findings`` (stored as dicts by the
-    analyzer pipeline) and validates them against ``analyzers.finding.Finding``.
-    Validation errors are logged at debug level and skipped — a malformed
-    analyzer row must not crash the run; it just drops from the structural set.
-    The merge-evidence plan's W1 owns the durable store; this loader is the
-    minimal hook the approval gate needs today.
-    """
-    run_state = getattr(ctx.tool_state, "analyzer_run", None)
-    if run_state is None:
-        return []
-    raw = list(getattr(run_state, "findings", []) or [])
-    if not raw:
-        return []
+def _typed_findings_from_rows(raw: list[Any]) -> list[Any]:
+    """Validate dict rows as ``Finding`` objects, skipping malformed ones."""
     from mergecraft.analyzers.finding import Finding, FindingValidationError
 
     typed: list[Any] = []
@@ -68,6 +54,39 @@ def _load_structural_findings(ctx: ToolContext) -> list[Any]:
         except FindingValidationError as err:
             logger.debug("status checks: dropping malformed finding row: {}", err)
     return typed
+
+
+def _load_structural_findings(ctx: ToolContext) -> list[Any]:
+    """Return the typed ``Finding`` objects the approval gate reads.
+
+    Unions agent findings (``ctx.tool_state.agent_findings``) with analyzer
+    findings (``ctx.tool_state.analyzer_run.findings``). CI SARIF is #464 /
+    AG and is not loaded here. Validation errors are logged at debug level
+    and skipped — a malformed row must not crash the run. Deduplicates on
+    ``fingerprint`` so an analyzer finding the agent also reported is not
+    counted twice.
+    """
+    raw: list[Any] = []
+    agent_rows = getattr(ctx.tool_state, "agent_findings", None)
+    if agent_rows:
+        raw.extend(list(agent_rows))
+    run_state = getattr(ctx.tool_state, "analyzer_run", None)
+    if run_state is not None:
+        raw.extend(list(getattr(run_state, "findings", []) or []))
+    if not raw:
+        return []
+
+    typed = _typed_findings_from_rows(raw)
+    seen: set[str] = set()
+    unique: list[Any] = []
+    for finding in typed:
+        fingerprint = getattr(finding, "fingerprint", None)
+        if isinstance(fingerprint, str) and fingerprint:
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+        unique.append(finding)
+    return unique
 
 
 async def _create_check_run(
@@ -193,14 +212,21 @@ async def report_status_checks(
         decision_summary_lines,
         log_decision,
     )
+    from mergecraft.evidence.run_packet import build_run_packet
 
-    findings = _load_structural_findings(ctx)
+    # D7 / #460: prefer ``decide_approval`` on the evidence packet so the
+    # check-run and packet.decision.verdict cannot diverge. Agent findings
+    # reach the packet through ``_load_structural_findings``.
+    change_id = f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"
+    packet = build_run_packet(ctx, change_id=change_id, run_succeeded=run_succeeded)
     tier = getattr(ctx, "trust_tier", "trusted")
-    approval_conclusion: Conclusion = decide_approval(
-        findings,
+    packet_decision = decide_approval(
+        packet,
         run_succeeded=run_succeeded,
         tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
     )
+    approval_conclusion: Conclusion = packet_decision.verdict  # type: ignore[assignment]  # — Decision.verdict is the success/failure/neutral wire shape Conclusion uses
+    findings = list(packet.findings)
     decision_inputs = approval_decision_inputs(
         findings,
         run_succeeded=run_succeeded,
