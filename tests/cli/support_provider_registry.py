@@ -222,3 +222,56 @@ def model_index_value(row: dict[str, Any]) -> int | None:
     if raw is None:
         return None
     return int(raw)
+
+
+# BD #480 — ``agents setmodel`` / ``addbackupmodel`` fixtures (D8).
+
+AGENTS_CMD_MODULE = "mergecraft.cli.agents_cmd"
+
+
+def import_agents_cmd() -> Any:
+    """Import ``mergecraft.cli.agents_cmd`` or fail with a clear message."""
+    try:
+        return importlib.import_module(AGENTS_CMD_MODULE)
+    except ImportError as exc:
+        pytest.fail(f"{AGENTS_CMD_MODULE} is not importable: {exc}")
+
+
+def format_model_slug(provider_label: str, model_id: str) -> str:
+    """Return ``provider/model`` slug for agent ``modelChain`` entries (#480)."""
+    return f"{provider_label.strip().lower()}/{model_id}"
+
+
+def agents_block(config: dict[str, Any]) -> dict[str, Any]:
+    """Return the ``agents`` mapping from a config dict."""
+    agents = config.get("agents")
+    if agents is None:
+        return {}
+    assert isinstance(agents, dict)
+    return agents
+
+
+def agents_model_chain(config: dict[str, Any], role: str) -> list[str]:
+    """Return ``modelChain`` for one agent role from raw config."""
+    entry = agents_block(config).get(role.lower(), {})
+    if not isinstance(entry, dict):
+        return []
+    chain = entry.get("modelChain")
+    if chain is None:
+        return []
+    assert isinstance(chain, list)
+    return [str(item) for item in chain]
+
+
+def write_agents_model_chain(tmp_path: Path, role: str, chain: list[str]) -> None:
+    """Persist ``agents.<role>.modelChain`` in ``.mergecraft/config.yaml``."""
+    config = read_config(tmp_path)
+    agents = config.setdefault("agents", {})
+    if not isinstance(agents, dict):
+        pytest.fail("agents block must be a mapping")
+    entry = agents.setdefault(role.lower(), {})
+    if not isinstance(entry, dict):
+        pytest.fail(f"agents.{role} must be a mapping")
+    entry["modelChain"] = list(chain)
+    path = tmp_path / ".mergecraft" / "config.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")

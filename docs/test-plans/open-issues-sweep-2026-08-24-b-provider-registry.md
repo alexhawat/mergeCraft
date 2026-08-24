@@ -253,3 +253,65 @@ make typecheck
 uv run pytest --collect-only -q tests/cli/test_model_cmd.py
 uv run pytest -q tests/cli/test_model_cmd.py  # RED: xfails expected
 ```
+
+## BD #480 — ``agents setmodel`` / ``addbackupmodel``
+
+Maps **BD RED** contracts for #480 (`agents setmodel` / `addbackupmodel`) to the test suite.
+
+### D8 — primary-only replacement + backup append → BD
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| ``setmodel`` replaces primary only; backups preserved | `tests/cli/test_agents_setmodel_cmd.py::test_agents_setmodel_replaces_primary_preserves_backups` | E2E |
+| ``addbackupmodel`` appends one entry | `…::test_agents_addbackupmodel_appends_to_chain` | E2E |
+| Two ``addbackupmodel`` calls yield ordered distinct backups | `…::test_agents_addbackupmodel_twice_yields_two_distinct_backups_in_order` | E2E |
+| Duplicate backup (same provider+model) rejected | `…::test_agents_addbackupmodel_rejects_duplicate_backup` | error |
+| ``agents set --model`` no longer wipes backup chain | `…::test_agents_set_preserves_backup_chain_after_model_override` | E2E / regression |
+
+### Registry validation at write time → BD
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Unregistered provider exits non-zero; config unchanged | `…::test_agents_setmodel_unregistered_provider_fails_at_write_time` | error |
+| Unregistered model exits non-zero; config unchanged | `…::test_agents_setmodel_unregistered_model_fails_at_write_time` | error |
+| ``addbackupmodel`` unregistered pair fails at write time | `…::test_agents_addbackupmodel_unregistered_pair_fails_at_write_time` | error |
+
+### CLI verbs + UX → BD
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| ``setmodel`` / ``addbackupmodel`` registered on agents app | `…::test_agents_help_lists_setmodel_and_addbackupmodel_verbs` | functional |
+| Help documents ``--provider`` / ``--model`` / ``--all`` | `…::test_agents_setmodel_help_documents_flags` | functional |
+| Unknown agent role exits non-zero and lists valid roles | `…::test_agents_setmodel_rejects_unknown_role_lists_valid_roles`, `…::test_agents_addbackupmodel_rejects_unknown_role` | error |
+| Interactive pickers when flags omitted | `…::test_agents_setmodel_interactive_picker_when_flags_omitted` | E2E |
+| ``--all`` lists overwrite targets before applying | `…::test_agents_setmodel_all_lists_targets_before_overwrite` | E2E |
+| ``AgentBindingOverride`` validation before file write | `…::test_agents_setmodel_validates_binding_before_write` | error |
+
+### Pinned public API (implementation wave BD)
+
+Extend `src/mergecraft/cli/agents_cmd.py`:
+
+- Typer subcommands: `setmodel` (`setmodel_cmd`), `addbackupmodel` (`addbackupmodel_cmd`)
+- Registry validation helper (e.g. `validate_registered_model_slug(provider, model_id)`) — fails at write time
+- Fix `set_cmd` so `--model` replaces primary only (D8 bug fix)
+
+Shared fixtures in `tests/cli/support_provider_registry.py`:
+
+- `format_model_slug`, `write_agents_model_chain`, `agents_model_chain`, `import_agents_cmd`
+
+### xfail reconciliation
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| BD | all `@BD_XFAIL` / `@pytest.mark.xfail(reason="green after BD impl")` in `tests/cli/test_agents_setmodel_cmd.py` |
+
+### BD verification commands
+
+```bash
+uv run pytest --collect-only -q tests/cli/test_agents_setmodel_cmd.py
+uv run pytest -q tests/cli/test_agents_setmodel_cmd.py  # RED: xfails expected
+```
+
+## BD RED evidence
+
+- BD test-author wave: pending — 15 collected, 15 xfails expected
