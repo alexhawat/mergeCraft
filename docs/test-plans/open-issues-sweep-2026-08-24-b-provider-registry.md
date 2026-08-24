@@ -388,3 +388,79 @@ uv run pytest -q tests/agents/test_registry_provider_runtime.py tests/agents/tes
 ## BE RED evidence
 
 - BE test-author wave: `f8ca1c23` — 28 collected, 28 xfails; lint+typecheck clean
+
+## BF #483 — config/secret split + ``provider migrate``
+
+Maps **BF RED** contracts for #483 (``provider migrate``, config/secret split enforcement,
+legacy shim precedence, Bedrock/Vertex ``cloud_chain`` migration) to the test suite.
+
+### D2 — config/secret split → BF
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Structure in ``.mergecraft/config.yaml`` (providers, harness, url, region) | `tests/cli/test_provider_migrate_cmd.py::test_provider_migrate_apply_writes_provider_config_and_indexed_secrets`, `…::test_provider_migrate_config_yaml_never_contains_credential_values` | E2E |
+| Secrets in ``.env`` via indexed ``LLM_PROVIDER_<N>_*`` keys | `…::test_provider_migrate_apply_writes_provider_config_and_indexed_secrets`, `tests/cli/test_provider_migrate_registry.py::test_plan_migration_lists_target_indexed_key_names_only` | E2E / unit |
+| ``.env`` must not carry harness/url/modelChain structure | `tests/cli/test_provider_migrate_cmd.py::test_provider_migrate_env_never_contains_harness_or_url_structure`, `tests/cli/test_provider_migrate_registry.py::test_validate_config_secret_split_flags_structure_in_env` | E2E / error |
+| ``config.yaml`` must not contain credential values | `tests/cli/test_provider_migrate_cmd.py::test_provider_migrate_config_yaml_never_contains_credential_values`, `tests/cli/test_provider_migrate_registry.py::test_validate_config_secret_split_flags_credential_in_yaml` | E2E / error |
+
+### ``provider migrate`` dry-run / apply → BF
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Dry-run is default; writes nothing | `tests/cli/test_provider_migrate_cmd.py::test_provider_migrate_default_is_dry_run_no_writes` | E2E |
+| Diff prints key **names** and sources, never secret values | `…::test_provider_migrate_dry_run_prints_key_names_not_secret_values[*]`, `…::test_provider_migrate_dry_run_shows_fingerprint_not_full_secret`, `tests/cli/test_provider_migrate_registry.py::test_migration_secret_fingerprint_redacts_full_value` | E2E / unit |
+| ``--apply`` writes config + indexed env keys | `tests/cli/test_provider_migrate_cmd.py::test_provider_migrate_apply_writes_provider_config_and_indexed_secrets` | E2E |
+| Idempotent re-run is a no-op | `…::test_provider_migrate_apply_idempotent_second_run_is_noop`, `tests/cli/test_provider_migrate_registry.py::test_apply_provider_migration_is_idempotent` | E2E / unit |
+| Partial manual migration completes only missing pieces | `tests/cli/test_provider_migrate_cmd.py::test_provider_migrate_apply_only_fills_missing_after_partial_manual` | E2E |
+| Deterministic index allocation across machines | `…::test_provider_migrate_deterministic_index_allocation` | E2E |
+| Ambiguous ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` refuses / prompts | `…::test_provider_migrate_ambiguous_custom_base_url_refuses_or_prompts` | error |
+
+### D7 — legacy ``*_API_KEY`` shim → BF
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Registry ``LLM_PROVIDER_<N>_API_KEY`` wins over legacy env for same provider | `tests/cli/test_provider_migrate_cmd.py::test_legacy_env_registry_key_wins_with_single_deprecation_warning`, `tests/cli/test_provider_migrate_registry.py::test_registry_credential_precedence_over_legacy_env[*]` | unit / E2E |
+| Deprecation warning names ignored legacy var; once per process | `…::test_legacy_env_registry_key_wins_with_single_deprecation_warning` | unit |
+
+### D10 — Bedrock/Vertex ``cloud_chain`` multi-secret → BF
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Bedrock maps ``AWS_*`` secrets under one ``envIndex`` (not ``_API_KEY``) | `tests/cli/test_provider_migrate_cmd.py::test_provider_migrate_bedrock_maps_multi_secret_under_one_index`, `tests/cli/test_provider_migrate_registry.py::test_cloud_chain_migration_bedrock_suffixes_under_one_index` | E2E / unit |
+| Shared ``AWS_*`` vars copied, never moved/deleted; diff says so | `tests/cli/test_provider_migrate_cmd.py::test_provider_migrate_bedrock_copies_aws_vars_leaves_originals_in_place` | E2E |
+| ``AWS_REGION`` / project / location land in config | `…::test_provider_migrate_bedrock_maps_multi_secret_under_one_index`, `…::test_provider_migrate_vertex_maps_credentials_under_one_index` | E2E |
+| Vertex credentials path under one index | `…::test_provider_migrate_vertex_maps_credentials_under_one_index`, `tests/cli/test_provider_migrate_registry.py::test_cloud_chain_migration_vertex_suffixes_under_one_index` | E2E / unit |
+
+### Pinned public API (implementation wave BF)
+
+Extend `src/mergecraft/cli/provider_cmd.py`:
+
+- Typer subcommand: `migrate` (`migrate_cmd`, dry-run default, `--apply`)
+- `plan_provider_migration(env_path, config_path) -> MigrationPlan`
+- `apply_provider_migration(plan, *, env_path, config_path) -> None`
+- `migration_secret_fingerprint(value: str) -> str`
+- `validate_config_secret_split(config_path, env_path) -> list[str]`
+- `resolve_indexed_credential(entry: Mapping[str, Any]) -> str | None` — registry key wins; legacy shim warns once (D7)
+
+Shared fixtures in `tests/cli/support_provider_registry.py`:
+
+- `BF_XFAIL`, `LEGACY_API_KEY_MIGRATIONS`, `write_env_pairs`, `stub_mergecraft_env`, `require_provider_migrate_symbols`
+
+### xfail reconciliation
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| BF | all `@BF_XFAIL` / `@pytest.mark.xfail(reason="green after BF impl")` in `tests/cli/test_provider_migrate_cmd.py` and `tests/cli/test_provider_migrate_registry.py` |
+
+### BF verification commands
+
+```bash
+make lint
+make typecheck
+uv run pytest --collect-only -q tests/cli/test_provider_migrate_cmd.py tests/cli/test_provider_migrate_registry.py
+uv run pytest -q tests/cli/test_provider_migrate_cmd.py tests/cli/test_provider_migrate_registry.py  # RED: xfails expected
+```
+
+## BF RED evidence
+
+- BF test-author wave: `47b5ad2f` — 35 collected, 35 xfails; lint+typecheck clean

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -390,3 +391,98 @@ def bootstrap_nous_registry(
     monkeypatch.setenv("LLM_PROVIDER_1", "nous")
     monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", api_key)
     return format_model_slug("nous", model_id)
+
+
+# BF #483 — ``provider migrate`` / config-secret split (D2, D7, D10).
+
+BF_XFAIL = pytest.mark.xfail(reason="green after BF impl", strict=False)
+
+LEGACY_API_KEY_MIGRATIONS: dict[str, tuple[str, str]] = {
+    "OPENAI_API_KEY": ("openai", "API_KEY"),
+    "ANTHROPIC_API_KEY": ("anthropic", "API_KEY"),
+    "GEMINI_API_KEY": ("google", "API_KEY"),
+    "CURSOR_API_KEY": ("cursor", "API_KEY"),
+    "DEEPSEEK_API_KEY": ("deepseek", "API_KEY"),
+    "NOUS_API_KEY": ("nous", "API_KEY"),
+}
+
+LEGACY_STRUCTURE_IN_ENV: tuple[str, ...] = (
+    "harness",
+    "envIndex",
+    "modelChain",
+    "authKind",
+)
+
+BEDROCK_LEGACY_SECRET_KEYS: tuple[str, ...] = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+)
+
+BEDROCK_LEGACY_CONFIG_KEYS: tuple[str, ...] = (
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+)
+
+VERTEX_LEGACY_SECRET_KEYS: tuple[str, ...] = ("GOOGLE_APPLICATION_CREDENTIALS",)
+
+VERTEX_LEGACY_CONFIG_KEYS: tuple[str, ...] = (
+    "GOOGLE_CLOUD_PROJECT",
+    "VERTEX_LOCATION",
+)
+
+CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
+    "api_key",
+    "apiKey",
+    "secret",
+    "password",
+    "token",
+)
+
+
+def write_env_pairs(tmp_path: Path, pairs: Mapping[str, str]) -> None:
+    """Append ``KEY=value`` lines to ``tmp_path/.env``."""
+    env_path = tmp_path / ".env"
+    lines: list[str] = []
+    if env_path.is_file():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    for key, value in pairs.items():
+        lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def stub_mergecraft_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Point ``MERGECRAFT_ENV`` at ``tmp_path/.env``."""
+    monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
+
+
+def assert_output_never_contains_secret(output: str, secret: str) -> None:
+    """Fail when *output* leaks a credential value (BF migrate diff contract)."""
+    assert secret not in output, f"migrate output must not contain secret value {secret!r}"
+
+
+def require_provider_migrate_symbols() -> Any:
+    """Import ``provider_cmd`` and require BF migrate helpers to exist."""
+    module = import_provider_cmd()
+    for name in (
+        "migrate_cmd",
+        "plan_provider_migration",
+        "apply_provider_migration",
+        "migration_secret_fingerprint",
+        "validate_config_secret_split",
+        "resolve_indexed_credential",
+    ):
+        if not hasattr(module, name):
+            pytest.fail(f"{PROVIDER_CMD_MODULE}.{name} is not implemented")
+    return module
+
+
+def config_text(tmp_path: Path) -> str:
+    """Return raw ``.mergecraft/config.yaml`` text."""
+    path = tmp_path / ".mergecraft" / "config.yaml"
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def env_text(tmp_path: Path) -> str:
+    """Return raw ``.env`` text."""
+    path = tmp_path / ".env"
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
