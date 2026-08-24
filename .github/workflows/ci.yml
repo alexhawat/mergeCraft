@@ -202,3 +202,20 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Integration suite (self-skips without live secrets)
         run: make test-integration
+
+  mutation-advisory:
+    name: Verify (mutation advisory py3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+      - name: Decision-module mutation harness (advisory)
+        env:
+          MUTATION_ESCAPE_THRESHOLD_PCT: "45"
+        run: make mutation-test-decisions

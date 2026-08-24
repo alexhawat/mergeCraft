@@ -86,3 +86,27 @@ Ratchet (D12): merge-base `fail_under` comparison via `git merge-base HEAD origi
 `measured > floor + 5` warns (exit 0); `--hard-ceiling` opts into legacy fail.
 
 - Mutation escape rate: measure on `ef7e70d8` before setting TH9 threshold.
+
+### TH9 mutation harness (2026-08-25, HEAD `a5d971f8`, post TH4 policy/classifier tests)
+
+Measured via `uv run python scripts/mutate_decision_modules.py --threshold 100` on
+`wave/test-suite-hygiene-2026-08-24` @ `a5d971f8` (12 mutants/module, seed 42).
+Pre-lane-A §2.6 baseline was **54%** overall (49/90); post TH4 re-measure **40.4%** (40/99).
+
+| module | mutants | survived | escape % |
+| --- | ---: | ---: | ---: |
+| `classify/change_classifier.py` | 12 | 5 | 42% |
+| `evidence/shadow.py` | 12 | 6 | 50% |
+| `scripts/check_coverage_delta.py` | 12 | 3 | 25% |
+| `agents/gates.py` | 12 | 8 | 67% |
+| `policy/scoping.py` | 12 | 3 | 25% |
+| `utils/status_checks.py` | 12 | 7 | 58% |
+| `findings/dedup.py` | 12 | 7 | 58% |
+| `classify/blast_radius.py` | 12 | 0 | 0% |
+| `evidence/gate_policy.py` | 0 | — | (no eligible mutants) |
+| `policy/enforcement.py` | 3 | 1 | 33% |
+| **TOTAL** | **99** | **40** | **40%** |
+
+**Threshold chosen:** 45% (`MUTATION_ESCAPE_THRESHOLD_PCT` — measured 40.4% + 5pp advisory
+headroom; provisional D15 starting point was 35%). CI job `mutation-advisory` is
+`continue-on-error: true`.

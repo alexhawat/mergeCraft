@@ -7,6 +7,7 @@ RUFF_ADVISORY_FAMILIES ?= BLE,PTH,PERF,C901
 MYPY ?= $(UV) run mypy
 PYTEST ?= $(UV) run pytest
 MERGECRAFT_PYTEST_JOBS ?= auto
+MUTATION_ESCAPE_THRESHOLD_PCT ?= 45
 PYTEST_XDIST := $(if $(filter 0,$(MERGECRAFT_PYTEST_JOBS)),,$(if $(MERGECRAFT_PYTEST_JOBS),-n $(MERGECRAFT_PYTEST_JOBS),))
 BANDIT ?= $(UV) run bandit
 PIP_AUDIT ?= $(UV) run pip-audit
@@ -15,6 +16,7 @@ PRE_COMMIT ?= $(UV) run pre-commit
 
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
+	mutation-test-decisions \
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
@@ -149,6 +151,9 @@ coverage-measure: ## Unit tests with coverage report only (no floor/ratchet gate
 coverage-gate: coverage-measure ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
 	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
 	$(UV) run python scripts/check_coverage_floors.py coverage.json
+
+mutation-test-decisions: ## Decision-module mutation harness (advisory; D15 / §2.6)
+	$(UV) run python scripts/mutate_decision_modules.py --threshold $(MUTATION_ESCAPE_THRESHOLD_PCT)
 
 npm-audit: ## npm audit over docker/agent-clis lockfile (W12.3 / #27)
 	@command -v npm >/dev/null 2>&1 || { echo "npm not found on PATH" >&2; exit 2; }
