@@ -12,7 +12,6 @@ import pytest
 from tests.cli.support_provider_registry import (
     AUTH_KIND_CLOUD_CHAIN,
     BEDROCK_LEGACY_SECRET_KEYS,
-    BF_XFAIL,
     LEGACY_API_KEY_MIGRATIONS,
     VERTEX_LEGACY_SECRET_KEYS,
     indexed_env_key,
@@ -31,7 +30,6 @@ if TYPE_CHECKING:
 _OPENAI_SECRET = "sk-openai-plan-SECRET9999"
 
 
-@BF_XFAIL
 def test_plan_migration_detects_legacy_openai_key(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -55,7 +53,6 @@ def test_plan_migration_detects_legacy_openai_key(
     )
 
 
-@BF_XFAIL
 def test_plan_migration_lists_target_indexed_key_names_only(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -78,7 +75,6 @@ def test_plan_migration_lists_target_indexed_key_names_only(
     assert "nous-plan-secret-ABC" not in values
 
 
-@BF_XFAIL
 def test_migration_secret_fingerprint_redacts_full_value() -> None:
     module = require_provider_migrate_symbols()
     fingerprint = module.migration_secret_fingerprint(_OPENAI_SECRET)
@@ -87,7 +83,6 @@ def test_migration_secret_fingerprint_redacts_full_value() -> None:
     assert "9999" in fingerprint or "…" in fingerprint or "*" in fingerprint
 
 
-@BF_XFAIL
 def test_validate_config_secret_split_flags_credential_in_yaml(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -115,7 +110,6 @@ def test_validate_config_secret_split_flags_credential_in_yaml(
     assert "apikey" in joined or "credential" in joined or "secret" in joined
 
 
-@BF_XFAIL
 def test_validate_config_secret_split_flags_structure_in_env(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -134,7 +128,6 @@ def test_validate_config_secret_split_flags_structure_in_env(
     assert any("harness" in item.lower() for item in violations)
 
 
-@BF_XFAIL
 @pytest.mark.parametrize("legacy_key", sorted(LEGACY_API_KEY_MIGRATIONS))
 def test_registry_credential_precedence_over_legacy_env(
     tmp_path: Path,
@@ -167,7 +160,6 @@ def test_registry_credential_precedence_over_legacy_env(
     assert resolved == registry_value
 
 
-@BF_XFAIL
 def test_cloud_chain_migration_bedrock_suffixes_under_one_index(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -196,7 +188,6 @@ def test_cloud_chain_migration_bedrock_suffixes_under_one_index(
         assert indexed_env_key(env_index, suffix) in targets
 
 
-@BF_XFAIL
 def test_cloud_chain_migration_vertex_suffixes_under_one_index(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -221,7 +212,6 @@ def test_cloud_chain_migration_vertex_suffixes_under_one_index(
         assert indexed_env_key(env_index, suffix) in targets
 
 
-@BF_XFAIL
 def test_apply_provider_migration_is_idempotent(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

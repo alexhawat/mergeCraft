@@ -18,7 +18,6 @@ from tests.cli.support_provider_registry import (
     AUTH_KIND_CLOUD_CHAIN,
     BEDROCK_LEGACY_CONFIG_KEYS,
     BEDROCK_LEGACY_SECRET_KEYS,
-    BF_XFAIL,
     LEGACY_API_KEY_MIGRATIONS,
     LEGACY_STRUCTURE_IN_ENV,
     NOUS_BASE_URL,
@@ -73,7 +72,6 @@ def _setup_repo(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-@BF_XFAIL
 def test_provider_help_lists_migrate_verb() -> None:
     result = _invoke("provider", "--help")
     output = _plain(result.stdout + result.stderr).lower()
@@ -81,7 +79,6 @@ def test_provider_help_lists_migrate_verb() -> None:
     assert "migrate" in output
 
 
-@BF_XFAIL
 def test_provider_migrate_help_documents_apply_flag() -> None:
     result = _invoke("provider", "migrate", "--help")
     output = _plain(result.stdout + result.stderr).lower()
@@ -95,7 +92,6 @@ def test_provider_migrate_help_documents_apply_flag() -> None:
 # ---------------------------------------------------------------------------
 
 
-@BF_XFAIL
 def test_provider_migrate_default_is_dry_run_no_writes(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -121,7 +117,6 @@ def test_provider_migrate_default_is_dry_run_no_writes(
         for legacy, (label, suffix) in sorted(LEGACY_API_KEY_MIGRATIONS.items())
     ],
 )
-@BF_XFAIL
 def test_provider_migrate_dry_run_prints_key_names_not_secret_values(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -142,7 +137,6 @@ def test_provider_migrate_dry_run_prints_key_names_not_secret_values(
     assert_output_never_contains_secret(output, secret)
 
 
-@BF_XFAIL
 def test_provider_migrate_dry_run_shows_fingerprint_not_full_secret(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -162,7 +156,6 @@ def test_provider_migrate_dry_run_shows_fingerprint_not_full_secret(
 # ---------------------------------------------------------------------------
 
 
-@BF_XFAIL
 def test_provider_migrate_apply_writes_provider_config_and_indexed_secrets(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -204,7 +197,6 @@ def test_provider_migrate_apply_writes_provider_config_and_indexed_secrets(
     assert _NOUS_LEGACY_SECRET.lower() not in cfg_lower
 
 
-@BF_XFAIL
 def test_provider_migrate_apply_idempotent_second_run_is_noop(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -225,7 +217,6 @@ def test_provider_migrate_apply_idempotent_second_run_is_noop(
     assert "no changes" in output or "already migrated" in output or "noop" in output
 
 
-@BF_XFAIL
 def test_provider_migrate_apply_only_fills_missing_after_partial_manual(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -259,7 +250,6 @@ def test_provider_migrate_apply_only_fills_missing_after_partial_manual(
 # ---------------------------------------------------------------------------
 
 
-@BF_XFAIL
 def test_provider_migrate_config_yaml_never_contains_credential_values(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -288,7 +278,6 @@ def test_provider_migrate_config_yaml_never_contains_credential_values(
                 assert "cursor-secret-VALUE999" not in value
 
 
-@BF_XFAIL
 def test_provider_migrate_env_never_contains_harness_or_url_structure(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -312,7 +301,6 @@ def test_provider_migrate_env_never_contains_harness_or_url_structure(
     assert NOUS_BASE_URL not in env_blob or "url=" not in env_blob
 
 
-@BF_XFAIL
 def test_provider_migrate_ambiguous_custom_base_url_refuses_or_prompts(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -332,7 +320,6 @@ def test_provider_migrate_ambiguous_custom_base_url_refuses_or_prompts(
     assert "LLM_PROVIDER_1" not in read_env_file(tmp_path)
 
 
-@BF_XFAIL
 def test_provider_migrate_deterministic_index_allocation(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -372,7 +359,6 @@ def test_provider_migrate_deterministic_index_allocation(
 # ---------------------------------------------------------------------------
 
 
-@BF_XFAIL
 def test_provider_migrate_bedrock_maps_multi_secret_under_one_index(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -407,7 +393,6 @@ def test_provider_migrate_bedrock_maps_multi_secret_under_one_index(
     assert "us-east-1" in cfg_text or any(key in cfg_text for key in BEDROCK_LEGACY_CONFIG_KEYS)
 
 
-@BF_XFAIL
 def test_provider_migrate_bedrock_copies_aws_vars_leaves_originals_in_place(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -432,7 +417,6 @@ def test_provider_migrate_bedrock_copies_aws_vars_leaves_originals_in_place(
     assert env.get("AWS_SECRET_ACCESS_KEY") == legacy["AWS_SECRET_ACCESS_KEY"]
 
 
-@BF_XFAIL
 def test_provider_migrate_vertex_maps_credentials_under_one_index(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -473,7 +457,6 @@ def test_provider_migrate_vertex_maps_credentials_under_one_index(
 # ---------------------------------------------------------------------------
 
 
-@BF_XFAIL
 def test_legacy_env_registry_key_wins_with_single_deprecation_warning(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

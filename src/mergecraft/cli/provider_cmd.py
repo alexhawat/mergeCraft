@@ -7,8 +7,9 @@ import os
 import shutil
 import subprocess
 import tempfile
+import warnings
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,41 @@ BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
 )
 
 VERTEX_CLOUD_SUFFIXES: tuple[str, ...] = ("GOOGLE_APPLICATION_CREDENTIALS",)
+
+LEGACY_API_KEY_MIGRATIONS: dict[str, tuple[str, str]] = {
+    "OPENAI_API_KEY": ("openai", "API_KEY"),
+    "ANTHROPIC_API_KEY": ("anthropic", "API_KEY"),
+    "GEMINI_API_KEY": ("google", "API_KEY"),
+    "CURSOR_API_KEY": ("cursor", "API_KEY"),
+    "DEEPSEEK_API_KEY": ("deepseek", "API_KEY"),
+    "NOUS_API_KEY": ("nous", "API_KEY"),
+}
+
+LEGACY_LABEL_TO_API_KEY_ENV: dict[str, str] = {
+    label: legacy_key for legacy_key, (label, _suffix) in LEGACY_API_KEY_MIGRATIONS.items()
+}
+
+NOUS_BASE_URL_ENV = "NOUS_BASE_URL"
+CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
+
+BEDROCK_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("AWS_REGION", "AWS_DEFAULT_REGION")
+VERTEX_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("GOOGLE_CLOUD_PROJECT", "VERTEX_LOCATION")
+
+STRUCTURE_KEYS_IN_ENV: frozenset[str] = frozenset({"harness", "envIndex", "modelChain", "authKind"})
+
+ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset(
+    {NOUS_BASE_URL_ENV, *VERTEX_LEGACY_CONFIG_KEYS, *BEDROCK_LEGACY_CONFIG_KEYS}
+)
+
+CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
+    "api_key",
+    "apiKey",
+    "secret",
+    "password",
+    "token",
+)
+
+_LEGACY_CREDENTIAL_WARNED_KEYS: set[str] = set()
 
 _PROVIDER_AUTH_SCOPE_OPTION: str = typer.Option(
     "github",
@@ -630,6 +666,434 @@ def run_provider_auth(
     strategy.run(entry, scope)
 
 
+@dataclass(frozen=True, slots=True)
+class MigrationPlan:
+    """Planned provider migration from legacy env vars (#483 / BF)."""
+
+    providers: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    env_writes: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _read_env_map(env_path: Path) -> dict[str, str]:
+    """Parse ``KEY=value`` lines from *env_path* (secrets stay file-local)."""
+    if not env_path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        out[key] = value
+    return out
+
+
+def migration_secret_fingerprint(value: str) -> str:
+    """Return a redacted fingerprint suitable for dry-run output (never the full secret)."""
+    stripped = value.strip()
+    if len(stripped) <= 4:
+        return "…"
+    return f"…{stripped[-4:]}"
+
+
+def validate_config_secret_split(
+    config_path: Path,
+    env_path: Path,
+) -> list[str]:
+    """Return violations when credentials leak into config or structure leaks into ``.env``."""
+    violations: list[str] = []
+    if config_path.is_file():
+        config_data = _load_config_dict(config_path)
+        for entry in _provider_entries(config_data):
+            for key, value in entry.items():
+                key_lower = str(key).lower()
+                if any(token.lower() in key_lower for token in CREDENTIAL_SUBSTRINGS_IN_CONFIG):
+                    violations.append(
+                        f"config provider {entry.get('label', '?')!r} contains credential field {key!r}"
+                    )
+                if isinstance(value, str) and value.strip():
+                    value_lower = value.lower()
+                    if any(token in value_lower for token in ("sk-", "apikey", "secret")):
+                        violations.append(
+                            f"config provider {entry.get('label', '?')!r} may contain a credential value"
+                        )
+
+    if env_path.is_file():
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key = line.split("=", 1)[0].strip()
+            key_lower = key.lower()
+            if key_lower in STRUCTURE_KEYS_IN_ENV:
+                violations.append(f".env contains structure key {key!r} (move to config.yaml)")
+            if any(token.lower() in key_lower for token in CREDENTIAL_SUBSTRINGS_IN_CONFIG):
+                if key.startswith("LLM_PROVIDER_"):
+                    continue
+                if key in LEGACY_API_KEY_MIGRATIONS:
+                    continue
+                if key in BEDROCK_CLOUD_SUFFIXES or key in VERTEX_CLOUD_SUFFIXES:
+                    continue
+    return violations
+
+
+def _indexed_label_from_env(env_map: Mapping[str, str], env_index: int) -> str | None:
+    raw = env_map.get(f"LLM_PROVIDER_{env_index}", "").strip()
+    return raw or None
+
+
+def _indexed_value(env_map: Mapping[str, str], env_index: int, suffix: str) -> str | None:
+    raw = env_map.get(f"LLM_PROVIDER_{env_index}_{suffix}", "").strip()
+    return raw or None
+
+
+def _warn_legacy_credential_once(legacy_key: str, indexed_key: str) -> None:
+    if legacy_key in _LEGACY_CREDENTIAL_WARNED_KEYS:
+        return
+    _LEGACY_CREDENTIAL_WARNED_KEYS.add(legacy_key)
+    message = (
+        f"{indexed_key} wins over legacy {legacy_key}; "
+        f"legacy {legacy_key} is ignored — prefer indexed registry keys."
+    )
+    warnings.warn(message, DeprecationWarning, stacklevel=2)
+
+
+def resolve_indexed_credential(entry: Mapping[str, Any]) -> str | None:
+    """Resolve the primary API credential for *entry*; registry key wins over legacy (D7)."""
+    env_index = int(entry["envIndex"])
+    label = str(entry.get("label", "")).lower()
+    auth_kind = str(entry.get("authKind") or AUTH_KIND_API_KEY)
+
+    env_map = _read_env_map(_env_path())
+    legacy_key = LEGACY_LABEL_TO_API_KEY_ENV.get(label)
+    legacy_value = env_map.get(legacy_key, "").strip() if legacy_key else ""
+
+    if auth_kind == AUTH_KIND_CLOUD_CHAIN:
+        if label == "bedrock":
+            for suffix in BEDROCK_CLOUD_SUFFIXES:
+                value = _indexed_value(env_map, env_index, suffix)
+                if value:
+                    return value
+            return None
+        if label == "vertex":
+            return _indexed_value(env_map, env_index, VERTEX_CLOUD_SUFFIXES[0])
+        return None
+
+    api_key_value = _indexed_value(env_map, env_index, "API_KEY")
+    if api_key_value:
+        if legacy_value and legacy_value != api_key_value and legacy_key:
+            _warn_legacy_credential_once(legacy_key, f"LLM_PROVIDER_{env_index}_API_KEY")
+        return api_key_value
+
+    suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
+    if suffix != "API_KEY":
+        registry_value = _indexed_value(env_map, env_index, suffix)
+        if registry_value:
+            if legacy_value and legacy_value != registry_value and legacy_key:
+                _warn_legacy_credential_once(legacy_key, f"LLM_PROVIDER_{env_index}_{suffix}")
+            return registry_value
+
+    if legacy_value:
+        if legacy_key:
+            _warn_legacy_credential_once(legacy_key, f"LLM_PROVIDER_{env_index}_API_KEY")
+        return legacy_value
+
+    return None
+
+
+def _migration_provider_template(label: str, env_index: int) -> dict[str, Any]:
+    harness = default_harness_for_label(label) or "opencode"
+    entry: dict[str, Any] = {
+        "label": label,
+        "harness": harness,
+        "envIndex": env_index,
+    }
+    auth_kind = default_auth_kind_for_label(label)
+    if auth_kind is not None:
+        entry["authKind"] = auth_kind
+    url = _seed_url_for_label(label)
+    if url is not None:
+        entry["url"] = url
+    return entry
+
+
+def _next_migration_index(entries: Sequence[Mapping[str, Any]], planned: int) -> int:
+    indices = [
+        int(entry["envIndex"])
+        for entry in entries
+        if isinstance(entry, Mapping) and entry.get("envIndex") is not None
+    ]
+    if not indices:
+        return planned
+    return max(indices) + 1
+
+
+def plan_provider_migration(
+    env_path: Path,
+    config_path: Path,
+) -> MigrationPlan:
+    """Plan migration from legacy ``*_API_KEY`` env vars to indexed registry layout (#483)."""
+    env_map = _read_env_map(env_path)
+    config_data = _load_config_dict(config_path)
+    existing_entries = _provider_entries(config_data)
+    label_to_entry: dict[str, dict[str, Any]] = {}
+    for entry in existing_entries:
+        label = str(entry.get("label", "")).lower()
+        if label:
+            label_to_entry[label] = entry
+
+    providers_out: list[dict[str, Any]] = []
+    env_writes_out: list[dict[str, Any]] = []
+    notes_out: list[str] = []
+
+    if env_map.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip():
+        notes_out.append(
+            f"ambiguous legacy {CUSTOM_PROVIDER_BASE_URL_ENV} — add a provider label with "
+            "mergecraft provider add before migrating custom endpoints"
+        )
+
+    next_index = allocate_env_index(existing_entries)
+    labels_to_add: list[str] = []
+
+    for legacy_key, (label, suffix) in LEGACY_API_KEY_MIGRATIONS.items():
+        legacy_value = env_map.get(legacy_key, "").strip()
+        if not legacy_value:
+            continue
+        if label in label_to_entry:
+            entry = label_to_entry[label]
+            env_index = int(entry["envIndex"])
+            if _indexed_value(env_map, env_index, suffix):
+                continue
+            target = f"LLM_PROVIDER_{env_index}_{suffix}"
+            env_writes_out.append(
+                {
+                    "source": legacy_key,
+                    "target": target,
+                    "provider": label,
+                }
+            )
+            continue
+        if label not in labels_to_add:
+            labels_to_add.append(label)
+
+    bedrock_present = any(env_map.get(key, "").strip() for key in BEDROCK_CLOUD_SUFFIXES)
+    if bedrock_present and "bedrock" not in label_to_entry and "bedrock" not in labels_to_add:
+        labels_to_add.append("bedrock")
+        notes_out.append("will copy AWS credentials to indexed keys and leave originals in place")
+
+    vertex_cred = env_map.get(VERTEX_CLOUD_SUFFIXES[0], "").strip()
+    if vertex_cred and "vertex" not in label_to_entry and "vertex" not in labels_to_add:
+        labels_to_add.append("vertex")
+
+    for label in labels_to_add:
+        entry = _migration_provider_template(label, next_index)
+        if label == "nous":
+            nous_url = env_map.get(NOUS_BASE_URL_ENV, "").strip()
+            if nous_url:
+                entry["url"] = nous_url
+        if label == "bedrock":
+            for region_key in BEDROCK_LEGACY_CONFIG_KEYS:
+                region_value = env_map.get(region_key, "").strip()
+                if region_value:
+                    entry["region"] = region_value
+                    entry[region_key] = region_value
+                    break
+        if label == "vertex":
+            for config_key in VERTEX_LEGACY_CONFIG_KEYS:
+                config_value = env_map.get(config_key, "").strip()
+                if config_value:
+                    entry[config_key] = config_value
+        providers_out.append(entry)
+        label_to_entry[label] = entry
+        next_index = _next_migration_index(tuple(label_to_entry.values()), next_index + 1)
+
+    for legacy_key, (label, suffix) in LEGACY_API_KEY_MIGRATIONS.items():
+        legacy_value = env_map.get(legacy_key, "").strip()
+        if not legacy_value:
+            continue
+        matched = label_to_entry.get(label)
+        if matched is None:
+            continue
+        env_index = int(matched["envIndex"])
+        if _indexed_value(env_map, env_index, suffix):
+            continue
+        target = f"LLM_PROVIDER_{env_index}_{suffix}"
+        if any(step.get("target") == target for step in env_writes_out):
+            continue
+        env_writes_out.append(
+            {
+                "source": legacy_key,
+                "target": target,
+                "provider": label,
+            }
+        )
+
+    if "bedrock" in label_to_entry:
+        bedrock_entry = label_to_entry["bedrock"]
+        env_index = int(bedrock_entry["envIndex"])
+        for suffix in BEDROCK_CLOUD_SUFFIXES:
+            source_value = env_map.get(suffix, "").strip()
+            if not source_value:
+                continue
+            target = f"LLM_PROVIDER_{env_index}_{suffix}"
+            if _indexed_value(env_map, env_index, suffix):
+                continue
+            if any(step.get("target") == target for step in env_writes_out):
+                continue
+            env_writes_out.append(
+                {
+                    "source": suffix,
+                    "target": target,
+                    "provider": "bedrock",
+                }
+            )
+
+    if "vertex" in label_to_entry:
+        vertex_entry = label_to_entry["vertex"]
+        env_index = int(vertex_entry["envIndex"])
+        for suffix in VERTEX_CLOUD_SUFFIXES:
+            source_value = env_map.get(suffix, "").strip()
+            if not source_value:
+                continue
+            target = f"LLM_PROVIDER_{env_index}_{suffix}"
+            if _indexed_value(env_map, env_index, suffix):
+                continue
+            if any(step.get("target") == target for step in env_writes_out):
+                continue
+            env_writes_out.append(
+                {
+                    "source": suffix,
+                    "target": target,
+                    "provider": "vertex",
+                }
+            )
+
+    return MigrationPlan(
+        providers=tuple(providers_out),
+        env_writes=tuple(env_writes_out),
+        notes=tuple(notes_out),
+    )
+
+
+def apply_provider_migration(
+    plan: MigrationPlan,
+    *,
+    env_path: Path,
+    config_path: Path,
+) -> None:
+    """Apply a migration plan to config and ``.env`` (#483)."""
+    from mergecraft.cli.auth_cmd import _write_env_value
+
+    if not plan.providers and not plan.env_writes:
+        return
+
+    config_data = _load_config_dict(config_path)
+    entries = _provider_entries(config_data)
+    if plan.providers:
+        entries.extend(plan.providers)
+        config_data["providers"] = entries
+        _write_config_dict(config_path, config_data)
+
+    env_map = _read_env_map(env_path)
+    for provider_entry in plan.providers:
+        env_index = int(provider_entry["envIndex"])
+        label = str(provider_entry["label"])
+        label_key = f"LLM_PROVIDER_{env_index}"
+        if not env_map.get(label_key, "").strip() and _write_env_value(env_path, label_key, label):
+            env_map[label_key] = label
+
+    for step in plan.env_writes:
+        source = str(step.get("source", ""))
+        target = str(step.get("target", ""))
+        if not source or not target:
+            continue
+        value = env_map.get(source, "").strip()
+        if not value:
+            continue
+        if not _write_env_value(env_path, target, value):
+            cli_bail(f"could not write {target} to {env_path}")
+        env_map[target] = value
+
+    if plan.providers:
+        keys_to_remove = set(ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY)
+        for provider_entry in plan.providers:
+            label = str(provider_entry.get("label", "")).lower()
+            if label == "nous":
+                keys_to_remove.add(NOUS_BASE_URL_ENV)
+            if label == "vertex":
+                keys_to_remove.update(VERTEX_LEGACY_CONFIG_KEYS)
+            if label == "bedrock":
+                keys_to_remove.update(BEDROCK_LEGACY_CONFIG_KEYS)
+        if keys_to_remove and env_path.is_file():
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+            kept = [
+                line
+                for line in lines
+                if not line.strip()
+                or line.strip().startswith("#")
+                or line.split("=", 1)[0].strip() not in keys_to_remove
+            ]
+            env_path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+
+
+def _print_migration_plan(plan: MigrationPlan, env_path: Path) -> None:
+    env_map = _read_env_map(env_path)
+    for note in plan.notes:
+        console.print(note)
+    for provider_row in plan.providers:
+        label = str(provider_row.get("label", ""))
+        env_index = provider_row.get("envIndex")
+        harness = provider_row.get("harness")
+        console.print(
+            f"provider [cyan]{label}[/cyan] -> config (envIndex={env_index}, harness={harness})"
+        )
+    for step in plan.env_writes:
+        source = str(step.get("source", ""))
+        target = str(step.get("target", ""))
+        provider_label = str(step.get("provider", ""))
+        raw_value = env_map.get(source, "")
+        fingerprint = migration_secret_fingerprint(raw_value) if raw_value else "…"
+        console.print(f"{source} -> {target} ({provider_label}) fingerprint {fingerprint}")
+
+
+@app.command("migrate")
+def migrate_cmd(
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write indexed keys and config (default is dry-run; never prints secret values).",
+    ),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+) -> None:
+    """Migrate legacy ``*_API_KEY`` env vars into indexed provider registry layout (D2 / #483)."""
+    repo_root = cwd.resolve()
+    config_path = _config_path(repo_root)
+    env_path = _env_path()
+    plan = plan_provider_migration(env_path=env_path, config_path=config_path)
+
+    if not plan.providers and not plan.env_writes:
+        for note in plan.notes:
+            console.print(note)
+        if apply:
+            console.print("no changes — already migrated")
+        elif not plan.notes:
+            console.print("no migration planned")
+        return
+
+    if apply:
+        apply_provider_migration(plan, env_path=env_path, config_path=config_path)
+        console.print("[green]migration applied[/green]")
+        return
+
+    console.print("dry-run — no files written (pass --apply to migrate)")
+    _print_migration_plan(plan, env_path)
+
+
 def persist_legacy_indexed_auth(
     label: str,
     scope: str,
@@ -686,16 +1150,24 @@ __all__ = [
     "AUTH_KIND_DEVICE_CODE",
     "AUTH_KIND_OAUTH",
     "AUTH_KIND_PRIMARY_SUFFIX",
+    "LEGACY_API_KEY_MIGRATIONS",
     "AuthStrategy",
+    "MigrationPlan",
     "ProviderRegistry",
     "app",
+    "apply_provider_migration",
     "indexed_credential_keys",
     "list_supported_harnesses",
     "load_provider_registry",
+    "migrate_cmd",
+    "migration_secret_fingerprint",
     "persist_legacy_indexed_auth",
+    "plan_provider_migration",
     "provider_auth_cmd",
     "resolve_auth_strategy",
+    "resolve_indexed_credential",
     "resolve_provider_harness",
     "run_provider_auth",
     "seed_builtin_providers",
+    "validate_config_secret_split",
 ]
