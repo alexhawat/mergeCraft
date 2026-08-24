@@ -655,18 +655,8 @@ def _line_is_owned_workflow_mutation(line: str) -> bool:
 
 def assert_only_owned_workflow_keys_changed(before: str, after: str) -> None:
     """Assert byte-stable surgery: only owned ``with:``/``env:`` keys may differ."""
-    before_lines = before.splitlines()
-    after_lines = after.splitlines()
-    max_len = max(len(before_lines), len(after_lines))
-    for index in range(max_len):
-        old = before_lines[index] if index < len(before_lines) else None
-        new = after_lines[index] if index < len(after_lines) else None
-        if old == new:
-            continue
-        if old is not None and _line_is_owned_workflow_mutation(old):
-            continue
-        if new is not None and _line_is_owned_workflow_mutation(new):
-            continue
-        raise AssertionError(
-            f"non-owned workflow line changed at line {index + 1}: before={old!r} after={new!r}"
-        )
+
+    def non_owned_lines(text: str) -> list[str]:
+        return [line for line in text.splitlines() if not _line_is_owned_workflow_mutation(line)]
+
+    assert non_owned_lines(before) == non_owned_lines(after)

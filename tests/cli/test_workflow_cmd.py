@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 
 import yaml
 from tests.cli.support_provider_registry import (
-    BG_XFAIL,
     CUSTOM_BASE_URL,
     NOUS_BASE_URL,
     NOUS_TENCENT_HY3,
@@ -88,7 +87,6 @@ def _register_nous_provider(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@BG_XFAIL
 def test_workflow_namespace_registered_on_root_app() -> None:
     result = _invoke("workflow", "--help")
     output = _plain(result.stdout + result.stderr).lower()
@@ -97,7 +95,6 @@ def test_workflow_namespace_registered_on_root_app() -> None:
     assert "model" in output
 
 
-@BG_XFAIL
 def test_gha_namespace_does_not_expose_workflow_authoring_verbs() -> None:
     result = _invoke("gha", "--help")
     output = _plain(result.stdout + result.stderr).lower()
@@ -106,7 +103,6 @@ def test_gha_namespace_does_not_expose_workflow_authoring_verbs() -> None:
     assert "setmodel" not in output
 
 
-@BG_XFAIL
 def test_workflow_help_lists_provider_model_agents_and_list_verbs() -> None:
     require_workflow_cmd_symbols()
     result = _invoke("workflow", "--help")
@@ -116,7 +112,6 @@ def test_workflow_help_lists_provider_model_agents_and_list_verbs() -> None:
         assert verb in output, f"expected workflow subcommand group {verb!r} in help"
 
 
-@BG_XFAIL
 def test_workflow_provider_harnesses_lists_supported_values_from_code() -> None:
     result = _invoke("workflow", "provider", "harnesses")
     output = _plain(result.stdout + result.stderr).lower()
@@ -130,7 +125,6 @@ def test_workflow_provider_harnesses_lists_supported_values_from_code() -> None:
 # ---------------------------------------------------------------------------
 
 
-@BG_XFAIL
 def test_workflow_provider_add_default_dry_run_shows_diff_without_writing(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -158,7 +152,6 @@ def test_workflow_provider_add_default_dry_run_shows_diff_without_writing(
     assert indexed_custom_provider_api_key(1) in output or "secrets" in output.lower()
 
 
-@BG_XFAIL
 def test_workflow_provider_add_apply_writes_owned_env_keys(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -193,7 +186,6 @@ def test_workflow_provider_add_apply_writes_owned_env_keys(
     assert_only_owned_workflow_keys_changed(before, after)
 
 
-@BG_XFAIL
 def test_workflow_model_add_updates_with_model_key(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -223,7 +215,6 @@ def test_workflow_model_add_updates_with_model_key(
     assert_only_owned_workflow_keys_changed(before, after)
 
 
-@BG_XFAIL
 def test_workflow_agents_setmodel_updates_primary_step_model(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -260,7 +251,6 @@ def test_workflow_agents_setmodel_updates_primary_step_model(
     assert_only_owned_workflow_keys_changed(before, after)
 
 
-@BG_XFAIL
 def test_workflow_model_prioritize_reorders_fallback_steps(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -305,7 +295,6 @@ def test_workflow_model_prioritize_reorders_fallback_steps(
     assert_only_owned_workflow_keys_changed(before, after)
 
 
-@BG_XFAIL
 def test_workflow_list_shows_provider_model_state(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -326,7 +315,6 @@ def test_workflow_list_shows_provider_model_state(
 # ---------------------------------------------------------------------------
 
 
-@BG_XFAIL
 def test_workflow_provider_add_rejects_unknown_harness(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -353,7 +341,6 @@ def test_workflow_provider_add_rejects_unknown_harness(
     assert workflow_text(tmp_path) == before
 
 
-@BG_XFAIL
 def test_workflow_provider_add_reports_missing_github_secrets(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -379,7 +366,6 @@ def test_workflow_provider_add_reports_missing_github_secrets(
     assert "secret" in output.lower()
 
 
-@BG_XFAIL
 def test_workflow_mutate_refuses_when_no_mergecraft_step(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -413,7 +399,6 @@ jobs:
     assert "mergecraft" in output or "uses:" in output
 
 
-@BG_XFAIL
 def test_workflow_failure_is_ordinary_cli_error_not_action_annotation(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -438,7 +423,6 @@ def test_workflow_failure_is_ordinary_cli_error_not_action_annotation(
     assert "::error::" not in output
 
 
-@BG_XFAIL
 def test_workflow_runs_without_github_actions_env(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -460,7 +444,6 @@ def test_workflow_runs_without_github_actions_env(
     assert "::error::" not in output
 
 
-@BG_XFAIL
 def test_workflow_default_path_targets_mergecraft_yml(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -472,7 +455,6 @@ def test_workflow_default_path_targets_mergecraft_yml(
     assert WORKFLOW_DEFAULT_RELATIVE_PATH in output
 
 
-@BG_XFAIL
 def test_workflow_mutated_repo_passes_action_yml_hygiene_check(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

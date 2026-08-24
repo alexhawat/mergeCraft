@@ -50,6 +50,7 @@ from mergecraft.cli import (
     tracing_logfire_cmd,
     update_cmd,
     watch_cmd,
+    workflow_cmd,
     xrepo_cmd,
 )
 from mergecraft.cli.exits import (
@@ -103,6 +104,7 @@ app.add_typer(context_cmd.app, name="context")
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(provider_cmd.app, name="provider")
 app.add_typer(model_cmd.app, name="model")
+app.add_typer(workflow_cmd.app, name="workflow")
 app.add_typer(models_cmd.app, name="models")
 app.add_typer(analyzers_cmd.app, name="analyzers")
 app.command("init")(init_cmd.run)

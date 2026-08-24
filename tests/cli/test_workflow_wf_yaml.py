@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 from tests.cli.support_provider_registry import (
-    BG_XFAIL,
     NOUS_BASE_URL,
     WORKFLOW_ONE_STEP_TEMPLATE,
     WORKFLOW_OWNED_ENV_PREFIXES,
@@ -39,7 +38,6 @@ def _write_workflow(path: Path, body: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@BG_XFAIL
 def test_workflow_owned_key_constants_match_registry_contract() -> None:
     module = require_workflow_wf_yaml_symbols()
     assert tuple(module.WORKFLOW_OWNED_WITH_KEYS) == WORKFLOW_OWNED_WITH_KEYS
@@ -51,7 +49,6 @@ def test_workflow_owned_key_constants_match_registry_contract() -> None:
 # ---------------------------------------------------------------------------
 
 
-@BG_XFAIL
 def test_apply_provider_env_wiring_writes_indexed_custom_provider_keys(tmp_path: Path) -> None:
     module = require_workflow_wf_yaml_symbols()
     workflow = tmp_path / "mergecraft.yml"
@@ -77,7 +74,6 @@ def test_apply_provider_env_wiring_writes_indexed_custom_provider_keys(tmp_path:
     assert env_map[indexed_custom_provider_base_url(1)] == NOUS_BASE_URL
 
 
-@BG_XFAIL
 def test_apply_provider_env_wiring_is_idempotent(tmp_path: Path) -> None:
     module = require_workflow_wf_yaml_symbols()
     workflow = tmp_path / "mergecraft.yml"
@@ -105,7 +101,6 @@ def test_apply_provider_env_wiring_is_idempotent(tmp_path: Path) -> None:
     assert not second.was_modified
 
 
-@BG_XFAIL
 def test_apply_provider_env_wiring_preserves_surrounding_comments(tmp_path: Path) -> None:
     module = require_workflow_wf_yaml_symbols()
     workflow_text = """\
@@ -145,7 +140,6 @@ jobs:
     assert_only_owned_workflow_keys_changed(before, after)
 
 
-@BG_XFAIL
 def test_apply_provider_env_wiring_raises_when_no_mergecraft_step(tmp_path: Path) -> None:
     module = require_workflow_wf_yaml_symbols()
     workflow = tmp_path / "mergecraft.yml"
@@ -178,7 +172,6 @@ jobs:
 # ---------------------------------------------------------------------------
 
 
-@BG_XFAIL
 def test_apply_model_wiring_updates_with_model_key(tmp_path: Path) -> None:
     module = require_workflow_wf_yaml_symbols()
     workflow = tmp_path / "mergecraft.yml"
@@ -196,7 +189,6 @@ def test_apply_model_wiring_updates_with_model_key(tmp_path: Path) -> None:
     assert parsed["jobs"]["review"]["steps"][0]["with"]["model"] == slug
 
 
-@BG_XFAIL
 def test_apply_model_wiring_step_selector_targets_named_step(tmp_path: Path) -> None:
     module = require_workflow_wf_yaml_symbols()
     workflow = tmp_path / "mergecraft.yml"
@@ -219,7 +211,6 @@ def test_apply_model_wiring_step_selector_targets_named_step(tmp_path: Path) -> 
     assert nous["with"]["model"] == "nous/tencent/hy3"
 
 
-@BG_XFAIL
 def test_apply_model_wiring_rejects_invalid_secret_name(tmp_path: Path) -> None:
     module = require_workflow_wf_yaml_symbols()
     workflow = tmp_path / "mergecraft.yml"
@@ -243,7 +234,6 @@ def test_apply_model_wiring_rejects_invalid_secret_name(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@BG_XFAIL
 def test_render_workflow_diff_emits_unified_diff(tmp_path: Path) -> None:
     module = require_workflow_wf_yaml_symbols()
     workflow = tmp_path / "mergecraft.yml"
