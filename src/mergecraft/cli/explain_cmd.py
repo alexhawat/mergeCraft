@@ -5,7 +5,6 @@ Exports: ``run``
 
 from __future__ import annotations
 
-import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,6 @@ from typing import Any
 import typer
 from rich.table import Table
 
-from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
@@ -24,14 +22,6 @@ from mergecraft.review.completed import (
     completed_review_exists,
     lookup_finding_packet_in_review,
 )
-
-_FINGERPRINT_HEX_RE = re.compile(r"^[0-9a-f]+$")
-
-
-def _is_finding_id_token(token: str) -> bool:
-    if token.startswith(FINDING_SHORT_ID_PREFIX):
-        return True
-    return len(token) >= 6 and _FINGERPRINT_HEX_RE.fullmatch(token) is not None
 
 
 def _read_diff(repo_root: Path) -> str:
@@ -142,10 +132,7 @@ def run(
                 "or use: explain <review-id> <finding-id>",
                 code=CLI_USAGE_EXIT_CODE,
             )
-        elif _is_finding_id_token(token):
-            resolved_finding_id = token
-        else:
-            resolved_finding_id = token
+        resolved_finding_id = token
 
     if resolved_finding_id:
         packet: dict[str, Any] | None = None
