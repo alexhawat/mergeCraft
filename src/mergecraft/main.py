@@ -1045,7 +1045,7 @@ def _promote_and_finalize_agent_result(
         except BudgetExhausted as exc:
             ctx.budget_exhaustion = exc
 
-    if output_schema and not tool_state.output:
+    if output_schema and not tool_state.output and result.success:
         msg = (
             "output_schema was provided but agent did not call set_output — "
             "structured output is required"

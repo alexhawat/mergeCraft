@@ -11,7 +11,10 @@ Contracts:
 
 from __future__ import annotations
 
-from typing import Final
+import json
+import re
+from enum import StrEnum
+from typing import Any, Final
 
 import httpx
 from tenacity import (
@@ -64,13 +67,119 @@ _RETRYABLE_CLI_NEEDLES: Final[tuple[str, ...]] = (
     "insufficient_quota",
 )
 
+# Billing *class* markers only — a generic HTTP 404 is retryable without them
+# (#466). Do not grow this list as the sole classifier.
+_BILLING_MARKERS: Final[tuple[str, ...]] = ("credit", "balance", "billing")
+_UNKNOWN_MODEL_MARKER: Final[str] = "does not exist"
+_HTTP_404_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\bHTTP\s+404\b)|(?:\bstatusCode\s*[:=]\s*404\b)",
+    re.IGNORECASE,
+)
+
+
+class ProviderFailureClass(StrEnum):
+    """Distinct provider-failure classes for model-chain failover (#466)."""
+
+    UNKNOWN_MODEL = "unknown_model"
+    BILLING = "billing"
+    HTTP_404 = "http_404"
+    RETRYABLE = "retryable"
+    PERMANENT = "permanent"
+
+
+_RETRYABLE_FAILURE_CLASSES: Final[frozenset[ProviderFailureClass]] = frozenset(
+    {
+        ProviderFailureClass.BILLING,
+        ProviderFailureClass.HTTP_404,
+        ProviderFailureClass.RETRYABLE,
+    }
+)
+
+
+def classify_provider_failure(
+    stderr: str = "",
+    *,
+    status_code: int | None = None,
+) -> ProviderFailureClass:
+    """Classify a provider refusal for failover — not GitHub HTTP retry.
+
+    Unknown-model 404 (``does not exist``) is permanent for this slug. Any other
+    HTTP 404 — including a generic ``Not Found`` with no billing prose — is
+    retryable so the chain can advance. Provider ``isRetryable: false`` is
+    ignored: Nous billing 404s used that flag while the refusal was factually
+    wrong (#466).
+    """
+    payload = _provider_json_payload(stderr)
+    haystack = f"{stderr} {_message_from_payload(payload)}".lower()
+    if _UNKNOWN_MODEL_MARKER in haystack:
+        return ProviderFailureClass.UNKNOWN_MODEL
+    http_404 = _is_http_404(stderr=stderr, status_code=status_code, payload=payload)
+    billing = any(marker in haystack for marker in _BILLING_MARKERS)
+    if http_404 and billing:
+        return ProviderFailureClass.BILLING
+    if http_404:
+        return ProviderFailureClass.HTTP_404
+    if billing:
+        return ProviderFailureClass.BILLING
+    if any(needle in haystack for needle in _RETRYABLE_CLI_NEEDLES):
+        return ProviderFailureClass.RETRYABLE
+    return ProviderFailureClass.PERMANENT
+
 
 def is_retryable_cli_failure(*, returncode: int | None, stderr: str = "") -> bool:
-    """Classify CLI rate-limit / overload / quota failures as retryable."""
+    """Classify CLI rate-limit / overload / quota / transient-404 failures as retryable."""
     if returncode is not None and returncode in RATE_LIMIT_EXIT_CODES:
         return True
-    lowered = stderr.lower()
-    return any(needle in lowered for needle in _RETRYABLE_CLI_NEEDLES)
+    kind = classify_provider_failure(stderr)
+    return kind in _RETRYABLE_FAILURE_CLASSES
+
+
+def _provider_json_payload(stderr: str) -> dict[str, Any] | None:
+    text = stderr.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        parsed: object = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _message_from_payload(payload: dict[str, Any] | None) -> str:
+    if payload is None:
+        return ""
+    data = payload.get("data")
+    if isinstance(data, dict):
+        message = data.get("message")
+        if isinstance(message, str):
+            return message
+    message = payload.get("message")
+    return message if isinstance(message, str) else ""
+
+
+def _status_code_from_payload(payload: dict[str, Any] | None) -> int | None:
+    if payload is None:
+        return None
+    for candidate in (payload, payload.get("data")):
+        if not isinstance(candidate, dict):
+            continue
+        code = candidate.get("statusCode")
+        if isinstance(code, int):
+            return code
+    return None
+
+
+def _is_http_404(
+    *,
+    stderr: str,
+    status_code: int | None,
+    payload: dict[str, Any] | None,
+) -> bool:
+    if status_code == 404:
+        return True
+    if _status_code_from_payload(payload) == 404:
+        return True
+    return _HTTP_404_RE.search(stderr) is not None
 
 
 class retry_transient_safe_methods(retry_base):
@@ -109,6 +218,8 @@ __all__ = [
     "DEFAULT_WAIT",
     "RATE_LIMIT_EXIT_CODES",
     "SAFE_HTTP_METHODS",
+    "ProviderFailureClass",
+    "classify_provider_failure",
     "is_retryable_cli_failure",
     "is_safe_http_method",
     "is_transient_http_error",

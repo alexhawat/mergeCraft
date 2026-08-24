@@ -59,6 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A transient Nous HTTP 404 (including a false billing/credits refusal) now
+  fails over to the next model instead of stopping the run and reporting a
+  missing `set_output` schema failure (#466)
 - Empty Bandit JSON stdout is a clean scan (zero findings) instead of a skip;
   unparsable stdout still skips and quotes the first bytes of that output (#467)
 - Catalog-check rejects all-zero `sha256` provenance pins (placeholders that
