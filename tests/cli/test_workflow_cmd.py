@@ -28,6 +28,7 @@ from tests.cli.support_provider_registry import (
     indexed_custom_provider_api_key,
     indexed_custom_provider_base_url,
     indexed_env_key,
+    read_config,
     require_workflow_cmd_symbols,
     scaffold_mergecraft_home,
     scaffold_workflow_file,
@@ -591,3 +592,85 @@ def test_workflow_mutated_repo_passes_action_yml_hygiene_check(
         text=True,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# ---------------------------------------------------------------------------
+# PR #498 review — --cwd scoping and existing-provider --url overrides
+# ---------------------------------------------------------------------------
+
+
+def test_relative_workflow_path_resolves_against_cwd_option(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A relative --workflow follows --cwd, not the process working directory."""
+    target = tmp_path / "target-repo"
+    caller = tmp_path / "caller-repo"
+    scaffold_mergecraft_home(target)
+    scaffold_workflow_file(target, WORKFLOW_ONE_STEP_TEMPLATE)
+    decoy = scaffold_workflow_file(caller, WORKFLOW_ONE_STEP_TEMPLATE)
+    decoy_before = decoy.read_text(encoding="utf-8")
+
+    # Deliberately do not chdir into the target: the caller sits elsewhere.
+    monkeypatch.chdir(caller)
+    stub_mergecraft_env(monkeypatch, target)
+
+    result = _invoke(
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "nous",
+        "--url",
+        NOUS_BASE_URL,
+        "--harness",
+        "opencode",
+        "--cwd",
+        str(target),
+        "--workflow",
+        WORKFLOW_DEFAULT_RELATIVE_PATH,
+        "--apply",
+    )
+    output = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, output
+
+    assert decoy.read_text(encoding="utf-8") == decoy_before, (
+        "a relative --workflow must not rewrite the caller's own workflow"
+    )
+    written = (target / WORKFLOW_DEFAULT_RELATIVE_PATH).read_text(encoding="utf-8")
+    assert written != WORKFLOW_ONE_STEP_TEMPLATE, (
+        "the --cwd repo's workflow should be the one wired"
+    )
+
+
+def test_existing_provider_url_override_is_applied_and_persisted(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """--url on an already-registered provider replaces the stored endpoint."""
+    workflow = _setup_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    _register_nous_provider(tmp_path)
+
+    result = _invoke(
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "nous",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+    output = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, output
+
+    entries = read_config(tmp_path).get("providers", [])
+    stored = next(entry for entry in entries if entry["label"] == "nous")
+    assert stored["url"] == CUSTOM_BASE_URL, (
+        f"the validated --url override must replace the stored endpoint; got {stored['url']!r}"
+    )
+    assert NOUS_BASE_URL not in workflow_text(workflow), (
+        "the workflow must not stay wired to the superseded endpoint"
+    )

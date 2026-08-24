@@ -60,6 +60,18 @@ def _workflow_option() -> Path:
     return Path(DEFAULT_WORKFLOW_RELATIVE_PATH)
 
 
+def _resolve_workflow_path(workflow: Path, repo_root: Path) -> Path:
+    """Anchor a relative ``--workflow`` to ``--cwd``.
+
+    ``--cwd`` scopes the registry config, so a relative workflow path left
+    against the process cwd would let one invocation read config from one
+    repository and rewrite the workflow of another.
+    """
+    if workflow.is_absolute():
+        return workflow
+    return repo_root / workflow
+
+
 def _emit_workflow_change(
     workflow: Path,
     change: WorkflowChange,
@@ -111,6 +123,14 @@ def _plan_provider_for_workflow(
                     cli_bail(str(exc))
             if resolved_url is None:
                 cli_bail(f"provider {normalised_label!r} requires --url (absolute http(s) URL)")
+            # Carry the validated override onto the row that gets wired and
+            # persisted; returning the untouched entry would silently keep the
+            # old endpoint after accepting --url.
+            if resolved_url != entry.get("url"):
+                entry["url"] = resolved_url
+                if persist:
+                    data["providers"] = entries
+                    _write_config_dict(config_path, data)
             return entry, env_index
 
     try:
@@ -224,6 +244,7 @@ def list_cmd(
 ) -> None:
     """List provider/model wiring present in mergeCraft workflow steps."""
     repo_root = cwd.resolve()
+    workflow = _resolve_workflow_path(workflow, repo_root)
     steps = _iter_mergecraft_steps(workflow)
     if not steps:
         console.print(f"[yellow]no uses: alexhawat/mergeCraft steps found in {workflow}[/yellow]")
@@ -284,6 +305,7 @@ def provider_add_cmd(
 ) -> None:
     """Register a provider and wire indexed custom-provider env keys into the workflow."""
     repo_root = cwd.resolve()
+    workflow = _resolve_workflow_path(workflow, repo_root)
     entry, env_index = _plan_provider_for_workflow(
         repo_root,
         label=label,
@@ -331,6 +353,7 @@ def model_add_cmd(
 ) -> None:
     """Wire a registered model into ``with.model`` on a mergeCraft workflow step."""
     repo_root = cwd.resolve()
+    workflow = _resolve_workflow_path(workflow, repo_root)
     slug = _resolve_registered_model(repo_root, provider=provider, model=model)
     try:
         change = apply_model_wiring(
@@ -362,6 +385,7 @@ def model_prioritize_cmd(
 ) -> None:
     """Promote one model ahead of another in the workflow fallback chain."""
     repo_root = cwd.resolve()
+    workflow = _resolve_workflow_path(workflow, repo_root)
     slug = _resolve_registered_model(repo_root, provider=provider, model=model)
     before_slug = before.strip()
     try:
@@ -400,6 +424,7 @@ def agents_setmodel_cmd(
     """Wire an agent's primary model into a mergeCraft workflow step."""
     _ = agent  # config validation deferred to registry slug resolution
     repo_root = cwd.resolve()
+    workflow = _resolve_workflow_path(workflow, repo_root)
     config_path = _config_path(repo_root)
     data = _load_config_dict(config_path)
     entries = _provider_entries(data)
