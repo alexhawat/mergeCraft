@@ -1521,8 +1521,6 @@ async def main() -> MainResult:
             if ctx.tool_context:
                 try:
                     await persist_learnings(ctx.tool_context)
-                    from mergecraft.evidence.run_packet import prepare_run_packet
-
                     prepared = prepare_run_packet(
                         ctx.tool_context,
                         run_succeeded=run_succeeded_for_outcome(error_outcome),

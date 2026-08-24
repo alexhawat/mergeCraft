@@ -194,7 +194,7 @@ async def collect_ci_sarif_findings(
         if not isinstance(run_id, int):
             continue
         try:
-            artifacts = await ctx.scm.list_workflow_run_artifacts(
+            artifacts = await client.list_workflow_run_artifacts(
                 ctx.repo.owner, ctx.repo.name, run_id
             )
         except Exception as listing_err:
@@ -210,7 +210,7 @@ async def collect_ci_sarif_findings(
             if name not in wanted or not isinstance(artifact_id, int):
                 continue
             try:
-                archive = await ctx.scm.download_artifact_zip(
+                archive = await client.download_artifact_zip(
                     ctx.repo.owner, ctx.repo.name, artifact_id
                 )
                 for document in _sarif_documents(archive):

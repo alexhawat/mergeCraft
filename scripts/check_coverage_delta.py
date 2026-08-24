@@ -61,8 +61,22 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
     base_percent = _percent_covered(base)
     delta = head_percent - base_percent
     breach_depth = resolved_floor - head_percent
-    inherited = False
-    caused_by_change = False
+
+    def _result(
+        *,
+        inherited: bool = False,
+        caused_by_change: bool = False,
+        message: str,
+    ) -> CoverageDeltaResult:
+        return CoverageDeltaResult(
+            head_percent=head_percent,
+            base_percent=base_percent,
+            floor=resolved_floor,
+            delta=delta,
+            inherited=inherited,
+            caused_by_change=caused_by_change,
+            message=message,
+        )
 
     ok_message = (
         f"coverage delta OK: head {head_percent:.2f}% vs base {base_percent:.2f}% "
@@ -74,43 +88,33 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
 
     if base_percent + 1e-9 < resolved_floor:
         if head_percent + 1e-9 >= resolved_floor:
-            message = ok_message
-        elif head_percent + 1e-9 < base_percent:
-            caused_by_change = True
-            message = caused_message
-        else:
-            inherited = True
-            message = (
+            return _result(message=ok_message)
+        if head_percent + 1e-9 < base_percent:
+            return _result(caused_by_change=True, message=caused_message)
+        return _result(
+            inherited=True,
+            message=(
                 f"inherited drop: base branch {base_percent:.2f}% is below floor "
                 f"{resolved_floor:.2f}% (head {head_percent:.2f}%, delta {delta:+.2f}pp)"
-            )
-    else:
-        base_at_floor = abs(base_percent - resolved_floor) <= 1e-9
-        if (
-            base_at_floor
-            and head_percent + 1e-9 < resolved_floor
-            and breach_depth + 1e-9 >= INHERITED_BREACH_MARGIN
-        ):
-            inherited = True
-            message = (
+            ),
+        )
+
+    base_at_floor = abs(base_percent - resolved_floor) <= 1e-9
+    if (
+        base_at_floor
+        and head_percent + 1e-9 < resolved_floor
+        and breach_depth + 1e-9 >= INHERITED_BREACH_MARGIN
+    ):
+        return _result(
+            inherited=True,
+            message=(
                 f"inherited drop: head {head_percent:.2f}% is {breach_depth:.2f}pp below floor "
                 f"{resolved_floor:.2f}% vs base {base_percent:.2f}%"
-            )
-        elif head_percent + 1e-9 < base_percent:
-            caused_by_change = True
-            message = caused_message
-        else:
-            message = ok_message
-
-    return CoverageDeltaResult(
-        head_percent=head_percent,
-        base_percent=base_percent,
-        floor=resolved_floor,
-        delta=delta,
-        inherited=inherited,
-        caused_by_change=caused_by_change,
-        message=message,
-    )
+            ),
+        )
+    if head_percent + 1e-9 < base_percent:
+        return _result(caused_by_change=True, message=caused_message)
+    return _result(message=ok_message)
 
 
 def main(argv: list[str] | None = None) -> int:

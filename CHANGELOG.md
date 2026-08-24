@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
-  Major/Critical (not clamped to Minor), dogfood `.mergecraft/config.yaml`
-  lists those three `ciEvidence.sarifArtifacts`, and `.github/workflows/ci.yml`
-  uploads them. A ruff SARIF error can fail `mergecraft-approval` (#464)
+  Major/Critical (not clamped to Minor); a listing error on one workflow run
+  does not skip later runs; a Major/Critical finding is kept over a less
+  severe duplicate fingerprint. Dogfood `.mergecraft/config.yaml` lists those
+  three `ciEvidence.sarifArtifacts`, and `.github/workflows/ci.yml` uploads
+  them. A ruff SARIF error can fail `mergecraft-approval` (#464)
 - `make action-pin-check` also measures the pin against the default branch's own
   tip, not just against the other branch's pin. Comparing pins to each other
   passes when both are equally stale, which is what happened after #457 merged:
@@ -80,9 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent Critical or Major finding fails ``mergecraft-approval`` and the
   evidence packet's ``request_changes`` action. An empty finding list still
   stays ``neutral``; untrusted runs still never ``success`` (#460)
-- A CI SARIF listing error on one workflow run no longer skips later runs;
-  a Major/Critical CI finding is kept over a less severe duplicate fingerprint,
-  and recorded CI findings reach the same approval union (#464)
 - Coverage delta vs the base branch now attributes a drop of 1.0pp or more
   below `fail_under` as inherited drift when the base is already at the floor,
   instead of always treating `head < base` as caused by the PR (#485)
