@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import StringIO
 from types import SimpleNamespace
 from typing import Any
@@ -39,8 +40,8 @@ def test_diff_review_cmd_uses_notify_findings_once_policy() -> None:
     assert len(emitted) == 1
 
 
-def test_finish_agent_protocol_does_not_redeliver_already_seen_finding() -> None:
-    """Edge: finish-path notify shares ``seen`` so a live finding is not emitted twice."""
+def test_finish_agent_protocol_re_emits_batch_short_ids_for_seen_findings() -> None:
+    """Edge: finish-path notify refreshes streamed rows with batch-resolved short ids."""
     buf = StringIO()
     stream = AgentProtocolStream(stream=buf)
     finding = make_finding(
@@ -69,7 +70,10 @@ def test_finish_agent_protocol_does_not_redeliver_already_seen_finding() -> None
     finding_events = [
         line for line in events if '"event": "finding"' in line or '"event":"finding"' in line
     ]
-    assert len(finding_events) == 1
+    assert len(finding_events) == 2
+    final = json.loads(finding_events[-1])["finding"]
+    assert isinstance(final.get("short_id"), str)
+    assert final["short_id"].startswith("MC-")
 
 
 def test_mcp_set_output_notifies_on_finding_per_row_without_cli_import() -> None:

@@ -1,4 +1,4 @@
-"""Review output dispatch for ``mergecraft review`` (Thermos F8 / F16).
+"""Review output dispatch for ``mergecraft review``.
 
 Hunk export writes a **raw** ``{"comments":[...]}`` JSON object to stdout for
 pipe-friendly tooling — not the CLI ``emit_cli_json`` envelope used by
@@ -91,15 +91,15 @@ def dispatch_review_output(
         return
 
     if effective_output_format == "json":
-        target = json_output or output
-        if target is not None and target.is_file():
-            console.print(f"[green]wrote[/green] {target}")
         if json_stdout:
             emit_review_json_stdout(
                 review_id=review_id,
                 findings=findings,
                 output_text=text or None,
             )
+        target = json_output or output
+        if target is not None and target.is_file():
+            console.print(f"[green]wrote[/green] {target}")
         return
 
     if effective_output_format == "jsonl":

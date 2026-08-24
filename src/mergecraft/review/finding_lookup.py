@@ -1,4 +1,4 @@
-"""Shared finding-id safety checks and evidence-packet lookup (#453 / Thermos F3).
+"""Shared finding-id safety checks and evidence-packet lookup (#453).
 
 Exports:
     is_safe_path_stem: Reject traversal and separator characters in file stems.

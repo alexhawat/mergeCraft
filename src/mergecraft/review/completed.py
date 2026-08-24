@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from mergecraft.analyzers.finding import Finding
+from mergecraft.evidence.minimal_packet import minimal_evidence_packet
 from mergecraft.review.finding_lookup import (
     is_safe_path_stem,
     load_json_packets_in_dir,
@@ -37,6 +38,13 @@ _REVIEW_ARTIFACT_SKIP = frozenset(
 def completed_review_dir(review_id: str, *, repo_root: Path) -> Path:
     """Return ``<repo>/.mergecraft/reviews/<review_id>``."""
     return repo_root / _REVIEWS_SUBDIR / review_id
+
+
+def completed_review_exists(review_id: str, *, repo_root: Path) -> bool:
+    """Return whether ``review_id`` has a readable ``completed.json`` marker."""
+    if not is_safe_path_stem(review_id):
+        return False
+    return (completed_review_dir(review_id, repo_root=repo_root) / "completed.json").is_file()
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,9 +226,7 @@ def lookup_finding_packet_in_review(
     fingerprints = _fingerprints_from_findings(loaded.findings)
     if not fingerprints:
         return None
-    fallback_packets = {
-        fp: {"finding_id": fp, "state": "unverified", "kinds": []} for fp in fingerprints
-    }
+    fallback_packets = {fp: minimal_evidence_packet(fp) for fp in fingerprints}
     return lookup_packet_by_finding_id(finding_id, fallback_packets)
 
 
@@ -252,6 +258,7 @@ __all__ = [
     "COMPLETED_REVIEW_SCHEMA_VERSION",
     "CompletedReview",
     "completed_review_dir",
+    "completed_review_exists",
     "list_completed_review_ids",
     "load_completed_review",
     "load_completed_review_trace_events",

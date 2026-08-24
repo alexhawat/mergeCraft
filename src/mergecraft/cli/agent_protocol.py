@@ -136,14 +136,21 @@ def notify_findings(
     rows: Sequence[dict[str, Any]],
     *,
     seen: set[str] | None = None,
+    refresh: bool = False,
 ) -> set[str]:
-    """Call ``on_finding`` once per novel row. Returns the updated seen set."""
+    """Call ``on_finding`` once per novel row. Returns the updated seen set.
+
+    When ``refresh`` is true, rows that carry a ``short_id`` are re-emitted even
+    when their fingerprint was already streamed without batch-resolved ids.
+    """
     emitted = seen if seen is not None else set()
     if on_finding is None:
         return emitted
     for row in rows:
         key = finding_event_key(row)
         if key in emitted:
+            if refresh and row.get("short_id"):
+                on_finding(row)
             continue
         emitted.add(key)
         on_finding(row)

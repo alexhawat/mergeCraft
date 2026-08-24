@@ -265,3 +265,78 @@ def test_findings_lookup_does_not_invoke_review_agent(
     combined = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
     assert calls == []
+
+
+def test_explain_with_review_id_fails_closed_when_finding_missing_in_review(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Error — review-scoped explain does not fall back to global evidence."""
+    review_id = sample_review_id()
+    seed_completed_review(tmp_path, review_id=review_id)
+    _guard_against_review_rerun(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["explain", review_id, "MC-deadbeef", "--repo-root", str(tmp_path)],
+        env=_DUMB_ENV,
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
+    assert "unknown finding id" in combined.casefold()
+
+
+def test_replay_unknown_review_id_fails_closed_without_global_fallback(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Error — explicit replay ids without co-located traces do not scan global traces."""
+    review_id = "review-missing-replay-453"
+    _guard_against_review_rerun(monkeypatch)
+    trace_calls: list[object] = []
+
+    def _boom(*args: object, **kwargs: object) -> list[dict[str, object]]:
+        trace_calls.append((args, kwargs))
+        msg = "global trace fallback must not run for explicit review id"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr("mergecraft.cli.replay_cmd.load_trace_jsonl_events", _boom)
+    result = runner.invoke(
+        app,
+        ["replay", review_id, "--repo-root", str(tmp_path)],
+        env=_DUMB_ENV,
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
+    assert "unknown review run" in combined.casefold()
+    assert trace_calls == []
+
+
+def test_review_with_unsafe_review_id_still_succeeds_and_persists_safely(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Happy — unsafe ``MERGECRAFT_REVIEW_ID`` values do not crash persistence."""
+    unsafe_review_id = "../escape"
+    _install_fake_review(monkeypatch)
+    patch = tmp_path / "change.diff"
+    patch.write_text(_SAMPLE_PATCH, encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "--format",
+            "json",
+            "review",
+            "--diff",
+            str(patch),
+            "--cwd",
+            str(tmp_path),
+        ],
+        env={**_DUMB_ENV, "MERGECRAFT_REVIEW_ID": unsafe_review_id},
+    )
+    combined = _plain(result.stdout + result.stderr)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
+    from tests.review.support_durable_review import require_callable
+
+    loaded_ids = require_callable("list_completed_review_ids")(repo_root=tmp_path)
+    assert loaded_ids
+    assert unsafe_review_id not in loaded_ids

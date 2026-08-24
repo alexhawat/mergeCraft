@@ -13,11 +13,15 @@ from typing import Any
 import typer
 from rich.table import Table
 
-from mergecraft.cli import trace_jsonl
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
+from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
-from mergecraft.cli.trace_jsonl import load_trace_jsonl_events, session_ids_in_trace_order
+from mergecraft.cli.trace_jsonl import (
+    default_trace_dir,
+    load_trace_jsonl_events,
+    session_ids_in_trace_order,
+)
 from mergecraft.review.completed import load_completed_review_trace_events
 
 
@@ -68,8 +72,10 @@ def run(
     events: list[dict[str, Any]] = []
     if run_id:
         events = load_completed_review_trace_events(run_id, repo_root=root)
-    if not events:
-        target = trace_dir if trace_dir is not None else trace_jsonl.default_trace_dir()
+        if not events:
+            cli_bail(f"unknown review run id {run_id}", code=CLI_USAGE_EXIT_CODE)
+    else:
+        target = trace_dir if trace_dir is not None else default_trace_dir()
         events = load_trace_jsonl_events(target)
     payload = _payload(run_id=run_id, events=events)
     if wants_json_output(ctx, json_flag=False):

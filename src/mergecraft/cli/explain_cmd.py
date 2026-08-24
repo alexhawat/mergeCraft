@@ -20,7 +20,10 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import OutputFormat, emit_cli_json, wants_json_output
 from mergecraft.evidence.audit import lookup_finding_packet
-from mergecraft.review.completed import load_completed_review, lookup_finding_packet_in_review
+from mergecraft.review.completed import (
+    completed_review_exists,
+    lookup_finding_packet_in_review,
+)
 from mergecraft.review.finding_lookup import is_safe_path_stem
 
 _FINGERPRINT_HEX_RE = re.compile(r"^[0-9a-f]+$")
@@ -136,7 +139,7 @@ def run(
         token = review_id_or_finding
         if _is_finding_id_token(token):
             resolved_finding_id = token
-        elif is_safe_path_stem(token) and load_completed_review(token, repo_root=root) is not None:
+        elif is_safe_path_stem(token) and completed_review_exists(token, repo_root=root):
             cli_bail(
                 f"{token!r} is a stored review id — pass a finding id (MC-…) "
                 "or use: explain <review-id> <finding-id>",
@@ -153,10 +156,12 @@ def run(
                 resolved_finding_id,
                 repo_root=root,
             )
-        if packet is None:
+            if packet is None:
+                cli_bail(f"unknown finding id {resolved_finding_id}", code=CLI_USAGE_EXIT_CODE)
+        else:
             packet = lookup_finding_packet(resolved_finding_id, repo_root=root)
-        if packet is None:
-            cli_bail(f"unknown finding id {resolved_finding_id}", code=CLI_USAGE_EXIT_CODE)
+            if packet is None:
+                cli_bail(f"unknown finding id {resolved_finding_id}", code=CLI_USAGE_EXIT_CODE)
         payload = _finding_payload(
             resolved_finding_id,
             packet,

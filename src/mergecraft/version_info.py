@@ -1,4 +1,4 @@
-"""Version display helpers for CLI and telemetry (#473 / Thermos F17)."""
+"""Version display helpers for CLI and telemetry (#473)."""
 
 from __future__ import annotations
 

@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import tempfile
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import Any, NoReturn
 
 import typer
 from loguru import logger
 
-from mergecraft.analyzers.finding import finding_json_record, finding_short_id
+from mergecraft.analyzers.finding import Finding
 from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
@@ -35,13 +36,11 @@ from mergecraft.review.completed_artifacts import (
     collect_trace_events_for_review,
 )
 from mergecraft.review.engine import ReviewEngine
+from mergecraft.review.finding_lookup import is_safe_path_stem
 from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.types import ShellPermission  # noqa: TC001
 from mergecraft.utils.log import configure_logging
 from mergecraft.utils.source_resolve import SourceResolverSpec
-
-if TYPE_CHECKING:
-    from mergecraft.analyzers.finding import Finding
 
 _PANEL_SOURCE = "Source"
 _PANEL_DIFF = "Diff selection"
@@ -145,18 +144,26 @@ def _resolve_outcome(result: OfflineReviewResult) -> RunOutcome:
     return RunOutcome.passed if result.success else RunOutcome.failed
 
 
-def _agent_finding_record(finding: dict[str, Any]) -> dict[str, Any]:
-    """Attach a short id when ``finding`` carries a fingerprint."""
-    fingerprint = finding.get("fingerprint")
-    if not isinstance(fingerprint, str) or not fingerprint:
-        return finding
-    from mergecraft.analyzers.finding import Finding
+def _safe_review_id_for_persist(review_id: str) -> str:
+    """Return a path-safe review id for durable storage."""
+    if is_safe_path_stem(review_id):
+        return review_id
+    logger.warning(
+        "ignoring unsafe {} for durable review storage; using generated id",
+        review_id,
+    )
+    return uuid.uuid4().hex
 
+
+def _agent_finding_record(finding: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a streamed finding without attaching a per-row short id."""
+    if finding.get("fingerprint"):
+        return finding
     try:
         model = Finding.model_validate(finding)
     except ValueError:
         return finding
-    return finding_json_record(model, short_id=finding_short_id(fingerprint))
+    return model.model_dump(mode="json")
 
 
 def _persist_completed_cli_review(
@@ -171,6 +178,7 @@ def _persist_completed_cli_review(
 ) -> None:
     from mergecraft.evidence.run_manifest import build_run_manifest
 
+    safe_review_id = _safe_review_id_for_persist(review_id)
     manifest = build_run_manifest(
         cwd=cwd,
         model=model or "(unresolved)",
@@ -179,7 +187,7 @@ def _persist_completed_cli_review(
     )
     findings_records = finding_json_records(findings)
     review = CompletedReview(
-        review_id=review_id,
+        review_id=safe_review_id,
         snapshot=snapshot,
         manifest=manifest,
         findings=findings_records,
@@ -191,12 +199,15 @@ def _persist_completed_cli_review(
         evidence_packet_path=evidence_packet_path,
     )
     trace_events = collect_trace_events_for_review(review_id, repo_root=cwd)
-    persist_completed_review(
-        review,
-        repo_root=cwd,
-        evidence_packets=evidence_packets,
-        trace_events=trace_events,
-    )
+    try:
+        persist_completed_review(
+            review,
+            repo_root=cwd,
+            evidence_packets=evidence_packets,
+            trace_events=trace_events,
+        )
+    except ValueError as exc:
+        logger.warning("skipped durable review persistence: {}", exc)
 
 
 def cleanup_review_subprocesses() -> None:
@@ -238,6 +249,7 @@ def _finish_agent_protocol(
         stream.finding,
         finding_json_records(findings),
         seen=seen,
+        refresh=True,
     )
     stream.verdict(outcome.value, exit_code)
     stream.run_finished(exit_code)
@@ -589,6 +601,7 @@ def run(
     from mergecraft.tracing.review_context import resolve_review_id
 
     review_id = resolve_review_id()
+    persist_review_id = _safe_review_id_for_persist(review_id)
     json_stdout = (
         effective_output_format == "json"
         and json_output is None
@@ -706,7 +719,7 @@ def run(
             effective_output_format=effective_output_format,
             result=result,
             findings=findings,
-            review_id=review_id,
+            review_id=persist_review_id,
             output=output,
             json_output=json_output,
             json_stdout=json_stdout,
@@ -714,7 +727,12 @@ def run(
             exit_code=exit_code,
         )
 
-        if json_output is not None and result.success and not dry_run:
+        if (
+            json_output is not None
+            and result.success
+            and not dry_run
+            and effective_output_format != "json"
+        ):
             console.print(f"[green]wrote[/green] {json_output}")
 
         raise typer.Exit(exit_code)

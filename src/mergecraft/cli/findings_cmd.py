@@ -21,7 +21,12 @@ if TYPE_CHECKING:
 
     from mergecraft.findings.lifecycle import LifecycleRecord
 
-from mergecraft.analyzers.finding import Finding, render_finding_markdown, resolve_finding_short_ids
+from mergecraft.analyzers.finding import (
+    Finding,
+    finding_short_id,
+    render_finding_markdown,
+    resolve_finding_short_ids,
+)
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
@@ -110,7 +115,7 @@ def _render_durable_findings_markdown(
                 lines.append(str(message))
                 lines.append("")
             continue
-        short_id = short_ids.get(finding.fingerprint, finding.fingerprint[:6])
+        short_id = short_ids.get(finding.fingerprint, finding_short_id(finding.fingerprint))
         lines.append(render_finding_markdown(finding, short_id=short_id))
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
