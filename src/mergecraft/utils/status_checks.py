@@ -35,6 +35,7 @@ from mergecraft.run_outcome import CompletionConclusion
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import TrustTier
+    from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.mcp.context import ToolContext
 
 COMPLETION_CHECK = "mergecraft"
@@ -93,6 +94,8 @@ async def report_status_checks(
     run_succeeded: bool,
     failure_reason: str | None = None,
     conclusion: CompletionConclusion | None = None,
+    packet: MergeEvidencePacket | None = None,
+    packet_ready: bool = False,
 ) -> None:
     """Post opt-in status checks. Best-effort; never raises into the run outcome.
 
@@ -164,14 +167,26 @@ async def report_status_checks(
         decision_summary_lines,
         log_decision,
     )
-    from mergecraft.evidence.run_packet import build_run_packet
 
     # D7 / #460: the packet already ran ``decide_approval``. Reuse
     # ``packet.decision.verdict`` so this layer only posts check-runs.
     # Best-effort: never raise after the completion check-run has posted.
-    change_id = f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"
+    # ``packet_ready`` means the caller already assembled (or failed to);
+    # do not rebuild for isolation.
+    if not packet_ready:
+        from mergecraft.evidence.run_packet import build_run_packet
+
+        change_id = f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"
+        try:
+            packet = build_run_packet(ctx, change_id=change_id, run_succeeded=run_succeeded)
+        except Exception as err:
+            logger.debug("status checks: approval path failed: {}", err)
+            return
+    if packet is None:
+        logger.debug("status checks: no packet; skipping approval check")
+        return
+
     try:
-        packet = build_run_packet(ctx, change_id=change_id, run_succeeded=run_succeeded)
         tier: TrustTier = ctx.trust_tier
         if packet.decision is None:
             logger.debug("status checks: packet has no decision; posting neutral approval")
@@ -223,7 +238,7 @@ async def report_status_checks(
             summary=approval_summary,
         )
     except Exception as err:
-        logger.debug("status checks: approval path failed: {}", err)
+        logger.debug("status checks: {} post failed: {}", APPROVAL_CHECK, err)
 
 
 __all__ = [

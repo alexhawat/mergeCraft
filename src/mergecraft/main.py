@@ -23,7 +23,7 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
-from mergecraft.evidence.run_packet import emit_run_packet
+from mergecraft.evidence.run_packet import _change_id, build_run_packet, emit_run_packet
 from mergecraft.main_outcome import (
     _classify_outcome,
     _publish_span_attrs,
@@ -357,13 +357,28 @@ async def _publish(
 
     assert ctx.settings is not None
     tracer = get_tracer_from_settings(ctx.settings)
+    run_ok = run_succeeded_for_outcome(outcome)
+    packet = None
+    try:
+        resolved_change_id = _change_id(tool_context)
+        if resolved_change_id is not None:
+            packet = build_run_packet(
+                tool_context,
+                change_id=resolved_change_id,
+                run_succeeded=run_ok,
+            )
+    except Exception as err:
+        logger.warning("evidence packet: assembly failed — {}", err)
+        packet = None
     with tracer.start_span("mergecraft.publish", attrs_source=attrs_source) as _span:
         await persist_learnings(tool_context)
         await report_status_checks(
             tool_context,
-            run_succeeded=run_succeeded_for_outcome(outcome),
+            run_succeeded=run_ok,
             failure_reason=failure_reason,
             conclusion=RUN_OUTCOME_CONCLUSION[outcome],
+            packet=packet,
+            packet_ready=True,
         )
         # #39 — opt-in, off by default, and never a gate: with `sarif_upload`
         # unset this returns before making any request.
@@ -374,7 +389,9 @@ async def _publish(
         written = await asyncio.to_thread(
             emit_run_packet,
             tool_context,
-            run_succeeded=outcome is RunOutcome.passed,
+            run_succeeded=run_ok,
+            packet=packet,
+            packet_ready=True,
             verdict_prediction=verdict_prediction,
             actual_outcome=actual_outcome,
         )

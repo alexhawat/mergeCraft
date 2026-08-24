@@ -283,6 +283,39 @@ async def test_collect_makes_no_api_call_when_ci_evidence_is_empty(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_collect_continues_after_one_run_listing_failure(tmp_path: Path) -> None:
+    """A listing error on run n must not skip remaining workflow runs."""
+
+    class _FirstRunBoom(_ArtifactGitHub):
+        async def get(self, path: str, **kwargs: Any) -> Any:
+            self.get_paths.append(path)
+            if path.endswith("/actions/runs"):
+                return {"workflow_runs": [{"id": 1}, {"id": 2}]}
+            return {}
+
+        async def list_workflow_run_artifacts(
+            self, owner: str, repo: str, run_id: int
+        ) -> list[dict[str, Any]]:
+            if run_id == 1:
+                raise RuntimeError("listing exploded")
+            return list(self.artifacts)
+
+    github = _FirstRunBoom(
+        artifacts=[{"id": 7, "name": "ruff-sarif"}],
+        archives={
+            7: _zip_sarif("ruff.sarif", _sarif(tool="ruff", rule_id="F401", level="error")),
+        },
+    )
+    ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif"])
+
+    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+
+    assert any(item.source == "ci" and item.severity in _BLOCKING for item in findings), (
+        "later workflow run must still be ingested after an earlier listing failure"
+    )
+
+
+@pytest.mark.asyncio
 async def test_collect_swallows_artifact_download_failure(tmp_path: Path) -> None:
     class _BrokenZip(_ArtifactGitHub):
         async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes:

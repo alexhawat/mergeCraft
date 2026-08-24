@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.evidence.run_packet import build_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import ApprovalRecord, init_tool_state
 from mergecraft.modes import compute_modes
@@ -176,6 +177,48 @@ async def test_report_status_checks_skips_approval_when_packet_raises(
 
     monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
     await report_status_checks(ctx, run_succeeded=True)
+    names = [run.get("name") for run in github.check_runs]
+    assert COMPLETION_CHECK in names
+    assert APPROVAL_CHECK not in names
+
+
+@pytest.mark.asyncio
+async def test_report_status_checks_does_not_rebuild_when_packet_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST uses the prebuilt packet; assembly is not retried for isolation."""
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
+    packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
+    calls = {"n": 0}
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        calls["n"] += 1
+        msg = "must not rebuild"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
+    await report_status_checks(ctx, run_succeeded=True, packet=packet, packet_ready=True)
+    assert calls["n"] == 0
+    assert APPROVAL_CHECK in [run.get("name") for run in github.check_runs]
+
+
+@pytest.mark.asyncio
+async def test_report_status_checks_skips_approval_without_rebuilding_failed_packet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
+    calls = {"n": 0}
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        calls["n"] += 1
+        msg = "must not rebuild"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
+    await report_status_checks(ctx, run_succeeded=True, packet=None, packet_ready=True)
+    assert calls["n"] == 0
     names = [run.get("name") for run in github.check_runs]
     assert COMPLETION_CHECK in names
     assert APPROVAL_CHECK not in names

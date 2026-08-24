@@ -497,3 +497,5 @@ def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -
     source = inspect.getsource(select_rule_id)
     assert "_RULE_PREDICATES" in source
     assert 'return "has_blockers"' not in source
+    assert "schema_failure" not in rule_ids
+    assert 'return "schema_failure"' in source

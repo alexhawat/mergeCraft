@@ -205,6 +205,25 @@ def test_emission_never_raises_into_the_run(tmp_path: Path) -> None:
     assert emit_run_packet(ctx, run_succeeded=True) is None
 
 
+def test_emit_run_packet_does_not_rebuild_when_packet_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _make_ctx(tmp_path)
+    packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
+    calls = {"n": 0}
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        calls["n"] += 1
+        msg = "must not rebuild"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
+    written = emit_run_packet(ctx, run_succeeded=True, packet=packet, packet_ready=True)
+    assert calls["n"] == 0
+    assert written is not None
+    assert json.loads(written.read_text(encoding="utf-8"))["change_id"] == packet.change_id
+
+
 def test_missing_diff_leaves_blast_radius_unset(tmp_path: Path) -> None:
     """No diff means no classification — not a fabricated 'low' lane."""
     written = emit_run_packet(_make_ctx(tmp_path, diff_text=None), run_succeeded=True)
@@ -436,3 +455,89 @@ def test_merge_findings_empty_fingerprint_does_not_duplicate() -> None:
     right = Finding.model_validate(shared)
     merged = merge_findings([left], [right])
     assert len(merged) == 1
+
+
+def test_merge_findings_keeps_higher_severity_on_fingerprint_collision() -> None:
+    """A Major/Critical CI row must not lose to an earlier Minor agent duplicate."""
+    from mergecraft.analyzers.finding import make_finding
+    from mergecraft.evidence.findings import merge_findings
+
+    agent = make_finding(
+        tool="agent",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="certain",
+        message="unused import",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="agent",
+        fingerprint="same-fp",
+    )
+    ci = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Major",
+        confidence="certain",
+        message="unused import",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="ci",
+        fingerprint="same-fp",
+    )
+    merged = merge_findings([agent], [ci])
+    assert len(merged) == 1
+    assert merged[0].severity == "Major"
+    assert merged[0].source == "ci"
+
+
+def test_load_run_findings_uses_typed_tool_state_not_getattr() -> None:
+    import inspect
+
+    from mergecraft.evidence.findings import load_run_findings
+
+    source = inspect.getsource(load_run_findings)
+    assert "getattr" not in source
+
+
+def test_load_run_findings_keeps_ci_blocker_over_agent_minor(tmp_path: Path) -> None:
+    from mergecraft.ci.evidence import record_ci_findings
+    from mergecraft.evidence.findings import load_run_findings
+
+    ctx = _make_ctx(tmp_path)
+    agent = make_finding(
+        tool="agent",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="certain",
+        message="unused import",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="agent",
+        fingerprint="same-fp",
+    )
+    ci = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Critical",
+        confidence="certain",
+        message="unused import",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="ci",
+        fingerprint="same-fp",
+    )
+    ctx.tool_state.agent_findings = [agent.model_dump()]
+    record_ci_findings(ctx.tool_state, [ci])
+    loaded = load_run_findings(ctx)
+    matching = [item for item in loaded if item.fingerprint == "same-fp"]
+    assert len(matching) == 1
+    assert matching[0].severity == "Critical"
+    assert matching[0].source == "ci"

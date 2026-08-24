@@ -146,6 +146,23 @@ def require_json_object(raw: str, *, what: str) -> dict[str, Any]:
     return cast("dict[str, Any]", payload)  # json.loads values are typed Any
 
 
+def iter_bandit_result_rows(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield Bandit ``results`` objects, or raise on a missing/non-object row.
+
+    Empty ``results: []`` is a clean scan. A missing array or a non-object
+    row is a parse failure — same contract as ``bandit_to_sarif``.
+    """
+    results = payload.get("results")
+    if not isinstance(results, list):
+        msg = "bandit JSON output missing a results array"
+        raise ValueError(msg)
+    for item in results:
+        if not isinstance(item, dict):
+            msg = "bandit JSON results array contains a non-object row"
+            raise ValueError(msg)
+        yield item
+
+
 def require_json_array(raw: str, *, what: str) -> list[Any]:
     """Parse ``raw`` as a JSON array or raise ``ValueError``."""
     payload = load_json(raw)

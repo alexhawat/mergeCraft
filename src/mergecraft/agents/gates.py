@@ -410,23 +410,6 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     return packet.decision is None or packet.decision.verdict != "failure"
 
 
-def _is_schema_failure(packet: MergeEvidencePacket) -> bool:
-    """A packet whose evidence is structurally missing — schema failure."""
-    # A packet with no findings, no blast radius, no decision, and an
-    # explicit self-assessment is the canonical "looks approved but
-    # nothing else" shape. The verdict function already guards against
-    # this, but the rule is independently meaningful for the gate.
-    if packet.findings:
-        return False
-    if packet.blast_radius is not None:
-        return False
-    if packet.decision is not None:
-        return False
-    if packet.self_assessment is None:
-        return False
-    return packet.self_assessment.approved is True
-
-
 def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
     """Blocking agent/analyzer findings request changes under their own key."""
     return _has_blocker(packet.findings)
@@ -444,7 +427,6 @@ _RULE_PREDICATES: Final[tuple[tuple[Callable[[MergeEvidencePacket], bool], str],
     (_packet_has_blockers, "has_blockers"),
     (_has_changed_unread_file, "changed-unread-file"),
     (_has_tool_loop, "tool_loop"),
-    (_is_schema_failure, "schema_failure"),
 )
 
 
@@ -458,6 +440,8 @@ def select_rule_id(packet: MergeEvidencePacket) -> str:
     for predicate, rule_id in _RULE_PREDICATES:
         if predicate(packet):
             return rule_id
+    # Catch-all only — do not also list ``schema_failure`` in the table;
+    # that entry never changed the outcome.
     return "schema_failure"
 
 

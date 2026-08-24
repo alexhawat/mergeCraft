@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     coerce_line,
+    iter_bandit_result_rows,
     map_confidence,
     map_native_severity,
     require_json_object,
@@ -46,13 +47,7 @@ def parse_bandit_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) 
     payload = require_json_object(raw, what="bandit JSON output")
     category = taxonomy_category(manifest)
     findings: list[Finding] = []
-    results = payload.get("results")
-    if not isinstance(results, list):
-        msg = "bandit JSON output missing a results array"
-        raise ValueError(msg)
-    for result in results:
-        if not isinstance(result, dict):
-            continue
+    for result in iter_bandit_result_rows(payload):
         path = resolve_repo_relative_path(str(result.get("filename") or ""), repo_root=repo_root)
         start_line = coerce_line(result.get("line_number", 1))
         rule_id = str(result.get("test_id") or result.get("test_name") or "bandit")

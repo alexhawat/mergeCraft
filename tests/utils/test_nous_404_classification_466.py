@@ -217,3 +217,14 @@ class TestProviderErrorNotSchemaFailure:
         ok = AgentResult(success=True, output="review text")
         with pytest.raises(RuntimeError, match="set_output"):
             _promote_and_finalize_agent_result(ctx, None, ok)
+
+
+def test_provider_failure_class_is_not_owned_by_http_retry_module() -> None:
+    """HTTP retry stays 429/5xx; model-chain taxonomy lives in provider_failure."""
+    from mergecraft.utils import retry_policy as rp
+    from mergecraft.utils.provider_failure import ProviderFailureClass, classify_provider_failure
+
+    assert not hasattr(rp, "ProviderFailureClass")
+    assert classify_provider_failure is not getattr(rp, "ProviderFailureClass", None)
+    assert ProviderFailureClass.BILLING.value == "billing"
+    assert callable(rp.classify_provider_failure)

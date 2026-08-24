@@ -51,7 +51,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.analyzers.finding import Finding, FindingValidationError, make_finding
+from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.manifest import AnalyzerManifest, DetectRules
 from mergecraft.analyzers.parsers.sarif import parse_sarif
 from mergecraft.analyzers.redact import redact_secrets
@@ -458,18 +458,12 @@ def ci_evidence_findings(state: ToolState) -> list[Finding]:
     evidence is supplementary, and one bad row must not take down the packet
     that carries the rest of the run's evidence.
     """
+    from mergecraft.evidence.findings import typed_findings_from_rows
+
     evidence = state.ci_evidence
     if evidence is None:
         return []
-    typed: list[Finding] = []
-    for row in evidence.findings:
-        if not isinstance(row, dict):
-            continue
-        try:
-            typed.append(Finding.model_validate(row))
-        except (FindingValidationError, ValueError) as err:
-            logger.debug("ci evidence: dropping malformed finding row: {}", err)
-    return typed
+    return typed_findings_from_rows(list(evidence.findings))
 
 
 __all__ = [

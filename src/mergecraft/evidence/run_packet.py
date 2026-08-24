@@ -434,6 +434,8 @@ def emit_run_packet(
     output_path: Path | None = None,
     verdict_prediction: Any | None = None,
     actual_outcome: str | None = None,
+    packet: MergeEvidencePacket | None = None,
+    packet_ready: bool = False,
 ) -> Path | None:
     """Build and write this run's evidence packet; return its path.
 
@@ -445,20 +447,35 @@ def emit_run_packet(
     ``change_id`` overrides the PR-derived identifier — the offline
     ``diff-review`` path has a real change to attest to but no pull request.
     ``output_path`` overrides the resolved destination.
+    ``packet_ready`` means the caller already assembled (or failed to);
+    this function then only writes and must not rebuild.
 
     Returns ``None`` when the run has no change to attest to.
     """
-    resolved_change_id = change_id or _change_id(ctx)
-    if resolved_change_id is None:
-        logger.debug("evidence packet: run has no pull request — nothing to attest")
-        return None
+    if packet_ready:
+        if packet is None:
+            return None
+        resolved_change_id = change_id or packet.change_id or _change_id(ctx)
+        if resolved_change_id is None:
+            logger.debug("evidence packet: run has no pull request — nothing to attest")
+            return None
+    else:
+        resolved_change_id = change_id or _change_id(ctx)
+        if resolved_change_id is None:
+            logger.debug("evidence packet: run has no pull request — nothing to attest")
+            return None
+        try:
+            packet = build_run_packet(
+                ctx,
+                change_id=resolved_change_id,
+                run_succeeded=run_succeeded,
+                extra_findings=extra_findings,
+            )
+        except Exception as err:  # an audit artifact never fails the run
+            logger.warning("evidence packet: assembly failed — {}", err)
+            return None
+
     try:
-        packet = build_run_packet(
-            ctx,
-            change_id=resolved_change_id,
-            run_succeeded=run_succeeded,
-            extra_findings=extra_findings,
-        )
         path = output_path or resolve_packet_path(
             tmpdir=ctx.tmpdir, change_slug=_slugify(resolved_change_id)
         )

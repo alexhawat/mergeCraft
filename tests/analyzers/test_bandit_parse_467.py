@@ -82,6 +82,16 @@ def test_empty_bandit_stdout_is_zero_findings_not_an_error(raw: str) -> None:
     assert findings == []
 
 
+def test_bandit_non_object_results_row_raises() -> None:
+    """Non-object ``results`` rows fail the same way as ``bandit_to_sarif``."""
+    with pytest.raises(ValueError, match="non-object"):
+        parse_bandit_json(
+            '{"results": ["not-an-object"]}',
+            manifest=_manifest(),
+            repo_root=Path("."),
+        )
+
+
 def test_empty_bandit_adapter_output_is_a_clean_scan_not_a_skip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

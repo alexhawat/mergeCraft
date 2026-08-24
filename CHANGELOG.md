@@ -63,6 +63,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A CI SARIF listing error on one workflow run no longer skips later runs, and
+  a Major/Critical CI finding is kept when it shares a fingerprint with a less
+  severe agent duplicate (#464)
+- Bandit JSON `results` rows that are not objects fail parse the same way as
+  the SARIF converter, while empty stdout is still a clean scan (#467)
 - Coverage delta vs the base branch now attributes a drop of 1.0pp or more
   below `fail_under` as inherited drift when the base is already at the floor,
   instead of always treating `head < base` as caused by the PR (#485)

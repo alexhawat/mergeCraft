@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import TypedDict
 
-from mergecraft.analyzers.parsers._common import require_json_object
+from mergecraft.analyzers.parsers._common import iter_bandit_result_rows, require_json_object
 
 _BANDIT_LEVEL = {"HIGH": "error", "MEDIUM": "warning", "LOW": "note"}
 
@@ -177,15 +177,12 @@ def bandit_to_sarif(raw: str) -> SarifLog:
         payload = require_json_object(raw, what="bandit JSON output")
     except ValueError as exc:
         raise ConverterError(str(exc)) from exc
-    rows = payload.get("results")
-    if not isinstance(rows, list):
-        msg = "bandit JSON output missing a results array"
-        raise ConverterError(msg)
+    try:
+        rows = list(iter_bandit_result_rows(payload))
+    except ValueError as exc:
+        raise ConverterError(str(exc)) from exc
     results: list[SarifResult] = []
     for item in rows:
-        if not isinstance(item, dict):
-            msg = "bandit JSON results array contains a non-object row"
-            raise ConverterError(msg)
         native = str(item.get("issue_severity") or "LOW").upper()
         line = _as_line(item.get("line_number"), default=1)
         results.append(

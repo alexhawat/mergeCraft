@@ -12,9 +12,12 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.analyzers.finding import Finding, FindingValidationError
+from mergecraft.review_taxonomy import FINDING_SEVERITIES
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+
+_SEVERITY_RANK: dict[str, int] = {name: index for index, name in enumerate(FINDING_SEVERITIES)}
 
 
 def typed_findings_from_rows(raw: list[Any]) -> list[Finding]:
@@ -49,18 +52,31 @@ def _dedupe_key(finding: Finding) -> str:
     )
 
 
+def _severity_rank(finding: Finding) -> int:
+    """Lower is more severe. Unknown grades sort after the taxonomy."""
+    return _SEVERITY_RANK.get(finding.severity, len(_SEVERITY_RANK))
+
+
 def merge_findings(*groups: list[Finding]) -> list[Finding]:
-    """Concatenate finding groups, dropping duplicate identity keys."""
-    unique: list[Finding] = []
-    seen: set[str] = set()
+    """Concatenate finding groups, keeping the more severe duplicate identity.
+
+    First-seen order is preserved. When fingerprints (or fallback keys)
+    collide, Major/Critical wins over Minor/Trivial so a CI blocker is not
+    dropped behind a less severe agent copy.
+    """
+    unique: dict[str, Finding] = {}
+    order: list[str] = []
     for group in groups:
         for finding in group:
             key = _dedupe_key(finding)
-            if key in seen:
+            existing = unique.get(key)
+            if existing is None:
+                unique[key] = finding
+                order.append(key)
                 continue
-            seen.add(key)
-            unique.append(finding)
-    return unique
+            if _severity_rank(finding) < _severity_rank(existing):
+                unique[key] = finding
+    return [unique[key] for key in order]
 
 
 def load_run_findings(
@@ -71,21 +87,20 @@ def load_run_findings(
 
     Validation errors are logged at debug and skipped. Deduplicates on
     :func:`_dedupe_key` (fingerprint when present, otherwise
-    tool/rule/path/line/message). CI SARIF recorded on tool state is included
-    so the approval check and the packet cannot diverge on #464 evidence.
+    tool/rule/path/line/message), keeping the more severe row on a collision.
+    CI SARIF recorded on tool state is included so the approval check and
+    the packet cannot diverge on #464 evidence.
     """
     from mergecraft.ci.evidence import ci_evidence_findings
 
-    raw: list[Any] = []
-    agent_rows = getattr(ctx.tool_state, "agent_findings", None)
-    if agent_rows:
-        raw.extend(list(agent_rows))
-    run_state = getattr(ctx.tool_state, "analyzer_run", None)
+    state = ctx.tool_state
+    raw: list[Any] = list(state.agent_findings)
+    run_state = state.analyzer_run
     if run_state is not None:
-        raw.extend(list(getattr(run_state, "findings", []) or []))
+        raw.extend(list(run_state.findings))
     return merge_findings(
         typed_findings_from_rows(raw),
-        ci_evidence_findings(ctx.tool_state),
+        ci_evidence_findings(state),
         list(extra or []),
     )
 
