@@ -23,9 +23,6 @@ severity_map:
   error: Major
   warning: Minor
   note: Trivial
-provenance:
-  linux-amd64:
-    url: https://github.com/StyraInc/regal/releases/download/v0.27.0/regal_Linux_x86_64.tar.gz
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+provenance: {}
 network_allowlist: []
 exclusive_group: null

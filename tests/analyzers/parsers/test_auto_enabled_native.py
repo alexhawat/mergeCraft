@@ -32,14 +32,17 @@ _JSONL_TOOLS: tuple[tuple[str, str], ...] = (
     ("clippy", "rustc_json"),
 )
 _TEXT_TOOLS: tuple[tuple[str, str], ...] = (("vulture", "vulture_text"),)
-_GARBAGE = (
-    "",
+_NONEMPTY_GARBAGE = (
     "not-json",
     "{",
     "[",
     "error: no such command: 'audit'",
     "error: no such command: 'deny'",
     "error: no such command: 'clippy'",
+)
+_EMPTY_STDOUT = ("", "   \n")
+_JSON_OBJECT_TOOLS_EXCEPT_BANDIT: tuple[tuple[str, str], ...] = tuple(
+    item for item in _JSON_OBJECT_TOOLS if item[0] != "bandit"
 )
 
 
@@ -65,15 +68,27 @@ def test_auto_enabled_parser_happy_path(
 
 
 @pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS)
-@pytest.mark.parametrize("raw", _GARBAGE)
+@pytest.mark.parametrize("raw", _NONEMPTY_GARBAGE)
 def test_json_object_parser_raises_on_garbage(tool_id: str, parser_id: str, raw: str) -> None:
     with pytest.raises(ValueError, match="JSON"):
         _parse(parser_id, raw, tool_id=tool_id)
 
 
-@pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS)
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS_EXCEPT_BANDIT)
+@pytest.mark.parametrize("raw", _EMPTY_STDOUT)
+def test_json_object_parser_raises_on_empty_stdout(tool_id: str, parser_id: str, raw: str) -> None:
+    with pytest.raises(ValueError, match="JSON"):
+        _parse(parser_id, raw, tool_id=tool_id)
+
+
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS_EXCEPT_BANDIT)
 def test_json_object_parser_empty_object_is_clean(tool_id: str, parser_id: str) -> None:
     assert _parse(parser_id, "{}", tool_id=tool_id) == []
+
+
+def test_bandit_empty_object_is_missing_results_not_clean() -> None:
+    with pytest.raises(ValueError, match="results array"):
+        _parse("bandit_json", "{}", tool_id="bandit")
 
 
 @pytest.mark.parametrize(("tool_id", "parser_id"), _JSON_OBJECT_TOOLS)
@@ -95,6 +110,13 @@ def test_sqlfluff_parser_empty_document_is_clean(raw: str) -> None:
 @pytest.mark.parametrize(("tool_id", "parser_id"), _JSONL_TOOLS)
 @pytest.mark.parametrize("raw", ["not-json", "{", "error: no such command: 'deny'"])
 def test_jsonl_parser_raises_on_garbage(tool_id: str, parser_id: str, raw: str) -> None:
+    with pytest.raises(ValueError, match="JSON"):
+        _parse(parser_id, raw, tool_id=tool_id)
+
+
+@pytest.mark.parametrize(("tool_id", "parser_id"), _JSONL_TOOLS)
+@pytest.mark.parametrize("raw", ["[1, 2]", '["skip"]', "[null]"])
+def test_jsonl_parser_raises_on_non_dict_array(tool_id: str, parser_id: str, raw: str) -> None:
     with pytest.raises(ValueError, match="JSON"):
         _parse(parser_id, raw, tool_id=tool_id)
 

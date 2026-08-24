@@ -25,12 +25,13 @@ import pytest
 
 from mergecraft.ci.evidence import check_run_to_finding, record_ci_findings
 from mergecraft.ci.verification import annotate_caused_by_pr, annotate_not_caused_by_pr
-from mergecraft.evidence.run_packet import emit_run_packet
+from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
+from mergecraft.scm.types import ListedItems
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
@@ -53,9 +54,13 @@ class _CheckRunGitHub(GitHubClient):
         repo: str,
         ref: str,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> ListedItems:
         self.refs.append(ref)
-        return {"total_count": len(self._check_runs), "check_runs": self._check_runs}
+        return ListedItems(
+            items=list(self._check_runs),
+            incomplete=False,
+            total_count=len(self._check_runs),
+        )
 
 
 def _ctx(
@@ -135,6 +140,71 @@ async def test_declared_ci_gate_replaces_the_unavailable_row(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_incomplete_check_run_listing_does_not_substitute_the_gate(
+    tmp_path: Path,
+) -> None:
+    class _IncompleteCheckRuns(_CheckRunGitHub):
+        async def list_check_runs_for_ref(
+            self,
+            owner: str,
+            repo: str,
+            ref: str,
+            **kwargs: Any,
+        ) -> ListedItems:
+            listed = await super().list_check_runs_for_ref(owner, repo, ref, **kwargs)
+            return ListedItems(
+                items=listed.items,
+                incomplete=True,
+                total_count=500,
+            )
+
+    github = _IncompleteCheckRuns([_check_run("Verify (drift gates)", "success")])
+    ctx = _ctx(
+        tmp_path,
+        github=github,
+        ci_gate_checks={"lint": "Verify (drift gates)"},
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'pass'")],
+    )
+
+    payload = await _run_static_checks(ctx)
+
+    assert github.refs == [HEAD_SHA]
+    statuses = [check["status"] for check in payload["checks"]]
+    assert "satisfied-by-ci" not in statuses
+    assert "declared-but-cannot-run" in statuses
+
+
+@pytest.mark.asyncio
+async def test_check_run_listing_without_incomplete_does_not_substitute(
+    tmp_path: Path,
+) -> None:
+    """A dict payload that omits ``incomplete`` must not look complete."""
+
+    class _DictCheckRuns(GitHubClient):
+        async def list_check_runs_for_ref(
+            self, owner: str, repo: str, ref: str, **kwargs: Any
+        ) -> dict[str, Any]:
+            _ = (owner, repo, kwargs)
+            return {
+                "total_count": 1,
+                "check_runs": [_check_run("Verify (drift gates)", "success")],
+            }
+
+    ctx = _ctx(
+        tmp_path,
+        github=_DictCheckRuns(token=""),
+        ci_gate_checks={"lint": "Verify (drift gates)"},
+        static_checks=[StaticCheckConfig(name="lint", command="python -c 'pass'")],
+    )
+
+    payload = await _run_static_checks(ctx)
+
+    statuses = [check["status"] for check in payload["checks"]]
+    assert "satisfied-by-ci" not in statuses
+    assert "declared-but-cannot-run" in statuses
+
+
+@pytest.mark.asyncio
 async def test_undeclared_ci_results_never_touch_a_gate(tmp_path: Path) -> None:
     """No declared mapping means mergeCraft must not even ask GitHub (D10)."""
     github = _CheckRunGitHub([_check_run("lint", "success")])
@@ -202,8 +272,8 @@ async def test_github_failure_leaves_the_gate_report_unchanged(tmp_path: Path) -
 def _packet(ctx: ToolContext, tmp_path: Path) -> dict[str, Any]:
     written = emit_run_packet(
         ctx,
-        run_succeeded=True,
         output_path=tmp_path / "packet.json",
+        packet=prepare_run_packet(ctx, run_succeeded=True),
     )
     assert written is not None
     return json.loads(written.read_text(encoding="utf-8"))
@@ -308,3 +378,92 @@ async def test_analyze_ci_failures_records_its_clusters_as_ci_evidence(tmp_path:
     # No diff paths were supplied, so nothing may be attributed to this PR.
     assert {row["introduced_by_pr"] for row in recorded} == {"false"}
     assert {row["severity"] for row in recorded}.isdisjoint({"Critical", "Major"})
+
+
+@pytest.mark.asyncio
+async def test_recorded_finding_count_is_merged_evidence_length(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.analyzers.finding import make_finding
+    from mergecraft.ci.blame import BlameVerdict
+    from mergecraft.ci.flaky import FlakyVerdict
+    from mergecraft.ci.intelligence import run_ci_intelligence
+    from mergecraft.ci.review import CiClusterReport, CiReviewStats
+
+    shared = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="unused",
+        path="src/app.py",
+        start_line=1,
+        end_line=1,
+        source="ci",
+        fingerprint="shared-ci",
+    )
+    clustered = shared.model_copy(update={"severity": "Major"})
+
+    async def _sarif(ctx: ToolContext, **_: object) -> list[Any]:
+        _ = ctx
+        return [shared]
+
+    async def _suite(
+        _self: object, ctx: ToolContext, *, check_suite_id: int, **_: object
+    ) -> dict[str, Any]:
+        _ = ctx, check_suite_id
+        return {
+            "jobs": [
+                {
+                    "job_name": "lint",
+                    "job_id": 1,
+                    "excerpt": {"content": "fail"},
+                    "log_index": [],
+                }
+            ],
+            "overflow": 0,
+            "total_failed_runs": 1,
+        }
+
+    def _analyze(*_args: object, **_kwargs: object) -> tuple[list[Any], CiReviewStats, int]:
+        report = CiClusterReport(
+            finding=clustered,
+            flaky=FlakyVerdict(classification="stable", summary="stable"),
+            blame=BlameVerdict(attribution="unknown", summary="unknown"),
+            excerpt="fail",
+        )
+        stats = CiReviewStats(
+            failure_count=1,
+            cluster_count=1,
+            flaky_count=0,
+            pr_attributed_count=0,
+            truncated=False,
+        )
+        return [report], stats, 0
+
+    class _DummyClient:
+        async def list_workflow_runs_for_check_suite(
+            self, *_args: object, **_kwargs: object
+        ) -> ListedItems:
+            return ListedItems(items=[{"id": 1}], incomplete=False)
+
+    monkeypatch.setattr(
+        "mergecraft.ci.intelligence.github_client_from_scm", lambda _scm: _DummyClient()
+    )
+    monkeypatch.setattr("mergecraft.ci.intelligence.collect_ci_sarif_findings", _sarif)
+    monkeypatch.setattr(
+        "mergecraft.ci.providers.github_actions.GitHubActionsProvider.fetch_check_suite_logs",
+        _suite,
+    )
+    monkeypatch.setattr("mergecraft.ci.review.analyze_ci_failures", _analyze)
+
+    ctx = _ctx(tmp_path)
+    payload = await run_ci_intelligence(ctx, check_suite_id=9)
+    from mergecraft.ci.evidence import ci_evidence_findings
+
+    merged = ci_evidence_findings(ctx.tool_state)
+    assert payload["recordedFindingCount"] == len(merged)
+    assert payload["recordedFindingCount"] == 1
+    assert payload["recordedFindingCount"] != 1 + 1
+    assert merged[0].severity == "Major"

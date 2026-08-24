@@ -28,11 +28,21 @@ def _with_suite_id(run: dict[str, Any]) -> dict[str, Any]:
 def list_check_runs_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         ref = str(params["ref"])
-        data = await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
+        listed = await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
+        if listed.incomplete:
+            # Same fail-closed policy as check-suite logs / CI intelligence /
+            # gate substitution: a truncated walk must not look like a complete
+            # catalog (silent total_count + partial check_runs).
+            return {
+                "ref": ref,
+                "incomplete": True,
+                "error": "check-run listing incomplete",
+                "total_count": listed.total_count,
+            }
         return {
             "ref": ref,
-            "total_count": data.get("total_count"),
-            "check_runs": [_with_suite_id(run) for run in data.get("check_runs") or []],
+            "total_count": listed.total_count,
+            "check_runs": [_with_suite_id(run) for run in listed.items],
         }
 
     return tool(

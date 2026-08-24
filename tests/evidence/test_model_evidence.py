@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 from loguru import logger
 
-from mergecraft.evidence.run_packet import emit_run_packet
+from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
@@ -65,7 +65,11 @@ def _make_ctx(tmp_path: Path, *, resolved_model: str | None = "claude-sonnet-4-5
 
 
 def _emit(tmp_path: Path, **kwargs: Any) -> dict[str, Any]:
-    written = emit_run_packet(_make_ctx(tmp_path, **kwargs), run_succeeded=True)
+    ctx = _make_ctx(tmp_path, **kwargs)
+    written = emit_run_packet(
+        ctx,
+        packet=prepare_run_packet(ctx, run_succeeded=True),
+    )
     assert written is not None
     return json.loads(written.read_text(encoding="utf-8"))
 

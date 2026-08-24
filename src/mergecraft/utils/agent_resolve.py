@@ -478,7 +478,7 @@ def _chain_deadline() -> float | None:
 
 def _inferred_retryable(result: AgentResult) -> bool:
     """Best-effort retryability from the failure itself, ignoring metadata."""
-    from mergecraft.utils.retry_policy import is_retryable_cli_failure
+    from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
     metadata = result.metadata or {}
     if metadata.get("timeout") is True or metadata.get("crash") is True:

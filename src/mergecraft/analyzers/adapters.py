@@ -499,8 +499,8 @@ def run_adapter(
         # ``UnicodeDecodeError`` is a ``ValueError``: output we cannot even read
         # is unreadable, not unparsable — and reading it must happen outside the
         # parse ``try`` so the handler below never sees an unbound ``raw``.
-        reason = f"skipped {tool_id}: could not read analyzer output ({exc})"
-        logger.info("{}", reason)
+        reason = f"skipped {tool_id}: could not read analyzer output"
+        logger.info("{}: {}", reason, exc)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     try:
@@ -514,17 +514,23 @@ def run_adapter(
             repo_root=repo_root,
         )
     except (ValueError, KeyError) as exc:
-        # Classify the failure: empty output means the analyzer never produced
-        # anything (sandbox unavailable outside CI), not that it emitted garbage
-        # we could not parse.
+        # D3: unparsable stdout stays a skip (not ``failed``). skip_reason is
+        # generic — do not embed raw analyzer bytes. Exception text is logged.
+        # Empty output means the analyzer never produced anything (sandbox
+        # unavailable outside CI), not that it emitted garbage. Bandit empty
+        # stdout never reaches this branch: ``parse_bandit_json`` returns ``[]``
+        # (#467) instead of raising.
         if not raw.strip():
             reason = (
                 f"skipped {tool_id}: no output (analyzer did not run — "
                 "likely sandbox unavailable outside CI)"
             )
         else:
-            reason = f"skipped {tool_id}: failed to parse analyzer output ({exc})"
-        logger.info("{}", reason)
+            reason = (
+                f"skipped {tool_id}: failed to parse analyzer output; "
+                "unparsable analyzer output omitted"
+            )
+        logger.info("{}: {}", reason, exc)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     if tool_id == "ruff":

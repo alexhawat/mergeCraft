@@ -144,7 +144,8 @@ workflow-lint: ## actionlint + zizmor over .github/workflows (W12.3 / #27)
 	@./scripts/workflow_lint.sh
 
 security: ## Bandit (medium+) + dependency audit
-	$(BANDIT) -c pyproject.toml -ll -r src/mergecraft
+	$(if $(BANDIT_JSON),mkdir -p $(dir $(BANDIT_JSON)))
+	$(BANDIT) -c pyproject.toml -ll -r src/mergecraft $(if $(BANDIT_JSON),-f json -o $(BANDIT_JSON))
 	@for attempt in 1 2 3; do \
 	  if $(PIP_AUDIT) --vulnerability-service=osv --timeout 60 --cache-dir $(PIP_AUDIT_CACHE); then \
 	    exit 0; \

@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, Final, Union, overload
 
 from loguru import logger
 
-from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES, GateAction
+from mergecraft.evidence.gate_policy import (
+    DEFAULT_GATE_POLICIES,
+    NAMED_GATE_POLICY_ROWS,
+    GateAction,
+)
 from mergecraft.evidence.gate_policy import GateActionPolicy as GateActionPolicy
 from mergecraft.evidence.packet import Decision as PacketDecision
 from mergecraft.evidence.packet import MergeEvidencePacket
@@ -22,6 +26,8 @@ from mergecraft.mcp.shared import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.mcp.context import ToolContext
@@ -122,6 +128,11 @@ def build_opencode_native_fs_permission() -> dict[str, object]:
 def _has_blocker(findings: list[Finding]) -> bool:
     """True iff any finding carries a severity the gate treats as blocking."""
     return any(f.severity in BLOCKING_SEVERITIES for f in findings)
+
+
+def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
+    """True iff ``packet`` carries any blocking finding."""
+    return _has_blocker(packet.findings)
 
 
 def has_failed_required_static_check(static_checks: list[dict[str, str]]) -> bool:
@@ -256,8 +267,6 @@ def _decide_approval_from_packet(
 
     The function is pure: no I/O, no logging, no module state.
     """
-    from mergecraft.evidence.packet import Decision as PacketDecision
-
     # #41 hard rule — if the packet already carries an explicit decision
     # (set by an upstream layer, e.g. a W9 thermostat overlay), honour it
     # verbatim. The agent's recorded ``self_assessment`` cannot override
@@ -374,20 +383,6 @@ def log_decision(
 # recorder is the only caller that *records* it (shadow mode).
 
 
-# Maps an evidence signal to the rule key the policy engine looks up.
-# Each rule is a tuple ``(predicate, rule_id)``; the first match wins.
-# The list is lookup order, so anything more specific must appear before
-# anything more general (a high-risk migration is checked before the
-# generic low-risk pass).
-_RULE_PREDICATES: Final[tuple[tuple[str, str], ...]] = (
-    ("high_risk_migration", "high_risk_migration"),
-    ("low_risk_passing", "low_risk_passing"),
-    ("changed_unread_file", "changed-unread-file"),
-    ("tool_loop", "tool_loop"),
-    ("schema_failure", "schema_failure"),
-)
-
-
 def _has_changed_unread_file(packet: MergeEvidencePacket) -> bool:
     """A trajectory finding flagged a file modified but never read."""
     return any(finding.rule_id == "changed-unread-file" for finding in packet.findings)
@@ -422,21 +417,23 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     return packet.decision is None or packet.decision.verdict != "failure"
 
 
-def _is_schema_failure(packet: MergeEvidencePacket) -> bool:
-    """A packet whose evidence is structurally missing — schema failure."""
-    # A packet with no findings, no blast radius, no decision, and an
-    # explicit self-assessment is the canonical "looks approved but
-    # nothing else" shape. The verdict function already guards against
-    # this, but the rule is independently meaningful for the gate.
-    if packet.findings:
-        return False
-    if packet.blast_radius is not None:
-        return False
-    if packet.decision is not None:
-        return False
-    if packet.self_assessment is None:
-        return False
-    return packet.self_assessment.approved is True
+# Ordered ``(predicate, rule_id, action)`` rows; first match wins.
+# Keys and actions come from ``NAMED_GATE_POLICY_ROWS`` so
+# ``DEFAULT_GATE_POLICIES`` cannot drift from this table.
+# Catch-all ``schema_failure`` is not listed (see ``select_rule_id``).
+# Tests pin ``has_blockers`` before ``changed-unread-file`` / ``tool_loop``.
+_PREDICATE_BY_RULE: Final[dict[str, Callable[[MergeEvidencePacket], bool]]] = {
+    "high_risk_migration": _is_high_risk_migration,
+    "low_risk_passing": _is_low_risk_passing,
+    "has_blockers": _packet_has_blockers,
+    "changed-unread-file": _has_changed_unread_file,
+    "tool_loop": _has_tool_loop,
+}
+_RULE_PREDICATES: Final[
+    tuple[tuple[Callable[[MergeEvidencePacket], bool], str, GateAction], ...]
+] = tuple(
+    (_PREDICATE_BY_RULE[rule_id], rule_id, action) for rule_id, action in NAMED_GATE_POLICY_ROWS
+)
 
 
 def select_rule_id(packet: MergeEvidencePacket) -> str:
@@ -446,18 +443,11 @@ def select_rule_id(packet: MergeEvidencePacket) -> str:
     the packet. ``"schema_failure"`` is the catch-all — it matches a
     packet whose evidence is structurally absent.
     """
-    if _is_high_risk_migration(packet):
-        return "high_risk_migration"
-    if _is_low_risk_passing(packet):
-        return "low_risk_passing"
-    if _has_changed_unread_file(packet):
-        return "changed-unread-file"
-    if _has_tool_loop(packet):
-        return "tool_loop"
-    if _is_schema_failure(packet):
-        return "schema_failure"
-    # Default: no rule matched; the policy lookup falls through to the
-    # schema-failure key, which is the conservative mapping.
+    for predicate, rule_id, _action in _RULE_PREDICATES:
+        if predicate(packet):
+            return rule_id
+    # Catch-all only — do not also list ``schema_failure`` in the table;
+    # that entry never changed the outcome.
     return "schema_failure"
 
 
@@ -490,13 +480,15 @@ def decide_action(
     vocabulary. The first step is consulting the policy map; the second
     is selecting the rule key the packet matches. Both are deterministic.
 
-    The five named policies ``DEFAULT_GATE_POLICIES`` ships are the
-    example set #46 names literally: a schema failure blocks, a
-    changed-unread-file asks for changes, a low-risk passing change
-    merges, a tool-loop asks for more tests, and a high-risk migration
-    asks for human review. Repositories override the mapping at the
-    call site: the override is merged on top of the defaults and any
-    value outside the closed vocabulary is rejected.
+    The six named policies ``DEFAULT_GATE_POLICIES`` ships are
+    ``schema_failure``, ``changed-unread-file``, ``has_blockers``,
+    ``low_risk_passing``, ``tool_loop``, and ``high_risk_migration``:
+    a schema failure blocks, a changed-unread-file asks for changes,
+    blockers request changes, a low-risk passing change merges, a
+    tool-loop asks for more tests, and a high-risk migration asks for
+    human review. Repositories override the mapping at the call site:
+    the override is merged on top of the defaults and any value
+    outside the closed vocabulary is rejected.
 
     ``mode`` is not consulted by this function — it is recorded on
     the resulting ``Decision`` row by the I/O shell. The gate's

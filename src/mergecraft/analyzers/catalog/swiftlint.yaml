@@ -23,10 +23,7 @@ severity_map:
   error: Major
   warning: Minor
   note: Trivial
-provenance:
-  darwin-arm64:
-    url: https://github.com/realm/SwiftLint/releases/download/0.57.0/portable_swiftlint.zip
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+provenance: {}
 network_allowlist: []
 exclusive_group: null
 declared_unavailable: requires non-Linux runner — SwiftLint needs macOS (C6 out of

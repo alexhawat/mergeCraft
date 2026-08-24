@@ -41,7 +41,7 @@ from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
-from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"

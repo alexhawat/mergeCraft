@@ -23,10 +23,7 @@ severity_map:
   error: Major
   warning: Minor
   note: Trivial
-provenance:
-  linux-amd64:
-    url: https://hub.docker.com/_/clang
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+provenance: {}
 network_allowlist: []
 exclusive_group: null
 declared_unavailable: requires compile_commands.json — mergeCraft never guesses compiler

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
+  Major/Critical (not clamped to Minor); a listing error on one workflow run
+  does not skip later runs; a Major/Critical finding is kept over a less
+  severe duplicate fingerprint. Dogfood `.mergecraft/config.yaml` lists those
+  three `ciEvidence.sarifArtifacts`, and `.github/workflows/ci.yml` uploads
+  them. A ruff SARIF error can fail `mergecraft-approval` (#464)
 - `make action-pin-check` also measures the pin against the default branch's own
   tip, not just against the other branch's pin. Comparing pins to each other
   passes when both are equally stale, which is what happened after #457 merged:
@@ -59,6 +65,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `list_check_runs` omits `check_runs` when the listing is truncated, instead
+  of returning a partial catalog with `total_count`. Analyzer JSON arrays no
+  longer treat a leading `{"error": ...}` then `[]` as a clean scan
+- Check-suite log fetch skips with a distinct unavailable payload when no
+  GitHub client is bound, instead of looking like “no failed runs”
+- Catalog-check rejects all-zero `sha256` provenance pins (placeholders that
+  made `provision_managed_binary` treat a trailing-slash URL as a directory and
+  fail with `Is a directory`). Pip-style tools such as `checkov` and `yamllint`
+  now ship `provenance: {}` like `semgrep`; a trailing-slash URL is refused
+  with a `ProvisionError` that names the URL (#458)
+- Empty Bandit JSON stdout is a clean scan (zero findings) instead of a skip;
+  non-object `results` rows fail parse the same way as the SARIF converter;
+  unparsable stdout still skips without embedding a raw stdout snippet (#467)
+- A transient Nous HTTP 404 (including a false billing/credits refusal) now
+  fails over to the next model instead of stopping the run and reporting a
+  missing `set_output` schema failure (#466)
+- The approval gate now unions agent findings with analyzer findings, so an
+  agent Critical or Major finding fails ``mergecraft-approval`` and the
+  evidence packet's ``request_changes`` action. An empty finding list still
+  stays ``neutral``; untrusted runs still never ``success`` (#460)
+- Coverage already below `fail_under` on the base branch stays inherited
+  drift even if HEAD drops further; a drop of 1.0pp or more below the floor
+  when the base is already at the floor is also inherited, instead of always
+  treating `head < base` as caused by the PR (#485)
+- A clean mypy JSON typecheck no longer fails the SARIF convert step, so the
+  mypy artifact still uploads for review evidence
+- Evidence packet `decision.verdict` is a GitHub check conclusion
+  (`success` / `failure` / `neutral`); schema version 1.9.0
+- `mergecraft-approval` posts `neutral` when the evidence packet was not
+  assembled, instead of omitting the check
 - Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
   the checkout did not provide a tool, resolution fell through to
   `shutil.which`, so a system copy ran against the consumer's code at an

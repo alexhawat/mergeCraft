@@ -20,11 +20,12 @@ Two rules keep this from turning into author-blame:
 * Only a **successful** declared check run may substitute. A declared gate that
   CI proved *broken* leaves the row alone and is reported as a finding instead,
   so the report never claims a green gate on red evidence.
-* Findings derived from CI start at a non-blocking severity with
-  ``introduced_by_pr="unknown"``. Attribution is the CI-intelligence layer's
-  job (``ci/blame.py``, ``ci/flaky.py``); until it speaks, a CI failure is
-  *reported, not blamed* (D11). The approval gate is monotone in blockers, so
-  this is what stops a flaky pipeline from blocking a clean PR.
+* Bare check-run findings start at a non-blocking severity with
+  ``introduced_by_pr="unknown"`` (D11). Declared-artifact SARIF keeps the
+  parser's mapped grade — a SARIF ``error`` stays Major/Critical so it can
+  reach the approval gate (D8 / #464) — while attribution stays ``unknown``
+  until ``ci/blame.py`` / ``ci/flaky.py`` speak. Flaky and pre-existing
+  failures those layers annotate remain non-blocking.
 
 Everything here is pure. The MCP tools stay the I/O boundary.
 
@@ -50,11 +51,16 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.analyzers.finding import Finding, FindingValidationError, make_finding
+from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.manifest import AnalyzerManifest, DetectRules
 from mergecraft.analyzers.parsers.sarif import parse_sarif
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.ci.paths import failure_line, primary_failure_path
+from mergecraft.evidence.merge import (
+    finding_dedupe_key,
+    merge_findings,
+    typed_findings_from_rows,
+)
 from mergecraft.review_taxonomy import finding_fingerprint
 
 if TYPE_CHECKING:
@@ -86,8 +92,8 @@ _FAILING_CONCLUSIONS: frozenset[str] = frozenset(
 # The only conclusion that may stand in for a gate mergeCraft could not run.
 _PASSING_CONCLUSION = "success"
 
-# Severity ceiling for anything derived from CI (D11). Nothing here may reach
-# `agents.gates.BLOCKING_SEVERITIES` on its own; only the blame layer promotes.
+# Severity for bare check-run findings (D11). SARIF from declared artifacts
+# keeps the parser's mapped grade (D8); this ceiling does not apply there.
 _UNBLAMED_SEVERITY = "Minor"
 
 _EXCERPT_LINES = 12
@@ -367,22 +373,20 @@ def _ci_sarif_manifest(artifact: str) -> AnalyzerManifest:
     )
 
 
-def _as_unblamed_ci_finding(finding: Finding, *, tool: str) -> Finding:
-    """Re-stamp an analyzer-shaped finding as unblamed CI evidence.
+def _as_unattributed_ci_finding(finding: Finding, *, tool: str) -> Finding:
+    """Re-stamp an analyzer-shaped finding as CI evidence without PR attribution.
 
-    Severity is capped rather than preserved: SARIF uploaded by someone else's
-    pipeline describes the tree, not this diff, so it may inform a reviewer but
-    must never block a merge on its own (D11). The message is redacted and the
-    fingerprint recomputed from the redacted text, so the stored hash always
-    matches the text a human will read.
+    Native SARIF severity is preserved (D8 / #464): a mapped Major/Critical
+    ``error`` must be able to reach the approval gate. Attribution stays
+    ``unknown`` until the blame layer speaks (D11). The message is redacted
+    and the fingerprint recomputed from the redacted text, so the stored hash
+    always matches the text a human will read.
     """
     message = redact_secrets(finding.message)
-    severity = finding.severity if finding.severity in {"Minor", "Trivial"} else _UNBLAMED_SEVERITY
     return finding.model_copy(
         update={
             "tool": tool,
             "source": "ci",
-            "severity": severity,
             "introduced_by_pr": "unknown",
             "message": message,
             "evidence": [redact_secrets(item) for item in finding.evidence],
@@ -400,7 +404,7 @@ def sarif_findings(raw: str, *, artifact: str, repo_root: Path) -> list[Finding]
     """
     tool = f"{CI_TOOL}:{artifact}"
     parsed = parse_sarif(raw, manifest=_ci_sarif_manifest(artifact), repo_root=repo_root)
-    return [_as_unblamed_ci_finding(finding, tool=tool) for finding in parsed]
+    return [_as_unattributed_ci_finding(finding, tool=tool) for finding in parsed]
 
 
 # ── recording on the run's state ──────────────────────────────────────────────
@@ -415,25 +419,30 @@ def _evidence_state(state: ToolState) -> CiEvidenceState:
 
 
 def record_ci_findings(state: ToolState, findings: Iterable[Finding]) -> list[Finding]:
-    """Record CI findings on the run, deduplicated on fingerprint.
+    """Record CI findings on the run, deduplicated on ``finding_dedupe_key``.
 
     Deduplication matters because the approval gate and the evidence packet are
     monotone in blockers: the same failure read twice (once off a check run,
-    once off the clustered logs) must not count twice. Returns the findings
-    that were newly added.
+    once off the clustered logs) must not count twice. When identities
+    collide, the more severe row wins (same rule as ``merge_findings``).
+    Returns findings that were newly added or upgraded.
     """
     evidence = _evidence_state(state)
-    seen = {str(row.get("fingerprint")) for row in evidence.findings}
-    added: list[Finding] = []
-    for finding in findings:
-        if finding.fingerprint in seen:
-            continue
-        seen.add(finding.fingerprint)
-        evidence.findings.append(finding.model_dump())
-        added.append(finding)
-    if added:
-        logger.info("ci evidence: recorded {} finding(s) from CI", len(added))
-    return added
+    incoming = list(findings)
+    if not incoming:
+        return []
+    before = typed_findings_from_rows(list(evidence.findings))
+    before_severity = {finding_dedupe_key(row): row.severity for row in before}
+    merged = merge_findings(before, incoming)
+    evidence.findings = [row.model_dump() for row in merged]
+    changed: list[Finding] = []
+    for row in merged:
+        key = finding_dedupe_key(row)
+        if before_severity.get(key) != row.severity:
+            changed.append(row)
+    if changed:
+        logger.info("ci evidence: recorded {} finding(s) from CI", len(changed))
+    return changed
 
 
 def record_gate_substitutions(
@@ -462,15 +471,7 @@ def ci_evidence_findings(state: ToolState) -> list[Finding]:
     evidence = state.ci_evidence
     if evidence is None:
         return []
-    typed: list[Finding] = []
-    for row in evidence.findings:
-        if not isinstance(row, dict):
-            continue
-        try:
-            typed.append(Finding.model_validate(row))
-        except (FindingValidationError, ValueError) as err:
-            logger.debug("ci evidence: dropping malformed finding row: {}", err)
-    return typed
+    return typed_findings_from_rows(list(evidence.findings))
 
 
 __all__ = [

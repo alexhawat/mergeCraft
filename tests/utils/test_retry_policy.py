@@ -107,8 +107,8 @@ class TestRetryShape:
     """Structural pins on the retry policy objects (no wall-clock asserts)."""
 
     def test_github_client_wait_is_exponential_with_jitter(self) -> None:
-        retrying = getattr(GitHubClient.request, "retry", None)
-        assert retrying is not None, "GitHubClient.request lost its retry decorator"
+        retrying = getattr(GitHubClient._send, "retry", None)
+        assert retrying is not None, "GitHubClient._send lost its retry decorator"
         wait = retrying.wait
         assert not isinstance(wait, tenacity.wait_fixed), (
             "wait_fixed does not backoff — 429/5xx bursts hammer the API"
@@ -123,8 +123,8 @@ class TestRetryShape:
         )
 
     def test_github_client_stop_is_bounded(self) -> None:
-        retrying = getattr(GitHubClient.request, "retry", None)
-        assert retrying is not None
+        retrying = getattr(GitHubClient._send, "retry", None)
+        assert retrying is not None, "GitHubClient._send lost its retry decorator"
         assert isinstance(retrying.stop, tenacity.stop_after_attempt)
         assert retrying.stop.max_attempt_number <= 5
 
@@ -142,7 +142,7 @@ class TestRetryableCliFailure:
 
     @pytest.mark.parametrize("code", [429, 498], ids=["429", "498"])
     def test_rate_limit_exit_codes_are_retryable(self, code: int) -> None:
-        from mergecraft.utils.retry_policy import is_retryable_cli_failure
+        from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
         assert is_retryable_cli_failure(returncode=code) is True
 
@@ -158,7 +158,7 @@ class TestRetryableCliFailure:
         ids=["rate-limit", "rate_limit", "too-many", "overloaded", "429-text"],
     )
     def test_stderr_needles_are_retryable(self, stderr: str) -> None:
-        from mergecraft.utils.retry_policy import is_retryable_cli_failure
+        from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
         assert is_retryable_cli_failure(returncode=1, stderr=stderr) is True
 
@@ -179,7 +179,7 @@ class TestRetryableCliFailure:
         rather than terminate the run. The first case is the verbatim Codex
         message that killed PR #443's review.
         """
-        from mergecraft.utils.retry_policy import is_retryable_cli_failure
+        from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
         assert is_retryable_cli_failure(returncode=1, stderr=stderr) is True
 
@@ -187,7 +187,7 @@ class TestRetryableCliFailure:
         """Guard the other direction: the stderr line PR #443 actually reported
         is not a provider refusal and must not be read as one.
         """
-        from mergecraft.utils.retry_policy import is_retryable_cli_failure
+        from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
         assert (
             is_retryable_cli_failure(returncode=1, stderr="Reading additional input from stdin...")
@@ -195,7 +195,7 @@ class TestRetryableCliFailure:
         )
 
     def test_ordinary_failure_is_not_retryable(self) -> None:
-        from mergecraft.utils.retry_policy import is_retryable_cli_failure
+        from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
         assert is_retryable_cli_failure(returncode=1, stderr="syntax error") is False
         assert is_retryable_cli_failure(returncode=None, stderr="") is False

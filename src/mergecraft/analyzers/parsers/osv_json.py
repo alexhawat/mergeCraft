@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -10,6 +9,7 @@ from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     map_confidence,
     map_native_severity,
+    require_json_object,
     resolve_repo_relative_path,
     taxonomy_category,
 )
@@ -89,10 +89,7 @@ def _severity_rank(taxonomy_severity: str) -> int:
 
 
 def parse_osv_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        msg = "osv JSON output must be an object"
-        raise ValueError(msg)
+    payload = require_json_object(raw, what="osv JSON output")
 
     category = taxonomy_category(manifest)
     findings: list[Finding] = []

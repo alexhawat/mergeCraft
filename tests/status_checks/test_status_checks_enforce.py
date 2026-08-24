@@ -157,6 +157,7 @@ async def test_report_status_checks_surfaces_neutral_for_crashed_run(
     """
     import httpx
 
+    from mergecraft.evidence.run_packet import prepare_run_packet
     from mergecraft.mcp.tool_state import ApprovalRecord, init_tool_state
     from mergecraft.modes import compute_modes
     from mergecraft.utils.github import GitHubClient
@@ -212,7 +213,11 @@ async def test_report_status_checks_surfaces_neutral_for_crashed_run(
     # Even though the agent's stored boolean says "approved", the run
     # crashed — the post-W8 rewire must consult the decision function
     # and surface ``"neutral"`` for the mergecraft-approval check.
-    await sc.report_status_checks(ctx, run_succeeded=False)
+    await sc.report_status_checks(
+        ctx,
+        run_succeeded=False,
+        packet=prepare_run_packet(ctx, run_succeeded=False),
+    )
 
     approve_checks = [run for run in github.check_runs if run.get("name") == sc.APPROVAL_CHECK]
     assert len(approve_checks) == 1

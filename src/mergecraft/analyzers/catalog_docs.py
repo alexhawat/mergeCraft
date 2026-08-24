@@ -39,14 +39,12 @@ def parse_analyzers_doc(path: Path) -> set[str]:
     return ids
 
 
-def _fixture_candidates(manifest_id: str) -> tuple[Path, ...]:
+def _fixture_candidates(manifest_id: str, *, fixture_root: Path) -> tuple[Path, ...]:
     return (
-        _DEFAULT_FIXTURE_ROOT / "sarif" / f"{manifest_id}-minimal.sarif.json",
-        _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.json",
-        _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.jsonl",
-        _DEFAULT_FIXTURE_ROOT / "native" / f"{manifest_id}-minimal.txt",
-        _DEFAULT_FIXTURE_ROOT / "agentsec" / f"{manifest_id}-minimal.yaml",
-        _DEFAULT_FIXTURE_ROOT / "antislop" / f"{manifest_id}-minimal.yaml",
+        fixture_root / "sarif" / f"{manifest_id}-minimal.sarif.json",
+        fixture_root / "native" / f"{manifest_id}-minimal.json",
+        fixture_root / "native" / f"{manifest_id}-minimal.jsonl",
+        fixture_root / "native" / f"{manifest_id}-minimal.txt",
     )
 
 
@@ -61,15 +59,7 @@ def manifest_has_fixture(
     root = fixture_root or _DEFAULT_FIXTURE_ROOT
     if manifest.id in IN_PROCESS_ANALYZER_IDS:
         return (root / manifest.id / f"{manifest.id}-minimal.yaml").is_file()
-    return any(
-        (root / rel).is_file()
-        for rel in (
-            Path("sarif") / f"{manifest.id}-minimal.sarif.json",
-            Path("native") / f"{manifest.id}-minimal.json",
-            Path("native") / f"{manifest.id}-minimal.jsonl",
-            Path("native") / f"{manifest.id}-minimal.txt",
-        )
-    )
+    return any(path.is_file() for path in _fixture_candidates(manifest.id, fixture_root=root))
 
 
 def severity_map_complete(manifest: AnalyzerManifest) -> bool:
@@ -88,7 +78,12 @@ def validate_manifest_ship_gate(
     doc_path: Path | None = None,
 ) -> None:
     """Validate one manifest satisfies fixture, doc row, and severity_map requirements."""
-    manifest = load_manifest_file(manifest_path, strict_severity_map=False)
+    try:
+        manifest = load_manifest_file(
+            manifest_path, strict_severity_map=False, check_provenance=True
+        )
+    except ManifestValidationError as exc:
+        raise CatalogIntegrityError(str(exc)) from exc
     root = fixture_root or _DEFAULT_FIXTURE_ROOT
     if not manifest_has_fixture(manifest, fixture_root=root):
         msg = f"{manifest.id} missing test fixture under {root}"
@@ -550,9 +545,10 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             "- **Green only substitutes.** A declared check run that passed rewrites "
             "the gate row to `satisfied-by-ci`. A declared check run that *failed* "
             "leaves the row alone and is reported as a `source: ci` finding instead.",
-            "- **Reported, not blamed.** Findings derived from CI start non-blocking "
-            "with `introduced_by_pr: unknown`; only the CI-intelligence blame layer "
-            "(`ci/blame.py`, `ci/flaky.py`) may attribute one to this PR.",
+            "- **Reported, not blamed.** Bare check-run findings start non-blocking; "
+            "SARIF `error` from declared `sarifArtifacts` keeps Major/Critical. "
+            "`introduced_by_pr` stays `unknown` until `ci/blame.py` / `ci/flaky.py` "
+            "attribute a finding to this PR.",
             "- **Redacted.** Log excerpts are truncated and passed through "
             "`analyzers/redact.py` before they enter a finding.",
         ]

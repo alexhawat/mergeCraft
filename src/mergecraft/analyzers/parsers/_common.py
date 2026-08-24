@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
 from mergecraft.analyzers.manifest import ManifestValidationError
 from mergecraft.review_taxonomy import FINDING_CATEGORIES
+from mergecraft.utils.json_load import try_load_json, try_load_json_array, try_load_json_object
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -103,26 +104,6 @@ def resolve_repo_relative_path(
     return cleaned
 
 
-def try_load_json(raw: str) -> object | None:
-    """Return the first JSON value in ``raw``, or ``None`` when none parse."""
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(raw):
-        if char not in "{[":
-            continue
-        try:
-            payload, _end = decoder.raw_decode(raw, index)
-        except json.JSONDecodeError:
-            continue
-        return cast("object", payload)  # json.JSONDecoder.raw_decode is typed Any
-    stripped = raw.strip()
-    if not stripped:
-        return None
-    try:
-        return cast("object", json.loads(stripped))  # json.loads is typed Any
-    except json.JSONDecodeError:
-        return None
-
-
 def load_json(raw: str) -> object:
     """Parse JSON from ``raw`` or raise ``ValueError``.
 
@@ -138,18 +119,27 @@ def load_json(raw: str) -> object:
 
 
 def require_json_object(raw: str, *, what: str) -> dict[str, Any]:
-    """Parse ``raw`` as a JSON object or raise ``ValueError``."""
-    payload = load_json(raw)
-    if not isinstance(payload, dict):
+    """Parse ``raw`` as a JSON object or raise ``ValueError``.
+
+    Leading JSON arrays are skipped (same resume-at-``_end`` path as
+    ``try_load_json_object``) so progress tokens cannot hide a later object.
+    """
+    payload = try_load_json_object(raw)
+    if payload is None:
         msg = f"{what} must be a JSON object"
         raise ValueError(msg)
-    return cast("dict[str, Any]", payload)  # json.loads values are typed Any
+    return payload
 
 
 def require_json_array(raw: str, *, what: str) -> list[Any]:
-    """Parse ``raw`` as a JSON array or raise ``ValueError``."""
-    payload = load_json(raw)
-    if not isinstance(payload, list):
+    """Parse ``raw`` as a JSON array or raise ``ValueError``.
+
+    Progress-token objects may precede the array (same resume-at-``_end``
+    path as ``try_load_json_array``). Other leading objects — including
+    ``{"error": ...}`` — fail parse so they cannot hide a later ``[]``.
+    """
+    payload = try_load_json_array(raw)
+    if payload is None:
         msg = f"{what} must be a JSON array"
         raise ValueError(msg)
     return payload
@@ -186,6 +176,8 @@ def iter_json_objects(raw: str) -> Iterator[dict[str, Any]]:
         yield loaded
         return
     if isinstance(loaded, list):
+        if loaded and not all(isinstance(item, dict) for item in loaded):
+            return
         for item in loaded:
             if isinstance(item, dict):
                 yield item
@@ -195,13 +187,14 @@ def load_jsonl_objects(raw: str) -> list[dict[str, Any]]:
     """Return JSON objects from JSONL (or a JSON array/object), else raise.
 
     Empty stdout is a valid empty document. Non-JSON tool error text is not.
+    A JSON array of non-dicts is not an empty document.
     """
     stripped = raw.strip()
     if not stripped:
         return []
-    objects = list(iter_json_objects(raw))
-    if objects:
-        return objects
+    parsed = list(iter_json_objects(raw))
+    if parsed:
+        return parsed
     payload = try_load_json(raw)
     if payload is None:
         msg = "expected JSONL objects"
@@ -209,42 +202,63 @@ def load_jsonl_objects(raw: str) -> list[dict[str, Any]]:
     if payload in ({}, []):
         return []
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
+        rows: list[dict[str, Any]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                msg = "expected JSONL objects"
+                raise ValueError(msg)
+            rows.append(item)
+        return rows
     msg = "expected JSONL objects"
     raise ValueError(msg)
 
 
-def coerce_line(value: object, *, default: int = 1) -> int:
+def _as_int_line(value: object) -> int:
+    """Parse a line number from a tool payload, or raise ``ValueError``."""
     if isinstance(value, bool):
-        return default
+        msg = f"invalid line number: {value!r}"
+        raise ValueError(msg)
     if isinstance(value, int):
-        return max(value, 1)
+        return value
     if isinstance(value, float):
-        return max(int(value), 1)
+        return int(value)
     if isinstance(value, str):
         try:
-            return max(int(value.strip()), 1)
+            return int(value.strip())
         except ValueError:
-            return default
-    return default
+            msg = f"invalid line number: {value!r}"
+            raise ValueError(msg) from None
+    msg = f"invalid line number: {value!r}"
+    raise ValueError(msg)
+
+
+def coerce_line(value: object, *, default: int = 1) -> int:
+    """Return a 1-based line number, mapping unusable values to ``default``."""
+    if value is None:
+        return max(default, 1)
+    try:
+        return max(_as_int_line(value), 1)
+    except ValueError:
+        return max(default, 1)
+
+
+def require_line(value: object, *, default: int = 1) -> int:
+    """Return a 1-based line number, or raise ``ValueError`` if unusable.
+
+    ``None`` still maps to ``default`` (missing region). Invalid types and
+    non-numeric strings fail closed.
+    """
+    if value is None:
+        return max(default, 1)
+    return max(_as_int_line(value), 1)
 
 
 def coerce_optional_line(value: object) -> int | None:
     """Return a 1-based line, or ``None`` when the tool did not report one."""
-    if value is None or isinstance(value, bool):
+    if value is None:
         return None
-    if isinstance(value, int):
-        return value if value >= 1 else None
-    if isinstance(value, float):
-        parsed = int(value)
-        return parsed if parsed >= 1 else None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            parsed = int(stripped)
-        except ValueError:
-            return None
-        return parsed if parsed >= 1 else None
-    return None
+    try:
+        parsed = _as_int_line(value)
+    except ValueError:
+        return None
+    return parsed if parsed >= 1 else None

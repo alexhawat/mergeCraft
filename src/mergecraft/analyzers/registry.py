@@ -42,7 +42,7 @@ def load_catalog() -> tuple[AnalyzerManifest, ...]:
         return ()
     manifests: list[AnalyzerManifest] = []
     for path in sorted(_CATALOG_DIR.glob("*.yaml")):
-        manifest = load_manifest_file(path, strict_severity_map=False)
+        manifest = load_manifest_file(path, strict_severity_map=False, check_provenance=True)
         manifests.append(manifest)
     return tuple(manifests)
 

@@ -1,10 +1,12 @@
-"""The five default gate-action policies (#46 / W9.2).
+"""The six default gate-action policies (#46 / W9.2 plus ``has_blockers``).
 
 The thermostat is the structural successor to the ``Decision`` row Batch
 A shipped: every gate outcome maps to a *named* action, never to a
 number. The default policies here are the five example mappings #46
-names literally — a schema failure blocks, a changed-unread-file asks
-for changes, a low-risk passing change merges, a tool-loop asks for more
+names literally, plus ``has_blockers`` so Critical/Major findings
+request changes under their own key — a schema failure blocks, a
+changed-unread-file asks for changes, ``has_blockers`` asks for
+changes, a low-risk passing change merges, a tool-loop asks for more
 tests, and a high-risk migration asks for human review.
 
 The mapping is **declarative data, not a long if/elif**: a repository
@@ -17,7 +19,7 @@ by ``decide_action()`` rather than silently widening the gate.
 Exports:
     GateAction: The closed action vocabulary (Pydantic enum / Literal).
     GateActionPolicy: A schema -> action mapping. Treated as data.
-    DEFAULT_GATE_POLICIES: The five example policies from #46.
+    DEFAULT_GATE_POLICIES: The six policies (#46 examples plus ``has_blockers``).
 """
 
 from __future__ import annotations
@@ -72,21 +74,29 @@ RuleId = str
 GateActionPolicy = dict[RuleId, GateAction]
 
 
-# The five default policies #46 ships. Every rule that lands here is
-# reachable from a packet on ``decide_action()``. Order is the lookup
-# priority: ``decide_action`` walks the policy in dict insertion order.
+# Named rules in ``select_rule_id`` order (not including the catch-all).
+# ``agents.gates._RULE_PREDICATES`` walks the same keys; ``schema_failure``
+# is appended below and is never listed in the predicate table.
+NAMED_GATE_POLICY_ROWS: Final[tuple[tuple[str, GateAction], ...]] = (
+    ("high_risk_migration", GateAction.REQUIRE_HUMAN_REVIEW),
+    ("low_risk_passing", GateAction.AUTO_MERGE),
+    ("has_blockers", GateAction.REQUEST_CHANGES),
+    ("changed-unread-file", GateAction.REQUEST_CHANGES),
+    ("tool_loop", GateAction.REQUIRE_MORE_TESTS),
+)
+
+# Catch-all ``schema_failure`` stays outside the named rows. Dict insertion
+# order is not match priority; ``select_rule_id`` chooses the key.
 DEFAULT_GATE_POLICIES: Final[GateActionPolicy] = {
     "schema_failure": GateAction.BLOCK,
-    "changed-unread-file": GateAction.REQUEST_CHANGES,
-    "low_risk_passing": GateAction.AUTO_MERGE,
-    "tool_loop": GateAction.REQUIRE_MORE_TESTS,
-    "high_risk_migration": GateAction.REQUIRE_HUMAN_REVIEW,
+    **{rule_id: action for rule_id, action in NAMED_GATE_POLICY_ROWS},
 }
 
 
 __all__ = [
     "DEFAULT_GATE_POLICIES",
     "GATE_ACTIONS",
+    "NAMED_GATE_POLICY_ROWS",
     "GateAction",
     "GateActionPolicy",
     "RuleId",

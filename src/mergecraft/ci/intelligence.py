@@ -11,11 +11,13 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
+from mergecraft.scm.github import github_client_from_scm
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
     from mergecraft.ci.review import CiClusterReport, CiReviewStats
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.utils.github import GitHubClient
 
 _COMMAND_HINT = re.compile(r"(make\s+\S+|uv run\s+\S+|pytest[^\n]*)")
 _GITHUB_PROVIDER = GitHubActionsProvider()
@@ -156,16 +158,45 @@ def _sarif_documents(archive: bytes) -> list[str]:
         return []
 
 
+def _unavailable_ci_intelligence(
+    *,
+    reason: str,
+    sarif_finding_count: int = 0,
+) -> dict[str, Any]:
+    """Fail-closed CI intelligence when listing failed or no failed jobs exist."""
+    return {
+        "available": False,
+        "reason": reason,
+        "section": "",
+        "preMergeSummary": "",
+        "comments": [],
+        "sarifFindingCount": sarif_finding_count,
+        "stats": {
+            "failureCount": 0,
+            "clusterCount": 0,
+            "flakyCount": 0,
+            "prAttributedCount": 0,
+            "truncated": False,
+            "overflow": 0,
+        },
+        "clusters": [],
+    }
+
+
 async def collect_ci_sarif_findings(
     ctx: ToolContext,
     *,
-    check_suite_id: int,
+    client: GitHubClient,
+    runs: list[dict[str, Any]],
 ) -> list[Finding]:
     """Ingest SARIF the consumer's CI already produced, for declared artifacts only.
 
     Opt-in by construction: with no ``ciEvidence.sarifArtifacts`` declared this
     makes no API call at all. Every failure is logged and swallowed — SARIF is a
     supplementary evidence source and must never take a review down with it.
+    ``client`` and ``runs`` are required: ``run_ci_intelligence`` lists the
+    check suite once and passes both in. This function does not re-bind a
+    client or re-list runs.
     """
     wanted = {name.strip() for name in ctx.ci_sarif_artifacts if name.strip()}
     if not wanted:
@@ -176,32 +207,46 @@ async def collect_ci_sarif_findings(
 
     repo_root = Path(primary_repo_state(ctx.tool_state).dir)
     findings: list[Finding] = []
-    try:
-        payload = await ctx.scm.get(
-            f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
-            params={"check_suite_id": check_suite_id, "per_page": 100},
-        )
-        runs = payload.get("workflow_runs") or [] if isinstance(payload, dict) else []
-        for run in runs:
-            run_id = run.get("id")
-            if not isinstance(run_id, int):
-                continue
-            artifacts = await ctx.scm.list_workflow_run_artifacts(
+
+    for run in runs:
+        run_id = run.get("id")
+        if not isinstance(run_id, int):
+            continue
+        try:
+            listed = await ctx.scm.list_workflow_run_artifacts(
                 ctx.repo.owner, ctx.repo.name, run_id
             )
-            for artifact in artifacts:
-                name = str(artifact.get("name") or "")
-                artifact_id = artifact.get("id")
-                if name not in wanted or not isinstance(artifact_id, int):
-                    continue
-                archive = await ctx.scm.download_artifact_zip(
+        except Exception as listing_err:
+            logger.warning(
+                "ci evidence: SARIF listing failed for run {} — {}",
+                run_id,
+                listing_err,
+            )
+            continue
+        if listed.incomplete:
+            logger.warning(
+                "ci evidence: SARIF listing truncated for run {} — not treating as complete",
+                run_id,
+            )
+            continue
+        for artifact in listed.items:
+            name = str(artifact.get("name") or "")
+            artifact_id = artifact.get("id")
+            if name not in wanted or not isinstance(artifact_id, int):
+                continue
+            try:
+                archive = await client.download_artifact_zip(
                     ctx.repo.owner, ctx.repo.name, artifact_id
                 )
                 for document in _sarif_documents(archive):
                     findings.extend(sarif_findings(document, artifact=name, repo_root=repo_root))
-    except Exception as err:
-        logger.warning("ci evidence: SARIF artifact ingest failed — {}", err)
-        return findings
+            except Exception as artifact_err:
+                logger.warning(
+                    "ci evidence: SARIF artifact {} ingest failed — {}",
+                    name,
+                    artifact_err,
+                )
+                continue
     return findings
 
 
@@ -224,36 +269,40 @@ async def run_ci_intelligence(
     flaky failure stays ``Minor`` / ``introduced_by_pr="false"`` and cannot block
     (D11).
     """
-    from mergecraft.ci.evidence import record_ci_findings
+    from mergecraft.ci.evidence import ci_evidence_findings, record_ci_findings
+    from mergecraft.ci.providers.github_actions import unbound_check_suite_logs
     from mergecraft.ci.review import analyze_ci_failures
 
-    sarif = await collect_ci_sarif_findings(ctx, check_suite_id=check_suite_id)
-    if sarif:
-        record_ci_findings(ctx.tool_state, sarif)
-
-    suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(ctx, check_suite_id=check_suite_id)
+    client = github_client_from_scm(ctx.scm)
+    if client is None:
+        sarif: list[Finding] = []
+        suite = unbound_check_suite_logs(check_suite_id)
+    else:
+        try:
+            listed = await client.list_workflow_runs_for_check_suite(
+                ctx.repo.owner, ctx.repo.name, check_suite_id
+            )
+        except Exception as err:
+            return _unavailable_ci_intelligence(
+                reason=str(err) or "check-suite run listing failed",
+            )
+        if listed.incomplete:
+            return _unavailable_ci_intelligence(
+                reason="check-suite run listing incomplete",
+            )
+        runs = listed.items
+        sarif = await collect_ci_sarif_findings(ctx, client=client, runs=runs)
+        if sarif:
+            record_ci_findings(ctx.tool_state, sarif)
+        suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(
+            ctx, check_suite_id=check_suite_id, client=client, runs=runs
+        )
     jobs = suite.get("jobs") or []
     provider_overflow = int(suite.get("overflow") or 0)
     total_failed_runs = int(suite.get("total_failed_runs") or len(jobs))
     if not jobs:
         reason = str(suite.get("message") or "no failed workflow runs found for this check suite")
-        return {
-            "available": False,
-            "reason": reason,
-            "section": "",
-            "preMergeSummary": "",
-            "comments": [],
-            "sarifFindingCount": len(sarif),
-            "stats": {
-                "failureCount": 0,
-                "clusterCount": 0,
-                "flakyCount": 0,
-                "prAttributedCount": 0,
-                "truncated": False,
-                "overflow": 0,
-            },
-            "clusters": [],
-        }
+        return _unavailable_ci_intelligence(reason=reason, sarif_finding_count=len(sarif))
 
     raw_failures = provider_jobs_to_raw_failures(jobs)
     reports, stats, overflow = analyze_ci_failures(
@@ -272,10 +321,10 @@ async def run_ci_intelligence(
         raw_failures=raw_failures,
         fix_suggestions=fix_suggestions,
     )
-    recorded = record_ci_findings(ctx.tool_state, [report.finding for report in reports])
+    record_ci_findings(ctx.tool_state, [report.finding for report in reports])
     payload["available"] = True
     payload["checkSuiteId"] = check_suite_id
-    payload["recordedFindingCount"] = len(recorded) + len(sarif)
+    payload["recordedFindingCount"] = len(ci_evidence_findings(ctx.tool_state))
     payload["sarifFindingCount"] = len(sarif)
     return payload
 

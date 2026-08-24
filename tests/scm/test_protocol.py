@@ -297,6 +297,28 @@ def test_no_github_specific_type_leaks_into_core() -> None:
     )
 
 
+def test_check_suite_workflow_listing_is_github_client_not_scm_protocol() -> None:
+    """GitHub Actions CI listing stays on GitHubClient; GitLab must not stub it."""
+    require_scm()
+    from mergecraft.scm.protocol import protocol_operation_names
+
+    assert "list_workflow_runs_for_check_suite" not in protocol_operation_names()
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    assert not hasattr(GitHubScmAdapter, "list_workflow_runs_for_check_suite")
+    root = Path(__file__).resolve().parents[2]
+    github_src = (root / "src/mergecraft/scm/github.py").read_text(encoding="utf-8")
+    assert "list_workflow_runs_for_check_suite" not in github_src
+    for rel in (
+        "src/mergecraft/ci/intelligence.py",
+        "src/mergecraft/mcp/check_suite.py",
+    ):
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "github_client_from_scm" in text
+        assert "list_workflow_runs_for_check_suite" in text
+        assert "GitHubScmAdapter" not in text
+
+
 @pytest.mark.asyncio
 async def test_review_publication_goes_through_the_protocol(tmp_path: Path) -> None:
     """Validated terminal submissions publish via the SCM provider, not ctx.github."""
@@ -347,12 +369,13 @@ async def test_protocol_list_check_runs_alias_reaches_the_check_runs_endpoint(
     github = RecordingGitHubClient(transport=github_snapshot_transport())
     adapter = GitHubScmAdapter(github)
 
-    payload = await adapter.list_check_runs("acme", "demo", "main")
+    listed = await adapter.list_check_runs("acme", "demo", "main")
 
     assert [path for _method, path, _payload in github.calls] == [
         "/repos/acme/demo/commits/main/check-runs"
     ]
-    assert "check_runs" in payload
+    assert listed.incomplete is False
+    assert listed.items
 
 
 def test_checkout_and_diff_semantics_are_preserved() -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final
 
 import httpx
 from loguru import logger
@@ -14,6 +14,7 @@ from mergecraft.config.settings import (
     RunContextData,
     load_repo_settings,
 )
+from mergecraft.scm.types import ListedItems
 from mergecraft.utils.retry_policy import (
     DEFAULT_STOP,
     DEFAULT_WAIT,
@@ -21,9 +22,14 @@ from mergecraft.utils.retry_policy import (
     retry_transient_safe_methods,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
 DEFAULT_API_URL = "https://api.github.com"
 DEFAULT_ACCEPT = "application/vnd.github+json"
 DEFAULT_API_VERSION = "2022-11-28"
+GITHUB_LIST_PAGE_SIZE: Final[int] = 100
+GITHUB_LIST_MAX_PAGES: Final[int] = 20
 
 
 def _as_dict(data: Any) -> dict[str, Any]:
@@ -35,8 +41,82 @@ def _as_dict(data: Any) -> dict[str, Any]:
 
 def _as_list(data: Any) -> list[dict[str, Any]]:
     if not isinstance(data, list):
-        return []
-    return [item for item in data if isinstance(item, dict)]
+        msg = f"expected JSON array, got {type(data).__name__}"
+        raise TypeError(msg)
+    items: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            msg = f"expected JSON object rows, got {type(item).__name__}"
+            raise TypeError(msg)
+        items.append(item)
+    return items
+
+
+async def paginate_github_list_pages(
+    fetch_page: Callable[[int], Awaitable[Any]],
+    *,
+    item_key: str,
+    page_size: int = GITHUB_LIST_PAGE_SIZE,
+    max_pages: int = GITHUB_LIST_MAX_PAGES,
+) -> ListedItems:
+    """Follow GitHub list pages until a short page or ``max_pages``.
+
+    Each ``fetch_page(page)`` should return a JSON object with ``item_key``.
+    A full page of ``page_size`` continues; a shorter page ends the walk so
+    items past 100 are not silently dropped.
+
+    ``incomplete`` is True when the walk hit ``max_pages`` on a full page,
+    the payload was not an object, ``item_key`` was missing or not a list,
+    a JSON array was returned where an object was expected, or non-dict
+    rows were dropped — callers must not treat that as a complete catalog.
+    """
+    collected: list[dict[str, Any]] = []
+    incomplete = False
+    total_count: int | None = None
+    for page in range(1, max_pages + 1):
+        payload = await fetch_page(page)
+        if (
+            isinstance(payload, dict)
+            and isinstance(payload.get("total_count"), int)
+            and total_count is None
+        ):
+            total_count = payload["total_count"]
+        if isinstance(payload, dict):
+            raw_items: Any = payload.get(item_key)
+            if not isinstance(raw_items, list):
+                logger.warning(
+                    "github list pagination: missing or non-list {} on object payload; "
+                    "stopping without treating the list as complete",
+                    item_key,
+                )
+                incomplete = True
+                break
+        else:
+            logger.warning(
+                "github list pagination: unexpected {} payload for {}; "
+                "stopping without treating the list as complete",
+                type(payload).__name__,
+                item_key,
+            )
+            incomplete = True
+            break
+        page_len = len(raw_items)
+        batch = [item for item in raw_items if isinstance(item, dict)]
+        if len(batch) != page_len:
+            incomplete = True
+        collected.extend(batch)
+        if page_len < page_size:
+            break
+        if page == max_pages:
+            logger.warning(
+                "github list pagination: hit max_pages={} with a full page of {} {}; "
+                "results may be truncated",
+                max_pages,
+                page_size,
+                item_key,
+            )
+            incomplete = True
+    return ListedItems(items=collected, incomplete=incomplete, total_count=total_count)
 
 
 class RepoContext:
@@ -78,6 +158,11 @@ def _default_api_base_url() -> str:
     return (os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL).rstrip("/")
 
 
+def usable_github_token(token: str) -> str:
+    """Return a non-empty GitHub token, or ``""`` when missing or whitespace (#469)."""
+    return token.strip()
+
+
 class GitHubClient:
     """Thin async GitHub REST + GraphQL client backed by ``httpx.AsyncClient``."""
 
@@ -90,15 +175,16 @@ class GitHubClient:
         user_agent: str = "mergeCraft",
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.token = token
+        self.token = usable_github_token(token)
         self.base_url = (base_url or _default_api_base_url()).rstrip("/")
         self._owns_client = client is None
         headers = {
             "Accept": DEFAULT_ACCEPT,
-            "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": DEFAULT_API_VERSION,
             "User-Agent": user_agent,
         }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         self._client = client or httpx.AsyncClient(
             base_url=self.base_url,
             headers=headers,
@@ -121,6 +207,33 @@ class GitHubClient:
         stop=DEFAULT_STOP,
         reraise=True,
     )
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: Any = None,
+        headers: dict[str, str] | None = None,
+        follow_redirects: bool = False,
+    ) -> httpx.Response:
+        """Token-gated HTTP send with the same retry policy as :meth:`request`."""
+        if not self.token:
+            msg = "GitHub token is missing; cannot call the GitHub API"
+            raise ValueError(msg)
+        response = await self._client.request(
+            method,
+            path,
+            params=params,
+            json=json,
+            headers=headers,
+            follow_redirects=follow_redirects,
+        )
+        if response.status_code >= 400:
+            logger.debug("GitHub {} {} -> {}", method, path, response.status_code)
+            response.raise_for_status()
+        return response
+
     async def request(
         self,
         method: str,
@@ -136,16 +249,7 @@ class GitHubClient:
         errors with bounded exponential backoff + jitter. Mutations
         (POST/PATCH/PUT/DELETE) are never retried blindly (W9.3 / ``#34``).
         """
-        response = await self._client.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            headers=headers,
-        )
-        if response.status_code >= 400:
-            logger.debug("GitHub {} {} -> {}", method, path, response.status_code)
-            response.raise_for_status()
+        response = await self._send(method, path, params=params, json=json, headers=headers)
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
@@ -484,7 +588,7 @@ class GitHubClient:
         repo: str,
         ref: str,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> ListedItems:
         """List individual check runs for a commit ref (#36 gate evidence).
 
         ``list_check_suites_for_ref`` returns suites, whose conclusion is the
@@ -492,27 +596,67 @@ class GitHubClient:
         a repo declaring ``lint: "Verify (lint)"`` is pointing at one job, not
         at whether the whole suite went green.
         """
-        params = {"per_page": 100, **(kwargs.pop("params", None) or {})}
-        return _as_dict(
-            await self.get(
-                f"/repos/{owner}/{repo}/commits/{ref}/check-runs", params=params, **kwargs
+        extra = kwargs.pop("params", None) or {}
+
+        async def _fetch_page(page: int) -> Any:
+            params = {
+                **extra,
+                "per_page": GITHUB_LIST_PAGE_SIZE,
+                "page": page,
+            }
+            return await self.get(
+                f"/repos/{owner}/{repo}/commits/{ref}/check-runs",
+                params=params,
+                **kwargs,
             )
+
+        listed = await paginate_github_list_pages(_fetch_page, item_key="check_runs")
+        # Never overwrite GitHub's total_count with len(items): a truncated
+        # walk would then look complete.
+        total = listed.total_count
+        if total is None and not listed.incomplete:
+            total = len(listed.items)
+        return ListedItems(
+            items=listed.items,
+            incomplete=listed.incomplete,
+            total_count=total,
         )
+
+    async def list_workflow_runs_for_check_suite(
+        self,
+        owner: str,
+        repo: str,
+        check_suite_id: int,
+    ) -> ListedItems:
+        """List workflow runs for a check suite (every page, not only the first 100)."""
+
+        async def _fetch_page(page: int) -> Any:
+            return await self.get(
+                f"/repos/{owner}/{repo}/actions/runs",
+                params={
+                    "check_suite_id": check_suite_id,
+                    "per_page": GITHUB_LIST_PAGE_SIZE,
+                    "page": page,
+                },
+            )
+
+        return await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
 
     async def list_workflow_run_artifacts(
         self,
         owner: str,
         repo: str,
         run_id: int,
-    ) -> list[dict[str, Any]]:
-        """List artifacts a workflow run uploaded."""
-        payload = await self.get(
-            f"/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
-            params={"per_page": 100},
-        )
-        if not isinstance(payload, dict):
-            return []
-        return _as_list(payload.get("artifacts"))
+    ) -> ListedItems:
+        """List artifacts a workflow run uploaded (every page, not only the first 100)."""
+
+        async def _fetch_page(page: int) -> Any:
+            return await self.get(
+                f"/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
+                params={"per_page": GITHUB_LIST_PAGE_SIZE, "page": page},
+            )
+
+        return await paginate_github_list_pages(_fetch_page, item_key="artifacts")
 
     async def download_artifact_zip(
         self,
@@ -521,14 +665,12 @@ class GitHubClient:
         artifact_id: int,
     ) -> bytes:
         """Download one artifact's zip archive, following GitHub's redirect."""
-        response = await self._client.get(
+        response = await self._send(
+            "GET",
             f"/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip",
             headers={"Accept": DEFAULT_ACCEPT},
             follow_redirects=True,
         )
-        if response.status_code >= 400:
-            msg = f"artifact download failed: {response.status_code}"
-            raise RuntimeError(msg)
         return response.content
 
     async def download_workflow_run_logs(
@@ -538,14 +680,12 @@ class GitHubClient:
         run_id: int,
     ) -> bytes:
         """Download one workflow run's log archive, following GitHub's redirect."""
-        response = await self._client.get(
+        response = await self._send(
+            "GET",
             f"/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
             headers={"Accept": DEFAULT_ACCEPT},
             follow_redirects=True,
         )
-        if response.status_code >= 400:
-            msg = f"log download failed: {response.status_code}"
-            raise RuntimeError(msg)
         return response.content
 
 

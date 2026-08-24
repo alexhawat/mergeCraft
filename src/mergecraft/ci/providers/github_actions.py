@@ -12,11 +12,40 @@ from loguru import logger
 
 from mergecraft.ci.log_excerpt import analyze_log
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
-from mergecraft.scm.github import GitHubScmAdapter
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.utils.github import GitHubClient
+
+
+def unavailable_check_suite_logs(
+    check_suite_id: int,
+    *,
+    message: str,
+    skipped: bool = False,
+) -> dict[str, Any]:
+    """MCP skip/unavailable payload (unbound client or listing failure).
+
+    Always includes ``available: False`` so clients do not treat an empty
+    job list as a live suite with no failures.
+    """
+    return {
+        "check_suite_id": check_suite_id,
+        "message": message,
+        "jobs": [],
+        "available": False,
+        "skipped": skipped,
+    }
+
+
+def unbound_check_suite_logs(check_suite_id: int) -> dict[str, Any]:
+    """Payload when no GitHub client is bound — skip, do not invent a list."""
+    return unavailable_check_suite_logs(
+        check_suite_id,
+        message="check-suite logs unavailable: GitHub client not bound",
+        skipped=True,
+    )
 
 
 class GitHubActionsProvider:
@@ -37,20 +66,20 @@ class GitHubActionsProvider:
         ctx: ToolContext,
         *,
         check_suite_id: int,
+        client: GitHubClient,
+        runs: list[dict[str, Any]],
         truncation_cap: int = DEFAULT_TRUNCATION_CAP,
     ) -> dict[str, Any]:
-        """Download failed workflow logs for a check suite (legacy MCP contract)."""
-        payload = await ctx.scm.get(
-            f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs",
-            params={"check_suite_id": check_suite_id, "per_page": 100},
-        )
-        runs = (
-            payload.get("workflow_runs", [])
-            if isinstance(payload, dict)
-            else (payload if isinstance(payload, list) else [])
-        )
+        """Download failed workflow logs for a check suite (legacy MCP contract).
+
+        ``client`` and ``runs`` are required: the orchestrator lists check-suite
+        runs once and passes them in. This method does not re-bind or re-list.
+        """
         failed = [run for run in runs if run.get("conclusion") == "failure"]
         if not failed:
+            # Trusted empty: no failed runs. Omit ``available`` so this does
+            # not share the unbound/truncated/list-failure shape
+            # (``unavailable_check_suite_logs`` always sets ``available: False``).
             return {
                 "check_suite_id": check_suite_id,
                 "message": "no failed workflow runs found for this check suite",
@@ -62,12 +91,11 @@ class GitHubActionsProvider:
         jobs_out: list[dict[str, Any]] = []
         selected, overflow = apply_truncation(failed, cap=truncation_cap)
         for run in selected:
-            run_id = run["id"]
+            run_id = run.get("id")
+            if not isinstance(run_id, int):
+                continue
             try:
-                scm = ctx.scm
-                if not isinstance(scm, GitHubScmAdapter):
-                    raise RuntimeError("log download requires a GitHub SCM adapter")
-                raw = await scm.download_workflow_run_logs(
+                raw = await client.download_workflow_run_logs(
                     ctx.repo.owner,
                     ctx.repo.name,
                     run_id,
@@ -119,4 +147,8 @@ class GitHubActionsProvider:
         return log_text
 
 
-__all__ = ["GitHubActionsProvider"]
+__all__ = [
+    "GitHubActionsProvider",
+    "unavailable_check_suite_logs",
+    "unbound_check_suite_logs",
+]
