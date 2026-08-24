@@ -311,6 +311,41 @@ tests.
 | Wave greens | Remove xfail from |
 | --- | --- |
 | CG | all tests in `tests/ci/test_mergecraft_workflow_timeout_budget.py` |
+| CG | ✅ reconciled 2026-08-24 — 4/4 CG cases pass without `--runxfail` |
+
+## CI #487 — init gitignore for audit.jsonl → CI RED
+
+Source: D10, issue #487. Explicit ignore for ``.mergecraft/audit.jsonl`` in the
+``init`` gitignore scaffold so enterprise audit JSONL never appears as untracked
+local state. Lane C owns ``cli/init_cmd.py`` scaffold — not the mergeCraft repo
+``/.mergecraft/*`` negation pattern.
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| Explicit gitignore line scaffolded | `tests/cli/test_init_audit_jsonl_gitignore.py::test_init_scaffolds_explicit_audit_jsonl_gitignore_line` | functional |
+| Append when .gitignore preexists | `…::test_init_appends_audit_jsonl_when_gitignore_preexists` | edge |
+| ``git check-ignore`` accepts path | `…::test_audit_jsonl_is_gitignored_after_init` | E2E |
+| Not listed as untracked | `…::test_audit_jsonl_not_listed_as_untracked_after_init` | E2E |
+| No duplicate line on re-init | `…::test_init_does_not_duplicate_audit_jsonl_gitignore_line` | edge |
+| Gitignore line pin | `…::test_support_pins_audit_jsonl_gitignore_line` | unit |
+
+### Pinned public contract (implementation wave CI)
+
+``src/mergecraft/cli/init_cmd.py``:
+
+- ``AUDIT_JSONL_GITIGNORE_LINE`` — ``".mergecraft/audit.jsonl"`` (matches
+  ``mergecraft.enterprise.audit.DEFAULT_AUDIT_REL``)
+- ``init`` creates or updates ``.gitignore`` with that explicit line (append when
+  missing; do not duplicate on ``--force`` re-run)
+
+Helpers under ``tests/cli/support_init_audit_jsonl.py`` encode the path and git
+checks for pytest.
+
+## xfail reconciliation (CI)
+
+| Wave greens | Remove xfail from |
+| --- | --- |
+| CI | all xfail tests in `tests/cli/test_init_audit_jsonl_gitignore.py` except `test_support_pins_audit_jsonl_gitignore_line` |
 
 ## Verification commands
 
@@ -329,7 +364,8 @@ uv run pytest --collect-only -q \
   tests/evals/test_lens_routing_capability.py \
   tests/evals/test_lens_capability_json.py \
   tests/cli/test_update_version_cmd.py \
-  tests/ci/test_mergecraft_workflow_timeout_budget.py
+  tests/ci/test_mergecraft_workflow_timeout_budget.py \
+  tests/cli/test_init_audit_jsonl_gitignore.py
 uv run pytest -q \
   tests/analyzers/test_finding_short_id.py \
   tests/findings/test_finding_short_id_outputs.py \
@@ -342,5 +378,6 @@ uv run pytest -q \
   tests/evals/test_lens_routing_capability.py \
   tests/evals/test_lens_capability_json.py \
   tests/cli/test_update_version_cmd.py \
-  tests/ci/test_mergecraft_workflow_timeout_budget.py
+  tests/ci/test_mergecraft_workflow_timeout_budget.py \
+  tests/cli/test_init_audit_jsonl_gitignore.py
 ```
