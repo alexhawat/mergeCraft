@@ -342,13 +342,14 @@ def test_minimax_missing_credential_fails_loud(
     assert any(token in message for token in ("minimax",)), (
         f"error message must mention 'minimax'; got: {message!r}"
     )
-    # The error must name the env vars that fix the configuration.
-    assert SINGLETON_BASE_URL_ENV.lower() in message or any(
-        INDEXED_BASE_URL_FMT.format(n=n).lower() in message for n in (1,)
-    ), (
-        f"error message must name the custom-provider env vars "
-        f"({SINGLETON_BASE_URL_ENV} or {INDEXED_BASE_URL_FMT.format(n=1)}); got: {message!r}"
-    )
+    # Unregistered providers fail loud with registry guidance; registered-but-missing
+    # creds name the custom-provider env vars.
+    assert (
+        "not registered" in message
+        or "provider add" in message
+        or SINGLETON_BASE_URL_ENV.lower() in message
+        or any(INDEXED_BASE_URL_FMT.format(n=n).lower() in message for n in (1,))
+    ), f"error message must name registry setup or custom-provider env vars; got: {message!r}"
     # And it must NOT silently resolve to the opencode harness.
     assert "opencode" not in message, (
         f"error must not mention 'opencode' (silent fall-through); got: {message!r}"

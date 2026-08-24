@@ -547,4 +547,4 @@ uv run pytest -q tests/cli/test_workflow_cmd.py tests/cli/test_workflow_wf_yaml.
 
 ## BG RED evidence
 
-- BG test-author wave: pending — 26 collected, 26 xfails expected; lint+typecheck clean
+- BG test-author wave: `bdde388f` — 26 collected, 23 xfails + 3 xpass; lint+typecheck clean

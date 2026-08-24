@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import RepoSettings
 from mergecraft.utils.agent_resolve import _is_retryable_failure, run_with_model_chain
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.mark.asyncio
@@ -79,21 +84,58 @@ def test_parse_failure_is_not_retryable() -> None:
 
 
 @pytest.mark.asyncio
-async def test_opencode_retries_at_most_once(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_opencode_retries_at_most_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """OpenCode gets the initial attempt plus exactly one retry, then the chain
     stops spending wall clock on that harness (#444).
     """
-    monkeypatch.setenv("NOUS_API_KEY", "sk-test")
+    from tests.cli.support_provider_registry import (
+        NOUS_BASE_URL,
+        clear_legacy_gateway_env,
+        scaffold_mergecraft_home,
+        write_indexed_provider_secret,
+        write_registry_provider_row,
+    )
+
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    clear_legacy_gateway_env(monkeypatch)
+    write_registry_provider_row(
+        tmp_path,
+        label="nous",
+        harness="opencode",
+        env_index=1,
+        url=NOUS_BASE_URL,
+        models=[
+            {"id": "deepseek/deepseek-v4-flash", "modelIndex": 1},
+            {"id": "deepseek/deepseek-v4-pro", "modelIndex": 2},
+            {"id": "qwen/qwen3.8-max", "modelIndex": 3},
+        ],
+    )
+    write_indexed_provider_secret(
+        tmp_path,
+        env_index=1,
+        label="nous",
+        api_key="sk-test",
+    )
+    monkeypatch.setenv("LLM_PROVIDER_1", "nous")
+    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "sk-test")
     monkeypatch.setattr(
         "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
     )
+    from mergecraft.config.settings import load_repo_settings
+
+    base_settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
     settings = RepoSettings.model_validate(
         {
+            **base_settings.model_dump(),
             "models": [
                 "nous/deepseek/deepseek-v4-flash",
                 "nous/deepseek/deepseek-v4-pro",
                 "nous/qwen/qwen3.8-max",
-            ]
+            ],
         }
     )
     attempts: list[str] = []

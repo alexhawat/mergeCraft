@@ -17,11 +17,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.cli.support_provider_registry import bootstrap_opencode_gateway
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from _pytest.monkeypatch import MonkeyPatch
 
 runner = CliRunner()
@@ -75,19 +78,19 @@ def test_mergecraft_models_list_renders_minimax_row_without_credentials(
 
 
 def test_mergecraft_models_list_renders_minimax_row_with_credentials(
+    tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """``mergecraft models list`` flips the credentials column to ``yes``
-    when ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` is set (D10 / option ii:
-    MiniMax routes through the W3 helper).
-
-    Locates the minimax row by its first token; the row format is
-    ``slug provider display credentials`` (space-separated), with the
-    credentials column as the trailing token. The ``yes`` / ``no``
-    marker is the W6 behavioural pin.
-    """
+    """``mergecraft models list`` flips the credentials column to ``yes`` when registered."""
     _clear_provider_env(monkeypatch)
-    monkeypatch.setenv(SINGLETON_API_KEY_ENV, "minimax-test-key")
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="minimax",
+        url="https://api.minimax.io/v1",
+        model_id="MiniMax-M3",
+        api_key="minimax-test-key",
+    )
 
     result = runner.invoke(app, ["models", "list"])
 
@@ -109,17 +112,20 @@ def test_mergecraft_models_list_renders_minimax_row_with_credentials(
 
 
 def test_mergecraft_models_list_minimax_row_does_not_leak_api_key(
+    tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Convention 7: the resolved api key value never appears in the
-    rendered table — even when the credentials column flips to ``yes``.
-
-    Pins against a regression where ``mergecraft models list`` would
-    print the raw env var value alongside the row.
-    """
+    """Convention 7: the resolved api key value never appears in the rendered table."""
     _clear_provider_env(monkeypatch)
     sentinel = "sk-minimax-table-SENTINEL-LEAK-CHECK-0001"
-    monkeypatch.setenv(SINGLETON_API_KEY_ENV, sentinel)
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="minimax",
+        url="https://api.minimax.io/v1",
+        model_id="MiniMax-M3",
+        api_key=sentinel,
+    )
 
     result = runner.invoke(app, ["models", "list"])
 

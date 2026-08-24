@@ -7,6 +7,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.agents.conftest import make_agent_run_context
+from tests.cli.support_provider_registry import (
+    bootstrap_nous_registry,
+    bootstrap_opencode_gateway,
+    scaffold_mergecraft_home,
+)
 
 from mergecraft.agents.opencode import (
     CUSTOM_PROVIDER_API_KEY_ENV,
@@ -46,8 +51,13 @@ def _config(tmp_path: Path, model: str | None) -> dict[str, object]:
 def test_custom_provider_is_registered_from_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv(CUSTOM_PROVIDER_BASE_URL_ENV, NOUS_BASE_URL)
-    monkeypatch.setenv(CUSTOM_PROVIDER_API_KEY_ENV, "nous-key")
+    bootstrap_nous_registry(
+        tmp_path,
+        monkeypatch,
+        model_id="deepseek/deepseek-v4-flash",
+        api_key="nous-key",
+        url=NOUS_BASE_URL,
+    )
 
     config = _config(tmp_path, NOUS_MODEL)
 
@@ -85,16 +95,23 @@ def test_provider_omitted_for_an_unprefixed_model(
     assert "provider" not in _config(tmp_path, "deepseek-v4-flash")
 
 
-def test_unconfigured_environment_leaves_config_unchanged(tmp_path: Path) -> None:
+def test_unconfigured_environment_leaves_config_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
     config = _config(tmp_path, NOUS_MODEL)
 
     assert "provider" not in config
-    assert config["enabled_providers"] == ["nous"]
 
 
 def test_nous_api_key_alone_registers_preset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Registered nous with indexed secret emits the provider block (D7 shim is credential-only)."""
+    bootstrap_nous_registry(
+        tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash", api_key="nous-key"
+    )
     monkeypatch.setenv("NOUS_API_KEY", "nous-key")
 
     config = _config(tmp_path, NOUS_MODEL)
@@ -110,7 +127,14 @@ def test_nous_api_key_alone_registers_preset(
 
 
 def test_tokenhub_api_key_registers_hy3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TOKENHUB_API_KEY", "th-key")
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="tokenhub",
+        url="https://tokenhub-intl.tencentcloudmaas.com/v1",
+        model_id="hy3",
+        api_key="th-key",
+    )
 
     config = _config(tmp_path, "tokenhub/hy3")
 
@@ -132,7 +156,9 @@ def test_tokenhub_api_key_registers_hy3(tmp_path: Path, monkeypatch: pytest.Monk
 def test_custom_provider_env_overrides_named_preset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
+    bootstrap_nous_registry(
+        tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash", api_key="nous-key"
+    )
     monkeypatch.setenv(CUSTOM_PROVIDER_BASE_URL_ENV, "https://example.test/v1")
     monkeypatch.setenv(CUSTOM_PROVIDER_API_KEY_ENV, "custom-key")
 

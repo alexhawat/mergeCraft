@@ -106,6 +106,8 @@ def scaffold_mergecraft_home(tmp_path: Path, *, config_body: str = "") -> Path:
     cfg_dir = tmp_path / ".mergecraft"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     path = cfg_dir / "config.yaml"
+    if path.is_file():
+        return path
     body = config_body.strip()
     path.write_text((body + "\n") if body else "models: []\n", encoding="utf-8")
     return path
@@ -362,6 +364,43 @@ def write_indexed_provider_secret(
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def bootstrap_opencode_gateway(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    label: str,
+    url: str,
+    model_id: str,
+    harness: str = "opencode",
+    env_index: int = 1,
+    api_key: str = "registry-test-key",
+) -> str:
+    """Register one provider via config registry + indexed secret (no presets)."""
+    cfg_path = tmp_path / ".mergecraft" / "config.yaml"
+    if not cfg_path.is_file():
+        scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    for key in LEGACY_GATEWAY_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    write_registry_provider_row(
+        tmp_path,
+        label=label,
+        harness=harness,
+        env_index=env_index,
+        url=url,
+        models=[{"id": model_id, "modelIndex": 1}],
+    )
+    write_indexed_provider_secret(
+        tmp_path,
+        env_index=env_index,
+        label=label,
+        api_key=api_key,
+    )
+    monkeypatch.setenv(f"LLM_PROVIDER_{env_index}", label)
+    monkeypatch.setenv(f"LLM_PROVIDER_{env_index}_API_KEY", api_key)
+    return format_model_slug(label, model_id)
+
+
 def bootstrap_nous_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -371,26 +410,14 @@ def bootstrap_nous_registry(
     api_key: str = "registry-nous-test-key",
 ) -> str:
     """Register Nous purely via config registry + indexed secret (no presets)."""
-    scaffold_mergecraft_home(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    clear_legacy_gateway_env(monkeypatch)
-    write_registry_provider_row(
+    return bootstrap_opencode_gateway(
         tmp_path,
+        monkeypatch,
         label="nous",
-        harness="opencode",
-        env_index=1,
         url=url,
-        models=[{"id": model_id, "modelIndex": 1}],
-    )
-    write_indexed_provider_secret(
-        tmp_path,
-        env_index=1,
-        label="nous",
+        model_id=model_id,
         api_key=api_key,
     )
-    monkeypatch.setenv("LLM_PROVIDER_1", "nous")
-    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", api_key)
-    return format_model_slug("nous", model_id)
 
 
 # BF #483 — ``provider migrate`` / config-secret split (D2, D7, D10).
