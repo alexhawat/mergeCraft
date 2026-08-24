@@ -70,8 +70,9 @@ def load_run_findings(
     """Return agent, analyzer, and CI findings the gate and packet both read.
 
     Validation errors are logged at debug and skipped. Deduplicates on
-    ``fingerprint``. CI SARIF recorded on tool state is included so the
-    approval check and the packet cannot diverge on #464 evidence.
+    :func:`_dedupe_key` (fingerprint when present, otherwise
+    tool/rule/path/line/message). CI SARIF recorded on tool state is included
+    so the approval check and the packet cannot diverge on #464 evidence.
     """
     from mergecraft.ci.evidence import ci_evidence_findings
 

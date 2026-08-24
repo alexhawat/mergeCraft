@@ -194,13 +194,23 @@ async def collect_ci_sarif_findings(
                 artifact_id = artifact.get("id")
                 if name not in wanted or not isinstance(artifact_id, int):
                     continue
-                archive = await ctx.scm.download_artifact_zip(
-                    ctx.repo.owner, ctx.repo.name, artifact_id
-                )
-                for document in _sarif_documents(archive):
-                    findings.extend(sarif_findings(document, artifact=name, repo_root=repo_root))
+                try:
+                    archive = await ctx.scm.download_artifact_zip(
+                        ctx.repo.owner, ctx.repo.name, artifact_id
+                    )
+                    for document in _sarif_documents(archive):
+                        findings.extend(
+                            sarif_findings(document, artifact=name, repo_root=repo_root)
+                        )
+                except Exception as artifact_err:
+                    logger.warning(
+                        "ci evidence: SARIF artifact {} ingest failed — {}",
+                        name,
+                        artifact_err,
+                    )
+                    continue
     except Exception as err:
-        logger.warning("ci evidence: SARIF artifact ingest failed — {}", err)
+        logger.warning("ci evidence: SARIF listing failed — {}", err)
         return findings
     return findings
 

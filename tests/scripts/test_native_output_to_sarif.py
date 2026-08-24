@@ -113,3 +113,15 @@ def test_invalid_line_number_does_not_write_clean_sarif(tmp_path: Path) -> None:
     )
     assert main(["mypy", str(src), str(dest)]) == 1
     assert not dest.exists()
+
+
+def test_truncated_mypy_jsonl_is_converter_failure_not_partial_scan() -> None:
+    good = '{"file": "a.py", "line": 1, "message": "x", "code": "attr-defined"}\n'
+    truncated = '{"file": "b.py", "line": 2, "message":'
+    with pytest.raises(ConverterError, match=r"truncated|invalid"):
+        mypy_to_sarif(good + truncated)
+
+
+def test_bandit_non_object_results_row_is_converter_failure() -> None:
+    with pytest.raises(ConverterError, match="non-object"):
+        bandit_to_sarif('{"results": ["not-an-object"]}')

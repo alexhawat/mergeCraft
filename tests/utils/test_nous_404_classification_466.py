@@ -165,6 +165,17 @@ class TestNous404Failover:
     def test_billing_prose_404_is_retryable_even_as_bare_text(self, stderr: str) -> None:
         assert _is_retryable_failure(_failed(stderr)) is True
 
+    def test_load_balancer_prose_is_not_billing_or_failover(self) -> None:
+        stderr = "GET https://cdn.example/v1/upstream HTTP/1.1 404 from the load balancer"
+        billing = _classify(_NOUS_BILLING_404, status_code=404)
+        assert _classify(stderr, status_code=404) != billing
+        assert _is_retryable_failure(_failed(stderr)) is False
+
+    def test_accreditation_credit_substring_is_not_billing(self) -> None:
+        stderr = "HTTP 404: accreditation document is missing"
+        billing = _classify(_NOUS_BILLING_404, status_code=404)
+        assert _classify(stderr, status_code=404) != billing
+
 
 class TestProviderErrorNotSchemaFailure:
     """Agent never ran → surface the provider error, not a missing ``set_output``."""

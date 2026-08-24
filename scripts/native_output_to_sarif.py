@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import TypedDict
 
-from mergecraft.analyzers.parsers._common import iter_json_objects, require_json_object
+from mergecraft.analyzers.parsers._common import require_json_object
 
 _BANDIT_LEVEL = {"HIGH": "error", "MEDIUM": "warning", "LOW": "note"}
 
@@ -129,8 +129,21 @@ def mypy_to_sarif(raw: str) -> SarifLog:
         return _sarif(tool="mypy", results=[])
     results: list[SarifResult] = []
     matched = False
-    for item in iter_json_objects(raw):
+    for line in raw.splitlines():
+        stripped_line = line.strip()
+        if not stripped_line:
+            continue
+        if stripped_line[0] not in "{[":
+            continue
+        try:
+            parsed = json.loads(stripped_line)
+        except json.JSONDecodeError as exc:
+            msg = "mypy native output contains invalid or truncated JSON"
+            raise ConverterError(msg) from exc
+        if not isinstance(parsed, dict):
+            continue
         matched = True
+        item = parsed
         severity = str(item.get("severity") or "error")
         level = "error" if severity == "error" else "warning"
         start = _as_line(item.get("line"), default=1)
@@ -171,7 +184,8 @@ def bandit_to_sarif(raw: str) -> SarifLog:
     results: list[SarifResult] = []
     for item in rows:
         if not isinstance(item, dict):
-            continue
+            msg = "bandit JSON results array contains a non-object row"
+            raise ConverterError(msg)
         native = str(item.get("issue_severity") or "LOW").upper()
         line = _as_line(item.get("line_number"), default=1)
         results.append(

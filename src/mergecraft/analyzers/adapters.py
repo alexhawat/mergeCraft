@@ -495,12 +495,12 @@ def run_adapter(
     output_file = Path(outcome.output_path)
     try:
         raw = output_file.read_text(encoding="utf-8")
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
         # ``UnicodeDecodeError`` is a ``ValueError``: output we cannot even read
         # is unreadable, not unparsable — and reading it must happen outside the
         # parse ``try`` so the handler below never sees an unbound ``raw``.
         reason = f"skipped {tool_id}: could not read analyzer output"
-        logger.info("{}", reason)
+        logger.info("{}: {}", reason, exc)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     try:
@@ -513,10 +513,10 @@ def run_adapter(
             manifest=manifest,
             repo_root=repo_root,
         )
-    except (ValueError, KeyError):
+    except (ValueError, KeyError) as exc:
         # Classify the failure: empty output means the analyzer never produced
         # anything (sandbox unavailable outside CI), not that it emitted garbage
-        # we could not parse.
+        # we could not parse. Skip reason stays generic — exception text is logged.
         if not raw.strip():
             reason = (
                 f"skipped {tool_id}: no output (analyzer did not run — "
@@ -527,7 +527,7 @@ def run_adapter(
                 f"skipped {tool_id}: failed to parse analyzer output; "
                 "unparsable analyzer output omitted"
             )
-        logger.info("{}", reason)
+        logger.info("{}: {}", reason, exc)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     if tool_id == "ruff":

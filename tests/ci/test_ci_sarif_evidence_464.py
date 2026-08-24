@@ -296,6 +296,34 @@ async def test_collect_swallows_artifact_download_failure(tmp_path: Path) -> Non
     assert findings == []
 
 
+@pytest.mark.asyncio
+async def test_collect_continues_after_one_artifact_failure(tmp_path: Path) -> None:
+    """One declared artifact exploding must not drop later declared artifacts."""
+
+    class _FirstBoom(_ArtifactGitHub):
+        async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes:
+            if artifact_id == 1:
+                raise RuntimeError("first zip exploded")
+            return await super().download_artifact_zip(owner, repo, artifact_id)
+
+    github = _FirstBoom(
+        artifacts=[
+            {"id": 1, "name": "ruff-sarif"},
+            {"id": 2, "name": "mypy-sarif"},
+        ],
+        archives={
+            2: _zip_sarif("mypy.sarif", _sarif(tool="mypy", rule_id="name-defined", level="error")),
+        },
+    )
+    ctx = _ctx(tmp_path, github=github, ci_sarif_artifacts=["ruff-sarif", "mypy-sarif"])
+
+    findings = await collect_ci_sarif_findings(ctx, check_suite_id=123)
+
+    assert any(item.source == "ci" and item.severity in _BLOCKING for item in findings), (
+        "later declared SARIF artifact must still be ingested after an earlier failure"
+    )
+
+
 def test_settings_accept_first_wave_sarif_artifacts() -> None:
     settings = RepoSettings.model_validate({"ciEvidence": {"sarifArtifacts": list(_FIRST_WAVE)}})
     assert settings.ci_evidence.sarif_artifacts == list(_FIRST_WAVE)

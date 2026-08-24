@@ -69,7 +69,10 @@ _RETRYABLE_CLI_NEEDLES: Final[tuple[str, ...]] = (
 
 # Billing *class* markers only — a generic HTTP 404 is retryable without them
 # (#466). Do not grow this list as the sole classifier.
-_BILLING_MARKERS: Final[tuple[str, ...]] = ("credit", "balance", "billing")
+_BILLING_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:credits?|balance|billing)\b",
+    re.IGNORECASE,
+)
 _UNKNOWN_MODEL_MARKER: Final[str] = "does not exist"
 _HTTP_404_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:\bHTTP\s+404\b)|(?:\bstatusCode\s*[:=]\s*404\b)",
@@ -112,18 +115,18 @@ def classify_provider_failure(
     """
     if payload is None:
         payload = _provider_json_payload(stderr)
-    haystack = f"{stderr} {_message_from_payload(payload)}".lower()
+    haystack = f"{stderr} {_message_from_payload(payload)}"
     http_404 = _is_http_404(stderr=stderr, status_code=status_code, payload=payload)
-    billing = any(marker in haystack for marker in _BILLING_MARKERS)
-    if billing:
+    if _looks_like_billing(stderr=haystack, payload=payload):
         return ProviderFailureClass.BILLING
-    if http_404 and _UNKNOWN_MODEL_MARKER in haystack:
+    lowered = haystack.lower()
+    if http_404 and _UNKNOWN_MODEL_MARKER in lowered:
         return ProviderFailureClass.UNKNOWN_MODEL
     if http_404 and payload is not None:
         return ProviderFailureClass.HTTP_404
     if http_404:
         return ProviderFailureClass.PERMANENT
-    if any(needle in haystack for needle in _RETRYABLE_CLI_NEEDLES):
+    if any(needle in lowered for needle in _RETRYABLE_CLI_NEEDLES):
         return ProviderFailureClass.RETRYABLE
     return ProviderFailureClass.PERMANENT
 
@@ -142,6 +145,28 @@ def is_retryable_cli_failure(
         status_code = _status_code_from_payload(payload)
     kind = classify_provider_failure(stderr, status_code=status_code, payload=payload)
     return kind in _RETRYABLE_FAILURE_CLASSES
+
+
+def _looks_like_billing(
+    *,
+    stderr: str,
+    payload: dict[str, Any] | None,
+) -> bool:
+    """True when structured fields or word-boundary billing tokens fire.
+
+    Substring ``balance`` must not match ``load balancer``. Unrelated
+    ``credit`` inside a longer token is ignored.
+    """
+    parts = [stderr, _message_from_payload(payload)]
+    if payload is not None:
+        for candidate in (payload, payload.get("data")):
+            if not isinstance(candidate, dict):
+                continue
+            for key in ("code", "type", "error", "error_type", "reason"):
+                value = candidate.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+    return _BILLING_TOKEN_RE.search(" ".join(parts)) is not None
 
 
 def _provider_json_payload(stderr: str) -> dict[str, Any] | None:

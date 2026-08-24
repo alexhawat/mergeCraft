@@ -22,6 +22,8 @@ from mergecraft.mcp.shared import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.mcp.context import ToolContext
@@ -374,20 +376,6 @@ def log_decision(
 # recorder is the only caller that *records* it (shadow mode).
 
 
-# Maps an evidence signal to the rule key the policy engine looks up.
-# Each rule is a tuple ``(predicate, rule_id)``; the first match wins.
-# The list is lookup order, so anything more specific must appear before
-# anything more general (a high-risk migration is checked before the
-# generic low-risk pass).
-_RULE_PREDICATES: Final[tuple[tuple[str, str], ...]] = (
-    ("high_risk_migration", "high_risk_migration"),
-    ("low_risk_passing", "low_risk_passing"),
-    ("changed_unread_file", "changed-unread-file"),
-    ("tool_loop", "tool_loop"),
-    ("schema_failure", "schema_failure"),
-)
-
-
 def _has_changed_unread_file(packet: MergeEvidencePacket) -> bool:
     """A trajectory finding flagged a file modified but never read."""
     return any(finding.rule_id == "changed-unread-file" for finding in packet.findings)
@@ -439,6 +427,27 @@ def _is_schema_failure(packet: MergeEvidencePacket) -> bool:
     return packet.self_assessment.approved is True
 
 
+def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
+    """Blocking agent/analyzer findings request changes under their own key."""
+    return _has_blocker(packet.findings)
+
+
+# Maps an evidence signal to the rule key the policy engine looks up.
+# Each rule is a tuple ``(predicate, rule_id)``; the first match wins.
+# The list is lookup order, so anything more specific must appear before
+# anything more general (a high-risk migration is checked before the
+# generic low-risk pass). ``has_blockers`` is in this table — it is not a
+# parallel if-chain sitting beside an unused lookup.
+_RULE_PREDICATES: Final[tuple[tuple[Callable[[MergeEvidencePacket], bool], str], ...]] = (
+    (_is_high_risk_migration, "high_risk_migration"),
+    (_is_low_risk_passing, "low_risk_passing"),
+    (_packet_has_blockers, "has_blockers"),
+    (_has_changed_unread_file, "changed-unread-file"),
+    (_has_tool_loop, "tool_loop"),
+    (_is_schema_failure, "schema_failure"),
+)
+
+
 def select_rule_id(packet: MergeEvidencePacket) -> str:
     """Pick the rule key the policy engine should consult for ``packet``.
 
@@ -446,22 +455,9 @@ def select_rule_id(packet: MergeEvidencePacket) -> str:
     the packet. ``"schema_failure"`` is the catch-all — it matches a
     packet whose evidence is structurally absent.
     """
-    if _is_high_risk_migration(packet):
-        return "high_risk_migration"
-    if _is_low_risk_passing(packet):
-        return "low_risk_passing"
-    if _has_blocker(packet.findings):
-        # Blocking agent/analyzer findings request changes under their own
-        # policy key — wins over unread-file / tool-loop telemetry.
-        return "has_blockers"
-    if _has_changed_unread_file(packet):
-        return "changed-unread-file"
-    if _has_tool_loop(packet):
-        return "tool_loop"
-    if _is_schema_failure(packet):
-        return "schema_failure"
-    # Default: no rule matched; the policy lookup falls through to the
-    # schema-failure key, which is the conservative mapping.
+    for predicate, rule_id in _RULE_PREDICATES:
+        if predicate(packet):
+            return rule_id
     return "schema_failure"
 
 

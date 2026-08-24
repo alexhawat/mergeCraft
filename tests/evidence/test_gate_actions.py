@@ -25,6 +25,7 @@ no other one — a property put to the test in the close-out mutation.
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -483,3 +484,16 @@ def test_has_blockers_wins_over_changed_unread_file() -> None:
     assert select_rule_id(packet) == "has_blockers"
     action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) == "request_changes"
+
+
+def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -> None:
+    """``_RULE_PREDICATES`` drives ``select_rule_id`` and lists ``has_blockers``."""
+    from mergecraft.agents.gates import _RULE_PREDICATES, select_rule_id
+
+    rule_ids = [rule_id for _predicate, rule_id in _RULE_PREDICATES]
+    assert "has_blockers" in rule_ids
+    assert rule_ids.index("has_blockers") < rule_ids.index("changed-unread-file")
+    assert inspect.unwrap(select_rule_id).__code__.co_names  # smoke: function exists
+    source = inspect.getsource(select_rule_id)
+    assert "_RULE_PREDICATES" in source
+    assert 'return "has_blockers"' not in source
