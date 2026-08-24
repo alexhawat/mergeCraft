@@ -86,14 +86,6 @@ def _sarif(*, tool: str, results: list[SarifResult]) -> SarifLog:
     }
 
 
-def _as_line(value: object, *, default: int = 1) -> int:
-    """Parse a SARIF line number, wrapping conversion errors."""
-    try:
-        return require_line(value, default=default)
-    except ValueError as exc:
-        raise ConverterError(str(exc)) from exc
-
-
 def _result(
     *,
     rule_id: str,
@@ -150,8 +142,11 @@ def mypy_to_sarif(raw: str) -> SarifLog:
         item = parsed
         severity = str(item.get("severity") or "error")
         level = "error" if severity == "error" else "warning"
-        start = _as_line(item.get("line"), default=1)
-        end = _as_line(item.get("end_line"), default=start)
+        try:
+            start = require_line(item.get("line"), default=1)
+            end = require_line(item.get("end_line"), default=start)
+        except ValueError as exc:
+            raise ConverterError(str(exc)) from exc
         results.append(
             _result(
                 rule_id=str(item.get("code") or "mypy"),
@@ -188,7 +183,10 @@ def bandit_to_sarif(raw: str) -> SarifLog:
     results: list[SarifResult] = []
     for item in rows:
         native = bandit_native_severity(item)
-        start, end = bandit_row_span(item)
+        try:
+            start, end = bandit_row_span(item, fail_closed=True)
+        except ValueError as exc:
+            raise ConverterError(str(exc)) from exc
         results.append(
             _result(
                 rule_id=str(item.get("test_id") or "bandit"),

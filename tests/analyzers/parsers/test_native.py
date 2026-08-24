@@ -127,6 +127,13 @@ exclusive_group: dependency-vuln
     assert findings[0].rule_id == "CVE-2024-0001"
 
 
+def test_require_json_array_skips_leading_object() -> None:
+    from mergecraft.analyzers.parsers._common import require_json_array
+
+    raw = '{"banner": true}\n[{"file": "a.css"}]'
+    assert require_json_array(raw, what="stylelint JSON output") == [{"file": "a.css"}]
+
+
 def test_trivy_parser_skips_leading_empty_array_before_report() -> None:
     """A banner plus ``[]`` must not hide the later Trivy report object."""
     parsers = import_module("mergecraft.analyzers.parsers")

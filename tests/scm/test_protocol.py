@@ -303,7 +303,12 @@ def test_check_suite_workflow_listing_is_github_client_not_scm_protocol() -> Non
     from mergecraft.scm.protocol import protocol_operation_names
 
     assert "list_workflow_runs_for_check_suite" not in protocol_operation_names()
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    assert not hasattr(GitHubScmAdapter, "list_workflow_runs_for_check_suite")
     root = Path(__file__).resolve().parents[2]
+    github_src = (root / "src/mergecraft/scm/github.py").read_text(encoding="utf-8")
+    assert "list_workflow_runs_for_check_suite" not in github_src
     for rel in (
         "src/mergecraft/ci/intelligence.py",
         "src/mergecraft/ci/providers/github_actions.py",

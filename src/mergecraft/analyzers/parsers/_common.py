@@ -9,7 +9,7 @@ from urllib.parse import unquote, urlparse
 
 from mergecraft.analyzers.manifest import ManifestValidationError
 from mergecraft.review_taxonomy import FINDING_CATEGORIES
-from mergecraft.utils.json_load import try_load_json, try_load_json_object
+from mergecraft.utils.json_load import try_load_json, try_load_json_array, try_load_json_object
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -149,9 +149,13 @@ def iter_bandit_result_rows(payload: dict[str, Any]) -> Iterator[dict[str, Any]]
 
 
 def require_json_array(raw: str, *, what: str) -> list[Any]:
-    """Parse ``raw`` as a JSON array or raise ``ValueError``."""
-    payload = load_json(raw)
-    if not isinstance(payload, list):
+    """Parse ``raw`` as a JSON array or raise ``ValueError``.
+
+    Leading JSON objects are skipped (same resume-at-``_end`` path as
+    ``try_load_json_array``) so a banner object cannot hide a later array.
+    """
+    payload = try_load_json_array(raw)
+    if payload is None:
         msg = f"{what} must be a JSON array"
         raise ValueError(msg)
     return payload
@@ -230,30 +234,37 @@ def require_line(value: object, *, default: int = 1) -> int:
     return _line_number(value, default=default, fail_closed=True)
 
 
-def _line_number(value: object, *, default: int, fail_closed: bool) -> int:
+def _line_number(value: object, *, default: int, fail_closed: bool, clamp: bool = True) -> int:
+    parsed: int | None
     if value is None:
-        return default
-    if isinstance(value, bool):
+        parsed = None
+    elif isinstance(value, bool):
         if fail_closed:
             msg = f"invalid line number: {value!r}"
             raise ValueError(msg)
-        return default
-    if isinstance(value, int):
-        return max(value, 1)
-    if isinstance(value, float):
-        return max(int(value), 1)
-    if isinstance(value, str):
+        parsed = None
+    elif isinstance(value, int):
+        parsed = value
+    elif isinstance(value, float):
+        parsed = int(value)
+    elif isinstance(value, str):
         try:
-            return max(int(value.strip()), 1)
+            parsed = int(value.strip())
         except ValueError:
             if fail_closed:
                 msg = f"invalid line number: {value!r}"
                 raise ValueError(msg) from None
-            return default
-    if fail_closed:
+            parsed = None
+    elif fail_closed:
         msg = f"invalid line number: {value!r}"
         raise ValueError(msg)
-    return default
+    else:
+        parsed = None
+    if parsed is None:
+        parsed = default
+    if clamp:
+        return max(parsed, 1)
+    return parsed
 
 
 _BANDIT_NATIVE_LEVELS: dict[str, str] = {
@@ -271,32 +282,27 @@ def bandit_native_severity(result: dict[str, Any]) -> str:
     )
 
 
-def bandit_row_span(result: dict[str, Any]) -> tuple[int, int]:
-    """Return ``(start_line, end_line)`` from ``line_number`` / ``line_range``."""
-    start = coerce_line(result.get("line_number"), default=1)
+def bandit_row_span(result: dict[str, Any], *, fail_closed: bool = False) -> tuple[int, int]:
+    """Return ``(start_line, end_line)`` from ``line_number`` / ``line_range``.
+
+    In-repo Bandit parse stays lenient (``coerce_line``). SARIF conversion
+    passes ``fail_closed=True`` so invalid lines raise like mypy.
+    """
+    parse = require_line if fail_closed else coerce_line
+    start = parse(result.get("line_number"), default=1)
     line_range = result.get("line_range")
     if isinstance(line_range, list) and line_range:
-        end = coerce_line(line_range[-1], default=start)
+        end = parse(line_range[-1], default=start)
         return start, max(end, start)
     return start, start
 
 
 def coerce_optional_line(value: object) -> int | None:
     """Return a 1-based line, or ``None`` when the tool did not report one."""
-    if value is None or isinstance(value, bool):
+    if value is None:
         return None
-    if isinstance(value, int):
-        return value if value >= 1 else None
-    if isinstance(value, float):
-        parsed = int(value)
-        return parsed if parsed >= 1 else None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            parsed = int(stripped)
-        except ValueError:
-            return None
-        return parsed if parsed >= 1 else None
-    return None
+    try:
+        parsed = _line_number(value, default=0, fail_closed=True, clamp=False)
+    except ValueError:
+        return None
+    return parsed if parsed >= 1 else None

@@ -148,15 +148,15 @@ def test_bandit_non_object_results_row_is_converter_failure() -> None:
         bandit_to_sarif('{"results": ["not-an-object"]}')
 
 
-def test_as_line_uses_require_line_not_a_second_type_ladder() -> None:
+def test_sarif_converters_use_require_line_not_as_line() -> None:
     import inspect
 
     from mergecraft.analyzers.parsers._common import coerce_line, require_line
 
-    source = inspect.getsource(_MOD._as_line)
-    assert "isinstance" not in source
-    assert "strict=" not in source
+    source = inspect.getsource(_MOD)
+    assert "def _as_line" not in source
     assert "require_line" in source
+    assert "fail_closed=True" in source
     assert require_line(None) == 1
     assert coerce_line("nope") == 1
     with pytest.raises(ValueError, match="line number"):
@@ -164,6 +164,11 @@ def test_as_line_uses_require_line_not_a_second_type_ladder() -> None:
     with pytest.raises(ValueError, match="line number"):
         require_line(True)
     with pytest.raises(ConverterError, match="line number"):
-        _MOD._as_line("nope")
+        mypy_to_sarif('{"file": "a.py", "line": "nope", "message": "x", "code": "attr-defined"}\n')
     with pytest.raises(ConverterError, match="line number"):
-        _MOD._as_line(True)
+        mypy_to_sarif('{"file": "a.py", "line": true, "message": "x", "code": "attr-defined"}\n')
+    with pytest.raises(ConverterError, match="line number"):
+        bandit_to_sarif(
+            '{"results": [{"test_id": "B101", "issue_severity": "HIGH",'
+            ' "issue_text": "assert", "filename": "a.py", "line_number": "nope"}]}'
+        )

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+_JsonKind = Literal["any", "object", "array"]
 
 
 def try_load_json(raw: str) -> object | None:
     """Return the first JSON value in ``raw``, or ``None`` when none parse."""
-    return _first_json_value(raw, object_only=False)
+    return _first_json_value(raw, kind="any")
 
 
 def try_load_json_object(raw: str) -> dict[str, Any] | None:
@@ -19,11 +21,20 @@ def try_load_json_object(raw: str) -> dict[str, Any] | None:
     array, resume at that value's ``raw_decode`` ``_end`` so interior ``{``
     tokens are not latched.
     """
-    payload = _first_json_value(raw, object_only=True)
+    payload = _first_json_value(raw, kind="object")
     return payload if isinstance(payload, dict) else None
 
 
-def _first_json_value(raw: str, *, object_only: bool) -> object | None:
+def try_load_json_array(raw: str) -> list[Any] | None:
+    """Return the first JSON array in ``raw``, skipping leading objects.
+
+    Same resume-at-``_end`` scanner as :func:`try_load_json_object`.
+    """
+    payload = _first_json_value(raw, kind="array")
+    return payload if isinstance(payload, list) else None
+
+
+def _first_json_value(raw: str, *, kind: _JsonKind) -> object | None:
     decoder = json.JSONDecoder()
     index = 0
     length = len(raw)
@@ -37,7 +48,10 @@ def _first_json_value(raw: str, *, object_only: bool) -> object | None:
         except json.JSONDecodeError:
             index += 1
             continue
-        if object_only and not isinstance(payload, dict):
+        if kind == "object" and not isinstance(payload, dict):
+            index = _end if _end > index else index + 1
+            continue
+        if kind == "array" and not isinstance(payload, list):
             index = _end if _end > index else index + 1
             continue
         return cast("object", payload)  # json.JSONDecoder.raw_decode is typed Any
@@ -48,9 +62,11 @@ def _first_json_value(raw: str, *, object_only: bool) -> object | None:
         payload = json.loads(stripped)
     except json.JSONDecodeError:
         return None
-    if object_only and not isinstance(payload, dict):
+    if kind == "object" and not isinstance(payload, dict):
+        return None
+    if kind == "array" and not isinstance(payload, list):
         return None
     return cast("object", payload)  # json.loads is typed Any
 
 
-__all__ = ["try_load_json", "try_load_json_object"]
+__all__ = ["try_load_json", "try_load_json_array", "try_load_json_object"]
