@@ -108,7 +108,7 @@ RUN mkdir -p /usr/local/analyzers /tmp/analyzer-dl \
 
 WORKDIR /opt/mergecraft
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md hatch_build.py ./
 COPY src/mergecraft ./src/mergecraft
 
 RUN uv sync --frozen --no-dev \
