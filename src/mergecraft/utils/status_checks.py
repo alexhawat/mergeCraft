@@ -99,6 +99,22 @@ async def _create_check_run(
     )
 
 
+def _catalog_unavailable_banner(ctx: ToolContext) -> str | None:
+    """Return a one-line catalog banner when the analyzer catalog did not run.
+
+    D6 / #459: glanceable ``analyzers: unavailable`` on check-run summaries.
+    Omitted when the catalog executed (including mixed passed + skipped).
+    """
+    run_state = getattr(ctx.tool_state, "analyzer_run", None)
+    if run_state is None:
+        return None
+    from mergecraft.analyzers.pipeline import catalog_scan_status
+
+    if catalog_scan_status(run_state) != "unavailable":
+        return None
+    return "analyzers: unavailable"
+
+
 async def report_status_checks(
     ctx: ToolContext,
     *,
@@ -144,6 +160,17 @@ async def report_status_checks(
     completion_conclusion: CompletionConclusion = conclusion or (
         "success" if run_succeeded else "failure"
     )
+    catalog_banner = _catalog_unavailable_banner(ctx)
+    completion_summary = (
+        "The mergeCraft run finished successfully."
+        if run_succeeded
+        else (
+            failure_reason
+            or "The mergeCraft run failed or timed out. See the run logs for details."
+        )
+    )
+    if catalog_banner:
+        completion_summary = f"{completion_summary}\n{catalog_banner}"
     try:
         await _create_check_run(
             ctx,
@@ -151,14 +178,7 @@ async def report_status_checks(
             head_sha=completion_sha,
             conclusion=completion_conclusion,
             title="mergeCraft run completed" if run_succeeded else "mergeCraft run failed",
-            summary=(
-                "The mergeCraft run finished successfully."
-                if run_succeeded
-                else (
-                    failure_reason
-                    or "The mergeCraft run failed or timed out. See the run logs for details."
-                )
-            ),
+            summary=completion_summary,
         )
     except Exception as err:
         logger.debug("status checks: {} post failed: {}", COMPLETION_CHECK, err)
@@ -213,6 +233,8 @@ async def report_status_checks(
     approval_summary = f"{approval_summary}\nDecision inputs:\n" + "\n".join(
         decision_summary_lines(decision_inputs)
     )
+    if catalog_banner:
+        approval_summary = f"{approval_summary}\n{catalog_banner}"
 
     try:
         await _create_check_run(

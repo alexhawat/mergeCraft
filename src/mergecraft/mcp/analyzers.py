@@ -109,17 +109,24 @@ def run_analyzers_tool(ctx: ToolContext):
             "preMergeSummary": run_state.pre_merge_summary,
             "lockfileDigest": run_state.lockfile_digest,
         }
+        from mergecraft.analyzers.pipeline import catalog_scan_status
+
+        scan_status = catalog_scan_status(run_state)
         if not run_state.ran:
-            payload["reason"] = run_state.reason
+            reason = run_state.reason or "analyzer catalog unavailable"
+            if "unavailable" not in reason.lower():
+                reason = f"{reason} (catalog unavailable)"
+            payload["reason"] = reason
         if run_state.mechanical_section:
             payload["mechanicalSection"] = run_state.mechanical_section
         if run_state.deferred_section:
             payload["deferredSection"] = run_state.deferred_section
         logger.info(
-            "analyzers: ran={} tools={} findings={}",
+            "analyzers: ran={} tools={} findings={} catalog={}",
             run_state.ran,
             len(run_state.analyzers),
             len(run_state.findings),
+            scan_status,
         )
         return payload
 
