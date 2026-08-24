@@ -174,6 +174,43 @@ def warn_legacy_nous_api_key_once() -> None:
     )
 
 
+def legacy_opencode_harness_for_unregistered_provider(
+    settings: RepoSettings | None,
+    provider: str,
+) -> str | None:
+    """Return ``opencode`` when D7 legacy credentials exist without a registry row."""
+    if lookup_registry_entry(settings, provider) is not None:
+        return None
+    if provider == "nous" and _legacy_nous_api_key_present():
+        warn_legacy_nous_api_key_once()
+        return "opencode"
+    from mergecraft.agents.openai_compatible_gateways import _legacy_gateway_preset_credentials
+
+    if _legacy_gateway_preset_credentials(provider):
+        return "opencode"
+    return None
+
+
+def resolve_legacy_nous_gateway_endpoint(
+    provider_id: str,
+    *,
+    settings: RepoSettings | None = None,
+) -> tuple[str, str, str] | None:
+    """Resolve legacy ``NOUS_API_KEY`` when no registry row exists (D7)."""
+    if provider_id != "nous":
+        return None
+    if lookup_registry_entry(settings, provider_id) is not None:
+        return None
+    api_key = _read_env_value(_LEGACY_NOUS_API_KEY)
+    if not api_key:
+        return None
+    base_url = SEED_PROVIDER_URLS.get("nous")
+    if not base_url:
+        return None
+    warn_legacy_nous_api_key_once()
+    return provider_id, base_url, api_key
+
+
 def resolve_registry_gateway_endpoint(
     model: str,
     *,
@@ -305,9 +342,11 @@ __all__ = [
     "indexed_credential_for_entry",
     "indexed_env_key",
     "infer_harness_for_slug",
+    "legacy_opencode_harness_for_unregistered_provider",
     "lookup_registry_entry",
     "lookup_registry_entry_by_env_index",
     "registry_harness_for_provider",
+    "resolve_legacy_nous_gateway_endpoint",
     "resolve_registry_gateway_endpoint",
     "warn_legacy_nous_api_key_once",
 ]

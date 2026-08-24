@@ -1439,6 +1439,17 @@ def resolve_runtime_agent(
             raise ModelFallbackPolicyError(msg)
 
         if provider is not None:
+            from mergecraft.config.runtime_provider_registry import (
+                legacy_opencode_harness_for_unregistered_provider,
+            )
+
+            legacy_harness = legacy_opencode_harness_for_unregistered_provider(
+                resolved_settings,
+                provider,
+            )
+            if legacy_harness is not None:
+                return resolve_agent(legacy_harness)
+
             msg = (
                 f"configuration error: provider {provider!r} is not registered — "
                 "add it with `mergecraft provider add`"
