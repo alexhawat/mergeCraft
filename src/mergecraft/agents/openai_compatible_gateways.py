@@ -1,17 +1,10 @@
-"""Known OpenAI-compatible gateways (Nous Portal, Tencent TokenHub).
+"""OpenAI-compatible gateway helpers for the opencode harness.
 
-These providers are reached through the opencode harness via
-``@ai-sdk/openai-compatible``. Callers may still set
-``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` + ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY``
-to override any preset; when those are absent, model prefixes ``nous/`` and
-``tokenhub/`` resolve from ``NOUS_API_KEY`` / ``TOKENHUB_API_KEY``.
-
-W3 (issue #71) extends the contract so a workflow can wire several
-OpenAI-compatible providers simultaneously — each addressed by an indexed
-``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` env-var pair (operator
-locked). The single-provider shape (and the named-preset paths) are
-preserved; the multi-provider resolver adds a dict-valued surface that both
-``agents/opencode.py`` and ``agents/codex.py`` consume.
+Operators configure providers through the registry (``.mergecraft/config.yaml``
+``providers:`` + indexed ``LLM_PROVIDER_<N>_API_KEY`` secrets). The singleton
+``MERGECRAFT_CUSTOM_PROVIDER_{BASE_URL,API_KEY}`` pair and indexed
+``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` env vars remain as
+generic OpenAI-compatible escape hatches for advanced deployments.
 """
 
 from __future__ import annotations
@@ -20,6 +13,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import urlparse
 
@@ -31,28 +25,10 @@ from pydantic.functional_validators import BeforeValidator
 if TYPE_CHECKING:
     from mergecraft.tracing.genai import ModelParams
 
-NOUS_API_KEY_ENV = "NOUS_API_KEY"
-NOUS_BASE_URL_ENV = "NOUS_BASE_URL"
-DEFAULT_NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1"
-
-TOKENHUB_API_KEY_ENV = "TOKENHUB_API_KEY"
-TOKENHUB_BASE_URL_ENV = "TOKENHUB_BASE_URL"
-DEFAULT_TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
-
 CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
 CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS"
 PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
-
-# W6 (#34): MiniMax is reachable through the existing custom-provider helper
-# (operator-locked D10 / option ii). The alias env vars re-use the D7
-# singleton names so the operator's mental model stays uniform with the
-# generic custom-provider surface; the default base URL pins the
-# OpenAI-compatible endpoint documented at
-# https://platform.minimax.io/docs/api-reference/text-openai-api.md.
-MINIMAX_API_KEY_ENV = CUSTOM_PROVIDER_API_KEY_ENV
-MINIMAX_BASE_URL_ENV = CUSTOM_PROVIDER_BASE_URL_ENV
-DEFAULT_MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 
 # Indexed multi-provider convention (W3 / issue #71). Both halves must be
 # set per index; partial pairs are dropped. Discovery enumerates every
@@ -141,6 +117,21 @@ class ProviderConfig(BaseModel):
         return stripped
 
 
+@dataclass(frozen=True, slots=True)
+class GatewayPreset:
+    """One named OpenAI-compatible inference gateway (seed metadata only)."""
+
+    provider_id: str
+    api_key_env: str
+    base_url_env: str
+    default_base_url: str
+
+
+# Named gateway presets were removed in BE #481 — operators register providers
+# in config instead. The dict remains for typing/back-compat imports.
+GATEWAY_PRESETS: dict[str, GatewayPreset] = {}
+
+
 def require_capabilities(config: ProviderConfig, required: frozenset[str]) -> None:
     """Fail closed when ``config`` lacks a declared capability (D12).
 
@@ -156,38 +147,6 @@ def require_capabilities(config: ProviderConfig, required: frozenset[str]) -> No
         raise _ConfigurationError(msg)
 
 
-@dataclass(frozen=True, slots=True)
-class GatewayPreset:
-    """One named OpenAI-compatible inference gateway."""
-
-    provider_id: str
-    api_key_env: str
-    base_url_env: str
-    default_base_url: str
-
-
-GATEWAY_PRESETS: dict[str, GatewayPreset] = {
-    "nous": GatewayPreset(
-        provider_id="nous",
-        api_key_env=NOUS_API_KEY_ENV,
-        base_url_env=NOUS_BASE_URL_ENV,
-        default_base_url=DEFAULT_NOUS_BASE_URL,
-    ),
-    "tokenhub": GatewayPreset(
-        provider_id="tokenhub",
-        api_key_env=TOKENHUB_API_KEY_ENV,
-        base_url_env=TOKENHUB_BASE_URL_ENV,
-        default_base_url=DEFAULT_TOKENHUB_BASE_URL,
-    ),
-    "minimax": GatewayPreset(
-        provider_id="minimax",
-        api_key_env=MINIMAX_API_KEY_ENV,
-        base_url_env=MINIMAX_BASE_URL_ENV,
-        default_base_url=DEFAULT_MINIMAX_BASE_URL,
-    ),
-}
-
-
 def _has_env(name: str) -> bool:
     val = os.environ.get(name)
     return isinstance(val, str) and bool(val.strip())
@@ -199,22 +158,14 @@ def has_custom_provider_env() -> bool:
 
 
 def has_gateway_credentials(provider_id: str) -> bool:
-    """Return whether ``provider_id`` can authenticate from the environment.
-
-    For ``nous``, ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` is honoured as a
-    back-compat alias even when ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` is
-    unset — the opencode harness contract re-passes ``NOUS_API_KEY`` as
-    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` on the Nous step, so a workflow
-    that wires the alias alone should still resolve credentials (D4).
-    """
+    """Return whether ``provider_id`` can authenticate from generic custom env."""
     if has_custom_provider_env():
         return True
-    preset = GATEWAY_PRESETS.get(provider_id.lower())
-    if preset is None:
-        return False
-    if _has_env(preset.api_key_env):
-        return True
-    return bool(provider_id.lower() == "nous" and _has_env(CUSTOM_PROVIDER_API_KEY_ENV))
+    from mergecraft.config.runtime_provider_registry import has_registry_credentials
+    from mergecraft.config.settings import load_repo_settings
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    return has_registry_credentials(settings, provider_id.lower())
 
 
 def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
@@ -222,8 +173,8 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
 
     Preference order:
 
-    1. Explicit ``MERGECRAFT_CUSTOM_PROVIDER_*`` pair (any ``provider/model`` slug)
-    2. Named preset matching the model prefix (``nous/…``, ``tokenhub/…``)
+    1. Operator registry row for the model prefix
+    2. Explicit ``MERGECRAFT_CUSTOM_PROVIDER_*`` pair (any ``provider/model`` slug)
 
     Returns ``None`` when credentials or a usable model prefix are missing.
     """
@@ -237,19 +188,20 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     if not model_id:
         return None
 
+    from mergecraft.config.runtime_provider_registry import resolve_registry_gateway_endpoint
+    from mergecraft.config.settings import load_repo_settings
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    registry_endpoint = resolve_registry_gateway_endpoint(model, settings=settings)
+    if registry_endpoint is not None:
+        return registry_endpoint
+
     custom_base = os.environ.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip()
     custom_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
     if custom_base and custom_key:
         return provider_id, custom_base, custom_key
 
-    preset = GATEWAY_PRESETS.get(provider_id)
-    if preset is None:
-        return None
-    api_key = os.environ.get(preset.api_key_env, "").strip()
-    if not api_key:
-        return None
-    base_url = os.environ.get(preset.base_url_env, "").strip() or preset.default_base_url
-    return provider_id, base_url, api_key
+    return None
 
 
 def _parse_extra_options_env(env_name: str) -> dict[str, Any]:
@@ -413,15 +365,29 @@ def _provider_config_for_model(model: str) -> ProviderConfig | None:
     if resolved is None:
         return None
     preset_provider_id, base_url, _api_key = resolved
-    preset = GATEWAY_PRESETS.get(preset_provider_id)
-    if preset is None:
-        return None
+    api_key_env = (
+        f"LLM_PROVIDER_{_registry_env_index_for_provider(preset_provider_id)}_API_KEY"
+        if _registry_env_index_for_provider(preset_provider_id) is not None
+        else CUSTOM_PROVIDER_API_KEY_ENV
+    )
     return ProviderConfig(
         provider_id=preset_provider_id,
         base_url=base_url,
-        api_key_env=preset.api_key_env,
+        api_key_env=api_key_env,
         extra_options=_extra_options_for_provider(preset_provider_id),
     )
+
+
+def _registry_env_index_for_provider(provider_id: str) -> int | None:
+    from mergecraft.config.runtime_provider_registry import lookup_registry_entry
+    from mergecraft.config.settings import load_repo_settings
+
+    entry = lookup_registry_entry(
+        load_repo_settings(root=Path.cwd(), load_learnings_files=False), provider_id
+    )
+    if entry is None:
+        return None
+    return entry.env_index
 
 
 def resolve_model_params_for_model(model: str | None) -> ModelParams | None:
@@ -441,17 +407,8 @@ __all__ = [
     "CAPABILITY_VALUES",
     "CUSTOM_PROVIDER_API_KEY_ENV",
     "CUSTOM_PROVIDER_BASE_URL_ENV",
-    "DEFAULT_MINIMAX_BASE_URL",
-    "DEFAULT_NOUS_BASE_URL",
-    "DEFAULT_TOKENHUB_BASE_URL",
     "GATEWAY_PRESETS",
-    "MINIMAX_API_KEY_ENV",
-    "MINIMAX_BASE_URL_ENV",
-    "NOUS_API_KEY_ENV",
-    "NOUS_BASE_URL_ENV",
     "SINGLETON_PROVIDER_ID",
-    "TOKENHUB_API_KEY_ENV",
-    "TOKENHUB_BASE_URL_ENV",
     "GatewayPreset",
     "ProviderConfig",
     "has_custom_provider_env",

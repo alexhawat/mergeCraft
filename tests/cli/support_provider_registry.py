@@ -387,4 +387,6 @@ def bootstrap_nous_registry(
         label="nous",
         api_key=api_key,
     )
+    monkeypatch.setenv("LLM_PROVIDER_1", "nous")
+    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", api_key)
     return format_model_slug("nous", model_id)

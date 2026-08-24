@@ -42,8 +42,6 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-BE_XFAIL = pytest.mark.xfail(reason="green after BE impl", strict=False)
-
 _UNKNOWN_SLUG = "acme-registry/unregistered-model"
 _UNKNOWN_PROVIDER = "acme-registry"
 
@@ -57,21 +55,18 @@ def _configuration_error_types() -> tuple[type[BaseException], ...]:
 # ── D4 / issue #481 — unknown provider is configuration_error ────────────────
 
 
-@BE_XFAIL
 def test_agent_mode_for_unknown_provider_raises_configuration_error() -> None:
     """Bare ``return "opencode"`` fallback must be gone for unknown providers."""
     with pytest.raises(_configuration_error_types(), match=r"configuration|unknown|provider"):
         _agent_mode_for_slug(_UNKNOWN_SLUG)
 
 
-@BE_XFAIL
 def test_resolve_harness_unknown_provider_raises_configuration_error() -> None:
     settings = RepoSettings.model_validate({"model": _UNKNOWN_SLUG})
     with pytest.raises(_configuration_error_types(), match=r"configuration|unknown|provider"):
         resolve_harness(settings, _UNKNOWN_SLUG)
 
 
-@BE_XFAIL
 def test_resolve_runtime_agent_unknown_provider_not_opencode(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -85,7 +80,6 @@ def test_resolve_runtime_agent_unknown_provider_not_opencode(
     )
 
 
-@BE_XFAIL
 def test_classify_unknown_provider_error_maps_to_configuration_error() -> None:
     settings = RepoSettings.model_validate({"model": _UNKNOWN_SLUG})
     with pytest.raises(_configuration_error_types()) as exc_info:
@@ -93,7 +87,6 @@ def test_classify_unknown_provider_error_maps_to_configuration_error() -> None:
     assert _classify_error_outcome(exc_info.value) is RunOutcome.configuration_error
 
 
-@BE_XFAIL
 def test_harness_supports_provider_rejects_unregistered_custom_provider() -> None:
     """Custom providers must be registered — no silent opencode allow-list bypass."""
     assert _harness_supports_provider("opencode", _UNKNOWN_PROVIDER) is False
@@ -102,7 +95,6 @@ def test_harness_supports_provider_rejects_unregistered_custom_provider() -> Non
 # ── Nous works only via registry (harness: opencode) ───────────────────────
 
 
-@BE_XFAIL
 def test_nous_resolves_to_opencode_via_registry_harness(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -114,7 +106,6 @@ def test_nous_resolves_to_opencode_via_registry_harness(
     assert agent.name == "opencode"
 
 
-@BE_XFAIL
 def test_nous_credentials_from_indexed_registry_key_only(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -126,7 +117,6 @@ def test_nous_credentials_from_indexed_registry_key_only(
     assert has_credentials_for_slug(slug) is False
 
 
-@BE_XFAIL
 def test_nous_without_registry_entry_raises_configuration_error(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -140,7 +130,6 @@ def test_nous_without_registry_entry_raises_configuration_error(
         resolve_runtime_agent(model=slug, settings=settings)
 
 
-@BE_XFAIL
 def test_resolve_gateway_endpoint_uses_registry_url_not_preset(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -204,7 +193,6 @@ _HARNESS_REGISTRY_CASES = (
 )
 
 
-@BE_XFAIL
 @pytest.mark.parametrize(
     ("harness", "label", "slug", "url"),
     _HARNESS_REGISTRY_CASES,
@@ -233,6 +221,8 @@ def test_registry_declared_harness_respected_at_runtime(
         label=label,
         api_key=f"{label}-registry-test-key",
     )
+    monkeypatch.setenv(f"LLM_PROVIDER_{1}", label)
+    monkeypatch.setenv(f"LLM_PROVIDER_{1}_API_KEY", f"{label}-registry-test-key")
     if label == "openai":
         monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
     elif label == "anthropic":
@@ -258,7 +248,6 @@ def test_registry_declared_harness_respected_at_runtime(
 # ── D7 — legacy NOUS_API_KEY honoured with deprecation warning ──────────────
 
 
-@BE_XFAIL
 def test_legacy_nous_api_key_emits_deprecation_warning_once(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

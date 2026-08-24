@@ -15,7 +15,6 @@ from typing import Any
 import typer
 import yaml
 
-from mergecraft.agents.openai_compatible_gateways import GATEWAY_PRESETS
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
@@ -29,6 +28,7 @@ from mergecraft.config.provider_registry import (
     supported_harness_names,
     validate_http_url,
 )
+from mergecraft.config.runtime_provider_registry import SEED_PROVIDER_URLS
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import PROVIDERS
 
@@ -145,7 +145,9 @@ def resolve_provider_harness(label: str, *, harness: str | None = None) -> str:
         if harness_value not in supported_harness_names():
             msg = f"unknown harness {harness!r}; {_harness_help_suffix()}"
             raise ValueError(msg)
-        if not harness_supports_provider(harness_value, normalised):
+        if default_harness_for_label(normalised) is not None and not harness_supports_provider(
+            harness_value, normalised
+        ):
             msg = (
                 f"incompatible harness {harness_value!r} for provider {label!r}; "
                 f"{_harness_help_suffix()}"
@@ -168,10 +170,7 @@ def load_provider_registry(config_path: Path) -> ProviderRegistry:
 
 
 def _seed_url_for_label(label: str) -> str | None:
-    preset = GATEWAY_PRESETS.get(label)
-    if preset is not None:
-        return preset.default_base_url
-    return None
+    return SEED_PROVIDER_URLS.get(label)
 
 
 def seed_builtin_providers(config_path: Path) -> None:

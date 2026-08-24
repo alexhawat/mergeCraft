@@ -107,20 +107,6 @@ def _has_cursor_auth() -> bool:
     return _has_env("CURSOR_API_KEY")
 
 
-def _has_gateway_auth(provider: str) -> bool:
-    """Return whether the gateway credential for ``provider`` is configured.
-
-    Covers Nous Portal (``NOUS_API_KEY``) and Tencent TokenHub
-    (``TOKENHUB_API_KEY``) through the opencode harness. The
-    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` env var acts as a back-compat alias
-    for any named preset (D4): consumers that wired the opencode harness
-    contract directly without ``mergecraft auth nous`` keep working.
-    """
-    from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
-
-    return has_gateway_credentials(provider)
-
-
 def has_credentials_for_slug(slug: str) -> bool:
     """Return whether the current environment has credentials for ``slug``."""
     try:
@@ -140,15 +126,28 @@ def has_credentials_for_slug(slug: str) -> bool:
         return _has_bedrock_auth() and bool(os.environ.get(BEDROCK_MODEL_ID_ENV, "").strip())
     if provider == "vertex":
         return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
-    if provider in {"nous", "tokenhub"}:
-        return _has_gateway_auth(provider)
-    if provider == "minimax":
-        # W6 (#34): MiniMax is reachable through the existing custom-provider
-        # helper (operator-locked D10 / option ii). The single pair that
-        # surfaces a credential is the D7 singleton; the indexed
-        # ``_N`` form is also accepted because the helper's multi-provider
-        # resolver may surface the provider via ``provider_<N>``.
-        return _has_gateway_auth(provider)
+
+    from mergecraft.config.runtime_provider_registry import (
+        indexed_api_key_for_entry,
+        lookup_registry_entry,
+    )
+    from mergecraft.config.settings import load_repo_settings
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    entry = lookup_registry_entry(settings, provider)
+    if entry is not None:
+        if indexed_api_key_for_entry(entry):
+            return True
+        if provider == "nous":
+            from mergecraft.config.runtime_provider_registry import (
+                _legacy_nous_api_key_present,
+                warn_legacy_nous_api_key_once,
+            )
+
+            if _legacy_nous_api_key_present():
+                warn_legacy_nous_api_key_once()
+                return True
+        return False
     return False
 
 
@@ -166,18 +165,19 @@ def _agent_binary_available(slug: str) -> bool:
     except ValueError:
         return False
 
+    from mergecraft.config.runtime_provider_registry import lookup_registry_entry
+    from mergecraft.config.settings import load_repo_settings
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    entry = lookup_registry_entry(settings, provider)
+    if entry is not None and entry.harness == "opencode":
+        return True
+
     binary_by_provider = {
         "anthropic": "claude",
         "openai": "codex",
         "google": "gemini",
         "cursor": "cursor",
-        # D5: the opencode harness consumes env vars directly for the Nous path,
-        # so there is no required CLI on PATH. Explicit ``None`` short-circuits
-        # the gate to ``True`` and pins the W1.7 regression pin.
-        "nous": None,
-        # W6 (#34): MiniMax rides the same env-var-driven opencode harness
-        # path; no CLI binary is required on PATH.
-        "minimax": None,
     }
     binary = binary_by_provider.get(provider)
     if binary is None:
@@ -740,7 +740,7 @@ async def run_with_model_chain(
 
         while attempts < max_attempts:
             slug = chain[chain_index]
-            if _agent_mode_for_slug(slug) == "opencode":
+            if _agent_mode_for_slug(slug, settings=settings) == "opencode":
                 if opencode_attempts >= _OPENCODE_MAX_ATTEMPTS:
                     logger.warning(
                         "» model chain skipping slug={} (fallback_index={}): opencode "
@@ -1005,18 +1005,16 @@ def _agent_provider_for_slug(slug: str) -> str:
         return "unknown"
 
 
-def _agent_mode_for_slug(slug: str) -> str:
+def _agent_mode_for_slug(slug: str, *, settings: RepoSettings | None = None) -> str:
     """Return the agent mode name (e.g. ``claude``) that would serve ``slug``."""
-    provider = _agent_provider_for_slug(slug)
-    if provider == "anthropic":
-        return "claude"
-    if provider == "openai":
-        return "codex"
-    if provider == "google":
-        return "gemini"
-    if provider == "cursor":
-        return "cursor"
-    return "opencode"
+    from mergecraft.config.runtime_provider_registry import infer_harness_for_slug
+    from mergecraft.config.settings import load_repo_settings
+
+    resolved_settings = settings or load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    try:
+        return infer_harness_for_slug(slug, settings=resolved_settings)
+    except ValueError as exc:
+        raise ModelFallbackPolicyError(str(exc)) from exc
 
 
 _NATIVE_HARNESS_PROVIDERS: dict[str, frozenset[str]] = {
@@ -1026,9 +1024,9 @@ _NATIVE_HARNESS_PROVIDERS: dict[str, frozenset[str]] = {
     "cursor": frozenset({"cursor"}),
 }
 
-# OpenCode is the generic multi-provider harness: gateway presets, custom
-# slugs, and explicit overrides (openai / anthropic under ``harness: opencode``).
-_OPENCODE_NATIVE_PROVIDERS = frozenset({"nous", "tokenhub", "minimax", "openai", "anthropic"})
+# OpenCode natively serves OpenAI-compatible slugs for these built-in prefixes when
+# explicitly overridden to ``harness: opencode`` in the operator registry.
+_OPENCODE_NATIVE_PROVIDERS = frozenset({"openai", "anthropic"})
 _KNOWN_CATALOG_PROVIDERS = frozenset(
     {
         "anthropic",
@@ -1037,9 +1035,12 @@ _KNOWN_CATALOG_PROVIDERS = frozenset(
         "cursor",
         "bedrock",
         "vertex",
-        "nous",
-        "tokenhub",
-        "minimax",
+        "xai",
+        "deepseek",
+        "moonshotai",
+        "opencode",
+        "opencode-go",
+        "openrouter",
     }
 )
 
@@ -1047,10 +1048,7 @@ _KNOWN_CATALOG_PROVIDERS = frozenset(
 def _harness_supports_provider(harness: str, provider: str) -> bool:
     """Return whether ``harness`` may run models from ``provider``."""
     if harness == "opencode":
-        if provider in _OPENCODE_NATIVE_PROVIDERS:
-            return True
-        # Custom / unknown catalog prefixes route through OpenCode today.
-        return provider not in _KNOWN_CATALOG_PROVIDERS
+        return provider in _OPENCODE_NATIVE_PROVIDERS
     native = _NATIVE_HARNESS_PROVIDERS.get(harness)
     return native is not None and provider in native
 
@@ -1058,17 +1056,29 @@ def _harness_supports_provider(harness: str, provider: str) -> bool:
 def resolve_harness(settings: RepoSettings, slug: str) -> str:
     """Resolve the agent harness for ``slug`` under ``settings`` (HA3 / D11).
 
-    When ``settings.harness`` is unset, delegates to today's
-    :func:`_agent_mode_for_slug` inference. When set, validates the
-    (harness, provider, model) triple and returns the explicit value.
-    Unsupported combinations raise :class:`ModelFallbackPolicyError` so
-    ``main._classify_error_outcome`` maps them to ``configuration_error``.
+    Registry rows win over built-in inference. Unsupported combinations raise
+    :class:`ModelFallbackPolicyError` so ``main._classify_error_outcome`` maps
+    them to ``configuration_error``.
     """
+    from mergecraft.config.runtime_provider_registry import registry_harness_for_provider
+
+    provider = _agent_provider_for_slug(slug)
+
     if settings.harness is None:
-        return _agent_mode_for_slug(slug)
+        registry_harness = registry_harness_for_provider(settings, provider)
+        if registry_harness is not None:
+            if registry_harness == "opencode" or _harness_supports_provider(
+                registry_harness, provider
+            ):
+                return registry_harness
+            msg = (
+                f"configuration error: harness {registry_harness!r} is incompatible with "
+                f"model {slug!r} (provider {provider!r})"
+            )
+            raise ModelFallbackPolicyError(msg)
+        return _agent_mode_for_slug(slug, settings=settings)
 
     harness = settings.harness
-    provider = _agent_provider_for_slug(slug)
     if _harness_supports_provider(harness, provider):
         return harness
 
@@ -1160,7 +1170,7 @@ def _attempt_harness_label(settings: RepoSettings | None, slug: str) -> str:
     """
     if settings is not None and settings.harness is not None:
         return settings.harness
-    return _agent_mode_for_slug(slug)
+    return _agent_mode_for_slug(slug, settings=settings)
 
 
 def _emit_advanced_attempt(
@@ -1369,42 +1379,25 @@ def resolve_runtime_agent(
         if provider == "anthropic" and _has_claude_code_auth():
             return agents["claude"]
 
-        if provider in {"nous", "tokenhub"}:
-            if _has_gateway_auth(provider):
-                return agents["opencode"]
-            hints = (
-                ("NOUS_API_KEY", "mergecraft auth nous")
-                if provider == "nous"
-                else ("TOKENHUB_API_KEY", "mergecraft auth tokenhub")
-            )
-            msg = (
-                f"{provider} model {model!r} selected but no credential is configured. "
-                f"Set {hints[0]} (via `{hints[1]}` or a GitHub Actions secret), "
-                "or set MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
-                "MERGECRAFT_CUSTOM_PROVIDER_API_KEY, or choose a different model."
-            )
-            raise ValueError(msg)
+        from mergecraft.config.runtime_provider_registry import lookup_registry_entry
+        from mergecraft.config.settings import load_repo_settings
 
-        if provider == "minimax":
-            # W6 (#34): MiniMax rides the custom-provider helper. Fail loud
-            # (convention 5) rather than silently falling through to the
-            # opencode harness when the env vars are missing — the harness
-            # will not be able to reach MiniMax without them, and the
-            # operator's CLI auth gate would mask the configuration error.
-            if _has_gateway_auth(provider):
-                return agents["opencode"]
-            msg = (
-                f"MiniMax model {model!r} selected but no credential is configured. "
-                "Set MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + "
-                "MERGECRAFT_CUSTOM_PROVIDER_API_KEY "
-                "(via `mergecraft auth minimax` or GitHub Actions secrets), "
-                "or an indexed pair "
-                "MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_1, "
-                "or choose a different model."
-            )
-            raise ValueError(msg)
+        resolved_settings = settings or load_repo_settings(
+            root=Path.cwd(), load_learnings_files=False
+        )
+        entry = lookup_registry_entry(resolved_settings, provider) if provider else None
+        if entry is not None:
+            return resolve_agent(entry.harness)
 
-    return agents["opencode"]
+        if provider is not None:
+            msg = (
+                f"configuration error: provider {provider!r} is not registered — "
+                "add it with `mergecraft provider add`"
+            )
+            raise ModelFallbackPolicyError(msg)
+
+    msg = "configuration error: no model configured for runtime agent resolution"
+    raise ModelFallbackPolicyError(msg)
 
 
 __all__ = [

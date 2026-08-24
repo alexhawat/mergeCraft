@@ -384,3 +384,7 @@ Shared fixtures in `tests/cli/support_provider_registry.py`:
 uv run pytest --collect-only -q tests/agents/test_registry_provider_runtime.py tests/agents/test_registry_provider_presets_removed.py
 uv run pytest -q tests/agents/test_registry_provider_runtime.py tests/agents/test_registry_provider_presets_removed.py  # RED: xfails expected
 ```
+
+## BE RED evidence
+
+- BE test-author wave: `f8ca1c23` — 28 collected, 28 xfails; lint+typecheck clean
