@@ -46,7 +46,6 @@ def _set_build_commit(monkeypatch: MonkeyPatch, commit: str | None) -> None:
     monkeypatch.setattr("mergecraft.__commit__", commit, raising=False)
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_update_help_documents_uv_reinstall() -> None:
     """Happy — ``update --help`` documents the self-update command."""
     result = runner.invoke(app, ["update", "--help"], env=_DUMB_ENV)
@@ -58,7 +57,6 @@ def test_update_help_documents_uv_reinstall() -> None:
     assert "reinstall" in lowered or "install" in lowered
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_update_default_shells_to_uv_tool_install_on_main(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -91,7 +89,6 @@ def test_update_default_shells_to_uv_tool_install_on_main(
         "e0a48d9f",
     ],
 )
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_update_branch_option_accepts_branch_tag_or_sha(
     monkeypatch: MonkeyPatch,
     ref: str,
@@ -111,7 +108,6 @@ def test_update_branch_option_accepts_branch_tag_or_sha(
     assert uv_install_spec(ref) in cmd
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_format_version_display_includes_short_commit_when_known() -> None:
     """Unit — version helper renders ``<version> (<short-sha>)`` when commit known."""
     format_display = require_version_callable("format_version_display")
@@ -119,7 +115,6 @@ def test_format_version_display_includes_short_commit_when_known() -> None:
     assert rendered == f"{__version__} ({_SHORT_COMMIT})"
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_format_version_display_omits_paren_commit_when_unknown() -> None:
     """Unit — version helper omits parentheses when build commit is unknown."""
     format_display = require_version_callable("format_version_display")
@@ -128,7 +123,6 @@ def test_format_version_display_omits_paren_commit_when_unknown() -> None:
     assert "(" not in rendered
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_version_flag_includes_commit_when_known(monkeypatch: MonkeyPatch) -> None:
     """Happy — ``mergecraft --version`` includes short commit when available."""
     _set_build_commit(monkeypatch, _SAMPLE_COMMIT)
@@ -138,7 +132,6 @@ def test_version_flag_includes_commit_when_known(monkeypatch: MonkeyPatch) -> No
     assert output == f"{__version__} ({_SHORT_COMMIT})"
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_version_command_includes_commit_when_known(monkeypatch: MonkeyPatch) -> None:
     """Happy — ``mergecraft version`` includes short commit when available."""
     _set_build_commit(monkeypatch, _SAMPLE_COMMIT)
@@ -158,7 +151,6 @@ def test_version_flag_omits_paren_commit_when_unknown(monkeypatch: MonkeyPatch) 
     assert "(" not in output
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_version_json_includes_additive_commit_field(monkeypatch: MonkeyPatch) -> None:
     """Functional — ``version --format json`` adds ``commit`` without breaking ``version``."""
     _set_build_commit(monkeypatch, _SAMPLE_COMMIT)
@@ -174,7 +166,6 @@ def test_version_json_includes_additive_commit_field(monkeypatch: MonkeyPatch) -
     assert "schema_version" in payload
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_version_json_commit_null_when_unknown(monkeypatch: MonkeyPatch) -> None:
     """Edge — JSON ``commit`` is null (additive) when build commit is unknown."""
     _set_build_commit(monkeypatch, None)
@@ -189,7 +180,6 @@ def test_version_json_commit_null_when_unknown(monkeypatch: MonkeyPatch) -> None
     assert payload["commit"] is None
 
 
-@pytest.mark.xfail(reason="green after CF", strict=False)
 def test_update_run_uses_check_true(monkeypatch: MonkeyPatch) -> None:
     """Error — ``update`` propagates ``uv`` failures (``check=True`` contract)."""
 
