@@ -75,7 +75,11 @@ lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-
 	$(UV) run python scripts/check_privilege_drop_chown.py
 	$(UV) run python scripts/check_type_ignores.py
 	$(UV) run python scripts/check_called_workflow_permissions.py
+	$(MAKE) lint-test-hygiene
 	@$(MAKE) npm-lockcheck
+
+lint-test-hygiene: ## Advisory scan for tautological test patterns (D16)
+	$(UV) run python scripts/check_test_cheat_signatures.py --advisory
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py

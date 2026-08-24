@@ -52,12 +52,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 # ---------------------------------------------------------------------------
-# A — xpass ratchet (CQ-1): fail session when non-D6 XPASSes remain
+# A — xpass ratchet (CQ-1): fail session when XPASSes remain
 # ---------------------------------------------------------------------------
 
 
 def _load_check_xpass() -> Any:
-    """Load ``scripts/check_xpass.py`` via importlib (single source for D6 list).
+    """Load ``scripts/check_xpass.py`` via importlib for the session hook.
 
     Raises:
         SystemExit: When the module cannot be loaded (fail-closed — aborts the session).
@@ -75,11 +75,7 @@ def _load_check_xpass() -> Any:
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
-    """Fail the session if any non-D6 XPASS slipped through (CQ-1 / #276).
-
-    D6 test paths (``scripts/check_xpass.py::D6_TEST_PATHS``) are excluded —
-    those xpasses are counted and printed but do not block the gate.
-    """
+    """Fail the session when any XPASS slipped through (CQ-1 / #276)."""
     tr = session.config.pluginmanager.getplugin("terminalreporter")
     if tr is None:
         return

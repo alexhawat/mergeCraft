@@ -2,8 +2,7 @@
 """Fail when pytest reports unexpected xpasses on the allowed test tree.
 
 ``xfail(strict=False)`` tests that pass (XPASS) are leftover RED markers.
-This ratchet exits 1 when any XPASS remains outside the morning-plan D6
-exclusion list. D6 xpasses are counted and printed, then ignored.
+This ratchet exits 1 when any XPASS remains.
 
 Parses pytest ``-rX`` / ``-ra`` terminal output (``XPASS nodeid - reason``
 lines) from a log file passed via ``--from-log``. The live gate runs inside
@@ -13,10 +12,8 @@ Module: scripts.check_xpass
 Depends: argparse, pathlib, sys, typing
 
 Exports:
-    D6_TEST_PATHS — morning-plan test files excluded from the fail condition.
-    is_d6_nodeid — True when a pytest nodeid lives on a D6 path.
     parse_xpass_log — extract XPASS records from pytest terminal output.
-    check_xpass — return 0 iff allowed-tree xpass count is 0.
+    check_xpass — return 0 iff xpass count is 0.
     main — CLI entry.
 """
 
@@ -29,25 +26,6 @@ from typing import NamedTuple, TextIO
 
 REPO = Path(__file__).resolve().parents[1]
 
-# Morning-plan test files this program must not clean up (D6). Inventory may
-# still count them; they do not fail the gate.
-D6_TEST_PATHS: frozenset[str] = frozenset(
-    {
-        "tests/agents/test_codex_custom_provider.py",
-        "tests/analyzers/test_scope.py",
-        "tests/cli/test_auth_logfire_cmd.py",
-        "tests/cli/test_gha_cmd.py",
-        "tests/cli/test_gha_failure_outputs.py",
-        "tests/evals/test_live_context.py",
-        "tests/mcp/test_check_runs.py",
-        "tests/mcp/test_git_tool.py",
-        "tests/mcp/test_labels.py",
-        "tests/mcp/test_submit_review_verdict.py",
-        "tests/mcp/test_upload.py",
-        "tests/review/test_terminal_verdict_policy.py",
-    }
-)
-
 
 class XpassRecord(NamedTuple):
     """One pytest XPASS line."""
@@ -55,14 +33,9 @@ class XpassRecord(NamedTuple):
     nodeid: str
     reason: str
 
-    @property
-    def d6(self) -> bool:
-        """Return True when this xpass is on a D6-forbidden test path."""
-        return is_d6_nodeid(self.nodeid)
-
 
 class XpassInventory(NamedTuple):
-    """Parsed xpass set plus D6 / allowed splits."""
+    """Parsed xpass set."""
 
     records: tuple[XpassRecord, ...]
 
@@ -72,37 +45,14 @@ class XpassInventory(NamedTuple):
         return len(self.records)
 
     @property
-    def d6_records(self) -> tuple[XpassRecord, ...]:
-        """Return xpasses on D6 paths (counted, not failing)."""
-        return tuple(record for record in self.records if record.d6)
-
-    @property
     def allowed_records(self) -> tuple[XpassRecord, ...]:
-        """Return xpasses this program is allowed to promote (W6)."""
-        return tuple(record for record in self.records if not record.d6)
-
-    @property
-    def d6_count(self) -> int:
-        """Return the D6-excluded xpass count."""
-        return len(self.d6_records)
+        """Return xpasses this program treats as gate failures."""
+        return self.records
 
     @property
     def allowed_count(self) -> int:
-        """Return the allowed-tree xpass count (the fail condition)."""
-        return len(self.allowed_records)
-
-
-def is_d6_nodeid(nodeid: str) -> bool:
-    """Return True when ``nodeid`` belongs to a D6-forbidden test file.
-
-    Args:
-        nodeid: Pytest nodeid (``path::test`` or ``path::test[param]``).
-
-    Returns:
-        True when the path component is in ``D6_TEST_PATHS``.
-    """
-    path = nodeid.split("::", 1)[0].replace("\\", "/")
-    return path in D6_TEST_PATHS
+        """Return the xpass count (the fail condition)."""
+        return len(self.records)
 
 
 def parse_xpass_log(text: str) -> XpassInventory:
@@ -112,7 +62,7 @@ def parse_xpass_log(text: str) -> XpassInventory:
         text: Captured pytest stdout+stderr.
 
     Returns:
-        Inventory of every ``XPASS`` line, D6-tagged.
+        Inventory of every ``XPASS`` line.
     """
     records: list[XpassRecord] = []
     for raw_line in text.splitlines():
@@ -129,21 +79,18 @@ def parse_xpass_log(text: str) -> XpassInventory:
 
 
 def check_xpass(inventory: XpassInventory, *, stream: TextIO | None = None) -> int:
-    """Return 0 when allowed-tree xpass count is 0; 1 otherwise.
+    """Return 0 when xpass count is 0; 1 otherwise.
 
     Args:
         inventory: Parsed xpass set.
         stream: Output stream (default ``sys.stderr``).
 
     Returns:
-        Process exit code (0 ok, 1 allowed-tree xpasses remain).
+        Process exit code (0 ok, 1 xpasses remain).
     """
     out: TextIO = sys.stderr if stream is None else stream
     allowed = inventory.allowed_records
-    summary = (
-        f"{inventory.allowed_count} allowed-tree xpassed "
-        f"({inventory.total} total, {inventory.d6_count} D6-excluded)"
-    )
+    summary = f"{inventory.allowed_count} xpassed ({inventory.total} total)"
     if not allowed:
         print(f"xpass-check OK: {summary}", file=out)
         return 0
@@ -161,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         argv: Argument vector (defaults to ``sys.argv[1:]``).
 
     Returns:
-        0 when allowed-tree xpass is 0; 1 when xpasses remain; 2 on usage/IO error.
+        0 when xpass count is 0; 1 when xpasses remain; 2 on usage/IO error.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

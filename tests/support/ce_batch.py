@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from tests.support.cd_batch import (
     d10_root_callback_owns_globals,
-    green_after,
     module_exists,
     require_callable,
     require_module,
@@ -70,7 +69,6 @@ __all__ = [
     "TRACING_EXPORTERS",
     "USAGE_ATTRS",
     "d10_root_callback_owns_globals",
-    "green_after",
     "module_exists",
     "require_callable",
     "require_module",
