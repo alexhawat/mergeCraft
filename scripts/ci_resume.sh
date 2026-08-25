@@ -4,8 +4,10 @@
 # run it skips every already-passed step and resumes from the failed one — so an agent can fix
 # one error and continue, without re-running the steps that already passed.
 #
-# When every step passes, the checkpoint is cleared and the run is equivalent to `make ci`.
-# Full `make ci` remains the authoritative gate; this is the iterative fix loop.
+# When every step passes, the checkpoint is cleared and the run is equivalent to `make ci`
+# (``CI_STEPS`` mirrors ``ci-static`` + ``security`` + ``coverage-gate`` only — advisory
+# workflow jobs such as ``mutation-advisory`` are not included).
+# Full ``make ci`` remains the authoritative gate; this is the iterative fix loop.
 #
 # NOTE (by design): after a fix, earlier steps are assumed still-passing and are NOT re-run.
 # If a fix might break an earlier step, run `make ci-reset` (or this script with --reset) to
@@ -80,5 +82,5 @@ done
 
 rm -f "$STATE"
 echo ""
-echo "ci-resume: ✅ all $total steps passed (equivalent to 'make ci')."
+echo "ci-resume: ✅ all $total steps passed (equivalent to 'make ci'; advisory CI jobs excluded)."
 exit 0

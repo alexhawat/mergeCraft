@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
+if TYPE_CHECKING:
+    from _pytest.monkeypatch import MonkeyPatch
 
 # Module-availability guard — same pattern as the sibling suite.
 try:  # pragma: no cover
@@ -66,8 +68,8 @@ def _make_diff_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _build_stub_agent(monkeypatch: pytest.MonkeyPatch, capture_path: Path) -> None:
-    """Replace `mergecraft.offline_review.resolve_runtime_agent` with a
+def _build_stub_agent(monkeypatch: MonkeyPatch, capture_path: Path) -> None:
+    """Replace `mergecraft.review.offline_agent.resolve_runtime_agent` with a
     deterministic AgentImpl that writes the prompt it received to
     `capture_path` and returns a single empty `set_output` payload.
 
@@ -77,10 +79,9 @@ def _build_stub_agent(monkeypatch: pytest.MonkeyPatch, capture_path: Path) -> No
     actually saw; the test asserts the prompt is fenced there.
     """
     from mergecraft.agents.shared import AgentResult, agent
-    from mergecraft.offline_review import resolve_runtime_agent as _orig
 
     async def _install(_token: str | None = None) -> str:
-        return "stub"
+        return "opencode"
 
     async def _run(ctx):  # type: ignore[no-untyped-def]
         # The agent's `instructions` carries the full assembled prompt.
@@ -94,32 +95,31 @@ def _build_stub_agent(monkeypatch: pytest.MonkeyPatch, capture_path: Path) -> No
             metadata={},
         )
 
-    stub = agent(name="stub", install=_install, run=_run)
-    # Bind the stub onto the original lookup name; this keeps the rest
-    # of the offline path (MCP server, modes, etc.) working unmodified.
+    stub = agent(name="opencode", install=_install, run=_run)
+
+    def _fake_start_mcp(_ctx: object, **_: object) -> tuple[str, object]:
+        return "http://127.0.0.1:1/mcp/reviewer", lambda: None
+
     monkeypatch.setattr(
-        "mergecraft.offline_review.resolve_runtime_agent",
-        lambda *, model=None: stub,  # type: ignore[arg-type]
+        "mergecraft.review.offline_agent.resolve_runtime_agent",
+        lambda **_: stub,
     )
-    _ = _orig  # silence unused warning — referenced for clarity
+    monkeypatch.setattr(
+        "mergecraft.review.offline_agent.start_mcp_http_server",
+        _fake_start_mcp,
+    )
+    monkeypatch.setattr(
+        "mergecraft.review.offline_agent.install_bundled_skills",
+        lambda **_: None,
+    )
 
 
 # ── W3.1 — the issue's primary acceptance criterion. ────────────────────────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "W3 stub infrastructure issue: the test's stub agent uses "
-        "name='stub', but run_offline_agent_review calls compute_modes(agent.name, "
-        "...) which requires a real agent id. The test was meant to mock "
-        "compute_modes too, but does not. Deferred to B-Final: patch the "
-        "stub to monkeypatch compute_modes or use a real agent id (#276)."
-    ),
-    strict=True,
-)
 def test_injected_pr_body_does_not_change_findings(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     """Run the offline review path twice against one fixture diff:
     once with a benign `prompt_extra`, once with a body containing the
@@ -180,6 +180,9 @@ def test_injected_pr_body_does_not_change_findings(
         redacted_benign = _redact_fence(benign_capture.read_text(encoding="utf-8"))
         redacted_injected = _redact_fence(injected_capture.read_text(encoding="utf-8"))
 
+    redacted_benign = _normalize_ephemeral_paths(redacted_benign)
+    redacted_injected = _normalize_ephemeral_paths(redacted_injected)
+
     assert redacted_benign == redacted_injected, (
         "injection in the operator body altered prompt sections outside "
         "the fence — the renderer is leaking the body into the system / "
@@ -222,6 +225,16 @@ def await_run(cwd: Path, *, prompt_extra: str):  # type: ignore[no-untyped-def]
     )
 
 
+def _normalize_ephemeral_paths(prompt: str) -> str:
+    """Collapse per-run temp dirs and fence nonces so two offline runs compare."""
+    import re
+
+    prompt = re.sub(r"/(?:private/)?var/folders/[^\s`\"']+", "<EPHEMERAL_ABS_PATH>", prompt)
+    prompt = re.sub(r"/tmp/[^\s`\"']+", "<EPHEMERAL_ABS_PATH>", prompt)
+    prompt = re.sub(r"mergecraft-diff-review-[a-z0-9]+", "<EPHEMERAL_REVIEW_DIR>", prompt)
+    return re.sub(r"nonce=[0-9a-f]{16}", "nonce=<NORMALIZED>", prompt)
+
+
 def _redact_fence(prompt: str) -> str:
     """Standalone redaction helper (mirrors `_prompt_minus_event_body`
     in the sibling test module)."""
@@ -250,17 +263,9 @@ def _extract_fenced(prompt: str) -> str:
 # ── W3.6 (continued from `test_prompt_fencing.py`) — full-path stub. ───────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "W3 stub infrastructure issue: see test_injected_pr_body_does_not_change_findings "
-        "for details. The stub agent uses name='stub' which fails in compute_modes(). "
-        "Deferred to B-Final (#276)."
-    ),
-    strict=True,
-)
 def test_offline_diff_review_fences_commit_messages_and_patch_headers(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     """The full offline path (W3.6) commits via `build_offline_review_prompt`
     and reads the diff via `diff_path`. Commit messages and patch

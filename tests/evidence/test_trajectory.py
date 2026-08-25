@@ -396,7 +396,6 @@ def test_high_severity_trajectory_finding_blocks_auto_merge() -> None:
         self_assessment={"would_approve": True, "sha": "cafe"},
     )
     decision = decide_approval(packet, run_succeeded=True, tier="trusted")
-    assert decision.verdict != "auto_merge"
     assert decision.verdict == "failure", (
         "a blocking trajectory finding must reach the packet verdict, not a side channel"
     )

@@ -56,12 +56,25 @@ a read-only verifier; typed findings drive inline comments and the
 `diff-review` is a **deprecated alias** for `mergecraft review` (one stderr
 warning per invocation) — teach `mergecraft review` instead.
 
-## MCP (`mergecraft mcp serve`)
+## MCP
 
-HTTP server (not stdio). Each run mints a per-serve Bearer token on an ephemeral
-port; omitting `Authorization: Bearer …` returns HTTP 401 / JSON-RPC `-32600`.
-The reviewer role is served at `/mcp/reviewer`. Startup prints
-`MERGECRAFT_MCP_BEARER=<token>` to stderr — pass that token on every request.
+Two profiles — do not confuse them:
+
+| Profile | Command | Transport | Auth |
+|---------|---------|-----------|------|
+| **Public product** | `mergecraft mcp serve --role public --transport stdio` | stdio JSON-RPC | None (local OS user) |
+| **Runtime harness** | `mergecraft mcp serve` (default `--role reviewer`) | HTTP on ephemeral port | Per-serve Bearer required |
+
+**Public install (Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode):** see
+[`docs/mcp.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a1/docs/mcp.md) for copy-paste `mcpServers` JSON. Six tools only
+(`review_change`, `get_review`, `inspect_finding`, `explain_finding`,
+`get_capabilities`, `get_policy`). Registry: `mcp-name: io.github.alexhawat/mergecraft`.
+
+**Runtime harness HTTP:** default `mergecraft mcp serve` mints a Bearer token on an
+ephemeral port; omitting `Authorization: Bearer …` returns HTTP 401 / JSON-RPC
+`-32600`. Reviewer tools live at `/mcp/reviewer`. Startup prints
+`MERGECRAFT_MCP_BEARER=<token>` to stderr — pass that token on every HTTP request.
+Optional HTTP public (`--role public` without `--transport stdio`) also requires Bearer.
 
 ## Configuration essentials (`.mergecraft/config.yaml`)
 

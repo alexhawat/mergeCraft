@@ -97,17 +97,46 @@ def test_ratchet_fails_when_coverage_drops_below_floor(tmp_path: Path) -> None:
     assert rc != 0, "ratchet accepted coverage below the floor"
 
 
-def test_ratchet_fails_when_coverage_exceeds_floor_without_bump(tmp_path: Path) -> None:
-    """Guard-deletion: a large rise without bumping the floor must fail."""
+def test_ratchet_warns_when_coverage_exceeds_floor_without_bump(tmp_path: Path) -> None:
+    """D12: a large rise without bumping the floor warns by default (exit 0)."""
     module = _load_ratchet()
     check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
     assert callable(check)
     report = _coverage_json(tmp_path, 99.0)
     rc = _run_ratchet(check, report, margin=5.0)
-    assert rc != 0, "ratchet accepted coverage far above the floor without a bump commit"
+    assert rc == 0, "ratchet should warn, not fail, when coverage exceeds the soft ceiling (D12)"
+
+
+def test_ratchet_fails_with_hard_ceiling_when_above_margin(tmp_path: Path) -> None:
+    """``--hard-ceiling`` restores the legacy fail-on-above-margin behaviour."""
+    module = _load_ratchet()
+    check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
+    assert callable(check)
+    report = _coverage_json(tmp_path, 99.0)
+    rc = _run_ratchet(check, report, margin=5.0, hard_ceiling=True)
+    assert rc != 0, "hard ceiling must fail when coverage far exceeds the floor"
 
 
 def test_ratchet_passes_within_margin(tmp_path: Path) -> None:
+    module = _load_ratchet()
+    check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
+    assert callable(check)
+    floor = _fail_under()
+    report = _coverage_json(tmp_path, floor + 1.0)
+    rc = _run_ratchet(check, report, margin=5.0)
+    assert rc == 0
+
+
+def test_ratchet_passes_when_github_base_ref_empty_on_push(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Push events expose ``GITHUB_BASE_REF=""``; must not resolve to ``origin/``."""
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_BASE_REF", "")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/pre-0.0.1")
+
     module = _load_ratchet()
     check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
     assert callable(check)

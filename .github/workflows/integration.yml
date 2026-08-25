@@ -41,6 +41,9 @@ jobs:
                 && format('refs/pull/{0}/merge', github.event.pull_request.number)
                 || github.ref }}
       - uses: ./.github/actions/bootstrap
+        env:
+          # Exporter unit tests run in coverage-measure (D14 / TH8).
+          MERGECRAFT_UV_EXTRAS: tracing
       - name: Integration suite
         run: make test-integration
       - name: Coverage ratchet

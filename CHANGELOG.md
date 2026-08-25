@@ -7,8 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
+  Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
+  ``docs/agent-loop.md`` parity note, and ``skills/mergecraft/SKILL.md`` public stdio
+  plus runtime HTTP Bearer; registry ownership string
+  ``mcp-name: io.github.alexhawat/mergecraft``
+
 ### Added
 
+- Public MCP product profile: ``mergecraft mcp serve --role public`` mounts six
+  semantic tools at ``/mcp/public`` (``review_change``, ``get_review``,
+  ``inspect_finding``, ``explain_finding``, ``get_capabilities``, ``get_policy``)
+  over the completed-review store without extending ``ReviewEntry``
+- Public MCP stdio transport: ``mergecraft mcp serve --role public --transport stdio``
+  serves the same six-tool public profile over newline-delimited JSON-RPC on
+  stdin/stdout without Bearer auth (HTTP public still requires the per-serve token)
+- Generated MCP Registry ``server.json`` at the repo root plus ``docs/mcp-tools.md``
+  from public ``ToolSpec`` schemas; ``make mcp-server-json-check`` validates schema
+  and drift in ``CI_STEPS`` (live registry publish remains operator G3)
+- Offline public MCP tool-selection eval corpus under ``evals/mcp-public/`` with
+  fixture prompts and deterministic scorer ``mergecraft.evals.mcp_public`` (no live
+  LLM in ``make test``)
 - CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
   Major/Critical (not clamped to Minor); a listing error on one workflow run
   does not skip later runs; a Major/Critical finding is kept over a less

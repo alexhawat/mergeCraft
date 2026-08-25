@@ -53,18 +53,28 @@ def _load_coverage_floors() -> Any:
 
 
 def _coverage_json(tmp_path: Path, percent: float) -> Path:
+    # Per-module summaries must satisfy tightened TH6 floors even when global is 82%.
+    module_percent = max(percent, 96.0)
     summary = {
-        "percent_covered": percent,
+        "percent_covered": module_percent,
         "num_statements": 100,
-        "covered_lines": int(percent),
+        "covered_lines": int(module_percent),
         "num_branches": 10,
-        "covered_branches": int(percent * 0.1),
+        "covered_branches": int(module_percent * 0.1),
     }
     files: dict[str, dict[str, Any]] = {}
     for suffix in ("utils/token.py", "utils/git_setup.py", "main.py"):
         files[f"src/mergecraft/{suffix}"] = {"summary": dict(summary)}
-    files["src/mergecraft/mcp/server.py"] = {"summary": dict(summary)}
-    files["src/mergecraft/action/post.py"] = {"summary": dict(summary)}
+    prefix_paths = (
+        "src/mergecraft/mcp/server.py",
+        "src/mergecraft/action/post.py",
+        "src/mergecraft/security/gate.py",
+        "src/mergecraft/analyzers/pipeline.py",
+        "src/mergecraft/agents/reviewer.py",
+        "src/mergecraft/review/modes.py",
+    )
+    for path in prefix_paths:
+        files[path] = {"summary": dict(summary)}
     payload = {
         "totals": {
             "percent_covered": percent,
@@ -102,6 +112,35 @@ def test_check_coverage_floors_rejects_measured_below_target(
     assert rc != 0
 
 
+def test_check_coverage_floors_rejects_missing_prefix_data(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Incomplete reports must not bypass prefix floors via a synthetic 100%."""
+    module = _load_coverage_floors()
+    report = _coverage_json(tmp_path, HH431_TARGET_FAIL_UNDER)
+    # Omit security/ (and agents/) so prefix aggregates have no matching files.
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    payload["files"] = {
+        path: data
+        for path, data in payload["files"].items()
+        if "/security/" not in path and "/agents/" not in path
+    }
+    report.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["check_coverage_floors", str(report)])
+    rc = int(module.main())
+    assert rc != 0
+    proc = subprocess.run(
+        [sys.executable, "scripts/check_coverage_floors.py", str(report)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert "no coverage data for prefix" in proc.stderr
+
+
 def test_check_coverage_floors_accepts_measured_at_target(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -113,18 +152,33 @@ def test_check_coverage_floors_accepts_measured_at_target(
     assert rc == 0
 
 
+def test_repo_coverage_report_fails_on_stale_low_coverage(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Stale ``coverage.json`` below the floor must fail the gate — never skip (D8, TH2).
+
+    TH2 removes the ``measured < HH431_TARGET_FAIL_UNDER`` skip from the sibling
+    meta-test; this contract pins the correct behaviour using a ``tmp_path`` report.
+    """
+    report = _coverage_json(tmp_path, 70.0)
+    monkeypatch.setattr(sys, "argv", ["check_coverage_floors", str(report)])
+    module = _load_coverage_floors()
+    rc = int(module.main())
+    assert rc != 0, "stale 70% coverage must fail check_coverage_floors"
+
+
 def test_repo_coverage_report_passes_floor_check_at_target() -> None:
     """W16 must produce ``coverage.json`` with global line ≥ the bumped floor."""
     report = REPO_ROOT / "coverage.json"
     if not report.is_file():
-        pytest.skip("coverage.json missing — run make coverage-gate after W16")
+        pytest.skip("coverage.json missing — run make coverage-gate first")
     payload = json.loads(report.read_text(encoding="utf-8"))
     measured = float(payload.get("totals", {}).get("percent_covered", 0.0))
-    if measured < HH431_TARGET_FAIL_UNDER:
-        pytest.skip(
-            f"coverage.json reports {measured:.2f}% — stale or mid-session; "
-            "make coverage-gate runs check_coverage_floors.py on the fresh report"
-        )
+    assert measured >= HH431_TARGET_FAIL_UNDER, (
+        f"coverage.json reports {measured:.2f}% — below floor "
+        f"{HH431_TARGET_FAIL_UNDER:.0f}% (stale or incomplete; run make coverage-gate)"
+    )
     proc = subprocess.run(
         [sys.executable, "scripts/check_coverage_floors.py", str(report)],
         cwd=REPO_ROOT,

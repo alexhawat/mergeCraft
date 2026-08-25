@@ -255,7 +255,10 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 | `mergecraft review --json out.json` | Structured findings on disk |
 | [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) | Contractual exit codes — branch on them instead of parsing text |
 | `mergecraft doctor` | Self-diagnosis of git, providers, analyzers, auth, config and MCP wiring |
-| `mergecraft mcp serve` | The reviewer's own MCP tool surface, Bearer-authenticated |
+| [`docs/mcp.md`](docs/mcp.md) | **Public MCP install** — six review-only tools over stdio for Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode |
+| `mergecraft mcp serve` | The reviewer's **in-run** MCP tool surface at `/mcp/reviewer`, Bearer-authenticated (not the public stdio profile) |
+
+MCP Registry ownership: `mcp-name: io.github.alexhawat/mergecraft`
 
 > **Reviewing *with* an agent, locally:** `mergecraft review` works offline on a
 > local diff, worktree, or cloned repo — no GitHub Action required.

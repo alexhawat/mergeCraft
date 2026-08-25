@@ -59,11 +59,40 @@ jobs:
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
+        env:
+          # Tracing extra only on the test job: exporter unit tests need logfire/otel
+          # installed, but static/toolchain jobs must not pay the sync cost (D14 / TH8).
+          MERGECRAFT_UV_EXTRAS: tracing
       - name: Unit tests (shard ${{ matrix.group }} of 2)
         env:
           MERGECRAFT_TEST_SPLITS: "2"
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
         run: make test
+
+  coverage-gate:
+    name: Verify (coverage gate py3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Merge-base ratchet (check_coverage_ratchet.py) needs full history.
+          fetch-depth: 0
+      - name: Fetch base branch for merge-base ratchet
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags origin "$BASE_REF"
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+        env:
+          # Tracing extra: exporter unit tests are part of coverage-measure (D14 / TH8).
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Coverage floors and ratchet
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: make coverage-gate
 
   static:
     name: Verify (static + build py${{ matrix.python }})
@@ -200,3 +229,20 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Integration suite (self-skips without live secrets)
         run: make test-integration
+
+  mutation-advisory:
+    name: Verify (mutation advisory py3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+      - name: Decision-module mutation harness (advisory)
+        env:
+          MUTATION_ESCAPE_THRESHOLD_PCT: "45"
+        run: make mutation-test-decisions
