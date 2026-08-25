@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.capabilities.manifest import capabilities_manifest
-from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+from mergecraft.config.settings import load_repo_settings
+from mergecraft.evidence.gate_policy import resolve_effective_gate_policies
 from mergecraft.mcp.shared import EMPTY_SCHEMA, JsonSchema, ToolClass, execute, tool
 from mergecraft.offline_review import parse_offline_review_findings, run_offline_diff_review
 from mergecraft.review.completed import (
@@ -26,11 +27,15 @@ from mergecraft.review.completed import (
 )
 from mergecraft.review.explain import finding_explain_payload
 from mergecraft.review.finding_lookup import is_safe_path_stem
+from mergecraft.review.output import finding_json_records
 from mergecraft.review.snapshot import canonical_review_snapshot
-from mergecraft.run_outcome import RunOutcome
+from mergecraft.run_outcome import RunOutcome, cli_exit_code_for_review
 from mergecraft.utils.source_resolve import SourceResolverSpec, confine_path
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.shared import ToolSpec
 
@@ -65,10 +70,17 @@ class _ParamRequiredError(ValueError):
         super().__init__(field)
 
 
-def _resolve_outcome(*, success: bool, outcome: RunOutcome | None) -> str:
-    if outcome is not None:
-        return outcome.value
-    return RunOutcome.passed.value if success else RunOutcome.failed.value
+def _offline_review_outcome(
+    *,
+    success: bool,
+    outcome: RunOutcome | None,
+    findings: Sequence[Finding],
+) -> str:
+    """Match CLI offline review outcome semantics (honest when findings exist)."""
+    base = outcome if outcome is not None else RunOutcome.passed if success else RunOutcome.failed
+    if base is RunOutcome.passed and findings and cli_exit_code_for_review(base, findings) != 0:
+        return RunOutcome.failed.value
+    return base.value
 
 
 def _require_nonempty_str(value: object, field: str) -> str:
@@ -175,6 +187,7 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
             head=head,
         )
         engine: ReviewEngine[OfflineReviewResult] = ReviewEngine(snapshot=snapshot)
+        dry_run = bool(params.get("dry_run", False))
         json_path = _internal_findings_json_path(ctx, repo_root)
         try:
             result = await run_offline_diff_review(
@@ -182,7 +195,7 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
                 base=base,
                 diff_file=diff_file,
                 prompt_extra=params.get("prompt"),
-                dry_run=bool(params.get("dry_run", False)),
+                dry_run=dry_run,
                 json_path=json_path,
                 invocation_root=repo_root,
                 source_spec=source_spec,
@@ -193,17 +206,24 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
                 return {"error": result.error or "review_change failed"}
 
             findings = parse_offline_review_findings(result)
-            finding_rows = persist_offline_review(
-                review_id=review_id,
-                trace_session_id=trace_session_id,
-                snapshot=snapshot,
-                repo_root=repo_root,
-                model="(mcp-public)",
-                prompt=params.get("prompt"),
+            if dry_run:
+                finding_rows = finding_json_records(findings)
+            else:
+                finding_rows = persist_offline_review(
+                    review_id=review_id,
+                    trace_session_id=trace_session_id,
+                    snapshot=snapshot,
+                    repo_root=repo_root,
+                    model="(mcp-public)",
+                    prompt=params.get("prompt"),
+                    findings=findings,
+                    evidence_packet_path=result.evidence_packet_path,
+                )
+            outcome = _offline_review_outcome(
+                success=result.success,
+                outcome=result.outcome,
                 findings=findings,
-                evidence_packet_path=result.evidence_packet_path,
             )
-            outcome = _resolve_outcome(success=result.success, outcome=result.outcome)
             return {
                 "review_id": review_id,
                 "outcome": outcome,
@@ -393,12 +413,13 @@ def get_capabilities_tool(ctx: ToolContext) -> ToolSpec:
 
 def get_policy_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(_params: dict[str, Any]) -> dict[str, Any]:
+        repo_root = _repo_root(ctx)
+        settings = load_repo_settings(root=repo_root, load_learnings_files=False)
+        effective = resolve_effective_gate_policies(settings.gates.override)
         return {
             "trust_tier": ctx.trust_tier,
-            "policy_rule_ids": list(DEFAULT_GATE_POLICIES),
-            "policies": {
-                rule_id: action.value for rule_id, action in DEFAULT_GATE_POLICIES.items()
-            },
+            "policy_rule_ids": list(effective),
+            "policies": {rule_id: action.value for rule_id, action in effective.items()},
         }
 
     return tool(

@@ -6,6 +6,7 @@ MC- short ids, capabilities/policy read-only contracts, and explain payload keys
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,9 +24,10 @@ from tests.mcp.public_mcp_support import (
 import mergecraft.mcp.public as public_mod
 from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX
 from mergecraft.capabilities.manifest import capabilities_manifest
-from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES, GateAction
 from mergecraft.review.completed import CompletedReview, load_completed_review
 from mergecraft.review.snapshot import canonical_review_snapshot
+from mergecraft.run_outcome import RunOutcome
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -69,10 +71,55 @@ def _call_public_tool(
     return _tool_result_text(body)
 
 
+def _install_fake_offline_review(
+    monkeypatch: MonkeyPatch,
+    *,
+    with_findings: bool = True,
+) -> None:
+    from mergecraft.analyzers.finding import finding_record_without_short_id
+    from mergecraft.offline_review import OfflineReviewResult
+
+    async def fake_run_offline_diff_review(**kwargs: object) -> OfflineReviewResult:
+        structured_output = None
+        if with_findings:
+            finding = minimal_valid_finding_dict("c" * 64, message="sample")
+            structured_output = json.dumps({"findings": [finding_record_without_short_id(finding)]})
+        return OfflineReviewResult(
+            success=True,
+            output="ok",
+            structured_output=structured_output,
+            outcome=RunOutcome.passed,
+        )
+
+    monkeypatch.setattr(
+        "mergecraft.mcp.public.run_offline_diff_review",
+        fake_run_offline_diff_review,
+    )
+
+
 def test_review_change_persists_completed_review(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    _install_fake_offline_review(monkeypatch)
+    payload = _call_public_tool(
+        tmp_path,
+        monkeypatch,
+        "review_change",
+        {},
+    )
+    review_id = payload.get("review_id")
+    assert isinstance(review_id, str), payload
+    assert review_id, payload
+    loaded = load_completed_review(review_id, repo_root=tmp_path)
+    assert loaded is not None
+
+
+def test_review_change_dry_run_does_not_persist(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _install_fake_offline_review(monkeypatch)
     payload = _call_public_tool(
         tmp_path,
         monkeypatch,
@@ -82,14 +129,31 @@ def test_review_change_persists_completed_review(
     review_id = payload.get("review_id")
     assert isinstance(review_id, str), payload
     assert review_id, payload
-    loaded = load_completed_review(review_id, repo_root=tmp_path)
-    assert loaded is not None
+    assert load_completed_review(review_id, repo_root=tmp_path) is None
+
+
+def test_review_change_dry_run_reports_non_clean_with_findings(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _install_fake_offline_review(monkeypatch)
+    payload = _call_public_tool(
+        tmp_path,
+        monkeypatch,
+        "review_change",
+        {"dry_run": True},
+    )
+    assert payload.get("outcome") == RunOutcome.failed.value
+    findings = payload.get("findings")
+    assert isinstance(findings, list), payload
+    assert findings, payload
 
 
 def test_review_change_returns_short_ids(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    _install_fake_offline_review(monkeypatch)
     payload = _call_public_tool(
         tmp_path,
         monkeypatch,
@@ -242,6 +306,35 @@ def test_get_policy_is_read_only(
     policies = payload.get("policies")
     assert isinstance(policies, dict), payload
     assert set(policies).issuperset(set(DEFAULT_GATE_POLICIES))
+    for rule_id, action in DEFAULT_GATE_POLICIES.items():
+        assert policies.get(rule_id) == action.value
+
+
+def test_get_policy_reflects_gate_override(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from mergecraft.cli.mcp_serve import build_mcp_tool_context
+
+    init_git_repo(tmp_path)
+    cfg_dir = tmp_path / ".mergecraft"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "config.yaml").write_text(
+        "models:\n  - anthropic/claude-sonnet\n"
+        "gates:\n"
+        "  override:\n"
+        "    low_risk_passing: require_human_review\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    ctx = build_mcp_tool_context(cwd=tmp_path)
+    spec = next(tool for tool in public_mod.build_public_tools(ctx) if tool.name == "get_policy")
+
+    payload = json.loads(asyncio.run(spec.execute({})).content[0]["text"])
+    policies = payload.get("policies")
+    assert isinstance(policies, dict), payload
+    assert policies["low_risk_passing"] == GateAction.REQUIRE_HUMAN_REVIEW.value
+    assert policies["schema_failure"] == DEFAULT_GATE_POLICIES["schema_failure"].value
 
 
 def test_review_change_rejects_diff_outside_workspace(
