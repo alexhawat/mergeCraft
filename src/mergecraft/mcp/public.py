@@ -208,17 +208,27 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
             findings = parse_offline_review_findings(result)
             if dry_run:
                 finding_rows = finding_json_records(findings)
-            else:
-                finding_rows = persist_offline_review(
-                    review_id=review_id,
-                    trace_session_id=trace_session_id,
-                    snapshot=snapshot,
-                    repo_root=repo_root,
-                    model="(mcp-public)",
-                    prompt=params.get("prompt"),
-                    findings=findings,
-                    evidence_packet_path=result.evidence_packet_path,
-                )
+                return {
+                    "review_id": review_id,
+                    "dry_run": True,
+                    "outcome": RunOutcome.inconclusive.value,
+                    "findings": finding_rows,
+                    "summary": (
+                        "Dry run: diff materialized and review prompt built; "
+                        "agent review not executed; nothing persisted."
+                    ),
+                }
+
+            finding_rows = persist_offline_review(
+                review_id=review_id,
+                trace_session_id=trace_session_id,
+                snapshot=snapshot,
+                repo_root=repo_root,
+                model="(mcp-public)",
+                prompt=params.get("prompt"),
+                findings=findings,
+                evidence_packet_path=result.evidence_packet_path,
+            )
             outcome = _offline_review_outcome(
                 success=result.success,
                 outcome=result.outcome,
@@ -415,7 +425,10 @@ def get_policy_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(_params: dict[str, Any]) -> dict[str, Any]:
         repo_root = _repo_root(ctx)
         settings = load_repo_settings(root=repo_root, load_learnings_files=False)
-        effective = resolve_effective_gate_policies(settings.gates.override)
+        try:
+            effective = resolve_effective_gate_policies(settings.gates.override)
+        except ValueError as exc:
+            return {"error": str(exc)}
         return {
             "trust_tier": ctx.trust_tier,
             "policy_rule_ids": list(effective),

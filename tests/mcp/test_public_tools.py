@@ -97,6 +97,24 @@ def _install_fake_offline_review(
     )
 
 
+def _install_real_shape_dry_run_offline_review(monkeypatch: MonkeyPatch) -> None:
+    """Stub the real dry-run boundary: success, no agent, no structured findings."""
+    from mergecraft.offline_review import OfflineReviewResult
+
+    async def fake_run_offline_diff_review(**kwargs: object) -> OfflineReviewResult:
+        return OfflineReviewResult(
+            success=True,
+            output="offline review prompt",
+            structured_output=None,
+            outcome=RunOutcome.passed,
+        )
+
+    monkeypatch.setattr(
+        "mergecraft.mcp.public.run_offline_diff_review",
+        fake_run_offline_diff_review,
+    )
+
+
 def test_review_change_persists_completed_review(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -132,21 +150,27 @@ def test_review_change_dry_run_does_not_persist(
     assert load_completed_review(review_id, repo_root=tmp_path) is None
 
 
-def test_review_change_dry_run_reports_non_clean_with_findings(
+def test_review_change_dry_run_reports_non_completion_without_fake_findings(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    _install_fake_offline_review(monkeypatch)
+    _install_real_shape_dry_run_offline_review(monkeypatch)
     payload = _call_public_tool(
         tmp_path,
         monkeypatch,
         "review_change",
         {"dry_run": True},
     )
-    assert payload.get("outcome") == RunOutcome.failed.value
+    assert payload.get("dry_run") is True, payload
+    assert payload.get("outcome") == RunOutcome.inconclusive.value, payload
+    assert payload.get("outcome") != RunOutcome.passed.value, payload
+    summary = payload.get("summary")
+    assert isinstance(summary, str), payload
+    assert "dry run" in summary.lower(), payload
+    assert "not executed" in summary.lower() or "not completed" in summary.lower(), payload
+    assert "completed with no findings" not in summary.lower(), payload
     findings = payload.get("findings")
-    assert isinstance(findings, list), payload
-    assert findings, payload
+    assert findings == [], payload
 
 
 def test_review_change_returns_short_ids(
@@ -335,6 +359,34 @@ def test_get_policy_reflects_gate_override(
     assert isinstance(policies, dict), payload
     assert policies["low_risk_passing"] == GateAction.REQUIRE_HUMAN_REVIEW.value
     assert policies["schema_failure"] == DEFAULT_GATE_POLICIES["schema_failure"].value
+
+
+def test_get_policy_returns_structured_error_on_invalid_gate_override(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from mergecraft.cli.mcp_serve import build_mcp_tool_context
+
+    init_git_repo(tmp_path)
+    cfg_dir = tmp_path / ".mergecraft"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "config.yaml").write_text(
+        "models:\n  - anthropic/claude-sonnet\n"
+        "gates:\n"
+        "  override:\n"
+        "    low_risk_passing: not_a_valid_action\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    ctx = build_mcp_tool_context(cwd=tmp_path)
+    spec = next(tool for tool in public_mod.build_public_tools(ctx) if tool.name == "get_policy")
+
+    payload = json.loads(asyncio.run(spec.execute({})).content[0]["text"])
+    error = payload.get("error")
+    assert isinstance(error, str), payload
+    assert error
+    assert "not_a_valid_action" in error
+    assert "policy_rule_ids" not in payload
 
 
 def test_review_change_rejects_diff_outside_workspace(
