@@ -76,19 +76,46 @@ class NullSink:
 
 _PENDING_SINK: ContextVar[object | None] = ContextVar("mergecraft_pending_trace_sink", default=None)
 _TRACING_SINK_FINGERPRINT_ATTR = "_mergecraft_tracing_fingerprint"
+_DISABLED_SINK_TOPOLOGY = "disabled"
 
 
-def _tracing_settings_fingerprint(tracing_settings: Any) -> str:
-    """Stable key for matching a pending sink handoff to ``tracing_settings``."""
-    dump_json = getattr(tracing_settings, "model_dump_json", None)
-    if callable(dump_json):
-        return str(dump_json())
-    return repr(tracing_settings)
+def _tracing_sink_topology_fingerprint(tracing_settings: Any) -> str:
+    """Stable sink-transport key for ``claim_sink`` handoff matching.
+
+    Compares only ``enabled`` and sink ``type`` values — not endpoints, paths,
+    retention, or other transport parameters. A disabled consumer does not
+    request a transport and may claim any pending handoff; an enabled consumer
+    with sinks must match the pending topology.
+    """
+    enabled = getattr(tracing_settings, "enabled", False)
+    if not enabled:
+        return _DISABLED_SINK_TOPOLOGY
+    sinks = getattr(tracing_settings, "sinks", None) or []
+    types: list[str] = []
+    for entry in sinks:
+        sink_type = getattr(entry, "type", None)
+        if sink_type is None and isinstance(entry, dict):
+            sink_type = entry.get("type")
+        if sink_type is not None:
+            types.append(str(sink_type))
+    return json.dumps(sorted(types), separators=(",", ":"))
+
+
+def _pending_handoff_compatible(pending_topology: str, tracing_settings: Any) -> bool:
+    """Return whether a staged sink matches the consumer's transport request."""
+    consumer_topology = _tracing_sink_topology_fingerprint(tracing_settings)
+    if consumer_topology == _DISABLED_SINK_TOPOLOGY:
+        return True
+    return pending_topology == consumer_topology
 
 
 def _tag_tracing_sink(sink: Any, tracing_settings: Any) -> Any:
-    """Attach the settings fingerprint used by :func:`claim_sink`."""
-    setattr(sink, _TRACING_SINK_FINGERPRINT_ATTR, _tracing_settings_fingerprint(tracing_settings))
+    """Attach the topology fingerprint used by :func:`claim_sink`."""
+    setattr(
+        sink,
+        _TRACING_SINK_FINGERPRINT_ATTR,
+        _tracing_sink_topology_fingerprint(tracing_settings),
+    )
     return sink
 
 
@@ -298,15 +325,16 @@ def claim_sink(tracing_settings: Any) -> Any:
     tracer claims it. Production callers that did not pre-resolve a sink take
     the normal factory path.
 
-    A pending sink is only honored when its fingerprint matches
-    ``tracing_settings`` — otherwise a stale ``sink_factory`` handoff from an
-    unrelated configuration (common on xdist workers) is discarded.
+    A pending sink is honored when the consumer does not request a conflicting
+    sink transport (disabled / no sinks) or when its topology matches
+    ``tracing_settings``. A stale ``sink_factory`` handoff whose transport
+    differs (memory vs otel on xdist workers) is discarded.
     """
     pending = _PENDING_SINK.get()
     if pending is not None:
         _PENDING_SINK.set(None)
         pending_fp = getattr(pending, _TRACING_SINK_FINGERPRINT_ATTR, None)
-        if pending_fp == _tracing_settings_fingerprint(tracing_settings):
+        if pending_fp is not None and _pending_handoff_compatible(pending_fp, tracing_settings):
             return pending
     resolved = sink_factory(tracing_settings)
     _PENDING_SINK.set(None)
