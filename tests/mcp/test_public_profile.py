@@ -1,4 +1,4 @@
-"""MP1.1 — public HTTP mount profile guards (RED until MP2)."""
+"""MP1.1 — public HTTP mount profile guards."""
 
 from __future__ import annotations
 

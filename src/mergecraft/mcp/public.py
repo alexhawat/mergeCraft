@@ -10,9 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.cli.capabilities_cmd import capabilities_manifest
-from mergecraft.cli.explain_cmd import finding_explain_payload
-from mergecraft.cli.review_output import finding_json_records
+from mergecraft.capabilities.manifest import capabilities_manifest
 from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 from mergecraft.mcp.shared import EMPTY_SCHEMA, JsonSchema, ToolClass, execute, tool
 from mergecraft.offline_review import parse_offline_review_findings, run_offline_diff_review
@@ -26,7 +24,9 @@ from mergecraft.review.completed_artifacts import (
     collect_evidence_packets_for_persist,
     collect_trace_events_for_review,
 )
+from mergecraft.review.explain import finding_explain_payload
 from mergecraft.review.finding_lookup import is_safe_path_stem
+from mergecraft.review.output import finding_json_records
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.source_resolve import SourceResolverSpec, confine_path

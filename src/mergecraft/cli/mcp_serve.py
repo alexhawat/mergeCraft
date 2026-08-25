@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import os
 import secrets
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -38,12 +41,10 @@ if TYPE_CHECKING:
 
 ServeRole = Literal["orchestrator", "reviewer", "verifier", "public"]
 
+_active_codegen_tmpdir: tempfile.TemporaryDirectory[str] | None = None
 
-def build_codegen_tool_context() -> ToolContext:
-    """Minimal :class:`ToolContext` for codegen and registry generation (no workspace)."""
-    import tempfile
 
-    tmpdir = tempfile.mkdtemp(prefix="mergecraft-gen-mcp-")
+def _tool_context_for_codegen_tmpdir(tmpdir: str) -> ToolContext:
     state = init_tool_state(owner="local", name="mergecraft", dir=tmpdir)
     return ToolContext(
         agent_id="claude",
@@ -67,6 +68,22 @@ def build_codegen_tool_context() -> ToolContext:
     )
 
 
+@contextmanager
+def codegen_tool_context() -> Iterator[ToolContext]:
+    """Yield a minimal :class:`ToolContext` with an auto-cleaned temp workspace."""
+    with tempfile.TemporaryDirectory(prefix="mergecraft-gen-mcp-") as tmpdir:
+        yield _tool_context_for_codegen_tmpdir(tmpdir)
+
+
+def build_codegen_tool_context() -> ToolContext:
+    """Minimal :class:`ToolContext` for codegen and registry generation (no workspace)."""
+    global _active_codegen_tmpdir
+    if _active_codegen_tmpdir is not None:
+        _active_codegen_tmpdir.cleanup()
+    _active_codegen_tmpdir = tempfile.TemporaryDirectory(prefix="mergecraft-gen-mcp-")
+    return _tool_context_for_codegen_tmpdir(_active_codegen_tmpdir.name)
+
+
 def role_endpoint(role: ServeRole) -> str:
     if role == "reviewer":
         return MCP_REVIEWER_ENDPOINT
@@ -77,7 +94,7 @@ def role_endpoint(role: ServeRole) -> str:
     return MCP_ENDPOINT
 
 
-def _parse_role(role: str) -> ServeRole:
+def parse_role(role: str) -> ServeRole:
     key = role.strip().lower()
     if key not in {"orchestrator", "reviewer", "verifier", "public"}:
         msg = f"unknown role {role!r} (expected orchestrator, reviewer, verifier, or public)"
@@ -170,7 +187,7 @@ def resolve_served_tool_specs(
     trust_override: str | None = None,
 ) -> list[ToolSpec]:
     """Return the MCP tool surface for a role without starting a server."""
-    parsed_role = _parse_role(role)
+    parsed_role = parse_role(role)
     ctx = build_mcp_tool_context(
         cwd=cwd,
         invocation_root=invocation_root,
@@ -218,7 +235,7 @@ def build_mcp_app_from_ctx(role: str, ctx: ToolContext) -> FastAPI:
     Returns:
         Configured :class:`~fastapi.FastAPI` application.
     """
-    parsed_role = _parse_role(role)
+    parsed_role = parse_role(role)
     if parsed_role == "orchestrator":
         orchestrator_tools = build_orchestrator_tools(ctx)
         return create_mcp_app(orchestrator_tools, ctx, auth_token=ctx.mcp_auth_token)
@@ -235,6 +252,7 @@ def build_mcp_app_from_ctx(role: str, ctx: ToolContext) -> FastAPI:
             ctx,
             role_tools={"public": build_public_tools(ctx)},
             auth_token=ctx.mcp_auth_token,
+            return_tool_errors=True,
         )
     return create_mcp_app(
         [],
@@ -267,6 +285,8 @@ __all__ = [
     "build_mcp_app_for_role",
     "build_mcp_app_from_ctx",
     "build_mcp_tool_context",
+    "codegen_tool_context",
+    "parse_role",
     "resolve_served_tool_names",
     "resolve_served_tool_specs",
     "role_endpoint",

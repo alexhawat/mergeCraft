@@ -1,4 +1,4 @@
-"""MP1.1 — public MCP role CLI contracts (RED until MP2)."""
+"""MP1.1 — public MCP role CLI contracts."""
 
 from __future__ import annotations
 

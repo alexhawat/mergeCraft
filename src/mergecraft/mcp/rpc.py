@@ -9,8 +9,9 @@ Exports:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
+from mergecraft.mcp.rpc_types import RpcError, rpc_error
 from mergecraft.mcp.shared import bind_selected_mode, reset_selected_mode
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
@@ -25,22 +26,6 @@ if TYPE_CHECKING:
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.shared import ToolSpec
-
-
-class RpcError(NamedTuple):
-    """A JSON-RPC error code/message pair, before it is wrapped in an envelope."""
-
-    code: int
-    message: str
-
-
-def rpc_error(req_id: Any, error: RpcError) -> dict[str, Any]:
-    """Wrap ``error`` in the JSON-RPC response envelope for ``req_id``."""
-    return {
-        "jsonrpc": "2.0",
-        "id": req_id,
-        "error": {"code": error.code, "message": error.message},
-    }
 
 
 def package_version() -> str:

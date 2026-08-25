@@ -1,4 +1,4 @@
-"""MP1.4 — generated ``server.json`` contracts (RED until MP4)."""
+"""MP1.4 — generated ``server.json`` contracts."""
 
 from __future__ import annotations
 

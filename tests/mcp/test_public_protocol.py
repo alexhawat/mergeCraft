@@ -1,4 +1,4 @@
-"""MP1.5 — public profile protocol conformance (RED until MP5)."""
+"""MP1.5 — public profile protocol conformance."""
 
 from __future__ import annotations
 

@@ -332,6 +332,7 @@ def create_mcp_app(
     role_tools: dict[str, list[ToolSpec]] | None = None,
     auth_token: str | None = None,
     orchestrator_auth_token: str | None = None,
+    return_tool_errors: bool = False,
 ) -> FastAPI:
     """Build the MCP app.
 
@@ -386,7 +387,7 @@ def create_mcp_app(
             role_tool_list,
             ctx,
             auth_token,
-            return_tool_errors=role == "public",
+            return_tool_errors=return_tool_errors,
         )
     return app
 

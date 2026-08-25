@@ -1,4 +1,4 @@
-"""MP1.3 — stdio transport for the public profile (RED until MP3)."""
+"""MP1.3 — stdio transport for the public profile."""
 
 from __future__ import annotations
 

@@ -11,9 +11,9 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.mcp_serve import (
-    _parse_role,
     build_mcp_app_from_ctx,
     build_mcp_tool_context,
+    parse_role,
     resolve_served_tool_names,
     role_endpoint,
 )
@@ -114,7 +114,7 @@ def serve_cmd(
             code=CLI_USAGE_EXIT_CODE,
         )
     try:
-        parsed_role = _parse_role(role)
+        parsed_role = parse_role(role)
     except ValueError as exc:
         cli_bail(str(exc), code=CLI_USAGE_EXIT_CODE)
     if parsed_transport == "stdio" and parsed_role != "public":

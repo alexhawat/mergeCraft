@@ -2,53 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Final, TypedDict
-
 import typer  # noqa: TC002 — Typer injects Context from this annotation at runtime
 from rich.table import Table
 
+from mergecraft.capabilities.manifest import (
+    ALLOWED_CAPABILITIES,
+    FORBIDDEN_CAPABILITIES,
+    CapabilitiesManifest,
+    capabilities_manifest,
+)
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
-from mergecraft.modes import _MODE_DEFS
-
-ALLOWED_CAPABILITIES: Final[tuple[str, ...]] = (
-    "identify",
-    "investigate",
-    "verify",
-    "explain",
-    "prioritize",
-    "suggest",
-)
-FORBIDDEN_CAPABILITIES: Final[tuple[str, ...]] = (
-    "edit_source",
-    "apply_fixes",
-    "commit",
-    "push",
-    "open_code_changing_pr",
-)
-
-
-class CapabilitiesManifest(TypedDict):
-    """Machine-readable review-only capability contract (no ``schema_version``)."""
-
-    review_only: bool
-    modes: list[str]
-    allowed: list[str]
-    forbidden: list[str]
-
-
-def capabilities_manifest() -> CapabilitiesManifest:
-    """Return the review-only capability manifest.
-
-    JSON callers inherit ``schema_version`` from the global ``--format json``
-    envelope; this payload must not include it.
-    """
-    return {
-        "review_only": True,
-        "modes": [name for name, _, _ in _MODE_DEFS],
-        "allowed": list(ALLOWED_CAPABILITIES),
-        "forbidden": list(FORBIDDEN_CAPABILITIES),
-    }
 
 
 def _render_table(manifest: CapabilitiesManifest) -> Table:

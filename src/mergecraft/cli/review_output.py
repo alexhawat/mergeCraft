@@ -10,16 +10,11 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 import typer
 
-from mergecraft.analyzers.finding import (
-    finding_json_record,
-    resolve_finding_short_ids,
-    validate_findings_export,
-    write_findings_json,
-)
+from mergecraft.analyzers.finding import validate_findings_export, write_findings_json
 from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.global_surface import emit_cli_json
@@ -29,6 +24,7 @@ from mergecraft.findings.hunk_export import (
     first_changed_lines_from_diff,
     format_file_level_drop_warning,
 )
+from mergecraft.review.output import finding_json_records
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -36,12 +32,6 @@ if TYPE_CHECKING:
 
 OutputFormat = Literal["text", "json", "jsonl", "sarif", "hunk"]
 HunkFileFindings = Literal["drop", "first-changed-line"]
-
-
-def finding_json_records(findings: Sequence[Finding]) -> list[dict[str, Any]]:
-    """Serialize findings for structured export with stable short ids."""
-    short_ids = resolve_finding_short_ids([row.fingerprint for row in findings])
-    return [finding_json_record(row, short_id=short_ids[row.fingerprint]) for row in findings]
 
 
 def write_jsonl_findings(path: Path, findings: Sequence[Finding]) -> None:

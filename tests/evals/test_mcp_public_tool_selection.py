@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tests.evals.support_mcp_public import case_by_id, require_callable
 
-from mergecraft.cli.capabilities_cmd import FORBIDDEN_CAPABILITIES, capabilities_manifest
+from mergecraft.capabilities.manifest import FORBIDDEN_CAPABILITIES, capabilities_manifest
 
 
 def test_review_this_change_selects_review_change() -> None:

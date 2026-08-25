@@ -1,4 +1,4 @@
-"""MP1.2 — six public semantic tools (RED until MP2).
+"""MP1.2 — six public semantic tools.
 
 Pins D3-D11: dedicated ``build_public_tools``, completed-review persistence,
 MC- short ids, capabilities/policy read-only contracts, and explain payload keys.
@@ -21,7 +21,7 @@ from tests.mcp.public_mcp_support import (
 
 import mergecraft.mcp.public as public_mod
 from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX
-from mergecraft.cli.capabilities_cmd import capabilities_manifest
+from mergecraft.capabilities.manifest import capabilities_manifest
 from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 from mergecraft.review.completed import CompletedReview, load_completed_review
 from mergecraft.review.snapshot import canonical_review_snapshot

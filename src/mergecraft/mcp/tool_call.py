@@ -11,7 +11,7 @@ from jsonschema.exceptions import best_match
 from jsonschema.validators import validator_for
 from loguru import logger
 
-from mergecraft.mcp.rpc import RpcError
+from mergecraft.mcp.rpc_types import RpcError
 from mergecraft.mcp.shared import JsonSchema, ToolResult, ToolSpec
 
 if TYPE_CHECKING:
