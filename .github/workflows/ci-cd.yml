@@ -38,6 +38,9 @@ jobs:
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
       - uses: ./.github/actions/bootstrap
+        env:
+          # Exporter unit tests run in coverage-measure (D14 / TH8) — match ci.yml.
+          MERGECRAFT_UV_EXTRAS: tracing
       - name: make ci
         run: make ci
 
