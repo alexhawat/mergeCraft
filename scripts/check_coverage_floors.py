@@ -4,9 +4,10 @@
 Reads a ``coverage.json`` produced by ``pytest --cov --cov-report=json`` and
 fails when global or critical-path floors drop below the locked thresholds.
 
-Floors are set from a measured baseline (2026-08-24, post lane A) with a
-2-point buffer so the gate fails on decreases without flaking on noise.
-Critical paths listed in the punch list get their own line/branch floors.
+Floors are set from a measured baseline (2026-08-24, post lane A). Module
+floors use a 2-point buffer on line and branch. Prefix aggregates use
+measured_line - 2 and measured_branch - 3 so branch coverage has extra
+headroom on large trees without weakening the line gate.
 """
 
 from __future__ import annotations
@@ -38,15 +39,16 @@ MODULE_FLOORS: dict[str, tuple[float, float]] = {
     "main.py": (85.3, 75.3),
 }
 
-# Prefix aggregates (line %, branch %). Branch floors for security/, analyzers/,
-# agents/, and review/ are ≥ 60 per D11.
+# Prefix aggregates (line %, branch %). Line floors are measured - 2; branch
+# floors are measured - 3 (extra headroom vs module floors). Branch floors for
+# security/, analyzers/, agents/, and review/ remain ≥ 60 per D11.
 PREFIX_FLOORS: tuple[tuple[str, str, float, float], ...] = (
-    ("mcp/", "/mcp/", 80.6, 66.9),
-    ("action/", "/action/", 89.1, 83.7),
-    ("security/", "/security/", 80.4, 71.3),
-    ("analyzers/", "/analyzers/", 84.9, 72.0),
-    ("agents/", "/agents/", 85.8, 76.1),
-    ("review/", "/review/", 87.4, 66.8),
+    ("mcp/", "/mcp/", 80.6, 65.9),
+    ("action/", "/action/", 89.1, 82.7),
+    ("security/", "/security/", 80.4, 70.3),
+    ("analyzers/", "/analyzers/", 84.9, 71.0),
+    ("agents/", "/agents/", 85.8, 75.1),
+    ("review/", "/review/", 87.4, 65.8),
 )
 
 

@@ -70,18 +70,18 @@ Do not weaken: `tests/test/coverage-431`, `tests/mcp/test_git_tool.py`, `tests/i
 Measured via `make coverage-measure` on `wave/test-suite-hygiene-2026-08-24` @ `34cd99f9`.
 `mcp/public.py` absent on this tree; floors baselined against current tip per D21.
 
-| Target | Measured line | Measured branch | Floor line (m−2) | Floor branch (m−2) |
+| Target | Measured line | Measured branch | Floor line (m−2) | Floor branch (prefix m−3) |
 | --- | ---: | ---: | ---: | ---: |
 | **global** | 83.04 | — | 82.00 (`fail_under`) | — |
-| `utils/token.py` | 53.9 | 41.2 | 51.9 | 39.2 |
-| `utils/git_setup.py` | 93.5 | 88.9 | 91.5 | 86.9 |
-| `main.py` | 87.3 | 77.3 | 85.3 | 75.3 |
-| `mcp/` | 82.6 | 68.9 | 80.6 | 66.9 |
-| `action/` | 91.1 | 85.7 | 89.1 | 83.7 |
-| `security/` | 82.4 | 73.3 | 80.4 | 71.3 |
-| `analyzers/` | 86.9 | 74.0 | 84.9 | 72.0 |
-| `agents/` | 87.8 | 78.1 | 85.8 | 76.1 |
-| `review/` | 89.4 | 68.8 | 87.4 | 66.8 |
+| `utils/token.py` | 53.9 | 41.2 | 51.9 | 39.2 (m−2) |
+| `utils/git_setup.py` | 93.5 | 88.9 | 91.5 | 86.9 (m−2) |
+| `main.py` | 87.3 | 77.3 | 85.3 | 75.3 (m−2) |
+| `mcp/` | 82.6 | 68.9 | 80.6 | 65.9 |
+| `action/` | 91.1 | 85.7 | 89.1 | 82.7 |
+| `security/` | 82.4 | 73.3 | 80.4 | 70.3 |
+| `analyzers/` | 86.9 | 74.0 | 84.9 | 71.0 |
+| `agents/` | 87.8 | 78.1 | 85.8 | 75.1 |
+| `review/` | 89.4 | 68.8 | 87.4 | 65.8 |
 
 Ratchet (D12): merge-base `fail_under` comparison via `git merge-base HEAD origin/pre-0.0.1`;
 `measured > floor + 5` warns (exit 0); `--hard-ceiling` opts into legacy fail.

@@ -69,6 +69,29 @@ jobs:
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
         run: make test
 
+  coverage-gate:
+    name: Verify (coverage gate py3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Merge-base ratchet (check_coverage_ratchet.py) needs full history.
+          fetch-depth: 0
+      - name: Fetch base branch for merge-base ratchet
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin "${{ github.base_ref }}"
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+        env:
+          # Tracing extra: exporter unit tests are part of coverage-measure (D14 / TH8).
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Coverage floors and ratchet
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+        run: make coverage-gate
+
   static:
     name: Verify (static + build py${{ matrix.python }})
     runs-on: ubuntu-latest
