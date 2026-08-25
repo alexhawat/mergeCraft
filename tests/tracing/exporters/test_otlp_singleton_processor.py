@@ -176,7 +176,6 @@ def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
     )
     tracers = [get_tracer_from_settings(settings) for _ in range(construction_count)]
 
-    reset_process_tracer_cache()
     _reset_test_seam()
     with tracers[-1].start_span(
         "tool.call",
