@@ -65,8 +65,16 @@ def _coverage_json(tmp_path: Path, percent: float) -> Path:
     files: dict[str, dict[str, Any]] = {}
     for suffix in ("utils/token.py", "utils/git_setup.py", "main.py"):
         files[f"src/mergecraft/{suffix}"] = {"summary": dict(summary)}
-    files["src/mergecraft/mcp/server.py"] = {"summary": dict(summary)}
-    files["src/mergecraft/action/post.py"] = {"summary": dict(summary)}
+    prefix_paths = (
+        "src/mergecraft/mcp/server.py",
+        "src/mergecraft/action/post.py",
+        "src/mergecraft/security/gate.py",
+        "src/mergecraft/analyzers/pipeline.py",
+        "src/mergecraft/agents/reviewer.py",
+        "src/mergecraft/review/modes.py",
+    )
+    for path in prefix_paths:
+        files[path] = {"summary": dict(summary)}
     payload = {
         "totals": {
             "percent_covered": percent,
@@ -102,6 +110,35 @@ def test_check_coverage_floors_rejects_measured_below_target(
     monkeypatch.setattr(sys, "argv", ["check_coverage_floors", str(report)])
     rc = int(module.main())
     assert rc != 0
+
+
+def test_check_coverage_floors_rejects_missing_prefix_data(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Incomplete reports must not bypass prefix floors via a synthetic 100%."""
+    module = _load_coverage_floors()
+    report = _coverage_json(tmp_path, HH431_TARGET_FAIL_UNDER)
+    # Omit security/ (and agents/) so prefix aggregates have no matching files.
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    payload["files"] = {
+        path: data
+        for path, data in payload["files"].items()
+        if "/security/" not in path and "/agents/" not in path
+    }
+    report.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["check_coverage_floors", str(report)])
+    rc = int(module.main())
+    assert rc != 0
+    proc = subprocess.run(
+        [sys.executable, "scripts/check_coverage_floors.py", str(report)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert "no coverage data for prefix" in proc.stderr
 
 
 def test_check_coverage_floors_accepts_measured_at_target(

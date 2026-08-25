@@ -63,17 +63,19 @@ def _match_module(path: str, suffix: str) -> bool:
     return normalized.endswith(suffix) or f"/{suffix}" in normalized
 
 
-def _aggregate_prefix(files: dict[str, Any], needle: str) -> tuple[float, float]:
+def _aggregate_prefix(files: dict[str, Any], needle: str) -> tuple[float, float, bool]:
     stmts = covered = branches = covered_b = 0
+    matched_any = False
     for path, payload in files.items():
         if needle not in path.replace("\\", "/"):
             continue
+        matched_any = True
         summary = payload["summary"]
         stmts += int(summary["num_statements"])
         covered += int(summary["covered_lines"])
         branches += int(summary.get("num_branches") or 0)
         covered_b += int(summary.get("covered_branches") or 0)
-    return _pct(covered, stmts), _pct(covered_b, branches)
+    return _pct(covered, stmts), _pct(covered_b, branches), matched_any
 
 
 def main() -> int:
@@ -122,7 +124,10 @@ def main() -> int:
             failures.append(f"{suffix} branch {branch_pct:.1f}% < floor {branch_floor:.1f}%")
 
     for label, needle, line_floor, branch_floor in PREFIX_FLOORS:
-        line_pct, branch_pct = _aggregate_prefix(files, needle)
+        line_pct, branch_pct, matched_any = _aggregate_prefix(files, needle)
+        if not matched_any:
+            failures.append(f"no coverage data for prefix {label}")
+            continue
         if line_pct + 1e-9 < line_floor:
             failures.append(f"{label} line {line_pct:.1f}% < floor {line_floor:.1f}%")
         if branch_pct + 1e-9 < branch_floor:
