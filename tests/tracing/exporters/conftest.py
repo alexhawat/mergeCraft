@@ -27,13 +27,18 @@ def _reset_exporter_tracer_cache() -> Iterator[None]:
     this package repeats it so OTLP singleton tests never inherit a stale
     ``_ACTIVE_SPAN`` from a sibling exporter test on the same xdist worker.
     Also clears any stale ``sink_factory`` handoff left by memory/jsonl tests.
+    Resets enterprise telemetry binding so a prior ``telemetry: opt-out`` test
+    does not block OTLP export on the same worker.
     """
+    from mergecraft.enterprise.runtime import reset_enterprise_runtime
     from mergecraft.tracing.sinks import _PENDING_SINK
     from mergecraft.tracing.tracer import reset_process_tracer_cache
 
+    reset_enterprise_runtime()
     reset_process_tracer_cache()
     _PENDING_SINK.set(None)
     yield
+    reset_enterprise_runtime()
     reset_process_tracer_cache()
     _PENDING_SINK.set(None)
 
