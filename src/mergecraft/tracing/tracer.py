@@ -431,6 +431,15 @@ def reset_process_tracer_cache() -> None:
         _PENDING_SINK.set(None)
     except ImportError:
         pass
+    # Enterprise telemetry opt-out/off is process-local; a prior test that bound
+    # it without the enterprise package conftest must not make ``sink_factory``
+    # skip OTLP children when ``claim_sink`` rebuilds after a discarded handoff.
+    try:
+        from mergecraft.enterprise.runtime import reset_enterprise_runtime
+
+        reset_enterprise_runtime()
+    except ImportError:
+        pass
 
 
 def resolve_trace_id(*, pin: bool = False) -> str:
