@@ -26,9 +26,9 @@ import pytest
 from tests.ci.workflow_support import REPO_ROOT
 from typer.testing import CliRunner
 
+from mergecraft.capabilities.manifest import FORBIDDEN_CAPABILITIES
 from mergecraft.cli.agent_protocol import AgentProtocolStream, format_event_line
 from mergecraft.cli.app import app
-from mergecraft.cli.capabilities_cmd import FORBIDDEN_CAPABILITIES
 from mergecraft.mcp.context import (
     PayloadEvent,
     RepoIdentity,

@@ -93,6 +93,24 @@ DEFAULT_GATE_POLICIES: Final[GateActionPolicy] = {
 }
 
 
+def resolve_effective_gate_policies(
+    overrides: dict[str, str] | None = None,
+) -> GateActionPolicy:
+    """Merge repo ``gates.override`` onto :data:`DEFAULT_GATE_POLICIES`."""
+    effective: GateActionPolicy = dict(DEFAULT_GATE_POLICIES)
+    if not overrides:
+        return effective
+    for rule_id, action_name in overrides.items():
+        if action_name not in GATE_ACTIONS:
+            msg = (
+                f"gate policy {rule_id!r} maps to {action_name!r}, which is outside the closed "
+                f"action vocabulary {sorted(GATE_ACTIONS)}"
+            )
+            raise ValueError(msg)
+        effective[rule_id] = GateAction(action_name)
+    return effective
+
+
 __all__ = [
     "DEFAULT_GATE_POLICIES",
     "GATE_ACTIONS",
@@ -100,4 +118,5 @@ __all__ = [
     "GateAction",
     "GateActionPolicy",
     "RuleId",
+    "resolve_effective_gate_policies",
 ]

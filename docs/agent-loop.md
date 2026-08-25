@@ -42,3 +42,12 @@ See also: [`docs/cli.md`](cli.md) (`review --agent`),
 Harness packages for Codex, Gemini CLI, and OpenCode are not authored here.
 Once README v2 RV3 lands, `skills/harnesses.yaml` is the authority this page
 should cite for install paths. Until then, create nothing under `skills/`.
+
+## Public MCP (same engine, different wire)
+
+[`docs/mcp.md`](mcp.md) documents the **product MCP** profile: six semantic tools over
+stdio for Cursor, Claude Desktop, Codex, Gemini CLI, and OpenCode. It uses the same
+review engine and completed-review store as this page's JSONL loop — `review_change`
+is not a second workflow, just MCP instead of `mergecraft review --agent` stdout.
+Pick JSONL when your harness already orchestrates phases; pick public MCP when your
+host only speaks MCP tools/list and tools/call.

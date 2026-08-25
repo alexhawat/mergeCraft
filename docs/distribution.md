@@ -101,3 +101,17 @@ install is required.
 - `meat_python_plus/` — experimental Python port of [meat](https://github.com/boldsoftware/meat);
   not imported by shipped `mergecraft`. Optional Meat reading-diff lens uses the
   `meat` Go binary (`go install meat.dev/cmd/meat@latest`) via `meat_harness`.
+
+## MCP Registry (`server.json`)
+
+Repo-root [`server.json`](../server.json) is **generated** by
+`scripts/gen_mcp_server_json.py` from the public MCP tool catalog and
+`pyproject.toml` version. Regenerate with `make mcp-server-json`; CI runs
+`make mcp-server-json-check` (schema validation against a vendored snapshot plus
+`--check` drift gate). The artifact advertises the **public** six-tool stdio
+profile (`mergecraft mcp serve --role public --transport stdio`) and PyPI
+package `merge-craft` — not the runtime reviewer/verifier harness bag.
+
+**Live registry publish is operator-owned (G3):** after a tagged release, run
+`mcp-publisher` against the generated `server.json` under namespace
+`io.github.alexhawat/mergecraft`. PR CI does not publish to the MCP Registry.

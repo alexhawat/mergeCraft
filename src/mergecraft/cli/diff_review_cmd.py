@@ -22,7 +22,6 @@ from mergecraft.cli.review_output import (
     HunkFileFindings,
     OutputFormat,
     dispatch_review_output,
-    finding_json_records,
 )
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.offline_review import (
@@ -30,13 +29,12 @@ from mergecraft.offline_review import (
     parse_offline_review_findings,
     run_offline_diff_review,
 )
-from mergecraft.review.completed import CompletedReview, persist_completed_review
-from mergecraft.review.completed_artifacts import (
-    collect_evidence_packets_for_persist,
-    collect_trace_events_for_review,
+from mergecraft.review.completed import (
+    persist_offline_review,
 )
 from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.finding_lookup import is_safe_path_stem
+from mergecraft.review.output import finding_json_records
 from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.types import ShellPermission  # noqa: TC001
 from mergecraft.utils.log import configure_logging
@@ -183,38 +181,17 @@ def _persist_completed_cli_review(
     evidence_packet_path: str | None = None,
     trace_dir: Path | None = None,
 ) -> None:
-    from mergecraft.evidence.run_manifest import build_run_manifest
-
-    manifest = build_run_manifest(
-        cwd=cwd,
-        model=model or "(unresolved)",
-        agent_id="mergecraft",
-        prompt_text=prompt or "",
-    )
-    findings_records = finding_json_records(findings)
-    review = CompletedReview(
-        review_id=review_id,
-        snapshot=snapshot,
-        manifest=manifest,
-        findings=findings_records,
-        trace_session_id=trace_session_id,
-    )
-    evidence_packets = collect_evidence_packets_for_persist(
-        findings,
-        repo_root=cwd,
-        evidence_packet_path=evidence_packet_path,
-    )
-    trace_events = collect_trace_events_for_review(
-        trace_session_id,
-        repo_root=cwd,
-        trace_dir=trace_dir,
-    )
     try:
-        persist_completed_review(
-            review,
+        persist_offline_review(
+            review_id=review_id,
+            trace_session_id=trace_session_id,
+            snapshot=snapshot,
             repo_root=cwd,
-            evidence_packets=evidence_packets,
-            trace_events=trace_events,
+            model=model or "(unresolved)",
+            prompt=prompt,
+            findings=findings,
+            evidence_packet_path=evidence_packet_path,
+            trace_dir=trace_dir,
         )
     except (OSError, ValueError) as exc:
         logger.warning("skipped durable review persistence: {}", exc)

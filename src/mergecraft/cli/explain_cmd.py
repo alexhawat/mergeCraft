@@ -22,6 +22,7 @@ from mergecraft.review.completed import (
     completed_review_exists,
     lookup_finding_packet_in_review,
 )
+from mergecraft.review.explain import finding_explain_payload
 
 
 def _read_diff(repo_root: Path) -> str:
@@ -55,27 +56,6 @@ def _change_payload(repo_root: Path) -> dict[str, Any]:
             else "No working-tree diff to explain."
         ),
     }
-
-
-def _finding_payload(
-    finding_id: str,
-    packet: dict[str, Any],
-    *,
-    review_id: str | None = None,
-) -> dict[str, Any]:
-    state = packet.get("state", "unverified")
-    kinds = packet.get("kinds", [])
-    kinds_text = ", ".join(str(item) for item in kinds) if isinstance(kinds, list) else "none"
-    payload: dict[str, Any] = {
-        "verb": "explain",
-        "finding_id": finding_id,
-        "paths": [],
-        "summary": f"Finding {finding_id} is {state} (kinds: {kinds_text}).",
-        "packet": packet,
-    }
-    if review_id is not None:
-        payload["review_id"] = review_id
-    return payload
 
 
 def _render_table(payload: dict[str, Any]) -> Table:
@@ -137,6 +117,11 @@ def run(
     if resolved_finding_id:
         packet: dict[str, Any] | None = None
         if resolved_review_id:
+            if not completed_review_exists(resolved_review_id, repo_root=root):
+                cli_bail(
+                    f"unknown review id {resolved_review_id!r}",
+                    code=CLI_USAGE_EXIT_CODE,
+                )
             packet = lookup_finding_packet_in_review(
                 resolved_review_id,
                 resolved_finding_id,
@@ -148,7 +133,7 @@ def run(
             packet = lookup_finding_packet(resolved_finding_id, repo_root=root)
             if packet is None:
                 cli_bail(f"unknown finding id {resolved_finding_id}", code=CLI_USAGE_EXIT_CODE)
-        payload = _finding_payload(
+        payload = finding_explain_payload(
             resolved_finding_id,
             packet,
             review_id=resolved_review_id,

@@ -73,6 +73,18 @@ pages:
     generator: null
     purpose: How mergeCraft is packaged — PyPI, Docker, and git install paths.
 
+  - path: docs/mcp-tools.md
+    audience: consumer
+    template: generated-ref
+    generator: mcp-server-json
+    purpose: Generated public MCP tool reference from ToolSpec schemas.
+
+  - path: docs/mcp.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries.
+
   - path: docs/blast-radius.md
     audience: contributor
     template: contributor
