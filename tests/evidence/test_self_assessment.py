@@ -107,14 +107,14 @@ def test_decide_approval_does_not_treat_self_assessment_as_evidence() -> None:
     """The decision function must read the ``decision`` field, not the self-assessment.
 
     This is the cross-field contract: even when the agent's self-assessment
-    says approved=True, an explicit decision of ``block`` must be honoured.
+    says approved=True, an explicit decision of ``failure`` must be honoured.
     """
     packet_mod = import_module("mergecraft.evidence.packet")
     gates_mod = import_module("mergecraft.agents.gates")
 
     payload = _packet_with_self_assessment(approved=True, no_findings=True)
     payload["decision"] = {  # type: ignore[index]
-        "verdict": "block",
+        "verdict": "failure",
         "reason": "explicit override — evidence verdict is authoritative",
         "decided_by": "mergecraft.agents.gates.decide_approval",
     }
@@ -122,7 +122,7 @@ def test_decide_approval_does_not_treat_self_assessment_as_evidence() -> None:
 
     decision = gates_mod.decide_approval(packet, run_succeeded=True, tier="trusted")
     verdict = getattr(decision, "verdict", None) or getattr(decision, "value", None)
-    assert verdict == "block", (
+    assert verdict == "failure", (
         "decision function honoured self_assessment over the explicit decision field"
     )
 

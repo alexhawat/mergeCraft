@@ -424,9 +424,12 @@ def test_trajectory_findings_reach_the_packet_from_a_real_run(tmp_path: Any) -> 
         ok=True,
     )
 
-    from mergecraft.evidence.run_packet import emit_run_packet
+    from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
 
-    written = emit_run_packet(ctx, run_succeeded=True)
+    written = emit_run_packet(
+        ctx,
+        packet=prepare_run_packet(ctx, run_succeeded=True),
+    )
     assert written is not None
     packet = json.loads(written.read_text(encoding="utf-8"))
     assert packet["trajectory"] is not None, "trajectory section stayed None on a real run"

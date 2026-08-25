@@ -146,11 +146,15 @@ def test_ci_sarif_artifact_becomes_findings(tmp_path: Path) -> None:
 
 
 def test_ci_sarif_findings_are_never_blamed_on_this_pr(tmp_path: Path) -> None:
-    """SARIF from someone else's pipeline says nothing about *who* introduced it (D11)."""
+    """SARIF from someone else's pipeline says nothing about *who* introduced it (D11).
+
+    Attribution stays ``unknown`` until the blame layer speaks. D8 / #464
+    forbids clamping every CI SARIF finding to a non-blocking severity —
+    blocking grade is asserted in ``test_ci_sarif_evidence_464``.
+    """
     findings = sarif_findings(_SARIF, artifact="ruff-sarif", repo_root=tmp_path)
 
     assert [f.introduced_by_pr for f in findings] == ["unknown"]
-    assert all(f.severity not in {"Critical", "Major"} for f in findings)
 
 
 # ── W5.3 — substitution requires a declared mapping (D10) ─────────────────────
@@ -284,6 +288,45 @@ def test_recording_is_idempotent_on_fingerprint() -> None:
     record_ci_findings(state, [finding])
 
     assert len(ci_evidence_findings(state)) == 1
+
+
+def test_recording_keeps_higher_severity_on_fingerprint_collision() -> None:
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    minor = check_run_to_finding(_check_run(conclusion="failure"))
+    assert minor is not None
+    minor = minor.model_copy(update={"severity": "Minor", "fingerprint": "ci-dup"})
+    major = minor.model_copy(update={"severity": "Major"})
+
+    record_ci_findings(state, [minor])
+    record_ci_findings(state, [major])
+
+    restored = ci_evidence_findings(state)
+    assert len(restored) == 1
+    assert restored[0].severity == "Major"
+
+
+def test_recording_changed_uses_dedupe_key_when_fingerprint_empty() -> None:
+    """A second empty-fingerprint finding with a different identity is new."""
+    from mergecraft.analyzers.finding import make_finding
+
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    first = make_finding(
+        tool="ci",
+        rule_id="X",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="one",
+        path="a.py",
+        start_line=1,
+        end_line=1,
+        source="ci",
+    ).model_copy(update={"fingerprint": ""})
+    second = first.model_copy(update={"path": "b.py", "message": "two"})
+    record_ci_findings(state, [first])
+    changed = record_ci_findings(state, [second])
+    assert len(changed) == 1
+    assert len(ci_evidence_findings(state)) == 2
 
 
 def test_declared_gate_findings_report_a_failing_mapped_check_run() -> None:

@@ -1183,7 +1183,7 @@ ciEvidence:
 
 - **Declared only.** mergeCraft never infers that a check run *named* `lint` proves the `lint` gate — a pull request can add a workflow with any name it likes. With no `ciEvidence` block nothing is read and no extra API call is made.
 - **Green only substitutes.** A declared check run that passed rewrites the gate row to `satisfied-by-ci`. A declared check run that *failed* leaves the row alone and is reported as a `source: ci` finding instead.
-- **Reported, not blamed.** Findings derived from CI start non-blocking with `introduced_by_pr: unknown`; only the CI-intelligence blame layer (`ci/blame.py`, `ci/flaky.py`) may attribute one to this PR.
+- **Reported, not blamed.** Bare check-run findings start non-blocking; SARIF `error` from declared `sarifArtifacts` keeps Major/Critical. `introduced_by_pr` stays `unknown` until `ci/blame.py` / `ci/flaky.py` attribute a finding to this PR.
 - **Redacted.** Log excerpts are truncated and passed through `analyzers/redact.py` before they enter a finding.
 
 ## SARIF upload to code scanning (#39)
@@ -2560,6 +2560,10 @@ preserved as the first entry):
 ```
 
 `MERGECRAFT_MODEL` (env var) follows the same rule: it joins as the head.
+When a model is named explicitly — the Action `with: model:` input or the
+CLI `--model` flag — that one heads the chain and `MERGECRAFT_MODEL`
+follows it, matching the CLI > env > YAML > default precedence that
+`mergecraft config explain model` reports.
 
 #### Escape hatch — `model_pin: enabled`
 

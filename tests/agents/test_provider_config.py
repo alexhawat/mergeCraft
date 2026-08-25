@@ -100,32 +100,6 @@ _BYTE_IDENTITY_CASES: tuple[tuple[str, str, dict[str, str], object], ...] = (
         },
     ),
     (
-        "named_nous",
-        NOUS_MODEL,
-        {"NOUS_API_KEY": "nous-key"},
-        {
-            "nous": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "nous",
-                "options": {"baseURL": NOUS_BASE_URL, "apiKey": "nous-key"},
-                "models": {"deepseek/deepseek-v4-flash": {"name": "deepseek/deepseek-v4-flash"}},
-            }
-        },
-    ),
-    (
-        "named_tokenhub",
-        TOKENHUB_MODEL,
-        {"TOKENHUB_API_KEY": "th-key"},
-        {
-            "tokenhub": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "tokenhub",
-                "options": {"baseURL": TOKENHUB_BASE_URL, "apiKey": "th-key"},
-                "models": {"hy3": {"name": "hy3"}},
-            }
-        },
-    ),
-    (
         "custom_singleton",
         "default/some-model",
         {
@@ -141,26 +115,6 @@ _BYTE_IDENTITY_CASES: tuple[tuple[str, str, dict[str, str], object], ...] = (
                     "apiKey": "custom-key",
                 },
                 "models": {"some-model": {"name": "some-model"}},
-            }
-        },
-    ),
-    (
-        "custom_base_url_overrides_nous",
-        NOUS_MODEL,
-        {
-            "NOUS_API_KEY": "nous-key",
-            SINGLETON_BASE_URL_ENV: "https://override.example.test/v1",
-            SINGLETON_API_KEY_ENV: "override-key",
-        },
-        {
-            "nous": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "nous",
-                "options": {
-                    "baseURL": "https://override.example.test/v1",
-                    "apiKey": "override-key",
-                },
-                "models": {"deepseek/deepseek-v4-flash": {"name": "deepseek/deepseek-v4-flash"}},
             }
         },
     ),
@@ -345,9 +299,19 @@ def test_gaps_in_indices_are_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _custom_provider_ids("provider_1/some-model") == [PROVIDER_1_ID, PROVIDER_3_ID]
 
 
-def test_named_presets_still_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``nous/*`` and ``tokenhub/*`` still resolve from their named env vars."""
-    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
+def test_named_presets_still_resolve_via_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registered ``nous/*`` and ``tokenhub/*`` resolve from registry + indexed secrets."""
+    from tests.cli.support_provider_registry import (
+        bootstrap_nous_registry,
+        bootstrap_opencode_gateway,
+    )
+
+    bootstrap_nous_registry(
+        tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash", api_key="nous-key"
+    )
     nous = build_custom_provider(NOUS_MODEL)
     assert nous == {
         "nous": {
@@ -359,8 +323,15 @@ def test_named_presets_still_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     assert _custom_provider_ids(NOUS_MODEL) == ["nous"]
 
-    monkeypatch.delenv("NOUS_API_KEY")
-    monkeypatch.setenv("TOKENHUB_API_KEY", "th-key")
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="tokenhub",
+        url=TOKENHUB_BASE_URL,
+        model_id="hy3",
+        api_key="th-key",
+        env_index=2,
+    )
     tokenhub = build_custom_provider(TOKENHUB_MODEL)
     assert tokenhub == {
         "tokenhub": {

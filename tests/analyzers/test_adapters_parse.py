@@ -10,6 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 if TYPE_CHECKING:
     import pytest
 
@@ -325,3 +327,60 @@ def test_tsc_help_stdout_is_parse_failure_not_pass(
     assert result.findings == []
     reason = result.skip_reason or ""
     assert "failed to parse" in reason, reason
+
+
+def test_unreadable_output_logs_exception_without_leaking_into_skip_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skip reason stays generic; the OSError is logged."""
+    _stub_chain(monkeypatch, output_text="{}", tmp_path=tmp_path)
+    canary = "disk exploded"
+    original = Path.read_text
+
+    def _read(self: Path, *args: object, **kwargs: object) -> str:
+        if self.name == f"{_TOOL_ID}.out":
+            raise OSError(canary)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _read)
+    records: list[str] = []
+    handler = logger.add(lambda message: records.append(str(message)), level="INFO")
+    try:
+        result = run_adapter(
+            tool_id=_TOOL_ID,
+            repo_root=tmp_path,
+            changed_files=["src/app.py"],
+            tier="trusted",
+        )
+    finally:
+        logger.remove(handler)
+
+    assert result.skipped is True
+    reason = result.skip_reason or ""
+    assert "could not read analyzer output" in reason
+    assert canary not in reason
+    assert any(canary in rec for rec in records)
+
+
+def test_parse_failure_logs_exception_without_leaking_into_skip_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skip reason stays generic; the parse exception is logged."""
+    _stub_chain(monkeypatch, output_text="not valid json {", tmp_path=tmp_path)
+    records: list[str] = []
+    handler = logger.add(lambda message: records.append(str(message)), level="INFO")
+    try:
+        result = run_adapter(
+            tool_id=_TOOL_ID,
+            repo_root=tmp_path,
+            changed_files=["src/app.py"],
+            tier="trusted",
+        )
+    finally:
+        logger.remove(handler)
+
+    assert result.skipped is True
+    reason = result.skip_reason or ""
+    assert "failed to parse analyzer output" in reason
+    assert "{" not in reason
+    assert records, "parse skip must log the exception"

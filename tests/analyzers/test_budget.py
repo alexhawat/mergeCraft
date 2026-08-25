@@ -38,6 +38,84 @@ def test_overflow_lands_in_mechanical_section() -> None:
     assert "### 🔧 Mechanical findings" in placement.mechanical_section
 
 
+def test_mechanical_section_includes_short_ids() -> None:
+    """Production markdown surfaces batch-resolved short ids for overflow findings."""
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    budget = import_module("mergecraft.analyzers.budget")
+    findings = [_finding("Major", path=f"src/f{i}.py", line=i) for i in range(1, INLINE_BUDGET + 2)]
+    placement = budget.place_findings(findings, inline_budget=0)
+    assert placement.mechanical_section is not None
+    overflow = findings[0]
+    short_id = finding_mod.finding_short_id(overflow.fingerprint)
+    assert short_id in placement.mechanical_section
+
+
+def test_sync_deferred_section_includes_short_ids() -> None:
+    """Live markdown regen keeps batch-resolved short ids on deferred overflow rows."""
+    from mergecraft.mcp.tool_state import AnalyzerRunState
+
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    budget = import_module("mergecraft.analyzers.budget")
+    finding = _finding("Major", path="src/deferred.py", line=9)
+    run_state = AnalyzerRunState(
+        ran=True,
+        findings=[{"fingerprint": finding.fingerprint}],
+        deferred_findings=[budget.finding_to_deferred_row(finding)],
+    )
+    budget.sync_deferred_section(run_state)
+    assert run_state.deferred_section is not None
+    short_id = finding_mod.finding_short_id(finding.fingerprint)
+    assert short_id in run_state.deferred_section
+
+
+def test_cross_lane_short_ids_disambiguate_collisions() -> None:
+    """Inline and mechanical lanes share one batch-resolved ``MC-…`` mapping."""
+    from mergecraft.review.finding_lookup import fingerprint_for_short_id
+
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    budget = import_module("mergecraft.analyzers.budget")
+    from tests.analyzers.support_short_id import collision_fingerprints
+
+    fp1, fp2 = collision_fingerprints()
+    inline_finding = finding_mod.make_finding(
+        tool="actionlint",
+        rule_id="inline",
+        category="Maintainability & Code Quality",
+        severity="Major",
+        confidence="likely",
+        message="inline collision",
+        path="src/inline.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+        fingerprint=fp1,
+    )
+    mechanical_finding = finding_mod.make_finding(
+        tool="actionlint",
+        rule_id="overflow",
+        category="Maintainability & Code Quality",
+        severity="Major",
+        confidence="likely",
+        message="mechanical collision",
+        path="src/mechanical.py",
+        start_line=2,
+        end_line=2,
+        source="analyzer",
+        fingerprint=fp2,
+    )
+    placement = budget.place_findings(
+        [inline_finding, mechanical_finding],
+        inline_budget=1,
+    )
+    expected_short_ids = finding_mod.resolve_finding_short_ids([fp1, fp2])
+    assert placement.short_ids == expected_short_ids
+    assert placement.short_ids[fp1] != placement.short_ids[fp2]
+    assert placement.mechanical_section is not None
+    assert f"**{placement.short_ids[fp2]}**" in placement.mechanical_section
+    displayed = placement.short_ids[fp2]
+    assert fingerprint_for_short_id(displayed, (fp1, fp2)) == fp2
+
+
 def test_trivial_severity_never_inline() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     trivial = _finding(BODY_ONLY_SEVERITY)

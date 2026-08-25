@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
+  Major/Critical (not clamped to Minor); a listing error on one workflow run
+  does not skip later runs; a Major/Critical finding is kept over a less
+  severe duplicate fingerprint. Dogfood `.mergecraft/config.yaml` lists those
+  three `ciEvidence.sarifArtifacts`, and `.github/workflows/ci.yml` uploads
+  them. A ruff SARIF error can fail `mergecraft-approval` (#464)
 - `make action-pin-check` also measures the pin against the default branch's own
   tip, not just against the other branch's pin. Comparing pins to each other
   passes when both are equally stale, which is what happened after #457 merged:
@@ -59,6 +65,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `validate_http_url` rejects whitespace and control characters anywhere in a
+  provider URL, not just at the ends. A stored URL is written verbatim into the
+  consumer workflow YAML, so an interior newline could open a new key or step
+  there. `workflow provider add` also re-validates a stored row before wiring it
+- `mergecraft workflow` resolves a relative `--workflow` against `--cwd` on every
+  subcommand. The registry config was scoped by `--cwd` while the workflow path
+  stayed against the process working directory, so invoking from outside the
+  target repository could read config from one repo and rewrite another repo's
+  workflow
+- The consumer workflow file is replaced atomically by `mergecraft workflow`,
+  matching the config writer. A crash mid-write used to leave it truncated
+- `provider migrate` validates a migrated `NOUS_BASE_URL` through
+  `validate_http_url` like every other URL entry point, instead of storing it
+  unchecked
+- `.mergecraft/config.yaml` is replaced atomically (temporary file plus rename,
+  preserving permissions) by every CLI writer. An in-place write truncates
+  first, so a failure partway through left a half-written config behind
+- `mergecraft workflow provider add --apply` writes the registry config only
+  after the workflow file lands, and rolls the workflow back if that config
+  write then fails. Either half failing used to exit nonzero with config on one
+  endpoint and Actions on the other
+- `mergecraft workflow provider add --url` on an already-registered provider now
+  applies the validated endpoint to the row that is wired and persisted. The
+  override was validated and then discarded, leaving the workflow on the
+  superseded endpoint with no indication the flag was ignored
+- Indexed registry credentials survive the legacy credential re-injection in
+  `build_agent_env`. When an `LLM_PROVIDER_<N>_*` secret and its deprecated
+  counterpart were both set, the legacy value overwrote the registry one for
+  API keys, Claude Code OAuth tokens, and the Bedrock/Vertex chains, inverting
+  the documented precedence
+- `list_check_runs` omits `check_runs` when the listing is truncated, instead
+  of returning a partial catalog with `total_count`. Analyzer JSON arrays no
+  longer treat a leading `{"error": ...}` then `[]` as a clean scan
+- Check-suite log fetch skips with a distinct unavailable payload when no
+  GitHub client is bound, instead of looking like “no failed runs”
+- Catalog-check rejects all-zero `sha256` provenance pins (placeholders that
+  made `provision_managed_binary` treat a trailing-slash URL as a directory and
+  fail with `Is a directory`). Pip-style tools such as `checkov` and `yamllint`
+  now ship `provenance: {}` like `semgrep`; a trailing-slash URL is refused
+  with a `ProvisionError` that names the URL (#458)
+- Empty Bandit JSON stdout is a clean scan (zero findings) instead of a skip;
+  non-object `results` rows fail parse the same way as the SARIF converter;
+  unparsable stdout still skips without embedding a raw stdout snippet (#467)
+- A transient Nous HTTP 404 (including a false billing/credits refusal) now
+  fails over to the next model instead of stopping the run and reporting a
+  missing `set_output` schema failure (#466)
+- The approval gate now unions agent findings with analyzer findings, so an
+  agent Critical or Major finding fails ``mergecraft-approval`` and the
+  evidence packet's ``request_changes`` action. An empty finding list still
+  stays ``neutral``; untrusted runs still never ``success`` (#460)
+- Coverage already below `fail_under` on the base branch stays inherited
+  drift even if HEAD drops further; a drop of 1.0pp or more below the floor
+  when the base is already at the floor is also inherited, instead of always
+  treating `head < base` as caused by the PR (#485)
+- A clean mypy JSON typecheck no longer fails the SARIF convert step, so the
+  mypy artifact still uploads for review evidence
+- Evidence packet `decision.verdict` is a GitHub check conclusion
+  (`success` / `failure` / `neutral`); schema version 1.9.0
+- `mergecraft-approval` posts `neutral` when the evidence packet was not
+  assembled, instead of omitting the check
+- Custom provider slugs not in the operator registry now fail closed instead of silently routing to OpenCode; the built-in catalog allow-list was narrowed accordingly.
+- Seeded ``tokenhub``/``minimax`` registry rows no longer shadow legacy ``TOKENHUB_API_KEY`` / ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` credentials: ``resolve_runtime_agent`` honours the same legacy fallbacks as ``has_credentials_for_slug``, and ``provider migrate`` can index those keys.
 - Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
   the checkout did not provide a tool, resolution fell through to
   `shutil.which`, so a system copy ran against the consumer's code at an
@@ -72,6 +140,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - mergeCraft's consumer workflow approval gate now runs in a separate job that
   `needs:` the review-attempts job, so Codex fallback can post `mergecraft-approval`
   before the fail-closed gate samples check-runs (#433)
+- An explicit `--model` now beats `MERGECRAFT_MODEL`. `resolve_model()` read the env override first and
+  returned before it ever looked at the flag, so a review asked for one model and ran another with no line
+  saying the request was dropped — inverting the repo's own `ConfigLayer` order (CLI > env > YAML > default)
+  and the flag's help text. The named model also heads the subagent chains the harness renders, so it
+  reaches the whole run rather than just the top-level dispatch, and `config explain model` now reports the
+  YAML layer as the config file alone instead of the env value promoted to its front (#468)
+- Offline reviews (`--base`/`--head`, `--diff`, `--cwd`) can record a terminal verdict. Review scope was
+  only ever established by `checkout_pr`, which an offline run has no PR for, so `submit_review_verdict` was
+  refused on every attempt and a completed review — analyzer findings and all — was never decided. The
+  materialized diff now establishes scope on the offline path. The post-run retry loop also stops when a
+  resume leaves the identical issue set, instead of replaying a precondition that cannot change between
+  attempts (#470)
 - Retryability now has one decision path. `_is_retryable_failure` gated on `metadata["retryable"]` alone
   while `_retryable_failure_reason` inferred the same property from the error text, and only the
   metadata-blind one decided — so a driver that omitted the flag was silently read as "permanent" and its

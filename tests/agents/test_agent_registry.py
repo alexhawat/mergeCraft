@@ -478,3 +478,58 @@ agents:
     verifier = _resolve_role(registry, "verifier")
     assert reviewer.agent_id == "mergecraft-reviewer"
     assert verifier.agent_id == "senior-reviewer"
+
+
+def test_model_head_outranks_the_env_override_in_default_chains(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """#468: an explicitly named model heads every default binding's chain.
+
+    ``MERGECRAFT_MODEL`` is the env layer and ``model_head`` is the CLI layer
+    (``--model`` / the Action ``with: model:`` input), so the named model must
+    lead — otherwise subagents run a model the operator did not ask for while
+    the flag is silently discarded.
+    """
+    from mergecraft.agents.registry import load_registry
+
+    monkeypatch.setenv("MERGECRAFT_MODEL", "acme/env-model")
+    settings = load_repo_settings(root=tmp_path)
+
+    without_head = load_registry(settings=settings, repo_root=tmp_path)
+    assert _resolve_role(without_head, "reviewer").model_chain[0] == "acme/env-model"
+
+    with_head = load_registry(settings=settings, repo_root=tmp_path, model_head="acme/cli-model")
+    for role in ("reviewer", "recall", "orchestrator"):
+        chain = _resolve_role(with_head, role).model_chain
+        assert chain[0] == "acme/cli-model", f"{role} chain must start with the CLI model: {chain}"
+        assert "acme/env-model" in chain, f"{role} must keep the env model as a fallback: {chain}"
+
+
+def test_requested_model_head_reads_both_run_payload_shapes(tmp_path: Path) -> None:
+    """#468: the model the operator named reaches the harness registry.
+
+    The run payload is a ``ResolvedPayload`` offline and a plain mapping on
+    the Action path; both carry the named model, and both must yield it as
+    the chain head so subagents do not fall back to ``MERGECRAFT_MODEL``.
+    """
+    from mergecraft.agents.harness_render import _requested_model_head
+    from mergecraft.agents.shared import AgentRunContext
+
+    def _ctx(payload: object) -> AgentRunContext:
+        return AgentRunContext(
+            payload=payload,
+            mcp_server_url="",
+            tmpdir=str(tmp_path),
+            subagent_denied_tools=(),
+            instructions=None,
+            tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+        )
+
+    resolved = ResolvedPayload(
+        event=PayloadEvent(trigger="unknown", title="offline diff-review"),
+        model="acme/cli-model",
+    )
+    assert _requested_model_head(_ctx(resolved)) == "acme/cli-model"
+    assert _requested_model_head(_ctx({"model": "acme/cli-model"})) == "acme/cli-model"
+    assert _requested_model_head(_ctx({"model": "   "})) is None
+    assert _requested_model_head(_ctx({})) is None

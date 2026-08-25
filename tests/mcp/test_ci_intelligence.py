@@ -16,6 +16,7 @@ from mergecraft.mcp.ci_intelligence import analyze_ci_failures_tool
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
+from mergecraft.scm.types import ListedItems
 from mergecraft.utils.github import GitHubClient
 
 
@@ -137,3 +138,51 @@ async def test_analyze_ci_failures_tool_no_failures(tmp_path: Path) -> None:
     payload = json.loads(raw.content[0]["text"])
     assert payload["available"] is False
     assert payload["stats"]["clusterCount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_analyze_ci_failures_listing_failure_is_unavailable_not_an_error(
+    tmp_path: Path,
+) -> None:
+    class _ListingFailGitHub(GitHubClient):
+        async def list_workflow_runs_for_check_suite(
+            self, *_args: object, **_kwargs: object
+        ) -> ListedItems:
+            msg = "check-suite run listing failed"
+            raise RuntimeError(msg)
+
+    listed = await analyze_ci_failures_tool(_ctx(tmp_path, _ListingFailGitHub(token="t"))).execute(
+        {"check_suite_id": 7}
+    )
+    empty = await analyze_ci_failures_tool(
+        _ctx(tmp_path, _FakeGitHub(runs=[], log_bytes=b""))
+    ).execute({"check_suite_id": 7})
+    assert listed.is_error is False
+    payload = json.loads(listed.content[0]["text"])
+    empty_payload = json.loads(empty.content[0]["text"])
+    assert payload["available"] is False
+    assert payload.keys() == empty_payload.keys()
+    assert payload["stats"] == empty_payload["stats"]
+    assert payload["sarifFindingCount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_analyze_ci_failures_incomplete_listing_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    class _IncompleteGitHub(GitHubClient):
+        async def list_workflow_runs_for_check_suite(
+            self, *_args: object, **_kwargs: object
+        ) -> ListedItems:
+            return ListedItems(
+                items=[{"id": 1, "conclusion": "failure", "name": "ci"}],
+                incomplete=True,
+            )
+
+    listed = await analyze_ci_failures_tool(_ctx(tmp_path, _IncompleteGitHub(token="t"))).execute(
+        {"check_suite_id": 7}
+    )
+    payload = json.loads(listed.content[0]["text"])
+    assert listed.is_error is False
+    assert payload["available"] is False
+    assert "incomplete" in payload["reason"]

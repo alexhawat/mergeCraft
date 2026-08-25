@@ -25,6 +25,7 @@ no other one — a property put to the test in the close-out mutation.
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -165,6 +166,30 @@ def test_policy_changed_unread_file_maps_to_request_changes() -> None:
     from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 
     action = decide_action(_changed_unread_packet(), policy=DEFAULT_GATE_POLICIES)
+    assert _find_action(action) == "request_changes"
+
+
+def test_policy_has_blockers_maps_to_request_changes() -> None:
+    """Critical/Major findings use the ``has_blockers`` policy key, not unread-file."""
+    from mergecraft.agents.gates import decide_action, select_rule_id
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+
+    finding = make_finding(
+        tool="agent",
+        rule_id="SEC-1",
+        category="Security & Privacy",
+        severity="Critical",
+        confidence="certain",
+        message="blocker",
+        path="src/auth.py",
+        start_line=1,
+        end_line=1,
+        source="agent",
+        introduced_by_pr="true",
+    )
+    packet = _packet(findings=[finding])
+    assert select_rule_id(packet) == "has_blockers"
+    action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) == "request_changes"
 
 
@@ -422,3 +447,66 @@ def test_unrecognised_gate_mode_falls_back_to_shadow() -> None:
     assert valid.gate_action == "shadow"
     enforced = RepoSettings.model_validate({"gates": {"gate_action": "enforce"}}).gates
     assert enforced.gate_action == "enforce"
+
+
+def test_has_blockers_wins_over_changed_unread_file() -> None:
+    """Critical/Major findings beat changed-unread-file / tool-loop telemetry."""
+    from mergecraft.agents.gates import decide_action, select_rule_id
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+
+    blocker = make_finding(
+        tool="agent",
+        rule_id="SEC-1",
+        category="Security & Privacy",
+        severity="Critical",
+        confidence="certain",
+        message="blocker",
+        path="src/auth.py",
+        start_line=1,
+        end_line=1,
+        source="agent",
+        introduced_by_pr="true",
+    )
+    unread = make_finding(
+        tool="trajectory",
+        rule_id="changed-unread-file",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="certain",
+        message="src/x.py was modified but never read",
+        path="src/x.py",
+        start_line=1,
+        end_line=1,
+        source="agent",
+        introduced_by_pr="true",
+    )
+    packet = _packet(findings=[unread, blocker])
+    assert select_rule_id(packet) == "has_blockers"
+    action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
+    assert _find_action(action) == "request_changes"
+
+
+def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -> None:
+    """``_RULE_PREDICATES`` drives ``select_rule_id`` and lists ``has_blockers``."""
+    from mergecraft.agents.gates import _RULE_PREDICATES, select_rule_id
+
+    rule_ids = [rule_id for _predicate, rule_id, _action in _RULE_PREDICATES]
+    assert "has_blockers" in rule_ids
+    assert rule_ids.index("has_blockers") < rule_ids.index("changed-unread-file")
+    assert inspect.unwrap(select_rule_id).__code__.co_names  # smoke: function exists
+    source = inspect.getsource(select_rule_id)
+    assert "_RULE_PREDICATES" in source
+    assert 'return "has_blockers"' not in source
+    assert "schema_failure" not in rule_ids
+    assert 'return "schema_failure"' in source
+    from mergecraft.evidence import gate_policy
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES, GateAction
+
+    assert gate_policy.__doc__ is not None
+    assert "six" in gate_policy.__doc__
+    assert "has_blockers" in gate_policy.__doc__
+    assert DEFAULT_GATE_POLICIES["schema_failure"] is GateAction.BLOCK
+    assert {
+        "schema_failure": GateAction.BLOCK,
+        **{rule_id: action for _predicate, rule_id, action in _RULE_PREDICATES},
+    } == DEFAULT_GATE_POLICIES

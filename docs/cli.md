@@ -11,8 +11,10 @@ Pass `--help` to any invocation below for its full flag set.
 <!-- BEGIN:cli-commands -->
 | Command | Description |
 |---------|-------------|
+| `mergecraft agents addbackupmodel` | Append a registered model to an agent's backup chain. |
 | `mergecraft agents list` | List agent bindings with model chain, prompt id, and tool count. |
 | `mergecraft agents set <role>` | Write a single agent binding override into `.mergecraft/config.yaml`. |
+| `mergecraft agents setmodel` | Replace the primary model for an agent role; backups are preserved (D8). |
 | `mergecraft agents show <role>` | Show resolved prompt text and MCP tool names for one role. |
 | `mergecraft analyzers detect` | Show analyzers that would run for changed paths in this repo. |
 | `mergecraft analyzers docs` | Regenerate `ANALYZERS.md` from manifests. |
@@ -77,6 +79,9 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft memory list` | List active memory entries for a repository. |
 | `mergecraft memory show` | Show one memory entry by id. |
 | `mergecraft memory validate` | Validate the repo memory document for structure, staleness, and conflicts. |
+| `mergecraft model add <model-id>` | Register a model on a provider in config (env override optional). |
+| `mergecraft model delete <provider> <model-id>` | Remove a model from a provider (model index gap is preserved). |
+| `mergecraft model list` | List models registered on each provider. |
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
@@ -90,6 +95,13 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft policy simulate` | Simulate a proposed rule against past PRs. |
 | `mergecraft policy test --fixtures FIXTURES` | Run should-trigger and should-not policy fixtures. |
 | `mergecraft profile recommend --risk RISK` | Print the review profile auto-selected from `--risk`. |
+| `mergecraft provider add --label LABEL` | Register a provider in config and allocate an indexed `.env` slot. |
+| `mergecraft provider auth` | Authenticate one registered provider into indexed `LLM_PROVIDER_*` secrets. |
+| `mergecraft provider delete <label>` | Remove a provider label from config (env index gap is preserved). |
+| `mergecraft provider edit <label>` | Update an existing provider entry in config. |
+| `mergecraft provider harnesses` | List supported agent harnesses (generated from code). |
+| `mergecraft provider list` | List registered provider labels. |
+| `mergecraft provider migrate` | Migrate legacy `*_API_KEY` env vars into indexed provider registry layout (D2 / #483). |
 | `mergecraft replay` | Replay a stored review run from local traces (read-only). |
 | `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
 | `mergecraft requirements inspect` | List ingested requirements and their states. |
@@ -102,8 +114,15 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft tracing logfire enable` | Enable Logfire tracing by writing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire unwire-workflow` | Remove Logfire tracing wiring from the consumer workflow. |
 | `mergecraft tracing logfire wire-workflow` | Wire Logfire tracing into the consumer workflow. |
+| `mergecraft update` | Reinstall mergecraft from GitHub using `uv tool install --reinstall`. |
 | `mergecraft version` | Show the mergeCraft package version. |
 | `mergecraft watch --pr N` | Stream a PR/issue timeline as one JSON line per new event. |
+| `mergecraft workflow agents setmodel --agent AGENT` | Wire an agent's primary model into a mergeCraft workflow step. |
+| `mergecraft workflow list` | List provider/model wiring present in mergeCraft workflow steps. |
+| `mergecraft workflow model add <model>` | Wire a registered model into `with.model` on a mergeCraft workflow step. |
+| `mergecraft workflow model prioritize` | Promote one model ahead of another in the workflow fallback chain. |
+| `mergecraft workflow provider add --label LABEL` | Register a provider and wire indexed custom-provider env keys into the workflow. |
+| `mergecraft workflow provider harnesses` | List supported agent harnesses (generated from code). |
 | `mergecraft xrepo explain` | Explain a cross-repo finding, or report producer/consumer contract breakage. |
 <!-- END:cli-commands -->
 

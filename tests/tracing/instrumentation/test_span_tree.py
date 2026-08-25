@@ -159,22 +159,22 @@ def test_instrumentation_is_noop_when_disabled(disabled_tracing: Any, tmp_path: 
     assert hasattr(disabled_tracing, "write")
 
 
-def test_run_root_is_single_when_tracing_enabled(captured_sink: Any) -> None:
-    """W3.1 (negative) — only one root span is emitted per run.
-
-    The issue's §3 tree has ``mergecraft.run`` as the single root; this
-    pin catches the trivial mistake of opening a second root span at one of
-    the child sites.
-    """
+def test_run_root_is_single_when_tracing_enabled(
+    captured_sink: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """W3.1 (negative) — only one root span is emitted per run."""
     import asyncio
 
     from mergecraft.config import RepoSettings
     from mergecraft.utils.agent_resolve import run_with_model_chain
 
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-span-tree-test")
+
     settings = RepoSettings.model_validate(
         {
             "tracing": {"enabled": True, "sinks": [{"type": "memory"}]},
-            "models": ["claude/sonnet"],
+            "models": ["anthropic/claude-sonnet"],
         }
     )
 

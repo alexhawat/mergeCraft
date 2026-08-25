@@ -25,9 +25,6 @@ severity_map:
   error: Major
   warning: Minor
   note: Trivial
-provenance:
-  linux-amd64:
-    url: https://github.com/danmar/cppcheck/releases/download/2.16.0/cppcheck-2.16.0-x64-Linux.tgz
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+provenance: {}
 network_allowlist: []
 exclusive_group: null

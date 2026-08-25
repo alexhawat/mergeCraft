@@ -128,3 +128,34 @@ def test_config_validate_runs_before_expensive_execution(
     output = _plain(result.stdout + result.stderr)
     assert result.exit_code != 0, output
     assert not agent_called["value"], "agent must not run when config validation fails"
+
+
+def test_config_explain_model_reports_cli_over_env_and_yaml(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """#468: ``model`` resolves CLI > env > YAML, and each layer is reported as itself."""
+    from mergecraft.cli.config_precedence import ConfigLayer, explain_setting
+
+    _write_config(tmp_path, "models:\n  - anthropic/claude-sonnet\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MERGECRAFT_MODEL", "openai/gpt-5.3-codex")
+
+    explained = explain_setting("model", cwd=tmp_path, cli_model="nous/tencent/hy3")
+    assert explained["winner"] == ConfigLayer.CLI.value
+    assert explained["value"] == "nous/tencent/hy3"
+
+    layers = explained["layers"]
+    assert layers[ConfigLayer.CLI.value] == "nous/tencent/hy3"
+    assert layers[ConfigLayer.ENV.value] == "openai/gpt-5.3-codex"
+    # The YAML layer is the config file on its own — not the env value
+    # promoted to the front of the effective list.
+    assert layers[ConfigLayer.YAML.value] == "anthropic/claude-sonnet"
+
+    without_cli = explain_setting("model", cwd=tmp_path)
+    assert without_cli["winner"] == ConfigLayer.ENV.value
+    assert without_cli["value"] == "openai/gpt-5.3-codex"
+
+    monkeypatch.delenv("MERGECRAFT_MODEL")
+    yaml_only = explain_setting("model", cwd=tmp_path)
+    assert yaml_only["winner"] == ConfigLayer.YAML.value
+    assert yaml_only["value"] == "anthropic/claude-sonnet"

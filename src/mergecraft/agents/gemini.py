@@ -39,7 +39,7 @@ from mergecraft.tracing.tracer import (
 )
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
-from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
@@ -171,7 +171,7 @@ def _normalize_gemini_api_key(env: dict[str, str]) -> None:
 
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
-    env = build_agent_env("gemini", {"HOME": str(Path(ctx.tmpdir))})
+    env = build_agent_env("gemini", {"HOME": str(Path(ctx.tmpdir))}, model=ctx.resolved_model)
     _normalize_gemini_api_key(env)
     return env
 

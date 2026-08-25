@@ -23,6 +23,7 @@ from mergecraft.evidence.run_packet import (
     changed_paths_from_diff,
     classify_run_blast_radius,
     emit_run_packet,
+    prepare_run_packet,
     resolve_packet_path,
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
@@ -122,6 +123,31 @@ def _sample_finding() -> dict[str, Any]:
     ).model_dump()
 
 
+_UNSET: Any = object()
+
+
+def _emit(
+    ctx: ToolContext,
+    *,
+    run_succeeded: bool,
+    packet: Any = _UNSET,
+    extra_findings: list[Any] | None = None,
+    **kwargs: Any,
+) -> Path | None:
+    if packet is _UNSET:
+        packet = prepare_run_packet(
+            ctx,
+            run_succeeded=run_succeeded,
+            change_id=kwargs.get("change_id"),
+            extra_findings=extra_findings,
+        )
+    return emit_run_packet(
+        ctx,
+        packet=packet,
+        **kwargs,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _isolate_packet_dir(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep a stray RUNNER_TEMP / override from redirecting test artifacts."""
@@ -131,7 +157,7 @@ def _isolate_packet_dir(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_emit_writes_a_packet_with_populated_blast_radius(tmp_path: Path) -> None:
     """The end-to-end artifact: a real file, with the section that was dead."""
-    written = emit_run_packet(_make_ctx(tmp_path), run_succeeded=True)
+    written = _emit(_make_ctx(tmp_path), run_succeeded=True)
 
     assert written is not None
     assert written.is_file(), "no packet reached disk — the emitter was not called"
@@ -150,7 +176,7 @@ def test_emit_writes_a_packet_with_populated_blast_radius(tmp_path: Path) -> Non
 
 def test_files_changed_includes_scope_exception_paths(tmp_path: Path) -> None:
     """Workflows, migrations and lockfiles reach the packet via analyzers/scope."""
-    written = emit_run_packet(_make_ctx(tmp_path), run_succeeded=True)
+    written = _emit(_make_ctx(tmp_path), run_succeeded=True)
     assert written is not None
     packet = json.loads(written.read_text(encoding="utf-8"))
 
@@ -163,7 +189,7 @@ def test_files_changed_includes_scope_exception_paths(tmp_path: Path) -> None:
 
 def test_deterministic_checks_carry_the_catalog_command(tmp_path: Path) -> None:
     """Analyzer rows become packet rows with the command that actually ran."""
-    written = emit_run_packet(_make_ctx(tmp_path), run_succeeded=True)
+    written = _emit(_make_ctx(tmp_path), run_succeeded=True)
     assert written is not None
     checks = json.loads(written.read_text(encoding="utf-8"))["deterministic_checks"]
 
@@ -174,7 +200,7 @@ def test_deterministic_checks_carry_the_catalog_command(tmp_path: Path) -> None:
 
 def test_failed_run_still_emits_a_packet(tmp_path: Path) -> None:
     """Evidence matters most when the run did not succeed."""
-    written = emit_run_packet(_make_ctx(tmp_path), run_succeeded=False)
+    written = _emit(_make_ctx(tmp_path), run_succeeded=False)
 
     assert written is not None
     decision = json.loads(written.read_text(encoding="utf-8"))["decision"]
@@ -184,7 +210,7 @@ def test_failed_run_still_emits_a_packet(tmp_path: Path) -> None:
 def test_self_assessment_alone_never_yields_auto_merge(tmp_path: Path) -> None:
     """#41's hard rule survives the wiring: prose cannot outvote the evidence."""
     ctx = _make_ctx(tmp_path, diff_text=_TRIVIAL_DIFF, findings=[])
-    written = emit_run_packet(ctx, run_succeeded=True)
+    written = _emit(ctx, run_succeeded=True)
 
     assert written is not None
     packet = json.loads(written.read_text(encoding="utf-8"))
@@ -194,7 +220,7 @@ def test_self_assessment_alone_never_yields_auto_merge(tmp_path: Path) -> None:
 
 def test_non_pr_run_emits_nothing(tmp_path: Path) -> None:
     """A run with no proposed merge has no change to attest to."""
-    assert emit_run_packet(_make_ctx(tmp_path, is_pr=False), run_succeeded=True) is None
+    assert emit_run_packet(_make_ctx(tmp_path, is_pr=False)) is None
 
 
 def test_emission_never_raises_into_the_run(tmp_path: Path) -> None:
@@ -202,12 +228,33 @@ def test_emission_never_raises_into_the_run(tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path)
     ctx.tool_state.repos.clear()  # primary_repo_state() will raise
 
-    assert emit_run_packet(ctx, run_succeeded=True) is None
+    prepared = prepare_run_packet(ctx, run_succeeded=True)
+    assert prepared is None
+    assert emit_run_packet(ctx, packet=prepared) is None
+
+
+def test_emit_run_packet_does_not_rebuild_when_packet_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _make_ctx(tmp_path)
+    packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
+    calls = {"n": 0}
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        calls["n"] += 1
+        msg = "must not rebuild"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
+    written = emit_run_packet(ctx, packet=packet)
+    assert calls["n"] == 0
+    assert written is not None
+    assert json.loads(written.read_text(encoding="utf-8"))["change_id"] == packet.change_id
 
 
 def test_missing_diff_leaves_blast_radius_unset(tmp_path: Path) -> None:
     """No diff means no classification — not a fabricated 'low' lane."""
-    written = emit_run_packet(_make_ctx(tmp_path, diff_text=None), run_succeeded=True)
+    written = _emit(_make_ctx(tmp_path, diff_text=None), run_succeeded=True)
 
     assert written is not None
     assert json.loads(written.read_text(encoding="utf-8"))["blast_radius"] is None
@@ -216,7 +263,7 @@ def test_missing_diff_leaves_blast_radius_unset(tmp_path: Path) -> None:
 def test_explicit_change_id_and_output_path_are_honored(tmp_path: Path) -> None:
     """The offline path supplies both, having no PR and its own destination."""
     target = tmp_path / "nested" / "packet.json"
-    written = emit_run_packet(
+    written = _emit(
         _make_ctx(tmp_path, is_pr=False),
         run_succeeded=True,
         change_id="local/demo@origin/main",
@@ -230,7 +277,7 @@ def test_explicit_change_id_and_output_path_are_honored(tmp_path: Path) -> None:
 def test_extra_findings_merge_without_duplicating(tmp_path: Path) -> None:
     """Agent findings join analyzer findings, deduplicated by fingerprint."""
     duplicate = make_finding(**_sample_finding_kwargs())
-    written = emit_run_packet(
+    written = _emit(
         _make_ctx(tmp_path),
         run_succeeded=True,
         extra_findings=[duplicate],
@@ -407,3 +454,215 @@ class TestModePromptVersions:
         # boundary (``build_packet`` and the existing schema contract); this
         # matches what the pre-S5 envelope returns when no mode ran.
         assert packet.mode_prompt_versions is None or (len(packet.mode_prompt_versions) == 0)
+
+
+def test_merge_findings_empty_fingerprint_does_not_duplicate() -> None:
+    """Empty fingerprints must not always append; use a stable fallback key."""
+    from mergecraft.analyzers.finding import Finding
+    from mergecraft.evidence.merge import merge_findings
+
+    shared = {
+        "tool": "agent",
+        "rule_id": "X",
+        "category": "Security & Privacy",
+        "severity": "Major",
+        "confidence": "certain",
+        "message": "same issue",
+        "path": "src/a.py",
+        "start_line": 3,
+        "end_line": 3,
+        "fingerprint": "",
+        "evidence": [],
+        "remediation": None,
+        "autofix": None,
+        "introduced_by_pr": "true",
+        "source": "agent",
+        "cluster_id": None,
+    }
+    left = Finding.model_validate(shared)
+    right = Finding.model_validate(shared)
+    merged = merge_findings([left], [right])
+    assert len(merged) == 1
+
+
+def test_merge_findings_keeps_higher_severity_on_fingerprint_collision() -> None:
+    """A Major/Critical CI row must not lose to an earlier Minor agent duplicate."""
+    from mergecraft.analyzers.finding import make_finding
+    from mergecraft.evidence.merge import merge_findings
+
+    agent = make_finding(
+        tool="agent",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="certain",
+        message="unused import",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="agent",
+        fingerprint="same-fp",
+    )
+    ci = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Major",
+        confidence="certain",
+        message="unused import",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="ci",
+        fingerprint="same-fp",
+    )
+    merged = merge_findings([agent], [ci])
+    assert len(merged) == 1
+    assert merged[0].severity == "Major"
+    assert merged[0].source == "ci"
+
+
+def test_typed_findings_from_rows_skips_pydantic_validation_error() -> None:
+    from pydantic import ValidationError
+
+    from mergecraft.analyzers.finding import Finding
+    from mergecraft.evidence.merge import typed_findings_from_rows
+
+    valid = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="unused import",
+        path="src/app.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+    )
+    extra_field = {**valid.model_dump(), "not_a_finding_field": True}
+    missing = {"tool": "ruff"}
+    try:
+        Finding.model_validate(extra_field)
+    except (ValidationError, ValueError):
+        pass
+    else:
+        raise AssertionError("expected extra=forbid to reject unknown fields")
+
+    typed = typed_findings_from_rows([valid.model_dump(), extra_field, missing, "nope"])
+    assert len(typed) == 1
+    assert typed[0].rule_id == "F401"
+
+
+def test_load_run_findings_skips_malformed_agent_row(tmp_path: Path) -> None:
+    from mergecraft.evidence.findings import load_run_findings
+
+    ctx = _make_ctx(tmp_path)
+    good = make_finding(
+        tool="agent",
+        rule_id="A1",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="note",
+        path="src/app.py",
+        start_line=1,
+        end_line=1,
+        source="agent",
+    )
+    ctx.tool_state.agent_findings = [good.model_dump(), {"tool": "bad"}]
+    loaded = load_run_findings(ctx)
+    assert any(row.rule_id == "A1" for row in loaded)
+
+
+def test_load_run_findings_keeps_ci_blocker_over_agent_minor(tmp_path: Path) -> None:
+    from mergecraft.ci.evidence import record_ci_findings
+    from mergecraft.evidence.findings import load_run_findings
+
+    ctx = _make_ctx(tmp_path)
+    agent = make_finding(
+        tool="agent",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="certain",
+        message="unused import",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="agent",
+        fingerprint="same-fp",
+    )
+    ci = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Critical",
+        confidence="certain",
+        message="unused import",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="ci",
+        fingerprint="same-fp",
+    )
+    ctx.tool_state.agent_findings = [agent.model_dump()]
+    record_ci_findings(ctx.tool_state, [ci])
+    loaded = load_run_findings(ctx)
+    matching = [item for item in loaded if item.fingerprint == "same-fp"]
+    assert len(matching) == 1
+    assert matching[0].severity == "Critical"
+    assert matching[0].source == "ci"
+
+
+def test_emit_run_packet_skips_without_rebuild_when_packet_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _make_ctx(tmp_path)
+    calls = {"n": 0}
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        calls["n"] += 1
+        msg = "must not rebuild"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
+    assert emit_run_packet(ctx) is None
+    assert emit_run_packet(ctx, packet=None) is None
+    assert calls["n"] == 0
+
+
+def test_emit_and_status_do_not_accept_unused_assembly_kwargs() -> None:
+    import inspect
+
+    from mergecraft.utils.status_checks import report_status_checks
+
+    emit_params = inspect.signature(emit_run_packet).parameters
+    assert "run_succeeded" not in emit_params
+    assert "extra_findings" not in emit_params
+    status_params = inspect.signature(report_status_checks).parameters
+    assert "extra_findings" not in status_params
+    assert "run_succeeded" in status_params
+
+
+def test_deterministic_checks_unknown_id_is_keyerror_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.evidence import run_packet as run_packet_mod
+
+    ctx = _make_ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(
+        ran=True,
+        analyzers=[AnalyzerStatusRow(id="not-a-catalog-tool", status="completed", finding_count=0)],
+    )
+    packet = build_run_packet(ctx, run_succeeded=True)
+    names = {row.name: row.command for row in packet.deterministic_checks}
+    assert names["not-a-catalog-tool"] == "not-a-catalog-tool"
+
+    def _raise_os(*_args: object, **_kwargs: object) -> None:
+        msg = "catalog unreadable"
+        raise OSError(msg)
+
+    monkeypatch.setattr("mergecraft.analyzers.registry.get_manifest", _raise_os)
+    with pytest.raises(OSError, match="catalog unreadable"):
+        run_packet_mod._deterministic_checks(ctx.tool_state)

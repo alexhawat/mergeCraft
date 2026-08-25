@@ -12,6 +12,7 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.server import build_common_tools
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
+from mergecraft.scm.types import ListedItems
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
@@ -38,11 +39,10 @@ class _RecordingGitHub(GitHubClient):
         repo: str,
         ref: str,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> ListedItems:
         self.run_calls.append((owner, repo, ref))
-        return {
-            "total_count": 1,
-            "check_runs": [
+        return ListedItems(
+            items=[
                 {
                     "id": RUN_ID,
                     "name": RUN_NAME,
@@ -52,7 +52,9 @@ class _RecordingGitHub(GitHubClient):
                     "check_suite": {"id": SUITE_ID},
                 }
             ],
-        }
+            incomplete=False,
+            total_count=1,
+        )
 
     async def list_check_suites_for_ref(
         self,
@@ -191,6 +193,37 @@ async def test_each_run_carries_the_suite_id_at_the_top_level(tmp_path: Path) ->
     assert run["check_suite_id"] == SUITE_ID
     # The original nesting stays: agents and tests already navigate by it.
     assert run["check_suite"]["id"] == SUITE_ID
+
+
+@pytest.mark.asyncio
+async def test_list_check_runs_incomplete_omits_partial_catalog(tmp_path: Path) -> None:
+    """A truncated check-run walk must not look like a complete catalog."""
+    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+
+    class _IncompleteGitHub(_RecordingGitHub):
+        async def list_check_runs_for_ref(
+            self,
+            owner: str,
+            repo: str,
+            ref: str,
+            **kwargs: Any,
+        ) -> ListedItems:
+            self.run_calls.append((owner, repo, ref))
+            return ListedItems(
+                items=[{"id": RUN_ID, "name": RUN_NAME, "check_suite": {"id": SUITE_ID}}],
+                incomplete=True,
+                total_count=500,
+            )
+
+    github = _IncompleteGitHub()
+    ctx = _ctx(tmp_path, github=github)
+    tool = check_runs.list_check_runs_tool(ctx)
+    payload = json.loads((await tool.execute({"ref": REF_SHA})).content[0]["text"])
+
+    assert payload["incomplete"] is True
+    assert "check_runs" not in payload
+    assert payload["error"]
+    assert payload["total_count"] == 500
 
 
 @pytest.mark.asyncio

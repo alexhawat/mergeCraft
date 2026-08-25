@@ -119,18 +119,42 @@ def _current_review_phase(tool_state: ToolState) -> ReviewPhase:
     return ReviewPhase(tool_state.review_phase)
 
 
+def establish_offline_review_scope(tool_state: ToolState, *, diff_path: str) -> None:
+    """Advance an offline run past ``INIT`` once its diff scope is materialized.
+
+    ``checkout_pr`` is how the Action path establishes review scope, but an
+    offline run (``--base``/``--head``, ``--diff``, ``--cwd``) has no PR to
+    check out — its scope comes from the materialized diff. Without this
+    transition the run stays in ``INIT`` and every terminal tool is refused
+    by :func:`ensure_review_scope_for_terminal`, so an offline review could
+    never record a verdict (issue #470).
+    """
+    primary_repo_state(tool_state).diff_path = diff_path
+    tool_state.review_phase = ReviewPhase.ESTABLISH_SCOPE.value
+    stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
+
+
 def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> None:
-    """Raise when a Review-mode terminal tool runs before ``checkout_pr`` (D10)."""
+    """Raise when a Review-mode terminal tool runs before review scope exists (D10).
+
+    Scope is established by ``checkout_pr`` on the Action path and by
+    :func:`establish_offline_review_scope` on the offline path; a run that
+    already carries a materialized diff satisfies the precondition either
+    way, so the message names both routes rather than only the PR one.
+    """
     mode = tool_state.selected_mode
     if mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT:
+        return
+    if primary_repo_state(tool_state).diff_path:
         return
     if mode == "IncrementalReview":
         primary = primary_repo_state(tool_state)
         if primary.incremental_changed_paths:
             return
     msg = (
-        f"{tool_name} requires checkout_pr to establish review scope "
-        "before the terminal verdict can be recorded"
+        f"{tool_name} requires review scope before the terminal verdict can be "
+        "recorded — run checkout_pr, or start the run against a diff "
+        "(--base/--head, --diff, --cwd)"
     )
     raise ValueError(msg)
 
@@ -731,6 +755,7 @@ __all__ = [
     "after_terminal_submission_recorded",
     "build_validation_state",
     "ensure_review_scope_for_terminal",
+    "establish_offline_review_scope",
     "record_validated_terminal_submission",
     "recorded_submission_payload",
     "revalidate_recorded_submission",

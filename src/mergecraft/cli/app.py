@@ -9,7 +9,8 @@ from pathlib import Path
 import typer
 from dotenv import load_dotenv
 
-from mergecraft import __version__
+import mergecraft
+from mergecraft import __version__, format_version_display, version_json_payload
 from mergecraft.cli import (
     agents_cmd,
     analyzers_cmd,
@@ -34,18 +35,22 @@ from mergecraft.cli import (
     lens_cmd,
     mcp_cmd,
     memory_cmd,
+    model_cmd,
     models_cmd,
     pipeline_cmd,
     plan_cmd,
     policy_cmd,
     profile_cmd,
+    provider_cmd,
     replay_cmd,
     requirements_cmd,
     run_cmd,
     support_bundle_cmd,
     tracing_cmd,
     tracing_logfire_cmd,
+    update_cmd,
     watch_cmd,
+    workflow_cmd,
     xrepo_cmd,
 )
 from mergecraft.cli.exits import (
@@ -55,6 +60,7 @@ from mergecraft.cli.global_surface import (
     ColorMode,
     OutputFormat,
     apply_global_cli_options,
+    emit_cli_json,
     validate_log_level_option,
 )
 from mergecraft.cli.typer_group import MergecraftTyperGroup
@@ -96,11 +102,15 @@ app.add_typer(mcp_cmd.app, name="mcp")
 app.add_typer(cache_cmd.app, name="cache")
 app.add_typer(context_cmd.app, name="context")
 app.add_typer(auth_cmd.app, name="auth")
+app.add_typer(provider_cmd.app, name="provider")
+app.add_typer(model_cmd.app, name="model")
+app.add_typer(workflow_cmd.app, name="workflow")
 app.add_typer(models_cmd.app, name="models")
 app.add_typer(analyzers_cmd.app, name="analyzers")
 app.command("init")(init_cmd.run)
 app.command("watch")(watch_cmd.run)
 app.command("doctor")(doctor_cmd.run)
+app.command("update")(update_cmd.run)
 app.command("capabilities")(capabilities_cmd.run)
 app.command("describe")(describe_cmd.run)
 app.command("explain")(explain_cmd.run)
@@ -182,7 +192,7 @@ def _root(
         color=color,
     )
     if version:
-        typer.echo(__version__)
+        typer.echo(format_version_display(__version__, mergecraft.__commit__))
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
@@ -190,9 +200,19 @@ def _root(
 
 
 @app.command("version")
-def version_cmd() -> None:
+def version_cmd(
+    format: OutputFormat | None = typer.Option(
+        None,
+        "--format",
+        help="Output format. Defaults to text.",
+        case_sensitive=False,
+    ),
+) -> None:
     """Show the mergeCraft package version."""
-    typer.echo(__version__)
+    if format == "json":
+        emit_cli_json(version_json_payload(__version__, mergecraft.__commit__))
+        return
+    typer.echo(format_version_display(__version__, mergecraft.__commit__))
 
 
 def _local_env_path() -> Path:

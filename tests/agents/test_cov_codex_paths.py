@@ -1010,7 +1010,7 @@ def test_a_captured_quota_error_classifies_as_retryable() -> None:
     Together with #444 this is what lets a quota wall fail over to the next
     model instead of terminating the run.
     """
-    from mergecraft.utils.retry_policy import is_retryable_cli_failure
+    from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
     handler, _close_all = codex_stream_event_handler(
         tracer=None,

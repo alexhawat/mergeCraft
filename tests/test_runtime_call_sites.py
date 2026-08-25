@@ -460,9 +460,9 @@ def test_ci_evidence_is_wired_into_the_tools_a_review_actually_calls() -> None:
         "reach the merge evidence packet (#36)"
     )
 
-    packet = _invoked_names(_parsed((_SRC_DIR / "evidence" / "run_packet.py").resolve()))
-    assert "ci_evidence_findings" in packet, (
-        "the evidence packet no longer reads recorded CI evidence (#36)"
+    findings = _invoked_names(_parsed((_SRC_DIR / "evidence" / "findings.py").resolve()))
+    assert "ci_evidence_findings" in findings, (
+        "the findings loader no longer reads recorded CI evidence (#36)"
     )
 
 

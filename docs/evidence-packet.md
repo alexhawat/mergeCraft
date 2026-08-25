@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.6.0`.
+The current version is `1.9.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -120,6 +120,10 @@ not move.
   `requested_model`, `executed_model`, `provider`, `fallback_index`, and
   `fallback_occurred` so every packet proves which model was requested vs
   which actually ran — unconditionally, not only via opt-in tracing.
+- `1.9.0` — `Decision.verdict` is the GitHub check-run conclusion
+  (`success` / `failure` / `neutral`). Gate actions such as `block` live
+  on `action`, not `verdict`. Persisted packets that stored `block` as
+  `verdict` no longer validate.
 
 ## Top-level fields
 
@@ -186,12 +190,12 @@ this is the **mechanical evidence** that backs the merge verdict.
 
 The evidence verdict. W1 ships the **shape**; W2 (#41) populates this
 field from `decide_approval()` (the function the security plan's Batch D
-lands — D5). Until W2 the field is typically `{"verdict": "block",
+lands — D5). Until W2 the field is typically `{"verdict": "neutral",
 "reason": "self-assessment-only run", "decided_by": "..."}`.
 
 | Field | Type | Notes |
 |------|------|-------|
-| `verdict` | `str` | One of `auto_merge`, `block`, `request_changes`, `require_human_review`, `unavailable`, `neutral`. |
+| `verdict` | `str` | One of `success`, `failure`, `neutral` (GitHub check-run conclusions). Gate actions such as `block` and `request_changes` live on `action`. |
 | `reason` | `str` | Human-readable explanation. |
 | `decided_by` | `str` | Dotted path of the function that produced the verdict. |
 
@@ -284,7 +288,7 @@ also the canonical fixture used by the WA-T round-trip tests:
     "sha": "0123456789abcdef0123456789abcdef01234567"
   },
   "decision": {
-    "verdict": "block",
+    "verdict": "neutral",
     "reason": "self-assessment-only run",
     "decided_by": "mergecraft.agents.gates.decide_approval"
   },

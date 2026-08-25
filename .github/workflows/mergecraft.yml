@@ -20,7 +20,7 @@
 # `needs:` the review-attempts job so Codex fallback can finish before the gate
 # samples check-runs (#433).
 #
-# Provider priority: DeepSeek V4 Flash via the Nous Portal is primary; OpenAI
+# Provider priority: Tencent HY3 via the Nous Portal is primary; OpenAI
 # (Codex) is the one-shot fallback when Nous is absent or its review posts no
 # verdict. Claude is not used.
 #
@@ -33,11 +33,10 @@
 # the rest of the session. Fixed upstream in alexhawat/mergeCraft#78 (the
 # endpoint now returns 202 with no body for notification-only POSTs).
 #
-# DeepSeek V4 Flash runs through the Nous Portal OpenAI-compatible endpoint — the
-# same model sevn.bot's own runtime uses (DEFAULT_NOUS_INFERENCE_BASE_URL /
-# NOUS_PORTAL_DEEPSEEK_V4_FLASH_MODEL_ID in src/sevn/config/defaults.py). It
-# reaches mergeCraft's `opencode` harness, not the Codex one: mergeCraft routes
-# any model whose provider isn't anthropic/openai/google/cursor to opencode
+# Tencent HY3 (`nous/tencent/hy3`) runs through the Nous Portal OpenAI-compatible
+# endpoint via MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + NOUS_API_KEY. It reaches
+# mergeCraft's `opencode` harness, not the Codex one: mergeCraft routes any model
+# whose provider isn't anthropic/openai/google/cursor to opencode
 # (src/mergecraft/utils/agent_resolve.py resolve_runtime_agent()), and the Codex
 # harness cannot stand in because Codex 0.146 dropped `wire_api = "chat"`
 # ("no longer supported; set wire_api = \"responses\"") while Nous Portal serves
@@ -45,14 +44,14 @@
 # alexhawat/mergeCraft#79 (closes #57 and #71): the image now installs
 # `opencode-ai`, and the harness registers a custom OpenAI-compatible provider
 # from MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + MERGECRAFT_CUSTOM_PROVIDER_API_KEY.
-# The provider id comes from the model prefix, so `nous/deepseek/deepseek-v4-flash`
-# registers provider `nous` serving `deepseek/deepseek-v4-flash`.
+# The provider id comes from the model prefix, so `nous/tencent/hy3` registers
+# provider `nous` serving `tencent/hy3`.
 #
 # mergeCraft reads the native GITHUB_EVENT_PATH, so the workflow just passes a
 # prompt — no ~mergecraft JSON payload needed.
 #
 # Auth (same-repo only — forks skip):
-# - NOUS_API_KEY — Nous Portal API key — primary (DeepSeek V4 Flash)
+# - NOUS_API_KEY — Nous Portal API key — primary (Tencent HY3 via nous/tencent/hy3)
 # - CODEX_AUTH_JSON — ChatGPT/Codex subscription (`mergecraft auth codex`) — fallback
 # - OPENAI_API_KEY — OpenAI API key (same Codex harness as CODEX_AUTH_JSON)
 # The job skips gracefully when none are set (e.g. fork PRs). Without
@@ -145,6 +144,12 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # Single per-attempt review budget (D8 / #465). Nous + Codex steps and the
+  # review job timeout-minutes derive from this — do not shorten per-attempt for
+  # retry headroom.
+  MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES: "25"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -293,7 +298,8 @@ jobs:
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # > 2× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
+    timeout-minutes: 65
     env:
       IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
       # Nous/DeepSeek primary; Codex fallback when Nous auth is absent or the
@@ -490,7 +496,7 @@ jobs:
         uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1 (PR #457)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
-          timeout: 25m
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
           # Provider prefix `nous/` selects the opencode harness and names the
           # provider registered from the MERGECRAFT_CUSTOM_PROVIDER_* env vars.
           # 2026-08-23: moved off deepseek-v4-flash, which repeatedly failed to
@@ -602,9 +608,9 @@ jobs:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
           # first, the action never posts its `mergecraft` completion check and the
-          # only diagnostic is lost. Leaving 5 min of headroom lets it exit
-          # cleanly and report failure instead.
-          timeout: 25m
+          # only diagnostic is lost. Job timeout-minutes is composed from the same
+          # per-attempt budget (D8) so both attempts can finish before the ceiling.
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
           model: openai/gpt-codex
           push: disabled
           shell: disabled

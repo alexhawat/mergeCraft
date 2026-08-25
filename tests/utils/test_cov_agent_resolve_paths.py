@@ -25,6 +25,8 @@ from mergecraft.models import BEDROCK_MODEL_ID_ENV, VERTEX_MODEL_ID_ENV
 from mergecraft.utils import agent_resolve as ar
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from _pytest.monkeypatch import MonkeyPatch
 
 # Every env var any credential probe in ``agent_resolve`` reads. Cleared for
@@ -140,19 +142,41 @@ def test_vertex_needs_both_service_account_and_a_pinned_model_id(
 
 
 def test_gateway_providers_read_their_preset_key_and_the_custom_alias(
+    tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """``nous``/``tokenhub``/``minimax`` all route through the gateway helper."""
+    """Registered gateway providers resolve credentials via indexed registry secrets."""
+    from tests.cli.support_provider_registry import (
+        bootstrap_nous_registry,
+        bootstrap_opencode_gateway,
+    )
+
     assert ar.has_credentials_for_slug("nous/deepseek-v4") is False
     assert ar.has_credentials_for_slug("tokenhub/hy3") is False
     assert ar.has_credentials_for_slug("minimax/MiniMax-M3") is False
 
-    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek-v4", api_key="nous-key")
     assert ar.has_credentials_for_slug("nous/deepseek-v4") is True
     assert ar.has_credentials_for_slug("tokenhub/hy3") is False
 
-    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "custom-key")
-    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://example.invalid/v1")
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="minimax",
+        url="https://api.minimax.io/v1",
+        model_id="MiniMax-M3",
+        api_key="custom-key",
+        env_index=2,
+    )
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="tokenhub",
+        url="https://tokenhub-intl.tencentcloudmaas.com/v1",
+        model_id="hy3",
+        api_key="custom-key",
+        env_index=3,
+    )
     assert ar.has_credentials_for_slug("minimax/MiniMax-M3") is True
     assert ar.has_credentials_for_slug("tokenhub/hy3") is True
 
@@ -582,11 +606,17 @@ def test_empty_chain_result_is_a_flagged_failure() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_agent_mode_for_slug_maps_each_native_provider_and_defaults_to_opencode() -> None:
+def test_agent_mode_for_slug_maps_each_native_provider_and_defaults_to_opencode(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from tests.cli.support_provider_registry import bootstrap_nous_registry
+
     assert ar._agent_mode_for_slug("anthropic/claude-sonnet") == "claude"
     assert ar._agent_mode_for_slug("openai/gpt") == "codex"
     assert ar._agent_mode_for_slug("google/gemini-3-pro") == "gemini"
     assert ar._agent_mode_for_slug("cursor/composer") == "cursor"
+    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek-v4")
     assert ar._agent_mode_for_slug("nous/deepseek-v4") == "opencode"
     assert ar._agent_provider_for_slug("no-slash-here") == "unknown"
 
@@ -597,8 +627,8 @@ def test_resolve_harness_infers_when_unset_and_validates_when_set() -> None:
 
     explicit = RepoSettings.model_validate({"harness": "opencode"})
     assert ar.resolve_harness(explicit, "openai/gpt") == "opencode"
-    # Uncatalogued prefixes route through OpenCode too.
-    assert ar.resolve_harness(explicit, "acme/private-1") == "opencode"
+    with pytest.raises(ar.ModelFallbackPolicyError, match=r"incompatible|not registered"):
+        ar.resolve_harness(explicit, "acme/private-1")
 
 
 def test_opencode_refuses_a_catalogued_provider_it_does_not_serve() -> None:
@@ -621,6 +651,41 @@ def test_attempt_harness_label_prefers_the_explicit_override() -> None:
     assert ar._attempt_harness_label(explicit, "google/gemini-3-pro") == "opencode"
     assert ar._attempt_harness_label(None, "google/gemini-3-pro") == "gemini"
     assert ar._attempt_harness_label(RepoSettings.model_validate({}), "openai/gpt") == "codex"
+
+
+def test_attempt_harness_label_degrades_for_unregistered_follow_on_slug() -> None:
+    """Synthetic follow-on spans must not raise when inference fails."""
+    with pytest.raises(ar.ModelFallbackPolicyError):
+        ar._agent_mode_for_slug("custom/unregistered-model")
+    assert ar._attempt_harness_label(None, "custom/unregistered-model") == "opencode"
+
+
+def test_follow_on_spans_do_not_crash_on_unregistered_tail() -> None:
+    """A successful run must not crash while emitting not_visited follow-on spans."""
+    import asyncio
+
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.tracing.sinks import sink_factory
+
+    settings = RepoSettings.model_validate(
+        {
+            "harness": "opencode",
+            "models": ["openai/gpt", "custom/unregistered-model"],
+            "tracing": {"enabled": True, "sinks": [{"type": "memory"}]},
+        }
+    )
+    wrapper = sink_factory(settings.tracing)
+    memory = wrapper.inner.sinks[0]
+
+    async def run_once(_slug: str) -> AgentResult:
+        return AgentResult(success=True, terminal_submission_received=True)
+
+    slug, _ = asyncio.run(ar.run_with_model_chain(settings=settings, run_once=run_once))
+    assert slug == "openai/gpt"
+
+    attempts = [event for event in memory.events if getattr(event, "kind", None) == "agent.attempt"]
+    assert len(attempts) >= 2
+    assert any(getattr(event, "status", None) == "not_visited" for event in attempts)
 
 
 # ---------------------------------------------------------------------------
@@ -697,12 +762,30 @@ def test_vertex_alias_requires_the_pinned_model_id(monkeypatch: MonkeyPatch) -> 
     assert ar.resolve_model(slug="vertex/byok") == "claude-sonnet-4@20250514"
 
 
-def test_resolve_model_env_override_wins_unless_explicitly_ignored(
+def test_resolve_model_explicit_slug_outranks_the_env_override(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """CLI beats ENV, matching ``ConfigLayer`` (issue #468)."""
+    monkeypatch.setenv("MERGECRAFT_MODEL", "acme/private-1")
+    assert ar.resolve_model(slug="acme/other-1") == "acme/other-1"
+    assert ar.resolve_model(slug="acme/other-1", respect_env_override=False) == "acme/other-1"
+
+
+def test_resolve_model_falls_back_to_the_env_override_without_a_slug(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MERGECRAFT_MODEL", "acme/private-1")
-    assert ar.resolve_model(slug="openai/gpt") == "acme/private-1"
-    assert ar.resolve_model(slug="acme/other-1", respect_env_override=False) == "acme/other-1"
+    assert ar.resolve_model() == "acme/private-1"
+    assert ar.resolve_model(slug="  ") == "acme/private-1"
+    assert ar.resolve_model(respect_env_override=False) is None
+
+
+def test_resolve_model_reports_an_unknown_explicit_slug_instead_of_using_env(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An explicit request is never silently swapped for the env value."""
+    monkeypatch.setenv("MERGECRAFT_MODEL", "acme/private-1")
+    assert ar.resolve_model(slug="gpt-4o-latest") is None
 
 
 def test_resolve_model_passes_through_a_raw_specifier_but_drops_a_bare_name() -> None:
@@ -778,32 +861,66 @@ def test_credentialled_native_providers_resolve_to_their_agent(
     assert ar.resolve_runtime_agent(model="openai/gpt").name == "codex"
 
 
-def test_anthropic_without_credentials_falls_through_to_opencode() -> None:
-    """Anthropic is the one native provider with no fail-loud arm."""
-    assert ar.resolve_runtime_agent(model="anthropic/claude-sonnet").name == "opencode"
+def test_anthropic_without_credentials_raises_configuration_error() -> None:
+    """Anthropic without credentials is a configuration error (no opencode fallback)."""
+    with pytest.raises(ar.ModelFallbackPolicyError, match=r"not registered|provider add"):
+        ar.resolve_runtime_agent(model="anthropic/claude-sonnet")
 
 
-def test_gateway_providers_fail_loud_with_their_own_auth_command() -> None:
-    with pytest.raises(ValueError, match="mergecraft auth nous"):
+def test_gateway_providers_fail_loud_with_registry_guidance() -> None:
+    with pytest.raises(ar.ModelFallbackPolicyError, match=r"not registered|provider add"):
         ar.resolve_runtime_agent(model="nous/deepseek-v4")
-    with pytest.raises(ValueError, match="mergecraft auth tokenhub"):
+    with pytest.raises(ar.ModelFallbackPolicyError, match=r"not registered|provider add"):
         ar.resolve_runtime_agent(model="tokenhub/hy3")
-    with pytest.raises(ValueError, match="mergecraft auth minimax"):
+    with pytest.raises(ar.ModelFallbackPolicyError, match=r"not registered|provider add"):
         ar.resolve_runtime_agent(model="minimax/MiniMax-M3")
 
 
 def test_gateway_providers_resolve_to_opencode_once_credentialled(
+    tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
-    monkeypatch.setenv("TOKENHUB_API_KEY", "th-key")
-    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "custom-key")
-    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://example.invalid/v1")
-    assert ar.resolve_runtime_agent(model="nous/deepseek-v4").name == "opencode"
-    assert ar.resolve_runtime_agent(model="tokenhub/hy3").name == "opencode"
-    assert ar.resolve_runtime_agent(model="minimax/MiniMax-M3").name == "opencode"
+    from tests.cli.support_provider_registry import (
+        NOUS_BASE_URL,
+        NOUS_DEEPSEEK_V4,
+        bootstrap_opencode_gateway,
+    )
+
+    nous_slug = bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="nous",
+        url=NOUS_BASE_URL,
+        model_id=NOUS_DEEPSEEK_V4,
+        api_key="nous-key",
+    )
+    tokenhub_slug = bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="tokenhub",
+        url="https://tokenhub-intl.tencentcloudmaas.com/v1",
+        model_id="hy3",
+        api_key="th-key",
+        env_index=2,
+    )
+    minimax_slug = bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="minimax",
+        url="https://api.minimax.io/v1",
+        model_id="MiniMax-M3",
+        api_key="custom-key",
+        env_index=3,
+    )
+    assert ar.resolve_runtime_agent(model=nous_slug).name == "opencode"
+    assert ar.resolve_runtime_agent(model=tokenhub_slug).name == "opencode"
+    assert ar.resolve_runtime_agent(model=minimax_slug).name == "opencode"
 
 
-def test_unknown_provider_and_no_model_both_land_on_opencode() -> None:
-    assert ar.resolve_runtime_agent(model="acme/private-1").name == "opencode"
+def test_unknown_provider_raises_configuration_error() -> None:
+    with pytest.raises(ar.ModelFallbackPolicyError, match=r"not registered|provider add"):
+        ar.resolve_runtime_agent(model="acme/private-1")
+
+
+def test_no_model_falls_back_to_opencode() -> None:
     assert ar.resolve_runtime_agent(model=None).name == "opencode"

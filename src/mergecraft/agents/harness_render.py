@@ -406,6 +406,24 @@ def default_subagent_selection(
     return tuple(roster)
 
 
+def _requested_model_head(ctx: AgentRunContext) -> str | None:
+    """Return the model slug the operator named for this run, if any.
+
+    The CLI ``--model`` flag and the Action ``with: model:`` input both land
+    on the run payload, which is a ``ResolvedPayload`` on the offline path
+    and a plain mapping on the Action path. An explicitly named model is the
+    CLI precedence layer, so it heads the subagent chains rather than being
+    displaced by ``MERGECRAFT_MODEL`` (issue #468).
+    """
+    payload = getattr(ctx, "payload", None)
+    if payload is None:
+        return None
+    raw = payload.get("model") if isinstance(payload, dict) else getattr(payload, "model", None)
+    if not isinstance(raw, str):
+        return None
+    return raw.strip() or None
+
+
 def render_for_run(
     ctx: AgentRunContext,
     harness: HarnessName,
@@ -417,7 +435,9 @@ def render_for_run(
 
     root = _repo_root_from_ctx(ctx) or Path(ctx.tmpdir)
     settings = load_repo_settings(root=root)
-    registry = load_registry(settings=settings, repo_root=root)
+    registry = load_registry(
+        settings=settings, repo_root=root, model_head=_requested_model_head(ctx)
+    )
     roster = (
         tuple(selected)
         if selected is not None

@@ -60,7 +60,7 @@ from mergecraft.tracing.tracer import (
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
-from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
@@ -231,7 +231,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
         or (vertex_id and model == vertex_id)
     ):
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
-    return build_agent_env("claude", extras)
+    return build_agent_env("claude", extras, model=ctx.resolved_model)
 
 
 def _build_claude_streaming_usage(payload: dict[str, Any]) -> AgentUsage:

@@ -211,6 +211,7 @@ recommended-model column here.
 | `bedrock/byok` | `bedrock` | — |
 | `vertex/byok` | `vertex` | — |
 | `nous/deepseek/deepseek-v4-flash` | `nous` | preferred |
+| `nous/tencent/hy3` | `nous` | preferred |
 | `tokenhub/hy3` | `tokenhub` | preferred |
 | `tokenhub/deepseek-v4-flash` | `tokenhub` | — |
 | `tokenhub/deepseek-v4-pro` | `tokenhub` | — |

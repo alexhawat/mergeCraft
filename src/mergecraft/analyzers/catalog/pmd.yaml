@@ -25,9 +25,6 @@ severity_map:
   error: Major
   warning: Minor
   note: Trivial
-provenance:
-  linux-amd64:
-    url: https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.9.0/pmd-dist-7.9.0-bin.zip
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+provenance: {}
 network_allowlist: []
 exclusive_group: null

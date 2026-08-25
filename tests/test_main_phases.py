@@ -79,13 +79,18 @@ async def test_run_context_carries_every_phase_input(
         signed_commits=True,
         analyzers=AnalyzersSettings(sarif_upload=True),
     )
+    explicit_model = "anthropic/claude-sonnet"
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         settings=settings,
         event_name="workflow_dispatch",
         event_payload={"action": "workflow_dispatch"},
-        env={"INPUT_MODEL": "test-model-xyz", "INPUT_ANALYZERS": "full"},
+        env={
+            "INPUT_MODEL": explicit_model,
+            "INPUT_ANALYZERS": "full",
+            "CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat-test-token",
+        },
     )
     assert rec.result is not None
     assert rec.result.success, f"run failed: {rec.result}"
@@ -109,7 +114,7 @@ async def test_run_context_carries_every_phase_input(
     assert ctx.git_token == "ghs_fake_git_token"
 
     # -- execute-phase locals -- filled onto the *same* object after setup --
-    assert ctx.resolved_model == "test-model-xyz"
+    assert ctx.resolved_model == explicit_model
     assert ctx.mcp_server_url == "http://127.0.0.1:0/mcp"
 
     # tool_state carries its own share of the sprawl, threaded from the

@@ -1,11 +1,12 @@
 """Opt-in commit-status check-runs (``mergecraft`` / ``mergecraft-approval``).
 
-The approval check-run is computed structurally (W8): the conclusion is a pure
-function of the typed ``Finding`` list, the run's completion state, and the
-trust tier. Narrative (``ApprovalRecord.would_approve``, ``result.output``,
-anything the model wrote) is recorded separately as an advisory input and is
-never the sole positive input — see ``decide_approval`` in
-``mergecraft.agents.gates`` for the full contract (D12, D13, D14).
+The approval check-run posts ``packet.decision.verdict`` (W8). When
+``packet`` is None, post ``neutral`` without assembling a packet.
+Narrative
+(``ApprovalRecord.would_approve``, ``result.output``, anything the model
+wrote) is recorded separately as an advisory input and is never the sole
+positive input — see ``decide_approval`` in ``mergecraft.agents.gates`` for
+the full contract (D12, D13, D14).
 
 Wire-shape semantics:
 
@@ -34,40 +35,13 @@ from loguru import logger
 from mergecraft.run_outcome import CompletionConclusion
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.manifest import TrustTier
+    from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.mcp.context import ToolContext
 
 COMPLETION_CHECK = "mergecraft"
 APPROVAL_CHECK = "mergecraft-approval"
 Conclusion = Literal["success", "failure", "neutral"]
-
-
-def _load_structural_findings(ctx: ToolContext) -> list[Any]:
-    """Return the typed ``Finding`` objects the approval gate reads.
-
-    Reads ``ctx.tool_state.analyzer_run.findings`` (stored as dicts by the
-    analyzer pipeline) and validates them against ``analyzers.finding.Finding``.
-    Validation errors are logged at debug level and skipped — a malformed
-    analyzer row must not crash the run; it just drops from the structural set.
-    The merge-evidence plan's W1 owns the durable store; this loader is the
-    minimal hook the approval gate needs today.
-    """
-    run_state = getattr(ctx.tool_state, "analyzer_run", None)
-    if run_state is None:
-        return []
-    raw = list(getattr(run_state, "findings", []) or [])
-    if not raw:
-        return []
-    from mergecraft.analyzers.finding import Finding, FindingValidationError
-
-    typed: list[Any] = []
-    for row in raw:
-        if not isinstance(row, dict):
-            continue
-        try:
-            typed.append(Finding.model_validate(row))
-        except FindingValidationError as err:
-            logger.debug("status checks: dropping malformed finding row: {}", err)
-    return typed
 
 
 async def _create_check_run(
@@ -99,12 +73,29 @@ async def _create_check_run(
     )
 
 
+def _catalog_unavailable_banner(ctx: ToolContext) -> str | None:
+    """Return a one-line catalog banner when the analyzer catalog did not run.
+
+    D6 / #459: glanceable ``analyzers: unavailable`` on check-run summaries.
+    Omitted when the catalog executed (including mixed passed + skipped).
+    """
+    run_state = ctx.tool_state.analyzer_run
+    if run_state is None:
+        return None
+    from mergecraft.analyzers.pipeline import CatalogScanStatus, catalog_scan_status
+
+    if catalog_scan_status(run_state) != CatalogScanStatus.UNAVAILABLE:
+        return None
+    return "analyzers: unavailable"
+
+
 async def report_status_checks(
     ctx: ToolContext,
     *,
     run_succeeded: bool,
     failure_reason: str | None = None,
     conclusion: CompletionConclusion | None = None,
+    packet: MergeEvidencePacket | None = None,
 ) -> None:
     """Post opt-in status checks. Best-effort; never raises into the run outcome.
 
@@ -112,14 +103,12 @@ async def report_status_checks(
     GitHub conclusion — pass ``mergecraft.run_outcome.RUN_OUTCOME_CONCLUSION
     [outcome]`` once a caller has a ``RunOutcome`` rather than a bare bool.
     Omitted, it falls back to the pre-W5 ``success``/``failure`` split driven
-    by ``run_succeeded`` alone. The ``mergecraft-approval`` check is
-    unaffected either way — it is always computed from ``run_succeeded`` via
-    ``decide_approval`` (D12-D14).
+    by ``run_succeeded`` alone. The ``mergecraft-approval`` check uses
+    ``packet.decision.verdict`` and is skipped when ``packet`` is None.
     """
     payload = ctx.payload
-    status_enabled = getattr(payload, "status_checks", False) or (
-        isinstance(getattr(payload, "extra", None), dict)
-        and bool(payload.extra.get("statusChecks") or payload.extra.get("status_checks"))
+    status_enabled = payload.status_checks or bool(
+        payload.extra.get("statusChecks") or payload.extra.get("status_checks")
     )
     if not status_enabled:
         return
@@ -144,6 +133,17 @@ async def report_status_checks(
     completion_conclusion: CompletionConclusion = conclusion or (
         "success" if run_succeeded else "failure"
     )
+    catalog_banner = _catalog_unavailable_banner(ctx)
+    completion_summary = (
+        "The mergeCraft run finished successfully."
+        if run_succeeded
+        else (
+            failure_reason
+            or "The mergeCraft run failed or timed out. See the run logs for details."
+        )
+    )
+    if catalog_banner:
+        completion_summary = f"{completion_summary}\n{catalog_banner}"
     try:
         await _create_check_run(
             ctx,
@@ -151,70 +151,85 @@ async def report_status_checks(
             head_sha=completion_sha,
             conclusion=completion_conclusion,
             title="mergeCraft run completed" if run_succeeded else "mergeCraft run failed",
-            summary=(
-                "The mergeCraft run finished successfully."
-                if run_succeeded
-                else (
-                    failure_reason
-                    or "The mergeCraft run failed or timed out. See the run logs for details."
-                )
-            ),
+            summary=completion_summary,
         )
     except Exception as err:
         logger.debug("status checks: {} post failed: {}", COMPLETION_CHECK, err)
 
-    # --- Approval gate (W8.2): structural conclusion, not narrative. ---------
+    # --- Approval gate (W8.2): post ``packet.decision.verdict``. -------------
     # The agent's boolean is still in ApprovalRecord.would_approve (W8.3) as an
-    # advisory input the merge-evidence plan reads; the conclusion is computed
-    # from typed findings + run state + tier only.
+    # advisory input the merge-evidence plan reads. A missing packet posts
+    # ``neutral`` so the check still lands; do not rebuild the packet.
     from mergecraft.agents.gates import (
         approval_decision_inputs,
-        decide_approval,
         decision_summary_lines,
         log_decision,
     )
 
-    findings = _load_structural_findings(ctx)
-    tier = getattr(ctx, "trust_tier", "trusted")
-    approval_conclusion: Conclusion = decide_approval(
-        findings,
-        run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
-    )
-    decision_inputs = approval_decision_inputs(
-        findings,
-        run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
-    )
-    log_decision(
-        findings,
-        run_succeeded=run_succeeded,
-        tier=tier,  # type: ignore[arg-type]  # — tier is str from getattr; callee expects TrustTier literal
-        conclusion=approval_conclusion,
-    )
-
-    approval = ctx.tool_state.approval
-    if approval_conclusion == "success":
-        approval_title = "mergeCraft would approve"
-        approval_summary = "mergeCraft has no outstanding review feedback on this PR."
-    elif approval_conclusion == "failure":
-        approval_title = "mergeCraft would not approve"
-        approval_summary = (
-            "mergeCraft has outstanding review feedback or requested changes on this PR."
-        )
-    else:
-        approval_title = "mergeCraft review did not complete"
-        approval_summary = (
-            "The mergeCraft review did not complete, so no approval decision was recorded."
-        )
-
-    if approval and approval.sha:
-        approval_summary = f"{approval_summary} Reviewed commit: {approval.sha}."
-    approval_summary = f"{approval_summary}\nDecision inputs:\n" + "\n".join(
-        decision_summary_lines(decision_inputs)
-    )
+    # D7 / #460: the packet already ran ``decide_approval``. Reuse
+    # ``packet.decision.verdict`` so this layer only posts check-runs.
+    # Best-effort: never raise after the completion check-run has posted.
+    if packet is None:
+        logger.debug("status checks: no packet; posting neutral approval")
+        try:
+            await _create_check_run(
+                ctx,
+                name=APPROVAL_CHECK,
+                head_sha=head_sha,
+                conclusion="neutral",
+                title="mergeCraft review did not complete",
+                summary=(
+                    "The mergeCraft evidence packet was not assembled, so no "
+                    "approval decision was recorded."
+                ),
+            )
+        except Exception as err:
+            logger.debug("status checks: {} post failed: {}", APPROVAL_CHECK, err)
+        return
 
     try:
+        tier: TrustTier = ctx.trust_tier
+        if packet.decision is None:
+            logger.debug("status checks: packet has no decision; posting neutral approval")
+            approval_conclusion: Conclusion = "neutral"
+        else:
+            approval_conclusion = packet.decision.verdict
+        findings = list(packet.findings)
+        decision_inputs = approval_decision_inputs(
+            findings,
+            run_succeeded=run_succeeded,
+            tier=tier,
+        )
+        log_decision(
+            findings,
+            run_succeeded=run_succeeded,
+            tier=tier,
+            conclusion=approval_conclusion,
+        )
+
+        approval = ctx.tool_state.approval
+        if approval_conclusion == "success":
+            approval_title = "mergeCraft would approve"
+            approval_summary = "mergeCraft has no outstanding review feedback on this PR."
+        elif approval_conclusion == "failure":
+            approval_title = "mergeCraft would not approve"
+            approval_summary = (
+                "mergeCraft has outstanding review feedback or requested changes on this PR."
+            )
+        else:
+            approval_title = "mergeCraft review did not complete"
+            approval_summary = (
+                "The mergeCraft review did not complete, so no approval decision was recorded."
+            )
+
+        if approval and approval.sha:
+            approval_summary = f"{approval_summary} Reviewed commit: {approval.sha}."
+        approval_summary = f"{approval_summary}\nDecision inputs:\n" + "\n".join(
+            decision_summary_lines(decision_inputs)
+        )
+        if catalog_banner:
+            approval_summary = f"{approval_summary}\n{catalog_banner}"
+
         await _create_check_run(
             ctx,
             name=APPROVAL_CHECK,

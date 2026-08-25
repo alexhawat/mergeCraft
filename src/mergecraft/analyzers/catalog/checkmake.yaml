@@ -22,9 +22,6 @@ timeout_s: 60
 trust: trusted
 severity_map:
   warning: Minor
-provenance:
-  linux-amd64:
-    url: https://github.com/mrtazz/checkmake/releases/download/0.2.2/checkmake-0.2.2.linux.amd64
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000'
+provenance: {}
 network_allowlist: []
 exclusive_group: null

@@ -321,6 +321,12 @@ def provision_managed_binary(
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             artifact_name = entry.url.rsplit("/", 1)[-1]
+            if not artifact_name:
+                msg = (
+                    f"provenance URL {entry.url} has no artifact filename "
+                    "(trailing slash or empty last path segment)"
+                )
+                raise ProvisionError(msg)
             download_path = tmp_path / artifact_name
             try:
                 _download_pinned_url(entry.url, download_path)

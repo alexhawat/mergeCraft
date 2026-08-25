@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
@@ -15,11 +15,17 @@ from mergecraft.analyzers.parsers._common import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
-_LEVELS: dict[str, str] = {
+
+class _ParseLine(Protocol):
+    def __call__(self, value: object, *, default: int = ...) -> int: ...
+
+
+_BANDIT_NATIVE_LEVELS: dict[str, str] = {
     "high": "high",
     "medium": "medium",
     "low": "low",
@@ -27,45 +33,82 @@ _LEVELS: dict[str, str] = {
 }
 
 
-def _native_severity(result: dict[str, Any]) -> str:
-    return _LEVELS.get(str(result.get("issue_severity") or "medium").casefold(), "medium")
+def iter_bandit_result_rows(payload: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield Bandit ``results`` objects, or raise on a missing/non-object row.
+
+    Empty ``results: []`` is a clean scan. A missing array or a non-object
+    row is a parse failure — same contract as ``bandit_to_sarif``.
+    """
+    results = payload.get("results")
+    if not isinstance(results, list):
+        msg = "bandit JSON output missing a results array"
+        raise ValueError(msg)
+    for item in results:
+        if not isinstance(item, dict):
+            msg = "bandit JSON results array contains a non-object row"
+            raise ValueError(msg)
+        yield item
 
 
-def _end_line(result: dict[str, Any], start_line: int) -> int:
+def bandit_native_severity(result: dict[str, Any]) -> str:
+    """Normalize Bandit ``issue_severity`` for the parser and SARIF converter."""
+    return _BANDIT_NATIVE_LEVELS.get(
+        str(result.get("issue_severity") or "medium").casefold(), "medium"
+    )
+
+
+def bandit_row_span(
+    result: dict[str, Any],
+    *,
+    parse_line: _ParseLine = coerce_line,
+) -> tuple[int, int]:
+    """Return ``(start_line, end_line)`` from ``line_number`` / ``line_range``.
+
+    In-repo Bandit parse stays lenient (``coerce_line``). SARIF conversion
+    passes ``parse_line=require_line`` so invalid lines raise like mypy.
+    """
+    start = parse_line(result.get("line_number"), default=1)
     line_range = result.get("line_range")
     if isinstance(line_range, list) and line_range:
-        return coerce_line(line_range[-1], default=start_line)
-    return start_line
+        end = parse_line(line_range[-1], default=start)
+        return start, max(end, start)
+    return start, start
 
 
 def parse_bandit_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
+    # Empty stdout is a clean scan (Bandit JSON on a finding-free run). Do not
+    # treat it as missing output; unparsable non-empty stdout still raises.
+    # The adapter's empty-output skip path does not apply here: returning ``[]``
+    # is a passed scan (#467), not a sandbox-unavailable skip.
+    if not raw.strip():
+        return []
     payload = require_json_object(raw, what="bandit JSON output")
     category = taxonomy_category(manifest)
     findings: list[Finding] = []
-    results = payload.get("results")
-    if not isinstance(results, list):
-        return findings
-    for result in results:
-        if not isinstance(result, dict):
-            continue
+    for result in iter_bandit_result_rows(payload):
         path = resolve_repo_relative_path(str(result.get("filename") or ""), repo_root=repo_root)
-        start_line = coerce_line(result.get("line_number", 1))
+        start_line, end_line = bandit_row_span(result)
         rule_id = str(result.get("test_id") or result.get("test_name") or "bandit")
         findings.append(
             make_finding(
                 tool=manifest.id,
                 rule_id=rule_id,
                 category=category,
-                severity=map_native_severity(manifest, _native_severity(result)),
+                severity=map_native_severity(manifest, bandit_native_severity(result)),
                 confidence=map_confidence(str(result.get("issue_confidence") or "") or None),
                 message=str(result.get("issue_text") or rule_id),
                 path=path or "unknown.py",
                 start_line=start_line,
-                end_line=_end_line(result, start_line),
+                end_line=end_line,
                 source="analyzer",
             )
         )
     return findings
 
 
-__all__ = ["parse_bandit_json"]
+__all__ = [
+    "bandit_native_severity",
+    "bandit_row_span",
+    "iter_bandit_result_rows",
+    "parse_bandit_json",
+]

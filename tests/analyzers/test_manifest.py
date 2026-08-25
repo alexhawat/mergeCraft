@@ -55,14 +55,13 @@ def test_unmapped_analyzer_severity_is_validation_error_not_default() -> None:
 def test_provenance_requires_sha256_per_declared_platform() -> None:
     manifest_mod = import_module("mergecraft.analyzers.manifest")
     raw = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
-    manifest = manifest_mod.load_manifest_yaml(
-        raw.replace(
-            'sha256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"',
-            'sha256: ""',
-        )
-    )
     with pytest.raises(manifest_mod.ManifestValidationError, match=r"sha256|provenance"):
-        manifest_mod.validate_manifest(manifest)
+        manifest_mod.load_manifest_yaml(
+            raw.replace(
+                'sha256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"',
+                'sha256: ""',
+            )
+        )
 
 
 @pytest.mark.parametrize("trust", ["trusted", "untrusted"])

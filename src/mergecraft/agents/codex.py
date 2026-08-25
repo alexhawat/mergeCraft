@@ -41,7 +41,7 @@ from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
-from mergecraft.utils.retry_policy import is_retryable_cli_failure
+from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
@@ -567,7 +567,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     extra: dict[str, str] = {"CODEX_HOME": str(codex_home)}
     if ctx.mcp_auth_token:
         extra[_CODEX_MCP_TOKEN_ENV] = ctx.mcp_auth_token
-    env = build_agent_env("codex", extra)
+    env = build_agent_env("codex", extra, model=ctx.resolved_model)
     _setup_codex_auth(ctx, codex_home=codex_home)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
     # (config.toml, mergecraft-instructions.md, auth.json) while this process

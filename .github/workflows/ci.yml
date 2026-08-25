@@ -108,6 +108,40 @@ jobs:
             detail="$(printf '%s' "$out" | grep -m1 -- '  - ' | sed 's/^  - //')"
             echo "::warning title=mergecraft action pin drift::${detail:-see log}"
           fi
+      # First-wave CI SARIF for mergeCraft ingest (#464 / D8). Upload even when
+      # the static tier failed so the review still sees the tool's findings.
+      - name: Emit ruff and mypy SARIF
+        if: always() && matrix.python == '3.14'
+        run: |
+          mkdir -p .sarif
+          uv run ruff check src tests scripts --output-format sarif --output-file .sarif/ruff.sarif || true
+          set +e
+          uv run mypy src/mergecraft --output json --no-error-summary > .sarif/mypy.json
+          mypy_rc=$?
+          set -e
+          if [ ! -s .sarif/mypy.json ]; then
+            if [ "$mypy_rc" -eq 0 ]; then
+              printf '%s\n' '[]' > .sarif/mypy.json
+            else
+              echo "mypy produced no JSON (exit ${mypy_rc})" >&2
+              exit 1
+            fi
+          fi
+          uv run python scripts/native_output_to_sarif.py mypy .sarif/mypy.json .sarif/mypy.sarif
+      - name: Upload ruff SARIF
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ruff-sarif
+          path: .sarif/ruff.sarif
+          if-no-files-found: warn
+      - name: Upload mypy SARIF
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mypy-sarif
+          path: .sarif/mypy.sarif
+          if-no-files-found: warn
 
   security:
     name: Verify (security audit py${{ matrix.python }})
@@ -129,7 +163,21 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: bandit + pip-audit (OSV.dev)
-        run: make security
+        env:
+          BANDIT_JSON: .sarif/bandit.json
+        run: |
+          mkdir -p .sarif
+          make security
+      - name: Convert bandit SARIF
+        if: always() && matrix.python == '3.14'
+        run: uv run python scripts/native_output_to_sarif.py bandit .sarif/bandit.json .sarif/bandit.sarif
+      - name: Upload bandit SARIF
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bandit-sarif
+          path: .sarif/bandit.sarif
+          if-no-files-found: warn
 
   integration:
     name: Verify (integration py${{ matrix.python }})
