@@ -36,7 +36,16 @@ git worktree add "$worktree" "$base_ref"
   # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
   # only runs on the PR checkout, not this detached base worktree.
   make setup-local-analyzers
-  make coverage-measure
+  if grep -q '^coverage-measure:' Makefile; then
+    make coverage-measure
+  else
+    # Pre-TH base trees only ship ``coverage-gate``; inline the measure recipe
+    # so the delta gate can compare against the merge base before TH lands.
+    "${UV:-uv}" run pytest tests -q --tb=short --strict-markers -m "not integration" \
+      --cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
+      --randomly-seed="${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}" \
+      -rX
+  fi
   cp coverage.json "${GITHUB_WORKSPACE}/coverage-base.json"
 )
 make coverage-gate

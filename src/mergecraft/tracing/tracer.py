@@ -419,6 +419,9 @@ def reset_process_tracer_cache() -> None:
 
     _PROCESS_TRACER = None
     _PROCESS_TRACING_FINGERPRINT = None
+    # Prevent ``get_tracer_from_settings`` from returning a stale tracer when
+    # a prior test left an active span on the ContextVar (xdist shard ordering).
+    _ACTIVE_SPAN.set(None)
 
 
 def resolve_trace_id(*, pin: bool = False) -> str:

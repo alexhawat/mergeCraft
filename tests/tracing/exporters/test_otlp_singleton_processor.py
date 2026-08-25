@@ -159,6 +159,7 @@ def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
     from mergecraft.tracing.tracer import get_tracer_from_settings
 
     _ensure_real_tracer_provider()
+    _reset_test_seam()
     monkeypatch.setenv("MERGECRAFT_TRACING", "true")
     endpoint = "http://127.0.0.1:1/canary-singleton-get-tracer"
     monkeypatch.setenv("MERGECRAFT_OTEL_ENDPOINT", endpoint)

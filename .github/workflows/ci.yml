@@ -80,7 +80,9 @@ jobs:
           fetch-depth: 0
       - name: Fetch base branch for merge-base ratchet
         if: github.event_name == 'pull_request'
-        run: git fetch --no-tags origin "${{ github.base_ref }}"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags origin "$BASE_REF"
       - uses: ./.github/actions/bootstrap
         with:
           python-version: "3.14"
