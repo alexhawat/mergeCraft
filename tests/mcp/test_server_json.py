@@ -46,11 +46,33 @@ def test_server_json_package_is_pypi_merge_craft_stdio_public() -> None:
     assert pkg.get("identifier") == "merge-craft"
     transport = pkg.get("transport") or {}
     assert transport.get("type") == "stdio"
-    command = transport.get("command") or transport.get("args")
-    command_text = json.dumps(command)
-    assert "mergecraft" in command_text
+    package_args = pkg.get("packageArguments") or []
+    command_text = json.dumps(package_args)
+    assert "mcp" in command_text
     assert "public" in command_text
     assert "stdio" in command_text
+
+
+def test_server_json_package_arguments_not_under_transport_args() -> None:
+    data = json.loads(_SERVER_JSON.read_text(encoding="utf-8"))
+    pkg = data["packages"][0]
+    transport = pkg.get("transport") or {}
+    assert "args" not in transport, transport
+    package_args = pkg.get("packageArguments")
+    assert isinstance(package_args, list), pkg
+    positional_values = [
+        item["value"]
+        for item in package_args
+        if isinstance(item, dict) and item.get("type") == "positional"
+    ]
+    named_args = {
+        item["name"]: item.get("value")
+        for item in package_args
+        if isinstance(item, dict) and item.get("type") == "named"
+    }
+    assert positional_values == ["mcp", "serve"], package_args
+    assert named_args.get("--role") == "public", package_args
+    assert named_args.get("--transport") == "stdio", package_args
 
 
 def test_server_json_does_not_advertise_runtime_tool_names() -> None:

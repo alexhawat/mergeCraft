@@ -41,6 +41,11 @@ def test_mcp_page_exists_and_is_manifested() -> None:
     assert "docs/mcp.md" in _manifest_paths()
 
 
+def test_mcp_page_stdio_auth_mentions_local_scope() -> None:
+    text = _read(_MCP_PAGE)
+    assert "--scope local" in text or "--scope both" in text
+
+
 def test_mcp_page_answers_three_questions() -> None:
     text = _read(_MCP_PAGE).lower()
     for heading in (

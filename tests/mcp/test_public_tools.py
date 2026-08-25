@@ -302,6 +302,29 @@ async def test_review_change_forwards_serve_trust_tier(
     assert json_path.suffix == ".json"
 
 
+def test_internal_findings_json_path_closes_mkstemp_fd(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from mergecraft.cli.mcp_serve import build_mcp_tool_context
+
+    init_git_repo(tmp_path)
+    write_minimal_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ctx = build_mcp_tool_context(cwd=tmp_path)
+    closed: list[int] = []
+
+    def fake_mkstemp(*args: object, **kwargs: object) -> tuple[int, str]:
+        return (42, str(tmp_path / "mergecraft-mcp-findings-test.json"))
+
+    monkeypatch.setattr(public_mod.tempfile, "mkstemp", fake_mkstemp)
+    monkeypatch.setattr(public_mod.os, "close", closed.append)
+
+    path = public_mod._internal_findings_json_path(ctx, tmp_path)
+    assert path.name == "mergecraft-mcp-findings-test.json"
+    assert closed == [42]
+
+
 def test_public_tools_are_not_filtered_orchestrator_tools(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

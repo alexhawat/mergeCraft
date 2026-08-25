@@ -66,16 +66,13 @@ def build_server_json() -> dict[str, Any]:
                 "version": version,
                 "transport": {
                     "type": "stdio",
-                    "args": [
-                        "mergecraft",
-                        "mcp",
-                        "serve",
-                        "--role",
-                        "public",
-                        "--transport",
-                        "stdio",
-                    ],
                 },
+                "packageArguments": [
+                    {"type": "positional", "value": "mcp"},
+                    {"type": "positional", "value": "serve"},
+                    {"type": "named", "name": "--role", "value": "public"},
+                    {"type": "named", "name": "--transport", "value": "stdio"},
+                ],
             }
         ],
     }

@@ -9,7 +9,8 @@ Registry namespace: `mcp-name: io.github.alexhawat/mergecraft` (generated
 [`server.json`](../server.json)). Tool schemas: [`docs/mcp-tools.md`](mcp-tools.md).
 
 **Prereqs:** install the CLI (`uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"`)
-and authenticate a provider (`mergecraft auth …`). Run `mergecraft init` in the repo
+and authenticate a provider for local stdio (`mergecraft auth <provider> --scope local`, or
+`--scope both` if you also use GitHub Actions). Run `mergecraft init` in the repo
 you want reviewed so `.mergecraft/config.yaml` exists.
 
 **Not in this release:** hosted HTTP remote MCP, OAuth connectors, or ChatGPT Apps /

@@ -8,6 +8,7 @@ Exports:
 from __future__ import annotations
 
 import contextlib
+import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -107,13 +108,13 @@ def _internal_findings_json_path(ctx: ToolContext, repo_root: Path) -> Path:
             json_dir = str(candidate)
         except ValueError:
             json_dir = None
-    return Path(
-        tempfile.mkstemp(
-            prefix="mergecraft-mcp-findings-",
-            suffix=".json",
-            dir=json_dir,
-        )[1]
+    fd, path = tempfile.mkstemp(
+        prefix="mergecraft-mcp-findings-",
+        suffix=".json",
+        dir=json_dir,
     )
+    os.close(fd)
+    return Path(path)
 
 
 def _require_params(

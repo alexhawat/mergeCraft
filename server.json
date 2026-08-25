@@ -9,17 +9,28 @@
       "identifier": "merge-craft",
       "version": "0.1.0a1",
       "transport": {
-        "type": "stdio",
-        "args": [
-          "mergecraft",
-          "mcp",
-          "serve",
-          "--role",
-          "public",
-          "--transport",
-          "stdio"
-        ]
-      }
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "positional",
+          "value": "serve"
+        },
+        {
+          "type": "named",
+          "name": "--role",
+          "value": "public"
+        },
+        {
+          "type": "named",
+          "name": "--transport",
+          "value": "stdio"
+        }
+      ]
     }
   ]
 }
