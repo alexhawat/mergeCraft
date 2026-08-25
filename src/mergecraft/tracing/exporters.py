@@ -593,8 +593,20 @@ class OTLPSink:
             service_name="mergecraft-otel",
         )
 
+    def _ensure_tracer(self) -> None:
+        """Bind ``self._tracer`` when a provider exists but the tracer was never set."""
+        if self._tracer is not None or self._provider is None:
+            return
+        try:
+            from opentelemetry import trace as _trace
+
+            self._tracer = _trace.get_tracer(self.service_name)
+        except ImportError:
+            self._tracer = None
+
     def _ensure_provider(self) -> Any | None:
         if self._provider is not None:
+            self._ensure_tracer()
             return self._provider
         self._provider = _setup_tracer_provider(
             self.endpoint,
@@ -602,12 +614,7 @@ class OTLPSink:
             self.service_name,
         )
         if self._provider is not None:
-            try:
-                from opentelemetry import trace as _trace
-
-                self._tracer = _trace.get_tracer(self.service_name)
-            except ImportError:
-                self._tracer = None
+            self._ensure_tracer()
         return self._provider
 
     def write(self, event: TraceEvent) -> None:

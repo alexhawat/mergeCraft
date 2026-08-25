@@ -75,6 +75,21 @@ class NullSink:
 
 
 _PENDING_SINK: ContextVar[object | None] = ContextVar("mergecraft_pending_trace_sink", default=None)
+_TRACING_SINK_FINGERPRINT_ATTR = "_mergecraft_tracing_fingerprint"
+
+
+def _tracing_settings_fingerprint(tracing_settings: Any) -> str:
+    """Stable key for matching a pending sink handoff to ``tracing_settings``."""
+    dump_json = getattr(tracing_settings, "model_dump_json", None)
+    if callable(dump_json):
+        return str(dump_json())
+    return repr(tracing_settings)
+
+
+def _tag_tracing_sink(sink: Any, tracing_settings: Any) -> Any:
+    """Attach the settings fingerprint used by :func:`claim_sink`."""
+    setattr(sink, _TRACING_SINK_FINGERPRINT_ATTR, _tracing_settings_fingerprint(tracing_settings))
+    return sink
 
 
 class MemorySink:
@@ -227,7 +242,7 @@ def sink_factory(tracing_settings: Any) -> Any:
             _reset_test_seam()
         except ImportError:
             pass
-        return NullSink()
+        return _tag_tracing_sink(NullSink(), tracing_settings)
 
     children: list[Any] = []
     for entry in tracing_settings.sinks:
@@ -265,13 +280,13 @@ def sink_factory(tracing_settings: Any) -> Any:
         raise ValueError(msg)
 
     if not children:
-        return NullSink()
+        return _tag_tracing_sink(NullSink(), tracing_settings)
     from mergecraft.tracing.exporters import dedupe_otlp_sinks
 
     children = dedupe_otlp_sinks(children)
     if not children:
-        return NullSink()
-    resolved = RedactingSink(MultiSink(children))
+        return _tag_tracing_sink(NullSink(), tracing_settings)
+    resolved = _tag_tracing_sink(RedactingSink(MultiSink(children)), tracing_settings)
     _PENDING_SINK.set(resolved)
     return resolved
 
@@ -282,11 +297,17 @@ def claim_sink(tracing_settings: Any) -> Any:
     The handoff lets a caller inspect an in-memory sink before an emit-site
     tracer claims it. Production callers that did not pre-resolve a sink take
     the normal factory path.
+
+    A pending sink is only honored when its fingerprint matches
+    ``tracing_settings`` — otherwise a stale ``sink_factory`` handoff from an
+    unrelated configuration (common on xdist workers) is discarded.
     """
     pending = _PENDING_SINK.get()
     if pending is not None:
         _PENDING_SINK.set(None)
-        return pending
+        pending_fp = getattr(pending, _TRACING_SINK_FINGERPRINT_ATTR, None)
+        if pending_fp == _tracing_settings_fingerprint(tracing_settings):
+            return pending
     resolved = sink_factory(tracing_settings)
     _PENDING_SINK.set(None)
     return resolved

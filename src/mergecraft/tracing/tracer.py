@@ -422,6 +422,23 @@ def reset_process_tracer_cache() -> None:
     # Prevent ``get_tracer_from_settings`` from returning a stale tracer when
     # a prior test left an active span on the ContextVar (xdist shard ordering).
     _ACTIVE_SPAN.set(None)
+    # ``sink_factory`` stashes its product on a ContextVar; a leftover handoff
+    # from an unrelated test (memory/jsonl vs otel) must not poison
+    # ``claim_sink`` on this worker.
+    try:
+        from mergecraft.tracing.sinks import _PENDING_SINK
+
+        _PENDING_SINK.set(None)
+    except ImportError:
+        pass
+    # ``sink_factory`` stashes its product on ``_PENDING_SINK`` for
+    # ``claim_sink`` handoff; a sibling test that called ``sink_factory`` but
+    # never claimed leaves a MemorySink (or other stale sink) that
+    # ``get_tracer_from_settings`` would otherwise reuse instead of building
+    # the OTLP sink under test (#293 / shard-2 xdist flake).
+    from mergecraft.tracing.sinks import _PENDING_SINK
+
+    _PENDING_SINK.set(None)
 
 
 def resolve_trace_id(*, pin: bool = False) -> str:
