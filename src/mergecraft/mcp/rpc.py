@@ -20,41 +20,13 @@ from mergecraft.tracing._tool_attrs import (
 )
 from mergecraft.tracing.tracer import get_tracer_from_settings
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.version import package_version
 
 if TYPE_CHECKING:
     from jsonschema.protocols import Validator
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.shared import ToolSpec
-
-
-def package_version() -> str:
-    """Return the installed mergeCraft version for MCP metadata."""
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        installed = version("merge-craft")
-        if installed.strip():
-            return installed
-    except PackageNotFoundError:
-        pass
-
-    from mergecraft import __version__
-
-    if __version__.strip() and __version__ != "0.0.0+unknown":
-        return __version__
-
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
-    if pyproject.is_file():
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        project_version = data.get("project", {}).get("version")
-        if isinstance(project_version, str) and project_version.strip():
-            return project_version
-
-    return __version__
 
 
 async def dispatch_mcp_rpc(

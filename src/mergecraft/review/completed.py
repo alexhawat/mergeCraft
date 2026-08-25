@@ -8,6 +8,9 @@ Exports:
     load_completed_review: Reload a stored review, or ``None`` on miss/corrupt.
     list_completed_review_ids: Enumerate stored review ids under a repo root.
     lookup_finding_packet_in_review: Evidence packet lookup scoped to one review.
+    lookup_finding_row_in_review: Finding row lookup scoped to one review.
+    completed_review_payload: Load a stored review as a tool/API payload dict.
+    persist_offline_review: Persist an offline review with evidence and trace artifacts.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 from mergecraft.analyzers.finding import Finding, finding_record_without_short_id
@@ -26,6 +30,7 @@ from mergecraft.review.finding_lookup import (
     load_json_packets_in_dir,
     lookup_packet_by_finding_id,
 )
+from mergecraft.review.output import finding_json_records
 from mergecraft.review.snapshot import ReviewSnapshot
 
 COMPLETED_REVIEW_SCHEMA_VERSION = "1.0.0"
@@ -105,6 +110,59 @@ def persist_completed_review(
         lines = [json.dumps(event, ensure_ascii=False) for event in events]
         (root / "trace.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return root
+
+
+def persist_offline_review(
+    *,
+    review_id: str,
+    trace_session_id: str,
+    snapshot: ReviewSnapshot,
+    repo_root: Path,
+    model: str,
+    prompt: str | None,
+    findings: Sequence[Finding],
+    evidence_packet_path: str | None = None,
+    trace_dir: Path | None = None,
+    agent_id: str = "mergecraft",
+) -> list[dict[str, Any]]:
+    """Persist an offline review and return serialized finding rows."""
+    from mergecraft.evidence.run_manifest import build_run_manifest
+    from mergecraft.review.completed_artifacts import (
+        collect_evidence_packets_for_persist,
+        collect_trace_events_for_review,
+    )
+
+    manifest = build_run_manifest(
+        cwd=repo_root,
+        model=model,
+        agent_id=agent_id,
+        prompt_text=prompt or "",
+    )
+    findings_records = finding_json_records(findings)
+    review = CompletedReview(
+        review_id=review_id,
+        snapshot=snapshot,
+        manifest=manifest,
+        findings=findings_records,
+        trace_session_id=trace_session_id,
+    )
+    evidence_packets = collect_evidence_packets_for_persist(
+        findings,
+        repo_root=repo_root,
+        evidence_packet_path=evidence_packet_path,
+    )
+    trace_events = collect_trace_events_for_review(
+        trace_session_id,
+        repo_root=repo_root,
+        trace_dir=trace_dir,
+    )
+    persist_completed_review(
+        review,
+        repo_root=repo_root,
+        evidence_packets=evidence_packets,
+        trace_events=trace_events,
+    )
+    return findings_records
 
 
 def _read_json_file(path: Path) -> Any:
@@ -204,6 +262,48 @@ def _fingerprints_from_findings(findings: list[dict[str, Any]]) -> list[str]:
     return fingerprints
 
 
+def _finding_row_for_id(
+    findings: list[dict[str, Any]],
+    finding_id: str,
+) -> dict[str, Any] | None:
+    for row in findings:
+        if row.get("short_id") == finding_id:
+            return row
+        if row.get("fingerprint") == finding_id:
+            return row
+    return None
+
+
+def lookup_finding_row_in_review(
+    review_id: str,
+    finding_id: str,
+    *,
+    repo_root: Path,
+) -> dict[str, Any] | None:
+    """Return a finding row when the review exists and the id matches."""
+    loaded = load_completed_review(review_id, repo_root=repo_root)
+    if loaded is None:
+        return None
+    return _finding_row_for_id(loaded.findings, finding_id)
+
+
+def completed_review_payload(
+    review_id: str,
+    *,
+    repo_root: Path,
+) -> dict[str, Any] | None:
+    """Load a stored review as a tool/API payload dict."""
+    loaded = load_completed_review(review_id, repo_root=repo_root)
+    if loaded is None:
+        return None
+    return {
+        "review_id": loaded.review_id,
+        "manifest": loaded.manifest,
+        "findings": loaded.findings,
+        "trace_session_id": loaded.trace_session_id,
+    }
+
+
 def lookup_finding_packet_in_review(
     review_id: str,
     finding_id: str,
@@ -261,9 +361,12 @@ __all__ = [
     "CompletedReview",
     "completed_review_dir",
     "completed_review_exists",
+    "completed_review_payload",
     "list_completed_review_ids",
     "load_completed_review",
     "load_completed_review_trace_events",
     "lookup_finding_packet_in_review",
+    "lookup_finding_row_in_review",
     "persist_completed_review",
+    "persist_offline_review",
 ]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final, TypedDict
 
-from mergecraft.modes import _MODE_DEFS
+from mergecraft.modes import production_mode_names
 
 ALLOWED_CAPABILITIES: Final[tuple[str, ...]] = (
     "identify",
@@ -40,7 +40,7 @@ def capabilities_manifest() -> CapabilitiesManifest:
     """
     return {
         "review_only": True,
-        "modes": [name for name, _, _ in _MODE_DEFS],
+        "modes": production_mode_names(),
         "allowed": list(ALLOWED_CAPABILITIES),
         "forbidden": list(FORBIDDEN_CAPABILITIES),
     }

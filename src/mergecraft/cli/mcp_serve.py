@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import os
 import secrets
-import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from mergecraft.config.settings import (
+    TrustTier,
     apply_trust_tier_to_repo_settings,
     load_repo_settings,
     parse_cli_trust_override,
 )
-from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
+from mergecraft.mcp.context_factory import minimal_tool_context
 from mergecraft.mcp.endpoints import MCP_PUBLIC_ENDPOINT
 from mergecraft.mcp.public import build_public_tools
 from mergecraft.mcp.server import (
@@ -27,50 +25,16 @@ from mergecraft.mcp.server import (
     build_verifier_tools,
     create_mcp_app,
 )
-from mergecraft.mcp.tool_state import init_tool_state
-from mergecraft.modes import compute_modes
 from mergecraft.offline_review import resolve_offline_review_trust_tier
-from mergecraft.types import XrepoConfig
-from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.source_resolve import SourceResolverSpec, resolve_workspace
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
+    from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.shared import ToolSpec
 
 ServeRole = Literal["orchestrator", "reviewer", "verifier", "public"]
-
-
-def _tool_context_for_codegen_tmpdir(tmpdir: str) -> ToolContext:
-    state = init_tool_state(owner="local", name="mergecraft", dir=tmpdir)
-    return ToolContext(
-        agent_id="claude",
-        repo=RepoIdentity(owner="local", name="mergecraft"),
-        payload=ResolvedPayload(
-            event=PayloadEvent(trigger="unknown"),
-            shell="disabled",
-            push="disabled",
-        ),
-        github=GitHubClient(token=""),
-        github_installation_token="",
-        git_token="",
-        api_token="",
-        modes=compute_modes("claude"),
-        tool_state=state,
-        mcp_server_url="",
-        mcp_auth_token="",
-        mcp_orchestrator_auth_token="",
-        tmpdir=tmpdir,
-        xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
-    )
-
-
-@contextmanager
-def codegen_tool_context() -> Iterator[ToolContext]:
-    """Yield a minimal :class:`ToolContext` with an auto-cleaned temp workspace."""
-    with tempfile.TemporaryDirectory(prefix="mergecraft-gen-mcp-") as tmpdir:
-        yield _tool_context_for_codegen_tmpdir(tmpdir)
 
 
 def role_endpoint(role: ServeRole) -> str:
@@ -101,6 +65,10 @@ def _resolve_serve_auth_token() -> str:
     return configured or secrets.token_hex(32)
 
 
+def _as_trust_tier(raw: str) -> TrustTier:
+    return "trusted" if raw == "trusted" else "untrusted"
+
+
 def build_mcp_tool_context(
     *,
     cwd: Path,
@@ -113,11 +81,13 @@ def build_mcp_tool_context(
     spec = SourceResolverSpec(cwd=root, invocation_root=inv_root)
     workspace = resolve_workspace(spec)
     repo_root = workspace.cwd.resolve()
-    trust_tier = resolve_offline_review_trust_tier(
-        cwd=repo_root,
-        invocation_root=inv_root,
-        trust_override=parse_cli_trust_override(trust_override),
-        cloned=workspace.cloned,
+    trust_tier = _as_trust_tier(
+        resolve_offline_review_trust_tier(
+            cwd=repo_root,
+            invocation_root=inv_root,
+            trust_override=parse_cli_trust_override(trust_override),
+            cloned=workspace.cloned,
+        )
     )
     settings = load_repo_settings(root=repo_root, load_learnings_files=False)
     settings, _drops = apply_trust_tier_to_repo_settings(
@@ -134,41 +104,22 @@ def build_mcp_tool_context(
     push_policy: Literal["disabled", "restricted", "enabled"] = (
         "restricted" if trust_tier == "trusted" else "disabled"
     )
-    state = init_tool_state(owner="local", name=repo_root.name, dir=str(repo_root))
-    state.trust_tier = trust_tier
-    modes = compute_modes("claude", signed_commits=False)
-    payload = ResolvedPayload(
-        event=PayloadEvent(trigger="unknown", title="mcp serve"),
+    run_token = _resolve_serve_auth_token()
+    return minimal_tool_context(
+        str(repo_root),
+        repo_name=repo_root.name,
+        trust_tier=trust_tier,
         shell=shell_policy,
         push=push_policy,
-        cwd=str(repo_root),
-    )
-    run_token = _resolve_serve_auth_token()
-    return ToolContext(
-        agent_id="claude",
-        repo=RepoIdentity(owner="local", name=repo_root.name),
-        payload=payload,
-        github=GitHubClient(token=""),
-        github_installation_token="",
-        git_token="",
-        api_token="",
-        modes=modes,
-        tool_state=state,
-        mcp_server_url="",
+        payload_cwd=str(repo_root),
+        payload_title="mcp serve",
         mcp_auth_token=run_token,
-        tmpdir=str(repo_root),
-        signed_commits=False,
-        pr_approve_enabled=False,
-        auto_merge_enabled=False,
         static_checks_enabled=trust_tier == "trusted",
-        analyzers_mode="auto",
-        trust_tier=trust_tier,  # type: ignore[arg-type]  # — trust_tier is TrustTier; ToolContext.trust_tier field expects str supertype
         analyzers_settings_enabled=settings.analyzers.enabled,
-        xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
     )
 
 
-def _tool_specs_for_role(parsed_role: ServeRole, ctx: ToolContext) -> list[ToolSpec]:
+def tool_specs_for_role(parsed_role: ServeRole, ctx: ToolContext) -> list[ToolSpec]:
     if parsed_role == "orchestrator":
         return build_orchestrator_tools(ctx)
     if parsed_role == "reviewer":
@@ -192,7 +143,7 @@ def resolve_served_tool_specs(
         invocation_root=invocation_root,
         trust_override=trust_override,
     )
-    return _tool_specs_for_role(parsed_role, ctx)
+    return tool_specs_for_role(parsed_role, ctx)
 
 
 def resolve_served_tool_names(
@@ -229,7 +180,7 @@ def build_mcp_app_from_ctx(role: str, ctx: ToolContext) -> FastAPI:
         Configured :class:`~fastapi.FastAPI` application.
     """
     parsed_role = parse_role(role)
-    tools = _tool_specs_for_role(parsed_role, ctx)
+    tools = tool_specs_for_role(parsed_role, ctx)
     if parsed_role == "orchestrator":
         return create_mcp_app(tools, ctx, auth_token=ctx.mcp_auth_token)
     if parsed_role == "public":
@@ -270,9 +221,9 @@ __all__ = [
     "build_mcp_app_for_role",
     "build_mcp_app_from_ctx",
     "build_mcp_tool_context",
-    "codegen_tool_context",
     "parse_role",
     "resolve_served_tool_names",
     "resolve_served_tool_specs",
     "role_endpoint",
+    "tool_specs_for_role",
 ]

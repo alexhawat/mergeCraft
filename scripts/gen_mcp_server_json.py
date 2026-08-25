@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING, Any
 
 import jsonschema
 
-from mergecraft.cli.mcp_serve import codegen_tool_context
+from mergecraft.mcp.codegen import codegen_tool_context
 from mergecraft.mcp.public import PUBLIC_TOOL_NAMES, build_public_tools
-from mergecraft.mcp.rpc import package_version
+from mergecraft.utils.version import package_version
 
 if TYPE_CHECKING:
     from mergecraft.mcp.shared import ToolSpec

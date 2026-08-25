@@ -16,11 +16,11 @@ from mergecraft.cli.mcp_serve import (
     parse_role,
     resolve_served_tool_names,
     role_endpoint,
+    tool_specs_for_role,
 )
 from mergecraft.cli.profiles import apply_profile_env, resolve_profile
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.mcp.ports import MCP_HOST, read_env_port, select_port
-from mergecraft.mcp.public import build_public_tools
 from mergecraft.mcp.stdio import run_public_stdio_server
 
 app = typer.Typer(
@@ -138,7 +138,7 @@ def serve_cmd(
             cli_bail(str(exc))
 
         if parsed_transport == "stdio":
-            run_public_stdio_server(ctx, build_public_tools(ctx))
+            run_public_stdio_server(ctx, tool_specs_for_role("public", ctx))
             return
 
         try:

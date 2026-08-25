@@ -138,7 +138,7 @@ def test_findings_by_review_id_markdown_includes_short_id_and_severity(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Happy — stored rows with export-only short ids still render full markdown."""
-    from mergecraft.cli.review_output import finding_json_records
+    from mergecraft.review.output import finding_json_records
 
     review_id = sample_review_id()
     finding_mod = __import__("mergecraft.analyzers.finding", fromlist=["make_finding"])

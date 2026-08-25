@@ -15,26 +15,19 @@ from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
 from mergecraft.mcp.shared import EMPTY_SCHEMA, JsonSchema, ToolClass, execute, tool
 from mergecraft.offline_review import parse_offline_review_findings, run_offline_diff_review
 from mergecraft.review.completed import (
-    CompletedReview,
-    load_completed_review,
+    completed_review_exists,
+    completed_review_payload,
     lookup_finding_packet_in_review,
-    persist_completed_review,
-)
-from mergecraft.review.completed_artifacts import (
-    collect_evidence_packets_for_persist,
-    collect_trace_events_for_review,
+    lookup_finding_row_in_review,
+    persist_offline_review,
 )
 from mergecraft.review.explain import finding_explain_payload
 from mergecraft.review.finding_lookup import is_safe_path_stem
-from mergecraft.review.output import finding_json_records
-from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
+from mergecraft.review.snapshot import canonical_review_snapshot
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.source_resolve import SourceResolverSpec, confine_path
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.shared import ToolSpec
 
@@ -81,77 +74,18 @@ def _require_nonempty_str(value: object, field: str) -> str:
     return value.strip()
 
 
-def _persist_public_review(
-    *,
-    review_id: str,
-    trace_session_id: str,
-    snapshot: ReviewSnapshot,
-    repo_root: Path,
-    prompt: str | None,
-    findings: Sequence[Finding],
-    evidence_packet_path: str | None = None,
-) -> list[dict[str, Any]]:
-    from mergecraft.evidence.run_manifest import build_run_manifest
-
-    manifest = build_run_manifest(
-        cwd=repo_root,
-        model="(mcp-public)",
-        agent_id="mergecraft",
-        prompt_text=prompt or "",
-    )
-    findings_records = finding_json_records(findings)
-    review = CompletedReview(
-        review_id=review_id,
-        snapshot=snapshot,
-        manifest=manifest,
-        findings=findings_records,
-        trace_session_id=trace_session_id,
-    )
-    evidence_packets = collect_evidence_packets_for_persist(
-        findings,
-        repo_root=repo_root,
-        evidence_packet_path=evidence_packet_path,
-    )
-    trace_events = collect_trace_events_for_review(
-        trace_session_id,
-        repo_root=repo_root,
-    )
-    persist_completed_review(
-        review,
-        repo_root=repo_root,
-        evidence_packets=evidence_packets,
-        trace_events=trace_events,
-    )
-    return findings_records
-
-
-def _finding_row_for_id(
-    findings: list[dict[str, Any]],
-    finding_id: str,
-) -> dict[str, Any] | None:
-    for row in findings:
-        if row.get("short_id") == finding_id:
-            return row
-        if row.get("fingerprint") == finding_id:
-            return row
-    return None
-
-
-def _get_review_payload(
-    review_id: str,
-    *,
-    repo_root: Path,
-) -> dict[str, Any] | None:
-    """Load a stored review via strict completed-review validation."""
-    loaded = load_completed_review(review_id, repo_root=repo_root)
-    if loaded is None:
-        return None
-    return {
-        "review_id": loaded.review_id,
-        "manifest": loaded.manifest,
-        "findings": loaded.findings,
-        "trace_session_id": loaded.trace_session_id,
-    }
+def _require_params(
+    params: dict[str, Any],
+    *fields: str,
+) -> dict[str, Any]:
+    """Validate required string params; return values or a single-field error dict."""
+    values: dict[str, str] = {}
+    for field in fields:
+        try:
+            values[field] = _require_nonempty_str(params.get(field), field)
+        except _ParamRequiredError as exc:
+            return {"error": f"{exc.field} is required"}
+    return values
 
 
 def review_change_tool(ctx: ToolContext) -> ToolSpec:
@@ -202,11 +136,12 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
             return {"error": result.error or "review_change failed"}
 
         findings = parse_offline_review_findings(result)
-        finding_rows = _persist_public_review(
+        finding_rows = persist_offline_review(
             review_id=review_id,
             trace_session_id=trace_session_id,
             snapshot=snapshot,
             repo_root=repo_root,
+            model="(mcp-public)",
             prompt=params.get("prompt"),
             findings=findings,
             evidence_packet_path=result.evidence_packet_path,
@@ -265,11 +200,11 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
 
 def get_review_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        try:
-            review_id = _require_nonempty_str(params.get("review_id"), "review_id")
-        except _ParamRequiredError as exc:
-            return {"error": f"{exc.field} is required"}
-        payload = _get_review_payload(review_id, repo_root=_repo_root(ctx))
+        required = _require_params(params, "review_id")
+        if "error" in required:
+            return required
+        review_id = required["review_id"]
+        payload = completed_review_payload(review_id, repo_root=_repo_root(ctx))
         if payload is None:
             return {"error": f"unknown review id {review_id!r}"}
         return payload
@@ -297,16 +232,15 @@ def get_review_tool(ctx: ToolContext) -> ToolSpec:
 
 def inspect_finding_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        try:
-            finding_id = _require_nonempty_str(params.get("finding_id"), "finding_id")
-            review_id = _require_nonempty_str(params.get("review_id"), "review_id")
-        except _ParamRequiredError as exc:
-            return {"error": f"{exc.field} is required"}
+        required = _require_params(params, "finding_id", "review_id")
+        if "error" in required:
+            return required
+        finding_id = required["finding_id"]
+        review_id = required["review_id"]
         repo_root = _repo_root(ctx)
-        loaded = load_completed_review(review_id, repo_root=repo_root)
-        if loaded is None:
+        if not completed_review_exists(review_id, repo_root=repo_root):
             return {"error": f"unknown review id {review_id!r}"}
-        row = _finding_row_for_id(loaded.findings, finding_id)
+        row = lookup_finding_row_in_review(review_id, finding_id, repo_root=repo_root)
         if row is None:
             return {"error": f"unknown finding id {finding_id!r}"}
         return {"finding_id": finding_id, "finding": row, "review_id": review_id}
@@ -338,15 +272,18 @@ def inspect_finding_tool(ctx: ToolContext) -> ToolSpec:
 
 def explain_finding_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        try:
-            finding_id = _require_nonempty_str(params.get("finding_id"), "finding_id")
-            review_id = _require_nonempty_str(params.get("review_id"), "review_id")
-        except _ParamRequiredError as exc:
-            return {"error": f"{exc.field} is required"}
+        required = _require_params(params, "finding_id", "review_id")
+        if "error" in required:
+            return required
+        finding_id = required["finding_id"]
+        review_id = required["review_id"]
+        repo_root = _repo_root(ctx)
+        if not completed_review_exists(review_id, repo_root=repo_root):
+            return {"error": f"unknown review id {review_id!r}"}
         packet = lookup_finding_packet_in_review(
             review_id,
             finding_id,
-            repo_root=_repo_root(ctx),
+            repo_root=repo_root,
         )
         if packet is None:
             return {"error": f"unknown finding id {finding_id!r}"}
@@ -379,7 +316,8 @@ def explain_finding_tool(ctx: ToolContext) -> ToolSpec:
 
 def get_capabilities_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(_params: dict[str, Any]) -> dict[str, Any]:
-        return dict(capabilities_manifest())
+        manifest = capabilities_manifest()
+        return {**manifest}
 
     return tool(
         name="get_capabilities",

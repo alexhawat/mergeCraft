@@ -117,6 +117,11 @@ def run(
     if resolved_finding_id:
         packet: dict[str, Any] | None = None
         if resolved_review_id:
+            if not completed_review_exists(resolved_review_id, repo_root=root):
+                cli_bail(
+                    f"unknown review id {resolved_review_id!r}",
+                    code=CLI_USAGE_EXIT_CODE,
+                )
             packet = lookup_finding_packet_in_review(
                 resolved_review_id,
                 resolved_finding_id,
@@ -142,4 +147,4 @@ def run(
     console.print(_render_table(payload))
 
 
-__all__ = ["finding_explain_payload", "run"]
+__all__ = ["run"]

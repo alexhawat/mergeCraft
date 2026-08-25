@@ -74,6 +74,7 @@ from mergecraft.mcp.review_comments import (
     resolve_review_thread_tool,
 )
 from mergecraft.mcp.rpc import dispatch_mcp_rpc, package_version
+from mergecraft.mcp.rpc_types import json_rpc_parse_error
 from mergecraft.mcp.select_mode import select_mode_tool
 from mergecraft.mcp.shared import (
     PRIMARY_MUTATING_ALLOWLIST,
@@ -287,10 +288,9 @@ def _register_mcp_route(
         try:
             body = await request.json()
         except Exception:
-            # No envelope helper here: a parse failure has no request id to echo,
-            # so this response deliberately carries no ``id`` field at all.
+            # No envelope id: a parse failure has no request id to echo (see json_rpc_parse_error).
             return JSONResponse(
-                {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}},
+                json_rpc_parse_error(include_id=False),
                 status_code=400,
             )
         items = body if isinstance(body, list) else [body]

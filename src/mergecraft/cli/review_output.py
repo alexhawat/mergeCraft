@@ -149,6 +149,5 @@ def dispatch_review_output(
 __all__ = [
     "dispatch_review_output",
     "emit_review_json_stdout",
-    "finding_json_records",
     "write_jsonl_findings",
 ]

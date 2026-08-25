@@ -12,6 +12,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.rpc import dispatch_mcp_rpc
+from mergecraft.mcp.rpc_types import json_rpc_parse_error
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -68,9 +69,7 @@ async def _serve_stdio_loop(tools: list[ToolSpec], tool_ctx: ToolContext) -> Non
         try:
             body = json.loads(stripped)
         except json.JSONDecodeError:
-            _write_response(
-                {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
-            )
+            _write_response(json_rpc_parse_error(include_id=True, req_id=None))
             continue
         if isinstance(body, list):
             for item in body:

@@ -101,6 +101,11 @@ _MODE_DEFS: Final[list[tuple[str, str, str]]] = [
 ]
 
 
+def production_mode_names() -> list[str]:
+    """Return built-in mode names registered for production review."""
+    return [name for name, _, _ in _MODE_DEFS]
+
+
 def is_write_capable_mode_name(name: str) -> bool:
     """Return True when ``name`` matches a write-capable built-in (case-insensitive)."""
     return name.casefold() in _WRITE_CAPABLE_MODE_NAMES_CF
@@ -307,6 +312,7 @@ __all__ = [
     "compute_prompt_version",
     "is_write_capable_mode_name",
     "modes",
+    "production_mode_names",
     "prompt_version_for",
     "refuse_review_only_mutation",
 ]

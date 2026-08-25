@@ -12,6 +12,24 @@ class RpcError(NamedTuple):
     message: str
 
 
+PARSE_ERROR = RpcError(-32700, "Parse error")
+
+
+def json_rpc_parse_error(*, include_id: bool, req_id: Any = None) -> dict[str, Any]:
+    """Build a parse-error envelope.
+
+    HTTP transport omits ``id`` when the body cannot be parsed; stdio sets
+    ``id`` to ``None`` so clients always receive a well-formed response object.
+    """
+    envelope: dict[str, Any] = {
+        "jsonrpc": "2.0",
+        "error": {"code": PARSE_ERROR.code, "message": PARSE_ERROR.message},
+    }
+    if include_id:
+        envelope["id"] = req_id
+    return envelope
+
+
 def rpc_error(req_id: Any, error: RpcError) -> dict[str, Any]:
     """Wrap ``error`` in the JSON-RPC response envelope for ``req_id``."""
     return {
@@ -21,4 +39,4 @@ def rpc_error(req_id: Any, error: RpcError) -> dict[str, Any]:
     }
 
 
-__all__ = ["RpcError", "rpc_error"]
+__all__ = ["PARSE_ERROR", "RpcError", "json_rpc_parse_error", "rpc_error"]

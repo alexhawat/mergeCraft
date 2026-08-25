@@ -6,7 +6,16 @@ from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mergecraft.mcp.rpc import package_version
+import pytest
+
+from mergecraft.mcp.rpc_types import PARSE_ERROR, json_rpc_parse_error
+from mergecraft.utils.version import package_version
+
+
+@pytest.fixture(autouse=True)
+def _clear_package_version_cache() -> None:
+    package_version.cache_clear()
+
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -48,6 +57,22 @@ def test_package_version_without_pyproject(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr("pathlib.Path", _FakePath)
     assert package_version() == "1.0.0+test"
+
+
+def test_json_rpc_parse_error_envelope_split() -> None:
+    """HTTP omits ``id``; stdio sets ``id`` to ``None`` — both share code/message."""
+    http = json_rpc_parse_error(include_id=False)
+    stdio = json_rpc_parse_error(include_id=True, req_id=None)
+    assert "id" not in http
+    assert stdio["id"] is None
+    assert (
+        http["error"]
+        == stdio["error"]
+        == {
+            "code": PARSE_ERROR.code,
+            "message": PARSE_ERROR.message,
+        }
+    )
 
 
 def test_public_http_tool_failure_returns_jsonrpc_envelope(
