@@ -32,7 +32,7 @@ git worktree add "$worktree" "$base_ref"
   # [project.optional-dependencies] extra, which `uv run` does not install, so
   # `make coverage-measure` died with "Failed to spawn: pytest" before measuring
   # anything. Sync the extra explicitly.
-  "${UV:-uv}" sync --extra dev
+  "${UV:-uv}" sync --extra dev --extra tracing
   # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
   # only runs on the PR checkout, not this detached base worktree.
   make setup-local-analyzers
