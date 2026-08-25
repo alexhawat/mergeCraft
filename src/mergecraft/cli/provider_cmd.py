@@ -983,7 +983,12 @@ def plan_provider_migration(
         if label == "nous":
             nous_url = env_map.get(NOUS_BASE_URL_ENV, "").strip()
             if nous_url:
-                entry["url"] = nous_url
+                # A stored URL is emitted verbatim into workflow YAML, so a
+                # migrated one has to clear the same bar as one typed at the CLI.
+                try:
+                    entry["url"] = validate_http_url(nous_url)
+                except ValueError as exc:
+                    cli_bail(f"{NOUS_BASE_URL_ENV} is not a usable provider url: {exc}")
         if label == "bedrock":
             for region_key in BEDROCK_LEGACY_CONFIG_KEYS:
                 region_value = env_map.get(region_key, "").strip()

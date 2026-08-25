@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -91,10 +93,36 @@ def _emit_workflow_change(
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
 
     try:
-        workflow.write_text(change.new_text, encoding="utf-8")
+        _atomic_write_text(workflow, change.new_text)
     except OSError as exc:
         cli_bail(f"could not write {workflow}: {exc}")
     console.print(f"[green]wrote[/green] {workflow}")
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Replace *path* via a sibling temp file and rename.
+
+    An in-place write truncates first, so a crash mid-write would leave the
+    consumer workflow corrupt. The rename is atomic: the file is either the old
+    content or the new one.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode & 0o777 if path.is_file() else None
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if mode is not None:
+            tmp_path.chmod(mode)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def _restore_workflow(workflow: Path, previous: str | None) -> None:

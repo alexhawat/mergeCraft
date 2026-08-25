@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stayed against the process working directory, so invoking from outside the
   target repository could read config from one repo and rewrite another repo's
   workflow
+- The consumer workflow file is replaced atomically by `mergecraft workflow`,
+  matching the config writer. A crash mid-write used to leave it truncated
+- `provider migrate` validates a migrated `NOUS_BASE_URL` through
+  `validate_http_url` like every other URL entry point, instead of storing it
+  unchecked
 - `.mergecraft/config.yaml` is replaced atomically (temporary file plus rename,
   preserving permissions) by every CLI writer. An in-place write truncates
   first, so a failure partway through left a half-written config behind

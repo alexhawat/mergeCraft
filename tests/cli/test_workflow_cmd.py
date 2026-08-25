@@ -690,16 +690,16 @@ def test_apply_failure_leaves_provider_config_unchanged(
     _register_nous_provider(tmp_path)
     before = read_config(tmp_path)
 
-    real_write_text = Path.write_text
+    real_replace = os.replace
 
-    def _explode_on_workflow(self: Path, *args: object, **kwargs: object) -> int:
-        # Fail only the workflow write; a global patch would block the config
-        # write too and the assertion below would hold vacuously.
-        if self == workflow:
+    def _explode_on_workflow(src: Any, dst: Any, **kwargs: Any) -> None:
+        # Fail only the workflow write; failing every write would block the
+        # config write too and the assertion below would hold vacuously.
+        if Path(dst) == workflow:
             raise OSError("disk full")
-        return real_write_text(self, *args, **kwargs)  # type: ignore[arg-type]
+        real_replace(src, dst, **kwargs)
 
-    monkeypatch.setattr(Path, "write_text", _explode_on_workflow)
+    monkeypatch.setattr(os, "replace", _explode_on_workflow)
     result = _invoke(
         "workflow",
         "provider",
@@ -828,3 +828,57 @@ def test_partial_config_write_leaves_the_original_config_intact(
     assert read_config(tmp_path) == config_before
     leftovers = list(config_path.parent.glob(".config.yaml.*.tmp"))
     assert not leftovers, f"temporary config files were left behind: {leftovers}"
+
+
+def test_partial_workflow_write_leaves_the_original_workflow_intact(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A workflow write that dies mid-payload must not truncate the file."""
+    workflow = _setup_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    _register_nous_provider(tmp_path)
+    workflow_before = workflow.read_text(encoding="utf-8")
+    real_fdopen = os.fdopen
+
+    class _HalfWriter:
+        def __init__(self, handle: Any) -> None:
+            self._handle = handle
+
+        def write(self, payload: str) -> int:
+            self._handle.write(payload[: len(payload) // 2])
+            raise OSError("disk full")
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._handle, name)
+
+        def __enter__(self) -> _HalfWriter:
+            self._handle.__enter__()
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            self._handle.__exit__(*exc)
+
+    def _half_writing_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        return _HalfWriter(real_fdopen(fd, *args, **kwargs))
+
+    monkeypatch.setattr(os, "fdopen", _half_writing_fdopen)
+    result = _invoke(
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "nous",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+    monkeypatch.undo()
+
+    assert result.exit_code != CLI_SUCCESS_EXIT_CODE, _plain(result.stdout + result.stderr)
+    assert workflow.read_text(encoding="utf-8") == workflow_before, (
+        "a failed workflow write must not truncate the original file"
+    )
+    leftovers = list(workflow.parent.glob(f".{workflow.name}.*.tmp"))
+    assert not leftovers, f"temporary workflow files were left behind: {leftovers}"
