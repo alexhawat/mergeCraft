@@ -22,6 +22,7 @@ import sys
 import tempfile
 import tokenize
 import tomllib
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -323,7 +324,8 @@ def _mutate_module(
     test_dirs = MODULE_TEST_DIRS[module]
     original = canonical_path.read_text(encoding="utf-8")
     candidates = _enumerate_line_mutants(original)
-    rng = random.Random(seed + hash(module))
+    module_seed_offset = zlib.adler32(module.encode("utf-8"))
+    rng = random.Random(seed + module_seed_offset)
     rng.shuffle(candidates)
     selected = candidates[:max_mutants]
 
@@ -346,25 +348,31 @@ def _mutate_module(
         )
 
     mutate_path = resolve_module_path(module, repo_root=sandbox_root)
-    for mutant in selected:
-        mutated_source = _apply_mutant(original, mutant)
-        if mutated_source == original:
-            errors += 1
+    try:
+        for mutant in selected:
+            mutated_source = _apply_mutant(original, mutant)
+            if mutated_source == original:
+                errors += 1
+                if verbose:
+                    print(f"  SKIP {mutant.label} (no-op apply)")
+                continue
+            mutate_path.write_text(mutated_source, encoding="utf-8")
+            try:
+                code, output = _run_pytest(test_dirs, repo_root=sandbox_root)
+            finally:
+                mutate_path.write_text(original, encoding="utf-8")
+            if code == 0:
+                survived += 1
+                status = "SURVIVED"
+            else:
+                killed += 1
+                status = "KILLED"
             if verbose:
-                print(f"  SKIP {mutant.label} (no-op apply)")
-            continue
-        mutate_path.write_text(mutated_source, encoding="utf-8")
-        code, output = _run_pytest(test_dirs, repo_root=sandbox_root)
-        if code == 0:
-            survived += 1
-            status = "SURVIVED"
-        else:
-            killed += 1
-            status = "KILLED"
-        if verbose:
-            print(f"  {status} {mutant.label}")
-            if verbose >= 2 and output.strip():
-                print(output.strip().splitlines()[-1])
+                print(f"  {status} {mutant.label}")
+                if verbose >= 2 and output.strip():
+                    print(output.strip().splitlines()[-1])
+    finally:
+        mutate_path.write_text(original, encoding="utf-8")
 
     return ModuleResult(
         module=module,
