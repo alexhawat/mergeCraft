@@ -156,9 +156,10 @@ def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
 
     from mergecraft.config import RepoSettings
     from mergecraft.tracing.exporters import _reset_test_seam, captured_payload
-    from mergecraft.tracing.tracer import get_tracer_from_settings
+    from mergecraft.tracing.tracer import get_tracer_from_settings, reset_process_tracer_cache
 
     _ensure_real_tracer_provider()
+    reset_process_tracer_cache()
     _reset_test_seam()
     monkeypatch.setenv("MERGECRAFT_TRACING", "true")
     endpoint = "http://127.0.0.1:1/canary-singleton-get-tracer"
@@ -175,6 +176,7 @@ def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
     )
     tracers = [get_tracer_from_settings(settings) for _ in range(construction_count)]
 
+    reset_process_tracer_cache()
     _reset_test_seam()
     with tracers[-1].start_span(
         "tool.call",

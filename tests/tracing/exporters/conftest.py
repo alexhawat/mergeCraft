@@ -12,10 +12,26 @@ from __future__ import annotations
 
 import json
 import socket
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_exporter_tracer_cache() -> Iterator[None]:
+    """Clear process tracer cache and active span before each exporter test.
+
+    ``tests/conftest.py`` already autouses ``reset_process_tracer_cache`` globally;
+    this package repeats it so OTLP singleton tests never inherit a stale
+    ``_ACTIVE_SPAN`` from a sibling exporter test on the same xdist worker.
+    """
+    from mergecraft.tracing.tracer import reset_process_tracer_cache
+
+    reset_process_tracer_cache()
+    yield
+    reset_process_tracer_cache()
 
 
 def ensure_real_tracer_provider() -> None:
