@@ -133,8 +133,33 @@ def _remove_git_worktree(work_dir: Path) -> None:
     )
 
 
-def _prepare_mutation_sandbox() -> tuple[Path, Path, Callable[[], None]]:
-    """Return sandbox root, repo root inside it, and a cleanup callback."""
+def _pytest_env(*, repo_root: Path) -> dict[str, str]:
+    """Build a subprocess env whose venv resolves to ``repo_root``."""
+    env = os.environ.copy()
+    venv = repo_root / ".venv"
+    env["VIRTUAL_ENV"] = str(venv)
+    venv_bin = str(venv / "bin")
+    env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
+    return env
+
+
+def _ensure_sandbox_venv(repo_root: Path) -> Path:
+    """Install the editable package in ``repo_root``; return its pytest interpreter."""
+    proc = subprocess.run(
+        ["uv", "sync", "--extra", "dev", "--directory", str(repo_root)],
+        env=_pytest_env(repo_root=repo_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        msg = proc.stderr.strip() or proc.stdout.strip() or "uv sync failed"
+        raise RuntimeError(msg)
+    return repo_root / ".venv" / "bin" / "python"
+
+
+def _prepare_mutation_sandbox() -> tuple[Path, Path, Path, Callable[[], None]]:
+    """Return sandbox root, repo root, pytest interpreter, and cleanup."""
     tmp = Path(tempfile.mkdtemp(prefix="mergecraft-mut-"))
     work_dir = tmp / "wt"
     try:
@@ -151,19 +176,25 @@ def _prepare_mutation_sandbox() -> tuple[Path, Path, Callable[[], None]]:
                 shutil.copy2(src, dest)
         work_dir = mirror
 
+    python = _ensure_sandbox_venv(work_dir)
+
     def cleanup() -> None:
         if (tmp / "wt").is_dir():
             _remove_git_worktree(tmp / "wt")
         shutil.rmtree(tmp, ignore_errors=True)
 
-    return tmp, work_dir, cleanup
+    return tmp, work_dir, python, cleanup
 
 
 def _string_spans(line: str) -> list[tuple[int, int]]:
+    """Return string-literal column spans on ``line``, or ``[]`` if not tokenizable."""
     spans: list[tuple[int, int]] = []
-    for tok in tokenize.generate_tokens(io.StringIO(line).readline):
-        if tok.type == tokenize.STRING:
-            spans.append((tok.start[1], tok.end[1]))
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(line).readline):
+            if tok.type == tokenize.STRING:
+                spans.append((tok.start[1], tok.end[1]))
+    except tokenize.TokenError:
+        return []
     return spans
 
 
@@ -288,11 +319,16 @@ def _apply_mutant(source: str, mutant: Mutant) -> str:
     return "".join(lines)
 
 
-def _run_pytest(test_targets: Sequence[str], *, repo_root: Path) -> tuple[int, str]:
+def _run_pytest(
+    test_targets: Sequence[str],
+    *,
+    repo_root: Path,
+    python: Path,
+) -> tuple[int, str]:
     """Run pytest on ``test_targets``; return exit code and combined output."""
     cmd = [
-        "uv",
-        "run",
+        str(python),
+        "-m",
         "pytest",
         *test_targets,
         "-m",
@@ -304,6 +340,7 @@ def _run_pytest(test_targets: Sequence[str], *, repo_root: Path) -> tuple[int, s
     proc = subprocess.run(
         cmd,
         cwd=repo_root,
+        env=_pytest_env(repo_root=repo_root),
         capture_output=True,
         text=True,
         check=False,
@@ -315,6 +352,7 @@ def _mutate_module(
     module: str,
     *,
     sandbox_root: Path,
+    python: Path,
     max_mutants: int,
     seed: int,
     verbose: int,
@@ -358,7 +396,7 @@ def _mutate_module(
                 continue
             mutate_path.write_text(mutated_source, encoding="utf-8")
             try:
-                code, output = _run_pytest(test_dirs, repo_root=sandbox_root)
+                code, output = _run_pytest(test_dirs, repo_root=sandbox_root, python=python)
             finally:
                 mutate_path.write_text(original, encoding="utf-8")
             if code == 0:
@@ -466,13 +504,14 @@ def main(argv: list[str] | None = None) -> int:
     threshold = _resolve_threshold(args.threshold)
 
     results: list[ModuleResult] = []
-    _tmp, sandbox_root, cleanup = _prepare_mutation_sandbox()
+    _tmp, sandbox_root, python, cleanup = _prepare_mutation_sandbox()
     try:
         for module in modules:
             results.append(
                 _mutate_module(
                     module,
                     sandbox_root=sandbox_root,
+                    python=python,
                     max_mutants=args.max_mutants,
                     seed=args.seed,
                     verbose=args.verbose,
