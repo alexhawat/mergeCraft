@@ -125,3 +125,22 @@ def test_ratchet_passes_within_margin(tmp_path: Path) -> None:
     report = _coverage_json(tmp_path, floor + 1.0)
     rc = _run_ratchet(check, report, margin=5.0)
     assert rc == 0
+
+
+def test_ratchet_passes_when_github_base_ref_empty_on_push(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Push events expose ``GITHUB_BASE_REF=""``; must not resolve to ``origin/``."""
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_BASE_REF", "")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/pre-0.0.1")
+
+    module = _load_ratchet()
+    check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
+    assert callable(check)
+    floor = _fail_under()
+    report = _coverage_json(tmp_path, floor + 1.0)
+    rc = _run_ratchet(check, report, margin=5.0)
+    assert rc == 0

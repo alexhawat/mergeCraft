@@ -66,10 +66,28 @@ def _fail_under_from_git_ref(repo_root: Path, ref: str) -> float | None:
     return float(floor)
 
 
+def _default_base_branch() -> str:
+    """Resolve the branch used for merge-base ``fail_under`` comparisons.
+
+    ``GITHUB_BASE_REF`` is set for pull requests but empty on ``push`` /
+    ``workflow_dispatch``. Treat blank values as unset and fall back to the
+    branch being built (``GITHUB_REF``), then ``pre-0.0.1``.
+    """
+    explicit = (os.environ.get("GITHUB_BASE_REF") or "").strip()
+    if explicit:
+        return explicit
+    ref = (os.environ.get("GITHUB_REF") or "").strip()
+    if ref.startswith("refs/heads/"):
+        branch = ref.removeprefix("refs/heads/").strip()
+        if branch:
+            return branch
+    return "pre-0.0.1"
+
+
 def _merge_base_ref(repo_root: Path, *, base_ref: str | None = None) -> str | None:
     if base_ref is not None:
         return base_ref
-    base_branch = os.environ.get("GITHUB_BASE_REF", "pre-0.0.1")
+    base_branch = _default_base_branch()
     remote_base = f"origin/{base_branch}"
     result = subprocess.run(
         ["git", "merge-base", "HEAD", remote_base],
@@ -97,7 +115,7 @@ def _fail_under_from_merge_base(
     base_ref: str | None = None,
 ) -> tuple[float | None, str | None]:
     root = _repo_root(repo_root)
-    base_branch = os.environ.get("GITHUB_BASE_REF", "pre-0.0.1")
+    base_branch = _default_base_branch()
     remote_base = f"origin/{base_branch}"
     merge_base = _merge_base_ref(root, base_ref=base_ref)
     if merge_base is None:
