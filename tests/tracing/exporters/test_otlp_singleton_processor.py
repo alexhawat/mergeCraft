@@ -18,6 +18,8 @@ import json
 from typing import Any
 
 import pytest
+from loguru import logger
+from tests.tracing.exporters.conftest import assert_otlp_emit_path_ready
 
 _N_CONSTRUCTIONS = 5
 
@@ -176,16 +178,32 @@ def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
     )
     tracers = [get_tracer_from_settings(settings) for _ in range(construction_count)]
 
+    reset_process_tracer_cache()
     _reset_test_seam()
-    with tracers[-1].start_span(
-        "tool.call",
-        attrs_source=lambda: {"tool.name": "read_file", "tool.exit_code": "ok"},
-    ):
-        pass
+    assert_otlp_emit_path_ready(tracers[-1])
+
+    warning_messages: list[str] = []
+    warning_sink_id = logger.add(
+        lambda record: warning_messages.append(record["message"]),
+        level="WARNING",
+        filter=lambda record: "trace otel sink write failed" in record["message"],
+    )
+    try:
+        with tracers[-1].start_span(
+            "tool.call",
+            attrs_source=lambda: {"tool.name": "read_file", "tool.exit_code": "ok"},
+        ):
+            pass
+    finally:
+        logger.remove(warning_sink_id)
 
     flush = getattr(tracers[-1].sink, "flush", None)
     if callable(flush):
         flush()
+
+    assert not warning_messages, (
+        f"OTLPSink.write must not swallow export failures silently; warnings: {warning_messages!r}"
+    )
 
     payloads = captured_payload()
     assert len(payloads) == 1, (

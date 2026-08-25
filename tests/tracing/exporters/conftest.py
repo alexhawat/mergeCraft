@@ -26,12 +26,16 @@ def _reset_exporter_tracer_cache() -> Iterator[None]:
     ``tests/conftest.py`` already autouses ``reset_process_tracer_cache`` globally;
     this package repeats it so OTLP singleton tests never inherit a stale
     ``_ACTIVE_SPAN`` from a sibling exporter test on the same xdist worker.
+    Also clears any stale ``sink_factory`` handoff left by memory/jsonl tests.
     """
+    from mergecraft.tracing.sinks import _PENDING_SINK
     from mergecraft.tracing.tracer import reset_process_tracer_cache
 
     reset_process_tracer_cache()
+    _PENDING_SINK.set(None)
     yield
     reset_process_tracer_cache()
+    _PENDING_SINK.set(None)
 
 
 def ensure_real_tracer_provider() -> None:
@@ -104,6 +108,37 @@ def otlp_sink_children(sink: Any) -> list[Any]:
     inner = getattr(sink, "inner", sink)
     children = getattr(inner, "sinks", ())
     return [child for child in children if isinstance(child, OTLPSink)]
+
+
+def assert_otlp_emit_path_ready(tracer: Any) -> Any:
+    """Assert the tracer resolves to a live OTLP sink with an active provider.
+
+    Raises:
+        AssertionError: When the sink is degraded, not OTLP, or the provider
+            or tracer is missing after lazy initialization.
+    """
+    from mergecraft.tracing.exporters import OTLPSink, has_active_tracer_provider
+    from mergecraft.tracing.sinks import NullSink
+
+    sink = getattr(tracer, "sink", tracer)
+    inner = getattr(sink, "inner", sink)
+    children = list(getattr(inner, "sinks", ()))
+    assert children, "tracer sink must expose at least one child sink"
+    assert not any(isinstance(child, NullSink) for child in children), (
+        "expected a live OTLP sink, got NullSink (remote export disabled or extra missing)"
+    )
+    otlp_sinks = [child for child in children if isinstance(child, OTLPSink)]
+    assert len(otlp_sinks) == 1, (
+        f"expected exactly one OTLPSink child, got {[type(c).__name__ for c in children]}"
+    )
+    otlp_sink = otlp_sinks[0]
+    provider = otlp_sink._ensure_provider()
+    assert provider is not None, "OTLPSink provider setup must not degrade to None"
+    assert otlp_sink._tracer is not None, "OTLPSink tracer must be bound after provider setup"
+    assert has_active_tracer_provider(), (
+        "has_active_tracer_provider() must be True once the OTLP provider is wired"
+    )
+    return otlp_sink
 
 
 def export_span_count(event: Any, otlp_sinks: list[Any]) -> int:
