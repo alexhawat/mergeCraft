@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from mergecraft.classify.blast_radius import classify_blast_radius
 
 
@@ -88,3 +90,93 @@ def test_classifier_makes_one_cheap_call() -> None:
     _classify_change(change, agent_runner=_agent_runner)
 
     assert len(calls) == 1, "classifier must make exactly one cheap agent call"
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_is_trivial"),
+    [
+        pytest.param(
+            _change(
+                "migrations/20260816_add_invoice_index.sql",
+                files_changed=1,
+                diff="ALTER TABLE invoices ADD COLUMN status text;",
+            ),
+            False,
+            id="migration-diff",
+        ),
+        pytest.param(
+            _change(
+                "docs/guide.md",
+                files_changed=1,
+                lines_added=1,
+                lines_deleted=1,
+                diff="@@ typo fix @@",
+            ),
+            True,
+            id="typo-only-doc",
+        ),
+        pytest.param(
+            _change(
+                "docs/guide.md",
+                files_changed=1,
+                lines_added=20,
+                lines_deleted=18,
+                diff="@@ large doc churn @@",
+            ),
+            False,
+            id="churn-over-threshold",
+        ),
+        pytest.param(
+            _change(
+                "src/generated/schema.py",
+                "src/generated/models.py",
+                files_changed=2,
+            ),
+            True,
+            id="all-generated",
+        ),
+    ],
+)
+def test_is_trivial_exact_bool_per_fixture(
+    change: dict[str, object],
+    expected_is_trivial: bool,
+) -> None:
+    """Exact ``is_trivial`` bool per fixture — not ``in {True, False}`` (D6)."""
+    result = _classify_change(change)
+    assert result.is_trivial is expected_is_trivial
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_is_trivial"),
+    [
+        pytest.param(
+            _change(
+                "docs/readme.md",
+                files_changed=2,
+                lines_added=1,
+                lines_deleted=1,
+                diff="@@ two files @@",
+            ),
+            False,
+            id="invert-files-changed-threshold",
+        ),
+        pytest.param(
+            _change(
+                "docs/readme.md",
+                files_changed=1,
+                lines_added=2,
+                lines_deleted=2,
+                diff="@@ small edit @@",
+            ),
+            True,
+            id="invert-churn-threshold",
+        ),
+    ],
+)
+def test_is_trivial_threshold_inversions(
+    change: dict[str, object],
+    expected_is_trivial: bool,
+) -> None:
+    """Inverted threshold fixtures must fail if thresholds drift (D6)."""
+    result = _classify_change(change)
+    assert result.is_trivial is expected_is_trivial

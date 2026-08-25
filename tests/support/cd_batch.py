@@ -57,11 +57,6 @@ CLEANUP_FAILURE_MODES = frozenset(
 )
 
 
-def green_after(wave: str, reason: str) -> Any:
-    """Non-strict xfail until the matching impl wave (never ``strict=True``)."""
-    return pytest.mark.xfail(reason=f"green after {wave}: {reason}", strict=False)
-
-
 def module_exists(module_name: str) -> bool:
     try:
         return importlib.util.find_spec(module_name) is not None
@@ -101,7 +96,6 @@ __all__ = [
     "SUPPORTED_WEBHOOK_PROVIDERS",
     "WEBHOOK_MODULE",
     "d10_root_callback_owns_globals",
-    "green_after",
     "module_exists",
     "require_callable",
     "require_module",

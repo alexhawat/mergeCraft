@@ -7,17 +7,21 @@ RUFF_ADVISORY_FAMILIES ?= BLE,PTH,PERF,C901
 MYPY ?= $(UV) run mypy
 PYTEST ?= $(UV) run pytest
 MERGECRAFT_PYTEST_JOBS ?= auto
+MUTATION_ESCAPE_THRESHOLD_PCT ?= 45
 PYTEST_XDIST := $(if $(filter 0,$(MERGECRAFT_PYTEST_JOBS)),,$(if $(MERGECRAFT_PYTEST_JOBS),-n $(MERGECRAFT_PYTEST_JOBS),))
 BANDIT ?= $(UV) run bandit
 PIP_AUDIT ?= $(UV) run pip-audit
 PIP_AUDIT_CACHE ?= $(CURDIR)/.cache/pip-audit
 PRE_COMMIT ?= $(UV) run pre-commit
+# test-integration uses pipefail and PIPESTATUS (bash-only); GNU make defaults to /bin/sh (dash on Ubuntu CI).
+SHELL := /bin/bash
 
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
+	mutation-test-decisions \
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
-	test-integration test-integration-live test-otlp-collector coverage-gate npm-audit workflow-lint \
+	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check pins-check action-pin-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
@@ -34,7 +38,7 @@ ensure-uv: ## Install uv on PATH when missing
 	@test -x "$(HOME)/.local/bin/uv" || (echo "uv install failed" >&2; exit 1)
 
 setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
-	$(UV) sync --extra dev
+	$(UV) sync --extra dev $(if $(MERGECRAFT_UV_EXTRAS),--extra $(MERGECRAFT_UV_EXTRAS),)
 	@$(MAKE) setup-local-analyzers
 	@if [ -n "$${CI}$${MERGECRAFT_SKIP_PRECOMMIT}" ]; then \
 	  echo "skipping pre-commit install (CI / MERGECRAFT_SKIP_PRECOMMIT)"; \
@@ -75,7 +79,11 @@ lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-
 	$(UV) run python scripts/check_privilege_drop_chown.py
 	$(UV) run python scripts/check_type_ignores.py
 	$(UV) run python scripts/check_called_workflow_permissions.py
+	$(MAKE) lint-test-hygiene
 	@$(MAKE) npm-lockcheck
+
+lint-test-hygiene: ## Block on tautological test patterns (D16)
+	$(UV) run python scripts/check_test_cheat_signatures.py
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py
@@ -115,9 +123,18 @@ test: ## Unit tests
 # secrets so the same marker becomes the live-provider release precondition.
 # The ``live`` marker is registered for future narrowing by test-creator.
 test-integration: ## Integration tests (PR CI; self-skip without live secrets)
+	@log=$$(mktemp); \
+	set -o pipefail; \
 	$(PYTEST) tests -v --tb=short --strict-markers -m "integration and not live" \
 		--ignore=tests/tracing/test_otlp_collector_e2e.py $(PYTEST_XDIST) \
-		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
+		2>&1 | tee $$log; \
+	rc=$${PIPESTATUS[0]}; \
+	$(UV) run python scripts/check_integration_ran.py --log $$log; \
+	check_rc=$$?; \
+	rm -f $$log; \
+	if [ $$rc -ne 0 ]; then exit $$rc; fi; \
+	exit $$check_rc
 
 test-integration-live: ## Live-provider integration (scheduled / release precondition)
 	@live_selector='-m "live"'; \
@@ -127,13 +144,18 @@ test-integration-live: ## Live-provider integration (scheduled / release precond
 test-otlp-collector: ## OTLP collector integration — spans must leave the process (#143)
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
-coverage-gate: ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
+coverage-measure: ## Unit tests with coverage report only (no floor/ratchet gates)
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
 		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
 		-rX
+
+coverage-gate: coverage-measure ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
 	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
 	$(UV) run python scripts/check_coverage_floors.py coverage.json
+
+mutation-test-decisions: ## Decision-module mutation harness (advisory; D15 / §2.6)
+	$(UV) run python scripts/mutate_decision_modules.py --threshold $(MUTATION_ESCAPE_THRESHOLD_PCT)
 
 npm-audit: ## npm audit over docker/agent-clis lockfile (W12.3 / #27)
 	@command -v npm >/dev/null 2>&1 || { echo "npm not found on PATH" >&2; exit 2; }

@@ -200,22 +200,32 @@ def test_deterministic_checks_carry_the_catalog_command(tmp_path: Path) -> None:
 
 def test_failed_run_still_emits_a_packet(tmp_path: Path) -> None:
     """Evidence matters most when the run did not succeed."""
-    written = _emit(_make_ctx(tmp_path), run_succeeded=False)
+    written = _emit(
+        _make_ctx(tmp_path, diff_text=None, findings=[]),
+        run_succeeded=False,
+    )
 
     assert written is not None
     decision = json.loads(written.read_text(encoding="utf-8"))["decision"]
-    assert decision["verdict"] != "auto_merge"
+    assert decision["verdict"] == "neutral", (
+        "failed run without blockers must not propagate a permissive outcome (D3)"
+    )
 
 
 def test_self_assessment_alone_never_yields_auto_merge(tmp_path: Path) -> None:
     """#41's hard rule survives the wiring: prose cannot outvote the evidence."""
-    ctx = _make_ctx(tmp_path, diff_text=_TRIVIAL_DIFF, findings=[])
+    ctx = _make_ctx(tmp_path, diff_text=None, findings=[])
     written = _emit(ctx, run_succeeded=True)
 
     assert written is not None
     packet = json.loads(written.read_text(encoding="utf-8"))
     assert packet["self_assessment"]["approved"] is True
-    assert packet["decision"]["verdict"] != "auto_merge"
+    assert packet["decision"]["verdict"] == "neutral", (
+        "self-assessment-only packet must reach neutral verdict per #41 (D3)"
+    )
+    assert packet["decision"]["action"] != "auto_merge", (
+        "self-assessment-only run must not route to auto_merge gate action (#41)"
+    )
 
 
 def test_non_pr_run_emits_nothing(tmp_path: Path) -> None:

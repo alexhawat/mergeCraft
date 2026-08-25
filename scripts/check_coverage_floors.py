@@ -4,9 +4,10 @@
 Reads a ``coverage.json`` produced by ``pytest --cov --cov-report=json`` and
 fails when global or critical-path floors drop below the locked thresholds.
 
-Floors are set from a measured baseline (2026-08-11, ~70% global line) with a
-small buffer so the gate fails on decreases without flaking on noise. Critical
-paths listed in the punch list get their own line/branch floors.
+Floors are set from a measured baseline (2026-08-24, post lane A). Module
+floors use a 2-point buffer on line and branch. Prefix aggregates use
+measured_line - 2 and measured_branch - 3 so branch coverage has extra
+headroom on large trees without weakening the line gate.
 """
 
 from __future__ import annotations
@@ -30,13 +31,25 @@ def _fail_under_from_pyproject() -> float:
     return mod.fail_under_from_pyproject()
 
 
-# Critical-path floors (line %, branch %). Values are ratchet floors just
-# under the 2026-08-11 measured baseline so decreases fail the gate.
+# Critical-path floors (line %, branch %). Values are measured - 2 on
+# 2026-08-24 @ wave/test-suite-hygiene-2026-08-24 (HEAD 34cd99f9).
 MODULE_FLOORS: dict[str, tuple[float, float]] = {
-    "utils/token.py": (15.0, 0.0),
-    "utils/git_setup.py": (80.0, 80.0),
-    "main.py": (60.0, 40.0),
+    "utils/token.py": (51.9, 39.2),
+    "utils/git_setup.py": (91.5, 86.9),
+    "main.py": (85.3, 75.3),
 }
+
+# Prefix aggregates (line %, branch %). Line floors are measured - 2; branch
+# floors are measured - 3 (extra headroom vs module floors). Branch floors for
+# security/, analyzers/, agents/, and review/ remain ≥ 60 per D11.
+PREFIX_FLOORS: tuple[tuple[str, str, float, float], ...] = (
+    ("mcp/", "/mcp/", 80.6, 65.9),
+    ("action/", "/action/", 89.1, 82.7),
+    ("security/", "/security/", 80.4, 70.3),
+    ("analyzers/", "/analyzers/", 84.9, 71.0),
+    ("agents/", "/agents/", 85.8, 75.1),
+    ("review/", "/review/", 87.4, 65.8),
+)
 
 
 def _pct(covered: int, total: int) -> float:
@@ -50,17 +63,19 @@ def _match_module(path: str, suffix: str) -> bool:
     return normalized.endswith(suffix) or f"/{suffix}" in normalized
 
 
-def _aggregate_prefix(files: dict[str, Any], needle: str) -> tuple[float, float]:
+def _aggregate_prefix(files: dict[str, Any], needle: str) -> tuple[float, float, bool]:
     stmts = covered = branches = covered_b = 0
+    matched_any = False
     for path, payload in files.items():
         if needle not in path.replace("\\", "/"):
             continue
+        matched_any = True
         summary = payload["summary"]
         stmts += int(summary["num_statements"])
         covered += int(summary["covered_lines"])
         branches += int(summary.get("num_branches") or 0)
         covered_b += int(summary.get("covered_branches") or 0)
-    return _pct(covered, stmts), _pct(covered_b, branches)
+    return _pct(covered, stmts), _pct(covered_b, branches), matched_any
 
 
 def main() -> int:
@@ -108,11 +123,11 @@ def main() -> int:
         if branch_pct + 1e-9 < branch_floor:
             failures.append(f"{suffix} branch {branch_pct:.1f}% < floor {branch_floor:.1f}%")
 
-    for label, needle, line_floor, branch_floor in (
-        ("mcp/", "/mcp/", 55.0, 35.0),
-        ("action/", "/action/", 35.0, 35.0),
-    ):
-        line_pct, branch_pct = _aggregate_prefix(files, needle)
+    for label, needle, line_floor, branch_floor in PREFIX_FLOORS:
+        line_pct, branch_pct, matched_any = _aggregate_prefix(files, needle)
+        if not matched_any:
+            failures.append(f"no coverage data for prefix {label}")
+            continue
         if line_pct + 1e-9 < line_floor:
             failures.append(f"{label} line {line_pct:.1f}% < floor {line_floor:.1f}%")
         if branch_pct + 1e-9 < branch_floor:

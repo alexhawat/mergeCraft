@@ -419,6 +419,18 @@ def reset_process_tracer_cache() -> None:
 
     _PROCESS_TRACER = None
     _PROCESS_TRACING_FINGERPRINT = None
+    # Prevent ``get_tracer_from_settings`` from returning a stale tracer when
+    # a prior test left an active span on the ContextVar (xdist shard ordering).
+    _ACTIVE_SPAN.set(None)
+    # ``sink_factory`` stashes its product on a ContextVar; a leftover handoff
+    # from an unrelated test (memory/jsonl vs otel) must not poison
+    # ``claim_sink`` on this worker.
+    try:
+        from mergecraft.tracing.sinks import _PENDING_SINK
+
+        _PENDING_SINK.set(None)
+    except ImportError:
+        pass
 
 
 def resolve_trace_id(*, pin: bool = False) -> str:
