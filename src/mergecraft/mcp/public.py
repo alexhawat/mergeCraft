@@ -7,6 +7,8 @@ Exports:
 
 from __future__ import annotations
 
+import contextlib
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -74,6 +76,46 @@ def _require_nonempty_str(value: object, field: str) -> str:
     return value.strip()
 
 
+def _validate_optional_git_ref(
+    value: object,
+    *,
+    field: str,
+    repo_root: Path,
+) -> str | None:
+    """Return an error message when *value* is an unsafe git ref or path."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return f"{field} must be a string"
+    ref = value.strip()
+    if not ref:
+        return f"{field} must not be empty"
+    if ref.startswith("-"):
+        return f"{field} must not start with '-' (git could parse it as a flag)"
+    if confine_path(repo_root, ref) is None:
+        return f"{field} must stay inside the workspace"
+    return None
+
+
+def _internal_findings_json_path(ctx: ToolContext, repo_root: Path) -> Path:
+    """Allocate a temp JSON sink for structured offline review output."""
+    json_dir: str | None = None
+    if ctx.tmpdir:
+        candidate = Path(ctx.tmpdir).resolve()
+        try:
+            candidate.relative_to(repo_root)
+            json_dir = str(candidate)
+        except ValueError:
+            json_dir = None
+    return Path(
+        tempfile.mkstemp(
+            prefix="mergecraft-mcp-findings-",
+            suffix=".json",
+            dir=json_dir,
+        )[1]
+    )
+
+
 def _require_params(
     params: dict[str, Any],
     *fields: str,
@@ -110,53 +152,70 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
                 return {"error": "diff path must be inside the workspace"}
             diff_file = confined
 
+        for field in ("base", "head"):
+            ref_error = _validate_optional_git_ref(
+                params.get(field),
+                field=field,
+                repo_root=repo_root,
+            )
+            if ref_error is not None:
+                return {"error": ref_error}
+
         trust_override = None
         if ctx.trust_tier in ("trusted", "untrusted"):
             trust_override = ctx.trust_tier
 
+        base = params.get("base")
+        head = params.get("head")
         source_spec = SourceResolverSpec(
             cwd=repo_root,
             invocation_root=repo_root,
-            base=params.get("base"),
-            head=params.get("head"),
+            base=base,
+            head=head,
         )
         engine: ReviewEngine[OfflineReviewResult] = ReviewEngine(snapshot=snapshot)
-        result = await run_offline_diff_review(
-            cwd=repo_root,
-            base=params.get("base"),
-            diff_file=diff_file,
-            prompt_extra=params.get("prompt"),
-            dry_run=bool(params.get("dry_run", False)),
-            invocation_root=repo_root,
-            source_spec=source_spec,
-            engine=engine,
-            trust_override=trust_override,
-        )
-        if not result.success:
-            return {"error": result.error or "review_change failed"}
+        json_path = _internal_findings_json_path(ctx, repo_root)
+        try:
+            result = await run_offline_diff_review(
+                cwd=repo_root,
+                base=base,
+                diff_file=diff_file,
+                prompt_extra=params.get("prompt"),
+                dry_run=bool(params.get("dry_run", False)),
+                json_path=json_path,
+                invocation_root=repo_root,
+                source_spec=source_spec,
+                engine=engine,
+                trust_override=trust_override,
+            )
+            if not result.success:
+                return {"error": result.error or "review_change failed"}
 
-        findings = parse_offline_review_findings(result)
-        finding_rows = persist_offline_review(
-            review_id=review_id,
-            trace_session_id=trace_session_id,
-            snapshot=snapshot,
-            repo_root=repo_root,
-            model="(mcp-public)",
-            prompt=params.get("prompt"),
-            findings=findings,
-            evidence_packet_path=result.evidence_packet_path,
-        )
-        outcome = _resolve_outcome(success=result.success, outcome=result.outcome)
-        return {
-            "review_id": review_id,
-            "outcome": outcome,
-            "findings": finding_rows,
-            "summary": (
-                f"Review {review_id} completed with {len(finding_rows)} finding(s)."
-                if finding_rows
-                else f"Review {review_id} completed with no findings."
-            ),
-        }
+            findings = parse_offline_review_findings(result)
+            finding_rows = persist_offline_review(
+                review_id=review_id,
+                trace_session_id=trace_session_id,
+                snapshot=snapshot,
+                repo_root=repo_root,
+                model="(mcp-public)",
+                prompt=params.get("prompt"),
+                findings=findings,
+                evidence_packet_path=result.evidence_packet_path,
+            )
+            outcome = _resolve_outcome(success=result.success, outcome=result.outcome)
+            return {
+                "review_id": review_id,
+                "outcome": outcome,
+                "findings": finding_rows,
+                "summary": (
+                    f"Review {review_id} completed with {len(finding_rows)} finding(s)."
+                    if finding_rows
+                    else f"Review {review_id} completed with no findings."
+                ),
+            }
+        finally:
+            with contextlib.suppress(OSError):
+                json_path.unlink(missing_ok=True)
 
     return tool(
         name="review_change",

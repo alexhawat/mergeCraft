@@ -7,6 +7,7 @@ MC- short ids, capabilities/policy read-only contracts, and explain payload keys
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -27,8 +28,6 @@ from mergecraft.review.completed import CompletedReview, load_completed_review
 from mergecraft.review.snapshot import canonical_review_snapshot
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from _pytest.monkeypatch import MonkeyPatch
 
 
@@ -260,6 +259,19 @@ def test_review_change_rejects_diff_outside_workspace(
     assert payload.get("error") == "diff path must be inside the workspace"
 
 
+def test_review_change_rejects_option_shaped_base(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    payload = _call_public_tool(
+        tmp_path,
+        monkeypatch,
+        "review_change",
+        {"base": "--output=/tmp/review", "dry_run": True},
+    )
+    assert payload.get("error") == ("base must not start with '-' (git could parse it as a flag)")
+
+
 @pytest.mark.asyncio
 async def test_review_change_forwards_serve_trust_tier(
     tmp_path: Path,
@@ -285,6 +297,9 @@ async def test_review_change_forwards_serve_trust_tier(
     spec = public_mod.review_change_tool(ctx)
     await spec.execute({"dry_run": True})
     assert captured.get("trust_override") == "trusted"
+    json_path = captured.get("json_path")
+    assert isinstance(json_path, Path), captured
+    assert json_path.suffix == ".json"
 
 
 def test_public_tools_are_not_filtered_orchestrator_tools(

@@ -99,24 +99,13 @@ Project or user MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 
 ### Codex CLI
 
-Codex reads MCP servers from its settings file (same `mcpServers` shape):
+Codex stores MCP servers in `~/.codex/config.toml` (or project `.codex/config.toml` in a
+trusted repo). Use a `[mcp_servers.<name>]` table — not JSON `mcpServers`:
 
-```json
-{
-  "mcpServers": {
-    "mergecraft": {
-      "command": "mergecraft",
-      "args": [
-        "mcp",
-        "serve",
-        "--role",
-        "public",
-        "--transport",
-        "stdio"
-      ]
-    }
-  }
-}
+```toml
+[mcp_servers.mergecraft]
+command = "mergecraft"
+args = ["mcp", "serve", "--role", "public", "--transport", "stdio"]
 ```
 
 ### Gemini CLI
@@ -143,14 +132,17 @@ Gemini CLI MCP settings (`settings.json` or project override):
 
 ### OpenCode
 
-OpenCode `opencode.json` (or equivalent MCP block):
+OpenCode `opencode.json` / `opencode.jsonc` (global or project). Local stdio servers
+require `type: "local"` and a `command` array (executable plus args):
 
 ```json
 {
   "mcp": {
     "mergecraft": {
-      "command": "mergecraft",
-      "args": [
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "mergecraft",
         "mcp",
         "serve",
         "--role",
