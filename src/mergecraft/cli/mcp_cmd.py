@@ -11,10 +11,11 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.mcp_serve import (
-    _role_endpoint,
+    _parse_role,
     build_mcp_app_from_ctx,
     build_mcp_tool_context,
     resolve_served_tool_names,
+    role_endpoint,
 )
 from mergecraft.cli.profiles import apply_profile_env, resolve_profile
 from mergecraft.config.settings import parse_cli_trust_override
@@ -105,14 +106,17 @@ def serve_cmd(
         help="Transport protocol: http (default) or stdio (public role only).",
     ),
 ) -> None:
-    """Start the MCP HTTP server for a resolved workspace and role."""
+    """Start the MCP server over HTTP or stdio (public role only) for a workspace and role."""
     parsed_transport = transport.strip().lower()
     if parsed_transport not in {"http", "stdio"}:
         cli_bail(
             f"unknown transport {transport!r} (expected http or stdio)",
             code=CLI_USAGE_EXIT_CODE,
         )
-    parsed_role = role.strip().lower()
+    try:
+        parsed_role = _parse_role(role)
+    except ValueError as exc:
+        cli_bail(str(exc), code=CLI_USAGE_EXIT_CODE)
     if parsed_transport == "stdio" and parsed_role != "public":
         cli_bail(
             "stdio transport requires --role public",
@@ -146,11 +150,7 @@ def serve_cmd(
         console.print(f"MERGECRAFT_MCP_BEARER={ctx.mcp_auth_token}")
 
         listen_port = port if port is not None else read_env_port() or select_port()
-        endpoint = _role_endpoint(
-            parsed_role  # type: ignore[arg-type]  # — parsed_role verified against ServeRole literals
-            if parsed_role in {"orchestrator", "reviewer", "verifier", "public"}
-            else "reviewer"
-        )
+        endpoint = role_endpoint(parsed_role)
         auth_token = ctx.mcp_auth_token
         console.print(
             f"[green]MCP server listening on http://{host}:{listen_port}{endpoint}[/green]"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tests.evals.support_mcp_public import case_by_id, require_callable
 
-from mergecraft.cli.capabilities_cmd import FORBIDDEN_CAPABILITIES
+from mergecraft.cli.capabilities_cmd import FORBIDDEN_CAPABILITIES, capabilities_manifest
 
 
 def test_review_this_change_selects_review_change() -> None:
@@ -37,8 +37,7 @@ def test_commit_this_fix_does_not_select_a_write_tool() -> None:
 
 
 def test_forbidden_capabilities_remain_forbidden_in_get_capabilities_payload() -> None:
-    build_payload = require_callable("build_get_capabilities_payload")
-    payload = build_payload()
+    payload = capabilities_manifest()
     forbidden = set(payload.get("forbidden") or [])
     for capability in FORBIDDEN_CAPABILITIES:
         assert capability in forbidden

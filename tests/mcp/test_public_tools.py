@@ -237,13 +237,12 @@ def test_get_policy_is_read_only(
         assert not str(prop).lower().startswith("set_"), prop
 
     payload = _call_public_tool(tmp_path, monkeypatch, "get_policy", {})
-    assert "trust_tier" in payload
-    rule_ids = payload.get("policy_rule_ids") or payload.get("rules")
-    assert isinstance(rule_ids, (list, dict)), payload
-    if isinstance(rule_ids, dict):
-        assert set(rule_ids).issuperset(set(DEFAULT_GATE_POLICIES))
-    else:
-        assert set(rule_ids).issuperset(set(DEFAULT_GATE_POLICIES))
+    rule_ids = payload.get("policy_rule_ids")
+    assert isinstance(rule_ids, list), payload
+    assert set(rule_ids).issuperset(set(DEFAULT_GATE_POLICIES))
+    policies = payload.get("policies")
+    assert isinstance(policies, dict), payload
+    assert set(policies).issuperset(set(DEFAULT_GATE_POLICIES))
 
 
 def test_review_change_rejects_diff_outside_workspace(

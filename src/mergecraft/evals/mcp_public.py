@@ -9,7 +9,6 @@ Exports:
     RUNTIME_WRITE_TOOL_NAMES: Runtime mutating tools the public profile must never select.
     McpPublicEvalCase: One labeled offline eval row.
     load_mcp_public_cases: Load eval cases from the corpus file.
-    build_get_capabilities_payload: Return the same payload as ``get_capabilities``.
     select_public_tool: Offline heuristic tool selection for a user prompt.
     score_mcp_public_case: Return whether one case passes the offline selector.
     score_mcp_public_corpus: Score every case in the corpus.
@@ -22,7 +21,6 @@ import re
 from pathlib import Path
 from typing import Final, TypedDict
 
-from mergecraft.cli.capabilities_cmd import capabilities_manifest
 from mergecraft.mcp.public import PUBLIC_TOOL_NAMES
 
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
@@ -87,9 +85,6 @@ def load_mcp_public_cases(*, cases_path: Path | None = None) -> list[McpPublicEv
         msg = f"{path} must contain a JSON list"
         raise ValueError(msg)
     return data
-
-
-build_get_capabilities_payload = capabilities_manifest
 
 
 def _normalized(prompt: str) -> str:
@@ -187,7 +182,6 @@ __all__ = [
     "PUBLIC_MCP_EVAL_CASES_PATH",
     "RUNTIME_WRITE_TOOL_NAMES",
     "McpPublicEvalCase",
-    "build_get_capabilities_payload",
     "load_mcp_public_cases",
     "score_mcp_public_case",
     "score_mcp_public_corpus",

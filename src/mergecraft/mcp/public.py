@@ -7,11 +7,8 @@ Exports:
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-from loguru import logger
 
 from mergecraft.cli.capabilities_cmd import capabilities_manifest
 from mergecraft.cli.explain_cmd import finding_explain_payload
@@ -60,14 +57,16 @@ def _repo_root(ctx: ToolContext) -> Path:
     return Path(cwd).resolve()
 
 
-def _safe_review_id(review_id: str) -> str:
+def _validated_review_id(review_id: str) -> str | None:
     if is_safe_path_stem(review_id):
         return review_id
-    logger.warning(
-        "ignoring unsafe {} for durable review storage; using generated id",
-        review_id,
-    )
-    return uuid.uuid4().hex
+    return None
+
+
+class _ParamRequiredError(ValueError):
+    def __init__(self, field: str) -> None:
+        self.field = field
+        super().__init__(field)
 
 
 def _resolve_outcome(*, success: bool, outcome: RunOutcome | None) -> str:
@@ -76,9 +75,9 @@ def _resolve_outcome(*, success: bool, outcome: RunOutcome | None) -> str:
     return RunOutcome.passed.value if success else RunOutcome.failed.value
 
 
-def _require_nonempty_str(value: object, field: str) -> str | dict[str, str]:
+def _require_nonempty_str(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        return {"error": f"{field} is required"}
+        raise _ParamRequiredError(field)
     return value.strip()
 
 
@@ -91,7 +90,7 @@ def _persist_public_review(
     prompt: str | None,
     findings: Sequence[Finding],
     evidence_packet_path: str | None = None,
-) -> None:
+) -> list[dict[str, Any]]:
     from mergecraft.evidence.run_manifest import build_run_manifest
 
     manifest = build_run_manifest(
@@ -123,6 +122,7 @@ def _persist_public_review(
         evidence_packets=evidence_packets,
         trace_events=trace_events,
     )
+    return findings_records
 
 
 def _finding_row_for_id(
@@ -164,7 +164,9 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
         # D4 — ``entry="cli"`` matches offline review snapshot shape for public MCP serve.
         snapshot = canonical_review_snapshot(entry="cli", source=str(repo_root))
         trace_session_id = resolve_review_id()
-        review_id = _safe_review_id(trace_session_id)
+        review_id = _validated_review_id(trace_session_id)
+        if review_id is None:
+            return {"error": "invalid review_id"}
 
         diff_file = None
         raw_diff = params.get("diff")
@@ -200,7 +202,7 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
             return {"error": result.error or "review_change failed"}
 
         findings = parse_offline_review_findings(result)
-        _persist_public_review(
+        finding_rows = _persist_public_review(
             review_id=review_id,
             trace_session_id=trace_session_id,
             snapshot=snapshot,
@@ -209,7 +211,6 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
             findings=findings,
             evidence_packet_path=result.evidence_packet_path,
         )
-        finding_rows = finding_json_records(findings)
         outcome = _resolve_outcome(success=result.success, outcome=result.outcome)
         return {
             "review_id": review_id,
@@ -264,9 +265,10 @@ def review_change_tool(ctx: ToolContext) -> ToolSpec:
 
 def get_review_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        review_id = _require_nonempty_str(params.get("review_id"), "review_id")
-        if isinstance(review_id, dict):
-            return review_id
+        try:
+            review_id = _require_nonempty_str(params.get("review_id"), "review_id")
+        except _ParamRequiredError as exc:
+            return {"error": f"{exc.field} is required"}
         payload = _get_review_payload(review_id, repo_root=_repo_root(ctx))
         if payload is None:
             return {"error": f"unknown review id {review_id!r}"}
@@ -295,12 +297,11 @@ def get_review_tool(ctx: ToolContext) -> ToolSpec:
 
 def inspect_finding_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        finding_id = _require_nonempty_str(params.get("finding_id"), "finding_id")
-        if isinstance(finding_id, dict):
-            return finding_id
-        review_id = _require_nonempty_str(params.get("review_id"), "review_id")
-        if isinstance(review_id, dict):
-            return review_id
+        try:
+            finding_id = _require_nonempty_str(params.get("finding_id"), "finding_id")
+            review_id = _require_nonempty_str(params.get("review_id"), "review_id")
+        except _ParamRequiredError as exc:
+            return {"error": f"{exc.field} is required"}
         repo_root = _repo_root(ctx)
         loaded = load_completed_review(review_id, repo_root=repo_root)
         if loaded is None:
@@ -337,12 +338,11 @@ def inspect_finding_tool(ctx: ToolContext) -> ToolSpec:
 
 def explain_finding_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
-        finding_id = _require_nonempty_str(params.get("finding_id"), "finding_id")
-        if isinstance(finding_id, dict):
-            return finding_id
-        review_id = _require_nonempty_str(params.get("review_id"), "review_id")
-        if isinstance(review_id, dict):
-            return review_id
+        try:
+            finding_id = _require_nonempty_str(params.get("finding_id"), "finding_id")
+            review_id = _require_nonempty_str(params.get("review_id"), "review_id")
+        except _ParamRequiredError as exc:
+            return {"error": f"{exc.field} is required"}
         packet = lookup_finding_packet_in_review(
             review_id,
             finding_id,

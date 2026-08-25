@@ -5,9 +5,9 @@
 Generated from `ToolSpec` definitions in `src/mergecraft/mcp/public.py`.
 Install and connect via `docs/mcp.md`.
 
-## `explain_finding`
+## `review_change`
 
-Explain one finding using the same payload shape as `mergecraft explain`. Do not use for whole-change summaries — call without a finding id on the CLI.
+Run a read-only mergeCraft review on the workspace change and persist a durable review id. Do not use when you need to commit, push, or open a PR — use runtime reviewer tools instead.
 
 ### Input schema
 
@@ -16,47 +16,27 @@ Explain one finding using the same payload shape as `mergecraft explain`. Do not
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "finding_id": {
+    "base": {
       "type": "string",
-      "description": "MC- short id or fingerprint for the finding."
+      "description": "Optional git base ref for the diff (defaults to HEAD)."
     },
-    "review_id": {
+    "head": {
       "type": "string",
-      "description": "Stored review id that owns the finding."
+      "description": "Optional git head ref when comparing two refs."
+    },
+    "diff": {
+      "type": "string",
+      "description": "Optional path to a standalone patch file."
+    },
+    "dry_run": {
+      "type": "boolean",
+      "description": "Materialize the diff and build the review prompt without invoking an agent."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Optional extra instructions appended to the review prompt."
     }
-  },
-  "required": [
-    "finding_id",
-    "review_id"
-  ]
-}
-```
-
-## `get_capabilities`
-
-Return the review-only capability manifest (allowed vs forbidden actions). Do not use to mutate repository state — it is read-only metadata.
-
-### Input schema
-
-```json
-{
-  "type": "object",
-  "properties": {},
-  "additionalProperties": false
-}
-```
-
-## `get_policy`
-
-Return the read-only gate policy for this serve context. Do not use to change trust tier or gate rules — there is no setter.
-
-### Input schema
-
-```json
-{
-  "type": "object",
-  "properties": {},
-  "additionalProperties": false
+  }
 }
 ```
 
@@ -109,9 +89,9 @@ Return structured metadata for one finding by MC- short id or fingerprint. Do no
 }
 ```
 
-## `review_change`
+## `explain_finding`
 
-Run a read-only mergeCraft review on the workspace change and persist a durable review id. Do not use when you need to commit, push, or open a PR — use runtime reviewer tools instead.
+Explain one finding using the same payload shape as `mergecraft explain`. Do not use for whole-change summaries — call without a finding id on the CLI.
 
 ### Input schema
 
@@ -120,26 +100,46 @@ Run a read-only mergeCraft review on the workspace change and persist a durable 
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "base": {
+    "finding_id": {
       "type": "string",
-      "description": "Optional git base ref for the diff (defaults to HEAD)."
+      "description": "MC- short id or fingerprint for the finding."
     },
-    "head": {
+    "review_id": {
       "type": "string",
-      "description": "Optional git head ref when comparing two refs."
-    },
-    "diff": {
-      "type": "string",
-      "description": "Optional path to a standalone patch file."
-    },
-    "dry_run": {
-      "type": "boolean",
-      "description": "Materialize the diff and build the review prompt without invoking an agent."
-    },
-    "prompt": {
-      "type": "string",
-      "description": "Optional extra instructions appended to the review prompt."
+      "description": "Stored review id that owns the finding."
     }
-  }
+  },
+  "required": [
+    "finding_id",
+    "review_id"
+  ]
+}
+```
+
+## `get_capabilities`
+
+Return the review-only capability manifest (allowed vs forbidden actions). Do not use to mutate repository state — it is read-only metadata.
+
+### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+## `get_policy`
+
+Return the read-only gate policy for this serve context. Do not use to change trust tier or gate rules — there is no setter.
+
+### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
 }
 ```

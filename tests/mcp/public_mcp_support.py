@@ -55,12 +55,6 @@ RUNTIME_PRIMITIVE_SAMPLES: tuple[str, ...] = (
     "create_pull_request_review",
 )
 
-MUTATING_RUNTIME_TOOLS: tuple[str, ...] = (
-    "push_branch",
-    "commit_changes",
-    "create_pull_request",
-)
-
 _LIST_PAYLOAD: dict[str, Any] = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
 _INIT_PAYLOAD: dict[str, Any] = {
     "jsonrpc": "2.0",
@@ -78,24 +72,6 @@ cli_runner = CliRunner()
 
 def import_module(dotted: str) -> Any:
     return importlib.import_module(dotted)
-
-
-def require_public_module() -> Any:
-    return import_module("mergecraft.mcp.public")
-
-
-def require_stdio_module() -> Any:
-    return import_module("mergecraft.mcp.stdio")
-
-
-def require_eval_module() -> Any:
-    return import_module("mergecraft.evals.mcp_public")
-
-
-def require_generator_script() -> Any:
-    from tests.docs.support import load_script_module
-
-    return load_script_module("scripts/gen_mcp_server_json.py")
 
 
 def init_git_repo(tmp_path: Path) -> None:
@@ -245,10 +221,6 @@ __all__ = [
     "is_auth_rejection",
     "mcp_list_names",
     "minimal_valid_finding_dict",
-    "require_eval_module",
-    "require_generator_script",
-    "require_public_module",
-    "require_stdio_module",
     "rpc_json",
     "stdio_rpc_exchange",
     "write_minimal_config",

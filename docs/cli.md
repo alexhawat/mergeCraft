@@ -69,7 +69,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft lens show <lens-id>` | Show rubric, triggers, evidence, and tool classes for one lens. |
 | `mergecraft lens test <lens-id>` | Preview one lens dispatch (rubric + routing context) for a diff fixture. |
 | `mergecraft mcp list` | Print the resolved MCP tool names for a role. |
-| `mergecraft mcp serve` | Start the MCP HTTP server for a resolved workspace and role. |
+| `mergecraft mcp serve` | Start the MCP server over HTTP or stdio (public role only) for a workspace and role. |
 | `mergecraft memory export --output OUTPUT` | Export repo memory to a JSON bundle. |
 | `mergecraft memory feedback` | Record accepted / dismissed / disputed feedback for a finding fingerprint. |
 | `mergecraft memory forget` | Remove one active memory entry. |

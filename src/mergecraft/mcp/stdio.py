@@ -68,7 +68,9 @@ async def _serve_stdio_loop(tools: list[ToolSpec], tool_ctx: ToolContext) -> Non
         try:
             body = json.loads(stripped)
         except json.JSONDecodeError:
-            _write_response({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}})
+            _write_response(
+                {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
+            )
             continue
         if isinstance(body, list):
             for item in body:

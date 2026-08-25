@@ -4,7 +4,7 @@ Exports:
     RpcError: JSON-RPC error code/message pair.
     rpc_error: Wrap an ``RpcError`` in a response envelope.
     dispatch_mcp_rpc: Handle ``initialize``, ``tools/list``, and ``tools/call``.
-    mcp_server_version: Installed package version for ``serverInfo``.
+    package_version: Installed package version for ``serverInfo``.
 """
 
 from __future__ import annotations
@@ -44,23 +44,32 @@ def rpc_error(req_id: Any, error: RpcError) -> dict[str, Any]:
 
 
 def package_version() -> str:
-    """Return mergeCraft version from ``pyproject.toml`` (MCP metadata canonical source)."""
+    """Return the installed mergeCraft version for MCP metadata."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        installed = version("merge-craft")
+        if installed.strip():
+            return installed
+    except PackageNotFoundError:
+        pass
+
+    from mergecraft import __version__
+
+    if __version__.strip() and __version__ != "0.0.0+unknown":
+        return __version__
+
     import tomllib
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[3]
-    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-    version = data.get("project", {}).get("version")
-    if isinstance(version, str) and version.strip():
-        return version
-    from mergecraft import __version__
+    pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
+    if pyproject.is_file():
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        project_version = data.get("project", {}).get("version")
+        if isinstance(project_version, str) and project_version.strip():
+            return project_version
 
     return __version__
-
-
-def mcp_server_version() -> str:
-    """Return the mergeCraft version for MCP ``serverInfo``."""
-    return package_version()
 
 
 async def dispatch_mcp_rpc(
@@ -85,7 +94,7 @@ async def dispatch_mcp_rpc(
                 "capabilities": {"tools": {}},
                 "serverInfo": {
                     "name": MERGECRAFT_MCP_NAME,
-                    "version": mcp_server_version(),
+                    "version": package_version(),
                 },
             },
         }
@@ -96,13 +105,13 @@ async def dispatch_mcp_rpc(
             "result": {"tools": [tool.list_entry() for tool in tools]},
         }
     if method == "tools/call":
-        from mergecraft.mcp.server import (
-            _argument_schema_error,
-            _charge_tool_call_budget,
-            _coerce_arguments,
-            _record_trajectory,
-            _span_tool_call_id,
-            _tool_result_to_rpc,
+        from mergecraft.mcp.tool_call import (
+            argument_schema_error,
+            charge_tool_call_budget,
+            coerce_arguments,
+            record_trajectory,
+            span_tool_call_id,
+            tool_result_to_rpc,
         )
 
         name = params.get("name")
@@ -114,15 +123,15 @@ async def dispatch_mcp_rpc(
         tool = by_name.get(name)
         if tool is None:
             return rpc_error(req_id, RpcError(-32601, f"Unknown tool: {name}"))
-        arguments = _coerce_arguments(arguments, tool.input_schema)
-        schema_error = _argument_schema_error(tool, arguments, validators)
+        arguments = coerce_arguments(arguments, tool.input_schema)
+        schema_error = argument_schema_error(tool, arguments, validators)
         if schema_error is not None:
-            _record_trajectory(tool_ctx, name, arguments, ok=False, error=schema_error.message)
+            record_trajectory(tool_ctx, name, arguments, ok=False, error=schema_error.message)
             return rpc_error(req_id, schema_error)
         try:
             from mergecraft.utils.run_bounds import BudgetExhausted
 
-            _charge_tool_call_budget(tool_ctx)
+            charge_tool_call_budget(tool_ctx)
         except BudgetExhausted as exc:
             return rpc_error(req_id, RpcError(-32000, str(exc)))
         from mergecraft.config.settings import RepoSettings
@@ -133,7 +142,7 @@ async def dispatch_mcp_rpc(
             "tool.server": MERGECRAFT_MCP_NAME,
             "gen_ai.operation.name": "execute_tool",
             "gen_ai.tool.name": name,
-            "gen_ai.tool.call.id": _span_tool_call_id(),
+            "gen_ai.tool.call.id": span_tool_call_id(),
         }
         if agent_id:
             call_attrs["mergecraft.agent.id"] = agent_id
@@ -146,14 +155,14 @@ async def dispatch_mcp_rpc(
             except Exception as exc:
                 span.set_status("error", str(exc))
                 enrich_tool_response(span, output=None, error=exc)
-                _record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
+                record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
                 if return_tool_errors:
                     return rpc_error(req_id, RpcError(-32603, str(exc)))
                 raise
             finally:
                 reset_selected_mode(mode_token)
             enrich_tool_response(span, output=result)
-            _record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
+            record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
             emit_verb_subevent(
                 tracer,
                 parent_span_id=span.span_id,
@@ -163,7 +172,7 @@ async def dispatch_mcp_rpc(
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": _tool_result_to_rpc(result),
+                "result": tool_result_to_rpc(result),
             }
     return rpc_error(req_id, RpcError(-32601, f"Method not found: {method}"))
 
@@ -171,7 +180,6 @@ async def dispatch_mcp_rpc(
 __all__ = [
     "RpcError",
     "dispatch_mcp_rpc",
-    "mcp_server_version",
     "package_version",
     "rpc_error",
 ]

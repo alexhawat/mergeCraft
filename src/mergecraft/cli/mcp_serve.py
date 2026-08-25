@@ -67,7 +67,7 @@ def build_codegen_tool_context() -> ToolContext:
     )
 
 
-def _role_endpoint(role: ServeRole) -> str:
+def role_endpoint(role: ServeRole) -> str:
     if role == "reviewer":
         return MCP_REVIEWER_ENDPOINT
     if role == "verifier":
@@ -263,11 +263,11 @@ def build_mcp_app_for_role(
 
 
 __all__ = [
-    "_role_endpoint",
     "build_codegen_tool_context",
     "build_mcp_app_for_role",
     "build_mcp_app_from_ctx",
     "build_mcp_tool_context",
     "resolve_served_tool_names",
     "resolve_served_tool_specs",
+    "role_endpoint",
 ]

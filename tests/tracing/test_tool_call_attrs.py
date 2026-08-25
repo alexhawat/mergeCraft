@@ -129,7 +129,7 @@ def test_mcp_tool_call_span_has_request_attrs(
     tracer = Tracer(sink=sink, session_id="mcp-success", run_id="mcp-success-run")
 
     monkeypatch.setattr(
-        "mergecraft.tracing.tracer.get_tracer_from_settings",
+        "mergecraft.mcp.rpc.get_tracer_from_settings",
         lambda _settings: tracer,
     )
 
@@ -209,7 +209,7 @@ def test_mcp_tool_call_span_has_error_attrs(
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="mcp-error", run_id="mcp-error-run")
     monkeypatch.setattr(
-        "mergecraft.tracing.tracer.get_tracer_from_settings",
+        "mergecraft.mcp.rpc.get_tracer_from_settings",
         lambda _settings: tracer,
     )
 

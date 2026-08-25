@@ -48,7 +48,7 @@ def _public_tool_specs() -> list[ToolSpec]:
     if names != set(PUBLIC_TOOL_NAMES):
         msg = f"public tool names mismatch: {names} != {set(PUBLIC_TOOL_NAMES)}"
         raise RuntimeError(msg)
-    return sorted(specs, key=lambda spec: spec.name)
+    return specs
 
 
 def build_server_json() -> dict[str, Any]:
