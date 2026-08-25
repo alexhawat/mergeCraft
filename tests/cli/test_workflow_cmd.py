@@ -9,11 +9,12 @@ ordinary CLI failures outside GitHub Actions.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from tests.cli.support_provider_registry import (
@@ -734,14 +735,15 @@ def test_config_write_failure_rolls_the_workflow_back(
     workflow_before = workflow.read_text(encoding="utf-8")
 
     config_path = tmp_path / ".mergecraft" / "config.yaml"
-    real_write_text = Path.write_text
+    real_replace = os.replace
 
-    def _explode_on_config(self: Path, *args: object, **kwargs: object) -> int:
-        if self == config_path:
+    def _explode_on_config(src: Any, dst: Any, **kwargs: Any) -> None:
+        # The config write is atomic, so fail it at the rename that publishes it.
+        if Path(dst) == config_path:
             raise OSError("disk full")
-        return real_write_text(self, *args, **kwargs)  # type: ignore[arg-type]
+        real_replace(src, dst, **kwargs)
 
-    monkeypatch.setattr(Path, "write_text", _explode_on_config)
+    monkeypatch.setattr(os, "replace", _explode_on_config)
     result = _invoke(
         "workflow",
         "provider",
@@ -761,3 +763,68 @@ def test_config_write_failure_rolls_the_workflow_back(
     assert workflow.read_text(encoding="utf-8") == workflow_before, (
         "the workflow must be rolled back when the config write fails"
     )
+
+
+def test_partial_config_write_leaves_the_original_config_intact(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A config write that dies mid-payload must not truncate config.yaml.
+
+    The earlier rollback test raises before the file is opened. This one fails
+    after bytes are already written, which an in-place truncating write would
+    leave behind as a damaged config.
+    """
+    workflow = _setup_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    _register_nous_provider(tmp_path)
+    config_path = tmp_path / ".mergecraft" / "config.yaml"
+    config_before = read_config(tmp_path)
+    config_text_before = config_path.read_text(encoding="utf-8")
+
+    real_fdopen = os.fdopen
+
+    class _HalfWriter:
+        def __init__(self, handle: Any) -> None:
+            self._handle = handle
+
+        def write(self, payload: str) -> int:
+            # Let a prefix land, then fail: a truncating in-place write would
+            # already have destroyed the original by this point.
+            self._handle.write(payload[: len(payload) // 2])
+            raise OSError("disk full")
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._handle, name)
+
+        def __enter__(self) -> _HalfWriter:
+            self._handle.__enter__()
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            self._handle.__exit__(*exc)
+
+    def _half_writing_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        return _HalfWriter(real_fdopen(fd, *args, **kwargs))
+
+    monkeypatch.setattr(os, "fdopen", _half_writing_fdopen)
+    result = _invoke(
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "nous",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+    monkeypatch.undo()
+
+    assert result.exit_code != CLI_SUCCESS_EXIT_CODE, _plain(result.stdout + result.stderr)
+    assert config_path.read_text(encoding="utf-8") == config_text_before, (
+        "a failed config write must not truncate the original file"
+    )
+    assert read_config(tmp_path) == config_before
+    leftovers = list(config_path.parent.glob(".config.yaml.*.tmp"))
+    assert not leftovers, f"temporary config files were left behind: {leftovers}"

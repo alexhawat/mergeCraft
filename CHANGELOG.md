@@ -74,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stayed against the process working directory, so invoking from outside the
   target repository could read config from one repo and rewrite another repo's
   workflow
+- `.mergecraft/config.yaml` is replaced atomically (temporary file plus rename,
+  preserving permissions) by every CLI writer. An in-place write truncates
+  first, so a failure partway through left a half-written config behind
 - `mergecraft workflow provider add --apply` writes the registry config only
   after the workflow file lands, and rolls the workflow back if that config
   write then fails. Either half failing used to exit nonzero with config on one
