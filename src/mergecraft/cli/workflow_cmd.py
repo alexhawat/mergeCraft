@@ -131,7 +131,9 @@ def _restore_workflow(workflow: Path, previous: str | None) -> None:
         if previous is None:
             workflow.unlink(missing_ok=True)
         else:
-            workflow.write_text(previous, encoding="utf-8")
+            # Same reason as the forward write: a truncating restore that then
+            # fails would corrupt the very file it is trying to put back.
+            _atomic_write_text(workflow, previous)
     except OSError as exc:
         console.print(f"[red]could not restore {workflow} after a failed config write: {exc}[/red]")
 

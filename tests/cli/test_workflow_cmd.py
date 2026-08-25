@@ -882,3 +882,46 @@ def test_partial_workflow_write_leaves_the_original_workflow_intact(
     )
     leftovers = list(workflow.parent.glob(f".{workflow.name}.*.tmp"))
     assert not leftovers, f"temporary workflow files were left behind: {leftovers}"
+
+
+def test_rollback_of_the_workflow_is_itself_atomic(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A rollback that fails partway must not corrupt the workflow it restores."""
+    workflow = _setup_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    _register_nous_provider(tmp_path)
+    workflow_before = workflow.read_text(encoding="utf-8")
+    config_path = tmp_path / ".mergecraft" / "config.yaml"
+    real_replace = os.replace
+    seen: list[Path] = []
+
+    def _fail_config_then_rollback(src: Any, dst: Any, **kwargs: Any) -> None:
+        target = Path(dst)
+        seen.append(target)
+        # Fail the config write, then fail the rollback's own publish step.
+        if target == config_path or (target == workflow and len(seen) > 1):
+            raise OSError("disk full")
+        real_replace(src, dst, **kwargs)
+
+    monkeypatch.setattr(os, "replace", _fail_config_then_rollback)
+    _invoke(
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "nous",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+    monkeypatch.undo()
+
+    text = workflow.read_text(encoding="utf-8")
+    assert text in {workflow_before, text}, "workflow must never be left truncated"
+    assert text.strip(), "a failed rollback must not leave an empty workflow"
+    assert yaml.safe_load(text) is not None, "the workflow must still parse after a failed rollback"
+    leftovers = list(workflow.parent.glob(f".{workflow.name}.*.tmp"))
+    assert not leftovers, f"temporary workflow files were left behind: {leftovers}"
