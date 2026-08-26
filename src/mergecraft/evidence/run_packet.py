@@ -9,8 +9,8 @@ This module is that missing consumer.
 It is deliberately the *only* place that knows how to read a live run's
 state. The builder stays pure, the classifier stays pure, and everything
 environment-shaped (tool state, temp dirs, ``RUNNER_TEMP``) is confined
-here. Wiring a consumer is not a schema change, so
-``PACKET_SCHEMA_VERSION`` is untouched (D7).
+here. Schema versioning lives in ``mergecraft.evidence.packet``; this module
+only assembles and emits packets for a completed run.
 
 Exports:
     build_run_packet: Assemble the packet for a completed run (decision included).
@@ -26,12 +26,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+from pydantic import ValidationError
 
-from mergecraft.analyzers.scope import parse_diff_scope
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.emit import write_packet
 from mergecraft.evidence.packet import DeterministicCheck, MergeEvidencePacket, ModePromptVersion
+from mergecraft.utils.diff_paths import changed_paths_from_diff
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -98,32 +99,6 @@ def _read_diff_text(state: RepoToolState) -> str:
             except OSError as err:
                 logger.debug("evidence packet: cannot read {} — {}", path, err)
     return ""
-
-
-def changed_paths_from_diff(diff_text: str) -> list[str]:
-    """Return every path the diff touches, reusing the analyzer scope parser.
-
-    ``analyzers/scope.py`` already parses a unified diff and, on top of the
-    hunk ranges, explicitly identifies changed workflows, migrations,
-    lockfiles and dependency manifests (its "scope exceptions"). Those are
-    precisely the paths that drive blast radius, so this reuses that signal
-    rather than writing a second diff parser with its own idea of what a
-    migration looks like.
-
-    Unioning the exception sets in matters: a lockfile or workflow changed
-    with no surviving hunk range would otherwise drop out of the path list
-    and silently soften the classification.
-    """
-    if not diff_text.strip():
-        return []
-    scope = parse_diff_scope(diff_text)
-    paths: set[str] = set(scope.hunk_ranges)
-    paths |= set(scope.added_files)
-    paths |= set(scope.changed_lockfiles)
-    paths |= set(scope.changed_workflows)
-    paths |= set(scope.changed_migrations)
-    paths |= set(scope.changed_dependency_manifests)
-    return sorted(paths)
 
 
 def _diff_stats(diff_text: str) -> dict[str, object]:
@@ -248,12 +223,13 @@ def _finalize_packet_with_gate(
     ctx: ToolContext,
     run_succeeded: bool,
     decision_reason_suffix: str | None = None,
+    pinned: bool = False,
 ) -> MergeEvidencePacket:
     """Attach structural verdict and gate action to an assembled packet."""
     from mergecraft.agents.gates import decide_action, decide_approval
 
-    gate_mode = _resolve_gate_mode(ctx)
-    gate_policy = _resolve_gate_policy(ctx)
+    gate_mode = _resolve_gate_mode(ctx, pinned=pinned)
+    gate_policy = _resolve_gate_policy(ctx, pinned=pinned)
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
     packet_with_decision = packet.model_copy(update={"decision": decision})
     action = decide_action(packet_with_decision, mode=gate_mode, policy=gate_policy)
@@ -269,6 +245,46 @@ def _finalize_packet_with_gate(
         }
     )
     return packet_with_decision.model_copy(update={"decision": final_decision})
+
+
+def _assemble_packet_core(
+    ctx: ToolContext,
+    *,
+    change_id: str,
+    files_changed: list[str],
+    findings: list[Finding],
+    deterministic_checks: list[DeterministicCheck],
+    blast_radius: BlastRadiusClassification | None,
+    trajectory: dict[str, Any] | None,
+) -> MergeEvidencePacket:
+    """Shared evidence shell for happy-path and fail-closed packet assembly."""
+    state = ctx.tool_state
+    executed_model = ctx.resolved_model or state.model or "(unresolved)"
+    requested_model = state.requested_model or executed_model
+    provider = _provider_for_model_evidence(
+        executed_model=executed_model,
+        requested_model=requested_model,
+        agent_id=ctx.agent_id,
+    )
+    return build_packet(
+        change_id=change_id,
+        agent_id=ctx.agent_id,
+        agent_version=_agent_version(),
+        model=executed_model,
+        requested_model=requested_model,
+        executed_model=executed_model,
+        provider=provider,
+        fallback_index=state.fallback_index,
+        fallback_occurred=state.fallback_occurred,
+        files_changed=files_changed,
+        findings=findings,
+        deterministic_checks=deterministic_checks,
+        self_assessment=_self_assessment(state),
+        blast_radius=blast_radius,
+        trajectory=trajectory,
+        mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
+        dispatched_lens_ids=list(state.dispatched_lens_ids),
+    )
 
 
 def build_run_packet(
@@ -309,40 +325,14 @@ def build_run_packet(
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
     trajectory_findings = audit_trajectory(trajectory)
 
-    executed_model = ctx.resolved_model or state.model or "(unresolved)"
-    requested_model = state.requested_model or executed_model
-    fallback_index = state.fallback_index
-    fallback_occurred = state.fallback_occurred
-    provider = _provider_for_model_evidence(
-        executed_model=executed_model,
-        requested_model=requested_model,
-        agent_id=ctx.agent_id,
-    )
-
-    packet = build_packet(
+    packet = _assemble_packet_core(
+        ctx,
         change_id=resolved_change_id,
-        agent_id=ctx.agent_id,
-        agent_version=_agent_version(),
-        model=executed_model,
-        requested_model=requested_model,
-        executed_model=executed_model,
-        provider=provider,
-        fallback_index=fallback_index,
-        fallback_occurred=fallback_occurred,
         files_changed=changed_paths,
         findings=[*load_run_findings(ctx, extra=extra_findings), *trajectory_findings],
         deterministic_checks=_deterministic_checks(state),
-        self_assessment=_self_assessment(state),
         blast_radius=blast_radius,
         trajectory=trajectory.model_dump(mode="json"),
-        # S5 (#145): one ``ModePromptVersion`` row for the mode that actually
-        # ran, so an archived verdict can be attributed to the prompt that
-        # produced it. ``ctx.modes`` is the *catalog* (Build/Review/Plan/...),
-        # not the dispatched mode — every row in the catalog falsely
-        # advertising the verdict is a misleading evidence artifact. Mirrors
-        # the ``JudgePin`` pattern for the verifier.
-        mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
-        dispatched_lens_ids=list(state.dispatched_lens_ids),
     )
     return _finalize_packet_with_gate(packet, ctx=ctx, run_succeeded=run_succeeded)
 
@@ -378,25 +368,46 @@ def _provider_for_model_evidence(
     return "unknown"
 
 
-def _resolve_gate_mode(ctx: ToolContext) -> str:
+def _resolve_gate_mode(ctx: ToolContext, *, pinned: bool = False) -> str:
     """Return the gate mode (``shadow`` / ``enforce``) for this run.
 
     D5 / MCB-17: read ``gates.gate_action`` from the AG2 settings snapshot
     on ``ToolContext``, not from package defaults. D12: every new gate
     defaults to ``shadow``. Pydantic validation on ``GateMode`` ensures a
     typo'd value widens to ``shadow``, never to ``enforce``.
-    """
-    from mergecraft.config.settings_snapshot import repo_settings_from_context
 
+    When ``pinned`` is true, use the snapshotted value without re-checking
+    disk — for fail-closed assembly paths that must not throw on config drift.
+    """
+    from mergecraft.config import default_settings
+    from mergecraft.config.settings_snapshot import (
+        pinned_repo_settings_from_context,
+        repo_settings_from_context,
+    )
+
+    if pinned:
+        settings = pinned_repo_settings_from_context(ctx)
+        if settings is not None:
+            return settings.gates.gate_action
+        return default_settings().gates.gate_action
     return repo_settings_from_context(ctx).gates.gate_action
 
 
-def _resolve_gate_policy(ctx: ToolContext) -> GateActionPolicy:
+def _resolve_gate_policy(ctx: ToolContext, *, pinned: bool = False) -> GateActionPolicy:
     """Merge repo ``gates.override`` onto the default gate-action policy."""
-    from mergecraft.config.settings_snapshot import repo_settings_from_context
+    from mergecraft.config import default_settings
+    from mergecraft.config.settings_snapshot import (
+        pinned_repo_settings_from_context,
+        repo_settings_from_context,
+    )
     from mergecraft.evidence.gate_policy import resolve_effective_gate_policies
 
-    settings = repo_settings_from_context(ctx)
+    if pinned:
+        settings = pinned_repo_settings_from_context(ctx)
+        if settings is None:
+            settings = default_settings()
+    else:
+        settings = repo_settings_from_context(ctx)
     return resolve_effective_gate_policies(settings.gates.override)
 
 
@@ -439,38 +450,21 @@ def _fail_closed_assembly_packet(
     reason: str,
 ) -> MergeEvidencePacket:
     """Return a neutral packet when assembly fails in ``enforce`` mode (MCB-17)."""
-    state = ctx.tool_state
-    executed_model = ctx.resolved_model or state.model or "(unresolved)"
-    requested_model = state.requested_model or executed_model
-    provider = _provider_for_model_evidence(
-        executed_model=executed_model,
-        requested_model=requested_model,
-        agent_id=ctx.agent_id,
-    )
-    packet = build_packet(
+    packet = _assemble_packet_core(
+        ctx,
         change_id=change_id,
-        agent_id=ctx.agent_id,
-        agent_version=_agent_version(),
-        model=executed_model,
-        requested_model=requested_model,
-        executed_model=executed_model,
-        provider=provider,
-        fallback_index=state.fallback_index,
-        fallback_occurred=state.fallback_occurred,
         files_changed=[],
         findings=[],
         deterministic_checks=[],
-        self_assessment=_self_assessment(state),
         blast_radius=None,
         trajectory=None,
-        mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
-        dispatched_lens_ids=list(state.dispatched_lens_ids),
     )
     return _finalize_packet_with_gate(
         packet,
         ctx=ctx,
         run_succeeded=run_succeeded,
         decision_reason_suffix=f"assembly failed — {reason}",
+        pinned=True,
     )
 
 
@@ -492,9 +486,9 @@ def prepare_run_packet(
             run_succeeded=run_succeeded,
             extra_findings=extra_findings,
         )
-    except (KeyError, OSError, RuntimeError, ValueError) as err:
+    except (KeyError, OSError, RuntimeError, ValueError, ValidationError) as err:
         logger.warning("evidence packet: assembly failed — {}", err)
-        if _resolve_gate_mode(ctx) == "enforce":
+        if _resolve_gate_mode(ctx, pinned=True) == "enforce":
             return _fail_closed_assembly_packet(
                 ctx,
                 change_id=resolved,
@@ -597,7 +591,6 @@ def emit_run_packet(
 __all__ = [
     "PACKET_FILENAME",
     "build_run_packet",
-    "changed_paths_from_diff",
     "classify_run_blast_radius",
     "emit_run_packet",
     "prepare_run_packet",

@@ -69,6 +69,23 @@ def capture_repo_settings_snapshot(
     return snapshot
 
 
+def capture_run_scope_snapshot(
+    ctx: ToolContext,
+    *,
+    root: Path,
+    settings: RepoSettings | None = None,
+    load_learnings_files: bool = False,
+) -> RepoSettingsSnapshot:
+    """Pin repo settings on ``ctx`` and the run-scope ContextVar in one write."""
+    snapshot = capture_repo_settings_snapshot(
+        root=root,
+        settings=settings,
+        load_learnings_files=load_learnings_files,
+    )
+    ctx.repo_settings_snapshot = snapshot
+    return snapshot
+
+
 def assert_config_unchanged(snapshot: RepoSettingsSnapshot) -> None:
     """Refuse when ``.mergecraft/config.yaml`` changed after the snapshot was taken."""
     current = config_yaml_hash(root=snapshot.repo_root)
@@ -77,9 +94,19 @@ def assert_config_unchanged(snapshot: RepoSettingsSnapshot) -> None:
         raise ValueError(msg)
 
 
+def _snapshot_from_context(ctx: ToolContext) -> RepoSettingsSnapshot | None:
+    return ctx.repo_settings_snapshot or _RUN_SCOPE_SNAPSHOT.get()
+
+
 def repo_settings_from_context(ctx: ToolContext) -> RepoSettings:
-    """Read the run-scope settings snapshot, falling back to a live load when unset."""
-    snapshot = ctx.repo_settings_snapshot or _RUN_SCOPE_SNAPSHOT.get()
+    """Read the run-scope settings snapshot, with a live-load fallback.
+
+    Production runs must install a snapshot via :func:`capture_run_scope_snapshot`
+    before untrusted execution. The live-load fallback exists for offline runs,
+    unit tests, and other contexts that never pin a snapshot — it must not be
+    relied on for publish or gate decisions in production.
+    """
+    snapshot = _snapshot_from_context(ctx)
     if snapshot is not None:
         assert_config_unchanged(snapshot)
         return snapshot.settings
@@ -89,14 +116,28 @@ def repo_settings_from_context(ctx: ToolContext) -> RepoSettings:
     return load_repo_settings(root=repo_root, load_learnings_files=False)
 
 
+def pinned_repo_settings_from_context(ctx: ToolContext) -> RepoSettings | None:
+    """Return snapshotted settings without re-checking disk (fail-closed paths only)."""
+    snapshot = _snapshot_from_context(ctx)
+    if snapshot is None:
+        return None
+    return snapshot.settings
+
+
 def repo_settings_for_gateway_resolvers(*, root: Path | None = None) -> RepoSettings:
     """Return repo settings for gateway credential resolution (AG9 / #496).
 
-    Prefer the AG2 run-scope snapshot when installed. Otherwise live-load once
-    per context and reuse the derived value for the gateway hot path.
+    Prefer the AG2 run-scope snapshot when installed and refuse when
+    ``.mergecraft/config.yaml`` changed after the snapshot (same fail-closed
+    posture as publish/gate paths). When no snapshot is installed — offline
+    CLIs, unit tests, and other contexts that never call
+    :func:`capture_run_scope_snapshot` — live-load once per context and reuse
+    the derived value for the gateway hot path. That fallback must not be
+    relied on for production review runs.
     """
     snapshot = _RUN_SCOPE_SNAPSHOT.get()
     if snapshot is not None:
+        assert_config_unchanged(snapshot)
         return snapshot.settings
 
     derived = _DERIVED_GATEWAY_SETTINGS.get()
@@ -104,9 +145,7 @@ def repo_settings_for_gateway_resolvers(*, root: Path | None = None) -> RepoSett
         return derived
 
     repo_root = (root or Path.cwd()).resolve()
-    import mergecraft.config.settings_snapshot as snapshot_module
-
-    settings = snapshot_module.load_repo_settings(
+    settings = load_repo_settings(
         root=repo_root,
         load_learnings_files=False,
     )
@@ -134,8 +173,10 @@ __all__ = [
     "RepoSettingsSnapshot",
     "assert_config_unchanged",
     "capture_repo_settings_snapshot",
+    "capture_run_scope_snapshot",
     "config_yaml_hash",
     "load_repo_settings",
+    "pinned_repo_settings_from_context",
     "repo_settings_for_gateway_resolvers",
     "repo_settings_from_context",
     "reset_gateway_settings_cache",

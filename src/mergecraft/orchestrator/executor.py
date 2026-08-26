@@ -165,16 +165,17 @@ def _record_terminal_submission(
     findings: list[Finding],
     *,
     run_succeeded: bool,
-) -> TerminalSubmission:
+) -> tuple[TerminalSubmission, str]:
     policy = decide_approval(findings, run_succeeded=run_succeeded, tier="trusted")
     if policy == "success":
-        return record_validated_terminal_submission(
+        submission = record_validated_terminal_submission(
             ctx,
             {"verdict": "approve", "summary": "pipeline terminal node"},
             findings=findings,
         )
+        return submission, str(policy)
     wire_findings = _submission_findings_for_policy(findings, str(policy))
-    return record_validated_terminal_submission(
+    submission = record_validated_terminal_submission(
         ctx,
         {
             "verdict": "request_changes",
@@ -183,6 +184,7 @@ def _record_terminal_submission(
         },
         findings=wire_findings,
     )
+    return submission, str(policy)
 
 
 class PipelineExecutor:
@@ -283,15 +285,10 @@ class PipelineExecutor:
                 continue
 
             if step.kind is PipelineStepKind.terminal:
-                submission = _record_terminal_submission(
+                submission, policy = _record_terminal_submission(
                     ctx,
                     collected_findings,
                     run_succeeded=run_succeeded,
-                )
-                policy = decide_approval(
-                    collected_findings,
-                    run_succeeded=run_succeeded,
-                    tier="trusted",
                 )
                 records.append(StepRecord(step_id=step.id, status="ran"))
                 return PipelineRunResult(
@@ -302,7 +299,7 @@ class PipelineExecutor:
                     terminal_protocol=TERMINAL_PROTOCOL,
                     verdict_recorded_via=record_validated_terminal_submission,
                     structural_approval=False,
-                    policy_verdict=str(policy),
+                    policy_verdict=policy,
                     verifier_skipped_by_repo_pipeline=(
                         pipeline.source == "repo" and verifier_in_repo_pipeline and not verifier_ran
                     ),

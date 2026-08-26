@@ -1,4 +1,4 @@
-"""RED — pipeline executor honesty (AG6 / MCB-37)."""
+"""GREEN — pipeline executor honesty (AG6 / MCB-37)."""
 
 from __future__ import annotations
 

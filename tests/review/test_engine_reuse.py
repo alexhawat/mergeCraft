@@ -1,4 +1,4 @@
-"""RED — ReviewEngine timeout callback reset (AG7 / MCB-36)."""
+"""GREEN — ReviewEngine timeout callback reset (AG7 / MCB-36)."""
 
 from __future__ import annotations
 

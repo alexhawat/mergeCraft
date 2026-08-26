@@ -730,14 +730,8 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         repo_setting=settings.analyzers.sarif_upload,
     )
     ctx.sarif_upload_enabled = sarif_upload_enabled
-    from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.mcp.tool_state import primary_repo_state
 
-    repo_settings_snapshot = capture_repo_settings_snapshot(
-        root=Path(primary_repo_state(tool_state).dir),
-        settings=settings,
-        load_learnings_files=False,
-    )
     ctx.tool_context = ToolContext(
         agent_id=ctx.agent_id,
         repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
@@ -783,7 +777,14 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         budget_tracker=ctx.budget_tracker,
-        repo_settings_snapshot=repo_settings_snapshot,
+    )
+    from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
+
+    capture_run_scope_snapshot(
+        ctx.tool_context,
+        root=Path(primary_repo_state(tool_state).dir),
+        settings=settings,
+        load_learnings_files=False,
     )
 
 

@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT
 
 _REPO_ROOT = Path(REPO_ROOT)
@@ -30,7 +28,6 @@ def test_subprocess_uv_calls_pass_no_sync() -> None:
     assert offenders == []
 
 
-@pytest.mark.xfail(reason="green after AG8: UV_PROJECT_ENVIRONMENT in Makefile", strict=False)
 def test_uv_project_environment_is_exported_by_the_makefile() -> None:
     makefile = (_REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     assert re.search(r"^UV_PROJECT_ENVIRONMENT\s*\??=", makefile, re.MULTILINE)

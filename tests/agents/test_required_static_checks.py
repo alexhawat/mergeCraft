@@ -1,13 +1,8 @@
-"""RED — required static checks (AG4 / MCB-16, AG0-G4 choice (a))."""
+"""GREEN — required static checks (AG4 / MCB-16, AG0-G4 choice (a))."""
 
 from __future__ import annotations
 
 import pytest
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AG4: required static check semantics",
-    strict=False,
-)
 
 _STATUS_MATRIX: tuple[tuple[str, bool], ...] = (
     ("passed", True),

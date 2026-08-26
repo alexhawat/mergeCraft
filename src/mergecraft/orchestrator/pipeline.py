@@ -10,7 +10,6 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.utils.path_globs import path_matches_glob
 from mergecraft.utils.risk_bands import RISK_BANDS, risk_at_or_above
 
@@ -28,11 +27,6 @@ _ALLOWED_PREDICATE_RE = re.compile(
     r"|analyzer_findings\.severity >= (Trivial|Minor|Major|Critical)"
     r"|decision\.([a-z_]+) is (trivial|not_trivial))$"
 )
-
-_predicate_pattern = _ALLOWED_PREDICATE_RE.pattern
-assert _predicate_pattern.startswith("^")
-assert _predicate_pattern.endswith("$")
-assert set(_SEVERITY_ORDER) == set(FINDING_SEVERITIES)
 
 
 class PipelineValidationError(ValueError):

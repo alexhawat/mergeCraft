@@ -1,10 +1,8 @@
-"""RED — gate mode from repo settings (AG4 / MCB-17)."""
+"""GREEN — gate mode from repo settings (AG4 / MCB-17)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-
-import pytest
 
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
@@ -15,10 +13,7 @@ from mergecraft.utils.github import GitHubClient
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AG4: gate mode from settings snapshot",
-    strict=False,
-)
+    from _pytest.monkeypatch import MonkeyPatch
 
 
 def _write_gate_config(tmp_path: Path, gate_action: str) -> None:
@@ -47,7 +42,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     )
 
 
-def test_repo_setting_enforce_is_honoured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_repo_setting_enforce_is_honoured(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _write_gate_config(tmp_path, "enforce")
     monkeypatch.chdir(tmp_path)
     from mergecraft.evidence.run_packet import _resolve_gate_mode
@@ -56,7 +51,7 @@ def test_repo_setting_enforce_is_honoured(tmp_path: Path, monkeypatch: pytest.Mo
     assert _resolve_gate_mode(ctx) == "enforce"
 
 
-def test_repo_setting_shadow_is_honoured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_repo_setting_shadow_is_honoured(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _write_gate_config(tmp_path, "shadow")
     monkeypatch.chdir(tmp_path)
     from mergecraft.evidence.run_packet import _resolve_gate_mode
@@ -67,7 +62,7 @@ def test_repo_setting_shadow_is_honoured(tmp_path: Path, monkeypatch: pytest.Mon
 
 def test_mode_is_not_read_from_package_defaults(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     _write_gate_config(tmp_path, "enforce")
     monkeypatch.chdir(tmp_path)
@@ -102,7 +97,7 @@ def test_shadow_mode_performs_zero_external_mutations(tmp_path: Path) -> None:
 
 def test_packet_assembly_exception_fails_closed_in_enforce_mode(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: MonkeyPatch,
 ) -> None:
     _write_gate_config(tmp_path, "enforce")
     monkeypatch.chdir(tmp_path)

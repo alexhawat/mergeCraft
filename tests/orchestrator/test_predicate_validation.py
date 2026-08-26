@@ -1,10 +1,18 @@
-"""RED — pipeline predicate validation (AG6 / MCB-29)."""
+"""GREEN — pipeline predicate validation (AG6 / MCB-29)."""
 
 from __future__ import annotations
 
 import pytest
 
 from mergecraft.orchestrator.pipeline import PipelineValidationError, validate_predicate
+
+
+def test_predicate_regex_is_anchored() -> None:
+    from mergecraft.orchestrator.pipeline import _ALLOWED_PREDICATE_RE
+
+    pattern = _ALLOWED_PREDICATE_RE.pattern
+    assert pattern.startswith("^")
+    assert pattern.endswith("$")
 
 
 def test_path_containing_subprocess_is_accepted() -> None:

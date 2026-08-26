@@ -1,4 +1,4 @@
-"""RED — pipeline severity ordering (AG6 / MCB-34)."""
+"""GREEN — pipeline severity ordering (AG6 / MCB-34)."""
 
 from __future__ import annotations
 

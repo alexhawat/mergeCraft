@@ -1,4 +1,4 @@
-"""RED — build_run_packet decision ordering (AG3 / MCB-15)."""
+"""GREEN — build_run_packet decision ordering (AG3 / MCB-15)."""
 
 from __future__ import annotations
 

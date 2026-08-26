@@ -1,4 +1,4 @@
-"""RED — shipped policy packs declare enforceable modes (AG5 / AG0-G3)."""
+"""GREEN — shipped policy packs declare enforceable modes (AG5 / AG0-G3)."""
 
 from __future__ import annotations
 

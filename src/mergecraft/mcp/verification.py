@@ -308,7 +308,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
         changed_paths: frozenset[str] | None = None
         if state.diff_path:
-            from mergecraft.evidence.run_packet import changed_paths_from_diff
+            from mergecraft.utils.diff_paths import changed_paths_from_diff
 
             diff_text = Path(state.diff_path).read_text(encoding="utf-8")
             changed_paths = frozenset(changed_paths_from_diff(diff_text))

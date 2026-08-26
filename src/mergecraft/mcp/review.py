@@ -22,7 +22,6 @@ from mergecraft.mcp.deferred_publish import (
     refresh_analyzer_sections_for_publish,
 )
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
-from mergecraft.mcp.review_scope import PublicationScopeError
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
 from mergecraft.mcp.verdict import (
@@ -47,6 +46,10 @@ from mergecraft.utils.learnings import (
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
+
+
+class PublicationScopeError(ValueError):
+    """A review mutation targeted a PR or commit outside the bound run scope."""
 
 
 def format_analyzer_inline_body(
@@ -354,22 +357,31 @@ def _bound_pull_number(ctx: ToolContext) -> int | None:
 
 
 def _resolve_bound_pull_number(ctx: ToolContext, params: dict[str, Any]) -> int:
-    legacy = params.get("pull_number")
-    if legacy is not None:
-        return int(legacy)
     bound = _bound_pull_number(ctx)
+    legacy = params.get("pull_number")
     if bound is None:
+        if legacy is not None:
+            msg = "pull_number cannot be supplied without a bound PR on this review run"
+            raise ValueError(msg)
         msg = "no pull number bound to this review run"
         raise ValueError(msg)
+    if legacy is not None:
+        return int(legacy)
     return bound
 
 
 def _resolve_bound_commit_id(ctx: ToolContext, params: dict[str, Any]) -> str | None:
     primary = primary_repo_state(ctx.tool_state)
+    bound_sha = primary.checkout_sha
     legacy = params.get("commit_id")
+    if bound_sha is None:
+        if legacy is not None:
+            msg = "commit_id cannot be supplied without a bound checkout on this review run"
+            raise ValueError(msg)
+        return None
     if legacy is not None:
         return str(legacy)
-    return primary.checkout_sha
+    return bound_sha
 
 
 def _assert_publication_scope(

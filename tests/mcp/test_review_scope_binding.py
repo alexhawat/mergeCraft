@@ -112,6 +112,34 @@ async def test_mismatched_commit_id_raises(tmp_path: Path) -> None:
     assert any(token in message for token in ("commit", "sha", "checkout"))
 
 
+@pytest.mark.asyncio
+async def test_unbound_run_rejects_caller_supplied_pull_number(tmp_path: Path) -> None:
+    ctx = _review_ctx(tmp_path, pr_number=7)
+    primary = primary_repo_state(ctx.tool_state)
+    primary.issue_number = None
+    ctx.tool_state.pr_number = None
+    spec = create_pull_request_review_tool(ctx)
+    result = await spec.execute({"pull_number": 8, "body": "review body", "comments": []})
+    assert "bound" in _error_text(result).lower()
+
+
+@pytest.mark.asyncio
+async def test_unbound_run_rejects_caller_supplied_commit_id(tmp_path: Path) -> None:
+    ctx = _review_ctx(tmp_path, pr_number=7)
+    primary = primary_repo_state(ctx.tool_state)
+    primary.checkout_sha = None
+    spec = create_pull_request_review_tool(ctx)
+    result = await spec.execute(
+        {
+            "pull_number": 7,
+            "body": "review body",
+            "comments": [],
+            "commit_id": "deadbeef",
+        }
+    )
+    assert "checkout" in _error_text(result).lower()
+
+
 _MUTATING_REVIEW_TOOLS: tuple[tuple[str, dict[str, Any]], ...] = (
     (
         "create_pull_request_review",
