@@ -23,16 +23,19 @@ NetworkDefault = Literal["deny", "allow"]
 PidNamespaceMethod = Literal["unshare", "sudo-unshare", "none"]
 
 _ISOLATION_PROBE_SCRIPT = """
+_sudo_allowed() {
+  [ "${CI:-}" = true ] || [ "${MERGECRAFT_PROBE_ALLOW_SUDO:-}" = 1 ]
+}
 probe() {
   pid=0 pid_method=none net=0 bind=0 tmpfs=0
   if unshare --pid --fork --mount-proc true 2>/dev/null; then
     pid=1 pid_method=unshare
-  elif sudo unshare --pid --fork --mount-proc true 2>/dev/null; then
+  elif _sudo_allowed && sudo unshare --pid --fork --mount-proc true 2>/dev/null; then
     pid=1 pid_method=sudo-unshare
   fi
   if unshare --net true 2>/dev/null; then
     net=1
-  elif sudo unshare --net true 2>/dev/null; then
+  elif _sudo_allowed && sudo unshare --net true 2>/dev/null; then
     net=1
   fi
   tmp=$(mktemp -d)
@@ -51,7 +54,7 @@ probe() {
   rm -rf "$tmp"
   echo "pid=$pid pid_method=$pid_method net=$net bind=$bind tmpfs=$tmpfs"
 }
-probe || { { [ "${CI:-}" = true ] || [ "${MERGECRAFT_PROBE_ALLOW_SUDO:-}" = 1 ]; } && sudo bash -c "$(declare -f probe); probe"; }
+probe || { _sudo_allowed && sudo bash -c "$(declare -f _sudo_allowed); $(declare -f probe); probe"; }
 """.strip()
 
 _PROBE_FIELD_RE = re.compile(r"^(pid|pid_method|net|bind|tmpfs)=(.+)$")
