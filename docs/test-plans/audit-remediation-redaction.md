@@ -63,6 +63,7 @@ matching impl PR lands.
 | `test_empty_and_oversized_headers_are_rejected` | MCB-11 | Blank secret + oversized signature rejected |
 | `test_route_never_returns_500_on_an_unauthenticated_path` | D8 | Route maps failures to 4xx |
 | `test_redelivery_through_accept_webhook_is_a_duplicate` | D9 | Second ingress call returns `duplicate=True` |
+| `test_webhook_ingress_verifies_then_processes_a_valid_payload` | D9 | Escalation BR4: W15 ingress test aligned — redelivery is `duplicate=True`, not replay raise |
 | `test_replay_store_evicts_on_ttl` | MCB-13 | TTL eviction frees delivery ids |
 | `test_replay_store_is_bounded` | MCB-13 | Store size capped |
 | `test_far_future_skew_is_rejected` | MCB-13 | Far-future skew rejected |
