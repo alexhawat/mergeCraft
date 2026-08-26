@@ -48,16 +48,57 @@ def test_non_ascii_header_raises_permission_error(provider: str) -> None:
 
 def test_empty_and_oversized_headers_are_rejected() -> None:
     """MCB-11: blank secrets and oversized header values fail closed."""
-    from mergecraft.scm.webhooks import verify_webhook_signature
+    from mergecraft.scm.webhooks import (
+        _MAX_SIGNATURE_HEADER_BYTES,
+        verify_webhook_signature,
+    )
 
     body = b"{}"
     with pytest.raises(PermissionError, match=r"missing webhook secret"):
         verify_webhook_signature("github", headers={}, body=body, secret="   ")
-    huge = "x" * 16_384
+    oversized = "x" * (_MAX_SIGNATURE_HEADER_BYTES + 1)
     headers = _signed_github_headers(body)
-    headers["X-Hub-Signature-256"] = huge
-    with pytest.raises(PermissionError):
+    headers["X-Hub-Signature-256"] = oversized
+    with pytest.raises(
+        PermissionError,
+        match=r"webhook signature/header exceeds maximum length",
+    ):
         verify_webhook_signature("github", headers=headers, body=body, secret=_WEBHOOK_SECRET)
+
+
+def test_signature_header_8_kib_boundary() -> None:
+    """MCB-11: ``_MAX_SIGNATURE_HEADER_BYTES`` is 8 KiB; only values beyond fail closed."""
+    from mergecraft.scm.webhooks import (
+        _MAX_SIGNATURE_HEADER_BYTES,
+        _SIGNATURE_HEADER_TOO_LONG_MSG,
+        verify_webhook_signature,
+    )
+
+    assert _MAX_SIGNATURE_HEADER_BYTES == 8192
+
+    body = b"{}"
+    at_limit = "x" * _MAX_SIGNATURE_HEADER_BYTES
+    headers_at_limit = _signed_github_headers(body)
+    headers_at_limit["X-Hub-Signature-256"] = at_limit
+    with pytest.raises(PermissionError) as at_limit_exc:
+        verify_webhook_signature(
+            "github",
+            headers=headers_at_limit,
+            body=body,
+            secret=_WEBHOOK_SECRET,
+        )
+    assert _SIGNATURE_HEADER_TOO_LONG_MSG not in str(at_limit_exc.value)
+
+    over_limit = "x" * (_MAX_SIGNATURE_HEADER_BYTES + 1)
+    headers_over_limit = _signed_github_headers(body)
+    headers_over_limit["X-Hub-Signature-256"] = over_limit
+    with pytest.raises(PermissionError, match=_SIGNATURE_HEADER_TOO_LONG_MSG):
+        verify_webhook_signature(
+            "github",
+            headers=headers_over_limit,
+            body=body,
+            secret=_WEBHOOK_SECRET,
+        )
 
 
 def test_route_never_returns_500_on_an_unauthenticated_path(

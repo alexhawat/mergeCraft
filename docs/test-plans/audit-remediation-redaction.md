@@ -133,7 +133,8 @@ BR8 integration follow-up: tracing/analyzer adapter tests compare `MemorySink` a
 | `tests/security/test_egress_concurrency.py::*` | Per-client ``pinned_http_transport`` / ``PinnedHTTPTransport`` concurrency (not global ``getaddrinfo``) |
 | `tests/ci/test_log_archive_bounds.py`, `tests/ci/test_sarif_bounds.py` | Archive caps imported from ``mergecraft.ci.archive_bounds`` (`ARCHIVE_MAX_*`) |
 | `tests/scm/test_ingress_idempotency.py::test_replay_store_evicts_on_ttl` | Patches ``REPLAY_SKEW_SECONDS`` (not legacy ``_MAX_REPLAY_SKEW_SECONDS``) |
-| `tests/scm/test_webhook_headers.py` | Explicit ``install_httpx_latin1_header_values`` for latin-1 header bytes via TestClient |
+| `tests/scm/test_webhook_headers.py` | Explicit ``install_httpx_latin1_header_values`` for latin-1 header bytes via TestClient; 8 KiB ``_MAX_SIGNATURE_HEADER_BYTES`` boundary + overlong message contract |
+| `tests/enterprise/test_support_bundle.py::test_support_bundle_resolves_audit_path_from_root` | ``write_support_bundle(..., root=workspace)`` resolves audit via ``resolve_audit_log_path(root=root)`` |
 
 ## Escalation (BR7 / MCB-21)
 
