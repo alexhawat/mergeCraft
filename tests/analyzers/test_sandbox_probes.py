@@ -7,11 +7,6 @@ import pytest
 from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.mcp import shell as shell_mod
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP3: capability probes replace CI short-circuit",
-    strict=False,
-)
-
 
 @pytest.fixture(autouse=True)
 def _reset_caches(monkeypatch: pytest.MonkeyPatch) -> None:

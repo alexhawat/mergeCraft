@@ -330,12 +330,18 @@ def _evidence_dir(ctx: AgentRunContext) -> Path:
 def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[str, str]:
     """Read paths allowlisted to the checkout and evidence scratch (MCB-06 / D4)."""
     roots = (checkout.resolve(), evidence.resolve())
-    read: dict[str, str] = dict(GIT_NATIVE_READ_DENY_OPENCODE)
+    read: dict[str, str] = {}
     for root in roots:
         root_posix = root.as_posix()
         read[root_posix] = "allow"
         read[f"{root_posix}/*"] = "allow"
         read[f"{root_posix}/**"] = "allow"
+    # Deny rules after broad allow patterns — matches gates.py spread order.
+    read.update(GIT_NATIVE_READ_DENY_OPENCODE)
+    for root in roots:
+        root_posix = root.as_posix()
+        read[f"{root_posix}/.git/config"] = "deny"
+        read[f"{root_posix}/.git/**"] = "deny"
     return read
 
 

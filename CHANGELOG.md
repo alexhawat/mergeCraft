@@ -36,8 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (MCB-09 / D7)
 - ``sudo-unshare`` shell spawn passes env by name via ``--preserve-env`` with
   ``env=env`` on ``Popen`` so provider keys never appear in argv (MCB-08)
-- Untrusted shell namespace hides every ``git`` binary and binds ``.git``
-  read-only in all spawn branches, including the unsandboxed fallback (MCB-25)
+- Namespaced shell spawn hides every ``git`` binary and binds ``.git`` read-only
+  inside ``unshare`` / ``sudo-unshare`` branches; unsandboxed opt-in runs the raw
+  command without host mount soup (MCB-25)
 - Python ``prep`` installs into ``.mergecraft/prep-scratch/prep-venv`` with a
   default-deny env allowlist so PR build deps cannot mutate the reviewer's
   interpreter or inherit provider credentials (MCB-22 / D12)

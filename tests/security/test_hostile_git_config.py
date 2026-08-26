@@ -11,11 +11,6 @@ from mergecraft.mcp.git import _run_git
 from mergecraft.xrepo.review import _rev_parse_commit
 from tests.security.hostile_git_fixtures import HostileGitRepo, build_hostile_git_repo
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP2: git_hardening routes every root-side git call",
-    strict=False,
-)
-
 
 def test_root_side_status_does_not_execute_fsmonitor(hostile_git_repo: HostileGitRepo) -> None:
     _run_git(["status", "--porcelain"], cwd=str(hostile_git_repo.root))

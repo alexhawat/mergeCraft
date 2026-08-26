@@ -37,11 +37,15 @@ _detected_sandbox: SandboxMethod | None = None
 _detected_netns: bool | None = None
 
 
-def reset_detection_cache() -> None:
-    """Clear cached sandbox / netns probe results (xdist isolation / #421)."""
+def _reset_shell_detection_globals() -> None:
     global _detected_sandbox, _detected_netns
     _detected_sandbox = None
     _detected_netns = None
+
+
+def reset_detection_cache() -> None:
+    """Clear cached sandbox / netns probe results (xdist isolation / #421)."""
+    _reset_shell_detection_globals()
     from mergecraft.analyzers.sandbox import probe_capabilities
 
     probe_capabilities.cache_clear()
@@ -232,10 +236,8 @@ def _unshare_argv(*, isolate_network: bool) -> list[str]:
 
 
 def _network_namespace_available() -> bool:
-    """Whether ``unshare --net`` works; uses the shared capability probe."""
-    from mergecraft.analyzers.sandbox import probe_capabilities
-
-    return probe_capabilities().network_namespace
+    """Whether ``unshare --net`` works; uses the shared capability probe cache."""
+    return network_namespace_available()
 
 
 def _git_readonly_bind_mounts() -> str:
@@ -345,8 +347,9 @@ def _spawn_shell(
             "refused by default; set MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1 to override"
         )
         raise RuntimeError(msg)
+    # Unsandboxed opt-in: run the command directly — no mount/chmod soup on the host.
     return subprocess.Popen(
-        ["bash", "-c", wrapped],
+        ["bash", "-c", command],
         cwd=cwd,
         env=env,
         stdout=stdout,

@@ -51,7 +51,7 @@ probe() {
   rm -rf "$tmp"
   echo "pid=$pid pid_method=$pid_method net=$net bind=$bind tmpfs=$tmpfs"
 }
-probe || sudo bash -c "$(declare -f probe); probe"
+probe || { { [ "${CI:-}" = true ] || [ "${MERGECRAFT_PROBE_ALLOW_SUDO:-}" = 1 ]; } && sudo bash -c "$(declare -f probe); probe"; }
 """.strip()
 
 _PROBE_FIELD_RE = re.compile(r"^(pid|pid_method|net|bind|tmpfs)=(.+)$")
@@ -118,7 +118,10 @@ def _parse_probe_output(stdout: bytes) -> dict[str, str]:
 
 
 def _run_isolation_probe() -> dict[str, str]:
-    if os.environ.get("MERGECRAFT_PROBE_TEST_DOUBLE") == "1":
+    if (
+        os.environ.get("PYTEST_CURRENT_TEST")
+        and os.environ.get("MERGECRAFT_PROBE_TEST_DOUBLE") == "1"
+    ):
         return dict(_PROBE_TEST_DOUBLE)
     try:
         result = subprocess.run(
@@ -197,12 +200,19 @@ def probe_capabilities() -> SandboxCapabilities:
     return caps
 
 
+def sandbox_skip_findings(plan: SandboxPlan) -> list[Finding]:
+    """Return user-visible findings when sandbox planning refuses execution."""
+    if plan.skip_finding is not None:
+        return [plan.skip_finding]
+    return []
+
+
 def reset_detection_cache() -> None:
     """Clear cached sandbox probes (xdist isolation / #421)."""
     probe_capabilities.cache_clear()
-    from mergecraft.mcp.shell import reset_detection_cache as reset_shell_detection_cache
+    from mergecraft.mcp.shell import _reset_shell_detection_globals
 
-    reset_shell_detection_cache()
+    _reset_shell_detection_globals()
 
 
 def _required_for_untrusted(caps: SandboxCapabilities) -> list[str]:
@@ -342,4 +352,5 @@ __all__ = [
     "plan_sandbox",
     "probe_capabilities",
     "reset_detection_cache",
+    "sandbox_skip_findings",
 ]

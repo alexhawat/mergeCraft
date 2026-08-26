@@ -9,11 +9,6 @@ import pytest
 
 from mergecraft.xrepo.review import _rev_parse_commit
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP2: reject_if_leading_dash + --end-of-options in _rev_parse_commit",
-    strict=False,
-)
-
 
 def _init_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "linked"

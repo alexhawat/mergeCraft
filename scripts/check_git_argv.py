@@ -22,6 +22,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 MERGECRAFT_SRC = REPO / "src" / "mergecraft"
 _ALLOWED_REL = "src/mergecraft/utils/git_hardening.py"
+_SUBPROCESS_ATTRS = frozenset({"create_subprocess_exec", "Popen", "run"})
 
 
 def _rel(path: Path) -> str:
@@ -31,13 +32,16 @@ def _rel(path: Path) -> str:
         return path.as_posix()
 
 
-def _is_git_list_literal(node: ast.AST) -> bool:
-    if not isinstance(node, ast.List):
+def _is_git_constant(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value == "git"
+
+
+def _is_git_list_or_tuple(node: ast.AST) -> bool:
+    if not isinstance(node, (ast.List, ast.Tuple)):
         return False
     if not node.elts:
         return False
-    first = node.elts[0]
-    return isinstance(first, ast.Constant) and first.value == "git"
+    return _is_git_constant(node.elts[0])
 
 
 class _Visitor(ast.NodeVisitor):
@@ -45,7 +49,22 @@ class _Visitor(ast.NodeVisitor):
         self.violations: list[int] = []
 
     def visit_List(self, node: ast.List) -> None:
-        if _is_git_list_literal(node):
+        if _is_git_list_or_tuple(node):
+            self.violations.append(node.lineno)
+        self.generic_visit(node)
+
+    def visit_Tuple(self, node: ast.Tuple) -> None:
+        if _is_git_list_or_tuple(node):
+            self.violations.append(node.lineno)
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in _SUBPROCESS_ATTRS
+            and node.args
+            and _is_git_constant(node.args[0])
+        ):
             self.violations.append(node.lineno)
         self.generic_visit(node)
 
@@ -77,7 +96,7 @@ def main() -> int:
     violations: list[str] = []
     for path in targets:
         for lineno in _scan_file(path):
-            violations.append(f"{_rel(path)}:{lineno}: bare ['git', …] list literal")
+            violations.append(f"{_rel(path)}:{lineno}: bare git subprocess argv")
 
     if violations:
         print(

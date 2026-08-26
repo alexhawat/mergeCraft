@@ -418,11 +418,10 @@ def run_adapter(
         scratch_dir=scratch_dir,
     )
     if not sandbox_decision.can_run:
-        skip_findings: list[Finding] = []
-        if sandbox_decision.skip_finding is not None:
-            skip_findings = [sandbox_decision.skip_finding]
+        from mergecraft.analyzers.sandbox import sandbox_skip_findings
+
         return AdapterRunResult(
-            findings=skip_findings,
+            findings=sandbox_skip_findings(sandbox_decision),
             skipped=True,
             skip_reason=sandbox_decision.skip_reason,
         )

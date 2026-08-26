@@ -112,7 +112,7 @@ def _run_argv(
     changed_files: list[str],
     tier: TrustTier,
     scratch_suffix: str = "",
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, list[Finding]]:
     return run_argv(
         manifest=manifest,
         repo_root=repo_root,
@@ -187,7 +187,7 @@ def _run_oasdiff(
 
         binary = provisioned.argv[0] if provisioned.argv else "oasdiff"
         argv = (binary, "breaking", "--format", "json", str(base_path), str(head_path))
-        raw, err = _run_argv(
+        raw, err, skip_findings = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=argv,
@@ -197,7 +197,11 @@ def _run_oasdiff(
         )
         if err and not raw:
             logger.info("{}", err)
-            return AdapterRunResult(findings=[], skipped=True, skip_reason=err)
+            return AdapterRunResult(
+                findings=skip_findings,
+                skipped=True,
+                skip_reason=err,
+            )
         if not raw:
             continue
         parsed = parse_oasdiff_json(raw, manifest=manifest, repo_root=repo_root)
@@ -245,7 +249,7 @@ def _run_squawk(
 
     binary = provisioned.argv[0] if provisioned.argv else "squawk"
     argv = (binary, "--reporter=json", "--assume-in-transaction", *paths)
-    raw, err = _run_argv(
+    raw, err, skip_findings = _run_argv(
         manifest=manifest,
         repo_root=repo_root,
         argv=argv,
@@ -254,7 +258,11 @@ def _run_squawk(
     )
     if err and not raw:
         logger.info("{}", err)
-        return AdapterRunResult(findings=[], skipped=True, skip_reason=err)
+        return AdapterRunResult(
+            findings=skip_findings,
+            skipped=True,
+            skip_reason=err,
+        )
     if not raw:
         return AdapterRunResult(findings=[])
 
@@ -320,7 +328,7 @@ def _run_buf(
             "--error-format",
             "json",
         )
-        raw, err = _run_argv(
+        raw, err, skip_findings = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=breaking_argv,
@@ -330,7 +338,11 @@ def _run_buf(
         )
         if err and not raw:
             logger.info("{}", err)
-            return AdapterRunResult(findings=[], skipped=True, skip_reason=err)
+            return AdapterRunResult(
+                findings=skip_findings,
+                skipped=True,
+                skip_reason=err,
+            )
         if raw:
             findings.extend(
                 parse_buf_breaking_json(
@@ -342,7 +354,7 @@ def _run_buf(
             )
 
         lint_argv = (binary, "lint", str(head_path), "--error-format", "json")
-        lint_raw, _ = _run_argv(
+        lint_raw, _, _ = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=lint_argv,

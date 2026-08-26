@@ -6,11 +6,6 @@ import pytest
 
 from mergecraft.utils.privilege import wrap_agent_command
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP6: image identity gate + hardened setpriv argv",
-    strict=False,
-)
-
 
 def test_root_outside_action_image_refuses_with_policy_message(
     monkeypatch: pytest.MonkeyPatch,
@@ -24,6 +19,10 @@ def test_root_outside_action_image_refuses_with_policy_message(
         wrap_agent_command(["echo", "hi"])
 
 
+@pytest.mark.xfail(
+    reason="green after AP6: image identity gate + hardened setpriv argv",
+    strict=False,
+)
 def test_allow_root_env_var_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("mergecraft.utils.privilege.os.getuid", lambda: 0)
     monkeypatch.setenv("MERGECRAFT_ALLOW_ROOT", "1")
@@ -44,6 +43,10 @@ def test_in_action_image_detects_is_sandbox_and_opt_dir(monkeypatch: pytest.Monk
     assert _in_action_image() is True
 
 
+@pytest.mark.xfail(
+    reason="green after AP6: image identity gate + hardened setpriv argv",
+    strict=False,
+)
 def test_setpriv_argv_carries_no_new_privs_and_cleared_caps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

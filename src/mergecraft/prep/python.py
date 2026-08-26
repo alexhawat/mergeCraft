@@ -29,6 +29,7 @@ _PREP_ENV_ALLOWLIST: Final[frozenset[str]] = frozenset(
         "PIP_EXTRA_INDEX_URL",
         "PIP_INDEX_URL",
         "PIP_TRUSTED_HOST",
+        "PIPENV_PIPFILE",
         "REQUESTS_CA_BUNDLE",
         "SSL_CERT_FILE",
         "TERM",
@@ -42,9 +43,14 @@ _PREP_ENV_ALLOWLIST: Final[frozenset[str]] = frozenset(
 )
 
 
-def _prep_env() -> dict[str, str]:
+def _prep_env(cwd: Path | None = None) -> dict[str, str]:
     """Return a default-deny env mapping for prep subprocesses."""
-    return {key: value for key, value in os.environ.items() if key in _PREP_ENV_ALLOWLIST}
+    env = {key: value for key, value in os.environ.items() if key in _PREP_ENV_ALLOWLIST}
+    if cwd is not None:
+        pipfile = cwd / "Pipfile"
+        if pipfile.is_file():
+            env["PIPENV_PIPFILE"] = str(pipfile)
+    return env
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,13 +135,13 @@ def _adapt_install_cmd(config: _PythonConfig, venv: Path, cwd: Path) -> tuple[st
         ]
     if config.tool == "poetry":
         return str(_prep_venv_bin(venv, "poetry")), [
-            "install",
-            "--no-interaction",
             "--directory",
             str(cwd),
+            "install",
+            "--no-interaction",
         ]
     if config.tool == "pipenv":
-        return str(_prep_venv_bin(venv, "pipenv")), ["sync", "--directory", str(cwd)]
+        return str(_prep_venv_bin(venv, "pipenv")), ["sync"]
     cmd, *args = config.install_cmd
     return cmd, args
 
@@ -146,13 +152,14 @@ def _adapt_tool_install(tool: str, venv: Path) -> tuple[str, list[str]]:
     return pip, install_cmd[1:]
 
 
-async def _run_cmd(cmd: str, args: list[str]) -> tuple[int, str]:
+async def _run_cmd(cmd: str, args: list[str], *, cwd: Path | None = None) -> tuple[int, str]:
     proc = await asyncio.create_subprocess_exec(
         cmd,
         *args,
+        cwd=str(cwd) if cwd is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env=_prep_env(),
+        env=_prep_env(cwd),
     )
     stdout_b, stderr_b = await proc.communicate()
     out = b"\n".join(part for part in (stdout_b, stderr_b) if part).decode(
@@ -249,7 +256,7 @@ class InstallPythonDependencies:
 
         cmd, args = _adapt_install_cmd(config, venv, cwd)
         logger.info("» running: {} {}", cmd, " ".join(args))
-        code, out = await _run_cmd(cmd, args)
+        code, out = await _run_cmd(cmd, args, cwd=cwd)
         if code != 0:
             return PrepResult(
                 language="python",
