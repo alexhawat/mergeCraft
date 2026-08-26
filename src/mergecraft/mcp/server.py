@@ -368,6 +368,9 @@ def create_mcp_app(
             return JSONResponse({"error": str(exc)}, status_code=401)
         except (ValueError, json.JSONDecodeError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            logger.warning("webhook ingress rejected unauthenticated delivery: {}", exc)
+            return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse(
             {
                 "result_id": result.result_id,

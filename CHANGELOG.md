@@ -86,6 +86,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SCM webhook ingress encodes signature operands with UTF-8 surrogateescape before
+  ``compare_digest``, so non-ASCII header bytes return 401 instead of raising
+  ``TypeError`` on unauthenticated paths (MCB-11)
+- Webhook redelivery through ``accept_webhook`` returns ``duplicate=True`` instead
+  of rejecting a reused delivery nonce; the replay store is bounded with TTL and
+  ``max_entries``, and far-future skew is rejected with ``abs()`` (MCB-13)
 - `validate_http_url` rejects whitespace and control characters anywhere in a
   provider URL, not just at the ends. A stored URL is written verbatim into the
   consumer workflow YAML, so an interior newline could open a new key or step
