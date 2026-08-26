@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.evidence.gate_policy import GateAction
 from mergecraft.evidence.packet import (
@@ -16,11 +14,6 @@ from mergecraft.evidence.packet import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AG3: decide_action sees attached decision",
-    strict=False,
-)
 
 
 def _packet(**overrides: Any) -> MergeEvidencePacket:

@@ -15,11 +15,6 @@ from mergecraft.evidence.packet import (
     MergeEvidencePacket,
 )
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AG3: gate decision ordering",
-    strict=False,
-)
-
 
 def _packet(**overrides: Any) -> MergeEvidencePacket:
     base: dict[str, Any] = {
@@ -120,7 +115,9 @@ def test_never_auto_merge(case: str) -> None:
             blast_radius=_low_blast_packet().blast_radius,
         )
     elif case == "evidence_unavailable":
-        packet = _low_blast_packet(deterministic_checks=[{"name": "ci", "status": "unavailable"}])
+        packet = _low_blast_packet(
+            deterministic_checks=[{"name": "ci", "status": "unavailable", "command": "make ci"}]
+        )
 
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=tier)
     packet_with_decision = packet.model_copy(update={"decision": decision})

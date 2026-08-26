@@ -49,6 +49,16 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | `validate_predicate` | `tests/orchestrator/test_predicate_validation.py` |
 | `ReviewEngine.run` | `tests/review/test_engine_reuse.py` |
 
+## AG3 reconciliation (post-impl test fixes)
+
+| Fix | Rationale |
+| --- | --- |
+| `evidence_unavailable` deterministic check | `DeterministicCheck` requires `command`; omitting it blocked packet construction before assertions. |
+| `trusted_success_no_blockers` → split cases | `_is_low_risk_passing` needs empty findings; Minor findings yield `neutral` (same as matrix `neutral_verdict`), not `auto_merge`. |
+| `low_risk_passing` helpers attach decision | AG3 packet-once: `decide_action` predicates consult attached `decision`; empty findings need explicit trusted `success`. |
+| `test_gate_rule_selection` self-assessment | Attach `decide_approval` row before `decide_action` per packet-once contract. |
+| `TRUSTED_PACKET_DECIDED_BY` anchor | `test_decide_approval_tags_trusted_packet_decided_by` pins the trusted decider constant (D9 / LR-1). |
+
 ## Verification
 
 ```bash

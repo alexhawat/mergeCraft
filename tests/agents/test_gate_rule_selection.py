@@ -81,7 +81,9 @@ def _has_blockers_packet() -> MergeEvidencePacket:
 
 
 def _low_risk_passing_packet() -> MergeEvidencePacket:
+    from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
     from mergecraft.classify.blast_radius import BlastRadiusClassification
+    from mergecraft.evidence.packet import Decision
 
     classification = BlastRadiusClassification(
         lane="low",
@@ -90,7 +92,13 @@ def _low_risk_passing_packet() -> MergeEvidencePacket:
         next_action="Eligible for automatic merge after required checks pass.",
         categories=[],
     )
-    return _packet(findings=[], blast_radius=classification)
+    packet = _packet(findings=[], blast_radius=classification)
+    decision = Decision(
+        verdict="success",
+        reason="low-risk passing: trusted structural success with no blockers",
+        decided_by=TRUSTED_PACKET_DECIDED_BY,
+    )
+    return packet.model_copy(update={"decision": decision})
 
 
 def _tool_loop_packet() -> MergeEvidencePacket:
@@ -166,7 +174,8 @@ def test_self_assessment_only_neutral_verdict_and_no_auto_merge_action() -> None
     )
     decision = decide_approval(packet, run_succeeded=True, tier="trusted")
     assert decision.verdict == "neutral"
-    action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
+    attached = packet.model_copy(update={"decision": decision})
+    action = decide_action(attached, policy=DEFAULT_GATE_POLICIES)
     assert action != GateAction.AUTO_MERGE
 
 

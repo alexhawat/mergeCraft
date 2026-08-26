@@ -14,11 +14,6 @@ from mergecraft.evidence.packet import (
     MergeEvidencePacket,
 )
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AG3: trusted packet decisions only",
-    strict=False,
-)
-
 
 def _packet(**overrides: Any) -> MergeEvidencePacket:
     base: dict[str, Any] = {
@@ -77,8 +72,29 @@ def test_success_verdict_with_a_critical_finding_is_refused() -> None:
         decide_approval(packet, run_succeeded=True, tier="trusted")
 
 
+def test_decide_approval_tags_trusted_packet_decided_by() -> None:
+    from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY, decide_approval
+
+    finding = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="finding",
+        path="src/x.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+    )
+    packet = _packet(findings=[finding])
+    decision = decide_approval(packet, run_succeeded=True, tier="trusted")
+    assert decision.decided_by == TRUSTED_PACKET_DECIDED_BY
+
+
 _AUTO_MERGE_CASES: tuple[tuple[str, bool, str], ...] = (
-    ("trusted_success_no_blockers", True, "trusted"),
+    ("trusted_explicit_success", True, "trusted"),
+    ("trusted_neutral_empty_findings", False, "trusted"),
     ("untrusted_never", False, "untrusted"),
     ("failed_run", False, "trusted"),
 )
@@ -101,25 +117,18 @@ def test_hypothesis_auto_merge_implies_positive_decision(
         next_action="eligible",
         categories=[],
     )
-    findings = []
-    if label == "trusted_success_no_blockers":
-        findings = [
-            make_finding(
-                tool="ruff",
-                rule_id="F401",
-                category="Maintainability & Code Quality",
-                severity="Minor",
-                confidence="likely",
-                message="finding",
-                path="src/x.py",
-                start_line=1,
-                end_line=1,
-                source="analyzer",
-            )
-        ]
-    packet = _packet(findings=findings, blast_radius=blast)
+    packet = _packet(findings=[], blast_radius=blast)
     run_ok = label != "failed_run"
-    decision = decide_approval(packet, run_succeeded=run_ok, tier=tier)
+    if label == "trusted_explicit_success":
+        from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
+
+        decision = Decision(
+            verdict="success",
+            reason="explicit trusted success for low-risk passing predicate",
+            decided_by=TRUSTED_PACKET_DECIDED_BY,
+        )
+    else:
+        decision = decide_approval(packet, run_succeeded=run_ok, tier=tier)
     attached = packet.model_copy(update={"decision": decision})
     action = decide_action(attached, policy=DEFAULT_GATE_POLICIES)
     if should_merge:
