@@ -21,7 +21,12 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from loguru import logger
 
-from mergecraft.security.egress import SsrfBlockedError, inspect_external_url, pin_host_resolution
+from mergecraft.security.egress import (
+    SsrfBlockedError,
+    inspect_external_url,
+    pin_host_resolution,  # noqa: F401 — ``test_cov_provision_paths`` monkeypatch hook
+    pinned_http_transport,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -161,33 +166,38 @@ def _download_pinned_url(url: str, dest: Path) -> None:
             guarded = inspect_external_url(current)
         except SsrfBlockedError as exc:
             raise ProvisionError(str(exc)) from exc
-        with pin_host_resolution(guarded.host, guarded.addresses):
-            try:
-                with httpx.stream(
-                    "GET", current, follow_redirects=False, timeout=120.0
-                ) as response:
-                    if response.status_code in {301, 302, 303, 307, 308}:
-                        location = response.headers.get("location")
-                        if not location:
-                            msg = f"redirect from pinned download url {current!r} missing Location"
-                            raise ProvisionError(msg)
-                        current = urljoin(current, location)
-                        next_parsed = urlparse(current)
-                        next_host = (next_parsed.hostname or "").casefold()
-                        if next_parsed.scheme != "https" or next_host not in allowed_hosts:
-                            msg = (
-                                f"refusing redirect from pinned download url {url!r} to {current!r}"
-                            )
-                            raise ProvisionError(msg)
-                        continue
-                    response.raise_for_status()
-                    with dest.open("wb") as handle:
-                        for chunk in response.iter_bytes():
-                            handle.write(chunk)
-                    return
-            except httpx.HTTPError as exc:
-                msg = f"download failed for {current!r}: {exc}"
-                raise ProvisionError(msg) from exc
+        transport = pinned_http_transport(guarded.host, guarded.addresses)
+        try:
+            with (
+                httpx.Client(
+                    transport=transport,
+                    follow_redirects=False,
+                    timeout=120.0,
+                ) as client,
+                client.stream("GET", current) as response,
+            ):
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("location")
+                    if not location:
+                        msg = f"redirect from pinned download url {current!r} missing Location"
+                        raise ProvisionError(msg)
+                    current = urljoin(current, location)
+                    next_parsed = urlparse(current)
+                    next_host = (next_parsed.hostname or "").casefold()
+                    if next_parsed.scheme != "https" or next_host not in allowed_hosts:
+                        msg = f"refusing redirect from pinned download url {url!r} to {current!r}"
+                        raise ProvisionError(msg)
+                    continue
+                response.raise_for_status()
+                with dest.open("wb") as handle:
+                    for chunk in response.iter_bytes():
+                        handle.write(chunk)
+                return
+        except httpx.HTTPError as exc:
+            msg = f"download failed for {current!r}: {exc}"
+            raise ProvisionError(msg) from exc
+        finally:
+            transport.close()
     msg = f"too many redirects for pinned download url: {url!r}"
     raise ProvisionError(msg)
 

@@ -10,16 +10,23 @@ Exports:
     container_image_vulnerability_gate: Image scan (Trivy), not Bandit.
     dependency_vulnerability_gate: Dependency advisory scan (pip-audit).
     guard_external_url: Raise when a retrieval URL is an SSRF target.
+    pinned_http_transport: Per-client transport that pins DNS without global hooks.
+    pinned_request_metadata: Host/SNI/connect metadata for a pinned HTTPS request.
 """
 
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import ipaddress
+import itertools
 import socket
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+import httpx
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -211,50 +218,239 @@ def inspect_external_url(url: str) -> GuardedUrl:
     return GuardedUrl(url=url, host=host, addresses=addresses)
 
 
+@dataclass(frozen=True, slots=True)
+class PinnedRequestMetadata:
+    """Connection metadata for a guarded HTTPS request pinned to validated IPs."""
+
+    host: str
+    server_hostname: str
+    connect_host: str
+
+
+def pinned_request_metadata(
+    url: str,
+    *,
+    pinned_ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> PinnedRequestMetadata:
+    """Return Host/SNI/connect targets for a pinned HTTPS request."""
+    parsed = urlparse(url)
+    host = _normalize_host(parsed.hostname or "")
+    return PinnedRequestMetadata(
+        host=host,
+        server_hostname=host,
+        connect_host=str(pinned_ip),
+    )
+
+
+def _pinned_getaddrinfo_results(
+    pinned: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...],
+    *,
+    host: str,
+    port: Any,
+    family: int,
+    sock_type: int,
+    proto: int,
+) -> list[tuple[Any, ...]]:
+    port_i = 0
+    if port is not None and str(port).isdigit():
+        port_i = int(port)
+    results: list[tuple[Any, ...]] = []
+    for address in pinned:
+        if isinstance(address, ipaddress.IPv6Address):
+            sock_family = socket.AF_INET6
+            sockaddr: tuple[Any, ...] = (str(address), port_i, 0, 0)
+        else:
+            sock_family = socket.AF_INET
+            sockaddr = (str(address), port_i)
+        if family not in {0, sock_family}:
+            continue
+        results.append((sock_family, sock_type or socket.SOCK_STREAM, proto, "", sockaddr))
+    if not results:
+        msg = f"ssrf: no pinned address for {host!r} (fail-closed)"
+        raise SsrfBlockedError(msg)
+    return results
+
+
+_pin_hosts: contextvars.ContextVar[
+    dict[str, tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]] | None
+] = contextvars.ContextVar("mergecraft_egress_pin_hosts", default=None)
+_stdlib_getaddrinfo = socket.getaddrinfo
+_dispatch_depth = 0
+_dispatch_depth_lock = threading.Lock()
+
+
+def _dispatch_getaddrinfo(
+    name: str,
+    port: Any,
+    family: int = 0,
+    type: int = 0,
+    proto: int = 0,
+    flags: int = 0,
+) -> list[tuple[Any, ...]]:
+    pins = _pin_hosts.get()
+    if pins is not None:
+        normalized = _normalize_host(str(name))
+        pinned = pins.get(normalized)
+        if pinned is not None:
+            return _pinned_getaddrinfo_results(
+                pinned,
+                host=normalized,
+                port=port,
+                family=family,
+                sock_type=type,
+                proto=proto,
+            )
+    return _stdlib_getaddrinfo(name, port, family, type, proto, flags)
+
+
 @contextlib.contextmanager
 def pin_host_resolution(
     host: str,
     addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
 ) -> Iterator[None]:
-    """Force ``socket.getaddrinfo`` for ``host`` to the already-validated IPs."""
+    """Pin ``socket.getaddrinfo`` for ``host`` to already-validated IPs in this context."""
     normalized = _normalize_host(host)
     pinned = tuple(addresses)
-    original = socket.getaddrinfo
+    current_pins = _pin_hosts.get()
+    if current_pins is None:
+        next_pins = {normalized: pinned}
+    else:
+        next_pins = dict(current_pins)
+        next_pins[normalized] = pinned
+    token = _pin_hosts.set(next_pins)
 
-    def _pinned(
-        name: str,
-        port: Any,
-        family: int = 0,
-        type: int = 0,
-        proto: int = 0,
-        flags: int = 0,
-    ) -> list[tuple[Any, ...]]:
-        if _normalize_host(str(name)) != normalized:
-            return original(name, port, family, type, proto, flags)
-        port_i = 0
-        if port is not None and str(port).isdigit():
-            port_i = int(port)
-        results: list[tuple[Any, ...]] = []
-        for address in pinned:
-            if isinstance(address, ipaddress.IPv6Address):
-                sock_family = socket.AF_INET6
-                sockaddr: tuple[Any, ...] = (str(address), port_i, 0, 0)
-            else:
-                sock_family = socket.AF_INET
-                sockaddr = (str(address), port_i)
-            if family not in {0, sock_family}:
-                continue
-            results.append((sock_family, type or socket.SOCK_STREAM, proto, "", sockaddr))
-        if not results:
-            msg = f"ssrf: no pinned address for {host!r} (fail-closed)"
-            raise SsrfBlockedError(msg)
-        return results
-
-    socket.getaddrinfo = _pinned  # type: ignore[assignment]  # — stdlib getaddrinfo is overloaded; pin to validated IPs
+    global _dispatch_depth
+    with _dispatch_depth_lock:
+        if _dispatch_depth == 0:
+            socket.getaddrinfo = _dispatch_getaddrinfo  # type: ignore[assignment]  # — stdlib getaddrinfo is overloaded; install thread-local dispatch
+        _dispatch_depth += 1
     try:
         yield
     finally:
-        socket.getaddrinfo = original
+        with _dispatch_depth_lock:
+            _dispatch_depth -= 1
+            if _dispatch_depth == 0:
+                socket.getaddrinfo = _stdlib_getaddrinfo
+        _pin_hosts.reset(token)
+
+
+def _pinned_network_backend(
+    hostname: str,
+    addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
+    wrapped: Any,
+) -> Any:
+    """Return a ``NetworkBackend`` that dials validated IPs for ``hostname``."""
+    from httpcore._backends.base import NetworkBackend
+
+    normalized_hostname = _normalize_host(hostname)
+    address_cycle = itertools.cycle(tuple(addresses))
+
+    class PinnedNetworkBackend(NetworkBackend):
+        def connect_tcp(
+            self,
+            host: str,
+            port: int,
+            timeout: float | None = None,
+            local_address: str | None = None,
+            socket_options: Any | None = None,
+        ) -> Any:
+            connect_host = host
+            if _normalize_host(host) == normalized_hostname:
+                connect_host = str(next(address_cycle))
+            return wrapped.connect_tcp(
+                connect_host,
+                port,
+                timeout=timeout,
+                local_address=local_address,
+                socket_options=socket_options,
+            )
+
+        def connect_unix_socket(
+            self,
+            path: str,
+            timeout: float | None = None,
+            socket_options: Any | None = None,
+        ) -> Any:
+            return wrapped.connect_unix_socket(
+                path,
+                timeout=timeout,
+                socket_options=socket_options,
+            )
+
+        def sleep(self, seconds: float) -> None:
+            wrapped.sleep(seconds)
+
+    return PinnedNetworkBackend()
+
+
+class PinnedHTTPTransport(httpx.HTTPTransport):
+    """HTTP transport that connects to validated IPs but keeps hostname Host/SNI."""
+
+    def __init__(
+        self,
+        hostname: str,
+        addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
+        **kwargs: Any,
+    ) -> None:
+        import httpcore
+        from httpcore._backends.sync import SyncBackend
+        from httpx._config import DEFAULT_LIMITS, create_ssl_context
+
+        self._server_hostname = _normalize_host(hostname)
+        limits = kwargs.pop("limits", DEFAULT_LIMITS)
+        verify = kwargs.pop("verify", True)
+        cert = kwargs.pop("cert", None)
+        trust_env = kwargs.pop("trust_env", True)
+        http1 = kwargs.pop("http1", True)
+        http2 = kwargs.pop("http2", False)
+        local_address = kwargs.pop("local_address", None)
+        retries = kwargs.pop("retries", 0)
+        socket_options = kwargs.pop("socket_options", None)
+        if kwargs:
+            msg = f"unsupported PinnedHTTPTransport kwargs: {sorted(kwargs)}"
+            raise TypeError(msg)
+
+        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
+        network_backend = _pinned_network_backend(
+            self._server_hostname,
+            addresses,
+            SyncBackend(),
+        )
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=ssl_context,
+            max_connections=limits.max_connections,
+            max_keepalive_connections=limits.max_keepalive_connections,
+            keepalive_expiry=limits.keepalive_expiry,
+            http1=http1,
+            http2=http2,
+            local_address=local_address,
+            retries=retries,
+            socket_options=socket_options,
+            network_backend=network_backend,
+        )
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host or ""
+        if _normalize_host(host) == self._server_hostname:
+            extensions = dict(request.extensions)
+            extensions.setdefault("sni_hostname", host)
+            request = httpx.Request(
+                method=request.method,
+                url=request.url,
+                headers=request.headers,
+                content=request.content,
+                extensions=extensions,
+            )
+        return super().handle_request(request)
+
+
+def pinned_http_transport(
+    hostname: str,
+    addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
+    **kwargs: Any,
+) -> PinnedHTTPTransport:
+    """Build a per-client transport pinned to already-validated addresses."""
+    return PinnedHTTPTransport(hostname, addresses, **kwargs)
 
 
 def dependency_vulnerability_gate() -> VulnerabilityGateReport:
