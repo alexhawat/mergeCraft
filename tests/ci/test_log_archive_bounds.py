@@ -5,11 +5,8 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 
-from mergecraft.ci.providers.github_actions import (
-    ARCHIVE_MAX_MEMBER_BYTES,
-    ARCHIVE_MAX_TOTAL_BYTES,
-    GitHubActionsProvider,
-)
+from mergecraft.ci.archive_bounds import ARCHIVE_MAX_MEMBER_BYTES, ARCHIVE_MAX_TOTAL_BYTES
+from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 
 _TRUNCATION_MARKER = "truncat"
 
