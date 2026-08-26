@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Post-run checkout integrity verification via
   ``security.review_integrity`` hashes the tree before review and fails closed
   on mutation (MCB-06)
+- Privilege drop gates on action-image identity (``IS_SANDBOX`` + ``/opt/mergecraft``)
+  instead of uid alone; root outside the image refuses with a policy diagnostic and
+  ``MERGECRAFT_ALLOW_ROOT=1`` override (MCB-24 / D11)
+- ``setpriv`` argv carries ``--no-new-privs``, ``--inh-caps=-all``, and
+  ``--bounding-set=-all``; fails closed when ``setpriv`` lacks ``--bounding-set``
+  support (MCB-32)
 - Root-side ``git`` subprocesses route through ``utils/git_hardening.git_argv`` with
   pinned safe-config keys; ``make lint`` enforces the route via
   ``scripts/check_git_argv.py`` (MCB-01)
