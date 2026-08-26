@@ -34,13 +34,21 @@ def _archive_mode(destination: Path) -> Literal["w", "w:gz"]:
     raise ValueError(msg)
 
 
-def write_support_bundle(destination: Path, *, extra_text: str = "") -> str:
+def write_support_bundle(
+    destination: Path,
+    *,
+    extra_text: str = "",
+    root: Path | None = None,
+) -> str:
     """Write a support bundle to *destination*, redacting secrets.
 
     Args:
         destination: Output path.  Must end with ``.tgz``, ``.tar.gz``, or
             ``.tar``.  Parent directories are created automatically.
         extra_text: Optional additional text to include in the bundle.
+        root: Workspace root used to resolve the audit log path. Defaults to
+            the current working directory when omitted — callers must run from
+            the intended workspace (or pass ``root`` explicitly).
 
     Returns:
         The string form of the written *destination* path.
@@ -54,7 +62,7 @@ def write_support_bundle(destination: Path, *, extra_text: str = "") -> str:
 
     python_info = f"python: {sys.version}\nplatform: {sys.platform}\n"
     payload = python_info
-    audit_path = resolve_audit_log_path()
+    audit_path = resolve_audit_log_path(root=root)
     if audit_path.is_file():
         breaks = verify_audit_chain(audit_path)
         payload += f"audit_log: {audit_path}\n"

@@ -74,9 +74,6 @@ AUDIT_REQUIRED_EVENT_FIELDS = frozenset({"event_type", "outcome", "context"})
 AUDIT_IDENTIFIER_FIELDS = frozenset({"run_id", "artifact_id"})
 AUDIT_STORED_EVENT_FIELDS = AUDIT_REQUIRED_EVENT_FIELDS | frozenset({"timestamp"})
 
-_REQUIRED_EVENT_FIELDS = AUDIT_REQUIRED_EVENT_FIELDS
-_IDENTIFIER_FIELDS = AUDIT_IDENTIFIER_FIELDS
-
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
@@ -124,23 +121,51 @@ def _chain_hash(prev: str, canonical_body: str) -> str:
     return hashlib.sha256((prev + canonical_body).encode("utf-8")).hexdigest()
 
 
+def _tail_last_nonempty_line(path: Path) -> str | None:
+    """Return the last non-empty line of *path* without scanning the whole file."""
+    chunk_size = 4096
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        pos = handle.tell()
+        if pos == 0:
+            return None
+        buffer = b""
+        while pos > 0:
+            read_len = min(chunk_size, pos)
+            pos -= read_len
+            handle.seek(pos)
+            buffer = handle.read(read_len) + buffer
+            if pos == 0:
+                candidates = buffer.splitlines()
+            else:
+                first_newline = buffer.find(b"\n")
+                if first_newline == -1:
+                    continue
+                candidates = buffer[first_newline + 1 :].splitlines()
+            for raw in reversed(candidates):
+                if raw.strip():
+                    return raw.decode("utf-8", errors="replace")
+        return None
+
+
 def _read_last_chain_hash(path: Path) -> str:
     if not path.is_file():
         return ""
-    last_hash = ""
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            payload = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            stored = payload.get("hash")
-            if isinstance(stored, str):
-                last_hash = stored
-    return last_hash
+    try:
+        last_line = _tail_last_nonempty_line(path)
+    except OSError:
+        return ""
+    if last_line is None:
+        return ""
+    try:
+        payload = json.loads(last_line)
+    except json.JSONDecodeError:
+        return ""
+    if isinstance(payload, dict):
+        stored = payload.get("hash")
+        if isinstance(stored, str):
+            return stored
+    return ""
 
 
 @contextlib.contextmanager
@@ -171,11 +196,11 @@ def _validate_event_payload(event: Any) -> dict[str, Any]:
     if not isinstance(event, dict):
         msg = "audit event must be a dict"
         raise TypeError(msg)
-    missing = _REQUIRED_EVENT_FIELDS - event.keys()
+    missing = AUDIT_REQUIRED_EVENT_FIELDS - event.keys()
     if missing:
         msg = f"missing required audit fields: {sorted(missing)}"
         raise ValueError(msg)
-    if not (_IDENTIFIER_FIELDS & event.keys()):
+    if not (AUDIT_IDENTIFIER_FIELDS & event.keys()):
         msg = "audit event must include run_id and/or artifact_id"
         raise ValueError(msg)
     if not isinstance(event["context"], dict):
@@ -217,14 +242,13 @@ def append_audit_event(
     if "artifact_id" in payload:
         normalized["artifact_id"] = payload["artifact_id"]
 
-    prev_hash = _read_last_chain_hash(path)
-    canonical = _canonical_audit_body(normalized)
-    event_hash = _chain_hash(prev_hash, canonical)
-    normalized["prev"] = prev_hash
-    normalized["hash"] = event_hash
-
-    line = json.dumps(normalized, ensure_ascii=False, default=str) + "\n"
     with _audit_append_lock(path), path.open("a", encoding="utf-8") as handle:
+        prev_hash = _read_last_chain_hash(path)
+        canonical = _canonical_audit_body(normalized)
+        event_hash = _chain_hash(prev_hash, canonical)
+        normalized["prev"] = prev_hash
+        normalized["hash"] = event_hash
+        line = json.dumps(normalized, ensure_ascii=False, default=str) + "\n"
         handle.write(line)
 
 
@@ -337,7 +361,13 @@ def _event_dedupe_key(event: dict[str, Any]) -> str:
     if isinstance(stored_hash, str) and stored_hash:
         return stored_hash
     body = {key: value for key, value in event.items() if key not in {"prev", "hash"}}
-    return json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+    return json.dumps(
+        body,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
 
 
 def _merge_audit_event_lists(

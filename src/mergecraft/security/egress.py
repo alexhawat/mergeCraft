@@ -3,6 +3,10 @@
 Network-boundary controls for deployments that can restrict outbound
 traffic. Approval still flows only through ``decide_approval()`` (D14).
 
+``PinnedHTTPTransport`` couples to httpx/httpcore private APIs
+(``HTTPTransport._pool`` and ``ConnectionPool._network_backend``). Pin
+``httpx`` in consuming deployments and re-verify on httpx upgrades.
+
 Exports:
     DEFAULT_EGRESS_ALLOWLIST: Default hosts when egress filtering is on.
     VulnerabilityGateReport: Named scan outcome (not ``make security``).
@@ -154,25 +158,33 @@ def _resolve_host_addresses(host: str) -> tuple[ipaddress.IPv4Address | ipaddres
     return tuple(addresses)
 
 
-def _ssrf_reason(host: str, scheme: str) -> str | None:
+def _validate_retrieval_host(
+    host: str,
+    scheme: str,
+) -> tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]:
+    """SSRF-check ``host`` and return the validated addresses (DNS resolved once)."""
     if scheme in _BLOCKED_SCHEMES:
         if scheme == "file":
-            return "ssrf: blocked file: URL"
-        return f"ssrf: blocked scheme {scheme!r}"
+            raise SsrfBlockedError("ssrf: blocked file: URL")
+        raise SsrfBlockedError(f"ssrf: blocked scheme {scheme!r}")
     if not host:
-        return "ssrf: blocked URL with empty host"
+        raise SsrfBlockedError("ssrf: blocked URL with empty host")
     if host in _LOOPBACK_HOSTS:
-        return "ssrf: blocked loopback host"
+        raise SsrfBlockedError("ssrf: blocked loopback host")
     if host in _METADATA_HOSTS:
-        return "ssrf: blocked metadata host"
-    address = _ip_from_host(host)
-    if address is not None:
-        return _blocked_address(address)
-    for resolved in _resolve_host_addresses(host):
+        raise SsrfBlockedError("ssrf: blocked metadata host")
+    literal = _ip_from_host(host)
+    if literal is not None:
+        reason = _blocked_address(literal)
+        if reason is not None:
+            raise SsrfBlockedError(reason)
+        return (literal,)
+    addresses = _resolve_host_addresses(host)
+    for resolved in addresses:
         reason = _blocked_address(resolved)
         if reason is not None:
-            return reason
-    return None
+            raise SsrfBlockedError(reason)
+    return addresses
 
 
 def guard_external_url(url: str) -> str:
@@ -198,20 +210,9 @@ def inspect_external_url(url: str) -> GuardedUrl:
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").casefold()
     host = _normalize_host(parsed.hostname or "")
-    reason = _ssrf_reason(host, scheme)
-    if reason is not None:
-        raise SsrfBlockedError(reason)
     if scheme not in {"http", "https"}:
         raise SsrfBlockedError(f"ssrf: blocked scheme {scheme or 'missing'!r}")
-    literal = _ip_from_host(host)
-    if literal is not None:
-        addresses: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...] = (literal,)
-    else:
-        addresses = _resolve_host_addresses(host)
-        for resolved in addresses:
-            blocked = _blocked_address(resolved)
-            if blocked is not None:
-                raise SsrfBlockedError(blocked)
+    addresses = _validate_retrieval_host(host, scheme)
     return GuardedUrl(url=url, host=host, addresses=addresses)
 
 
@@ -229,7 +230,11 @@ def pinned_request_metadata(
     *,
     pinned_ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> PinnedRequestMetadata:
-    """Return Host/SNI/connect targets for a pinned HTTPS request."""
+    """Return Host/SNI/connect targets for a pinned HTTPS request.
+
+    Test and documentation helper: production callers use
+    :func:`pinned_http_transport`, which applies the same Host/SNI pinning.
+    """
     parsed = urlparse(url)
     host = _normalize_host(parsed.hostname or "")
     return PinnedRequestMetadata(

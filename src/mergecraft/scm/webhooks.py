@@ -10,11 +10,6 @@ Exports:
     reject_webhook_replay: Reject stale timestamps and reused nonces.
     sign_webhook_payload: Produce provider signature headers for a body.
     verify_webhook_signature: Timing-safe HMAC check for a supported provider.
-
-Deployment note: ``_WebhookDeliveryStore`` is a module singleton per process.
-Multiple workers do not coordinate — duplicate deliveries can trigger parallel
-reviews until each worker has seen the delivery id. Pair with single-worker
-ingress or external dedup when that is unacceptable.
 """
 
 from __future__ import annotations
@@ -34,6 +29,9 @@ SUPPORTED_WEBHOOK_PROVIDERS: frozenset[str] = frozenset({"github", "gitlab"})
 
 REPLAY_SKEW_SECONDS = 300
 _MAX_DELIVERY_STORE_ENTRIES = 1024
+_MAX_SIGNATURE_HEADER_BYTES = 8192
+_SIGNATURE_HEADER_TOO_LONG_MSG = "webhook signature/header exceeds maximum length"
+
 _REVIEW_ONLY_FORBIDDEN: frozenset[str] = frozenset(
     {
         "commit",
@@ -190,7 +188,14 @@ def _format_signature(provider: str, digest: str) -> str:
     return digest
 
 
+def _reject_overlong_signature_value(value: str) -> None:
+    if len(value.encode("utf-8", "surrogateescape")) > _MAX_SIGNATURE_HEADER_BYTES:
+        raise PermissionError(_SIGNATURE_HEADER_TOO_LONG_MSG)
+
+
 def _timing_safe_compare(left: str, right: str) -> bool:
+    _reject_overlong_signature_value(left)
+    _reject_overlong_signature_value(right)
     return hmac.compare_digest(
         left.encode("utf-8", "surrogateescape"),
         right.encode("utf-8", "surrogateescape"),
@@ -264,6 +269,13 @@ def _delivery_nonce(provider: str, headers: dict[str, str]) -> str:
     return nonce
 
 
+def raise_on_replay_skew(received_at_skew_seconds: int) -> None:
+    """Reject webhook deliveries outside the replay freshness window."""
+    if abs(received_at_skew_seconds) > REPLAY_SKEW_SECONDS:
+        msg = f"stale webhook timestamp (skew {received_at_skew_seconds}s exceeds replay window)"
+        raise ValueError(msg)
+
+
 def reject_webhook_replay(
     provider: str,
     *,
@@ -274,9 +286,7 @@ def reject_webhook_replay(
     """Reject a stale timestamp or a reused delivery nonce."""
     _ = body
     name = _require_supported(provider)
-    if abs(received_at_skew_seconds) > REPLAY_SKEW_SECONDS:
-        msg = f"stale webhook timestamp (skew {received_at_skew_seconds}s exceeds replay window)"
-        raise ValueError(msg)
+    raise_on_replay_skew(received_at_skew_seconds)
     _store.remember_nonce(
         _delivery_nonce(name, headers),
         ttl_seconds=REPLAY_SKEW_SECONDS,
@@ -373,6 +383,7 @@ __all__ = [
     "conforming_review_request",
     "handle_webhook_rate_limit",
     "process_webhook_event",
+    "raise_on_replay_skew",
     "reject_webhook_replay",
     "sign_webhook_payload",
     "verify_webhook_signature",
