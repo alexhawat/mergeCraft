@@ -13,8 +13,10 @@ pytestmark = pytest.mark.xfail(
 
 
 def test_skipped_untrusted_analyzers_emit_a_finding(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mergecraft.analyzers.manifest import load_manifest_file
     from mergecraft.analyzers.sandbox import plan_sandbox
 
+    manifest = load_manifest_file(Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml"))
     monkeypatch.setattr(
         "mergecraft.analyzers.sandbox.probe_capabilities",
         lambda: type(
@@ -32,10 +34,10 @@ def test_skipped_untrusted_analyzers_emit_a_finding(monkeypatch: pytest.MonkeyPa
         )(),
     )
     plan = plan_sandbox(
+        manifest=manifest,
+        tier="untrusted",
         repo_root=Path("/tmp/repo"),
         scratch_dir=Path("/tmp/scratch"),
-        trust_tier="untrusted",
-        manifests=(),
     )
     assert plan.can_run is False
     assert plan.skip_reason is not None
@@ -43,3 +45,7 @@ def test_skipped_untrusted_analyzers_emit_a_finding(monkeypatch: pytest.MonkeyPa
     assert finding is not None, (
         "skipped untrusted tier must emit analyzers.sandbox-unavailable finding"
     )
+    rule_id = getattr(finding, "rule_id", None) or (
+        finding.get("rule_id") if isinstance(finding, dict) else None
+    )
+    assert rule_id == "analyzers.sandbox-unavailable"
