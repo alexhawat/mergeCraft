@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+import pytest
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
 from mergecraft.agents.shared import AgentResult
@@ -37,7 +38,19 @@ from mergecraft.utils.github import GitHubClient
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
+
+@pytest.fixture(autouse=True)
+def _uid_independent_privilege_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MCB-24 — prep fail-closed cases must not depend on ambient uid (AP1.4b)."""
+
+    def _noop_prepare_workspace_for_agent(_workspace: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "mergecraft.main.prepare_workspace_for_agent",
+        _noop_prepare_workspace_for_agent,
+    )
+
 
 _SKIP_ISSUE = (
     "skipped: python dependency installation can execute arbitrary code "

