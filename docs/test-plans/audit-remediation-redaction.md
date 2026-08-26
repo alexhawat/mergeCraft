@@ -118,6 +118,10 @@ Impl waves must introduce (or export) at least:
 - `mergecraft.ci.providers.github_actions._MAX_MEMBER_BYTES` / `_MAX_TOTAL_BYTES` (BR5)
 - `mergecraft.ci.intelligence._MAX_MEMBER_BYTES` / `_MAX_TOTAL_BYTES` (BR5)
 
+## Escalation
+
+BR8 census follow-up: harness/config tests (`test_redactor`, `test_diagnostics`, `test_setup_script_failure`) now assert `REDACTION_SENTINEL` (`<redacted>`) instead of legacy `[REDACTED]`.
+
 ## Escalation (BR7 / MCB-21)
 
 **Escalation:** `test_audit_producer_hk.py` pinned in-workspace `.mergecraft/audit.jsonl` writes; amended to use `MERGECRAFT_AUDIT_ROOT` + `resolve_audit_log_path` after BR7 relocated the audit sink.
