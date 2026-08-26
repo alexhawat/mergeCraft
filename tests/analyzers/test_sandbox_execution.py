@@ -95,14 +95,20 @@ def test_sandboxed_argv_uses_sudo_unshare_when_detected(
 def test_sandboxed_execution_blocks_repo_write_and_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    caps = _full_caps()
-    monkeypatch.setattr(sandbox_mod, "probe_capabilities", lambda: caps)
-    shell_mod._reset_shell_detection_globals()
-    method = shell_mod.detect_sandbox_method()
-    if method == "none":
+    caps = sandbox_mod.probe_capabilities()
+    if not caps.pid_namespace or caps.pid_namespace_method == "none":
         pytest.skip("PID namespace isolation unavailable on this host")
 
-    context = _sandbox_context(tmp_path)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    context = build_sandbox_context(
+        repo_root=tmp_path,
+        scratch_dir=scratch,
+        limits=SandboxLimits(timeout_s=30, memory_mb=256, max_processes=8),
+        network_allowlist=[],
+        read_only_source=True,
+        caps=caps,
+    )
     marker = tmp_path / "sandbox-write-probe"
     probe_script = (
         f"touch {marker} 2>/dev/null && echo WRITE_OK || echo WRITE_BLOCKED; "

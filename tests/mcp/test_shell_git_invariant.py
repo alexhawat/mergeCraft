@@ -84,10 +84,12 @@ def test_git_core_binary_is_unavailable_in_live_namespace(
     monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: True)
     captured: list[str] = []
 
+    real_popen = subprocess.Popen
+
     def _popen(argv: list[str], **_kwargs: Any) -> object:
         captured.extend(argv)
         # Run the wrapped bash -c for real to prove git-core is masked.
-        return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return real_popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     monkeypatch.setattr(shell_mod.subprocess, "Popen", _popen)
     proc = shell_mod._spawn_shell(
