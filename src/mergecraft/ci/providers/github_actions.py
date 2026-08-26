@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.ci.archive_bounds import (
-    _MAX_MEMBER_BYTES,
-    _MAX_TOTAL_BYTES,
+    ARCHIVE_MAX_MEMBER_BYTES,
+    ARCHIVE_MAX_TOTAL_BYTES,
     decode_log_archive,
 )
 from mergecraft.ci.log_excerpt import analyze_log
@@ -142,8 +142,8 @@ class GitHubActionsProvider:
 
 
 __all__ = [
-    "_MAX_MEMBER_BYTES",
-    "_MAX_TOTAL_BYTES",
+    "ARCHIVE_MAX_MEMBER_BYTES",
+    "ARCHIVE_MAX_TOTAL_BYTES",
     "GitHubActionsProvider",
     "unavailable_check_suite_logs",
     "unbound_check_suite_logs",

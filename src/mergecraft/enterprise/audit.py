@@ -14,6 +14,14 @@ The default audit sink lives outside the agent-writable workspace tree
 chaining detects tampering after the fact; it does not prevent it — for
 threat models that include the local host, forward to an external sink
 (syslog, OTLP logs, S3 object lock, etc.).
+
+``MERGECRAFT_AUDIT_ROOT`` selects a **flat** audit sink: when set, every
+workspace writes to ``$MERGECRAFT_AUDIT_ROOT/audit.jsonl`` (no per-workspace
+subdirectory). When unset, each workspace gets an isolated file under
+``~/.local/share/mergecraft/audit/<workspace-hash>/audit.jsonl``.
+
+Concurrent JSONL appends use ``fcntl`` locking on POSIX; on Windows locking is
+skipped (best-effort only — see ``_audit_append_lock``).
 """
 
 from __future__ import annotations
@@ -31,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.redaction_structured import redact_structured_value
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -88,7 +97,12 @@ def resolve_audit_root() -> Path:
 
 
 def resolve_audit_log_path(*, root: Path | None = None) -> Path:
-    """Return the audit JSONL path for *root*'s workspace."""
+    """Return the audit JSONL path for *root*'s workspace.
+
+    When ``MERGECRAFT_AUDIT_ROOT`` is set, returns a flat
+    ``<audit_root>/audit.jsonl`` shared across workspaces. Otherwise returns
+    ``<data_home>/mergecraft/audit/<workspace-hash>/audit.jsonl``.
+    """
     workspace = _resolve_root(root)
     audit_root = resolve_audit_root()
     if os.environ.get(MERGECRAFT_AUDIT_ROOT_ENV):
@@ -131,7 +145,12 @@ def _read_last_chain_hash(path: Path) -> str:
 
 @contextlib.contextmanager
 def _audit_append_lock(path: Path) -> Iterator[None]:
-    """Serialize concurrent JSONL appends across processes on one audit sink."""
+    """Serialize concurrent JSONL appends across processes on one audit sink.
+
+    Uses ``fcntl.flock`` on POSIX. On Windows ``fcntl`` is unavailable, so
+    locking is skipped — concurrent appends may interleave; rely on external
+    sinks for strict ordering on Windows hosts.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.parent / ".audit.lock"
     with lock_path.open("a+", encoding="utf-8") as handle:
@@ -145,15 +164,7 @@ def _audit_append_lock(path: Path) -> Iterator[None]:
 
 
 def _redact_context_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return redact_secrets(value)
-    if isinstance(value, dict):
-        return {str(key): _redact_context_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_redact_context_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_redact_context_value(item) for item in value]
-    return value
+    return redact_structured_value(value, redact_string=redact_secrets)
 
 
 def _validate_event_payload(event: Any) -> dict[str, Any]:
@@ -321,21 +332,51 @@ def _load_events_from_path(path: Path) -> list[dict[str, Any]]:
     return events
 
 
+def _event_dedupe_key(event: dict[str, Any]) -> str:
+    stored_hash = event.get("hash")
+    if isinstance(stored_hash, str) and stored_hash:
+        return stored_hash
+    body = {key: value for key, value in event.items() if key not in {"prev", "hash"}}
+    return json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _merge_audit_event_lists(
+    primary: list[dict[str, Any]],
+    legacy: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    for event in legacy + primary:
+        key = _event_dedupe_key(event)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(event)
+    return merged
+
+
 def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
     """Load audit events for *root*'s workspace.
+
+    Reads the external audit sink first, then merges legacy
+    ``.mergecraft/audit.jsonl`` history when present (deduped by hash or
+    canonical body) so pre-migration events are not lost on export.
 
     Args:
         root: Workspace root. Defaults to the current working directory.
 
     Returns:
-        Event dicts, one per non-empty JSONL line. Missing file → ``[]``.
+        Event dicts, one per non-empty JSONL line. Missing files → ``[]``.
     """
     workspace = _resolve_root(root)
     primary = resolve_audit_log_path(root=workspace)
-    events = _load_events_from_path(primary)
-    if events:
-        return events
-    return _load_events_from_path(_legacy_audit_path(workspace))
+    primary_events = _load_events_from_path(primary)
+    legacy_events = _load_events_from_path(_legacy_audit_path(workspace))
+    if not primary_events:
+        return legacy_events
+    if not legacy_events:
+        return primary_events
+    return _merge_audit_event_lists(primary_events, legacy_events)
 
 
 def verify_audit_chain(path: Path) -> list[int]:
@@ -344,6 +385,9 @@ def verify_audit_chain(path: Path) -> list[int]:
     Each record is expected to carry ``prev`` (previous line's hash, or ``""`` for
     the genesis record) and ``hash`` (``sha256(prev + canonical_body)`` where
     *canonical_body* is JSON with ``sort_keys=True`` excluding ``prev``/``hash``).
+
+    *path* must be a regular file; callers (e.g. ``mergecraft audit verify``)
+    must reject missing or non-regular paths before treating an empty result as ok.
     """
     if not path.is_file():
         return []

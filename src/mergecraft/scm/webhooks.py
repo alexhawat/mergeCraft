@@ -10,6 +10,11 @@ Exports:
     reject_webhook_replay: Reject stale timestamps and reused nonces.
     sign_webhook_payload: Produce provider signature headers for a body.
     verify_webhook_signature: Timing-safe HMAC check for a supported provider.
+
+Deployment note: ``_WebhookDeliveryStore`` is a module singleton per process.
+Multiple workers do not coordinate — duplicate deliveries can trigger parallel
+reviews until each worker has seen the delivery id. Pair with single-worker
+ingress or external dedup when that is unacceptable.
 """
 
 from __future__ import annotations
@@ -27,7 +32,7 @@ if TYPE_CHECKING:
 
 SUPPORTED_WEBHOOK_PROVIDERS: frozenset[str] = frozenset({"github", "gitlab"})
 
-_MAX_REPLAY_SKEW_SECONDS = 300
+REPLAY_SKEW_SECONDS = 300
 _MAX_DELIVERY_STORE_ENTRIES = 1024
 _REVIEW_ONLY_FORBIDDEN: frozenset[str] = frozenset(
     {
@@ -86,8 +91,8 @@ class ConformingReviewRequest:
 class _WebhookDeliveryStore:
     """Process-local delivery and nonce store (not shared across workers).
 
-      Missing delivery ids / nonces are fail-closed — callers must not invent
-      ``{provider}:anonymous`` keys. Restarting the process clears this map.
+    Missing delivery ids / nonces are fail-closed — callers must not invent
+    ``{provider}:anonymous`` keys. Restarting the process clears this map.
     Entries expire after the replay window and are capped at
     ``_MAX_DELIVERY_STORE_ENTRIES``; this is per-process only and does not
     coordinate across uvicorn workers.
@@ -269,12 +274,12 @@ def reject_webhook_replay(
     """Reject a stale timestamp or a reused delivery nonce."""
     _ = body
     name = _require_supported(provider)
-    if abs(received_at_skew_seconds) > _MAX_REPLAY_SKEW_SECONDS:
+    if abs(received_at_skew_seconds) > REPLAY_SKEW_SECONDS:
         msg = f"stale webhook timestamp (skew {received_at_skew_seconds}s exceeds replay window)"
         raise ValueError(msg)
     _store.remember_nonce(
         _delivery_nonce(name, headers),
-        ttl_seconds=_MAX_REPLAY_SKEW_SECONDS,
+        ttl_seconds=REPLAY_SKEW_SECONDS,
     )
 
 
@@ -298,7 +303,7 @@ def process_webhook_event(
         provider=name,
         event=event,
     )
-    return _store.process(key, result, ttl_seconds=_MAX_REPLAY_SKEW_SECONDS)
+    return _store.process(key, result, ttl_seconds=REPLAY_SKEW_SECONDS)
 
 
 def handle_webhook_rate_limit(
@@ -358,6 +363,7 @@ def assert_review_only_webhook_capabilities(*, requested_capability: str) -> Non
 
 
 __all__ = [
+    "REPLAY_SKEW_SECONDS",
     "SUPPORTED_WEBHOOK_PROVIDERS",
     "ConformingReviewRequest",
     "WebhookProcessResult",

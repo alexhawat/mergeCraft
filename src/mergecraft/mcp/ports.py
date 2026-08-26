@@ -144,13 +144,12 @@ def _raise_serve_error(server: uvicorn.Server) -> None:
     raise RuntimeError(str(exc)) from exc
 
 
-def _health_identity_ok(host: str, port: int, health_nonce: str) -> bool:
+def _health_identity_ok(client: httpx.Client, host: str, port: int, health_nonce: str) -> bool:
     url = f"http://{host}:{port}/health?nonce={health_nonce}"
     try:
-        with httpx.Client(timeout=0.25) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            payload = response.json()
+        response = client.get(url)
+        response.raise_for_status()
+        payload = response.json()
     except (httpx.HTTPError, json.JSONDecodeError, ValueError):
         return False
     return payload.get("status") == "ok" and payload.get("nonce") == health_nonce
@@ -167,25 +166,28 @@ def wait_for_bound_port(
 ) -> int:
     """Poll until uvicorn binds, returning the resolved listen port."""
     deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+    with httpx.Client(timeout=0.25) as client:
+        while time.monotonic() < deadline:
+            _raise_serve_error(server)
+            if getattr(server, "started", False):
+                try:
+                    port = bound_listen_port(server, bind_port)
+                except RuntimeError:
+                    pass
+                else:
+                    if health_nonce is not None and not _health_identity_ok(
+                        client, host, port, health_nonce
+                    ):
+                        time.sleep(poll_interval_s)
+                        continue
+                    return port
+            time.sleep(poll_interval_s)
         _raise_serve_error(server)
-        if getattr(server, "started", False):
-            try:
-                port = bound_listen_port(server, bind_port)
-            except RuntimeError:
-                pass
-            else:
-                if health_nonce is not None and not _health_identity_ok(host, port, health_nonce):
-                    time.sleep(poll_interval_s)
-                    continue
-                return port
-        time.sleep(poll_interval_s)
-    _raise_serve_error(server)
-    port = bound_listen_port(server, bind_port)
-    if health_nonce is not None and not _health_identity_ok(host, port, health_nonce):
-        msg = "MCP HTTP /health identity check failed"
-        raise RuntimeError(msg)
-    return port
+        port = bound_listen_port(server, bind_port)
+        if health_nonce is not None and not _health_identity_ok(client, host, port, health_nonce):
+            msg = "MCP HTTP /health identity check failed"
+            raise RuntimeError(msg)
+        return port
 
 
 def attach_serve_error_sink(server: uvicorn.Server) -> list[BaseException]:

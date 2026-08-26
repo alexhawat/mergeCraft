@@ -15,13 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP HTTP startup no longer treats a TCP connect probe as proof of identity;
   server-thread failures propagate and ``GET /health`` requires a per-run nonce
   (MCB-27)
+- Trace span redaction no longer leaks CLI secrets after a flagged argv token
+  (MCB-02), applies deny-key scrubbing at every nested depth including
+  list/tuple containers (MCB-03), and redacts Basic-auth material via the
+  shared secret matcher
+- Analyzer JSON and JSONL outputs are structurally redacted by key and value before
+  persist, so non-prefixed secrets in trufflehog-style payloads do not reach
+  prompts or ``.mergecraft/analyzer-runs/``
+- Entropy-based secret redaction uses a length-relative threshold with benign-shape
+  exclusions for git SHAs, hex runs, and identifiers so legitimate code tokens in
+  logs are not mangled unnecessarily
 
 ### Changed
 
 - **Breaking:** enterprise audit events are no longer written to
   ``.mergecraft/audit.jsonl`` inside the workspace by default; set
   ``MERGECRAFT_AUDIT_ROOT`` or read from the new default location (MCB-21)
-
+- Analyzer and trace redactors now emit the shared ``<redacted>`` placeholder from
+  ``mergecraft.redaction_sentinel`` instead of the legacy ``[REDACTED]`` analyzer spelling
+  (MCB-30)
+- Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings` (RC1, RC2)
+- `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget` (RC3, D2)
+- Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
+  `install()` via `action_pin_minimal()` instead of calling it at module import (#403)
+- Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
+  auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
+- `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
+  `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
   Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
   ``docs/agent-loop.md`` parity note, and ``skills/mergecraft/SKILL.md`` public stdio
@@ -85,33 +105,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration PR coverage now measures ``refs/pull/N/merge`` and reports delta vs the
   base branch via ``scripts/check_coverage_delta.py``, distinguishing inherited floor
   breaches from regressions caused by the PR (#432)
-
-### Changed
-
-- Analyzer and trace redactors now emit the shared ``<redacted>`` placeholder from
-  ``mergecraft.redaction_sentinel`` instead of the legacy ``[REDACTED]`` analyzer spelling
-  (MCB-30)
-- Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings` (RC1, RC2)
-- `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget` (RC3, D2)
-- Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
-  `install()` via `action_pin_minimal()` instead of calling it at module import (#403)
-- Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
-  auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
-- `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
-  `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
-
-### Security
-
-- Trace span redaction no longer leaks CLI secrets after a flagged argv token
-  (MCB-02), applies deny-key scrubbing at every nested depth including
-  list/tuple containers (MCB-03), and redacts Basic-auth material via the
-  shared secret matcher
-- Analyzer JSON and JSONL outputs are structurally redacted by key and value before
-  persist, so non-prefixed secrets in trufflehog-style payloads do not reach
-  prompts or `.mergecraft/analyzer-runs/`
-- Entropy-based secret redaction uses a length-relative threshold with benign-shape
-  exclusions for git SHAs, hex runs, and identifiers so legitimate code tokens in
-  logs are not mangled unnecessarily
 
 ### Fixed
 

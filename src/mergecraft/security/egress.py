@@ -16,12 +16,9 @@ Exports:
 
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import ipaddress
 import itertools
 import socket
-import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -29,7 +26,7 @@ from urllib.parse import urlparse
 import httpx
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
 DEFAULT_EGRESS_ALLOWLIST: frozenset[str] = frozenset(
     {
@@ -242,98 +239,6 @@ def pinned_request_metadata(
     )
 
 
-def _pinned_getaddrinfo_results(
-    pinned: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...],
-    *,
-    host: str,
-    port: Any,
-    family: int,
-    sock_type: int,
-    proto: int,
-) -> list[tuple[Any, ...]]:
-    port_i = 0
-    if port is not None and str(port).isdigit():
-        port_i = int(port)
-    results: list[tuple[Any, ...]] = []
-    for address in pinned:
-        if isinstance(address, ipaddress.IPv6Address):
-            sock_family = socket.AF_INET6
-            sockaddr: tuple[Any, ...] = (str(address), port_i, 0, 0)
-        else:
-            sock_family = socket.AF_INET
-            sockaddr = (str(address), port_i)
-        if family not in {0, sock_family}:
-            continue
-        results.append((sock_family, sock_type or socket.SOCK_STREAM, proto, "", sockaddr))
-    if not results:
-        msg = f"ssrf: no pinned address for {host!r} (fail-closed)"
-        raise SsrfBlockedError(msg)
-    return results
-
-
-_pin_hosts: contextvars.ContextVar[
-    dict[str, tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]] | None
-] = contextvars.ContextVar("mergecraft_egress_pin_hosts", default=None)
-_stdlib_getaddrinfo = socket.getaddrinfo
-_dispatch_depth = 0
-_dispatch_depth_lock = threading.Lock()
-
-
-def _dispatch_getaddrinfo(
-    name: str,
-    port: Any,
-    family: int = 0,
-    type: int = 0,
-    proto: int = 0,
-    flags: int = 0,
-) -> list[tuple[Any, ...]]:
-    pins = _pin_hosts.get()
-    if pins is not None:
-        normalized = _normalize_host(str(name))
-        pinned = pins.get(normalized)
-        if pinned is not None:
-            return _pinned_getaddrinfo_results(
-                pinned,
-                host=normalized,
-                port=port,
-                family=family,
-                sock_type=type,
-                proto=proto,
-            )
-    return _stdlib_getaddrinfo(name, port, family, type, proto, flags)
-
-
-@contextlib.contextmanager
-def pin_host_resolution(
-    host: str,
-    addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
-) -> Iterator[None]:
-    """Pin ``socket.getaddrinfo`` for ``host`` to already-validated IPs in this context."""
-    normalized = _normalize_host(host)
-    pinned = tuple(addresses)
-    current_pins = _pin_hosts.get()
-    if current_pins is None:
-        next_pins = {normalized: pinned}
-    else:
-        next_pins = dict(current_pins)
-        next_pins[normalized] = pinned
-    token = _pin_hosts.set(next_pins)
-
-    global _dispatch_depth
-    with _dispatch_depth_lock:
-        if _dispatch_depth == 0:
-            socket.getaddrinfo = _dispatch_getaddrinfo  # type: ignore[assignment]  # — stdlib getaddrinfo is overloaded; install thread-local dispatch
-        _dispatch_depth += 1
-    try:
-        yield
-    finally:
-        with _dispatch_depth_lock:
-            _dispatch_depth -= 1
-            if _dispatch_depth == 0:
-                socket.getaddrinfo = _stdlib_getaddrinfo
-        _pin_hosts.reset(token)
-
-
 def _pinned_network_backend(
     hostname: str,
     addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
@@ -392,41 +297,15 @@ class PinnedHTTPTransport(httpx.HTTPTransport):
         addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
         **kwargs: Any,
     ) -> None:
-        import httpcore
-        from httpcore._backends.sync import SyncBackend
-        from httpx._config import DEFAULT_LIMITS, create_ssl_context
-
+        # Coupled to httpx 0.28.x / httpcore: replaces ConnectionPool._network_backend
+        # after the public HTTPTransport constructor builds the pool.
+        super().__init__(**kwargs)
         self._server_hostname = _normalize_host(hostname)
-        limits = kwargs.pop("limits", DEFAULT_LIMITS)
-        verify = kwargs.pop("verify", True)
-        cert = kwargs.pop("cert", None)
-        trust_env = kwargs.pop("trust_env", True)
-        http1 = kwargs.pop("http1", True)
-        http2 = kwargs.pop("http2", False)
-        local_address = kwargs.pop("local_address", None)
-        retries = kwargs.pop("retries", 0)
-        socket_options = kwargs.pop("socket_options", None)
-        if kwargs:
-            msg = f"unsupported PinnedHTTPTransport kwargs: {sorted(kwargs)}"
-            raise TypeError(msg)
-
-        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
-        network_backend = _pinned_network_backend(
+        wrapped_backend = self._pool._network_backend
+        self._pool._network_backend = _pinned_network_backend(
             self._server_hostname,
             addresses,
-            SyncBackend(),
-        )
-        self._pool = httpcore.ConnectionPool(
-            ssl_context=ssl_context,
-            max_connections=limits.max_connections,
-            max_keepalive_connections=limits.max_keepalive_connections,
-            keepalive_expiry=limits.keepalive_expiry,
-            http1=http1,
-            http2=http2,
-            local_address=local_address,
-            retries=retries,
-            socket_options=socket_options,
-            network_backend=network_backend,
+            wrapped_backend,
         )
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:

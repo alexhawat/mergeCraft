@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
+from mergecraft.redaction_structured import redact_structured_value
 
 _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
@@ -22,13 +23,6 @@ _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"Basic [A-Za-z0-9+/=]{16,}"),
 )
 
-_SECRET_KEY_RE = re.compile(
-    r"^(?:api[_-]?key|secret|token|password|access[_-]?token|refresh[_-]?token|"
-    r"id[_-]?token|bearer[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key|"
-    r"proxy[_-]?authorization|x[_-]?api[_-]?key|set[_-]?cookie|pat|passwd)$",
-    re.IGNORECASE,
-)
-
 _MIN_ENTROPY_LENGTH = 16
 _ENTROPY_RATIO = 0.85
 _ENTROPY_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_-]{16,}")
@@ -36,7 +30,7 @@ _ENTROPY_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_-]{16,}")
 _BENIGN_HEX_40_RE = re.compile(r"^[a-f0-9]{40}$")
 _BENIGN_HEX_64_RE = re.compile(r"^[a-f0-9]{64}$")
 _BENIGN_PURE_HEX_RE = re.compile(r"^[a-f0-9]+$")
-_BENIGN_IDENTIFIER_RE = re.compile(r"^[a-z_]+$")
+_BENIGN_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _shannon_entropy(value: str) -> float:
@@ -125,21 +119,8 @@ def redact_secrets(text: str) -> str:
     return _maybe_redact_entire_string(text, redacted)
 
 
-def _is_secret_json_key(key: str) -> bool:
-    return bool(_SECRET_KEY_RE.match(key))
-
-
 def _redact_json_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: REDACTION_SENTINEL if _is_secret_json_key(str(key)) else _redact_json_value(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_json_value(item) for item in value]
-    if isinstance(value, str):
-        return redact_secrets(value)
-    return value
+    return redact_structured_value(value, redact_string=redact_secrets)
 
 
 def _json_dumps(value: Any) -> str:
@@ -148,7 +129,7 @@ def _json_dumps(value: Any) -> str:
 
 def _looks_like_jsonl(raw: str) -> bool:
     lines = [line for line in raw.splitlines() if line.strip()]
-    if len(lines) < 2:
+    if not lines:
         return False
     for line in lines:
         try:

@@ -24,7 +24,6 @@ from loguru import logger
 from mergecraft.security.egress import (
     SsrfBlockedError,
     inspect_external_url,
-    pin_host_resolution,  # noqa: F401 — ``test_cov_provision_paths`` monkeypatch hook
     pinned_http_transport,
 )
 
@@ -196,8 +195,6 @@ def _download_pinned_url(url: str, dest: Path) -> None:
         except httpx.HTTPError as exc:
             msg = f"download failed for {current!r}: {exc}"
             raise ProvisionError(msg) from exc
-        finally:
-            transport.close()
     msg = f"too many redirects for pinned download url: {url!r}"
     raise ProvisionError(msg)
 

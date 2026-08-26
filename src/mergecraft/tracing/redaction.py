@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
+from mergecraft.redaction_structured import DENY_KEYS, redact_structured_value
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
 
 if TYPE_CHECKING:
@@ -62,39 +63,10 @@ _QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(_QUERY_TOKEN_KEYS)
 _BEARER_RE = re.compile(r"(Bearer\s)[A-Za-z0-9._-]{16,}")
 _EMBEDDED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(sk-|ghp_|eyJ)[A-Za-z0-9._-]{8,}")
 
-DENY_KEYS: tuple[str, ...] = (
-    "authorization",
-    "cookie",
-    "api_key",
-    "secret",
-    "password",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "bearer_token",
-    "auth_token",
-    "proxy-authorization",
-    "x-api-key",
-    "set-cookie",
-    "private_key",
-    "client_secret",
-)
-
 
 def _redact_value(value: Any) -> Any:
     """Recursively redact a value: deny keys, strings, and nested structures."""
-    if isinstance(value, str):
-        return redact_secrets(value)
-    if isinstance(value, dict):
-        return {
-            key: REDACTED if key.lower() in DENY_KEYS else _redact_value(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_redact_value(item) for item in value)
-    return value
+    return redact_structured_value(value, redact_string=redact_secrets)
 
 
 def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
@@ -255,14 +227,26 @@ def redact_tool_payload(payload: Any) -> str:
     encoded = text.encode("utf-8")
     if len(encoded) <= TRACE_ATTRS_JSON_MAX_BYTES:
         return text
-    max_bytes = TRACE_ATTRS_JSON_MAX_BYTES
-    for head_byte_len in range(max_bytes, 0, -1):
-        head = encoded[:head_byte_len].decode("utf-8", errors="ignore")
-        truncated_bytes = len(encoded) - head_byte_len
+    return _truncate_utf8_payload(text, encoded, TRACE_ATTRS_JSON_MAX_BYTES)
+
+
+def _truncate_utf8_payload(text: str, encoded: bytes, max_bytes: int) -> str:
+    low = 0
+    high = min(max_bytes, len(encoded))
+    best = ""
+    while low <= high:
+        mid = (low + high) // 2
+        head = encoded[:mid].decode("utf-8", errors="ignore")
+        truncated_bytes = len(encoded) - mid
         marker = f"… <truncated {truncated_bytes} bytes>"
         result = head + marker
         if len(result.encode("utf-8")) <= max_bytes:
-            return result
+            best = result
+            low = mid + 1
+        else:
+            high = mid - 1
+    if best:
+        return best
     return f"… <truncated {len(encoded)} bytes>"
 
 

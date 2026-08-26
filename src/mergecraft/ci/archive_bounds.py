@@ -11,10 +11,10 @@ if TYPE_CHECKING:
 
 # 32 MiB aggregate / 8 MiB per member — large enough for real CI logs, small enough
 # to bound attacker-controlled zip bombs on the review path.
-_MAX_TOTAL_BYTES: Final[int] = 32 * 1024 * 1024
-_MAX_MEMBER_BYTES: Final[int] = 8 * 1024 * 1024
-_MAX_MEMBERS: Final[int] = 256
-_MAX_RATIO: Final[int] = 200
+ARCHIVE_MAX_TOTAL_BYTES: Final[int] = 32 * 1024 * 1024
+ARCHIVE_MAX_MEMBER_BYTES: Final[int] = 8 * 1024 * 1024
+ARCHIVE_MAX_MEMBERS: Final[int] = 256
+ARCHIVE_MAX_RATIO: Final[int] = 200
 
 _TRUNCATION_MARKER = "… <truncated>"
 
@@ -23,19 +23,19 @@ def _declared_amplification_exceeds_cap(infolist: list[zipfile.ZipInfo], raw_len
     if raw_len <= 0:
         return True
     declared = sum(info.file_size for info in infolist)
-    return declared > raw_len * _MAX_RATIO
+    return declared > raw_len * ARCHIVE_MAX_RATIO
 
 
 def _expansion_cap(raw_len: int) -> int:
     if raw_len <= 0:
         return 0
-    return raw_len * _MAX_RATIO
+    return raw_len * ARCHIVE_MAX_RATIO
 
 
 def _decode_bounded_fallback(raw: bytes | bytearray) -> str:
-    bounded = bytes(raw)[:_MAX_TOTAL_BYTES]
+    bounded = bytes(raw)[:ARCHIVE_MAX_TOTAL_BYTES]
     text = bounded.decode("utf-8", errors="replace")
-    if len(raw) > _MAX_TOTAL_BYTES:
+    if len(raw) > ARCHIVE_MAX_TOTAL_BYTES:
         if text and not text.endswith(_TRUNCATION_MARKER):
             text = f"{text}\n{_TRUNCATION_MARKER}"
         elif not text:
@@ -51,12 +51,12 @@ def _bounded_member_bytes(
     expansion_cap: int,
 ) -> tuple[bytes, bool]:
     with zf.open(info) as member:
-        chunk = member.read(_MAX_MEMBER_BYTES + 1)
-    truncated = len(chunk) > _MAX_MEMBER_BYTES
+        chunk = member.read(ARCHIVE_MAX_MEMBER_BYTES + 1)
+    truncated = len(chunk) > ARCHIVE_MAX_MEMBER_BYTES
     if truncated:
-        chunk = chunk[:_MAX_MEMBER_BYTES]
+        chunk = chunk[:ARCHIVE_MAX_MEMBER_BYTES]
 
-    remaining_total = _MAX_TOTAL_BYTES - total_read
+    remaining_total = ARCHIVE_MAX_TOTAL_BYTES - total_read
     if len(chunk) > remaining_total:
         chunk = chunk[: max(remaining_total, 0)]
         truncated = True
@@ -78,15 +78,14 @@ def extract_zip_texts(
     buffer = bytes(raw)
     with zipfile.ZipFile(BytesIO(buffer)) as zf:
         members = [info for info in zf.infolist() if name_filter(info.filename)]
-        if _declared_amplification_exceeds_cap(members, len(buffer)):
-            return [_TRUNCATION_MARKER]
+        declared_exceeds_cap = _declared_amplification_exceeds_cap(members, len(buffer))
 
         texts: list[str] = []
         total_read = 0
         expansion_cap = _expansion_cap(len(buffer))
-        truncated = False
+        truncated = declared_exceeds_cap
 
-        for info in members[:_MAX_MEMBERS]:
+        for info in members[:ARCHIVE_MAX_MEMBERS]:
             chunk, member_truncated = _bounded_member_bytes(
                 zf,
                 info,
@@ -107,7 +106,7 @@ def extract_zip_texts(
             if member_truncated:
                 break
 
-        if len(members) > _MAX_MEMBERS:
+        if len(members) > ARCHIVE_MAX_MEMBERS:
             truncated = True
         if truncated and (not texts or _TRUNCATION_MARKER not in texts[-1]):
             texts.append(_TRUNCATION_MARKER)
@@ -137,10 +136,10 @@ def extract_sarif_documents(raw: bytes | bytearray) -> list[str]:
 
 
 __all__ = [
-    "_MAX_MEMBERS",
-    "_MAX_MEMBER_BYTES",
-    "_MAX_RATIO",
-    "_MAX_TOTAL_BYTES",
+    "ARCHIVE_MAX_MEMBERS",
+    "ARCHIVE_MAX_MEMBER_BYTES",
+    "ARCHIVE_MAX_RATIO",
+    "ARCHIVE_MAX_TOTAL_BYTES",
     "decode_log_archive",
     "extract_sarif_documents",
     "extract_zip_texts",
