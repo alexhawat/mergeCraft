@@ -24,6 +24,7 @@ from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
     CLI_USAGE_EXIT_CODE,
 )
+from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
@@ -105,7 +106,7 @@ def _get_gh_token() -> str:
 def _parse_git_remote() -> tuple[str, str]:
     try:
         url = subprocess.check_output(
-            ["git", "remote", "get-url", "origin"], text=True, stderr=subprocess.DEVNULL
+            git_argv(["remote", "get-url", "origin"]), text=True, stderr=subprocess.DEVNULL
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
         cli_bail("not a git repository or no 'origin' remote found.")

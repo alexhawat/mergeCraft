@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mergecraft.utils.git_hardening import git_argv
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
@@ -84,7 +86,7 @@ def _git_change_candidates(repo_root: Path) -> list[dict[str, object]]:
         return []
     try:
         completed = subprocess.run(
-            ["git", "log", "-n", "30", "--pretty=format:%H\t%s", "--name-only"],
+            git_argv(["log", "-n", "30", "--pretty=format:%H\t%s", "--name-only"]),
             cwd=repo_root,
             capture_output=True,
             text=True,

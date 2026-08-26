@@ -19,6 +19,7 @@ from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
@@ -33,7 +34,7 @@ app = typer.Typer(
 def _git_changed_files(target_dir: Path) -> list[str]:
     try:
         completed = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"],
+            git_argv(["diff", "--name-only", "HEAD"]),
             cwd=target_dir,
             capture_output=True,
             text=True,

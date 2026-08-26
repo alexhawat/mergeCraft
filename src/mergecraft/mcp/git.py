@@ -34,6 +34,7 @@ from mergecraft.mcp.git_guards import (
 )
 from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
 from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -107,7 +108,7 @@ def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
 
 def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
-        ["git", *args],
+        git_argv(args),
         cwd=cwd,
         env=env or os.environ.copy(),
         capture_output=True,
@@ -488,7 +489,7 @@ def commit_changes_tool(ctx: ToolContext):
                 "reason": "nothing to commit",
             }
         _run_git(["add", "-A"], cwd=cwd)
-        _run_git(["-c", "core.hooksPath=/dev/null", "commit", "-m", message], cwd=cwd)
+        _run_git(["commit", "-m", message], cwd=cwd)
         sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
         # The commit is local either way — the push policy decides nothing about
         # the response, it only records why no remote update was attempted.

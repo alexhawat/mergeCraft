@@ -25,6 +25,7 @@ from mergecraft.evidence.run_manifest import runtime_tool_stamp
 from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES
 from mergecraft.utils.agent_resolve import has_credentials_for_slug
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -63,7 +64,7 @@ class AgentCliProvenance:
 def _git_probe(cwd: Path) -> ProbeResult:
     try:
         completed = subprocess.run(
-            ["git", "--version"],
+            git_argv(["--version"]),
             cwd=cwd,
             capture_output=True,
             text=True,

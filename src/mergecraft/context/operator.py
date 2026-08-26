@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from mergecraft.context.repo_paths import is_excluded_repo_path
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -112,7 +113,7 @@ def _search_indexed(*, repo_root: Path, query: str) -> list[str]:
     tokens = [part for part in query.split() if part]
     if not tokens:
         return []
-    command = ["git", "grep", "-l", "-I", "-i", "-F"]
+    command = git_argv(["grep", "-l", "-I", "-i", "-F"])
     for token in tokens:
         command.extend(["-e", token])
     command.append("HEAD")

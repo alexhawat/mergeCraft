@@ -257,7 +257,19 @@ def prepare_workspace_for_agent(workspace: str) -> None:
     if not target:
         return
     subprocess.run(
-        ["chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", target],
+        [
+            "find",
+            target,
+            "-path",
+            f"{target}/.git",
+            "-prune",
+            "-o",
+            "-exec",
+            "chown",
+            f"{pw.pw_uid}:{pw.pw_gid}",
+            "{}",
+            "+",
+        ],
         check=False,
         capture_output=True,
         text=True,

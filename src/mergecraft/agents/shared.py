@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 from loguru import logger
 
 from mergecraft.mcp.endpoints import mcp_role_url as _mcp_role_url
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -85,7 +86,7 @@ def spawn_agent_cli(
 def get_git_status(cwd: str | None = None) -> str:
     try:
         return subprocess.check_output(
-            ["git", "status", "--porcelain"],
+            git_argv(["status", "--porcelain"]),
             cwd=cwd,
             text=True,
             timeout=10,

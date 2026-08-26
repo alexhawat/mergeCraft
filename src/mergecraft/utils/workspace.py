@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from mergecraft.utils.git_hardening import git_argv
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -43,7 +45,7 @@ def add_safe_directory(path: str) -> None:
     if resolved in _safe_directories_added:
         return
     subprocess.run(
-        ["git", "config", "--global", "--add", "safe.directory", resolved],
+        git_argv(["config", "--global", "--add", "safe.directory", resolved]),
         check=False,
         capture_output=True,
         text=True,
@@ -89,7 +91,7 @@ def git_repo_root(start: str | None = None) -> Path | None:
     """
     try:
         completed = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            git_argv(["rev-parse", "--show-toplevel"]),
             cwd=start,
             check=False,
             capture_output=True,

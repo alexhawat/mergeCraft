@@ -22,6 +22,7 @@ from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import resolve_env
 from mergecraft.utils.workspace import (
     WorkspacePathError,
+    allowed_workspace_roots,
     git_repo_root,
     resolve_allowed_working_directory,
 )
@@ -258,6 +259,23 @@ def _unshare_argv(*, isolate_network: bool) -> list[str]:
     return argv
 
 
+def _git_readonly_bind_mounts() -> str:
+    """Shell fragment: bind every registered checkout ``.git`` read-only."""
+    parts: list[str] = []
+    seen: set[str] = set()
+    for root in allowed_workspace_roots():
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        escaped = key.replace("'", "'\\''")
+        parts.append(
+            f"[ -e '{escaped}/.git' ] && mount --bind '{escaped}/.git' '{escaped}/.git' "
+            f"2>/dev/null && mount -o remount,bind,ro '{escaped}/.git' 2>/dev/null; "
+        )
+    return "".join(parts)
+
+
 def _spawn_shell(
     command: str,
     *,
@@ -275,13 +293,10 @@ def _spawn_shell(
         )
         raise RuntimeError(msg)
 
-    repo_root = os.environ.get("GITHUB_WORKSPACE") or primary_repo_state_dir_safe(cwd)
-    escaped = repo_root.replace("'", "'\\''")
     fs_mounts = (
         "mkdir -p /var/lib/mergecraft 2>/dev/null; "
         "mount -t tmpfs tmpfs /var/lib/mergecraft 2>/dev/null; "
-        f"[ -e '{escaped}/.git' ] && mount --bind '{escaped}/.git' '{escaped}/.git' "
-        f"2>/dev/null && mount -o remount,bind,ro '{escaped}/.git' 2>/dev/null; "
+        f"{_git_readonly_bind_mounts()}"
     )
     proc_cleanup = (
         "umount /proc 2>/dev/null; umount /proc 2>/dev/null; mount -t proc proc /proc 2>/dev/null;"

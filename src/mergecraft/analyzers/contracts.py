@@ -16,6 +16,7 @@ from mergecraft.analyzers.parsers.squawk_json import parse_squawk_json
 from mergecraft.analyzers.paths import safe_repo_relative_path
 from mergecraft.analyzers.registry import _matches_detect_patterns, get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, resolve_analyzer
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -61,7 +62,7 @@ def _fixture_base_rel(head_path: str) -> str:
 
 def _git_ref_available(repo_root: Path, base_ref: str) -> bool:
     result = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--verify", f"{base_ref}^{{commit}}"],
+        git_argv(["-C", str(repo_root), "rev-parse", "--verify", f"{base_ref}^{{commit}}"]),
         capture_output=True,
         text=True,
         check=False,
@@ -78,7 +79,7 @@ def _resolve_base_file(repo_root: Path, head_path: str, base_ref: str) -> Path |
     if not _git_ref_available(repo_root, base_ref):
         return None
     result = subprocess.run(
-        ["git", "-C", str(repo_root), "show", f"{base_ref}:{head_path}"],
+        git_argv(["-C", str(repo_root), "show", f"{base_ref}:{head_path}"]),
         capture_output=True,
         text=True,
         check=False,

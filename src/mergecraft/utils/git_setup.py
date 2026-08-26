@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
+from mergecraft.utils.git_hardening import git_argv
+
 if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.types import ShellPermission
@@ -161,7 +163,7 @@ def _prepare_temp_dir_for_agent(path: str) -> None:
 
 def _git_config(repo_dir: str, key: str, value: str) -> None:
     subprocess.run(
-        ["git", "config", "--local", key, value],
+        git_argv(["config", "--local", key, value]),
         cwd=repo_dir,
         check=False,
         capture_output=True,
@@ -172,7 +174,7 @@ def _git_config(repo_dir: str, key: str, value: str) -> None:
 def _git_get(repo_dir: str, key: str) -> str:
     try:
         return subprocess.check_output(
-            ["git", "config", "--get", key],
+            git_argv(["config", "--get", key]),
             cwd=repo_dir,
             text=True,
             stderr=subprocess.DEVNULL,
@@ -204,7 +206,7 @@ def scrub_clone_credentials(repo_dir: Path | str) -> None:
         "credential.useHttpPath",
     ):
         subprocess.run(
-            ["git", "config", "--local", "--unset-all", key],
+            git_argv(["config", "--local", "--unset-all", key]),
             cwd=root,
             capture_output=True,
             text=True,

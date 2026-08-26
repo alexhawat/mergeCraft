@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Root-side ``git`` subprocesses route through ``utils/git_hardening.git_argv`` with
+  pinned safe-config keys; ``make lint`` enforces the route via
+  ``scripts/check_git_argv.py`` (MCB-01)
+- ``prepare_workspace_for_agent`` no longer recursively chowns ``.git``; sandbox shell
+  binds every registered workspace root's ``.git`` read-only (MCB-01 / D3)
+- Linked-repo ``_rev_parse_commit`` rejects leading-dash revs, validates pinned SHA
+  shape, and passes ``--end-of-options`` before the rev (MCB-33)
+
 ### Changed
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
