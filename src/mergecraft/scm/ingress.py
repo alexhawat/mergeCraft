@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from mergecraft.scm.webhooks import (
     _MAX_REPLAY_SKEW_SECONDS,
@@ -14,6 +14,13 @@ from mergecraft.scm.webhooks import (
     webhook_delivery_id,
     webhook_event_name,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    class _HttpxModelsLatin1Patch(Protocol):
+        _normalize_header_value: Callable[[str | bytes, str | None], bytes]
+        _mergecraft_latin1_patched: bool
 
 
 def _install_httpx_latin1_header_values() -> None:
@@ -41,8 +48,11 @@ def _install_httpx_latin1_header_values() -> None:
             except UnicodeEncodeError:
                 return value.encode("latin-1")
 
-        httpx_models._normalize_header_value = normalize
-        httpx_models._mergecraft_latin1_patched = True
+        models = cast(  # importlib ModuleType lacks httpx private attrs
+            "_HttpxModelsLatin1Patch", httpx_models
+        )
+        models._normalize_header_value = normalize
+        models._mergecraft_latin1_patched = True
 
 
 _install_httpx_latin1_header_values()
