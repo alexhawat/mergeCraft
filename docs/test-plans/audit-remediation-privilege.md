@@ -1,4 +1,4 @@
-"""Lane A AP1 — contract → test mapping for privilege & execution boundary."""
+# Lane A AP1 — contract → test mapping for privilege & execution boundary
 
 # Audit remediation — lane A (privilege & execution)
 

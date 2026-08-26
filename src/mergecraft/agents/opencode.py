@@ -680,7 +680,8 @@ def _capture_integrity_baseline(ctx: AgentRunContext) -> tuple[Path, str] | None
     try:
         return checkout, hash_tree(checkout)
     except OSError as exc:
-        logger.warning("review integrity baseline skipped for {}: {}", checkout, exc)
+        msg = f"review integrity baseline failed for {checkout}: {exc}"
+        logger.error(msg)
         return None
 
 
@@ -705,6 +706,11 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         return AgentResult(success=False, error=str(err))
 
     baseline = _capture_integrity_baseline(ctx)
+    if baseline is None:
+        return AgentResult(
+            success=False,
+            error="review integrity baseline could not be captured; refusing read-only review",
+        )
     model = ctx.resolved_model
     config_json = build_security_config(ctx, model)
     config_path = Path(ctx.tmpdir) / "opencode.json"

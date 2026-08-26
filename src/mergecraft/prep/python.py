@@ -127,6 +127,15 @@ def _adapt_install_cmd(config: _PythonConfig, venv: Path, cwd: Path) -> tuple[st
             "--python",
             str(_prep_venv_python(venv)),
         ]
+    if config.tool == "poetry":
+        return str(_prep_venv_bin(venv, "poetry")), [
+            "install",
+            "--no-interaction",
+            "--directory",
+            str(cwd),
+        ]
+    if config.tool == "pipenv":
+        return str(_prep_venv_bin(venv, "pipenv")), ["sync", "--directory", str(cwd)]
     cmd, *args = config.install_cmd
     return cmd, args
 

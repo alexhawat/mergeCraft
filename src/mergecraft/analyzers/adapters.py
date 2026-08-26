@@ -418,8 +418,11 @@ def run_adapter(
         scratch_dir=scratch_dir,
     )
     if not sandbox_decision.can_run:
+        skip_findings: list[Finding] = []
+        if sandbox_decision.skip_finding is not None:
+            skip_findings = [sandbox_decision.skip_finding]
         return AdapterRunResult(
-            findings=[],
+            findings=skip_findings,
             skipped=True,
             skip_reason=sandbox_decision.skip_reason,
         )

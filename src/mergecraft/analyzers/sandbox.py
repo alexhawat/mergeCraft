@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import re
 import resource
 import subprocess
@@ -117,6 +118,8 @@ def _parse_probe_output(stdout: bytes) -> dict[str, str]:
 
 
 def _run_isolation_probe() -> dict[str, str]:
+    if os.environ.get("MERGECRAFT_PROBE_TEST_DOUBLE") == "1":
+        return dict(_PROBE_TEST_DOUBLE)
     try:
         result = subprocess.run(
             ["bash", "-c", _ISOLATION_PROBE_SCRIPT],
@@ -125,16 +128,10 @@ def _run_isolation_probe() -> dict[str, str]:
             check=False,
         )
     except (OSError, ValueError):
-        # ValueError: argv-inspection tests mock ``subprocess.Popen`` with a
-        # MagicMock whose communicate() cannot model probe output.
-        return dict(_PROBE_TEST_DOUBLE)
+        return {}
     if result.returncode != 0:
         return {}
-    parsed = _parse_probe_output(getattr(result, "stdout", b"") or b"")
-    if parsed:
-        return parsed
-    # rc=0 with empty stdout: test double that cannot model per-capability results.
-    return dict(_PROBE_TEST_DOUBLE)
+    return _parse_probe_output(getattr(result, "stdout", b"") or b"")
 
 
 def _probe_cgroup_memory() -> tuple[bool, str | None]:
@@ -289,9 +286,10 @@ def plan_sandbox(
         msg = "plan_sandbox requires tier or trust_tier"
         raise TypeError(msg)
 
-    skipped_tool_ids = [m.id for m in manifests]
-    if manifest is not None:
-        skipped_tool_ids.append(manifest.id)
+    skipped_ids = [m.id for m in manifests]
+    if manifest is not None and manifest.id not in skipped_ids:
+        skipped_ids.append(manifest.id)
+    skipped_tool_ids = skipped_ids
 
     limits = SandboxLimits(
         timeout_s=manifest.timeout_s if manifest is not None else 300,

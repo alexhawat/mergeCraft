@@ -23,10 +23,25 @@ _SINK_SUFFIXES: frozenset[str] = frozenset({".log", ".txt", ".jsonl", ".ndjson"}
 _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
 
 
+_HASH_EXCLUDE_DIRS: frozenset[str] = frozenset(
+    {".git", "node_modules", ".mergecraft/prep-scratch", ".mergecraft/analyzer-scratch"}
+)
+
+
 def _iter_tree_files(root: Path) -> list[Path]:
     if not root.is_dir():
         return []
-    return sorted(path for path in root.rglob("*") if path.is_file())
+    files: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if any(
+            rel == excluded or rel.startswith(f"{excluded}/") for excluded in _HASH_EXCLUDE_DIRS
+        ):
+            continue
+        files.append(path)
+    return files
 
 
 def hash_tree(root: Path) -> str:
