@@ -74,6 +74,18 @@ def _load_check_xpass() -> Any:
     return mod
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _venv_inode_guard() -> Iterator[None]:
+    """Session guard: detect replacement of ``sys.prefix`` (MCB-23 / AG1.7).
+
+    Limit: catches directory replacement, not an in-place ``uv sync`` that adds
+    packages to the same directory inode.
+    """
+    baseline = Path(sys.prefix).stat().st_ino
+    yield
+    assert Path(sys.prefix).stat().st_ino == baseline
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:
     """Fail the session when any XPASS slipped through (CQ-1 / #276)."""
     tr = session.config.pluginmanager.getplugin("terminalreporter")
