@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 _CONFIGURED = False
+_STDERR_HANDLER_ID: int | None = None
 _BOUND_CONTEXT: dict[str, Any] = {
     "run_id": None,
     "repo": None,
@@ -84,6 +85,14 @@ def _patch_bound_context(record: dict[str, Any]) -> None:
             extra[key] = value
 
 
+def _remove_stderr_handler() -> None:
+    global _STDERR_HANDLER_ID
+    if _STDERR_HANDLER_ID is not None:
+        with suppress(ValueError):
+            logger.remove(_STDERR_HANDLER_ID)
+        _STDERR_HANDLER_ID = None
+
+
 def configure_logging(*, force: bool = False, level: str | None = None) -> None:
     """Configure loguru sinks from ``LOG_LEVEL`` / ``ACTIONS_STEP_DEBUG``.
 
@@ -91,21 +100,24 @@ def configure_logging(*, force: bool = False, level: str | None = None) -> None:
     Idempotent unless ``force=True``. Pass ``level`` to override env resolution
     (root ``--log-level`` / ``--quiet`` / ``--verbose`` / ``MERGECRAFT_LOG_LEVEL``).
     """
-    global _CONFIGURED
+    global _CONFIGURED, _STDERR_HANDLER_ID
     if _CONFIGURED and not force:
         return
 
     effective_level = level if level is not None else resolve_log_level()
     log_format = resolve_log_format()
     if force:
-        logger.remove()
+        _remove_stderr_handler()
+        if not _CONFIGURED:
+            with suppress(ValueError):
+                logger.remove(0)
     elif not _CONFIGURED:
         with suppress(ValueError):
             logger.remove(0)
     logger.configure(patcher=_patch_bound_context)  # type: ignore[arg-type]  # — loguru patcher stub is overly restrictive; _patch_bound_context(record) signature is compatible at runtime
 
     if log_format == "json":
-        logger.add(
+        _STDERR_HANDLER_ID = logger.add(
             sys.stderr,
             level=effective_level,
             serialize=True,
@@ -114,7 +126,7 @@ def configure_logging(*, force: bool = False, level: str | None = None) -> None:
             diagnose=False,
         )
     else:
-        logger.add(
+        _STDERR_HANDLER_ID = logger.add(
             sys.stderr,
             level=effective_level,
             format=(
