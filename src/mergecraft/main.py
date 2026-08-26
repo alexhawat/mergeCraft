@@ -488,6 +488,8 @@ async def _setup_run(ctx: RunContext) -> RunContext:
         dir=os.getcwd(),
         progress_comment=progress,
     )
+    if pr_number is not None:
+        tool_state.pr_number = int(pr_number)
     ctx.tool_state = tool_state
     tmpdir = create_temp_directory()
     ctx.tmpdir = tmpdir
@@ -729,9 +731,10 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     )
     ctx.sarif_upload_enabled = sarif_upload_enabled
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
+    from mergecraft.mcp.tool_state import primary_repo_state
 
     repo_settings_snapshot = capture_repo_settings_snapshot(
-        root=Path(os.getcwd()),
+        root=Path(primary_repo_state(tool_state).dir),
         settings=settings,
         load_learnings_files=False,
     )
@@ -1559,6 +1562,9 @@ async def main() -> MainResult:
             if ctx.scm is not None:
                 with contextlib.suppress(Exception):
                     await ctx.scm.aclose()
+            from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+
+            reset_gateway_settings_cache()
 
 
 __all__ = ["MainResult", "RunOutcome", "main"]

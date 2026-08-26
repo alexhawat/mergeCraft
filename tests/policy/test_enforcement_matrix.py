@@ -1,4 +1,4 @@
-"""RED — enforcement mode semantics (AG5 / MCB-12, AG0-G3 choice (a))."""
+"""GREEN — enforcement mode semantics (AG5 / MCB-12, AG0-G3 choice (a))."""
 
 from __future__ import annotations
 

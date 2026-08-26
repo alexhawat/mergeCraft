@@ -1,4 +1,4 @@
-"""RED — gate fail-closed matrix (AG3 / MCB-15)."""
+"""GREEN — gate fail-closed matrix (AG3 / MCB-15)."""
 
 from __future__ import annotations
 

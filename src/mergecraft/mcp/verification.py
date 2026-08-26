@@ -312,6 +312,10 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
             diff_text = Path(state.diff_path).read_text(encoding="utf-8")
             changed_paths = frozenset(changed_paths_from_diff(diff_text))
+        elif state.issue_number is not None or ctx.tool_state.pr_number is not None:
+            # PR-bound runs without a diff cannot attest changed paths — fail closed
+            # so verifier citations cannot cite arbitrary checkout files (MCB-20).
+            changed_paths = frozenset()
 
         findings = [
             AgentFinding(

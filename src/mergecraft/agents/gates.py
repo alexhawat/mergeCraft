@@ -430,7 +430,14 @@ def _is_high_risk_migration(packet: MergeEvidencePacket) -> bool:
 
 
 def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
-    """A clean low-risk PR: no findings, low blast radius, run succeeded."""
+    """True only for a clean low-risk PR with an explicit positive verdict.
+
+    Requires empty findings, a ``blast_radius.lane`` of ``low``, and a trusted
+    ``Decision`` row whose ``verdict`` is ``success``. A missing decision,
+    ``neutral``, or ``failure`` verdict never satisfies this predicate — the
+    structural approval gate must have attested success before ``auto_merge``
+    is eligible (D7 / MCB-15).
+    """
     if packet.findings:
         return False
     if not packet.blast_radius:

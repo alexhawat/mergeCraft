@@ -61,16 +61,24 @@ def _gate_facing_severity(
     """Map a rule's declared severity to the gate-facing finding severity (D7, D12).
 
     ``advisory`` caps blocking severities visibly to ``Trivial``. ``warning`` and
-    ``required`` preserve the declared value when evidence clears a required rule.
-    ``required`` downgrades ``Critical`` to ``Major`` when evidence is not cleared
-    so the mode stays distinguishable from ``blocking`` at the same declared
-    severity. ``blocking`` preserves declared severity and no longer promotes
-    ``Minor`` to ``Major``.
+    ``required`` preserve the declared value when a required rule carries no
+    evidence keys. ``required`` caps blocking severities to ``Trivial`` once
+    declared evidence is satisfied so ``decide_approval`` cannot block on a
+    cleared obligation. ``required`` downgrades ``Critical`` to ``Major`` when
+    evidence is not cleared so the mode stays distinguishable from ``blocking``
+    at the same declared severity. ``blocking`` preserves declared severity and
+    no longer promotes ``Minor`` to ``Major``.
     """
     if mode == "advisory" and declared in BLOCKING_SEVERITIES:
         return "Trivial"
-    if mode == "required" and not _evidence_cleared(violation) and declared == "Critical":
-        return "Major"
+    if mode == "required":
+        rule = _rule_from_violation(violation)
+        if rule is not None and _required_evidence_keys(rule):
+            if _evidence_cleared(violation):
+                if declared in BLOCKING_SEVERITIES:
+                    return "Trivial"
+            elif declared == "Critical":
+                return "Major"
     return declared
 
 

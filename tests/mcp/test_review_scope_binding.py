@@ -1,4 +1,4 @@
-"""RED — review publication bound to run scope (AG2 / MCB-05)."""
+"""GREEN — review publication bound to run scope (AG2 / MCB-05)."""
 
 from __future__ import annotations
 
@@ -60,12 +60,20 @@ def _review_ctx(tmp_path: Path, *, pr_number: int = 7) -> ToolContext:
     return ctx
 
 
+def _error_text(result: object) -> str:
+    from mergecraft.mcp.shared import ToolResult
+
+    assert isinstance(result, ToolResult)
+    assert result.is_error is True
+    return str(result.content[0]["text"])
+
+
 @pytest.mark.asyncio
 async def test_mismatched_pull_number_raises(tmp_path: Path) -> None:
     ctx = _review_ctx(tmp_path, pr_number=7)
     spec = create_pull_request_review_tool(ctx)
-    with pytest.raises(ValueError, match=r"PR #8"):
-        await spec.execute({"pull_number": 8, "body": "review body", "comments": []})
+    result = await spec.execute({"pull_number": 8, "body": "review body", "comments": []})
+    assert "PR #8" in _error_text(result)
 
 
 @pytest.mark.asyncio
@@ -73,8 +81,8 @@ async def test_mismatched_pull_number_makes_zero_scm_calls(tmp_path: Path) -> No
     ctx = _review_ctx(tmp_path, pr_number=7)
     client = github_client_from_ctx(ctx)
     spec = create_pull_request_review_tool(ctx)
-    with pytest.raises(ValueError, match=r"PR #8"):
-        await spec.execute({"pull_number": 8, "body": "review body", "comments": []})
+    result = await spec.execute({"pull_number": 8, "body": "review body", "comments": []})
+    assert result.is_error is True
     assert client.create_review_calls == 0
 
 
@@ -83,8 +91,8 @@ async def test_mismatched_pull_number_leaves_issue_number_unchanged(tmp_path: Pa
     ctx = _review_ctx(tmp_path, pr_number=7)
     primary = primary_repo_state(ctx.tool_state)
     spec = create_pull_request_review_tool(ctx)
-    with pytest.raises(ValueError, match=r"PR #8"):
-        await spec.execute({"pull_number": 8, "body": "review body", "comments": []})
+    result = await spec.execute({"pull_number": 8, "body": "review body", "comments": []})
+    assert result.is_error is True
     assert primary.issue_number == 7
 
 
@@ -92,15 +100,16 @@ async def test_mismatched_pull_number_leaves_issue_number_unchanged(tmp_path: Pa
 async def test_mismatched_commit_id_raises(tmp_path: Path) -> None:
     ctx = _review_ctx(tmp_path, pr_number=7)
     spec = create_pull_request_review_tool(ctx)
-    with pytest.raises(ValueError, match=r"commit|sha|checkout"):
-        await spec.execute(
-            {
-                "pull_number": 7,
-                "body": "review body",
-                "comments": [],
-                "commit_id": "not-the-checkout-sha",
-            }
-        )
+    result = await spec.execute(
+        {
+            "pull_number": 7,
+            "body": "review body",
+            "comments": [],
+            "commit_id": "not-the-checkout-sha",
+        }
+    )
+    message = _error_text(result).lower()
+    assert any(token in message for token in ("commit", "sha", "checkout"))
 
 
 _MUTATING_REVIEW_TOOLS: tuple[tuple[str, dict[str, Any]], ...] = (
@@ -123,8 +132,9 @@ async def test_hypothesis_arbitrary_mismatched_targets_never_reach_io(
     client = github_client_from_ctx(ctx)
     if tool_name == "create_pull_request_review":
         spec = create_pull_request_review_tool(ctx)
-        with pytest.raises(ValueError, match=r"PR"):
-            await spec.execute(params)
+        result = await spec.execute(params)
+        assert result.is_error is True
+        assert "PR" in _error_text(result)
     else:
         pytest.fail(f"unknown mutating review tool {tool_name!r}")
     assert client.create_review_calls == 0

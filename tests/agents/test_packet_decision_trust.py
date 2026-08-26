@@ -1,4 +1,4 @@
-"""RED — packet decision trust (AG3 / LR-1)."""
+"""GREEN — packet decision trust (AG3 / LR-1)."""
 
 from __future__ import annotations
 
