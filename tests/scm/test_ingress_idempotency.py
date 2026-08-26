@@ -35,7 +35,7 @@ def test_replay_store_evicts_on_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
     """MCB-13: TTL eviction frees delivery ids after the replay window."""
     from mergecraft.scm import webhooks as webhooks_module
 
-    monkeypatch.setattr(webhooks_module, "_MAX_REPLAY_SKEW_SECONDS", 1)
+    monkeypatch.setattr(webhooks_module, "REPLAY_SKEW_SECONDS", 1)
     delivery_id = "br1-ttl-eviction-canary-0001"
     headers = _github_headers(delivery_id)
     accept_webhook("github", headers=headers, body=_BODY, secret=_SECRET)

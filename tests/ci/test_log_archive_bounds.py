@@ -5,9 +5,11 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 
-import pytest
-
-from mergecraft.ci.providers.github_actions import GitHubActionsProvider
+from mergecraft.ci.providers.github_actions import (
+    ARCHIVE_MAX_MEMBER_BYTES,
+    ARCHIVE_MAX_TOTAL_BYTES,
+    GitHubActionsProvider,
+)
 
 _TRUNCATION_MARKER = "truncat"
 
@@ -33,12 +35,8 @@ def test_high_ratio_archive_is_refused() -> None:
 
 def test_member_and_total_caps_are_enforced() -> None:
     """D11: per-member and aggregate caps apply to archive expansion."""
-    from mergecraft.ci import providers as providers_pkg
-
-    max_member = getattr(providers_pkg.github_actions, "_MAX_MEMBER_BYTES", None)
-    max_total = getattr(providers_pkg.github_actions, "_MAX_TOTAL_BYTES", None)
-    if max_member is None or max_total is None:
-        pytest.fail("archive bound constants are not defined yet (BR5)")
+    max_member = ARCHIVE_MAX_MEMBER_BYTES
+    max_total = ARCHIVE_MAX_TOTAL_BYTES
 
     parts = [b"B" * (max_member + 1024) for _ in range(3)]
     buffer = BytesIO()

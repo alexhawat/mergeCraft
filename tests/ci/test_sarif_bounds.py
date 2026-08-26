@@ -5,9 +5,11 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 
-import pytest
-
-from mergecraft.ci.intelligence import _sarif_documents
+from mergecraft.ci.intelligence import (
+    ARCHIVE_MAX_MEMBER_BYTES,
+    ARCHIVE_MAX_TOTAL_BYTES,
+    _sarif_documents,
+)
 
 _TRUNCATION_MARKER = "truncat"
 
@@ -22,12 +24,8 @@ def _build_sarif_zip(*, documents: list[tuple[str, bytes]]) -> bytes:
 
 def test_sarif_documents_share_the_same_caps() -> None:
     """MCB-14: SARIF extraction uses the same bounded-read controls as log archives."""
-    from mergecraft.ci import intelligence as intelligence_module
-
-    max_member = getattr(intelligence_module, "_MAX_MEMBER_BYTES", None)
-    max_total = getattr(intelligence_module, "_MAX_TOTAL_BYTES", None)
-    if max_member is None or max_total is None:
-        pytest.fail("SARIF archive bound constants are not defined yet (BR5)")
+    max_member = ARCHIVE_MAX_MEMBER_BYTES
+    max_total = ARCHIVE_MAX_TOTAL_BYTES
 
     oversized = b"{" + b'"runs":[]' + b"," + b'"x":"' + (b"S" * (max_member + 2048)) + b'"}'
     raw = _build_sarif_zip(

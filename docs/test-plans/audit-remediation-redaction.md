@@ -82,7 +82,7 @@ matching impl PR lands.
 | Test | Finding | Contract |
 | --- | --- | --- |
 | `test_overlapping_pins_each_stay_pinned` | MCB-18 | Concurrent pins do not clobber |
-| `test_getaddrinfo_is_the_original_object_after_every_test` | MCB-18 | `socket.getaddrinfo` restored |
+| `test_getaddrinfo_is_the_original_object_after_every_test` | MCB-18 | `socket.getaddrinfo` never replaced |
 | `test_unrelated_resolution_is_unaffected_by_a_guarded_request` | MCB-18 | Unpinned hosts unchanged |
 | `test_host_header_and_sni_survive_ip_pinning` | D12 | `pinned_request_metadata` preserves hostname |
 
