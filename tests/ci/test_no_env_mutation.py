@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import re
 from pathlib import Path
 
@@ -12,25 +11,16 @@ from tests.ci.workflow_support import REPO_ROOT
 
 _REPO_ROOT = Path(REPO_ROOT)
 _TESTS_ROOT = _REPO_ROOT / "tests"
+_UV_RUN = re.compile(r"""['"]uv['"]\s*,\s*['"]run['"]""")
 
 
 def _uv_run_calls_missing_no_sync() -> list[str]:
     offenders: list[str] = []
     for path in sorted(_TESTS_ROOT.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            if isinstance(func, ast.Name) and func.id == "run":
-                # subprocess.run([...]) with uv run
-                pass
-            if isinstance(func, ast.Attribute) and func.attr == "run":
-                pass
         for match in re.finditer(r"subprocess\.run\s*\(\s*\[([^\]]+)\]", source, re.DOTALL):
             chunk = match.group(1)
-            if ("uv" in chunk or "'uv'" in chunk) and "--no-sync" not in chunk:
+            if _UV_RUN.search(chunk) and "--no-sync" not in chunk:
                 offenders.append(f"{path.relative_to(_REPO_ROOT)}:{match.start()}")
     return offenders
 
