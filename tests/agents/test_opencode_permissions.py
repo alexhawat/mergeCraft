@@ -11,7 +11,7 @@ from mergecraft.agents.opencode import build_security_config
 from mergecraft.agents.shared import AgentRunContext
 from mergecraft.mcp.tool_state import init_tool_state
 
-pytestmark = pytest.mark.xfail(
+_XFAIL = pytest.mark.xfail(
     reason="green after AP5: review-mode permission block in opencode.py",
     strict=False,
 )
@@ -37,18 +37,22 @@ def _permissions(tmp_path: Path) -> dict[str, object]:
     return perms
 
 
+@_XFAIL
 def test_review_mode_denies_webfetch(tmp_path: Path) -> None:
     assert _permissions(tmp_path).get("webfetch") == "deny"
 
 
+@_XFAIL
 def test_review_mode_denies_external_directory(tmp_path: Path) -> None:
     assert _permissions(tmp_path).get("external_directory") == "deny"
 
 
+@_XFAIL
 def test_review_mode_denies_edit(tmp_path: Path) -> None:
     assert _permissions(tmp_path).get("edit") == "deny"
 
 
+@_XFAIL
 def test_review_mode_read_is_allowlisted_to_the_checkout(tmp_path: Path) -> None:
     read = _permissions(tmp_path).get("read")
     assert read != {"*": "allow"}
@@ -57,4 +61,5 @@ def test_review_mode_read_is_allowlisted_to_the_checkout(tmp_path: Path) -> None
 
 
 def test_bash_stays_denied(tmp_path: Path) -> None:
+    """Guard — bash denial is already true on trunk; must not regress under AP5."""
     assert _permissions(tmp_path).get("bash") == "deny"
