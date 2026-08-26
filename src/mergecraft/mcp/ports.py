@@ -17,10 +17,9 @@ import json
 import os
 import socket
 import time
-import urllib.error
-import urllib.request
 from typing import TYPE_CHECKING
 
+import httpx
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -148,9 +147,11 @@ def _raise_serve_error(server: uvicorn.Server) -> None:
 def _health_identity_ok(host: str, port: int, health_nonce: str) -> bool:
     url = f"http://{host}:{port}/health?nonce={health_nonce}"
     try:
-        with urllib.request.urlopen(url, timeout=0.25) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
+        with httpx.Client(timeout=0.25) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError, ValueError):
         return False
     return payload.get("status") == "ok" and payload.get("nonce") == health_nonce
 
