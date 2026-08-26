@@ -78,18 +78,24 @@ def test_git_core_binary_is_unavailable_in_live_namespace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Debian action images expose git via ``/usr/lib/git-core`` outside PATH."""
+    from mergecraft.analyzers import sandbox as sandbox_mod
     from mergecraft.mcp import shell as shell_mod
 
-    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
-    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: True)
-    captured: list[str] = []
+    shell_mod.reset_detection_cache()
+    sandbox_mod.reset_detection_cache()
+    method = shell_mod.detect_sandbox_method()
+    if method == "none":
+        pytest.skip("PID namespace isolation unavailable on this host")
+    if not shell_mod.network_namespace_available():
+        pytest.skip("network namespace isolation unavailable on this host")
 
+    captured: list[str] = []
     real_popen = subprocess.Popen
 
-    def _popen(argv: list[str], **_kwargs: Any) -> object:
+    def _popen(argv: list[str], **kwargs: Any) -> object:
         captured.extend(argv)
         # Run the wrapped bash -c for real to prove git-core is masked.
-        return real_popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return real_popen(argv, **kwargs)
 
     monkeypatch.setattr(shell_mod.subprocess, "Popen", _popen)
     proc = shell_mod._spawn_shell(
@@ -102,10 +108,12 @@ def test_git_core_binary_is_unavailable_in_live_namespace(
         stderr=subprocess.PIPE,
         isolate_network=True,
     )
-    stdout, _stderr = proc.communicate(timeout=30)
-    text = stdout.decode("utf-8", errors="replace")
-    assert "EXEC:" not in text, text
-    assert "DONE" in text
+    stdout, stderr = proc.communicate(timeout=30)
+    out_text = stdout.decode("utf-8", errors="replace")
+    err_text = stderr.decode("utf-8", errors="replace")
+    assert proc.returncode == 0, (out_text, err_text)
+    assert "EXEC:" not in out_text, (out_text, err_text)
+    assert "DONE" in out_text, (out_text, err_text)
 
 
 def test_unsandboxed_branch_skips_namespace_mounts(monkeypatch: pytest.MonkeyPatch) -> None:
