@@ -25,6 +25,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft analyzers run <analyzer-id>` | Execute one analyzer against the working tree. |
 | `mergecraft ask` | Show a file-line excerpt or canned text; does not call a model. |
 | `mergecraft audit export` | Export the audit log as a JSON array. |
+| `mergecraft audit verify` | Verify the audit hash chain and print any broken line numbers. |
 | `mergecraft auth claude` | Save a Claude Code OAuth token as CLAUDE_CODE_OAUTH_TOKEN. |
 | `mergecraft auth codex` | Mint a Codex subscription credential and save it as CODEX_AUTH_JSON. |
 | `mergecraft auth cursor` | Save a Cursor API key as CURSOR_API_KEY. |
