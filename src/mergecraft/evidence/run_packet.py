@@ -314,25 +314,27 @@ def build_run_packet(
         dispatched_lens_ids=list(state.dispatched_lens_ids),
     )
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
-    # W9 (#46): the decision row carries the closed action vocabulary and
-    # the mode the gate rendered it in. The action is computed from the
-    # packet's evidence — never re-derived from prose or a numeric score.
-    # ``mode`` is read from the typed settings and defaults to ``shadow``
-    # (D12); the I/O shell applies the action when ``mode == "enforce"``,
-    # and the shadow recorder captures it otherwise.
+    # W9 (#46): attach the structural verdict before ``decide_action`` so
+    # predicates such as ``low_risk_passing`` consult the decision row the
+    # gate actually recorded — never a parallel assembly or a second packet
+    # build (MCB-15 / D8).
+    packet_with_decision = packet.model_copy(update={"decision": decision})
+    # The decision row carries the closed action vocabulary and the mode the
+    # gate rendered it in. The action is computed from the packet's evidence —
+    # never re-derived from prose or a numeric score. ``mode`` is read from the
+    # typed settings and defaults to ``shadow`` (D12); the I/O shell applies
+    # the action when ``mode == "enforce"``, and the shadow recorder captures
+    # it otherwise.
     gate_mode = _resolve_gate_mode(ctx)
-    action = decide_action(packet, mode=gate_mode)
-    return packet.model_copy(
+    action = decide_action(packet_with_decision, mode=gate_mode)
+    final_decision = decision.model_copy(
         update={
-            "decision": decision.model_copy(
-                update={
-                    "action": action.value,
-                    "decided_by_action": "mergecraft.agents.gates.decide_action",
-                    "mode": gate_mode,
-                }
-            )
+            "action": action.value,
+            "decided_by_action": "mergecraft.agents.gates.decide_action",
+            "mode": gate_mode,
         }
     )
+    return packet_with_decision.model_copy(update={"decision": final_decision})
 
 
 def _agent_version() -> str:

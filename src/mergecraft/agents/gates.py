@@ -63,6 +63,10 @@ GIT_NATIVE_READ_DENY_CLAUDE: list[str] = [f"{tool}(.git/config)" for tool in CLA
 # one source of truth.
 BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
 
+# Only rows attributed to the structural approval gate may be honoured when a
+# packet already carries an explicit ``decision`` (D9 / LR-1).
+TRUSTED_PACKET_DECIDED_BY: Final[str] = "mergecraft.agents.gates.decide_approval"
+
 # Terminal-protocol tools are orchestrator-only even when ``mutates=False``.
 TERMINAL_PROTOCOL_DENIED_TOOL_NAMES: Final[frozenset[str]] = frozenset({"submit_review_verdict"})
 
@@ -269,9 +273,19 @@ def _decide_approval_from_packet(
     """
     # #41 hard rule — if the packet already carries an explicit decision
     # (set by an upstream layer, e.g. a W9 thermostat overlay), honour it
-    # verbatim. The agent's recorded ``self_assessment`` cannot override
-    # the structural verdict.
+    # only when the row is trusted and consistent with the typed findings.
+    # ``MergeEvidencePacket`` validates from dicts; this guard keeps a forged
+    # row from becoming a permissive gate input (D9 / LR-1).
     if packet.decision is not None:
+        if packet.decision.decided_by != TRUSTED_PACKET_DECIDED_BY:
+            msg = (
+                f"packet decision refused: decided_by {packet.decision.decided_by!r} "
+                f"is not the trusted decider {TRUSTED_PACKET_DECIDED_BY!r}"
+            )
+            raise ValueError(msg)
+        if packet.decision.verdict == "success" and _has_blocker(packet.findings):
+            msg = "packet decision refused: blocker finding present; success verdict cannot stand"
+            raise ValueError(msg)
         return packet.decision
 
     conclusion = _decide_approval_from_findings(
@@ -412,9 +426,15 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
         return False
     if packet.blast_radius.lane != "low":
         return False
-    # The legacy approval verdict is the gate's own input; refusing
-    # ``auto_merge`` from the structural side is #41's hard rule.
-    return packet.decision is None or packet.decision.verdict != "failure"
+    # The structural verdict must be an explicit positive signal — a missing
+    # row, ``neutral``, or ``failure`` must never satisfy ``auto_merge``
+    # (D7 / MCB-15). ``run_succeeded`` is not a separate field on the packet;
+    # a trusted ``decide_approval`` row only reaches ``success`` when the run
+    # completed and the trust tier allows it.
+    decision = packet.decision
+    if decision is None:
+        return False
+    return decision.verdict == "success"
 
 
 # Ordered ``(predicate, rule_id, action)`` rows; first match wins.

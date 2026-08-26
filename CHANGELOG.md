@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
+  refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
+  explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
+  ``auto_merge`` (MCB-15)
+
 ### Changed
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
