@@ -409,12 +409,21 @@ def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
     return _merge_audit_event_lists(primary_events, legacy_events)
 
 
-def verify_audit_chain(path: Path) -> list[int]:
+def verify_audit_chain(
+    path: Path,
+    *,
+    expected_terminal_hash: str | None = None,
+) -> list[int]:
     """Return 1-based line numbers where the audit hash chain breaks.
 
     Each record is expected to carry ``prev`` (previous line's hash, or ``""`` for
     the genesis record) and ``hash`` (``sha256(prev + canonical_body)`` where
     *canonical_body* is JSON with ``sort_keys=True`` excluding ``prev``/``hash``).
+
+    When *expected_terminal_hash* is supplied (an external tip commitment from a
+    checkpoint, backup, or replication source), a valid prefix that ends early
+    is flagged on the last line — tail truncation is otherwise indistinguishable
+    from an intact chain.
 
     *path* must be a regular file; callers (e.g. ``mergecraft audit verify``)
     must reject missing or non-regular paths before treating an empty result as ok.
@@ -423,6 +432,8 @@ def verify_audit_chain(path: Path) -> list[int]:
         return []
     breaks: list[int] = []
     prev_hash = ""
+    last_line_no = 0
+    last_stored_hash: str | None = None
     for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         stripped = line.strip()
         if not stripped:
@@ -447,6 +458,16 @@ def verify_audit_chain(path: Path) -> list[int]:
         if stored_prev != prev_hash or stored_hash != expected_hash:
             breaks.append(line_no)
         prev_hash = stored_hash
+        last_line_no = line_no
+        last_stored_hash = stored_hash
+    if (
+        expected_terminal_hash is not None
+        and last_line_no > 0
+        and last_stored_hash is not None
+        and last_stored_hash != expected_terminal_hash
+        and last_line_no not in breaks
+    ):
+        breaks.append(last_line_no)
     return breaks
 
 

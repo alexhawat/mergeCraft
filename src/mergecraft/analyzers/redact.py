@@ -31,10 +31,11 @@ _REPO_PATH_TOKEN_RE = re.compile(r"^[\w.-]+(?:/[\w.-]+)+$")
 _BENIGN_HEX_40_RE = re.compile(r"^[a-f0-9]{40}$")
 _BENIGN_HEX_64_RE = re.compile(r"^[a-f0-9]{64}$")
 _BENIGN_PURE_HEX_RE = re.compile(r"^[a-f0-9]+$")
-# Lowercase kebab tokens (``golangci-lint``, config override keys) are catalog
-# identifiers, not high-entropy secrets — but ``sk-…`` / ``ghp_…`` still match
+# Catalog identifiers only: snake_case, SCREAMING_SNAKE, and lowercase kebab.
+# Mixed-case alphanumeric blobs (e.g. ``AbCdEfGh…``) are not identifiers and
+# must fall through to the entropy pass. ``sk-…`` / ``ghp_…`` still match
 # ``_SECRET_PATTERNS`` first.
-_BENIGN_IDENTIFIER_RE = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*|[a-z][a-z0-9-]*)$")
+_BENIGN_IDENTIFIER_RE = re.compile(r"^(?:[a-z_][a-z0-9_]*|[A-Z][A-Z0-9_]{2,}|[a-z][a-z0-9-]*)$")
 
 
 def _shannon_entropy(value: str) -> float:
