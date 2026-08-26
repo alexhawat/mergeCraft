@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import warnings
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mergecraft.config.provider_registry import BUILTIN_HARNESS_DEFAULTS
@@ -86,9 +85,9 @@ def lookup_registry_entry_by_env_index(
 
 
 def _provider_id_for_env_index(env_index: int) -> str:
-    from mergecraft.config.settings import load_repo_settings
+    from mergecraft.config.settings_snapshot import repo_settings_for_gateway_resolvers
 
-    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    settings = repo_settings_for_gateway_resolvers()
     entry = lookup_registry_entry_by_env_index(settings, env_index)
     if entry is not None:
         return entry.label.strip().lower()
@@ -293,9 +292,9 @@ def harness_env_for_active_provider(
     except ValueError:
         return {}
 
-    from mergecraft.config.settings import load_repo_settings
+    from mergecraft.config.settings_snapshot import repo_settings_for_gateway_resolvers
 
-    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    settings = repo_settings_for_gateway_resolvers()
     entry = lookup_registry_entry(settings, provider)
     if entry is None or entry.harness != agent_id:
         return {}

@@ -12,6 +12,13 @@ from tests.ci.workflow_support import REPO_ROOT
 _REPO_ROOT = Path(REPO_ROOT)
 
 
+@pytest.fixture(autouse=True)
+def _reset_gateway_settings_cache() -> None:
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+
+    reset_gateway_settings_cache()
+
+
 @pytest.mark.xfail(reason="green after AG9: gateway settings snapshot", strict=False)
 def test_resolve_gateway_endpoint_does_not_reload_per_call(
     monkeypatch: pytest.MonkeyPatch,
@@ -30,7 +37,7 @@ def test_resolve_gateway_endpoint_does_not_reload_per_call(
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "k")
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://example.invalid")
     with patch(
-        "mergecraft.config.settings.load_repo_settings",
+        "mergecraft.config.settings_snapshot.load_repo_settings",
         side_effect=_fake_load,
     ):
         for model in ("custom/m1", "custom/m2", "custom/m3"):
@@ -52,7 +59,7 @@ def test_has_gateway_credentials_reads_the_run_snapshot(monkeypatch: pytest.Monk
         return load_repo_settings(root=_REPO_ROOT, load_learnings_files=False)
 
     with patch(
-        "mergecraft.config.settings.load_repo_settings",
+        "mergecraft.config.settings_snapshot.load_repo_settings",
         side_effect=_fake_load,
     ):
         has_gateway_credentials("custom")

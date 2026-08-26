@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Gateway credential resolution reads repo settings from the run-scope snapshot
+  instead of reloading ``.mergecraft/config.yaml`` on every model lookup, with a
+  live-load fallback when no snapshot is installed (#496)
 - Gate mode and per-gate action overrides resolve from the run-scope settings
   snapshot instead of package defaults, and packet assembly in ``enforce`` mode
   fails closed with a neutral decision when assembly raises (MCB-17)
