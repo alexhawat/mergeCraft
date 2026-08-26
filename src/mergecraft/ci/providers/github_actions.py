@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import os
-import zipfile
-from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.ci.archive_bounds import (
+    _MAX_MEMBER_BYTES,
+    _MAX_TOTAL_BYTES,
+    decode_log_archive,
+)
 from mergecraft.ci.log_excerpt import analyze_log
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation
 
@@ -135,19 +138,12 @@ class GitHubActionsProvider:
 
     @staticmethod
     def _decode_log_archive(raw: bytes | bytearray) -> str:
-        log_text = ""
-        try:
-            with zipfile.ZipFile(BytesIO(raw)) as zf:
-                for name in zf.namelist():
-                    if name.endswith(".txt"):
-                        log_text += zf.read(name).decode("utf-8", errors="replace")
-                        log_text += "\n"
-        except zipfile.BadZipFile:
-            log_text = bytes(raw).decode("utf-8", errors="replace")
-        return log_text
+        return decode_log_archive(raw)
 
 
 __all__ = [
+    "_MAX_MEMBER_BYTES",
+    "_MAX_TOTAL_BYTES",
     "GitHubActionsProvider",
     "unavailable_check_suite_logs",
     "unbound_check_suite_logs",
