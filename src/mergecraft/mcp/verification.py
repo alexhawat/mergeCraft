@@ -305,6 +305,13 @@ def verify_agent_findings_tool(ctx: ToolContext):
         repo_root = Path(state.dir)
         repo_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
 
+        changed_paths: frozenset[str] | None = None
+        if state.diff_path:
+            from mergecraft.mcp.checkout import changed_paths_in_diff
+
+            diff_text = Path(state.diff_path).read_text(encoding="utf-8")
+            changed_paths = frozenset(changed_paths_in_diff(diff_text))
+
         findings = [
             AgentFinding(
                 path=str(row.get("path", "")),
@@ -345,6 +352,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
             budget=_verification_budget_for_round(repo_settings, ctx),
             learnings_text=_learnings_text(ctx),
             repo_root=repo_root,
+            changed_paths=changed_paths,
         )
         from mergecraft.findings.ledger import (
             ensure_finding_ledger,

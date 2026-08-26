@@ -7,6 +7,7 @@ import contextlib
 import os
 import time
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -727,6 +728,13 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         repo_setting=settings.analyzers.sarif_upload,
     )
     ctx.sarif_upload_enabled = sarif_upload_enabled
+    from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
+
+    repo_settings_snapshot = capture_repo_settings_snapshot(
+        root=Path(os.getcwd()),
+        settings=settings,
+        load_learnings_files=False,
+    )
     ctx.tool_context = ToolContext(
         agent_id=ctx.agent_id,
         repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
@@ -772,6 +780,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         budget_tracker=ctx.budget_tracker,
+        repo_settings_snapshot=repo_settings_snapshot,
     )
 
 

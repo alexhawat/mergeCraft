@@ -7,12 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Review publication refuses a model-supplied pull number or commit SHA that
+  differs from the run's bound scope, and those identity fields are no longer
+  exposed on the ``create_pull_request_review`` tool schema (MCB-05)
+
 ### Fixed
 
 - Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
   refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
   explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
   ``auto_merge`` (MCB-15)
+- Review publication reads repo settings from the run-scope snapshot taken before
+  untrusted execution instead of reloading ``.mergecraft/config.yaml`` from the mutable
+  checkout (MCB-19)
+- Verifier citation paths are confined to the checkout root via
+  ``resolve_confined_path``, rejecting traversal, absolute paths, prefix collisions,
+  and out-of-root symlinks, and must fall inside the changed-path set (MCB-20)
 
 ### Changed
 
