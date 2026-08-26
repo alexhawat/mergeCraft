@@ -4,13 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AG5: required pack rules can gate",
-    strict=False,
-)
 
 _PACKS_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "policy" / "packs"
 
@@ -46,6 +40,7 @@ def test_no_pack_declares_a_mode_that_cannot_gate() -> None:
             "severity": str(rule.get("severity", "Major")),
             "message": "pack rule",
             "path": "src/x.py",
+            "rule": rule,
         }
         result = evaluate_enforcement("required", violation=violation)
         assert result.contributes_blocker or (

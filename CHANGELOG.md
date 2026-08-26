@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required static checks block approval unless every row is explicitly
   ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``,
   and unknown statuses no longer satisfy the gate (MCB-16)
+- Policy ``required`` enforcement consults ``policy.evidence`` and contributes a
+  blocker until declared evidence is present; ``blocking`` no longer promotes
+  declared ``Minor`` findings to ``Major`` (MCB-12)
 - Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
   refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
   explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
@@ -34,8 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verifier citation paths are confined to the checkout root via
   ``resolve_confined_path``, rejecting traversal, absolute paths, prefix collisions,
   and out-of-root symlinks, and must fall inside the changed-path set (MCB-20)
+- Shipped ``operational_readiness`` policy pack rules now declare required
+  evidence keys so ``enforcement: required`` can gate merge (MCB-12)
 
 ### Changed
+
+- Policy enforcement modes are pairwise distinguishable: ``advisory`` caps blocking
+  severities to ``Trivial``, ``warning`` and ``required`` preserve declared
+  severity, and ``required`` clears only when ``policy.evidence`` is satisfied
+  (MCB-12)
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
   Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
