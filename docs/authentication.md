@@ -21,6 +21,31 @@ Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
 — the same credential your local coding agent uses. Only set env vars for
 providers you actually use.
 
+### Turning a provider off
+
+`mergecraft provider disable <label>` is the inverse of `auth` / `provider auth`:
+it deletes the provider's GitHub Actions secret and/or blanks its `.env` entry,
+so CI stops selecting that provider on the next run.
+
+```bash
+mergecraft provider disable nous                  # Actions secrets (default)
+mergecraft provider disable nous --scope both     # Actions secrets + local .env
+mergecraft provider enable nous --scope both      # re-authenticate
+```
+
+It takes the same `--scope local|github|both` as `auth` and
+`mergecraft tracing logfire disable`, and the `auth` subcommand names work as
+labels (`provider disable codex` is `provider disable openai`). Both credential
+shapes are cleared — the flat secret the workflow names (`NOUS_API_KEY`) and the
+indexed registry key (`LLM_PROVIDER_<N>_API_KEY`) — so a provider is off however
+it was authenticated. A secret that is already absent counts as success.
+
+Disable clears **credentials**, not registration: the `providers:` row and its
+`LLM_PROVIDER_<N>` label survive, so `provider enable` re-authenticates the same
+env index. Use `mergecraft provider delete` to drop the registration itself.
+Workflow YAML is never rewritten — the shipped cascade already skips a provider
+whose secret is missing.
+
 > **Codex on container runners:** Codex CLI's nested bubblewrap sandbox fails
 > inside namespaced containers. On an already-isolated ephemeral runner, pass
 > `codex_sandbox: danger-full-access`. mergeCraft never sets this itself —

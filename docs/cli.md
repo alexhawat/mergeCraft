@@ -98,7 +98,9 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft provider add --label LABEL` | Register a provider in config and allocate an indexed `.env` slot. |
 | `mergecraft provider auth` | Authenticate one registered provider into indexed `LLM_PROVIDER_*` secrets. |
 | `mergecraft provider delete <label>` | Remove a provider label from config (env index gap is preserved). |
+| `mergecraft provider disable <label>` | Clear one provider's credentials so GitHub CI and the local CLI stop using it. |
 | `mergecraft provider edit <label>` | Update an existing provider entry in config. |
+| `mergecraft provider enable <label>` | Authenticate one provider — the enable half of the toggle. |
 | `mergecraft provider harnesses` | List supported agent harnesses (generated from code). |
 | `mergecraft provider list` | List registered provider labels. |
 | `mergecraft provider migrate` | Migrate legacy `*_API_KEY` env vars into indexed provider registry layout (D2 / #483). |
