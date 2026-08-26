@@ -107,3 +107,32 @@ def test_packet_assembly_exception_fails_closed_in_enforce_mode(
     ctx.tool_state.pr_number = None
     result = prepare_run_packet(ctx, run_succeeded=True)
     assert result is None or result.decision is not None
+
+
+def test_fail_closed_assembly_survives_config_mutation_after_snapshot(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Enforce-mode assembly fallback must not throw when config.yaml drifts."""
+    _write_gate_config(tmp_path, "enforce")
+    monkeypatch.chdir(tmp_path)
+    from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
+    from mergecraft.evidence.run_packet import prepare_run_packet
+
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.pr_number = 7
+    ctx.payload.event.is_pr = True
+    capture_run_scope_snapshot(ctx, root=tmp_path, load_learnings_files=False)
+    (tmp_path / ".mergecraft" / "config.yaml").write_text(
+        "gates:\n  gate_action: shadow\n",
+        encoding="utf-8",
+    )
+
+    def _boom(_ctx: ToolContext, **_kwargs: object) -> None:
+        raise RuntimeError("assembly blew up")
+
+    monkeypatch.setattr("mergecraft.evidence.run_packet.build_run_packet", _boom)
+    result = prepare_run_packet(ctx, run_succeeded=True)
+    assert result is not None
+    assert result.decision is not None
+    assert result.decision.mode == "enforce"
