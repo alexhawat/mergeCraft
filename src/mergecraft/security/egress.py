@@ -42,9 +42,6 @@ DEFAULT_EGRESS_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-_BLOCKED_SCHEMES: frozenset[str] = frozenset(
-    {"file", "ftp", "gopher", "dict", "data", "javascript"}
-)
 _METADATA_HOSTS: frozenset[str] = frozenset(
     {
         "metadata.google.internal",
@@ -131,8 +128,6 @@ def _blocked_address(
         return "ssrf: blocked link-local / metadata address"
     if check.is_private or check.is_reserved or check.is_multicast:
         return "ssrf: blocked non-public address"
-    if check == ipaddress.ip_address("169.254.169.254"):
-        return "ssrf: blocked metadata address"
     return None
 
 
@@ -160,13 +155,8 @@ def _resolve_host_addresses(host: str) -> tuple[ipaddress.IPv4Address | ipaddres
 
 def _validate_retrieval_host(
     host: str,
-    scheme: str,
 ) -> tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]:
     """SSRF-check ``host`` and return the validated addresses (DNS resolved once)."""
-    if scheme in _BLOCKED_SCHEMES:
-        if scheme == "file":
-            raise SsrfBlockedError("ssrf: blocked file: URL")
-        raise SsrfBlockedError(f"ssrf: blocked scheme {scheme!r}")
     if not host:
         raise SsrfBlockedError("ssrf: blocked URL with empty host")
     if host in _LOOPBACK_HOSTS:
@@ -212,7 +202,7 @@ def inspect_external_url(url: str) -> GuardedUrl:
     host = _normalize_host(parsed.hostname or "")
     if scheme not in {"http", "https"}:
         raise SsrfBlockedError(f"ssrf: blocked scheme {scheme or 'missing'!r}")
-    addresses = _validate_retrieval_host(host, scheme)
+    addresses = _validate_retrieval_host(host)
     return GuardedUrl(url=url, host=host, addresses=addresses)
 
 
