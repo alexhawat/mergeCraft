@@ -9,11 +9,6 @@ import pytest
 
 from mergecraft.mcp import shell as shell_mod
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP4: read-only .git bind + git binary unavailable in namespace",
-    strict=False,
-)
-
 
 def _joined_argv(monkeypatch: pytest.MonkeyPatch, *, method: str) -> str:
     monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: method)
