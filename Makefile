@@ -116,6 +116,7 @@ agents-check: ## Agent registry model/prompt/tool validation gate (AP1)
 PYTEST_SPLIT := $(if $(MERGECRAFT_TEST_SPLITS),--splits $(MERGECRAFT_TEST_SPLITS) --group $(MERGECRAFT_TEST_GROUP) --splitting-algorithm least_duration,)
 test: ## Unit tests
 	$(PYTEST) tests -v --tb=short --strict-markers -m "not integration" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
+		--doctest-modules src/mergecraft/tracing/redaction.py \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
 # W12.1 / #21 — integration suite joins PR CI. Existing ``@pytest.mark.integration``

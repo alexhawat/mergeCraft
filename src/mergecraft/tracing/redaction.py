@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 _CLI_SECRET_FLAG = re.compile(
     r"^(?:--|[-/])?(?:token|api[-_]?key|secret|password|auth[-_]?token|access[-_]?token"
     r"|refresh[-_]?token|bearer[-_]?token|client[-_]?secret|private[-_]?key"
-    r"|pat|passwd|LOGFIRE_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY"
+    r"|pat|passwd|LOGFIRE_TOKEN|GITHUB_TOKEN|GH_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY"
     r"|GEMINI_API_KEY|CODEX_AUTH_JSON|NOUS_API_KEY|TOKENHUB_API_KEY)$",
     re.IGNORECASE,
 )
@@ -55,7 +55,7 @@ REDACTED = "<redacted>"  # canonical sentinel — H4 / W4: was three different s
 # credential-bearing portion of a URL while preserving scheme/host/path so
 # the URL stays readable (and parseable) in Logfire rows.
 _TELEGRAM_BOT_RE = re.compile(r"https?://api\.telegram\.org/bot[^/?\s]+")
-_BASIC_AUTH_RE = re.compile(r"https?://([^:@\s]+):[^@\s]+@")
+_BASIC_AUTH_RE = re.compile(r"(https?)://([^:@\s]+):[^@\s]+@")
 _QUERY_TOKEN_KEYS = ("api_key", "access_token", "token", "key", "secret")
 _QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(_QUERY_TOKEN_KEYS) + r")=([^&\s]+)")
 _BEARER_RE = re.compile(r"(Bearer\s)[A-Za-z0-9._-]{16,}")
@@ -72,15 +72,23 @@ DENY_KEYS: tuple[str, ...] = (
     "id_token",
     "bearer_token",
     "auth_token",
+    "proxy-authorization",
+    "x-api-key",
+    "set-cookie",
+    "private_key",
+    "client_secret",
 )
 
 
 def _redact_value(value: Any) -> Any:
-    """Recursively redact a value: strings via the shared helper, structures recursively."""
+    """Recursively redact a value: deny keys, strings, and nested structures."""
     if isinstance(value, str):
         return redact_secrets(value)
     if isinstance(value, dict):
-        return {key: _redact_value(item) for key, item in value.items()}
+        return {
+            key: REDACTED if key.lower() in DENY_KEYS else _redact_value(item)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_redact_value(item) for item in value]
     if isinstance(value, tuple):
@@ -92,13 +100,10 @@ def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
     """Return a redacted copy of ``attrs`` (never the input dict)."""
     if not attrs:
         return {}
-    out: dict[str, Any] = {}
-    for key, value in attrs.items():
-        if key.lower() in DENY_KEYS:
-            out[key] = REDACTED
-            continue
-        out[key] = _redact_value(value)
-    return out
+    redacted = _redact_value(attrs)
+    if not isinstance(redacted, dict):
+        return {}
+    return redacted
 
 
 def redact_event(event: TraceEvent) -> TraceEvent:
@@ -130,7 +135,11 @@ def redact_cli_argv(argv: list[str]) -> str:
     if not argv:
         return ""
     masked: list[str] = []
+    skip_next = False
     for index, token in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
         if "=" in token:
             key, _, val = token.partition("=")
             if _CLI_SECRET_FLAG.match(key):
@@ -142,6 +151,7 @@ def redact_cli_argv(argv: list[str]) -> str:
         if _CLI_SECRET_FLAG.match(token) and index + 1 < len(argv):
             masked.append(token)
             masked.append(REDACTED)
+            skip_next = True
             continue
         if _CLI_SECRET_VALUE.match(token):
             masked.append(REDACTED)
@@ -188,7 +198,7 @@ def redact_url(url: str) -> str:
     # and the URL would lose its ``/bot<token>`` shape.
     url = _TELEGRAM_BOT_RE.sub(lambda _m: _m.group(0).split("/bot", 1)[0] + "/bot" + REDACTED, url)
     # Pattern 2 — basic-auth userinfo.
-    url = _BASIC_AUTH_RE.sub(r"https://\1:" + REDACTED + r"@", url)
+    url = _BASIC_AUTH_RE.sub(r"\1://\2:" + REDACTED + r"@", url)
     # Pattern 3 — known token query params. Per-key replace so non-token
     # params (``x=1``, ``stream=true``) survive untouched (test 6 contract).
     url = _QUERY_TOKEN_RE.sub(lambda m: f"{m.group(1)}={REDACTED}", url)
@@ -204,15 +214,14 @@ def redact_tool_payload(payload: Any) -> str:
     """Redact a tool input/output payload for safe attachment to a span (T1).
 
     The stringified payload is capped at :data:`TRACE_ATTRS_JSON_MAX_BYTES`
-    (64 KiB) so a 1 MB tool body cannot blow past the JSONL ceiling, and the
-    result is run through :func:`redact_secrets` so embedded tokens
-    (``ghp_…`` / ``sk-…`` / bearer headers) cannot leak onto the span.
+    (64 KiB UTF-8 bytes) so a large tool body cannot blow past the JSONL
+    ceiling, and the result is run through :func:`redact_secrets` so embedded
+    tokens (``ghp_…`` / ``sk-…`` / bearer headers) cannot leak onto the span.
 
     Non-string values are stringified via ``json.dumps(default=str)`` so dicts
-    and lists survive. The cap is applied to the **final** string length, not
-    to any individual field — a single oversized value truncates the whole
-    payload to the sentinel ``"<truncated>"`` so the row stays a single JSON
-    line and Logfire's row inspector still surfaces the marker.
+    and lists survive. The cap compares UTF-8 byte length, not Python character
+    count. A slightly-over-cap payload keeps a head slice plus a visible
+    ``… <truncated N bytes>`` marker rather than discarding the whole body.
 
     Args:
         payload: The raw input/output payload from a driver event or the MCP
@@ -225,8 +234,8 @@ def redact_tool_payload(payload: Any) -> str:
     Examples:
         >>> redact_tool_payload({"q": "hello"})
         '{"q": "hello"}'
-        >>> redact_tool_payload("Bearer ghp_longtoken123…")
-        'Bearer <redacted>'
+        >>> redact_tool_payload("Bearer ghp_abcdefghijklmnopqrstuvwxyz1234")
+        'Bearer [REDACTED]'
     """
     if payload is None:
         return ""
@@ -242,9 +251,18 @@ def redact_tool_payload(payload: Any) -> str:
     else:
         text = str(payload)
     text = redact_secrets(text)
-    if len(text) > TRACE_ATTRS_JSON_MAX_BYTES:
-        return "<truncated>"
-    return text
+    encoded = text.encode("utf-8")
+    if len(encoded) <= TRACE_ATTRS_JSON_MAX_BYTES:
+        return text
+    max_bytes = TRACE_ATTRS_JSON_MAX_BYTES
+    for head_byte_len in range(max_bytes, 0, -1):
+        head = encoded[:head_byte_len].decode("utf-8", errors="ignore")
+        truncated_bytes = len(encoded) - head_byte_len
+        marker = f"… <truncated {truncated_bytes} bytes>"
+        result = head + marker
+        if len(result.encode("utf-8")) <= max_bytes:
+            return result
+    return f"… <truncated {len(encoded)} bytes>"
 
 
 __all__ = [

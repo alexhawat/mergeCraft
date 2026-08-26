@@ -17,6 +17,7 @@ _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\b(?:xox[baprs]-)[A-Za-z0-9-]{10,}\b"),
     re.compile(r"\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?([^\s'\"]{8,})", re.I),
+    re.compile(r"Basic [A-Za-z0-9+/=]{16,}"),
 )
 
 _MIN_ENTROPY_LENGTH = 20

@@ -84,8 +84,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
   `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
 
+### Security
+
+- Trace span redaction no longer leaks CLI secrets after a flagged argv token
+  (MCB-02), applies deny-key scrubbing at every nested depth including
+  list/tuple containers (MCB-03), and redacts Basic-auth material via the
+  shared secret matcher
+
 ### Fixed
 
+- ``redact_tool_payload`` caps UTF-8 byte length (not Python character count)
+  and keeps a head slice plus a visible truncation marker instead of discarding
+  the whole body (MCB-28)
+- ``redact_url`` preserves ``http`` vs ``https`` when redacting basic-auth
+  userinfo (MCB-31)
+- ``make test`` executes ``mergecraft.tracing.redaction`` doctests
+  (``--doctest-modules``)
 - `validate_http_url` rejects whitespace and control characters anywhere in a
   provider URL, not just at the ends. A stored URL is written verbatim into the
   consumer workflow YAML, so an interior newline could open a new key or step
