@@ -28,13 +28,20 @@ def test_git_argv_injects_no_ext_diff_for_diff_family() -> None:
     from mergecraft.utils.git_hardening import git_argv
 
     diff_argv = git_argv(["diff", "HEAD"])
-    assert diff_argv[diff_argv.index("diff") + 1] == "--no-ext-diff"
+    assert diff_argv[diff_argv.index("diff") + 1 : diff_argv.index("diff") + 3] == [
+        "--no-ext-diff",
+        "--no-textconv",
+    ]
 
     show_argv = git_argv(["-C", "/repo", "show", "HEAD:README.md"])
-    assert show_argv[show_argv.index("show") + 1] == "--no-ext-diff"
+    show_idx = show_argv.index("show")
+    assert show_argv[show_idx + 1 : show_idx + 3] == ["--no-ext-diff", "--no-textconv"]
 
     log_argv = git_argv(["log", "-p", "-1"])
-    assert log_argv[log_argv.index("log") + 1] == "--no-ext-diff"
+    log_idx = log_argv.index("log")
+    assert log_argv[log_idx + 1 : log_idx + 3] == ["--no-ext-diff", "--no-textconv"]
 
     assert "--no-ext-diff" not in git_argv(["status"])
+    assert "--no-textconv" not in git_argv(["status"])
     assert "--no-ext-diff" not in git_argv(["log", "-1", "--oneline"])
+    assert "--no-textconv" not in git_argv(["log", "-1", "--oneline"])

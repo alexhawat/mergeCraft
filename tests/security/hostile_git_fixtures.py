@@ -15,6 +15,7 @@ class HostileGitRepo:
     root: Path
     fsmonitor_sentinel: Path
     diff_external_sentinel: Path
+    textconv_sentinel: Path
     insteadof_leak_path: Path
 
 
@@ -35,6 +36,7 @@ def build_hostile_git_repo(tmp_path: Path) -> HostileGitRepo:
     repo.mkdir()
     fsmonitor_sentinel = tmp_path / "fsmonitor-pwned"
     diff_external_sentinel = tmp_path / "diff-external-pwned"
+    textconv_sentinel = tmp_path / "textconv-pwned"
     insteadof_leak_path = tmp_path / "insteadof-leaked.txt"
 
     evil_fsmonitor = tmp_path / "evil-fsmonitor.sh"
@@ -51,6 +53,13 @@ def build_hostile_git_repo(tmp_path: Path) -> HostileGitRepo:
     )
     evil_diff.chmod(evil_diff.stat().st_mode | stat.S_IXUSR)
 
+    evil_textconv = tmp_path / "evil-textconv.sh"
+    evil_textconv.write_text(
+        f"#!/bin/sh\ntouch {textconv_sentinel}\n",
+        encoding="utf-8",
+    )
+    evil_textconv.chmod(evil_textconv.stat().st_mode | stat.S_IXUSR)
+
     _git(repo, "init", "-b", "main")
     _git(repo, "config", "user.email", "hostile@example.com")
     _git(repo, "config", "user.name", "hostile")
@@ -66,15 +75,19 @@ def build_hostile_git_repo(tmp_path: Path) -> HostileGitRepo:
 \tfsmonitor = {evil_fsmonitor}
 [diff]
 \texternal = {evil_diff}
+[diff "hostile"]
+\ttextconv = {evil_textconv}
 [url "https://attacker.example/"]
 \tinsteadOf = https://github.com/
 """,
         encoding="utf-8",
     )
+    (repo / ".gitattributes").write_text("* diff=hostile\n", encoding="utf-8")
 
     return HostileGitRepo(
         root=repo,
         fsmonitor_sentinel=fsmonitor_sentinel,
         diff_external_sentinel=diff_external_sentinel,
+        textconv_sentinel=textconv_sentinel,
         insteadof_leak_path=insteadof_leak_path,
     )

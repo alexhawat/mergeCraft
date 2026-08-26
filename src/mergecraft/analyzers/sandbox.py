@@ -29,8 +29,12 @@ _sudo_allowed() {
 _run_probe() {
   local use_sudo=$1
   local unshare_cmd=unshare
+  local mount_cmd=mount
+  local umount_cmd=umount
   if [ "$use_sudo" = 1 ]; then
     unshare_cmd="sudo unshare"
+    mount_cmd="sudo mount"
+    umount_cmd="sudo umount"
   fi
   pid=0 pid_method=none net=0 bind=0 tmpfs=0
   if $unshare_cmd --pid --fork --mount-proc true 2>/dev/null; then
@@ -49,14 +53,14 @@ _run_probe() {
   tmp=$(mktemp -d)
   target="$tmp/ro-target"; mkdir -p "$target"; echo x >"$target/file"
   mnt="$tmp/mnt"; mkdir -p "$mnt"
-  if mount --bind "$target" "$mnt" 2>/dev/null \
-    && mount -o remount,bind,ro "$mnt" 2>/dev/null \
-    && umount "$mnt" 2>/dev/null; then
+  if $mount_cmd --bind "$target" "$mnt" 2>/dev/null \
+    && $mount_cmd -o remount,bind,ro "$mnt" 2>/dev/null \
+    && $umount_cmd "$mnt" 2>/dev/null; then
     bind=1
   fi
   scratch="$tmp/scratch"; mkdir -p "$scratch"
-  if mount -t tmpfs tmpfs "$scratch" 2>/dev/null \
-    && umount "$scratch" 2>/dev/null; then
+  if $mount_cmd -t tmpfs tmpfs "$scratch" 2>/dev/null \
+    && $umount_cmd "$scratch" 2>/dev/null; then
     tmpfs=1
   fi
   rm -rf "$tmp"

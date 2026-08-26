@@ -272,11 +272,11 @@ def _git_binary_unavailable_fragment() -> str:
     """Shell fragment: hide every ``git`` binary from the untrusted namespace."""
     return (
         "while IFS= read -r _g; do "
-        '[ -n "$_g" ] && [ -x "$_g" ] && mount --bind /dev/null "$_g" || exit 1; '
+        'if [ -n "$_g" ] && [ -x "$_g" ]; then mount --bind /dev/null "$_g" || exit 1; fi; '
         "done < <(type -a git 2>/dev/null | awk '{print $NF}' | sort -u); "
         'IFS=: read -ra _path_dirs <<< "${PATH:-}"; '
         'for _dir in "${_path_dirs[@]}"; do '
-        '[ -x "$_dir/git" ] && mount --bind /dev/null "$_dir/git" || exit 1; '
+        'if [ -x "$_dir/git" ]; then mount --bind /dev/null "$_dir/git" || exit 1; fi; '
         "done; "
     )
 

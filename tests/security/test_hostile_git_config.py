@@ -25,6 +25,12 @@ def test_root_side_diff_does_not_execute_diff_external(hostile_git_repo: Hostile
     assert not hostile_git_repo.diff_external_sentinel.exists()
 
 
+def test_root_side_diff_does_not_execute_textconv(hostile_git_repo: HostileGitRepo) -> None:
+    (hostile_git_repo.root / "README.md").write_text("changed\n", encoding="utf-8")
+    _run_git(["diff", "README.md"], cwd=str(hostile_git_repo.root))
+    assert not hostile_git_repo.textconv_sentinel.exists()
+
+
 def test_commit_path_does_not_execute_fsmonitor(hostile_git_repo: HostileGitRepo) -> None:
     """``commit_changes`` path must pin safe git config (hooksPath alone is insufficient)."""
     (hostile_git_repo.root / "tracked.txt").write_text("x\n", encoding="utf-8")

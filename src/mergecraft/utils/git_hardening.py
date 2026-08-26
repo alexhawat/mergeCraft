@@ -34,6 +34,7 @@ _PATCH_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
 _LOG_PATCH_FLAGS: Final[frozenset[str]] = frozenset(
     {"-p", "--patch", "-U", "--unified", "-W", "--function-context"}
 )
+_DIFF_HARDENING_FLAGS: Final[tuple[str, ...]] = ("--no-ext-diff", "--no-textconv")
 
 
 def _skip_global_opts(args: Sequence[str], start: int) -> int:
@@ -97,7 +98,7 @@ def git_argv(args: Sequence[str]) -> list[str]:
         argv.extend(args)
         return argv
     argv.extend(args[:insert_at])
-    argv.append("--no-ext-diff")
+    argv.extend(_DIFF_HARDENING_FLAGS)
     argv.extend(args[insert_at:])
     return argv
 

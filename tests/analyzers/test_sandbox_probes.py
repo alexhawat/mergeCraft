@@ -42,6 +42,8 @@ def test_all_probes_share_one_privilege_ladder(monkeypatch: pytest.MonkeyPatch) 
         assert "_run_probe 0" in script
         assert 'if [ "$pid" = 0 ] && _sudo_allowed' in script
         assert "probe ||" not in script
+        assert 'mount_cmd="sudo mount"' in script
+        assert 'umount_cmd="sudo umount"' in script
         return type(
             "R",
             (),
@@ -56,6 +58,8 @@ def test_all_probes_share_one_privilege_ladder(monkeypatch: pytest.MonkeyPatch) 
     assert caps.pid_namespace is True
     assert caps.pid_namespace_method == "sudo-unshare"
     assert caps.network_namespace is True
+    assert caps.read_only_bind is True
+    assert caps.tmpfs is True
 
 
 def test_probe_capabilities_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -50,6 +50,18 @@ def test_git_binary_unavailable_in_untrusted_namespace(
     assert "chmod 000" in joined or "unavailable" in joined or "/dev/null" in joined
 
 
+def test_git_binary_hide_skips_path_dirs_without_git(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PATH dirs lacking git must not abort the hide loop (MCB-25)."""
+    joined = _joined_argv(monkeypatch, method="unshare")
+    assert 'if [ -x "$_dir/git" ]; then mount --bind /dev/null "$_dir/git" || exit 1; fi' in joined
+    assert '[ -x "$_dir/git" ] && mount --bind /dev/null "$_dir/git" || exit 1' not in joined
+    assert (
+        'if [ -n "$_g" ] && [ -x "$_g" ]; then mount --bind /dev/null "$_g" || exit 1; fi' in joined
+    )
+
+
 def test_unsandboxed_branch_skips_namespace_mounts(monkeypatch: pytest.MonkeyPatch) -> None:
     joined = _joined_argv(monkeypatch, method="none")
     assert joined == "bash -c echo ok"
