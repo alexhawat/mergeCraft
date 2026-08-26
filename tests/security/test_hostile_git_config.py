@@ -18,7 +18,10 @@ def test_root_side_status_does_not_execute_fsmonitor(hostile_git_repo: HostileGi
 
 
 def test_root_side_diff_does_not_execute_diff_external(hostile_git_repo: HostileGitRepo) -> None:
-    _run_git(["diff", "HEAD"], cwd=str(hostile_git_repo.root))
+    (hostile_git_repo.root / "README.md").write_text("changed\n", encoding="utf-8")
+    output = _run_git(["diff", "README.md"], cwd=str(hostile_git_repo.root))
+    assert "README.md" in output
+    assert "changed" in output
     assert not hostile_git_repo.diff_external_sentinel.exists()
 
 

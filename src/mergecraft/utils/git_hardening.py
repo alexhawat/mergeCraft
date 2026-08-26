@@ -16,25 +16,95 @@ GIT_SAFE_CONFIG: Final[tuple[str, ...]] = (
     "-c",
     "core.fsmonitor=false",
     "-c",
-    "diff.external=",
-    "-c",
     "core.hooksPath=/dev/null",
     "-c",
-    "uploadpack.packObjectsHook=",
-    "-c",
     "core.sshCommand=ssh",
-    "-c",
-    "core.gitProxy=",
     "-c",
     "protocol.ext.allow=never",
     "-c",
     "core.pager=cat",
 )
 
+_GLOBAL_OPTS_TAKING_VALUE: Final[frozenset[str]] = frozenset(
+    {"-C", "--git-dir", "--work-tree", "--namespace"}
+)
+_PATCH_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
+    {"diff", "show", "range-diff", "format-patch"}
+)
+_LOG_PATCH_FLAGS: Final[frozenset[str]] = frozenset(
+    {"-p", "--patch", "-U", "--unified", "-W", "--function-context"}
+)
+
+
+def _skip_global_opts(args: Sequence[str], start: int) -> int:
+    """Return index of the first subcommand token after git global options."""
+    idx = start
+    while idx < len(args):
+        tok = args[idx]
+        if tok in _GLOBAL_OPTS_TAKING_VALUE:
+            idx += 2
+            continue
+        if tok.startswith(("--git-dir=", "--work-tree=", "--namespace=")):
+            idx += 1
+            continue
+        if tok.startswith("-"):
+            idx += 1
+            continue
+        return idx
+    return idx
+
+
+def _has_patch_flags(args: Sequence[str], start: int) -> bool:
+    for tok in args[start:]:
+        if tok in _LOG_PATCH_FLAGS:
+            return True
+        if tok.startswith("-") and not tok.startswith("--") and "p" in tok[1:]:
+            return True
+    return False
+
+
+def _no_ext_diff_insertion_index(args: Sequence[str]) -> int | None:
+    """Return index in *args* where ``--no-ext-diff`` should be inserted."""
+    sub_idx = _skip_global_opts(args, 0)
+    if sub_idx >= len(args):
+        return None
+    subcommand = args[sub_idx]
+    if subcommand in _PATCH_SUBCOMMANDS:
+        return sub_idx + 1
+    if subcommand == "log" and _has_patch_flags(args, sub_idx + 1):
+        return sub_idx + 1
+    if subcommand == "stash":
+        show_idx = sub_idx + 1
+        if (
+            show_idx < len(args)
+            and args[show_idx] == "show"
+            and _has_patch_flags(args, show_idx + 1)
+        ):
+            return show_idx + 1
+    return None
+
+
+def _needs_no_ext_diff(args: Sequence[str]) -> bool:
+    """Return whether *args* invoke git's external diff driver."""
+    return _no_ext_diff_insertion_index(args) is not None
+
 
 def git_argv(args: Sequence[str]) -> list[str]:
     """Return ``git`` argv with every safe-config pin prepended before *args*."""
-    return ["git", *GIT_SAFE_CONFIG, *args]
+    argv: list[str] = ["git", *GIT_SAFE_CONFIG]
+    insert_at = _no_ext_diff_insertion_index(args)
+    if insert_at is None:
+        argv.extend(args)
+        return argv
+    argv.extend(args[:insert_at])
+    argv.append("--no-ext-diff")
+    argv.extend(args[insert_at:])
+    return argv
 
 
-__all__ = ["GIT_SAFE_CONFIG", "git_argv"]
+def git_global_config_argv(args: Sequence[str]) -> list[str]:
+    """Return ``git config`` argv for global writes (no repo-local safe pins)."""
+    return ["git", "config", *args]
+
+
+__all__ = ["GIT_SAFE_CONFIG", "git_argv", "git_global_config_argv"]

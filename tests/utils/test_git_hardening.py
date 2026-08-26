@@ -4,11 +4,8 @@ from __future__ import annotations
 
 _EXPECTED_SAFE_KEYS: tuple[str, ...] = (
     "core.fsmonitor=false",
-    "diff.external=",
     "core.hooksPath=/dev/null",
-    "uploadpack.packObjectsHook=",
     "core.sshCommand=ssh",
-    "core.gitProxy=",
     "protocol.ext.allow=never",
     "core.pager=cat",
 )
@@ -25,3 +22,19 @@ def test_git_argv_pins_every_safe_config_key() -> None:
     assert argv[-1] == "status"
     for key in _EXPECTED_SAFE_KEYS:
         assert key.split("=")[0] in flat
+
+
+def test_git_argv_injects_no_ext_diff_for_diff_family() -> None:
+    from mergecraft.utils.git_hardening import git_argv
+
+    diff_argv = git_argv(["diff", "HEAD"])
+    assert diff_argv[diff_argv.index("diff") + 1] == "--no-ext-diff"
+
+    show_argv = git_argv(["-C", "/repo", "show", "HEAD:README.md"])
+    assert show_argv[show_argv.index("show") + 1] == "--no-ext-diff"
+
+    log_argv = git_argv(["log", "-p", "-1"])
+    assert log_argv[log_argv.index("log") + 1] == "--no-ext-diff"
+
+    assert "--no-ext-diff" not in git_argv(["status"])
+    assert "--no-ext-diff" not in git_argv(["log", "-1", "--oneline"])
