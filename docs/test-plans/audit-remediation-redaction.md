@@ -86,6 +86,10 @@ matching impl PR lands.
 | `test_unrelated_resolution_is_unaffected_by_a_guarded_request` | MCB-18 | Unpinned hosts unchanged |
 | `test_host_header_and_sni_survive_ip_pinning` | D12 | `pinned_request_metadata` preserves hostname |
 
+**Escalation (BR6 impl):** `tests/analyzers/test_cov_provision_paths.py::scripted_http`
+now mocks `provision.httpx.Client` + `MockTransport` (not legacy `httpx.stream` /
+`pin_host_resolution` hooks).
+
 ### BR1.6 — audit log and ports (BR7: MCB-21, MCB-27)
 
 | Test | Finding | Contract |

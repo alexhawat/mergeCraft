@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Egress DNS pinning no longer replaces the process-global ``socket.getaddrinfo``;
+  guarded downloads use a per-client ``httpx`` transport that connects to
+  validated IPs while preserving hostname ``Host`` headers and TLS SNI (MCB-18)
+
 ### Changed
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
