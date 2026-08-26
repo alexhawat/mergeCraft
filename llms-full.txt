@@ -2372,8 +2372,21 @@ It takes the same `--scope local|github|both` as `auth` and
 `mergecraft tracing logfire disable`, and the `auth` subcommand names work as
 labels (`provider disable codex` is `provider disable openai`). Both credential
 shapes are cleared — the flat secret the workflow names (`NOUS_API_KEY`) and the
-indexed registry key (`LLM_PROVIDER_<N>_API_KEY`) — so a provider is off however
-it was authenticated. A secret that is already absent counts as success.
+indexed registry key (`LLM_PROVIDER_<N>_API_KEY`), and every alias a provider
+recognises (`google` clears `GEMINI_API_KEY` *and*
+`GOOGLE_GENERATIVE_AI_API_KEY`) — so a provider is off however it was
+authenticated.
+
+"Disabled" is all-or-nothing. A provider stays usable through **any** of its
+credentials, so the command reports success only when every credential in the
+requested scope reaches the absent-or-blank state; if one cannot be cleared it
+exits non-zero and names what is left. A credential that was already absent
+counts as cleared.
+
+`--cwd` selects the repository the command acts on — both the `.env` it blanks
+and the `origin` whose Actions secrets it deletes — so it is safe to disable a
+provider in a repository you are not standing in. `MERGECRAFT_ENV`, when set,
+still names the `.env` explicitly.
 
 Disable clears **credentials**, not registration: the `providers:` row and its
 `LLM_PROVIDER_<N>` label survive, so `provider enable` re-authenticates the same

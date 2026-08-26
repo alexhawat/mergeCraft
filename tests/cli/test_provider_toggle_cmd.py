@@ -50,22 +50,39 @@ def _toggle() -> Any:
         pytest.fail(f"{TOGGLE_MODULE} is not importable: {exc}")
 
 
-def _capture_secret_delete(monkeypatch: MonkeyPatch, *, ok: bool = True) -> list[str]:
-    """Record ``_delete_gh_secret`` calls without shelling out to ``gh``."""
-    deleted: list[str] = []
+def _capture_secret_delete(
+    monkeypatch: MonkeyPatch,
+    *,
+    ok: bool = True,
+    fail_names: frozenset[str] = frozenset(),
+    slug: str = "acme/widgets",
+) -> list[tuple[str, str]]:
+    """Record ``_delete_gh_secret`` calls without shelling out to ``gh``.
+
+    Returns ``(secret_name, repo_slug)`` pairs so a test can assert *which*
+    repository was targeted, not merely that a delete happened. *fail_names*
+    makes individual keys fail, for mixed-outcome cases.
+    """
+    deleted: list[tuple[str, str]] = []
 
     def _recorder(*, name: str, repo_slug: str) -> bool:
-        deleted.append(name)
-        return ok
+        deleted.append((name, repo_slug))
+        return False if name in fail_names else ok
 
     # ``provider_toggle`` imports the helper inside the function body, so the
     # patch lands on the defining module where that late lookup resolves.
     monkeypatch.setattr("mergecraft.cli.tracing_logfire_cmd._delete_gh_secret", _recorder)
+    # The slug resolver is ``provider_toggle``'s own, and is cwd-anchored; stub
+    # it so tests need no real git remote.
     monkeypatch.setattr(
-        "mergecraft.cli.tracing_logfire_cmd._parse_repo_slug",
-        lambda: "acme/widgets",
+        "mergecraft.cli.provider_toggle.resolve_repo_slug",
+        lambda _cwd: slug,
     )
     return deleted
+
+
+def _deleted_names(calls: list[tuple[str, str]]) -> list[str]:
+    return [name for name, _slug in calls]
 
 
 def _seed_repo(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -150,8 +167,8 @@ def test_disable_github_deletes_the_actions_secret(
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "NOUS_API_KEY" in deleted
-    assert "LLM_PROVIDER_3_API_KEY" in deleted
+    assert "NOUS_API_KEY" in _deleted_names(deleted)
+    assert "LLM_PROVIDER_3_API_KEY" in _deleted_names(deleted)
 
 
 def test_disable_github_leaves_the_local_env_untouched(
@@ -201,7 +218,8 @@ def test_disable_bails_when_every_secret_delete_fails(
     )
 
     assert result.exit_code != 0
-    assert "nothing was cleared" in (result.stdout + result.stderr)
+    collapsed = " ".join((result.stdout + result.stderr).split())
+    assert "is NOT disabled" in collapsed
 
 
 # ── disable: local scope ─────────────────────────────────────────────────────
@@ -216,8 +234,8 @@ def test_disable_local_blanks_the_env_entries(tmp_path: Path, monkeypatch: Monke
         {"NOUS_API_KEY": "local-key", "LLM_PROVIDER_3_API_KEY": "indexed-key"},
     )
     monkeypatch.setattr(
-        "mergecraft.cli.tracing_logfire_cmd._parse_repo_slug",
-        lambda: pytest.fail("must not resolve a repo under --scope local"),
+        "mergecraft.cli.provider_toggle.resolve_repo_slug",
+        lambda _cwd: pytest.fail("must not resolve a repo under --scope local"),
     )
 
     result = runner.invoke(
@@ -258,7 +276,7 @@ def test_disable_both_clears_local_and_github(tmp_path: Path, monkeypatch: Monke
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "NOUS_API_KEY" in deleted
+    assert "NOUS_API_KEY" in _deleted_names(deleted)
     assert read_env_file(tmp_path)["NOUS_API_KEY"] == ""
 
 
@@ -375,3 +393,203 @@ def test_disable_then_enable_reuses_the_same_env_index(
 
     assert result.exit_code == 0, result.stdout + result.stderr
     assert seen == [3]
+
+
+# ── regressions: destructive targets follow --cwd, not the process cwd ───────
+
+
+def _init_git_repo(path: Path, *, origin: str) -> None:
+    """Create a real git repo at *path* with an ``origin`` remote."""
+    import subprocess
+
+    path.mkdir(parents=True, exist_ok=True)
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "remote", "add", "origin", origin],
+    ):
+        subprocess.run(argv, cwd=path, check=True, capture_output=True)
+
+
+def test_local_disable_targets_the_cwd_repo_not_the_process_cwd(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``--cwd`` selects the registry, so it must select the ``.env`` too.
+
+    Regression: resolving the local target from the *process* working directory
+    read the registry from one repository and blanked the ``.env`` of another —
+    reporting a provider disabled in a repo the command never touched.
+    """
+    target = tmp_path / "target-repo"
+    current = tmp_path / "current-repo"
+    _init_git_repo(target, origin="git@github.com:acme/target.git")
+    _init_git_repo(current, origin="git@github.com:acme/current.git")
+    scaffold_mergecraft_home(target)
+    write_provider_entry(target, label="nous", env_index=3)
+    (target / ".env").write_text("NOUS_API_KEY=target-key\n", encoding="utf-8")
+    (current / ".env").write_text("NOUS_API_KEY=current-key\n", encoding="utf-8")
+
+    # MERGECRAFT_ENV must be unset, or it would name the target unambiguously
+    # and the bug under test could not appear.
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.chdir(current)
+
+    result = runner.invoke(
+        app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(target)]
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert read_env_file(target)["NOUS_API_KEY"] == ""
+    # The repository the operator merely happened to stand in is untouched.
+    assert read_env_file(current)["NOUS_API_KEY"] == "current-key"
+
+
+def test_github_disable_targets_the_cwd_repos_origin(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The Actions secrets deleted must belong to the ``--cwd`` repository."""
+    target = tmp_path / "target-repo"
+    current = tmp_path / "current-repo"
+    _init_git_repo(target, origin="git@github.com:acme/target.git")
+    _init_git_repo(current, origin="git@github.com:acme/current.git")
+    scaffold_mergecraft_home(target)
+    write_provider_entry(target, label="nous", env_index=3)
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.chdir(current)
+
+    deleted: list[tuple[str, str]] = []
+
+    def _recorder(*, name: str, repo_slug: str) -> bool:
+        deleted.append((name, repo_slug))
+        return True
+
+    # Note: ``resolve_repo_slug`` is deliberately NOT stubbed here — the whole
+    # point is that it reads the remote of the ``--cwd`` repository.
+    monkeypatch.setattr("mergecraft.cli.tracing_logfire_cmd._delete_gh_secret", _recorder)
+
+    result = runner.invoke(
+        app, ["provider", "disable", "nous", "--scope", "github", "--cwd", str(target)]
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert deleted, "no secret delete was attempted"
+    assert {slug for _name, slug in deleted} == {"acme/target"}
+
+
+def test_resolve_repo_slug_reads_the_requested_repository(tmp_path: Path) -> None:
+    """Unit-level: the slug comes from *cwd*'s origin remote."""
+    repo = tmp_path / "somewhere"
+    _init_git_repo(repo, origin="https://github.com/acme/widgets.git")
+
+    assert _toggle().resolve_repo_slug(repo) == "acme/widgets"
+
+
+# ── regressions: partial failure is not "disabled" ───────────────────────────
+
+
+def test_partial_secret_delete_failure_is_not_reported_as_disabled(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A surviving credential means the provider is not disabled.
+
+    Regression: ``openai`` carries both ``CODEX_AUTH_JSON`` and
+    ``OPENAI_API_KEY``. An absent ``CODEX_AUTH_JSON`` counts as deleted, which
+    was enough to print "disabled" while a live ``OPENAI_API_KEY`` survived a
+    failed deletion — the provider stayed fully usable in CI.
+    """
+    _seed_repo(tmp_path, monkeypatch)
+    write_provider_entry(tmp_path, label="openai", env_index=1, auth_kind="device_code")
+    _capture_secret_delete(monkeypatch, fail_names=frozenset({"OPENAI_API_KEY"}))
+
+    result = runner.invoke(
+        app, ["provider", "disable", "openai", "--scope", "github", "--cwd", str(tmp_path)]
+    )
+
+    assert result.exit_code != 0
+    collapsed = " ".join((result.stdout + result.stderr).split())
+    assert "is NOT disabled" in collapsed
+    assert "OPENAI_API_KEY" in collapsed
+    assert "disabled." not in collapsed.replace("is NOT disabled", "")
+
+
+def test_mixed_scope_failure_bails_even_when_the_other_half_succeeded(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``--scope both`` with a good local write and a failed delete still bails."""
+    _seed_repo(tmp_path, monkeypatch)
+    write_provider_entry(tmp_path, label="nous", env_index=3)
+    _write_env(tmp_path, {"NOUS_API_KEY": "local-key"})
+    _capture_secret_delete(monkeypatch, ok=False)
+
+    result = runner.invoke(
+        app, ["provider", "disable", "nous", "--scope", "both", "--cwd", str(tmp_path)]
+    )
+
+    assert result.exit_code != 0
+    # The local half still happened — the command is not transactional, and the
+    # error names what is left rather than pretending nothing was cleared.
+    assert read_env_file(tmp_path)["NOUS_API_KEY"] == ""
+
+
+def test_local_partial_failure_bails(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """One unwritable ``.env`` key is enough to withhold the disabled claim."""
+    _seed_repo(tmp_path, monkeypatch)
+    write_provider_entry(tmp_path, label="nous", env_index=3)
+    _write_env(tmp_path, {"NOUS_API_KEY": "k", "LLM_PROVIDER_3_API_KEY": "k"})
+
+    real_write = importlib.import_module("mergecraft.cli.auth_cmd")._write_env_value
+
+    def _flaky(env_path: Path, key: str, value: str) -> bool:
+        if key == "LLM_PROVIDER_3_API_KEY":
+            return False
+        return bool(real_write(env_path, key, value))
+
+    monkeypatch.setattr("mergecraft.cli.auth_cmd._write_env_value", _flaky)
+
+    result = runner.invoke(
+        app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(tmp_path)]
+    )
+
+    assert result.exit_code != 0
+    collapsed = " ".join((result.stdout + result.stderr).split())
+    assert "LLM_PROVIDER_3_API_KEY" in collapsed
+
+
+def test_all_keys_cleared_still_reports_disabled(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """The tightened check must not withhold success from the happy path."""
+    _seed_repo(tmp_path, monkeypatch)
+    write_provider_entry(tmp_path, label="openai", env_index=1, auth_kind="device_code")
+    _capture_secret_delete(monkeypatch)
+
+    result = runner.invoke(
+        app, ["provider", "disable", "openai", "--scope", "github", "--cwd", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "disabled" in " ".join((result.stdout + result.stderr).split())
+
+
+# ── regression: Google's documented API-key alias ────────────────────────────
+
+
+def test_google_clears_its_documented_api_key_alias() -> None:
+    """``GOOGLE_GENERATIVE_AI_API_KEY`` authenticates Google just as well.
+
+    Regression: clearing only ``GEMINI_API_KEY`` reported the provider disabled
+    while the alias kept it authenticated. ``models.py`` lists both as Google's
+    ``env_vars`` and ``docs/authentication.md`` documents the alias.
+    """
+    resolved = _toggle().resolve_provider_secrets("google", None)
+
+    assert set(resolved.github) == {"GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"}
+
+
+def test_google_alias_matches_the_provider_catalog() -> None:
+    """The disable map must not drift from ``models.PROVIDERS``' ``env_vars``."""
+    from mergecraft.models import PROVIDERS
+
+    catalog = set(PROVIDERS["google"].env_vars)
+    resolved = set(_toggle().resolve_provider_secrets("google", None).github)
+
+    assert catalog <= resolved, (
+        f"credentials in the catalog but never cleared: {catalog - resolved}"
+    )

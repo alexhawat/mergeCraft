@@ -21,10 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI stops using it, without hand-editing secrets or workflow YAML. Honours
   `--scope local|github|both` like `tracing logfire disable`, deletes both the
   flat Actions secret (`NOUS_API_KEY`) and the indexed registry key
-  (`LLM_PROVIDER_<N>_API_KEY`), treats an already-absent secret as success, and
-  leaves the `providers:` registration intact so `provider enable` re-uses the
-  same env index. `auth` names (`codex`, `claude`, `gemini`) resolve onto their
-  registry labels (#520)
+  (`LLM_PROVIDER_<N>_API_KEY`) plus every alias a provider recognises, treats an
+  already-absent secret as cleared, and leaves the `providers:` registration
+  intact so `provider enable` re-uses the same env index. Reporting is
+  all-or-nothing: one credential that cannot be cleared fails the command rather
+  than claiming the provider is off. `--cwd` selects both destructive targets
+  (the `.env` and the `origin` repository). `auth` names (`codex`, `claude`,
+  `gemini`) resolve onto their registry labels (#520)
 - `mergecraft provider enable <label>` names the authenticate half of that
   toggle; it delegates to the existing `provider auth` flow (#520)
 - Public MCP product profile: ``mergecraft mcp serve --role public`` mounts six

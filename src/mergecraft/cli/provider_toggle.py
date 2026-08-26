@@ -17,9 +17,15 @@ is already 1200+ lines and is claimed by concurrent work, so the toggle keeps
 its own file and is attached to the existing ``provider`` Typer app by
 :func:`register`.
 
+Every destructive target is resolved from ``--cwd``, not from the process
+working directory, so the repository whose registry is read is the same one
+whose ``.env`` is blanked and whose Actions secrets are deleted.
+
 Exports:
     ProviderSecrets -- the Actions-secret and ``.env`` key names for one label.
     resolve_provider_secrets -- map a provider label to those names.
+    resolve_local_env_path -- the ``.env`` a given ``--cwd`` may blank.
+    resolve_repo_slug -- the ``owner/repo`` a given ``--cwd`` may delete from.
     register -- attach ``enable``/``disable`` to the ``provider`` Typer app.
 """
 
@@ -51,7 +57,11 @@ if TYPE_CHECKING:
 _FLAT_SECRETS_BY_LABEL: dict[str, tuple[str, ...]] = {
     "openai": ("CODEX_AUTH_JSON", "OPENAI_API_KEY"),
     "anthropic": ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"),
-    "google": ("GEMINI_API_KEY",),
+    # Both names are recognised credentials for Google: ``models.py`` lists
+    # them as that provider's ``env_vars`` and ``docs/authentication.md``
+    # documents the alias. Clearing only ``GEMINI_API_KEY`` would report the
+    # provider disabled while it stayed authenticated through the alias.
+    "google": ("GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"),
     "cursor": ("CURSOR_API_KEY",),
     "deepseek": ("DEEPSEEK_API_KEY",),
     "nous": ("NOUS_API_KEY",),
@@ -165,6 +175,65 @@ def _delete_github(secrets: ProviderSecrets, repo_slug: str) -> tuple[list[str],
     return deleted, failed
 
 
+def resolve_local_env_path(cwd: Path) -> Path:
+    """Return the ``.env`` this invocation may blank, anchored on *cwd*.
+
+    ``--cwd`` selects which repository the command acts on, so the destructive
+    local target must follow it. Anchoring on the *process* working directory
+    instead would read the registry from one repository and blank the ``.env``
+    of another — the operator would be told a provider was disabled in a repo
+    the command never touched.
+
+    ``MERGECRAFT_ENV`` still wins, matching
+    :func:`mergecraft.cli.auth_cmd._local_env_path`: an operator who has pinned
+    an explicit env file has named the target unambiguously.
+    """
+    import os
+
+    from mergecraft.utils.workspace import git_repo_root
+
+    configured = os.environ.get("MERGECRAFT_ENV")
+    if configured:
+        return Path(configured).resolve()
+
+    resolved = cwd.resolve()
+    root = git_repo_root(str(resolved))
+    if root is None:
+        cli_bail(
+            f"could not locate a git repository root at {resolved} — run from "
+            "inside the repository, pass --cwd, or point MERGECRAFT_ENV at the "
+            ".env you want cleared."
+        )
+    return root / ".env"
+
+
+def resolve_repo_slug(cwd: Path) -> str:
+    """Return ``owner/repo`` for the origin remote of the repository at *cwd*.
+
+    The GitHub half of the same problem as :func:`resolve_local_env_path`:
+    ``gh secret delete`` must target the repository ``--cwd`` names, not
+    whichever repository the operator happens to be standing in.
+    """
+    import re
+    import subprocess
+
+    resolved = cwd.resolve()
+    try:
+        url = subprocess.check_output(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(resolved),
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).strip()
+    except (subprocess.SubprocessError, OSError) as exc:
+        cli_bail(f"could not read the git origin remote at {resolved}: {exc}")
+    match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
+    if not match:
+        cli_bail(f"could not parse a github owner/repo from the remote at {resolved}: {url}")
+    return f"{match.group(1)}/{match.group(2)}"
+
+
 def _lookup_entry(label: str, cwd: Path) -> Mapping[str, Any] | None:
     """Return the ``providers:`` row for *label*, or ``None`` when unregistered."""
     from mergecraft.cli.provider_cmd import _config_path, load_provider_registry
@@ -212,8 +281,7 @@ def provider_disable_cmd(
     ``provider auth``, not of ``provider add``. Workflow YAML is never rewritten;
     the shipped cascade already no-ops a provider whose secret is absent.
     """
-    from mergecraft.cli.auth_cmd import _local_env_path, _normalise_scope
-    from mergecraft.cli.tracing_logfire_cmd import _parse_repo_slug
+    from mergecraft.cli.auth_cmd import _normalise_scope
 
     normalised = _require_label(label)
     _reject_logfire(normalised)
@@ -228,9 +296,16 @@ def provider_disable_cmd(
             "see registered labels."
         )
 
-    cleared_local: list[str] = []
+    # "Disabled" is an all-or-nothing claim about the provider, not about one
+    # key. A provider stays usable through ANY of its credentials, so a single
+    # surviving key means it is not disabled — reporting success because some
+    # *other* key was already absent would be the exact failure the operator
+    # asked this command to prevent. Every unresolved key is collected and the
+    # command bails naming them.
+    unresolved: list[str] = []
+
     if target in {"local", "both"}:
-        env_path = _local_env_path()
+        env_path = resolve_local_env_path(cwd)
         cleared_local, failed_local = _clear_local(secrets, env_path)
         if cleared_local:
             console.print(f"[green]cleared[/green] {', '.join(cleared_local)} in {env_path}")
@@ -239,11 +314,14 @@ def provider_disable_cmd(
                 f"[yellow]warning:[/yellow] could not clear "
                 f"{', '.join(failed_local)} in {env_path} — unset them manually."
             )
+            unresolved.extend(f"{key} (.env)" for key in failed_local)
 
-    deleted_github: list[str] = []
     if target in {"github", "both"}:
-        repo_slug = _parse_repo_slug()
-        console.print(f"deleting [cyan]{', '.join(secrets.github)}[/cyan] via gh secret delete...")
+        repo_slug = resolve_repo_slug(cwd)
+        console.print(
+            f"deleting [cyan]{', '.join(secrets.github)}[/cyan] via gh secret delete "
+            f"on [cyan]{repo_slug}[/cyan]..."
+        )
         deleted_github, failed_github = _delete_github(secrets, repo_slug)
         if deleted_github:
             console.print(
@@ -256,11 +334,14 @@ def provider_disable_cmd(
                 f"{', '.join(failed_github)} — remove them manually at:\n"
                 f"  https://github.com/{repo_slug}/settings/secrets/actions"
             )
+            unresolved.extend(f"{name} (Actions secret)" for name in failed_github)
 
-    if not cleared_local and not deleted_github:
+    if unresolved:
         cli_bail(
-            f"nothing was cleared for {secrets.label} — the requested scope failed. "
-            "retry with --scope local or --scope github to isolate the failure."
+            f"{secrets.label} is NOT disabled — {len(unresolved)} credential(s) "
+            f"could not be cleared: {', '.join(unresolved)}. The provider stays "
+            "usable through any one of them; clear the listed credentials and "
+            "re-run."
         )
 
     console.print(f"\n[bold]Provider {secrets.label} disabled.[/bold]")
@@ -315,5 +396,7 @@ __all__ = [
     "provider_disable_cmd",
     "provider_enable_cmd",
     "register",
+    "resolve_local_env_path",
     "resolve_provider_secrets",
+    "resolve_repo_slug",
 ]
