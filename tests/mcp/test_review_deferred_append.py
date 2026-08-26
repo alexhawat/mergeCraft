@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from tests.support.tool_context import github_client_from_ctx
+from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -45,7 +45,7 @@ class _RecordingGitHub(GitHubClient):
 
 @pytest.fixture
 def ctx(tmp_path: Path) -> ToolContext:
-    return ToolContext(
+    tool_ctx = ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
         payload=ResolvedPayload(event=PayloadEvent(trigger="unknown")),
@@ -58,6 +58,8 @@ def ctx(tmp_path: Path) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
     )
+    bind_review_publication_scope(tool_ctx)
+    return tool_ctx
 
 
 def _deferred_overflow_section(*, path: str, body: str) -> str:

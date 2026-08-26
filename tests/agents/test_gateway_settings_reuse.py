@@ -90,6 +90,36 @@ def test_registry_backed_and_legacy_resolution_are_unchanged(
     assert api_key == "k"
 
 
+def test_derived_gateway_cache_reloads_after_config_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.cli.support_provider_registry import (
+        bootstrap_nous_registry,
+        bootstrap_opencode_gateway,
+    )
+
+    from mergecraft.agents.opencode import build_custom_provider
+
+    TOKENHUB_BASE_URL = "https://tokenhub-intl.tencentcloudmaas.com/v1"
+    bootstrap_nous_registry(
+        tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash", api_key="nous-key"
+    )
+    assert build_custom_provider("nous/deepseek/deepseek-v4-flash") is not None
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="tokenhub",
+        url=TOKENHUB_BASE_URL,
+        model_id="hy3",
+        api_key="th-key",
+        env_index=2,
+    )
+    tokenhub = build_custom_provider("tokenhub/hy3")
+    assert tokenhub is not None
+    assert "tokenhub" in tokenhub
+
+
 def test_no_caller_signature_changed() -> None:
     """AST guard for D22 — opencode/codex call sites unchanged on trunk until AG9."""
     for rel in ("src/mergecraft/agents/opencode.py", "src/mergecraft/agents/codex.py"):

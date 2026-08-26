@@ -19,8 +19,8 @@ _RUN_SCOPE_SNAPSHOT: ContextVar[RepoSettingsSnapshot | None] = ContextVar(
     "mergecraft_run_scope_settings_snapshot",
     default=None,
 )
-_DERIVED_GATEWAY_SETTINGS: ContextVar[RepoSettings | None] = ContextVar(
-    "mergecraft_derived_gateway_settings",
+_DERIVED_GATEWAY_CACHE: ContextVar[RepoSettingsSnapshot | None] = ContextVar(
+    "mergecraft_derived_gateway_settings_cache",
     default=None,
 )
 
@@ -44,7 +44,7 @@ def config_yaml_hash(*, root: Path) -> str:
 
 def reset_gateway_settings_cache() -> None:
     """Clear derived gateway settings and run-scope snapshot ContextVar state."""
-    _DERIVED_GATEWAY_SETTINGS.set(None)
+    _DERIVED_GATEWAY_CACHE.set(None)
     _RUN_SCOPE_SNAPSHOT.set(None)
 
 
@@ -140,16 +140,26 @@ def repo_settings_for_gateway_resolvers(*, root: Path | None = None) -> RepoSett
         assert_config_unchanged(snapshot)
         return snapshot.settings
 
-    derived = _DERIVED_GATEWAY_SETTINGS.get()
-    if derived is not None:
-        return derived
-
     repo_root = (root or Path.cwd()).resolve()
+    derived = _DERIVED_GATEWAY_CACHE.get()
+    if (
+        derived is not None
+        and derived.repo_root == repo_root
+        and config_yaml_hash(root=repo_root) == derived.config_hash
+    ):
+        return derived.settings
+
     settings = load_repo_settings(
         root=repo_root,
         load_learnings_files=False,
     )
-    _DERIVED_GATEWAY_SETTINGS.set(settings)
+    _DERIVED_GATEWAY_CACHE.set(
+        RepoSettingsSnapshot(
+            settings=settings,
+            config_hash=config_yaml_hash(root=repo_root),
+            repo_root=repo_root,
+        )
+    )
     return settings
 
 
