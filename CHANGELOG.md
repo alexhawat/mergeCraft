@@ -84,6 +84,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
   `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
 
+### Security
+
+- Analyzer JSON and JSONL outputs are structurally redacted by key and value before
+  persist, so non-prefixed secrets in trufflehog-style payloads do not reach
+  prompts or `.mergecraft/analyzer-runs/`
+- Entropy-based secret redaction uses a length-relative threshold with benign-shape
+  exclusions for git SHAs, hex runs, and identifiers so legitimate code tokens in
+  logs are not mangled unnecessarily
+
 ### Fixed
 
 - `validate_http_url` rejects whitespace and control characters anywhere in a
