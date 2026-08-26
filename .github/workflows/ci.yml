@@ -141,6 +141,10 @@ jobs:
       # the static tier failed so the review still sees the tool's findings.
       - name: Emit ruff and mypy SARIF
         if: always() && matrix.python == '3.14'
+        env:
+          # Makefile bootstrap installs dev tools into .venv-dev (AG8); bare
+          # `uv run` would create a base-only .venv and fail to spawn ruff/mypy.
+          UV_PROJECT_ENVIRONMENT: .venv-dev
         run: |
           mkdir -p .sarif
           uv run ruff check src tests scripts --output-format sarif --output-file .sarif/ruff.sarif || true
@@ -199,6 +203,8 @@ jobs:
           make security
       - name: Convert bandit SARIF
         if: always() && matrix.python == '3.14'
+        env:
+          UV_PROJECT_ENVIRONMENT: .venv-dev
         run: uv run python scripts/native_output_to_sarif.py bandit .sarif/bandit.json .sarif/bandit.sarif
       - name: Upload bandit SARIF
         if: always() && matrix.python == '3.14'
