@@ -5,9 +5,8 @@ from __future__ import annotations
 
 def test_exactly_one_distinct_sentinel_across_redaction_surfaces() -> None:
     """MCB-30: tracing and analyzer redactors must emit one canonical sentinel."""
-    from mergecraft.redaction_sentinel import REDACTION_SENTINEL
-
     from mergecraft.analyzers.redact import redact_secrets
+    from mergecraft.redaction_sentinel import REDACTION_SENTINEL
     from mergecraft.tracing.redaction import REDACTED, redact_cli_argv, redact_url
 
     secret = "sk-br1-sentinel-canary-abcdefghijklmnop"
