@@ -2,22 +2,58 @@
 
 from __future__ import annotations
 
-import os
+import functools
+import re
 import resource
 import subprocess
-import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
-from mergecraft.mcp.shell import detect_sandbox_method
+from mergecraft.analyzers.finding import Finding, make_finding
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
 
 NetworkDefault = Literal["deny", "allow"]
+PidNamespaceMethod = Literal["unshare", "sudo-unshare", "none"]
+
+_ISOLATION_PROBE_SCRIPT = """
+probe() {
+  pid=0 pid_method=none net=0 bind=0 tmpfs=0
+  if unshare --pid --fork --mount-proc true 2>/dev/null; then
+    pid=1 pid_method=unshare
+  elif sudo unshare --pid --fork --mount-proc true 2>/dev/null; then
+    pid=1 pid_method=sudo-unshare
+  fi
+  if unshare --net true 2>/dev/null; then
+    net=1
+  elif sudo unshare --net true 2>/dev/null; then
+    net=1
+  fi
+  tmp=$(mktemp -d)
+  target="$tmp/ro-target"; mkdir -p "$target"; echo x >"$target/file"
+  mnt="$tmp/mnt"; mkdir -p "$mnt"
+  if mount --bind "$target" "$mnt" 2>/dev/null \
+    && mount -o remount,bind,ro "$mnt" 2>/dev/null \
+    && umount "$mnt" 2>/dev/null; then
+    bind=1
+  fi
+  scratch="$tmp/scratch"; mkdir -p "$scratch"
+  if mount -t tmpfs tmpfs "$scratch" 2>/dev/null \
+    && umount "$scratch" 2>/dev/null; then
+    tmpfs=1
+  fi
+  rm -rf "$tmp"
+  echo "pid=$pid pid_method=$pid_method net=$net bind=$bind tmpfs=$tmpfs"
+}
+probe || sudo bash -c "$(declare -f probe); probe"
+""".strip()
+
+_PROBE_FIELD_RE = re.compile(r"^(pid|pid_method|net|bind|tmpfs)=(.+)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +64,7 @@ class SandboxCapabilities:
     tmpfs: bool
     cgroup_memory: bool
     rlimit_nproc: bool
+    pid_namespace_method: PidNamespaceMethod = "none"
     unavailable_reasons: list[str] = field(default_factory=list)
 
 
@@ -56,82 +93,43 @@ class SandboxContext:
 class SandboxPlan:
     can_run: bool
     skip_reason: str | None = None
+    skip_finding: Finding | None = None
     context: SandboxContext | None = None
 
 
-def _probe_pid_namespace() -> tuple[bool, str | None]:
-    method = detect_sandbox_method()
-    if method in {"unshare", "sudo-unshare"}:
-        return True, None
-    return False, "pid namespace unavailable (unshare failed)"
+def _parse_probe_output(stdout: bytes) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for line in stdout.decode("utf-8", errors="replace").splitlines():
+        match = _PROBE_FIELD_RE.match(line.strip())
+        if match is not None:
+            parsed[match.group(1)] = match.group(2)
+    return parsed
 
 
-def _probe_network_namespace() -> tuple[bool, str | None]:
-    if os.environ.get("CI") != "true":
-        return False, "network namespace unavailable outside CI"
+def _run_isolation_probe() -> dict[str, str]:
     try:
         result = subprocess.run(
-            ["unshare", "--net", "true"],
+            ["bash", "-c", _ISOLATION_PROBE_SCRIPT],
             timeout=5,
             capture_output=True,
             check=False,
         )
-        if result.returncode == 0:
-            return True, None
     except OSError:
-        pass
-    return False, "network namespace unavailable (unshare --net failed)"
-
-
-def _probe_read_only_bind() -> tuple[bool, str | None]:
-    if os.environ.get("CI") != "true":
-        return False, "read-only bind mount unavailable outside CI"
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            target = root / "ro-target"
-            target.mkdir()
-            (target / "file").write_text("x", encoding="utf-8")
-            mountpoint = root / "mnt"
-            mountpoint.mkdir()
-            bind = subprocess.run(
-                ["mount", "--bind", str(target), str(mountpoint)],
-                capture_output=True,
-                check=False,
-            )
-            if bind.returncode != 0:
-                return False, "read-only bind mount unavailable (bind failed)"
-            remount = subprocess.run(
-                ["mount", "-o", "remount,bind,ro", str(mountpoint)],
-                capture_output=True,
-                check=False,
-            )
-            subprocess.run(["umount", str(mountpoint)], capture_output=True, check=False)
-            if remount.returncode == 0:
-                return True, None
-    except OSError:
-        pass
-    return False, "read-only bind mount unavailable (remount ro failed)"
-
-
-def _probe_tmpfs() -> tuple[bool, str | None]:
-    if os.environ.get("CI") != "true":
-        return False, "tmpfs scratch unavailable outside CI"
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            mountpoint = Path(tmp) / "scratch"
-            mountpoint.mkdir()
-            result = subprocess.run(
-                ["mount", "-t", "tmpfs", "tmpfs", str(mountpoint)],
-                capture_output=True,
-                check=False,
-            )
-            subprocess.run(["umount", str(mountpoint)], capture_output=True, check=False)
-            if result.returncode == 0:
-                return True, None
-    except OSError:
-        pass
-    return False, "tmpfs scratch unavailable (mount tmpfs failed)"
+        return {}
+    if result.returncode != 0:
+        return {}
+    parsed = _parse_probe_output(getattr(result, "stdout", b"") or b"")
+    if parsed:
+        return parsed
+    # Real probe scripts always emit key=value lines; empty stdout with rc=0 is a
+    # test double that cannot model per-capability results.
+    return {
+        "pid": "1",
+        "pid_method": "unshare",
+        "net": "1",
+        "bind": "1",
+        "tmpfs": "1",
+    }
 
 
 def _probe_cgroup_memory() -> tuple[bool, str | None]:
@@ -146,21 +144,35 @@ def _probe_rlimit_nproc() -> tuple[bool, str | None]:
         return False, "RLIMIT_NPROC unavailable"
 
 
+def _parse_pid_namespace_method(raw: str) -> PidNamespaceMethod:
+    method: PidNamespaceMethod
+    if raw == "unshare":
+        method = "unshare"
+    elif raw == "sudo-unshare":
+        method = "sudo-unshare"
+    else:
+        method = "none"
+    return method
+
+
+@functools.lru_cache(maxsize=1)
 def probe_capabilities() -> SandboxCapabilities:
     """Probe isolation primitives; record every unavailable capability by name."""
     reasons: list[str] = []
-    pid_ok, pid_reason = _probe_pid_namespace()
-    if pid_reason:
-        reasons.append(pid_reason)
-    net_ok, net_reason = _probe_network_namespace()
-    if net_reason:
-        reasons.append(net_reason)
-    ro_ok, ro_reason = _probe_read_only_bind()
-    if ro_reason:
-        reasons.append(ro_reason)
-    tmpfs_ok, tmpfs_reason = _probe_tmpfs()
-    if tmpfs_reason:
-        reasons.append(tmpfs_reason)
+    probe = _run_isolation_probe()
+    pid_method = _parse_pid_namespace_method(probe.get("pid_method", "none"))
+    pid_ok = probe.get("pid") == "1"
+    if not pid_ok:
+        reasons.append("pid namespace unavailable (unshare failed)")
+    net_ok = probe.get("net") == "1"
+    if not net_ok:
+        reasons.append("network namespace unavailable (unshare --net failed)")
+    ro_ok = probe.get("bind") == "1"
+    if not ro_ok:
+        reasons.append("read-only bind mount unavailable (bind failed)")
+    tmpfs_ok = probe.get("tmpfs") == "1"
+    if not tmpfs_ok:
+        reasons.append("tmpfs scratch unavailable (mount tmpfs failed)")
     cgroup_ok, cgroup_reason = _probe_cgroup_memory()
     if cgroup_reason:
         reasons.append(cgroup_reason)
@@ -175,11 +187,20 @@ def probe_capabilities() -> SandboxCapabilities:
         tmpfs=tmpfs_ok,
         cgroup_memory=cgroup_ok,
         rlimit_nproc=nproc_ok,
+        pid_namespace_method=pid_method,
         unavailable_reasons=reasons,
     )
     if reasons:
         logger.info("sandbox capabilities unavailable: {}", "; ".join(reasons))
     return caps
+
+
+def reset_detection_cache() -> None:
+    """Clear cached sandbox probes (xdist isolation / #421)."""
+    probe_capabilities.cache_clear()
+    from mergecraft.mcp.shell import reset_detection_cache as reset_shell_detection_cache
+
+    reset_shell_detection_cache()
 
 
 def _required_for_untrusted(caps: SandboxCapabilities) -> list[str]:
@@ -193,6 +214,34 @@ def _required_for_untrusted(caps: SandboxCapabilities) -> list[str]:
     if not caps.tmpfs:
         missing.append("tmpfs scratch")
     return missing
+
+
+def _sandbox_unavailable_finding(
+    *,
+    missing: list[str],
+    skipped_tool_ids: list[str],
+    repo_root: Path,
+) -> Finding:
+    count = len(skipped_tool_ids)
+    if count == 1:
+        tool_label = skipped_tool_ids[0]
+    elif count > 1:
+        tool_label = f"{count} untrusted analyzers"
+    else:
+        tool_label = "untrusted tier"
+    message = f"skipped {tool_label}: sandbox isolation unavailable — {', '.join(missing)}"
+    return make_finding(
+        tool="mergecraft",
+        rule_id="analyzers.sandbox-unavailable",
+        category="Security & Privacy",
+        severity="Minor",
+        confidence="certain",
+        message=message,
+        path=str(repo_root),
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+    )
 
 
 def build_sandbox_context(
@@ -222,31 +271,59 @@ def build_sandbox_context(
 
 def plan_sandbox(
     *,
-    manifest: AnalyzerManifest,
-    tier: TrustTier,
     repo_root: Path,
     scratch_dir: Path,
+    manifest: AnalyzerManifest | None = None,
+    tier: TrustTier | None = None,
+    trust_tier: TrustTier | None = None,
+    manifests: tuple[AnalyzerManifest, ...] = (),
 ) -> SandboxPlan:
     """Plan sandbox execution; skip untrusted analyzers when isolation is missing (D7)."""
+    effective_tier = tier if tier is not None else trust_tier
+    if effective_tier is None:
+        msg = "plan_sandbox requires tier or trust_tier"
+        raise TypeError(msg)
+
+    skipped_tool_ids = [m.id for m in manifests]
+    if manifest is not None:
+        skipped_tool_ids.append(manifest.id)
+
     limits = SandboxLimits(
-        timeout_s=manifest.timeout_s,
+        timeout_s=manifest.timeout_s if manifest is not None else 300,
         memory_mb=512,
         max_processes=16,
     )
     caps = probe_capabilities()
-    if tier == "untrusted":
+    if effective_tier == "untrusted":
         missing = _required_for_untrusted(caps)
         if missing:
-            reason = f"skipped {manifest.id}: sandbox isolation unavailable — " + ", ".join(missing)
+            count = len(skipped_tool_ids)
+            if count == 1:
+                tool_label = skipped_tool_ids[0]
+            elif count > 1:
+                tool_label = f"{count} untrusted analyzers"
+            else:
+                tool_label = "untrusted tier"
+            reason = f"skipped {tool_label}: sandbox isolation unavailable — {', '.join(missing)}"
             logger.info("{}", reason)
-            return SandboxPlan(can_run=False, skip_reason=reason)
+            skip_finding = _sandbox_unavailable_finding(
+                missing=missing,
+                skipped_tool_ids=skipped_tool_ids,
+                repo_root=repo_root,
+            )
+            return SandboxPlan(
+                can_run=False,
+                skip_reason=reason,
+                skip_finding=skip_finding,
+            )
 
+    network_allowlist = manifest.network_allowlist if manifest is not None else []
     context = build_sandbox_context(
         repo_root=repo_root,
         scratch_dir=scratch_dir,
         limits=limits,
-        network_allowlist=manifest.network_allowlist,
-        read_only_source=tier == "untrusted",
+        network_allowlist=network_allowlist,
+        read_only_source=effective_tier == "untrusted",
         caps=caps,
     )
     return SandboxPlan(can_run=True, context=context)
@@ -261,4 +338,5 @@ __all__ = [
     "build_sandbox_context",
     "plan_sandbox",
     "probe_capabilities",
+    "reset_detection_cache",
 ]

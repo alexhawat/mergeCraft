@@ -42,6 +42,9 @@ def reset_detection_cache() -> None:
     global _detected_sandbox, _detected_netns
     _detected_sandbox = None
     _detected_netns = None
+    from mergecraft.analyzers.sandbox import probe_capabilities
+
+    probe_capabilities.cache_clear()
 
 
 def get_sandbox_method() -> SandboxMethod:
@@ -52,34 +55,12 @@ def detect_sandbox_method() -> SandboxMethod:
     global _detected_sandbox
     if _detected_sandbox is not None:
         return _detected_sandbox
-    if os.environ.get("CI") != "true":
-        _detected_sandbox = "none"
-        logger.debug("sandbox disabled (CI !== true)")
-        return "none"
-    try:
-        result = subprocess.run(
-            ["unshare", "--pid", "--fork", "--mount-proc", "true"],
-            timeout=5,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            _detected_sandbox = "unshare"
-            return "unshare"
-    except Exception as exc:
-        logger.warning("unshare probe failed: {}", exc)
-    try:
-        result = subprocess.run(
-            ["sudo", "unshare", "--pid", "--fork", "--mount-proc", "true"],
-            timeout=5,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            _detected_sandbox = "sudo-unshare"
-            return "sudo-unshare"
-    except Exception as exc:
-        logger.warning("sudo-unshare probe failed: {}", exc)
+    from mergecraft.analyzers.sandbox import probe_capabilities
+
+    caps = probe_capabilities()
+    if caps.pid_namespace and caps.pid_namespace_method in {"unshare", "sudo-unshare"}:
+        _detected_sandbox = caps.pid_namespace_method
+        return _detected_sandbox
     _detected_sandbox = "none"
     logger.info("PID namespace isolation not available")
     return "none"
@@ -88,26 +69,15 @@ def detect_sandbox_method() -> SandboxMethod:
 def network_namespace_available() -> bool:
     """True when ``unshare --net`` works in this environment (W12.7 / #35).
 
-    Probed once and cached. Outside CI the probe is skipped (same policy as
-    PID namespaces) — callers treat that as unavailable and lean on credential
-    isolation instead.
+    Probed once and cached via :func:`mergecraft.analyzers.sandbox.probe_capabilities`.
     """
     global _detected_netns
     if _detected_netns is not None:
         return _detected_netns
-    if os.environ.get("CI") != "true":
-        _detected_netns = False
-        return False
-    try:
-        result = subprocess.run(
-            ["unshare", "--net", "true"],
-            timeout=5,
-            capture_output=True,
-            check=False,
-        )
-        _detected_netns = result.returncode == 0
-    except OSError:
-        _detected_netns = False
+    from mergecraft.analyzers.sandbox import probe_capabilities
+
+    caps = probe_capabilities()
+    _detected_netns = caps.network_namespace
     if not _detected_netns:
         logger.debug(
             "network namespace unavailable (unshare --net failed); "
@@ -276,6 +246,10 @@ def _git_readonly_bind_mounts() -> str:
     return "".join(parts)
 
 
+def _allow_unsandboxed_shell() -> bool:
+    return os.environ.get("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL") == "1"
+
+
 def _spawn_shell(
     command: str,
     *,
@@ -286,10 +260,10 @@ def _spawn_shell(
     isolate_network: bool = False,
 ) -> subprocess.Popen[bytes]:
     method = detect_sandbox_method()
-    if os.environ.get("CI") == "true" and method == "none":
+    if isolate_network and not network_namespace_available():
         msg = (
-            "pid namespace isolation is required in CI but unavailable "
-            "(both unshare and sudo unshare failed)"
+            "network namespace isolation is required but unavailable "
+            "(unshare --net and sudo unshare --net failed)"
         )
         raise RuntimeError(msg)
 
@@ -341,8 +315,14 @@ def _spawn_shell(
             stderr=stderr,
             start_new_session=True,
         )
+    if not _allow_unsandboxed_shell():
+        msg = (
+            "pid namespace isolation is unavailable and unsandboxed shell is "
+            "refused by default; set MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1 to override"
+        )
+        raise RuntimeError(msg)
     return subprocess.Popen(
-        ["bash", "-c", command],
+        ["bash", "-c", wrapped],
         cwd=cwd,
         env=env,
         stdout=stdout,

@@ -16,8 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binds every registered workspace root's ``.git`` read-only (MCB-01 / D3)
 - Linked-repo ``_rev_parse_commit`` rejects leading-dash revs, validates pinned SHA
   shape, and passes ``--end-of-options`` before the rev (MCB-33)
+- Sandbox capability probes run real isolation checks instead of gating on ``CI``;
+  untrusted MCP shell refuses unsandboxed spawn unless
+  ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1`` (MCB-07 / MCB-10)
+- Skipped untrusted analyzers emit a ``Minor`` finding
+  (``rule_id: analyzers.sandbox-unavailable``) naming missing isolation primitives
+  (MCB-09 / D7)
 
 ### Changed
+
+- ``probe_capabilities()`` is ``lru_cache``-backed; ``reset_detection_cache()`` clears
+  the probe cache for xdist isolation (MCB-35 / D13)
+- ``detect_sandbox_method()`` and ``network_namespace_available()`` delegate to the
+  cached capability probe with one unified privilege ladder (D5)
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
   Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
