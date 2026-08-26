@@ -202,10 +202,11 @@ def decide_approval(
       returns a :class:`mergecraft.evidence.packet.Decision` row with
       ``verdict`` / ``reason`` / ``decided_by``. The packet's existing
       ``self_assessment`` row is **advisory only**; if the packet carries an
-      explicit ``Decision``, that decision is returned verbatim (#41 hard rule —
-      the structural verdict is authoritative). Otherwise the same monotone
-      blocker logic runs against ``packet.findings`` and the result is wrapped
-      in a :class:`Decision`.
+      explicit ``Decision``, that row is honoured only when ``decided_by`` is
+      the trusted decider and the verdict is consistent with typed findings
+      (D9 / LR-1 — forged or permissive rows are refused). Otherwise the same
+      monotone blocker logic runs against ``packet.findings`` and the result is
+      wrapped in a :class:`Decision`.
 
     The decision is monotone in blockers:
 

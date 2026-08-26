@@ -1,4 +1,4 @@
-"""RED — gateway settings snapshot reuse (AG9 / issue #496)."""
+"""GREEN — gateway settings snapshot reuse (AG9 / issue #496)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ def _reset_gateway_settings_cache() -> None:
     reset_gateway_settings_cache()
 
 
-@pytest.mark.xfail(reason="green after AG9: gateway settings snapshot", strict=False)
 def test_resolve_gateway_endpoint_does_not_reload_per_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -45,7 +44,6 @@ def test_resolve_gateway_endpoint_does_not_reload_per_call(
     assert calls == 1
 
 
-@pytest.mark.xfail(reason="green after AG9: gateway settings snapshot", strict=False)
 def test_has_gateway_credentials_reads_the_run_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
 

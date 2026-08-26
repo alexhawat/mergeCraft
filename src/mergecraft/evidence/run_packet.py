@@ -13,7 +13,9 @@ here. Wiring a consumer is not a schema change, so
 ``PACKET_SCHEMA_VERSION`` is untouched (D7).
 
 Exports:
-    emit_run_packet: Build and write the packet for a completed run.
+    build_run_packet: Assemble the packet for a completed run (decision included).
+    prepare_run_packet: Assemble once with enforce-mode fail-closed fallback.
+    emit_run_packet: Write a pre-assembled packet; never rebuilds.
     resolve_packet_path: Resolve the stable on-disk destination.
 """
 
@@ -240,6 +242,35 @@ def _self_assessment(state: ToolState) -> dict[str, Any] | None:
     return {"would_approve": approval.would_approve, "sha": approval.sha}
 
 
+def _finalize_packet_with_gate(
+    packet: MergeEvidencePacket,
+    *,
+    ctx: ToolContext,
+    run_succeeded: bool,
+    decision_reason_suffix: str | None = None,
+) -> MergeEvidencePacket:
+    """Attach structural verdict and gate action to an assembled packet."""
+    from mergecraft.agents.gates import decide_action, decide_approval
+
+    gate_mode = _resolve_gate_mode(ctx)
+    gate_policy = _resolve_gate_policy(ctx)
+    decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
+    packet_with_decision = packet.model_copy(update={"decision": decision})
+    action = decide_action(packet_with_decision, mode=gate_mode, policy=gate_policy)
+    reason = decision.reason
+    if decision_reason_suffix:
+        reason = f"{reason}; {decision_reason_suffix}"
+    final_decision = decision.model_copy(
+        update={
+            "action": action.value,
+            "decided_by_action": "mergecraft.agents.gates.decide_action",
+            "mode": gate_mode,
+            "reason": reason,
+        }
+    )
+    return packet_with_decision.model_copy(update={"decision": final_decision})
+
+
 def build_run_packet(
     ctx: ToolContext,
     *,
@@ -255,7 +286,6 @@ def build_run_packet(
     evidence actually recorded, rather than of a parallel set of inputs.
     ``change_id`` defaults to the PR-derived identifier on ``ctx``.
     """
-    from mergecraft.agents.gates import decide_action, decide_approval
     from mergecraft.evidence.findings import load_run_findings
     from mergecraft.mcp.tool_state import primary_repo_state
 
@@ -314,29 +344,7 @@ def build_run_packet(
         mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
         dispatched_lens_ids=list(state.dispatched_lens_ids),
     )
-    decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
-    # W9 (#46): attach the structural verdict before ``decide_action`` so
-    # predicates such as ``low_risk_passing`` consult the decision row the
-    # gate actually recorded — never a parallel assembly or a second packet
-    # build (MCB-15 / D8).
-    packet_with_decision = packet.model_copy(update={"decision": decision})
-    # The decision row carries the closed action vocabulary and the mode the
-    # gate rendered it in. The action is computed from the packet's evidence —
-    # never re-derived from prose or a numeric score. ``mode`` is read from the
-    # typed settings and defaults to ``shadow`` (D12); the I/O shell applies
-    # the action when ``mode == "enforce"``, and the shadow recorder captures
-    # it otherwise.
-    gate_mode = _resolve_gate_mode(ctx)
-    gate_policy = _resolve_gate_policy(ctx)
-    action = decide_action(packet_with_decision, mode=gate_mode, policy=gate_policy)
-    final_decision = decision.model_copy(
-        update={
-            "action": action.value,
-            "decided_by_action": "mergecraft.agents.gates.decide_action",
-            "mode": gate_mode,
-        }
-    )
-    return packet_with_decision.model_copy(update={"decision": final_decision})
+    return _finalize_packet_with_gate(packet, ctx=ctx, run_succeeded=run_succeeded)
 
 
 def _agent_version() -> str:
@@ -428,13 +436,9 @@ def _fail_closed_assembly_packet(
     *,
     change_id: str,
     run_succeeded: bool,
-    gate_mode: str,
-    gate_policy: GateActionPolicy,
     reason: str,
 ) -> MergeEvidencePacket:
     """Return a neutral packet when assembly fails in ``enforce`` mode (MCB-17)."""
-    from mergecraft.agents.gates import decide_action, decide_approval
-
     state = ctx.tool_state
     executed_model = ctx.resolved_model or state.model or "(unresolved)"
     requested_model = state.requested_model or executed_model
@@ -462,18 +466,12 @@ def _fail_closed_assembly_packet(
         mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
         dispatched_lens_ids=list(state.dispatched_lens_ids),
     )
-    decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
-    packet_with_decision = packet.model_copy(update={"decision": decision})
-    action = decide_action(packet_with_decision, mode=gate_mode, policy=gate_policy)
-    final_decision = decision.model_copy(
-        update={
-            "action": action.value,
-            "decided_by_action": "mergecraft.agents.gates.decide_action",
-            "mode": gate_mode,
-            "reason": f"{decision.reason}; assembly failed — {reason}",
-        }
+    return _finalize_packet_with_gate(
+        packet,
+        ctx=ctx,
+        run_succeeded=run_succeeded,
+        decision_reason_suffix=f"assembly failed — {reason}",
     )
-    return packet_with_decision.model_copy(update={"decision": final_decision})
 
 
 def prepare_run_packet(
@@ -487,8 +485,6 @@ def prepare_run_packet(
     resolved = change_id or _change_id(ctx)
     if resolved is None:
         return None
-    gate_mode = _resolve_gate_mode(ctx)
-    gate_policy = _resolve_gate_policy(ctx)
     try:
         return build_run_packet(
             ctx,
@@ -496,15 +492,13 @@ def prepare_run_packet(
             run_succeeded=run_succeeded,
             extra_findings=extra_findings,
         )
-    except Exception as err:
+    except (KeyError, OSError, RuntimeError, ValueError) as err:
         logger.warning("evidence packet: assembly failed — {}", err)
-        if gate_mode == "enforce":
+        if _resolve_gate_mode(ctx) == "enforce":
             return _fail_closed_assembly_packet(
                 ctx,
                 change_id=resolved,
                 run_succeeded=run_succeeded,
-                gate_mode=gate_mode,
-                gate_policy=gate_policy,
                 reason=str(err),
             )
         return None

@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.config import load_repo_settings
 from mergecraft.findings.agent_adapter import (
     finding_for_publication_validation,
     normalize_agent_findings_via_pipeline,
@@ -303,14 +302,16 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
         state = primary_repo_state(ctx.tool_state)
         repo_root = Path(state.dir)
-        repo_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
+        from mergecraft.config.settings_snapshot import repo_settings_from_context
+
+        repo_settings = repo_settings_from_context(ctx)
 
         changed_paths: frozenset[str] | None = None
         if state.diff_path:
-            from mergecraft.mcp.checkout import changed_paths_in_diff
+            from mergecraft.evidence.run_packet import changed_paths_from_diff
 
             diff_text = Path(state.diff_path).read_text(encoding="utf-8")
-            changed_paths = frozenset(changed_paths_in_diff(diff_text))
+            changed_paths = frozenset(changed_paths_from_diff(diff_text))
 
         findings = [
             AgentFinding(

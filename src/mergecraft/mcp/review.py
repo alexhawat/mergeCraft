@@ -346,16 +346,22 @@ def _reject_mismatched_publication(submission: Any, params: dict[str, Any]) -> N
     raise ValueError(msg)
 
 
-def _resolve_bound_pull_number(ctx: ToolContext, params: dict[str, Any]) -> int:
+def _bound_pull_number(ctx: ToolContext) -> int | None:
+    """Return the PR number this review run is bound to, if any."""
     primary = primary_repo_state(ctx.tool_state)
     bound = primary.issue_number or ctx.tool_state.pr_number
+    return int(bound) if bound is not None else None
+
+
+def _resolve_bound_pull_number(ctx: ToolContext, params: dict[str, Any]) -> int:
     legacy = params.get("pull_number")
     if legacy is not None:
         return int(legacy)
+    bound = _bound_pull_number(ctx)
     if bound is None:
         msg = "no pull number bound to this review run"
         raise ValueError(msg)
-    return int(bound)
+    return bound
 
 
 def _resolve_bound_commit_id(ctx: ToolContext, params: dict[str, Any]) -> str | None:
@@ -372,7 +378,7 @@ def _assert_publication_scope(
     pull_number: int,
     commit_id: str | None = None,
 ) -> None:
-    bound = ctx.tool_state.pr_number
+    bound = _bound_pull_number(ctx)
     if bound is not None and pull_number != bound:
         msg = (
             f"create_pull_request_review targeted PR #{pull_number} but this run is "

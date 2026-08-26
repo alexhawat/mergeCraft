@@ -1,4 +1,4 @@
-"""RED — verifier citation path confinement (AG2 / MCB-20)."""
+"""GREEN — verifier citation path confinement (AG2 / MCB-20)."""
 
 from __future__ import annotations
 

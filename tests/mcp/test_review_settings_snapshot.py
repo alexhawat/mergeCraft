@@ -53,16 +53,22 @@ def test_publish_uses_the_presnapshot_settings(tmp_path: Path) -> None:
     snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
     assert snapshot.settings.gates.gate_action == "enforce"
 
+    ctx = _tool_context(tmp_path, snapshot=snapshot)
+    publish_mode = repo_settings_from_context(ctx).gates.gate_action
+    assert publish_mode == snapshot.settings.gates.gate_action == "enforce"
+
+
+def test_publish_refuses_when_config_mutates_after_snapshot(tmp_path: Path) -> None:
+    """A config mutation after snapshot time must not change publish/gate inputs."""
+    _write_config(tmp_path, "enforce")
+    snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
     (tmp_path / ".mergecraft" / "config.yaml").write_text(
         "gates:\n  gate_action: shadow\n",
         encoding="utf-8",
     )
-    after = load_repo_settings(root=tmp_path, load_learnings_files=False)
-    assert after.gates.gate_action == "shadow"
-
     ctx = _tool_context(tmp_path, snapshot=snapshot)
-    publish_mode = repo_settings_from_context(ctx).gates.gate_action
-    assert publish_mode == snapshot.settings.gates.gate_action == "enforce"
+    with pytest.raises(ValueError, match=r"config\.yaml changed"):
+        repo_settings_from_context(ctx)
 
 
 def test_invalid_config_mutation_keeps_terminal_behaviour_deterministic(

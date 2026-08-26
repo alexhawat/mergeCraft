@@ -143,9 +143,9 @@ def _findings_from_signals(signals: dict[str, Any]) -> list[Finding]:
 
 
 def _wire_findings(findings: list[Finding]) -> list[dict[str, Any]]:
-    from mergecraft.findings.agent_adapter import _finding_to_agent_draft
+    from mergecraft.findings.agent_adapter import finding_to_agent_draft
 
-    return [draft.model_dump() for draft in (_finding_to_agent_draft(f) for f in findings)]
+    return [draft.model_dump() for draft in (finding_to_agent_draft(f) for f in findings)]
 
 
 def _submission_findings_for_policy(

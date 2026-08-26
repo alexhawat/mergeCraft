@@ -51,6 +51,7 @@ from mergecraft.review_taxonomy import (
     finding_fingerprint,
 )
 from mergecraft.types import VERIFIER_AGENT_NAME
+from mergecraft.utils.path_confinement import resolve_confined_path
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -327,15 +328,18 @@ def plan_agent_verifications(
     for identity, finding in capped:
         cited: str | None = None
         if repo_root is not None and finding.path:
-            from mergecraft.utils.path_confinement import resolve_confined_path
-
             try:
                 cited = resolve_confined_path(
                     repo_root,
                     finding.path,
                     changed_paths=changed_paths,
                 )
-            except ValueError:
+            except ValueError as exc:
+                logger.info(
+                    "verifier path confinement rejected {} — {}",
+                    finding.path,
+                    exc,
+                )
                 cited = None
         dispatch.append(
             VerificationDispatch(

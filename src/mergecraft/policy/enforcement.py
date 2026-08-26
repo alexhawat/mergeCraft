@@ -43,7 +43,7 @@ def _evidence_cleared(violation: dict[str, Any]) -> bool:
     """Return whether declared evidence requirements are satisfied for this violation."""
     rule = _rule_from_violation(violation)
     if rule is None:
-        return True
+        return False
     if not _required_evidence_keys(rule):
         return True
     available = violation.get("available_evidence")

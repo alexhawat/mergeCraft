@@ -32,6 +32,16 @@ def _reset_process_tracer_cache() -> Iterator[None]:
     reset_process_tracer_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_run_scope_settings_snapshot() -> Iterator[None]:
+    """Clear run-scope settings ContextVar state so tests do not leak snapshots."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+
+    reset_gateway_settings_cache()
+    yield
+    reset_gateway_settings_cache()
+
+
 # ---------------------------------------------------------------------------
 # B — live opt-in once (CQ-2): skip ``live``-marked tests unless opted in
 # ---------------------------------------------------------------------------

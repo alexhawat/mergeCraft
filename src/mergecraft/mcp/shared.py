@@ -287,10 +287,6 @@ def execute(fn: ToolBody, tool_name: str | None = None) -> ToolHandler:
             prefix = f"[{tool_name}]" if tool_name else "tool"
             logger.info("{} error: {}", prefix, error)
             logger.debug("{} params: {}", prefix, params)
-            from mergecraft.mcp.review_scope import PublicationScopeError
-
-            if isinstance(error, PublicationScopeError):
-                raise
             return handle_tool_error(error)
 
     return _fn
