@@ -6,11 +6,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AG2: resolve_confined_path",
-    strict=False,
-)
-
 
 def _resolve(repo_root: str, untrusted: str, *, changed_paths: frozenset[str] | None = None) -> str:
     from mergecraft.utils.path_confinement import resolve_confined_path

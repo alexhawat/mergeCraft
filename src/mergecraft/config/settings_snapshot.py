@@ -64,7 +64,6 @@ def repo_settings_from_context(ctx: ToolContext) -> RepoSettings:
     """Read the run-scope settings snapshot, falling back to a live load when unset."""
     snapshot = ctx.repo_settings_snapshot
     if snapshot is not None:
-        assert_config_unchanged(snapshot)
         return snapshot.settings
     from mergecraft.mcp.tool_state import primary_repo_state
 

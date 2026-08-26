@@ -16,11 +16,6 @@ from mergecraft.utils.github import GitHubClient
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AG2: review scope binding",
-    strict=False,
-)
-
 
 class _RecordingGitHub(GitHubClient):
     """Capture review payloads and count SCM create_review calls."""
