@@ -251,14 +251,18 @@ def _git_readonly_bind_mounts() -> str:
         seen.add(key)
         escaped = key.replace("'", "'\\''")
         parts.append(
-            f"[ -e '{escaped}/.git' ] && mount --bind '{escaped}/.git' '{escaped}/.git' "
-            f"2>/dev/null && mount -o remount,bind,ro '{escaped}/.git' 2>/dev/null; "
+            f"if [ -e '{escaped}/.git' ]; then "
+            f"mount --bind '{escaped}/.git' '{escaped}/.git' || exit 1; "
+            f"mount -o remount,bind,ro '{escaped}/.git' || exit 1; "
+            "fi; "
         )
     if not parts:
         parts.append(
             "for _ws in .; do "
-            '[ -e "$_ws/.git" ] && mount --bind "$_ws/.git" "$_ws/.git" '
-            '2>/dev/null && mount -o remount,bind,ro "$_ws/.git" 2>/dev/null; '
+            'if [ -e "$_ws/.git" ]; then '
+            'mount --bind "$_ws/.git" "$_ws/.git" || exit 1; '
+            'mount -o remount,bind,ro "$_ws/.git" || exit 1; '
+            "fi; "
             "done; "
         )
     return "".join(parts)
@@ -268,7 +272,7 @@ def _git_binary_unavailable_fragment() -> str:
     """Shell fragment: hide every ``git`` binary from the untrusted namespace."""
     return (
         "for _g in $(command -v -a git 2>/dev/null); do "
-        'mount --bind /dev/null "$_g" 2>/dev/null || chmod 000 "$_g" 2>/dev/null; '
+        'mount --bind /dev/null "$_g" || exit 1; '
         "done; "
     )
 
