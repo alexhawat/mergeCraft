@@ -11,12 +11,11 @@ import pytest
 import mergecraft.utils.privilege as privilege
 from mergecraft.utils.privilege import prepare_workspace_for_agent
 
-pytestmark = pytest.mark.xfail(
+
+@pytest.mark.xfail(
     reason="green after AP2: prune .git from recursive chown",
     strict=False,
 )
-
-
 def test_prepare_workspace_does_not_chown_dot_git(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

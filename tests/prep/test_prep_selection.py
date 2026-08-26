@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from mergecraft.prep.python import _config_applies
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP7: uv.lock wins over requirements.txt",
-    strict=False,
-)
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_uv_lock_wins_over_a_stray_requirements_txt(tmp_path: Path) -> None:

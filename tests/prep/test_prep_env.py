@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP7: _prep_env allowlist",
-    strict=False,
-)
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_prep_env_is_a_real_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:

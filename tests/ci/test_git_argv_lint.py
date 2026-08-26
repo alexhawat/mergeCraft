@@ -6,13 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AP2: scripts/check_git_argv.py wired into make lint",
-    strict=False,
-)
-
 _REPO = Path(__file__).resolve().parents[2]
 _CHECKER = _REPO / "scripts" / "check_git_argv.py"
 

@@ -2,13 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AP2: utils/git_hardening.py lands",
-    strict=False,
-)
-
 _EXPECTED_SAFE_KEYS: tuple[str, ...] = (
     "core.fsmonitor=false",
     "diff.external=",

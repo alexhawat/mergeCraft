@@ -6,11 +6,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP7: dedicated prep-venv target",
-    strict=False,
-)
-
 
 @pytest.mark.asyncio
 async def test_install_targets_a_dedicated_virtualenv(tmp_path: Path) -> None:
@@ -20,7 +15,7 @@ async def test_install_targets_a_dedicated_virtualenv(tmp_path: Path) -> None:
     (tmp_path / "requirements.txt").write_text("httpx==0.28.1\n", encoding="utf-8")
     captured: list[list[str]] = []
 
-    async def _fake_run(cmd: str, args: list[str]) -> tuple[int, str]:
+    async def _fake_run(cmd: str, args: list[str], *, cwd: Path | None = None) -> tuple[int, str]:
         captured.append([cmd, *args])
         return 0, ""
 

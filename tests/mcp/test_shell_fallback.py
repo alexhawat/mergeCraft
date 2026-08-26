@@ -9,11 +9,6 @@ import pytest
 
 from mergecraft.mcp import shell as shell_mod
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP3: fail-closed unsandboxed shell + wrapped fallback",
-    strict=False,
-)
-
 
 def test_unsandboxed_shell_refuses_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", raising=False)
@@ -50,9 +45,10 @@ def test_allow_unsandboxed_env_var_overrides(monkeypatch: pytest.MonkeyPatch) ->
     assert captured, "override must allow fallback spawn"
 
 
-def test_fallback_branch_masks_container_sockets_when_it_runs(
+def test_fallback_branch_runs_raw_command_without_host_mounts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Unsandboxed opt-in must not run mount/chmod soup on the host (MCB-07 / M3)."""
     monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
     monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "none")
     captured: list[str] = []
@@ -71,4 +67,6 @@ def test_fallback_branch_masks_container_sockets_when_it_runs(
         isolate_network=False,
     )
     joined = captured[0]
-    assert "docker.sock" in joined or "mount --bind /dev/null" in joined
+    assert joined == "bash -c echo ok"
+    assert "docker.sock" not in joined
+    assert "mount --bind" not in joined

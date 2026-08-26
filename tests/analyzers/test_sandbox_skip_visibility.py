@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import pytest
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AP3: analyzers.sandbox-unavailable finding",
-    strict=False,
-)
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_skipped_untrusted_analyzers_emit_a_finding(monkeypatch: pytest.MonkeyPatch) -> None:

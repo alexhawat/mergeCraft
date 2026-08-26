@@ -6,11 +6,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP5: checkout/config integrity helper",
-    strict=False,
-)
-
 _OUTSIDE_CANARY = "MERGECRAFT_OUTSIDE_CHECKOUT_CANARY_AP1"
 _PROVIDER_CANARY = "MERGECRAFT_PROVIDER_KEY_CANARY_AP1"
 

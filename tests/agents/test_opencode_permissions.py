@@ -5,16 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from mergecraft.agents.opencode import build_security_config
 from mergecraft.agents.shared import AgentRunContext
 from mergecraft.mcp.tool_state import init_tool_state
-
-_XFAIL = pytest.mark.xfail(
-    reason="green after AP5: review-mode permission block in opencode.py",
-    strict=False,
-)
 
 
 def _ctx(tmp_path: Path) -> AgentRunContext:
@@ -37,27 +30,31 @@ def _permissions(tmp_path: Path) -> dict[str, object]:
     return perms
 
 
-@_XFAIL
 def test_review_mode_denies_webfetch(tmp_path: Path) -> None:
     assert _permissions(tmp_path).get("webfetch") == "deny"
 
 
-@_XFAIL
 def test_review_mode_denies_external_directory(tmp_path: Path) -> None:
     assert _permissions(tmp_path).get("external_directory") == "deny"
 
 
-@_XFAIL
 def test_review_mode_denies_edit(tmp_path: Path) -> None:
     assert _permissions(tmp_path).get("edit") == "deny"
 
 
-@_XFAIL
 def test_review_mode_read_is_allowlisted_to_the_checkout(tmp_path: Path) -> None:
     read = _permissions(tmp_path).get("read")
     assert read != {"*": "allow"}
     assert isinstance(read, dict)
     assert any(str(tmp_path) in str(v) or v == "allow" for v in read.values())
+
+
+def test_review_mode_denies_git_config_under_checkout(tmp_path: Path) -> None:
+    read = _permissions(tmp_path).get("read")
+    assert isinstance(read, dict)
+    checkout = tmp_path.resolve().as_posix()
+    assert read.get(f"{checkout}/.git/config") == "deny"
+    assert read.get(f"{checkout}/.git/**") == "deny"
 
 
 def test_bash_stays_denied(tmp_path: Path) -> None:

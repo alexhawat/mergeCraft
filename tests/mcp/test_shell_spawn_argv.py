@@ -10,11 +10,6 @@ import pytest
 from mergecraft.mcp import shell as shell_mod
 from mergecraft.utils.secrets import PROVIDER_KEY_ENV_VARS
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AP4: sudo --preserve-env by name",
-    strict=False,
-)
-
 _CANARY = "CANARY_PROVIDER_SECRET_VALUE_AP1"
 
 
@@ -42,7 +37,16 @@ def _capture_argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 @pytest.mark.parametrize(
     "isolate_network",
-    [False, True],
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.xfail(
+                reason="green after AP4: sudo --preserve-env by name",
+                strict=False,
+            ),
+        ),
+    ],
     ids=["pid_only", "pid_and_net"],
 )
 def test_no_provider_key_value_appears_in_any_branch_argv(
