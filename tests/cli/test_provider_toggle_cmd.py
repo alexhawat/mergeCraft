@@ -536,19 +536,29 @@ def test_local_partial_failure_bails(tmp_path: Path, monkeypatch: MonkeyPatch) -
     write_provider_entry(tmp_path, label="nous", env_index=3)
     _write_env(tmp_path, {"NOUS_API_KEY": "k", "LLM_PROVIDER_3_API_KEY": "k"})
 
-    real_write = importlib.import_module("mergecraft.cli.auth_cmd")._write_env_value
+    # Patch the module OBJECT, not the dotted string: the string form resolves
+    # by walking package attributes, which is not guaranteed to be the same
+    # object ``from mergecraft.cli.auth_cmd import _write_env_value`` reaches
+    # through ``sys.modules``. This mirrors tests/cli/test_auth_scope_cmd.py.
+    auth_cmd = importlib.import_module("mergecraft.cli.auth_cmd")
+    real_write = auth_cmd._write_env_value
+    calls: list[str] = []
 
     def _flaky(env_path: Path, key: str, value: str) -> bool:
+        calls.append(key)
         if key == "LLM_PROVIDER_3_API_KEY":
             return False
         return bool(real_write(env_path, key, value))
 
-    monkeypatch.setattr("mergecraft.cli.auth_cmd._write_env_value", _flaky)
+    monkeypatch.setattr(auth_cmd, "_write_env_value", _flaky)
 
     result = runner.invoke(
         app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(tmp_path)]
     )
 
+    # Guard the guard: if the stub is never reached the assertion below would
+    # be vacuous, and this test would silently stop testing anything.
+    assert "LLM_PROVIDER_3_API_KEY" in calls, f"stub never reached; calls={calls}"
     assert result.exit_code != 0
     collapsed = " ".join((result.stdout + result.stderr).split())
     assert "LLM_PROVIDER_3_API_KEY" in collapsed

@@ -749,6 +749,19 @@ def test_auth_logfire_subcommand_emits_no_syntax_warning(tmp_path: Path) -> None
     finally:
         if saved is not None:
             sys.modules["mergecraft.cli.auth_cmd"] = saved
+            # Re-importing also rebound ``auth_cmd`` on the PARENT PACKAGE to
+            # the throwaway module, and restoring ``sys.modules`` alone does
+            # not undo that. The two then disagree, and the disagreement is
+            # silent but load-bearing: ``monkeypatch.setattr`` with a dotted
+            # string resolves by walking package attributes (it would find the
+            # throwaway), while a function-level ``from mergecraft.cli.auth_cmd
+            # import X`` resolves through ``sys.modules`` (it finds the real
+            # one). Any later test patching ``mergecraft.cli.auth_cmd.<attr>``
+            # would patch an object nothing calls, and pass or fail by import
+            # order. Restore both.
+            import mergecraft.cli
+
+            mergecraft.cli.auth_cmd = saved
 
     bad = [w for w in captured if "invalid escape sequence" in str(w.message)]
     assert not bad, f"auth_logfire module emits SyntaxWarning(s): {[str(w.message) for w in bad]}"
