@@ -49,6 +49,14 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | `validate_predicate` | `tests/orchestrator/test_predicate_validation.py` |
 | `ReviewEngine.run` | `tests/review/test_engine_reuse.py` |
 
+## AG6 reconciliation (post-impl test fixes)
+
+| Fix | Rationale |
+| --- | --- |
+| Pre-AG1.5 orchestrator tests expect `dispatched` for agent/fan_out steps | AG6 executor honesty: non-executing dispatch steps record `dispatched`, not `ran`; decision/terminal steps remain `ran` |
+
+Affected files: `tests/orchestrator/test_pipeline_file.py`, `test_kinds.py`, `test_decision_nodes.py`, `test_pipeline_trust.py`.
+
 ## AG3 reconciliation (post-impl test fixes)
 
 | Fix | Rationale |
