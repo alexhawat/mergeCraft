@@ -30,6 +30,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
 
 if TYPE_CHECKING:
@@ -49,7 +50,7 @@ _CLI_SECRET_FLAG = re.compile(
 _CLI_SECRET_VALUE = re.compile(
     r"^(?:sk-|ghp_|gho_|ghu_|ghs_|ghr_|eyJ|AKIA|Bearer\s)", re.IGNORECASE
 )
-REDACTED = "<redacted>"  # canonical sentinel — H4 / W4: was three different sentinels
+REDACTED = REDACTION_SENTINEL
 
 # Inline URL redaction markers — T2 / PR D9. ``redact_url`` masks the
 # credential-bearing portion of a URL while preserving scheme/host/path so
@@ -235,7 +236,7 @@ def redact_tool_payload(payload: Any) -> str:
         >>> redact_tool_payload({"q": "hello"})
         '{"q": "hello"}'
         >>> redact_tool_payload("Bearer ghp_abcdefghijklmnopqrstuvwxyz1234")
-        'Bearer [REDACTED]'
+        'Bearer <redacted>'
     """
     if payload is None:
         return ""

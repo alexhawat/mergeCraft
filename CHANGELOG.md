@@ -75,6 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Analyzer and trace redactors now emit the shared ``<redacted>`` placeholder from
+  ``mergecraft.redaction_sentinel`` instead of the legacy ``[REDACTED]`` analyzer spelling
+  (MCB-30)
 - Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings` (RC1, RC2)
 - `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget` (RC3, D2)
 - Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
@@ -90,6 +93,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (MCB-02), applies deny-key scrubbing at every nested depth including
   list/tuple containers (MCB-03), and redacts Basic-auth material via the
   shared secret matcher
+- Analyzer JSON and JSONL outputs are structurally redacted by key and value before
+  persist, so non-prefixed secrets in trufflehog-style payloads do not reach
+  prompts or `.mergecraft/analyzer-runs/`
+- Entropy-based secret redaction uses a length-relative threshold with benign-shape
+  exclusions for git SHAs, hex runs, and identifiers so legitimate code tokens in
+  logs are not mangled unnecessarily
 
 ### Fixed
 
