@@ -5,17 +5,10 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AG6: executor does not lie about execution",
-    strict=False,
-)
 
 _TERMINAL_ONLY = """
 steps:

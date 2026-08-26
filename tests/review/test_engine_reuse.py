@@ -7,11 +7,20 @@ from typing import Any
 import pytest
 
 from mergecraft.review.engine import ReviewEngine
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AG7: engine timeout callback reset",
-    strict=False,
+from mergecraft.review.snapshot import (
+    CANONICAL_STAGE_NAMES,
+    ReviewSnapshot,
+    ReviewStageName,
+    ReviewStageSpec,
 )
+
+
+def _short_snapshot(*, review_ms: int = 10_000) -> ReviewSnapshot:
+    stages = tuple(
+        ReviewStageSpec(name=name, timeout_ms=review_ms if name == "review" else 10_000)
+        for name in CANONICAL_STAGE_NAMES
+    )
+    return ReviewSnapshot(entry="cli", stages=stages)
 
 
 class _StubDriver:
@@ -35,11 +44,11 @@ class _StubDriver:
 
 @pytest.mark.asyncio
 async def test_second_run_without_callback_does_not_call_the_first() -> None:
-    engine = ReviewEngine()
+    engine = ReviewEngine(snapshot=_short_snapshot())
     driver = _StubDriver()
     first_calls: list[int] = []
 
-    async def on_first_timeout() -> None:
+    def on_first_timeout(name: ReviewStageName) -> None:
         first_calls.append(1)
 
     await engine.run(driver, on_timeout=on_first_timeout)

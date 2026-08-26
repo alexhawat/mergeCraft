@@ -6,11 +6,6 @@ import pytest
 
 from mergecraft.orchestrator.pipeline import PipelineValidationError, validate_predicate
 
-pytestmark = pytest.mark.xfail(
-    reason="green after AG6: delete predicate blocklist",
-    strict=False,
-)
-
 
 def test_path_containing_subprocess_is_accepted() -> None:
     validate_predicate("changed_paths matches 'vendor/subprocess/run.py'")

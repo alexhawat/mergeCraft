@@ -2,14 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
-
-pytestmark = pytest.mark.xfail(
-    reason="green after AG6: complete severity taxonomy",
-    strict=False,
-)
 
 
 def _severity_rank(severity: str) -> int:
