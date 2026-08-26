@@ -35,20 +35,27 @@ def test_probe_does_not_consult_ci_env_var(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_all_probes_share_one_privilege_ladder(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every probe must share the same sudo/unshare fallback policy (D5)."""
-    monkeypatch.setenv("CI", "true")
-    seen: list[str] = []
+    monkeypatch.setenv("MERGECRAFT_PROBE_ALLOW_SUDO", "1")
 
     def _fake_run(cmd: list[str], **_kwargs: object) -> object:
-        seen.append(cmd[0])
-        return type("R", (), {"returncode": 1})()
+        script = cmd[-1]
+        assert "_run_probe 0" in script
+        assert 'if [ "$pid" = 0 ] && _sudo_allowed' in script
+        assert "probe ||" not in script
+        return type(
+            "R",
+            (),
+            {
+                "returncode": 0,
+                "stdout": b"pid=1 pid_method=sudo-unshare net=1 bind=1 tmpfs=1\n",
+            },
+        )()
 
     monkeypatch.setattr(sandbox_mod.subprocess, "run", _fake_run)
-    sandbox_mod.probe_capabilities()
-    sudo_hits = sum(1 for c in seen if c == "sudo")
-    unshare_hits = sum(1 for c in seen if c == "unshare")
-    assert sudo_hits == 0 or unshare_hits == 0 or sudo_hits > 0, (
-        "mixed privilege ladders across probes are forbidden"
-    )
+    caps = sandbox_mod.probe_capabilities()
+    assert caps.pid_namespace is True
+    assert caps.pid_namespace_method == "sudo-unshare"
+    assert caps.network_namespace is True
 
 
 def test_probe_capabilities_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -34,8 +34,24 @@ def test_review_mode_denies_webfetch(tmp_path: Path) -> None:
     assert _permissions(tmp_path).get("webfetch") == "deny"
 
 
-def test_review_mode_denies_external_directory(tmp_path: Path) -> None:
-    assert _permissions(tmp_path).get("external_directory") == "deny"
+def test_review_mode_external_directory_allowlists_checkout_and_evidence(
+    tmp_path: Path,
+) -> None:
+    from tests.agents.conftest import make_agent_run_context
+
+    from mergecraft.agents.opencode import _evidence_dir
+
+    ctx = make_agent_run_context(tmp_path, resolved_model="anthropic/claude-sonnet")
+    external = _permissions(tmp_path).get("external_directory")
+    assert isinstance(external, dict)
+    checkout = tmp_path.resolve().as_posix()
+    evidence = _evidence_dir(ctx).resolve().as_posix()
+    assert external.get("*") == "deny"
+    assert external.get(checkout) == "allow"
+    assert external.get(f"{checkout}/**") == "allow"
+    assert evidence != checkout
+    assert external.get(evidence) == "allow"
+    assert external.get(f"{evidence}/**") == "allow"
 
 
 def test_review_mode_denies_edit(tmp_path: Path) -> None:

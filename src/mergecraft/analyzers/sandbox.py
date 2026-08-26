@@ -26,16 +26,24 @@ _ISOLATION_PROBE_SCRIPT = """
 _sudo_allowed() {
   [ "${CI:-}" = true ] || [ "${MERGECRAFT_PROBE_ALLOW_SUDO:-}" = 1 ]
 }
-probe() {
-  pid=0 pid_method=none net=0 bind=0 tmpfs=0
-  if unshare --pid --fork --mount-proc true 2>/dev/null; then
-    pid=1 pid_method=unshare
-  elif _sudo_allowed && sudo unshare --pid --fork --mount-proc true 2>/dev/null; then
-    pid=1 pid_method=sudo-unshare
+_run_probe() {
+  local use_sudo=$1
+  local unshare_cmd=unshare
+  if [ "$use_sudo" = 1 ]; then
+    unshare_cmd="sudo unshare"
   fi
-  if unshare --net true 2>/dev/null; then
-    net=1
-  elif _sudo_allowed && sudo unshare --net true 2>/dev/null; then
+  pid=0 pid_method=none net=0 bind=0 tmpfs=0
+  if $unshare_cmd --pid --fork --mount-proc true 2>/dev/null; then
+    pid=1
+  fi
+  if [ "$pid" = 1 ]; then
+  if [ "$use_sudo" = 1 ]; then
+    pid_method=sudo-unshare
+  else
+    pid_method=unshare
+  fi
+  fi
+  if $unshare_cmd --net true 2>/dev/null; then
     net=1
   fi
   tmp=$(mktemp -d)
@@ -52,9 +60,12 @@ probe() {
     tmpfs=1
   fi
   rm -rf "$tmp"
-  echo "pid=$pid pid_method=$pid_method net=$net bind=$bind tmpfs=$tmpfs"
 }
-probe || { _sudo_allowed && sudo bash -c "$(declare -f _sudo_allowed); $(declare -f probe); probe"; }
+_run_probe 0
+if [ "$pid" = 0 ] && _sudo_allowed; then
+  _run_probe 1
+fi
+echo "pid=$pid pid_method=$pid_method net=$net bind=$bind tmpfs=$tmpfs"
 """.strip()
 
 _PROBE_FIELD_RE = re.compile(r"^(pid|pid_method|net|bind|tmpfs)=(.+)$")

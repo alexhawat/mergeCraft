@@ -24,7 +24,13 @@ _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
 
 
 _HASH_EXCLUDE_DIRS: frozenset[str] = frozenset(
-    {".git", "node_modules", ".mergecraft/prep-scratch", ".mergecraft/analyzer-scratch"}
+    {
+        ".git",
+        "node_modules",
+        ".mergecraft/prep-scratch",
+        ".mergecraft/analyzer-scratch",
+        "evidence",
+    }
 )
 
 

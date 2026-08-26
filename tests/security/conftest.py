@@ -126,10 +126,11 @@ def make_agent_run_ctx(tmp_path: Path):
 
 @pytest.fixture
 def no_ci_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force ``detect_sandbox_method`` off the CI-required unshare path.
-
-    Also resets the module-level detection cache so host runs always take the
-    plain ``bash -c`` spawn path regardless of test ordering.
-    """
+    """Reset sandbox detection cache and use unsandboxed shell for host runs."""
     monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
     monkeypatch.setattr("mergecraft.mcp.shell._detected_sandbox", None)
+    monkeypatch.setattr("mergecraft.mcp.shell._detected_netns", None)
+    from mergecraft.mcp import shell as shell_mod
+
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "none")

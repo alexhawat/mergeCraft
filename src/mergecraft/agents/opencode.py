@@ -327,6 +327,19 @@ def _evidence_dir(ctx: AgentRunContext) -> Path:
     return resolve_packet_path(tmpdir=ctx.tmpdir, change_slug=slug).parent
 
 
+def _build_review_mode_external_directory_allowlist(
+    checkout: Path, evidence: Path
+) -> dict[str, str]:
+    """Allow only the checkout and evidence scratch roots (MCB-06 / D4)."""
+    perms: dict[str, str] = {"*": "deny"}
+    for root in (checkout.resolve(), evidence.resolve()):
+        root_posix = root.as_posix()
+        perms[root_posix] = "allow"
+        perms[f"{root_posix}/*"] = "allow"
+        perms[f"{root_posix}/**"] = "allow"
+    return perms
+
+
 def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[str, str]:
     """Read paths allowlisted to the checkout and evidence scratch (MCB-06 / D4)."""
     roots = (checkout.resolve(), evidence.resolve())
@@ -346,12 +359,14 @@ def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[st
 
 
 def _build_review_mode_permissions(ctx: AgentRunContext) -> dict[str, object]:
+    checkout = _checkout_root(ctx)
+    evidence = _evidence_dir(ctx)
     return {
         "bash": "deny",
         "edit": "deny",
-        "read": _build_review_mode_read_allowlist(_checkout_root(ctx), _evidence_dir(ctx)),
+        "read": _build_review_mode_read_allowlist(checkout, evidence),
         "webfetch": "deny",
-        "external_directory": "deny",
+        "external_directory": _build_review_mode_external_directory_allowlist(checkout, evidence),
         "skill": "allow",
     }
 
@@ -719,7 +734,9 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         )
     model = ctx.resolved_model
     config_json = build_security_config(ctx, model)
-    config_path = Path(ctx.tmpdir) / "opencode.json"
+    config_dir = _evidence_dir(ctx)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "opencode.json"
     config_path.write_text(config_json, encoding="utf-8")
     extras: dict[str, str] = {
         "OPENCODE_CONFIG_CONTENT": config_json,

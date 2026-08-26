@@ -67,7 +67,7 @@ make ci         # full pre-merge gate
 - **MCP:** `mergecraft mcp serve` (HTTP, Bearer-required per-run token on an ephemeral port;
   reviewer role at `/mcp/reviewer`) and `mergecraft mcp list` — see [`docs/cli.md`](docs/cli.md)
 
-### Local development overrides
+**Optional local overrides**
 
 On hosts without Linux namespace isolation (`unshare`), mergeCraft refuses to run the MCP
 shell tool and may refuse root outside the Action image. For local debugging only:

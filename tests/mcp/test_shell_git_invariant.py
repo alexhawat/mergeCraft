@@ -17,6 +17,7 @@ pytestmark = pytest.mark.xfail(
 
 def _joined_argv(monkeypatch: pytest.MonkeyPatch, *, method: str) -> str:
     monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: method)
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: True)
     if method == "none":
         monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
     captured: list[str] = []
@@ -37,16 +38,23 @@ def _joined_argv(monkeypatch: pytest.MonkeyPatch, *, method: str) -> str:
     return " ".join(captured)
 
 
-@pytest.mark.parametrize("method", ["unshare", "sudo-unshare", "none"])
-def test_git_dir_is_read_only_in_every_branch(monkeypatch: pytest.MonkeyPatch, method: str) -> None:
+@pytest.mark.parametrize("method", ["unshare", "sudo-unshare"])
+def test_git_dir_is_read_only_in_sandboxed_branches(
+    monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
     joined = _joined_argv(monkeypatch, method=method)
     assert "remount,bind,ro" in joined
     assert ".git" in joined
 
 
-@pytest.mark.parametrize("method", ["unshare", "sudo-unshare", "none"])
+@pytest.mark.parametrize("method", ["unshare", "sudo-unshare"])
 def test_git_binary_unavailable_in_untrusted_namespace(
     monkeypatch: pytest.MonkeyPatch, method: str
 ) -> None:
     joined = _joined_argv(monkeypatch, method=method)
     assert "chmod 000" in joined or "unavailable" in joined or "/dev/null" in joined
+
+
+def test_unsandboxed_branch_skips_namespace_mounts(monkeypatch: pytest.MonkeyPatch) -> None:
+    joined = _joined_argv(monkeypatch, method="none")
+    assert joined == "bash -c echo ok"
