@@ -113,8 +113,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the whole body (MCB-28)
 - ``redact_url`` preserves ``http`` vs ``https`` when redacting basic-auth
   userinfo (MCB-31)
-- ``make test`` executes ``mergecraft.tracing.redaction`` doctests
-  (``--doctest-modules``)
+- ``tests/tracing/test_redaction_doctests.py`` executes
+  ``mergecraft.tracing.redaction`` doctests (D3)
 - SCM webhook ingress encodes signature operands with UTF-8 surrogateescape before
   ``compare_digest``, so non-ASCII header bytes return 401 instead of raising
   ``TypeError`` on unauthenticated paths (MCB-11)
