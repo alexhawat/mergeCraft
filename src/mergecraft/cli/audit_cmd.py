@@ -55,6 +55,11 @@ def verify(
 ) -> None:
     """Verify the audit hash chain and print any broken line numbers."""
     audit_path = path if path is not None else resolve_audit_log_path()
+    if not audit_path.is_file():
+        cli_bail(
+            f"audit log missing or not a regular file: {audit_path}",
+            code=1,
+        )
     breaks = verify_audit_chain(audit_path)
     if breaks:
         typer.echo(f"audit chain breaks at lines: {breaks}")

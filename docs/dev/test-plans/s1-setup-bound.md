@@ -15,7 +15,7 @@ Worktree: `mergecraft-rfc-s1-setup-bound` @ `wave/rfc-s1-setup-bound`
 ## Global conventions that bind this suite
 
 - **Convention 6 — no widening `RunOutcome`.** Existing six-value taxonomy. S1 only adds *producers* of `inconclusive`; the suite never assumes a new outcome value.
-- **Convention 7 — redact before surfacing.** Tests for stderr redaction assert the secret pattern is replaced by `[REDACTED]` in **both** the prompt and the `result` payload. Re-implementation in source is the impl wave's job — not the test's.
+- **Convention 7 — redact before surfacing.** Tests for stderr redaction assert the secret pattern is replaced by `<redacted>` (`REDACTION_SENTINEL`) in **both** the prompt and the `result` payload. Re-implementation in source is the impl wave's job — not the test's.
 - **Convention 8 — trust check at `main.py:368` does NOT move.** Test 7 (`test_untrusted_tier_never_executes_setup_script`) pins that the gate still runs before any subprocess spawn.
 - **Convention 9 — reuse `utils/process_group.py`.** Tests 12–14 hit the helper, not a private kill path.
 
@@ -38,7 +38,7 @@ Per-creator convention the impl wave turns RED → green; the 10 pending tests a
 | 1 | `test_trusted_setup_script_nonzero_exit_yields_inconclusive` | D5: trusted-tier non-zero exit → `RunOutcome.inconclusive` (not `passed`) | RED |
 | 2 | `test_inconclusive_maps_to_neutral_check_conclusion` | `RUN_OUTCOME_CONCLUSION[RunOutcome.inconclusive] == "neutral"` (no widening) | RED |
 | 3 | `test_setup_failure_reason_recorded_on_result_output` | structured `result` payload carries the redacted failure reason | RED |
-| 4 | `test_setup_script_stderr_is_redacted_before_surfacing` | convention 7: `ghp_…` / `sk-…` in stderr becomes `[REDACTED]` in prompt **and** `result` | RED |
+| 4 | `test_setup_script_stderr_is_redacted_before_surfacing` | convention 7: `ghp_…` / `sk-…` in stderr becomes `<redacted>` (`REDACTION_SENTINEL`) in prompt **and** `result` | RED |
 | 5 | `test_trusted_setup_script_zero_exit_still_passes` | **regression pin** — happy path today | PASS |
 | 6 | `test_no_setup_script_configured_is_unaffected` | **regression pin** — empty `setup_script` is a clean pass | PASS |
 | 7 | `test_untrusted_tier_never_executes_setup_script` | **regression pin** — convention 8: trust check precedes shell spawn | PASS |
