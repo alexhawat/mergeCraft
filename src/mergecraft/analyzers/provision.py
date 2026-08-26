@@ -150,51 +150,61 @@ def _safe_archive_member_path(dest_dir: Path, member_name: str) -> Path:
 
 def _download_pinned_url(url: str, dest: Path) -> None:
     current = url
-    for _ in range(8):
-        parsed = urlparse(current)
-        if parsed.scheme != "https" or not parsed.netloc:
-            msg = f"refusing unpinned or non-https download url: {current!r}"
-            raise ProvisionError(msg)
-        initial_host = parsed.netloc.casefold()
-        allowed_hosts = {
-            initial_host,
-            "objects.githubusercontent.com",
-            "release-assets.githubusercontent.com",
-        }
-        try:
-            guarded = inspect_external_url(current)
-        except SsrfBlockedError as exc:
-            raise ProvisionError(str(exc)) from exc
-        transport = pinned_http_transport(guarded.host, guarded.addresses)
-        try:
-            with (
-                httpx.Client(
-                    transport=transport,
+    client: httpx.Client | None = None
+    transport_key = None
+    try:
+        for _ in range(8):
+            parsed = urlparse(current)
+            if parsed.scheme != "https" or not parsed.netloc:
+                msg = f"refusing unpinned or non-https download url: {current!r}"
+                raise ProvisionError(msg)
+            initial_host = parsed.netloc.casefold()
+            allowed_hosts = {
+                initial_host,
+                "objects.githubusercontent.com",
+                "release-assets.githubusercontent.com",
+            }
+            try:
+                guarded = inspect_external_url(current)
+            except SsrfBlockedError as exc:
+                raise ProvisionError(str(exc)) from exc
+            next_key = (guarded.host, guarded.addresses)
+            if client is None or transport_key != next_key:
+                if client is not None:
+                    client.close()
+                client = httpx.Client(
+                    transport=pinned_http_transport(guarded.host, guarded.addresses),
                     follow_redirects=False,
                     timeout=120.0,
-                ) as client,
-                client.stream("GET", current) as response,
-            ):
-                if response.status_code in {301, 302, 303, 307, 308}:
-                    location = response.headers.get("location")
-                    if not location:
-                        msg = f"redirect from pinned download url {current!r} missing Location"
-                        raise ProvisionError(msg)
-                    current = urljoin(current, location)
-                    next_parsed = urlparse(current)
-                    next_host = (next_parsed.hostname or "").casefold()
-                    if next_parsed.scheme != "https" or next_host not in allowed_hosts:
-                        msg = f"refusing redirect from pinned download url {url!r} to {current!r}"
-                        raise ProvisionError(msg)
-                    continue
-                response.raise_for_status()
-                with dest.open("wb") as handle:
-                    for chunk in response.iter_bytes():
-                        handle.write(chunk)
-                return
-        except httpx.HTTPError as exc:
-            msg = f"download failed for {current!r}: {exc}"
-            raise ProvisionError(msg) from exc
+                )
+                transport_key = next_key
+            try:
+                with client.stream("GET", current) as response:
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location")
+                        if not location:
+                            msg = f"redirect from pinned download url {current!r} missing Location"
+                            raise ProvisionError(msg)
+                        current = urljoin(current, location)
+                        next_parsed = urlparse(current)
+                        next_host = (next_parsed.hostname or "").casefold()
+                        if next_parsed.scheme != "https" or next_host not in allowed_hosts:
+                            msg = (
+                                f"refusing redirect from pinned download url {url!r} to {current!r}"
+                            )
+                            raise ProvisionError(msg)
+                        continue
+                    response.raise_for_status()
+                    with dest.open("wb") as handle:
+                        for chunk in response.iter_bytes():
+                            handle.write(chunk)
+                    return
+            except httpx.HTTPError as exc:
+                msg = f"download failed for {current!r}: {exc}"
+                raise ProvisionError(msg) from exc
+    finally:
+        if client is not None:
+            client.close()
     msg = f"too many redirects for pinned download url: {url!r}"
     raise ProvisionError(msg)
 

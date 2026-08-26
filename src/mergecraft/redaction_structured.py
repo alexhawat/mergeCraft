@@ -51,12 +51,16 @@ DENY_KEYS: tuple[str, ...] = (
 _DENY_KEY_SET = frozenset(DENY_KEYS)
 
 
+def _normalize_structured_key(key: str) -> str:
+    return key.lower().replace("-", "_")
+
+
 def is_secret_structured_key(key: str) -> bool:
     """Return whether ``key`` names a credential field in structured payloads."""
-    normalized = key.lower().replace("-", "_")
+    normalized = _normalize_structured_key(key)
     if normalized in _DENY_KEY_SET:
         return True
-    return bool(SECRET_KEY_RE.match(key))
+    return bool(SECRET_KEY_RE.match(normalized))
 
 
 def redact_structured_value(

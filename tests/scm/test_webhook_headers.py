@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from tests.scm._httpx_compat import install_httpx_latin1_header_values
 
 from mergecraft.mcp.server import create_mcp_app
-from mergecraft.scm.httpx_compat import install_httpx_latin1_header_values
 from mergecraft.scm.webhooks import sign_webhook_payload
 
 

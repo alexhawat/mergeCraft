@@ -64,16 +64,11 @@ _BEARER_RE = re.compile(r"(Bearer\s)[A-Za-z0-9._-]{16,}")
 _EMBEDDED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(sk-|ghp_|eyJ)[A-Za-z0-9._-]{8,}")
 
 
-def _redact_value(value: Any) -> Any:
-    """Recursively redact a value: deny keys, strings, and nested structures."""
-    return redact_structured_value(value, redact_string=redact_secrets)
-
-
 def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
     """Return a redacted copy of ``attrs`` (never the input dict)."""
     if not attrs:
         return {}
-    redacted = _redact_value(attrs)
+    redacted = redact_structured_value(attrs, redact_string=redact_secrets)
     if not isinstance(redacted, dict):
         return {}
     return redacted

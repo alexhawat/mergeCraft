@@ -9,11 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.ci.archive_bounds import (
-    ARCHIVE_MAX_MEMBER_BYTES,
-    ARCHIVE_MAX_TOTAL_BYTES,
-    extract_sarif_documents,
-)
+from mergecraft.ci.archive_bounds import extract_sarif_documents
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 from mergecraft.scm.github import github_client_from_scm
 
@@ -326,8 +322,6 @@ async def run_ci_intelligence(
 
 
 __all__ = [
-    "ARCHIVE_MAX_MEMBER_BYTES",
-    "ARCHIVE_MAX_TOTAL_BYTES",
     "build_ci_intelligence_payload",
     "collect_ci_sarif_findings",
     "intelligence_from_failures",

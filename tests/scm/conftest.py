@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 import pytest
+from tests.scm._httpx_compat import install_httpx_latin1_header_values
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -15,7 +16,6 @@ from mergecraft.mcp.context import (
 )
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
-from mergecraft.scm.httpx_compat import install_httpx_latin1_header_values
 from mergecraft.utils.github import GitHubClient
 
 try:  # pragma: no cover — collection guard until DG9.2 lands ``mergecraft.scm``.
