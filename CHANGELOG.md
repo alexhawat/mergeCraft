@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1`` (MCB-07 / MCB-10)
 - Skipped untrusted analyzers emit a ``Minor`` finding
   (``rule_id: analyzers.sandbox-unavailable``) naming missing isolation primitives
+- ``sudo-unshare`` shell spawn passes env by name via ``--preserve-env`` with
+  ``env=env`` on ``Popen`` so provider keys never appear in argv (MCB-08)
+- Untrusted shell namespace hides every ``git`` binary and binds ``.git``
+  read-only in all spawn branches, including the unsandboxed fallback (MCB-25)
   (MCB-09 / D7)
 
 ### Changed

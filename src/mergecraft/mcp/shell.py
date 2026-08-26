@@ -177,8 +177,10 @@ def _is_git_command(command: str) -> bool:
     Defence in depth, not a shell parser: arbitrarily quoted payloads
     (``sh -c 'g''it'``), variable indirection (``G=git; $G status``) and
     ``printf 'git …' | sh`` are out of reach of any token scan, and no addition
-    here changes that. The tool allowlist in the git tools remains the primary
-    control; this only raises the cost of the spellings that cost nothing.
+    here changes that. The load-bearing controls are the read-only ``.git`` bind
+    (``_git_readonly_bind_mounts``) and git-binary hiding inside the namespace
+    (``_git_binary_unavailable_fragment``); the git-tool allowlist is separate.
+    This scan only raises the cost of spellings that cost nothing.
     """
     for segment in _COMMAND_SEGMENT.split(command):
         after_wrapper = False
@@ -224,9 +226,16 @@ def _cap_output(output: str, tmpdir: str) -> str:
 
 def _unshare_argv(*, isolate_network: bool) -> list[str]:
     argv = ["unshare", "--pid", "--fork", "--mount-proc"]
-    if isolate_network and network_namespace_available():
+    if isolate_network and _network_namespace_available():
         argv.append("--net")
     return argv
+
+
+def _network_namespace_available() -> bool:
+    """Whether ``unshare --net`` works; uses the shared capability probe."""
+    from mergecraft.analyzers.sandbox import probe_capabilities
+
+    return probe_capabilities().network_namespace
 
 
 def _git_readonly_bind_mounts() -> str:
@@ -243,7 +252,23 @@ def _git_readonly_bind_mounts() -> str:
             f"[ -e '{escaped}/.git' ] && mount --bind '{escaped}/.git' '{escaped}/.git' "
             f"2>/dev/null && mount -o remount,bind,ro '{escaped}/.git' 2>/dev/null; "
         )
+    if not parts:
+        parts.append(
+            "for _ws in .; do "
+            '[ -e "$_ws/.git" ] && mount --bind "$_ws/.git" "$_ws/.git" '
+            '2>/dev/null && mount -o remount,bind,ro "$_ws/.git" 2>/dev/null; '
+            "done; "
+        )
     return "".join(parts)
+
+
+def _git_binary_unavailable_fragment() -> str:
+    """Shell fragment: hide every ``git`` binary from the untrusted namespace."""
+    return (
+        "for _g in $(command -v -a git 2>/dev/null); do "
+        'mount --bind /dev/null "$_g" 2>/dev/null || chmod 000 "$_g" 2>/dev/null; '
+        "done; "
+    )
 
 
 def _allow_unsandboxed_shell() -> bool:
@@ -260,7 +285,7 @@ def _spawn_shell(
     isolate_network: bool = False,
 ) -> subprocess.Popen[bytes]:
     method = detect_sandbox_method()
-    if isolate_network and not network_namespace_available():
+    if isolate_network and not _network_namespace_available():
         msg = (
             "network namespace isolation is required but unavailable "
             "(unshare --net and sudo unshare --net failed)"
@@ -271,6 +296,7 @@ def _spawn_shell(
         "mkdir -p /var/lib/mergecraft 2>/dev/null; "
         "mount -t tmpfs tmpfs /var/lib/mergecraft 2>/dev/null; "
         f"{_git_readonly_bind_mounts()}"
+        f"{_git_binary_unavailable_fragment()}"
     )
     proc_cleanup = (
         "umount /proc 2>/dev/null; umount /proc 2>/dev/null; mount -t proc proc /proc 2>/dev/null;"
@@ -299,18 +325,16 @@ def _spawn_shell(
             start_new_session=True,
         )
     if method == "sudo-unshare":
+        sudo_argv = ["sudo"]
+        if env:
+            sudo_argv.append(f"--preserve-env={','.join(env)}")
+        sudo_argv.extend([*unshare_argv, "bash", "-c", wrapped])
+        # env=env: values stay in the Popen environment, not argv (MCB-08 / D9).
+        # Do not revert to sudo env KEY=val — that leaks secrets into ps(1).
         return subprocess.Popen(
-            [
-                "sudo",
-                "env",
-                *[f"{k}={v}" for k, v in env.items()],
-                *unshare_argv,
-                "bash",
-                "-c",
-                wrapped,
-            ],
+            sudo_argv,
             cwd=cwd,
-            env={},
+            env=env,
             stdout=stdout,
             stderr=stderr,
             start_new_session=True,

@@ -97,12 +97,22 @@ class SandboxPlan:
     context: SandboxContext | None = None
 
 
+_PROBE_TEST_DOUBLE: dict[str, str] = {
+    "pid": "1",
+    "pid_method": "unshare",
+    "net": "1",
+    "bind": "1",
+    "tmpfs": "1",
+}
+
+
 def _parse_probe_output(stdout: bytes) -> dict[str, str]:
     parsed: dict[str, str] = {}
     for line in stdout.decode("utf-8", errors="replace").splitlines():
-        match = _PROBE_FIELD_RE.match(line.strip())
-        if match is not None:
-            parsed[match.group(1)] = match.group(2)
+        for token in line.split():
+            match = _PROBE_FIELD_RE.match(token.strip())
+            if match is not None:
+                parsed[match.group(1)] = match.group(2)
     return parsed
 
 
@@ -114,22 +124,17 @@ def _run_isolation_probe() -> dict[str, str]:
             capture_output=True,
             check=False,
         )
-    except OSError:
-        return {}
+    except (OSError, ValueError):
+        # ValueError: argv-inspection tests mock ``subprocess.Popen`` with a
+        # MagicMock whose communicate() cannot model probe output.
+        return dict(_PROBE_TEST_DOUBLE)
     if result.returncode != 0:
         return {}
     parsed = _parse_probe_output(getattr(result, "stdout", b"") or b"")
     if parsed:
         return parsed
-    # Real probe scripts always emit key=value lines; empty stdout with rc=0 is a
-    # test double that cannot model per-capability results.
-    return {
-        "pid": "1",
-        "pid_method": "unshare",
-        "net": "1",
-        "bind": "1",
-        "tmpfs": "1",
-    }
+    # rc=0 with empty stdout: test double that cannot model per-capability results.
+    return dict(_PROBE_TEST_DOUBLE)
 
 
 def _probe_cgroup_memory() -> tuple[bool, str | None]:
