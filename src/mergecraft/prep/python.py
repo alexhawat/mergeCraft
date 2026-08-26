@@ -125,7 +125,7 @@ def _adapt_install_cmd(config: _PythonConfig, venv: Path, cwd: Path) -> tuple[st
         if config.file == "pyproject.toml":
             return pip, ["install", str(cwd)]
     if config.tool == "uv":
-        return "uv", [
+        return str(_prep_venv_bin(venv, "uv")), [
             "sync",
             "--frozen",
             "--directory",
@@ -238,11 +238,11 @@ class InstallPythonDependencies:
                 issues=[venv_issue or "failed to create prep virtualenv"],
             )
 
-        tool_cmd = config.tool
-        if shutil.which(tool_cmd) is None:
+        tool_exe = _prep_venv_bin(venv, config.tool)
+        if not tool_exe.is_file():
             install_cmd = _TOOL_INSTALL.get(config.tool)
             if install_cmd:
-                logger.info("» {} not found, attempting to install...", config.tool)
+                logger.info("» {} not found in prep venv, attempting to install...", config.tool)
                 pip_cmd, pip_args = _adapt_tool_install(config.tool, venv)
                 code, out = await _run_cmd(pip_cmd, pip_args)
                 if code != 0:
@@ -252,6 +252,14 @@ class InstallPythonDependencies:
                         config_file=config.file,
                         dependencies_installed=False,
                         issues=[out or f"failed to install {config.tool}"],
+                    )
+                if not tool_exe.is_file():
+                    return PrepResult(
+                        language="python",
+                        package_manager=config.tool,
+                        config_file=config.file,
+                        dependencies_installed=False,
+                        issues=[f"{config.tool} not available in prep venv after install"],
                     )
 
         cmd, args = _adapt_install_cmd(config, venv, cwd)
