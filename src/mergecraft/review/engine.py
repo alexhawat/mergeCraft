@@ -17,6 +17,7 @@ from mergecraft.review.snapshot import (
     ReviewSnapshot,
     ReviewStageName,
     ReviewStageSpec,
+    canonical_review_snapshot,
 )
 
 TimeoutMap = Mapping[ReviewStageName, float]
@@ -65,11 +66,16 @@ class ReviewEngineResult(Generic[T]):
         return output
 
 
+def _default_engine_snapshot() -> ReviewSnapshot:
+    """Canonical CLI snapshot for engines constructed without an explicit snapshot."""
+    return canonical_review_snapshot(entry="cli")
+
+
 @dataclass(slots=True)
 class ReviewEngine(Generic[T]):
     """Execute the canonical review stages with per-stage timeouts."""
 
-    snapshot: ReviewSnapshot
+    snapshot: ReviewSnapshot = field(default_factory=_default_engine_snapshot)
     _ran: list[ReviewStageName] = field(default_factory=list, init=False, repr=False)
     _on_timeout: OnTimeout | None = field(default=None, init=False, repr=False)
     _on_stage: OnStage | None = field(default=None, init=False, repr=False)
