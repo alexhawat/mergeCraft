@@ -124,6 +124,17 @@ BR8 census follow-up: harness/config tests (`test_redactor`, `test_diagnostics`,
 
 BR8 integration follow-up: tracing/analyzer adapter tests compare `MemorySink` attrs and parser paths through `as_sink_value` / `finding_path_matches` so BR8 entropy redaction does not false-fail planted-finding and span-identity contracts.
 
+## Thermos BR8 deferred follow-up (2026-08-26)
+
+| Test | Contract |
+| --- | --- |
+| `tests/enterprise/test_audit_verify_cli.py::*` | ``mergecraft audit verify`` exits 1 with ``audit log missing or not a regular file`` when path missing or not a regular file |
+| `tests/enterprise/test_audit_legacy_merge.py::*` | ``load_audit_events`` merges external sink + legacy ``.mergecraft/audit.jsonl`` via ``_merge_audit_event_lists`` |
+| `tests/security/test_egress_concurrency.py::*` | Per-client ``pinned_http_transport`` / ``PinnedHTTPTransport`` concurrency (not global ``getaddrinfo``) |
+| `tests/ci/test_log_archive_bounds.py`, `tests/ci/test_sarif_bounds.py` | Archive caps imported from ``mergecraft.ci.archive_bounds`` (`ARCHIVE_MAX_*`) |
+| `tests/scm/test_ingress_idempotency.py::test_replay_store_evicts_on_ttl` | Patches ``REPLAY_SKEW_SECONDS`` (not legacy ``_MAX_REPLAY_SKEW_SECONDS``) |
+| `tests/scm/test_webhook_headers.py` | Explicit ``install_httpx_latin1_header_values`` for latin-1 header bytes via TestClient |
+
 ## Escalation (BR7 / MCB-21)
 
 **Escalation:** `test_audit_producer_hk.py` pinned in-workspace `.mergecraft/audit.jsonl` writes; amended to use `MERGECRAFT_AUDIT_ROOT` + `resolve_audit_log_path` after BR7 relocated the audit sink.

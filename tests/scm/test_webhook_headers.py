@@ -6,7 +6,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mergecraft.mcp.server import create_mcp_app
+from mergecraft.scm.httpx_compat import install_httpx_latin1_header_values
 from mergecraft.scm.webhooks import sign_webhook_payload
+
+
+@pytest.fixture(autouse=True)
+def _install_httpx_latin1_header_values() -> None:
+    """Match HTTP latin-1 header bytes when httpx builds TestClient requests."""
+    install_httpx_latin1_header_values()
+
 
 _WEBHOOK_SECRET = "br1-webhook-header-test-secret"
 _NON_ASCII_BYTE = bytes([0x80]).decode("latin-1")

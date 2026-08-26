@@ -5,11 +5,8 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 
-from mergecraft.ci.intelligence import (
-    ARCHIVE_MAX_MEMBER_BYTES,
-    ARCHIVE_MAX_TOTAL_BYTES,
-    _sarif_documents,
-)
+from mergecraft.ci.archive_bounds import ARCHIVE_MAX_MEMBER_BYTES, ARCHIVE_MAX_TOTAL_BYTES
+from mergecraft.ci.intelligence import _sarif_documents
 
 _TRUNCATION_MARKER = "truncat"
 
