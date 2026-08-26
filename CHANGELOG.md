@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- OpenCode review sessions deny ``webfetch``, ``external_directory``, and
+  ``edit``; ``read`` is allowlisted to the checkout and evidence scratch
+  instead of ``*`` (MCB-06)
+- Post-run checkout integrity verification via
+  ``security.review_integrity`` hashes the tree before review and fails closed
+  on mutation (MCB-06)
 - Root-side ``git`` subprocesses route through ``utils/git_hardening.git_argv`` with
   pinned safe-config keys; ``make lint`` enforces the route via
   ``scripts/check_git_argv.py`` (MCB-01)
