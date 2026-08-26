@@ -278,6 +278,15 @@ def _git_binary_unavailable_fragment() -> str:
         'for _dir in "${_path_dirs[@]}"; do '
         'if [ -x "$_dir/git" ]; then mount --bind /dev/null "$_dir/git" || exit 1; fi; '
         "done; "
+        '_git_exec="$({ command -v git >/dev/null 2>&1 && git --exec-path 2>/dev/null || true; })"; '
+        'if [ -n "$_git_exec" ] && [ -d "$_git_exec" ]; then '
+        'for _g in "$_git_exec"/git "$_git_exec"/git-*; do '
+        'if [ -x "$_g" ]; then mount --bind /dev/null "$_g" || exit 1; fi; '
+        "done; fi; "
+        "for _g in /usr/lib/git-core/git /usr/lib/git-core/git-* "
+        "/usr/local/libexec/git-core/git /usr/local/libexec/git-core/git-*; do "
+        'if [ -x "$_g" ]; then mount --bind /dev/null "$_g" || exit 1; fi; '
+        "done; "
     )
 
 

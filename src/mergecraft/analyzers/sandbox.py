@@ -268,8 +268,8 @@ def _sandbox_unavailable_finding(
         confidence="certain",
         message=message,
         path=str(repo_root),
-        start_line=1,
-        end_line=1,
+        start_line=None,
+        end_line=None,
         source="analyzer",
     )
 
@@ -360,12 +360,90 @@ def plan_sandbox(
     return SandboxPlan(can_run=True, context=context)
 
 
+_SANDBOX_SOCKET_MASK_PATHS = (
+    "/var/run/docker.sock",
+    "/run/docker.sock",
+    "/var/run/podman/podman.sock",
+    "/run/podman/podman.sock",
+    "/run/containerd/containerd.sock",
+    "/var/run/crio/crio.sock",
+)
+
+_PROC_PREP_FRAGMENT = (
+    "umount /proc 2>/dev/null; umount /proc 2>/dev/null; mount -t proc proc /proc 2>/dev/null; "
+)
+
+
+def _shell_single_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def analyzer_isolation_mount_fragment(context: SandboxContext) -> str:
+    """Shell fragment: read-only repo bind and tmpfs scratch for untrusted analyzers."""
+    repo = _shell_single_quote(str(context.repo_root.resolve()))
+    scratch = _shell_single_quote(str(context.scratch_dir.resolve()))
+    return (
+        f"mkdir -p {scratch}; "
+        f"mount --bind {repo} {repo} || exit 1; "
+        f"mount -o remount,bind,ro {repo} || exit 1; "
+        f"mount -t tmpfs tmpfs {scratch} || exit 1; "
+    )
+
+
+def analyzer_socket_mask_fragment() -> str:
+    """Shell fragment: mask container runtime sockets inside the analyzer namespace."""
+    return "".join(
+        f"mount --bind /dev/null {path} 2>/dev/null || true; "
+        for path in _SANDBOX_SOCKET_MASK_PATHS
+    )
+
+
+def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
+    caps = probe_capabilities()
+    argv: list[str] = ["unshare", "--pid", "--fork", "--mount-proc"]
+    if isolate_network and caps.network_namespace:
+        argv.append("--net")
+    return argv
+
+
+def build_analyzer_sandbox_command(argv: tuple[str, ...], *, context: SandboxContext) -> str:
+    """Wrap analyzer argv in mount/socket isolation before ``exec``."""
+    import shlex
+
+    mounts = analyzer_isolation_mount_fragment(context)
+    sockets = analyzer_socket_mask_fragment()
+    inner = shlex.join(argv)
+    return f"{_PROC_PREP_FRAGMENT}{sockets}{mounts}exec {inner}"
+
+
+def build_analyzer_sandbox_argv(
+    argv: tuple[str, ...],
+    *,
+    context: SandboxContext,
+) -> list[str]:
+    """Return argv for a sandboxed analyzer subprocess (D6)."""
+    from mergecraft.mcp.shell import detect_sandbox_method
+
+    method = detect_sandbox_method()
+    wrapped = build_analyzer_sandbox_command(argv, context=context)
+    unshare_argv = _analyzer_unshare_argv(isolate_network=True)
+    if method == "sudo-unshare":
+        return ["sudo", *unshare_argv, "bash", "-c", wrapped]
+    if method == "unshare":
+        return [*unshare_argv, "bash", "-c", wrapped]
+    return list(argv)
+
+
 __all__ = [
     "NetworkDefault",
     "SandboxCapabilities",
     "SandboxContext",
     "SandboxLimits",
     "SandboxPlan",
+    "analyzer_isolation_mount_fragment",
+    "analyzer_socket_mask_fragment",
+    "build_analyzer_sandbox_argv",
+    "build_analyzer_sandbox_command",
     "build_sandbox_context",
     "plan_sandbox",
     "probe_capabilities",

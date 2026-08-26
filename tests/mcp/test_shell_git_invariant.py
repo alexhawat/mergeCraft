@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -60,6 +62,48 @@ def test_git_binary_hide_skips_path_dirs_without_git(
     assert (
         'if [ -n "$_g" ] && [ -x "$_g" ]; then mount --bind /dev/null "$_g" || exit 1; fi' in joined
     )
+
+
+def test_git_exec_path_and_git_core_binaries_are_masked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    joined = _joined_argv(monkeypatch, method="unshare")
+    assert "git --exec-path" in joined
+    assert '"/git"' in joined or '"/git-*"' in joined or "/git-core/git" in joined
+    assert "/usr/lib/git-core/git" in joined
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="live namespace mounts require Linux")
+def test_git_core_binary_is_unavailable_in_live_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Debian action images expose git via ``/usr/lib/git-core`` outside PATH."""
+    from mergecraft.mcp import shell as shell_mod
+
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: True)
+    captured: list[str] = []
+
+    def _popen(argv: list[str], **_kwargs: Any) -> object:
+        captured.extend(argv)
+        # Run the wrapped bash -c for real to prove git-core is masked.
+        return subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    monkeypatch.setattr(shell_mod.subprocess, "Popen", _popen)
+    proc = shell_mod._spawn_shell(
+        "for _g in /usr/lib/git-core/git /usr/lib/git-core/git-upload-pack; do "
+        'if [ -x "$_g" ]; then "$_g" --version >/dev/null 2>&1 && echo "EXEC:$_g"; fi; '
+        "done; echo DONE",
+        env={},
+        cwd="/tmp",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        isolate_network=True,
+    )
+    stdout, _stderr = proc.communicate(timeout=30)
+    text = stdout.decode("utf-8", errors="replace")
+    assert "EXEC:" not in text, text
+    assert "DONE" in text
 
 
 def test_unsandboxed_branch_skips_namespace_mounts(monkeypatch: pytest.MonkeyPatch) -> None:
