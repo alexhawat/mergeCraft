@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binds every registered workspace root's ``.git`` read-only (MCB-01 / D3)
 - Linked-repo ``_rev_parse_commit`` rejects leading-dash revs, validates pinned SHA
   shape, and passes ``--end-of-options`` before the rev (MCB-33)
+- Python ``prep`` installs into ``.mergecraft/prep-scratch/prep-venv`` with a
+  default-deny env allowlist so PR build deps cannot mutate the reviewer's
+  interpreter or inherit provider credentials (MCB-22 / D12)
+
+### Fixed
+
+- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``;
+  ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd()``
+  twice (MCB-22)
 
 ### Changed
 
