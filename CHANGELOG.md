@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pipeline predicate validation no longer rejects repository paths whose names
+  contain substrings such as ``subprocess`` or ``import``; the closed regex is
+  the sole control (MCB-29)
+- Pipeline severity predicates include ``Trivial`` and rank unknown severities
+  below every taxonomy member instead of treating them as ``Minor`` (MCB-34)
+- Pipeline preview marks non-executing steps as ``dispatched`` instead of
+  ``ran``, derives terminal verdicts from collected evidence instead of
+  hardcoding ``approve``, and documents ``PipelineExecutor`` as experimental
+  (MCB-37)
 - Gateway credential resolution reads repo settings from the run-scope snapshot
   instead of reloading ``.mergecraft/config.yaml`` on every model lookup, with a
   live-load fallback when no snapshot is installed (#496)

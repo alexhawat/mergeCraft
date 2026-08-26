@@ -1,11 +1,16 @@
-"""Deterministic pipeline executor — walks steps and records verdict protocol (AP6)."""
+"""Deterministic pipeline executor — walks steps and records verdict protocol (AP6).
+
+.. warning:: Experimental. ``PipelineExecutor`` is a preview stub for
+   ``mergecraft pipeline show``; it does not run registry agents or gate
+   production reviews.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from mergecraft.agents.gates import decide_approval
+from mergecraft.agents.gates import BLOCKING_SEVERITIES, decide_approval
 from mergecraft.agents.registry import AgentRole, Registry, resolve_agent_ref
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -33,11 +38,18 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.tool_state import TerminalSubmission
 
-StepStatus = Literal["ran", "skipped", "failed"]
+StepStatus = Literal["ran", "dispatched", "skipped", "failed"]
 TERMINAL_PROTOCOL = "submit_review_verdict"
+_PREVIEW_INSUFFICIENT_EVIDENCE = {
+    "path": ".",
+    "body": "Pipeline preview did not collect structural review evidence",
+    "severity": "Trivial",
+    "line": 1,
+}
 
 
 class PipelineExecutionError(RuntimeError):
@@ -114,6 +126,65 @@ def _infer_classifier_signals(
     return {"changed_paths": paths, "languages": languages, "risk_band": "low"}
 
 
+def _findings_from_signals(signals: dict[str, Any]) -> list[Finding]:
+    from mergecraft.findings.agent_adapter import agent_finding_to_finding, coerce_agent_finding
+
+    raw = signals.get("analyzer_findings", [])
+    if not isinstance(raw, list):
+        return []
+    findings: list[Finding] = []
+    for item in raw:
+        try:
+            draft = coerce_agent_finding(item)
+            findings.append(agent_finding_to_finding(draft, rule_id="pipeline.preview"))
+        except ValueError:
+            continue
+    return findings
+
+
+def _wire_findings(findings: list[Finding]) -> list[dict[str, Any]]:
+    from mergecraft.findings.agent_adapter import _finding_to_agent_draft
+
+    return [draft.model_dump() for draft in (_finding_to_agent_draft(f) for f in findings)]
+
+
+def _submission_findings_for_policy(
+    findings: list[Finding],
+    policy: str,
+) -> list[dict[str, Any]]:
+    if policy == "failure":
+        blockers = [finding for finding in findings if finding.severity in BLOCKING_SEVERITIES]
+        return _wire_findings(blockers)
+    if findings:
+        return _wire_findings(findings)
+    return [_PREVIEW_INSUFFICIENT_EVIDENCE]
+
+
+def _record_terminal_submission(
+    ctx: ToolContext,
+    findings: list[Finding],
+    *,
+    run_succeeded: bool,
+) -> TerminalSubmission:
+    policy = decide_approval(findings, run_succeeded=run_succeeded, tier="trusted")
+    if policy == "success":
+        return record_validated_terminal_submission(
+            ctx,
+            {"verdict": "approve", "summary": "pipeline terminal node"},
+            findings=findings,
+        )
+    wire_findings = _submission_findings_for_policy(findings, str(policy))
+    return record_validated_terminal_submission(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "pipeline terminal node",
+            "findings": wire_findings,
+        },
+        findings=wire_findings,
+    )
+
+
 class PipelineExecutor:
     """Walk a declarative pipeline, dispatching registry agents without an LLM loop."""
 
@@ -158,6 +229,8 @@ class PipelineExecutor:
             for step in pipeline.steps
         )
         tokens = 1 if kind == "llm" else 0
+        run_succeeded = True
+        collected_findings = _findings_from_signals(signals)
 
         for step in pipeline.steps:
             if step.when is not None and not evaluate_predicate(
@@ -186,6 +259,7 @@ class PipelineExecutor:
                 if on_error == "fail":
                     msg = f"on_error fail policy triggered for step {step.id!r}"
                     raise PipelineExecutionError(msg)
+                run_succeeded = False
                 continue
 
             if step.kind is PipelineStepKind.decision and step.decision:
@@ -209,12 +283,17 @@ class PipelineExecutor:
                 continue
 
             if step.kind is PipelineStepKind.terminal:
-                submission = record_validated_terminal_submission(
+                submission = _record_terminal_submission(
                     ctx,
-                    {"verdict": "approve", "summary": "pipeline terminal node"},
+                    collected_findings,
+                    run_succeeded=run_succeeded,
+                )
+                policy = decide_approval(
+                    collected_findings,
+                    run_succeeded=run_succeeded,
+                    tier="trusted",
                 )
                 records.append(StepRecord(step_id=step.id, status="ran"))
-                policy = decide_approval([], run_succeeded=True, tier="trusted")
                 return PipelineRunResult(
                     step_records=records,
                     terminal_submission=submission,
@@ -239,7 +318,7 @@ class PipelineExecutor:
                 records.append(
                     StepRecord(
                         step_id=step.id,
-                        status="ran",
+                        status="dispatched",
                         dispatched_agents=dispatched,
                     )
                 )
@@ -252,12 +331,12 @@ class PipelineExecutor:
                 records.append(
                     StepRecord(
                         step_id=step.id,
-                        status="ran",
+                        status="dispatched",
                         dispatched_agents=(step.agent,),
                     )
                 )
 
-        policy = decide_approval([], run_succeeded=True, tier="trusted")
+        policy = decide_approval(collected_findings, run_succeeded=run_succeeded, tier="trusted")
         return PipelineRunResult(
             step_records=records,
             orchestrator_kind=kind,
