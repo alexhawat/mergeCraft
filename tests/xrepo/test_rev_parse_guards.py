@@ -43,9 +43,17 @@ def test_leading_dash_rev_is_rejected(tmp_path: Path) -> None:
         _rev_parse_commit(repo, "-evil")
 
 
-def test_rev_parse_passes_end_of_options(tmp_path: Path) -> None:
+def test_rev_parse_passes_end_of_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _init_repo(tmp_path)
-    sha = subprocess.run(
+    seen: list[list[str]] = []
+    real_run = subprocess.run
+
+    def _record_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(list(cmd))
+        return real_run(cmd, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(subprocess, "run", _record_run)
+    sha = real_run(
         ["git", "rev-parse", "HEAD"],
         cwd=repo,
         capture_output=True,
@@ -53,3 +61,4 @@ def test_rev_parse_passes_end_of_options(tmp_path: Path) -> None:
         check=True,
     ).stdout.strip()
     assert _rev_parse_commit(repo, sha) == sha
+    assert any("--end-of-options" in argv for argv in seen)
