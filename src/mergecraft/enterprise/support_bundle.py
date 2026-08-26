@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Literal
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.enterprise.audit import resolve_audit_log_path, verify_audit_chain
 from mergecraft.reliability.diagnostic_bundle import write_diagnostic_bundle
 
 __all__ = [
@@ -53,6 +54,14 @@ def write_support_bundle(destination: Path, *, extra_text: str = "") -> str:
 
     python_info = f"python: {sys.version}\nplatform: {sys.platform}\n"
     payload = python_info
+    audit_path = resolve_audit_log_path()
+    if audit_path.is_file():
+        breaks = verify_audit_chain(audit_path)
+        payload += f"audit_log: {audit_path}\n"
+        if breaks:
+            payload += f"audit_chain_breaks: {breaks}\n"
+        else:
+            payload += "audit_chain: ok\n"
     if extra_text:
         payload += "\n# Extra info\n" + extra_text + "\n"
 

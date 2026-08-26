@@ -6,13 +6,23 @@ Exports:
     export_audit_log: Serialise a list of audit-event records to JSON.
     export_usage: Serialise a list of usage/cost records to JSON.
     explain_blocking_decision: Return a human-readable explanation of a block.
+    verify_audit_chain: Return 1-based line numbers where the hash chain breaks.
+    resolve_audit_log_path: Resolve the on-disk audit JSONL path for a workspace.
+
+The default audit sink lives outside the agent-writable workspace tree
+(``MERGECRAFT_AUDIT_ROOT`` or ``~/.local/share/mergecraft/audit``). Hash
+chaining detects tampering after the fact; it does not prevent it — for
+threat models that include the local host, forward to an external sink
+(syslog, OTLP logs, S3 object lock, etc.).
 """
 
 from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import json
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,9 +40,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AUDIT_IDENTIFIER_FIELDS",
+    "AUDIT_LOG_FILENAME",
     "AUDIT_REQUIRED_EVENT_FIELDS",
     "AUDIT_STORED_EVENT_FIELDS",
     "DEFAULT_AUDIT_REL",
+    "MERGECRAFT_AUDIT_ROOT_ENV",
     "append_audit_event",
     "explain_blocking_decision",
     "export_audit_log",
@@ -40,9 +52,14 @@ __all__ = [
     "load_audit_events",
     "maybe_audit_blocking_terminal_submission",
     "record_blocking_decision",
+    "resolve_audit_log_path",
+    "resolve_audit_root",
+    "verify_audit_chain",
 ]
 
 DEFAULT_AUDIT_REL: Path = Path(".mergecraft") / "audit.jsonl"
+AUDIT_LOG_FILENAME = "audit.jsonl"
+MERGECRAFT_AUDIT_ROOT_ENV = "MERGECRAFT_AUDIT_ROOT"
 
 AUDIT_REQUIRED_EVENT_FIELDS = frozenset({"event_type", "outcome", "context"})
 AUDIT_IDENTIFIER_FIELDS = frozenset({"run_id", "artifact_id"})
@@ -60,13 +77,61 @@ def _resolve_root(root: Path | None) -> Path:
     return root if root is not None else Path.cwd()
 
 
-def _audit_path(root: Path) -> Path:
-    return root / DEFAULT_AUDIT_REL
+def resolve_audit_root() -> Path:
+    """Return the configured audit sink directory (not the JSONL file itself)."""
+    raw = os.environ.get(MERGECRAFT_AUDIT_ROOT_ENV)
+    if raw:
+        return Path(raw).expanduser()
+    data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(data_home).expanduser() if data_home else Path.home() / ".local" / "share"
+    return base / "mergecraft" / "audit"
+
+
+def resolve_audit_log_path(*, root: Path | None = None) -> Path:
+    """Return the audit JSONL path for *root*'s workspace."""
+    workspace = _resolve_root(root)
+    audit_root = resolve_audit_root()
+    if os.environ.get(MERGECRAFT_AUDIT_ROOT_ENV):
+        return audit_root / AUDIT_LOG_FILENAME
+    workspace_key = hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()[:16]
+    return audit_root / workspace_key / AUDIT_LOG_FILENAME
+
+
+def _legacy_audit_path(workspace: Path) -> Path:
+    return workspace / DEFAULT_AUDIT_REL
+
+
+def _canonical_audit_body(record: dict[str, Any]) -> str:
+    body = {key: value for key, value in record.items() if key not in {"prev", "hash"}}
+    return json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+
+
+def _chain_hash(prev: str, canonical_body: str) -> str:
+    return hashlib.sha256((prev + canonical_body).encode("utf-8")).hexdigest()
+
+
+def _read_last_chain_hash(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    last_hash = ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            stored = payload.get("hash")
+            if isinstance(stored, str):
+                last_hash = stored
+    return last_hash
 
 
 @contextlib.contextmanager
 def _audit_append_lock(path: Path) -> Iterator[None]:
-    """Serialize concurrent JSONL appends across processes on one workspace."""
+    """Serialize concurrent JSONL appends across processes on one audit sink."""
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.parent / ".audit.lock"
     with lock_path.open("a+", encoding="utf-8") as handle:
@@ -113,12 +178,12 @@ def append_audit_event(
     *,
     root: Path | None = None,
 ) -> None:
-    """Append one structured audit event to ``.mergecraft/audit.jsonl`` (#417).
+    """Append one structured audit event to the enterprise audit JSONL stream (#417).
 
-    Concurrent appends are serialized with an ``fcntl`` lock on
-    ``.mergecraft/.audit.lock`` (best-effort on Windows, where locking is
-    skipped). mergeCraft's Action runs one review process per workspace, so
-    the lock mainly guards local CLI retries and parallel test workers.
+    Concurrent appends are serialized with an ``fcntl`` lock beside the log file
+    (best-effort on Windows, where locking is skipped). mergeCraft's Action runs
+    one review process per workspace, so the lock mainly guards local CLI retries
+    and parallel test workers.
 
     Args:
         event: Event payload with ``event_type``, ``outcome``, ``context``, and at
@@ -128,7 +193,7 @@ def append_audit_event(
     """
     payload = _validate_event_payload(event)
     workspace = _resolve_root(root)
-    path = _audit_path(workspace)
+    path = resolve_audit_log_path(root=workspace)
 
     normalized: dict[str, Any] = {
         "timestamp": payload.get("timestamp") or _utc_now_iso(),
@@ -140,6 +205,12 @@ def append_audit_event(
         normalized["run_id"] = payload["run_id"]
     if "artifact_id" in payload:
         normalized["artifact_id"] = payload["artifact_id"]
+
+    prev_hash = _read_last_chain_hash(path)
+    canonical = _canonical_audit_body(normalized)
+    event_hash = _chain_hash(prev_hash, canonical)
+    normalized["prev"] = prev_hash
+    normalized["hash"] = event_hash
 
     line = json.dumps(normalized, ensure_ascii=False, default=str) + "\n"
     with _audit_append_lock(path), path.open("a", encoding="utf-8") as handle:
@@ -222,16 +293,7 @@ def maybe_audit_blocking_terminal_submission(
         )
 
 
-def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
-    """Load audit events from ``.mergecraft/audit.jsonl`` under *root*.
-
-    Args:
-        root: Workspace root. Defaults to the current working directory.
-
-    Returns:
-        Event dicts, one per non-empty JSONL line. Missing file → ``[]``.
-    """
-    path = _audit_path(_resolve_root(root))
+def _load_events_from_path(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     events: list[dict[str, Any]] = []
@@ -257,6 +319,61 @@ def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
             continue
         events.append(payload)
     return events
+
+
+def load_audit_events(*, root: Path | None = None) -> list[dict[str, Any]]:
+    """Load audit events for *root*'s workspace.
+
+    Args:
+        root: Workspace root. Defaults to the current working directory.
+
+    Returns:
+        Event dicts, one per non-empty JSONL line. Missing file → ``[]``.
+    """
+    workspace = _resolve_root(root)
+    primary = resolve_audit_log_path(root=workspace)
+    events = _load_events_from_path(primary)
+    if events:
+        return events
+    return _load_events_from_path(_legacy_audit_path(workspace))
+
+
+def verify_audit_chain(path: Path) -> list[int]:
+    """Return 1-based line numbers where the audit hash chain breaks.
+
+    Each record is expected to carry ``prev`` (previous line's hash, or ``""`` for
+    the genesis record) and ``hash`` (``sha256(prev + canonical_body)`` where
+    *canonical_body* is JSON with ``sort_keys=True`` excluding ``prev``/``hash``).
+    """
+    if not path.is_file():
+        return []
+    breaks: list[int] = []
+    prev_hash = ""
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            record = json.loads(stripped)
+        except json.JSONDecodeError:
+            breaks.append(line_no)
+            continue
+        if not isinstance(record, dict):
+            breaks.append(line_no)
+            continue
+        stored_prev = record.get("prev")
+        stored_hash = record.get("hash")
+        canonical = _canonical_audit_body(record)
+        expected_hash = _chain_hash(prev_hash, canonical)
+        if stored_hash is None:
+            if line_no > 1:
+                breaks.append(line_no)
+            prev_hash = expected_hash
+            continue
+        if stored_prev != prev_hash or stored_hash != expected_hash:
+            breaks.append(line_no)
+        prev_hash = stored_hash
+    return breaks
 
 
 def _dump_records(records: list[dict[str, Any]]) -> str:

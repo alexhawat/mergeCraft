@@ -7,13 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+### Security
 
-- Egress DNS pinning no longer replaces the process-global ``socket.getaddrinfo``;
-  guarded downloads use a per-client ``httpx`` transport that connects to
-  validated IPs while preserving hostname ``Host`` headers and TLS SNI (MCB-18)
+- Enterprise audit log defaults outside the agent-writable workspace tree
+  (``MERGECRAFT_AUDIT_ROOT`` or ``~/.local/share/mergecraft/audit``); each
+  record is hash-chained and verifiable via ``mergecraft audit verify`` (MCB-21)
+- MCP HTTP startup no longer treats a TCP connect probe as proof of identity;
+  server-thread failures propagate and ``GET /health`` requires a per-run nonce
+  (MCB-27)
 
 ### Changed
+
+- **Breaking:** enterprise audit events are no longer written to
+  ``.mergecraft/audit.jsonl`` inside the workspace by default; set
+  ``MERGECRAFT_AUDIT_ROOT`` or read from the new default location (MCB-21)
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
   Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
@@ -124,6 +131,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI workflow log and SARIF artifact zip ingestion now use bounded
   `zf.open(info).read(n)` decompression with per-member, aggregate, member-count,
   and expansion-ratio caps instead of unbounded `zf.read(name)` (MCB-14)
+- Egress DNS pinning no longer replaces the process-global ``socket.getaddrinfo``;
+  guarded downloads use a per-client ``httpx`` transport that connects to
+  validated IPs while preserving hostname ``Host`` headers and TLS SNI (MCB-18)
 - `validate_http_url` rejects whitespace and control characters anywhere in a
   provider URL, not just at the ends. A stored URL is written verbatim into the
   consumer workflow YAML, so an interior newline could open a new key or step
