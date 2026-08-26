@@ -122,6 +122,8 @@ Impl waves must introduce (or export) at least:
 
 BR8 census follow-up: harness/config tests (`test_redactor`, `test_diagnostics`, `test_setup_script_failure`) now assert `REDACTION_SENTINEL` (`<redacted>`) instead of legacy `[REDACTED]`.
 
+BR8 integration follow-up: tracing/analyzer adapter tests compare `MemorySink` attrs and parser paths through `as_sink_value` / `finding_path_matches` so BR8 entropy redaction does not false-fail planted-finding and span-identity contracts.
+
 ## Escalation (BR7 / MCB-21)
 
 **Escalation:** `test_audit_producer_hk.py` pinned in-workspace `.mergecraft/audit.jsonl` writes; amended to use `MERGECRAFT_AUDIT_ROOT` + `resolve_audit_log_path` after BR7 relocated the audit sink.

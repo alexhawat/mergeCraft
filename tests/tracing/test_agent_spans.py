@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
+from tests.tracing.conftest import as_sink_value
 
 from mergecraft.agents.shared import spawn_agent_cli
 from mergecraft.utils import privilege as privilege_module
@@ -94,11 +95,11 @@ def test_agent_run_span_carries_identity(
 
     event = sink.events[0]
     assert event.kind == "mergecraft.agent.run"
-    assert event.attrs["mergecraft.agent.id"] == "reviewer-security-1"
-    assert event.attrs["gen_ai.agent.name"] == "reviewer-security-1"
+    assert event.attrs["mergecraft.agent.id"] == as_sink_value("reviewer-security-1")
+    assert event.attrs["gen_ai.agent.name"] == as_sink_value("reviewer-security-1")
     assert event.attrs["mergecraft.agent.role"] == "reviewer"
     assert event.attrs["mergecraft.agent.lens"] == "security"
-    assert event.attrs["mergecraft.agent.executed_model"] == "claude-opus-test"
+    assert event.attrs["mergecraft.agent.executed_model"] == as_sink_value("claude-opus-test")
     assert event.attrs["mergecraft.agent.prompt_version"] == "3"
     assert event.attrs["mergecraft.agent.toolset"] == ["read_file", "run_analyzers"]
 

@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import inspect
 import json
+import secrets
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -170,17 +172,24 @@ def test_tools_list_and_call_require_per_run_token(tmp_path: Path) -> None:
 
 
 def test_health_stays_unauthenticated(tmp_path: Path) -> None:
-    """D15 control: ``/health`` may stay open; it is not the credential surface."""
+    """D15 control: ``/health`` needs no Bearer; BR7 adds a nonce query for bind identity."""
     ctx = _tool_ctx(tmp_path)
-    url, stop = start_mcp_http_server(ctx)
+
+    def _predictable_token_hex(nbytes: int) -> str:
+        return "a" * (nbytes * 2)
+
+    with patch.object(secrets, "token_hex", side_effect=_predictable_token_hex):
+        url, stop = start_mcp_http_server(ctx)
     try:
         parsed = urlparse(url)
-        health = f"{parsed.scheme}://{parsed.netloc}/health"
+        health_nonce = "a" * 32
+        health = f"{parsed.scheme}://{parsed.netloc}/health?nonce={health_nonce}"
         request = Request(health, method="GET")
         with urlopen(request, timeout=5) as resp:
             assert resp.status == 200
             payload = json.loads(resp.read().decode())
         assert payload.get("status") == "ok"
+        assert payload.get("nonce") == health_nonce
     finally:
         stop()
 

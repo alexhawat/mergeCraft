@@ -83,13 +83,13 @@ def test_request_params_reach_the_span(tracer_and_sink: dict[str, Any], genai_mo
     # realistic slug like ``anthropic/claude-opus-4.8`` collides with it. The
     # redaction layer is a security boundary and does not bend for tests, so
     # the sink-routed assertion uses an id that survives it verbatim.
-    attrs = genai.request_attrs(model="claude-opus-test", params=_full_params(genai))
+    attrs = genai.request_attrs(model="claude-opus", params=_full_params(genai))
     with tracer.start_span("llm.call") as span:
         for key, value in attrs.items():
             span.set_attribute(key, value)
 
     event_attrs = sink.events[0].attrs
-    assert event_attrs["gen_ai.request.model"] == "claude-opus-test"
+    assert event_attrs["gen_ai.request.model"] == "claude-opus"
     assert event_attrs["gen_ai.request.temperature"] == 0.2
     assert event_attrs["gen_ai.request.top_p"] == 0.9
     assert event_attrs["gen_ai.request.top_k"] == 40
