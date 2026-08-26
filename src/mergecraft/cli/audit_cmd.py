@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from mergecraft.cli.errors import cli_bail
-from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
+from mergecraft.cli.exits import CLI_AUDIT_VERIFY_FAILED_EXIT_CODE, CLI_USAGE_EXIT_CODE
 from mergecraft.enterprise.audit import (
     export_audit_log,
     load_audit_events,
@@ -58,10 +58,10 @@ def verify(
     if not audit_path.is_file():
         cli_bail(
             f"audit log missing or not a regular file: {audit_path}",
-            code=1,
+            code=CLI_AUDIT_VERIFY_FAILED_EXIT_CODE,
         )
     breaks = verify_audit_chain(audit_path)
     if breaks:
         typer.echo(f"audit chain breaks at lines: {breaks}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(CLI_AUDIT_VERIFY_FAILED_EXIT_CODE)
     typer.echo("audit chain ok")

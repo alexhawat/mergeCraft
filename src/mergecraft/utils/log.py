@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import suppress
 from typing import Any
 
 from loguru import logger
@@ -96,7 +97,11 @@ def configure_logging(*, force: bool = False, level: str | None = None) -> None:
 
     effective_level = level if level is not None else resolve_log_level()
     log_format = resolve_log_format()
-    logger.remove()
+    if force:
+        logger.remove()
+    elif not _CONFIGURED:
+        with suppress(ValueError):
+            logger.remove(0)
     logger.configure(patcher=_patch_bound_context)  # type: ignore[arg-type]  # — loguru patcher stub is overly restrictive; _patch_bound_context(record) signature is compatible at runtime
 
     if log_format == "json":

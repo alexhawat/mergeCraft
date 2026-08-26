@@ -26,6 +26,7 @@ _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
 _MIN_ENTROPY_LENGTH = 16
 _ENTROPY_RATIO = 0.85
 _ENTROPY_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_-]{16,}")
+_REPO_PATH_TOKEN_RE = re.compile(r"^[\w.-]+(?:/[\w.-]+)+$")
 
 _BENIGN_HEX_40_RE = re.compile(r"^[a-f0-9]{40}$")
 _BENIGN_HEX_64_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -65,9 +66,16 @@ def _should_force_redact_dense_token(token: str) -> bool:
     return unique / len(token) > 0.25
 
 
+def _looks_like_repo_path_token(token: str) -> bool:
+    """Repo-relative path prefixes are not secrets — preserve for CI blame paths."""
+    return "/" in token and _REPO_PATH_TOKEN_RE.match(token) is not None
+
+
 def _entropy_redact(text: str) -> str:
     def replacer(match: re.Match[str]) -> str:
         token = match.group(0)
+        if _looks_like_repo_path_token(token):
+            return token
         if len(token) < _MIN_ENTROPY_LENGTH:
             return token
         if _BENIGN_HEX_40_RE.match(token) or _BENIGN_HEX_64_RE.match(token):
