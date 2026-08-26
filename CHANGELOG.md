@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``ran``, derives terminal verdicts from collected evidence instead of
   hardcoding ``approve``, and documents ``PipelineExecutor`` as experimental
   (MCB-37)
+- ``ReviewEngine.run`` clears the timeout callback on every invocation so a
+  second run with ``on_timeout=None`` does not retain the first run's handler
+  (MCB-36)
 - Gateway credential resolution reads repo settings from the run-scope snapshot
   instead of reloading ``.mergecraft/config.yaml`` on every model lookup, with a
   live-load fallback when no snapshot is installed (#496)

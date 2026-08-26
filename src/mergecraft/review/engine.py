@@ -160,8 +160,7 @@ class ReviewEngine(Generic[T]):
     ) -> ReviewEngineResult[T]:
         """Run materialize → analyze → review → publish in order."""
         self._ran.clear()
-        if on_timeout is not None:
-            self._on_timeout = on_timeout
+        self._on_timeout = on_timeout
         await self.run_stage("materialize", driver.materialize, timeouts=timeouts)
         await self.run_stage("analyze", driver.analyze, timeouts=timeouts)
         review_out = await self.run_stage("review", driver.review, timeouts=timeouts)
