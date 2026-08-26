@@ -23,12 +23,14 @@ class _RecordingGitHub(GitHubClient):
     def __init__(self) -> None:
         super().__init__(token="test-token")
         self.review_payloads: list[dict[str, Any]] = []
+        self.review_pull_numbers: list[int] = []
         self.create_review_calls: int = 0
 
     async def create_review(
         self, owner: str, repo: str, pull_number: int, **payload: Any
     ) -> dict[str, Any]:
         self.create_review_calls += 1
+        self.review_pull_numbers.append(pull_number)
         self.review_payloads.append(payload)
         return {"id": 1, "node_id": "n1", "html_url": "https://x/1", "state": "COMMENTED"}
 
@@ -146,6 +148,33 @@ _MUTATING_REVIEW_TOOLS: tuple[tuple[str, dict[str, Any]], ...] = (
         {"pull_number": 8, "body": "x", "comments": []},
     ),
 )
+
+
+@pytest.mark.asyncio
+async def test_get_issue_mutation_does_not_retarget_publication(tmp_path: Path) -> None:
+    """get_issue mutating primary.issue_number must not retarget publication."""
+    ctx = _review_ctx(tmp_path, pr_number=7)
+    primary = primary_repo_state(ctx.tool_state)
+    primary.issue_number = 8
+    client = github_client_from_ctx(ctx)
+    spec = create_pull_request_review_tool(ctx)
+    result = await spec.execute({"body": "review body", "comments": []})
+    assert result.is_error is not True, _error_text(result) if result.is_error else ""
+    assert client.create_review_calls == 1
+    assert client.review_pull_numbers == [7]
+
+
+@pytest.mark.asyncio
+async def test_get_issue_mutation_with_wrong_legacy_pull_number_refuses(tmp_path: Path) -> None:
+    ctx = _review_ctx(tmp_path, pr_number=7)
+    primary = primary_repo_state(ctx.tool_state)
+    primary.issue_number = 8
+    client = github_client_from_ctx(ctx)
+    spec = create_pull_request_review_tool(ctx)
+    result = await spec.execute({"pull_number": 8, "body": "review body", "comments": []})
+    assert result.is_error is True
+    assert "PR #8" in _error_text(result)
+    assert client.create_review_calls == 0
 
 
 @pytest.mark.asyncio

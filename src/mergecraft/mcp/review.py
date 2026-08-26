@@ -350,10 +350,22 @@ def _reject_mismatched_publication(submission: Any, params: dict[str, Any]) -> N
 
 
 def _bound_pull_number(ctx: ToolContext) -> int | None:
-    """Return the PR number this review run is bound to, if any."""
-    primary = primary_repo_state(ctx.tool_state)
-    bound = primary.issue_number or ctx.tool_state.pr_number
-    return int(bound) if bound is not None else None
+    """Return the PR number this review run is bound to, if any.
+
+    Uses only immutable run identity — never ``primary.issue_number``, which
+    ``get_issue`` / ``get_issue_comments`` / ``get_issue_events`` may retarget.
+    """
+    if ctx.tool_state.pr_number is not None:
+        return int(ctx.tool_state.pr_number)
+    event = ctx.payload.event
+    if event.is_pr and event.issue_number is not None:
+        return int(event.issue_number)
+    return None
+
+
+def _bound_commit_id(ctx: ToolContext) -> str | None:
+    """Return the checkout SHA this review run is bound to, if any."""
+    return primary_repo_state(ctx.tool_state).checkout_sha
 
 
 def _resolve_bound_pull_number(ctx: ToolContext, params: dict[str, Any]) -> int:
@@ -371,16 +383,19 @@ def _resolve_bound_pull_number(ctx: ToolContext, params: dict[str, Any]) -> int:
 
 
 def _resolve_bound_commit_id(ctx: ToolContext, params: dict[str, Any]) -> str | None:
-    primary = primary_repo_state(ctx.tool_state)
-    bound_sha = primary.checkout_sha
+    bound_sha = _bound_commit_id(ctx)
     legacy = params.get("commit_id")
     if bound_sha is None:
         if legacy is not None:
             msg = "commit_id cannot be supplied without a bound checkout on this review run"
             raise ValueError(msg)
         return None
-    if legacy is not None:
-        return str(legacy)
+    if legacy is not None and str(legacy) != bound_sha:
+        msg = (
+            f"create_pull_request_review targeted commit {legacy} but this run is "
+            f"bound to checkout sha {bound_sha}; refusing to publish"
+        )
+        raise PublicationScopeError(msg)
     return bound_sha
 
 
@@ -397,8 +412,7 @@ def _assert_publication_scope(
             f"bound to PR #{bound}; refusing to publish"
         )
         raise PublicationScopeError(msg)
-    primary = primary_repo_state(ctx.tool_state)
-    bound_sha = primary.checkout_sha
+    bound_sha = _bound_commit_id(ctx)
     if commit_id is not None and bound_sha is not None and commit_id != bound_sha:
         msg = (
             f"create_pull_request_review targeted commit {commit_id} but this run is "
@@ -463,10 +477,8 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
                 dispatched_lens_ids=ctx.tool_state.dispatched_lens_ids,
             )
         payload["body"] = add_footer(ctx, body_with_sections)
-    if primary.checkout_sha:
-        payload["commit_id"] = primary.checkout_sha
-    elif params.get("commit_id"):
-        payload["commit_id"] = params["commit_id"]
+    if commit_id:
+        payload["commit_id"] = commit_id
 
     incremental_diff_text: str | None = None
     if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
@@ -598,8 +610,7 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
     pending = ctx.tool_state.pending_review_publication
     if pending is None:
         submission = ctx.tool_state.terminal_submission
-        primary = primary_repo_state(ctx.tool_state)
-        pull_number = primary.issue_number or ctx.tool_state.pr_number
+        pull_number = _bound_pull_number(ctx)
         if pull_number is None:
             msg = "no pull number available for validated terminal submission publication"
             raise ValueError(msg)
@@ -668,8 +679,9 @@ def create_pull_request_review_tool(ctx: ToolContext):
 
         publication_params = dict(params)
         publication_params["pull_number"] = pull_number
-        if primary.checkout_sha:
-            publication_params["commit_id"] = primary.checkout_sha
+        bound_commit = _bound_commit_id(ctx)
+        if bound_commit:
+            publication_params["commit_id"] = bound_commit
         ctx.tool_state.pending_review_publication = publication_params
 
         ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
