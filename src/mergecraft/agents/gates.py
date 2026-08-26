@@ -139,14 +139,24 @@ def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
     return _has_blocker(packet.findings)
 
 
+_REQUIRED_STATIC_CHECK_SATISFIED: Final[frozenset[str]] = frozenset({"passed", "not_applicable"})
+"""Statuses that satisfy a required static check (AG0-G4a / MCB-16)."""
+
+
+def _required_static_check_row_satisfied(status: str | None) -> bool:
+    """True when a ``run_static_checks`` row explicitly satisfies the gate."""
+    return status in _REQUIRED_STATIC_CHECK_SATISFIED
+
+
 def has_failed_required_static_check(static_checks: list[dict[str, str]]) -> bool:
-    """True when any ``run_static_checks`` row reports ``status: failed``.
+    """True when any required static check row is not explicitly satisfied.
 
     The terminal-verdict validator consults this for ``approve`` submissions.
-    Only ``failed`` is a negative gate signal — ``unavailable`` and friends are
-    honest skips, not blockers.
+    AG0-G4 (a): only ``passed`` and ``not_applicable`` satisfy a required check.
+    Every other status — ``failed``, ``unavailable``, ``error``, ``timeout``,
+    or unknown — blocks approval.
     """
-    return any(row.get("status") == "failed" for row in static_checks)
+    return any(not _required_static_check_row_satisfied(row.get("status")) for row in static_checks)
 
 
 @overload

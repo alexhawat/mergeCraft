@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Gate mode and per-gate action overrides resolve from the run-scope settings
+  snapshot instead of package defaults, and packet assembly in ``enforce`` mode
+  fails closed with a neutral decision when assembly raises (MCB-17)
+- Required static checks block approval unless every row is explicitly
+  ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``,
+  and unknown statuses no longer satisfy the gate (MCB-16)
 - Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
   refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
   explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select

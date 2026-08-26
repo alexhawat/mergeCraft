@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
     from mergecraft.analyzers.finding import Finding
     from mergecraft.classify import BlastRadiusClassification
+    from mergecraft.evidence.gate_policy import GateActionPolicy
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import RepoToolState, ToolState
     from mergecraft.modes import Mode
@@ -326,7 +327,8 @@ def build_run_packet(
     # the action when ``mode == "enforce"``, and the shadow recorder captures
     # it otherwise.
     gate_mode = _resolve_gate_mode(ctx)
-    action = decide_action(packet_with_decision, mode=gate_mode)
+    gate_policy = _resolve_gate_policy(ctx)
+    action = decide_action(packet_with_decision, mode=gate_mode, policy=gate_policy)
     final_decision = decision.model_copy(
         update={
             "action": action.value,
@@ -371,16 +373,23 @@ def _provider_for_model_evidence(
 def _resolve_gate_mode(ctx: ToolContext) -> str:
     """Return the gate mode (``shadow`` / ``enforce``) for this run.
 
-    D12: every new gate defaults to ``shadow``. The typed settings carry
-    a per-gate override (``gates.gate_action`` / ``gates.thermostat``);
-    both default to ``shadow``. Resolving the mode here — rather than
-    reading ``os.environ`` ad hoc — keeps the contract Pydantic-validated
-    and ensures a typo'd value widens to ``shadow``, never to
-    ``enforce``.
+    D5 / MCB-17: read ``gates.gate_action`` from the AG2 settings snapshot
+    on ``ToolContext``, not from package defaults. D12: every new gate
+    defaults to ``shadow``. Pydantic validation on ``GateMode`` ensures a
+    typo'd value widens to ``shadow``, never to ``enforce``.
     """
-    from mergecraft.config import default_settings
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
 
-    return default_settings().gates.gate_action
+    return repo_settings_from_context(ctx).gates.gate_action
+
+
+def _resolve_gate_policy(ctx: ToolContext) -> GateActionPolicy:
+    """Merge repo ``gates.override`` onto the default gate-action policy."""
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
+    from mergecraft.evidence.gate_policy import resolve_effective_gate_policies
+
+    settings = repo_settings_from_context(ctx)
+    return resolve_effective_gate_policies(settings.gates.override)
 
 
 def _shadow_run_id(ctx: ToolContext) -> str:
@@ -414,6 +423,59 @@ def _change_id(ctx: ToolContext) -> str | None:
     return f"{ctx.repo.owner}/{ctx.repo.name}#{pull_number}"
 
 
+def _fail_closed_assembly_packet(
+    ctx: ToolContext,
+    *,
+    change_id: str,
+    run_succeeded: bool,
+    gate_mode: str,
+    gate_policy: GateActionPolicy,
+    reason: str,
+) -> MergeEvidencePacket:
+    """Return a neutral packet when assembly fails in ``enforce`` mode (MCB-17)."""
+    from mergecraft.agents.gates import decide_action, decide_approval
+
+    state = ctx.tool_state
+    executed_model = ctx.resolved_model or state.model or "(unresolved)"
+    requested_model = state.requested_model or executed_model
+    provider = _provider_for_model_evidence(
+        executed_model=executed_model,
+        requested_model=requested_model,
+        agent_id=ctx.agent_id,
+    )
+    packet = build_packet(
+        change_id=change_id,
+        agent_id=ctx.agent_id,
+        agent_version=_agent_version(),
+        model=executed_model,
+        requested_model=requested_model,
+        executed_model=executed_model,
+        provider=provider,
+        fallback_index=state.fallback_index,
+        fallback_occurred=state.fallback_occurred,
+        files_changed=[],
+        findings=[],
+        deterministic_checks=[],
+        self_assessment=_self_assessment(state),
+        blast_radius=None,
+        trajectory=None,
+        mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
+        dispatched_lens_ids=list(state.dispatched_lens_ids),
+    )
+    decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
+    packet_with_decision = packet.model_copy(update={"decision": decision})
+    action = decide_action(packet_with_decision, mode=gate_mode, policy=gate_policy)
+    final_decision = decision.model_copy(
+        update={
+            "action": action.value,
+            "decided_by_action": "mergecraft.agents.gates.decide_action",
+            "mode": gate_mode,
+            "reason": f"{decision.reason}; assembly failed — {reason}",
+        }
+    )
+    return packet_with_decision.model_copy(update={"decision": final_decision})
+
+
 def prepare_run_packet(
     ctx: ToolContext,
     *,
@@ -425,6 +487,8 @@ def prepare_run_packet(
     resolved = change_id or _change_id(ctx)
     if resolved is None:
         return None
+    gate_mode = _resolve_gate_mode(ctx)
+    gate_policy = _resolve_gate_policy(ctx)
     try:
         return build_run_packet(
             ctx,
@@ -434,6 +498,15 @@ def prepare_run_packet(
         )
     except Exception as err:
         logger.warning("evidence packet: assembly failed — {}", err)
+        if gate_mode == "enforce":
+            return _fail_closed_assembly_packet(
+                ctx,
+                change_id=resolved,
+                run_succeeded=run_succeeded,
+                gate_mode=gate_mode,
+                gate_policy=gate_policy,
+                reason=str(err),
+            )
         return None
 
 
