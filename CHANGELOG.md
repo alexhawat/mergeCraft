@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The self-review Action pin on both review steps moves to `b34e9f25`. The
+  previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
+  `src/mergecraft/`, so every review since then ran product code that stale.
+  The image at that pin carries no `[tracing]` extra, which would have left
+  the Logfire wiring exporting nothing, and analyzer defects already fixed by
+  #458 / #459 kept surfacing in Action logs. `make action-pin-check` reports
+  the drift correctly but gates nothing; #532 tracks wiring it into `make ci`
+
 ### Security
 
 - OpenCode review sessions deny ``webfetch``, ``external_directory``, and
