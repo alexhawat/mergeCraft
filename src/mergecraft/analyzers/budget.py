@@ -230,6 +230,49 @@ def agent_dict_to_finding(item: dict[str, Any], *, rule_id: str = "review") -> F
     )
 
 
+def _demote_unidentified_inline(
+    inline: list[Any],
+    *,
+    short_ids: dict[str, str],
+    mechanical: list[Finding],
+    deferred: list[Finding],
+) -> tuple[list[Any], list[Finding], list[Finding], bool]:
+    """Move inline findings without short ids into mechanical/deferred lanes."""
+    demoted_any = False
+    kept_inline: list[Any] = []
+    for item in inline:
+        fingerprint = _fingerprint_from_inline_item(item)
+        if fingerprint and fingerprint not in short_ids:
+            demoted_any = True
+            if isinstance(item, Finding):
+                if item.source == "agent":
+                    deferred.append(item)
+                else:
+                    mechanical.append(item)
+            else:
+                deferred.append(agent_dict_to_finding(item))
+            continue
+        kept_inline.append(item)
+    return kept_inline, mechanical, deferred, demoted_any
+
+
+def _section_findings_with_inline(
+    section: list[Finding],
+    inline: list[Any],
+    *,
+    include_inline: bool,
+) -> list[Finding]:
+    if not include_inline:
+        return section
+    combined = list(section)
+    for item in inline:
+        if isinstance(item, Finding):
+            combined.append(item)
+        elif isinstance(item, dict):
+            combined.append(agent_dict_to_finding(item))
+    return combined
+
+
 def place_findings(
     findings: list[Finding],
     *,
@@ -264,12 +307,35 @@ def place_findings(
         path_by_fingerprint=_path_by_fingerprint(inline, mechanical, deferred),
     )
 
+    inline, mechanical, deferred, demoted_due_to_short_id = _demote_unidentified_inline(
+        inline,
+        short_ids=short_ids,
+        mechanical=mechanical,
+        deferred=deferred,
+    )
+    mechanical_for_section = _section_findings_with_inline(
+        mechanical,
+        inline,
+        include_inline=demoted_due_to_short_id,
+    )
+    deferred_for_section = _section_findings_with_inline(
+        deferred,
+        inline,
+        include_inline=demoted_due_to_short_id,
+    )
+
     return FindingPlacement(
         inline=inline,
         mechanical=mechanical,
-        mechanical_section=_render_mechanical_section(mechanical, short_ids=short_ids),
+        mechanical_section=_render_mechanical_section(
+            mechanical_for_section,
+            short_ids=short_ids,
+        ),
         deferred=deferred,
-        deferred_section=render_deferred_section(deferred, short_ids=short_ids),
+        deferred_section=render_deferred_section(
+            deferred_for_section,
+            short_ids=short_ids,
+        ),
         short_ids=short_ids,
     )
 
