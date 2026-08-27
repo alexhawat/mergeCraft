@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Cheat-signature lint: narrow ``getattr_tautology`` to ``object()`` targets so
+  legitimate missing-attribute fallback asserts are not flagged; severity stays
+  ``error`` (#501)
+
 ### Changed
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
