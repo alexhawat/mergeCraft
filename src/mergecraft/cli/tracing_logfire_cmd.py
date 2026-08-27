@@ -40,6 +40,7 @@ from mergecraft.cli.tracing_logfire_wf_yaml import (
     remove_logfire_wiring,
     render_workflow_diff,
 )
+from mergecraft.utils.git_hardening import git_argv
 
 # ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region; it is
 # written by ``tracing logfire enable --region`` and read by the precedence
@@ -96,7 +97,7 @@ def _parse_repo_slug() -> str:
 
     try:
         url = subprocess.check_output(
-            ["git", "remote", "get-url", "origin"],
+            git_argv(["remote", "get-url", "origin"]),
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
@@ -392,6 +393,16 @@ def logfire_wire_workflow(
             "target a specific step exactly."
         ),
     ),
+    region: str | None = typer.Option(
+        None,
+        "--region",
+        help=(
+            "Logfire data region: 'us' or 'eu'. When given, writes "
+            "``MERGECRAFT_TRACING_REGION`` into the step's ``env:``. Omit to leave "
+            "the key alone (the resolver defaults to 'us'). An EU write token "
+            "(``pylf_v{N}_eu_…``) needs --region eu or spans go to the US host."
+        ),
+    ),
     apply: bool = typer.Option(
         False,
         "--apply",
@@ -415,6 +426,7 @@ def logfire_wire_workflow(
         mergecraft tracing logfire wire-workflow
         mergecraft tracing logfire wire-workflow --workflow .github/workflows/ci.yml \
             --secret LOGFIRE_TOKEN --project-var LOGFIRE_PROJECT --apply
+        mergecraft tracing logfire wire-workflow --region eu --step all --apply
 
     Refuses to add an obvious mismatch (e.g. existing ``tracing-to: otel``)
     unless ``--force`` is given. Dry-run by default; ``--apply`` writes.
@@ -423,6 +435,10 @@ def logfire_wire_workflow(
         cli_bail("--secret cannot be empty")
     if not project_var:
         cli_bail("--project-var cannot be empty")
+    if region is not None:
+        region = region.strip().lower()
+        if region not in _VALID_REGIONS:
+            cli_bail(f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).")
     try:
         proposed = apply_logfire_wiring(
             workflow_path=workflow,
@@ -430,6 +446,7 @@ def logfire_wire_workflow(
             project_var_name=project_var,
             step_selector=step,
             force=force,
+            region=region,
         )
     except LogfireWorkflowError as exc:
         cli_bail(str(exc))

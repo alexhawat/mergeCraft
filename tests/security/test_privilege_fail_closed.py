@@ -49,6 +49,8 @@ def _force_root(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make every branch in ``wrap_agent_command``/``prepare_workspace_for_agent``
     see the action-image root path, regardless of the host's real uid."""
     monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +125,9 @@ def test_root_with_setpriv_and_user_wraps_command(
     # privilege drop contract (the verifier reads uid from inside the child).
     assert wrapped == [
         "setpriv",
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--bounding-set=-all",
         "--reuid=mergecraft",
         "--regid=mergecraft",
         "--init-groups",
@@ -165,8 +170,8 @@ def test_custom_agent_user_via_env_is_honoured(
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "reviewer")
     monkeypatch.setattr(pwd, "getpwnam", lambda name: _FakePwnam(name))
     wrapped = privilege.wrap_agent_command(["claude", "--help"])
-    assert wrapped[1] == "--reuid=reviewer"
-    assert wrapped[2] == "--regid=reviewer"
+    assert wrapped[4] == "--reuid=reviewer"
+    assert wrapped[5] == "--regid=reviewer"
 
     # Case 2: env var names a user that doesn't exist → fail closed.
     monkeypatch.setattr(pwd, "getpwnam", lambda _name: (_ for _ in ()).throw(KeyError(_name)))
@@ -337,7 +342,7 @@ def test_main_missing_agent_user_fails_closed_as_configuration_error(
     from mergecraft.main import main
 
     # Pretend we're root in the action image with a missing agent user.
-    monkeypatch.setattr(os, "getuid", lambda: 0)
+    _force_root(monkeypatch)
 
     def _raise_keyerror(_name: str) -> _FakePwnam:
         raise KeyError(_name)

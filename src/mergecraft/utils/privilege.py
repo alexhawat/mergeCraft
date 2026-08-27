@@ -19,14 +19,17 @@ alongside the ``setpriv`` argv wrap, using the same fail-closed resolution.
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 _DEFAULT_AGENT_USER = "mergecraft"
+_ALLOW_ROOT_ENV = "MERGECRAFT_ALLOW_ROOT"
 
 if TYPE_CHECKING:
     import pwd
@@ -41,6 +44,57 @@ def agent_user_name() -> str:
     return (
         os.environ.get("MERGECRAFT_AGENT_USER", _DEFAULT_AGENT_USER).strip() or _DEFAULT_AGENT_USER
     )
+
+
+def _in_action_image() -> bool:
+    """Return whether the process is running inside the mergeCraft action image.
+
+      Keys on ``IS_SANDBOX=1`` and ``/opt/mergecraft`` — both set by the Dockerfile
+    (D11). Root policy gates on this identity rather than inferring posture from uid
+      alone (MCB-24).
+    """
+    return os.environ.get("IS_SANDBOX") == "1" and Path("/opt/mergecraft").is_dir()
+
+
+def _allow_root_override() -> bool:
+    return os.environ.get(_ALLOW_ROOT_ENV, "").strip() == "1"
+
+
+def _refuse_root_outside_action_image() -> None:
+    """Abort when root runs outside the action image without an explicit override."""
+    if os.getuid() != 0:
+        return
+    if _in_action_image() or _allow_root_override():
+        return
+    logger.error(
+        "refusing to run as root outside the mergeCraft action image — "
+        "this is deliberate policy, not a missing /etc/passwd entry; "
+        "set {}=1 to override for local development",
+        _ALLOW_ROOT_ENV,
+    )
+    raise _raise_configuration_error(
+        "refusing to run as root outside the mergeCraft action image — "
+        "this is deliberate policy, not a missing passwd entry; "
+        f"set {_ALLOW_ROOT_ENV}=1 to override for local development"
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _setpriv_supports_bounding_set() -> bool:
+    """Return whether the image ``setpriv`` supports ``--bounding-set`` (util-linux ≥ 2.33)."""
+    setpriv = shutil.which("setpriv")
+    if setpriv is None:
+        return False
+    try:
+        proc = subprocess.run(
+            [setpriv, "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return False
+    return "--bounding-set" in proc.stdout + proc.stderr
 
 
 def _raise_configuration_error(message: str) -> _ConfigurationError:
@@ -71,6 +125,7 @@ def _resolve_privilege_drop_user() -> pwd.struct_passwd | None:
     """
     if os.getuid() != 0:
         return None
+    _refuse_root_outside_action_image()
     user = agent_user_name()
     try:
         import pwd
@@ -123,6 +178,7 @@ def wrap_agent_command(cmd: list[str]) -> list[str]:
     """
     if os.getuid() != 0:
         return list(cmd)
+    _refuse_root_outside_action_image()
     user = agent_user_name()
     if shutil.which("setpriv") is None:
         logger.error(
@@ -135,7 +191,26 @@ def wrap_agent_command(cmd: list[str]) -> list[str]:
             "is unavailable and the run cannot proceed as root"
         )
     _resolve_privilege_drop_user()
-    return ["setpriv", f"--reuid={user}", f"--regid={user}", "--init-groups", *cmd]
+    if not _setpriv_supports_bounding_set():
+        logger.error(
+            "setpriv on PATH does not support --bounding-set (util-linux ≥ 2.33 required); "
+            "refusing to run the agent subprocess as root without capability clearing"
+        )
+        raise _raise_configuration_error(
+            "setpriv does not support --bounding-set in this image; hardened privilege "
+            "drop (--inh-caps=-all, --bounding-set=-all, --no-new-privs) cannot be "
+            "applied and the run cannot proceed as root"
+        )
+    return [
+        "setpriv",
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--bounding-set=-all",
+        f"--reuid={user}",
+        f"--regid={user}",
+        "--init-groups",
+        *cmd,
+    ]
 
 
 def _path_owned_by_uid(path: str, uid: int) -> bool:
@@ -222,6 +297,7 @@ def prepare_workspace_for_agent(workspace: str) -> None:
     """
     if os.getuid() != 0:
         return
+    _refuse_root_outside_action_image()
     user = agent_user_name()
     try:
         import pwd
@@ -257,7 +333,20 @@ def prepare_workspace_for_agent(workspace: str) -> None:
     if not target:
         return
     subprocess.run(
-        ["chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", target],
+        [
+            "find",
+            target,
+            "-path",
+            f"{target}/.git",
+            "-prune",
+            "-o",
+            "-exec",
+            "chown",
+            "-h",
+            f"{pw.pw_uid}:{pw.pw_gid}",
+            "{}",
+            "+",
+        ],
         check=False,
         capture_output=True,
         text=True,

@@ -34,6 +34,7 @@ from mergecraft.mcp.git_guards import (
 )
 from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
 from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv, read_remote_origin_url
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -105,11 +106,27 @@ def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
             idx += 1
 
 
-def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
+def _origin_remote_url(cwd: str) -> str:
+    return read_remote_origin_url(cwd)
+
+
+def _run_git(
+    args: list[str],
+    *,
+    cwd: str,
+    env: dict[str, str] | None = None,
+    remote_url: str | None = None,
+) -> str:
+    resolved_env = env or os.environ.copy()
+    if env is not None and env.get("GIT_CONFIG_COUNT"):
+        resolved_remote = remote_url or _origin_remote_url(cwd)
+        argv = git_authenticated_argv(args, remote_url=resolved_remote)
+    else:
+        argv = git_argv(args)
     result = subprocess.run(
-        ["git", *args],
+        argv,
         cwd=cwd,
-        env=env or os.environ.copy(),
+        env=resolved_env,
         capture_output=True,
         text=True,
         timeout=600,
@@ -122,10 +139,27 @@ def _run_git(args: list[str], *, cwd: str, env: dict[str, str] | None = None) ->
     return result.stdout
 
 
-def _git_env(token: str) -> dict[str, str]:
+def _run_authenticated_git(
+    args: list[str],
+    *,
+    cwd: str,
+    token: str,
+    trusted_remote_url: str | None = None,
+) -> str:
+    live_url = _origin_remote_url(cwd)
+    auth_url = trusted_remote_url or live_url
+    return _run_git(
+        args,
+        cwd=cwd,
+        env=_git_env(token, remote_url=auth_url),
+        remote_url=live_url,
+    )
+
+
+def _git_env(token: str, *, remote_url: str = "") -> dict[str, str]:
     from mergecraft.utils.git_setup import git_env_for_token
 
-    return git_env_for_token(token)
+    return git_env_for_token(token, remote_url=remote_url)
 
 
 # Git global options that may precede the subcommand. `-C` takes a separate
@@ -312,7 +346,10 @@ def git_fetch_tool(ctx: ToolContext):
         if refspec:
             reject_special_ref(str(refspec).split(":")[0], "refspec")
             args.append(str(refspec))
-        output = _run_git(args, cwd=cwd, env=_git_env(ctx.git_token))
+        trusted = primary_repo_state(ctx.tool_state).push_url
+        output = _run_authenticated_git(
+            args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
+        )
         return {"success": True, "output": output}
 
     return tool(
@@ -375,7 +412,10 @@ def push_branch_tool(ctx: ToolContext):
         args = ["push", "origin", str(branch)]
         if force:
             args.insert(1, "--force-with-lease")
-        output = _run_git(args, cwd=cwd, env=_git_env(ctx.git_token))
+        trusted = primary_repo_state(ctx.tool_state).push_url
+        output = _run_authenticated_git(
+            args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
+        )
         logger.info("pushed branch {}", branch)
         return {"success": True, "branch": branch, "output": output}
 
@@ -409,10 +449,12 @@ def push_tags_tool(ctx: ToolContext):
         for tag in tags:
             validate_tag_name(str(tag))
         refspecs = [f"refs/tags/{tag}" for tag in tags]
-        output = _run_git(
+        trusted = primary_repo_state(ctx.tool_state).push_url
+        output = _run_authenticated_git(
             ["push", "origin", *refspecs],
             cwd=cwd,
-            env=_git_env(ctx.git_token),
+            token=ctx.git_token,
+            trusted_remote_url=trusted,
         )
         return {"success": True, "tags": tags, "output": output}
 
@@ -443,10 +485,12 @@ def delete_branch_tool(ctx: ToolContext):
         remote = bool(params.get("remote", False))
         if remote:
             _require_push_allowed(ctx, branch=branch, action="delete")
-            output = _run_git(
+            trusted = primary_repo_state(ctx.tool_state).push_url
+            output = _run_authenticated_git(
                 ["push", "origin", "--delete", branch],
                 cwd=cwd,
-                env=_git_env(ctx.git_token),
+                token=ctx.git_token,
+                trusted_remote_url=trusted,
             )
         else:
             output = _run_git(["branch", "-D", branch], cwd=cwd)
@@ -488,7 +532,7 @@ def commit_changes_tool(ctx: ToolContext):
                 "reason": "nothing to commit",
             }
         _run_git(["add", "-A"], cwd=cwd)
-        _run_git(["-c", "core.hooksPath=/dev/null", "commit", "-m", message], cwd=cwd)
+        _run_git(["commit", "-m", message], cwd=cwd)
         sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
         # The commit is local either way — the push policy decides nothing about
         # the response, it only records why no remote update was attempted.

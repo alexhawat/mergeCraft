@@ -9,6 +9,7 @@ from loguru import logger
 
 from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 
 def _current_branch(cwd: str) -> str:
     return subprocess.check_output(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        git_argv(["rev-parse", "--abbrev-ref", "HEAD"]),
         cwd=cwd,
         text=True,
         timeout=10,

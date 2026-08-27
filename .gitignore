@@ -88,3 +88,12 @@ evals/results/structural-replay-convergence-*.json
 !/.mergecraft/xrepo-brief.md
 
 /.agents
+
+# Local wave agent kit (operator tooling; pack/unpack via scripts/wave_agents_kit.sh)
+/.github/agents/wave-plan-executor.md
+/.github/agents/test-creator.md
+/docs/_standards/invariants.md
+/scripts/wave_close.py
+/scripts/sync_agent_prompts.py
+/scripts/wave_agents_kit.sh
+/tests/scripts/test_wave_close.py

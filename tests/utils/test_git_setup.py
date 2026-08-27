@@ -12,10 +12,12 @@ from unittest.mock import MagicMock
 
 from mergecraft.utils import git_setup as git_setup_mod
 from mergecraft.utils.git_setup import (
+    _auth_header_prefixes,
     _is_under_forbidden_temp,
     _safe_temp_parent,
     cleanup_temp_directory,
     create_temp_directory,
+    git_env_for_token,
     register_created_path,
     setup_git,
     wipe_runner_leak_surface,
@@ -357,7 +359,7 @@ def test_setup_git_falls_back_to_primary_repo_state(
     )
     assert state.repos  # primary still present
     primary = next(iter(state.repos.values()))
-    assert primary.push_url == "https://github.com/other/elsewhere.git"
+    assert primary.push_url == "https://github.com/other/elsewhere"
 
 
 def test_wipe_preserves_active_temp_and_github_file_commands(
@@ -457,3 +459,37 @@ def test_write_askpass_chowns_when_root(monkeypatch: MonkeyPatch, tmp_path: Path
     askpass = write_askpass_script(str(tmp_path), "ghs_root_token")
     assert askpass in chown_targets or str(Path(askpass).parent) in chown_targets
     assert Path(askpass).is_file()
+
+
+def test_auth_header_prefixes_git_ssh_remote() -> None:
+    assert _auth_header_prefixes("git@github.com:acme/demo.git") == ("https://github.com/",)
+
+
+def test_auth_header_prefixes_https_remote() -> None:
+    assert _auth_header_prefixes("https://github.com/acme/demo.git") == ("https://github.com/",)
+    assert _auth_header_prefixes("http://gitlab.example.com/group/repo.git") == (
+        "http://gitlab.example.com/",
+    )
+
+
+def test_auth_header_prefixes_malformed_or_empty_fallback() -> None:
+    fallback = ("https://github.com/", "https://api.github.com/")
+    assert _auth_header_prefixes("") == fallback
+    assert _auth_header_prefixes("   ") == fallback
+    assert _auth_header_prefixes("not-a-url") == fallback
+
+
+def test_git_env_for_token_no_token_skips_config_pairs() -> None:
+    env = git_env_for_token("", remote_url="https://github.com/acme/demo.git")
+    assert env.get("GIT_CONFIG_COUNT") is None
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_git_env_for_token_hostile_rewritten_origin_stays_on_github() -> None:
+    """Bearer must scope to github.com even when checkout rewrites github URLs."""
+    env = git_env_for_token(
+        "ghs_secret",
+        remote_url="https://github.com/acme/demo.git",
+    )
+    assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
+    assert "attacker.example" not in str(env.values())

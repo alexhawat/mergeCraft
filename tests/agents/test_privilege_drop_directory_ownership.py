@@ -66,6 +66,8 @@ def _simulate_root_privilege_drop(monkeypatch: MonkeyPatch) -> list[list[str]]:
     calls land in, so callers can assert on the chowned path.
     """
     monkeypatch.setattr(privilege_module.os, "getuid", lambda: 0)
+    monkeypatch.setattr(privilege_module, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege_module, "_setpriv_supports_bounding_set", lambda: True)
     fake_pwd = MagicMock()
     fake_pwd.getpwnam.return_value = _FakePw()
     monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
@@ -91,9 +93,10 @@ def test_claude_write_mcp_config_chowns_config_dir_under_privilege_drop(
 
     config_dir = tmp_path / ".claude"
     assert calls, "prepare_workspace_for_agent must chown the newly created config dir"
-    assert calls[-1][0] == "chown"
-    assert calls[-1][-1] == str(config_dir)
-    assert calls[-1][2] == "1001:1001"
+    chown_call = next(c for c in calls if c[0] == "find")
+    assert "chown" in chown_call
+    assert chown_call[1] == str(config_dir)
+    assert chown_call[-3] == "1001:1001"
 
 
 def test_gemini_write_mcp_config_chowns_gemini_home_under_privilege_drop(
@@ -106,8 +109,9 @@ def test_gemini_write_mcp_config_chowns_gemini_home_under_privilege_drop(
 
     gemini_home = tmp_path / ".gemini"
     assert calls, "prepare_workspace_for_agent must chown the newly created gemini home"
-    assert calls[-1][0] == "chown"
-    assert calls[-1][-1] == str(gemini_home)
+    chown_call = next(c for c in calls if c[0] == "find")
+    assert "chown" in chown_call
+    assert chown_call[1] == str(gemini_home)
 
 
 def test_write_mcp_config_does_not_chown_when_not_root(

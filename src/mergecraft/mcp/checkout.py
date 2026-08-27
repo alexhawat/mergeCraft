@@ -16,6 +16,7 @@ from mergecraft.mcp.git import _git_env, _run_git
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
+from mergecraft.utils.git_hardening import read_remote_origin_url
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -226,11 +227,14 @@ def checkout_pr_tool(ctx: ToolContext):
             remote_branch=head_ref,
             local_branch=local_branch,
         )
-        if is_fork and head.get("repo"):
-            clone_url = (head["repo"].get("clone_url") or "").rstrip("/")
-            state.push_url = clone_url if clone_url.endswith(".git") else f"{clone_url}.git"
-        else:
-            state.push_url = f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}.git"
+        try:
+            state.push_url = read_remote_origin_url(cwd)
+        except RuntimeError:
+            if is_fork and head.get("repo"):
+                clone_url = (head["repo"].get("clone_url") or "").rstrip("/")
+                state.push_url = clone_url or f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}"
+            else:
+                state.push_url = f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}"
 
         # Write a basic diff file for reviewers
         temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
