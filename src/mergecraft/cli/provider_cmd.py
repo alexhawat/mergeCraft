@@ -425,7 +425,10 @@ def indexed_credential_keys(entry: Mapping[str, Any]) -> Sequence[str]:
         elif label == "vertex":
             suffixes = VERTEX_CLOUD_SUFFIXES
         else:
-            suffixes = BEDROCK_CLOUD_SUFFIXES
+            raise ValueError(
+                f"cloud_chain auth is not configured for provider {label!r}; "
+                "supported providers: bedrock, vertex"
+            )
     else:
         suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
         suffixes = (suffix,)
