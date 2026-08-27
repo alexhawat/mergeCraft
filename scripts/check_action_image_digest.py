@@ -41,9 +41,7 @@ GHCR_MANIFEST_ACCEPT = (
 )
 
 _ACTION_PIN_RE = re.compile(r"uses:\s*alexhawat/mergeCraft@(?P<sha>[0-9a-f]{40})")
-_DIGEST_IMAGE_RE = re.compile(
-    rf"^docker://{re.escape(SLIM_IMAGE)}@sha256:([a-f0-9]{{64}})$"
-)
+_DIGEST_IMAGE_RE = re.compile(rf"^docker://{re.escape(SLIM_IMAGE)}@sha256:([a-f0-9]{{64}})$")
 
 
 def _pins_in(text: str) -> list[str]:
@@ -70,10 +68,7 @@ def _ghcr_pull_token() -> str | None:
     )
     if gh_token:
         auth_header = f"Bearer {gh_token}"
-    url = (
-        "https://ghcr.io/token?service=ghcr.io"
-        f"&scope=repository:{SLIM_IMAGE_REPO}:pull"
-    )
+    url = f"https://ghcr.io/token?service=ghcr.io&scope=repository:{SLIM_IMAGE_REPO}:pull"
     try:
         request = urllib.request.Request(url)
         if auth_header:

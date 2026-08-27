@@ -23,9 +23,7 @@ class TestGhcrDigestLookup:
     def test_published_latest_tag_has_known_digest(self) -> None:
         module = _load_module()
         digest = module._ghcr_digest_for_tag("cfdf38dcd062779aac3e141c51f134213d395b67")
-        assert digest == (
-            "sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90"
-        )
+        assert digest == ("sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90")
 
     def test_missing_tag_returns_none(self) -> None:
         module = _load_module()
