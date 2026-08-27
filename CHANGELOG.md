@@ -91,6 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `indexed_credential_keys` rejects unsupported `cloud_chain` provider labels
+  instead of silently mapping them to Bedrock credential suffixes; the error names
+  the offending label and the supported set (`bedrock`, `vertex`) (#497)
 - `validate_http_url` rejects whitespace and control characters anywhere in a
   provider URL, not just at the ends. A stored URL is written verbatim into the
   consumer workflow YAML, so an interior newline could open a new key or step
