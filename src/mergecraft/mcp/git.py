@@ -146,12 +146,13 @@ def _run_authenticated_git(
     token: str,
     trusted_remote_url: str | None = None,
 ) -> str:
-    remote_url = trusted_remote_url or _origin_remote_url(cwd)
+    live_url = _origin_remote_url(cwd)
+    auth_url = trusted_remote_url or live_url
     return _run_git(
         args,
         cwd=cwd,
-        env=_git_env(token, remote_url=remote_url),
-        remote_url=remote_url,
+        env=_git_env(token, remote_url=auth_url),
+        remote_url=live_url,
     )
 
 

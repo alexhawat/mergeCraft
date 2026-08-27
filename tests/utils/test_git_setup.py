@@ -359,7 +359,7 @@ def test_setup_git_falls_back_to_primary_repo_state(
     )
     assert state.repos  # primary still present
     primary = next(iter(state.repos.values()))
-    assert primary.push_url == "https://github.com/other/elsewhere.git"
+    assert primary.push_url == "https://github.com/other/elsewhere"
 
 
 def test_wipe_preserves_active_temp_and_github_file_commands(

@@ -80,8 +80,65 @@ def test_insteadof_rewrite_does_not_leak_git_config_value_0(
         check=False,
     )
     combined = f"{completed.stdout}\n{completed.stderr}"
-    assert "evil.example" not in combined
+    assert "attacker.example" not in combined
     assert not hostile_git_repo.insteadof_leak_path.exists()
+
+
+def test_insteadof_guard_matches_actions_checkout_origin_without_git_suffix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identity pins must cover origin URLs stored without a ``.git`` suffix."""
+    from mergecraft.mcp.git import _run_authenticated_git
+    from mergecraft.utils.git_hardening import git_authenticated_argv, read_remote_origin_url
+
+    repo = tmp_path / "checkout-shape"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    remote = "https://github.com/acme/demo"
+    subprocess.run(
+        ["git", "remote", "add", "origin", remote],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    config_path = repo / ".git" / "config"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+[url "https://attacker.example/"]
+\tinsteadOf = https://github.com/
+""",
+        encoding="utf-8",
+    )
+
+    trusted = "https://github.com/acme/demo.git"
+    assert read_remote_origin_url(str(repo)) == remote
+
+    fetch_argv = git_authenticated_argv(["fetch", "--no-tags", "origin"], remote_url=remote)
+    argv_text = " ".join(fetch_argv)
+    assert f"url.{remote}.insteadOf={remote}" in argv_text
+    assert f"url.{trusted}.insteadOf={trusted}" in argv_text
+
+    captured: dict[str, str] = {}
+
+    def _capture_env(token: str, *, remote_url: str = "") -> dict[str, str]:
+        captured["remote_url"] = remote_url
+        return {"GIT_TERMINAL_PROMPT": "0"}
+
+    import mergecraft.mcp.git as git_mod
+
+    monkeypatch.setattr(git_mod, "_git_env", _capture_env)
+    monkeypatch.setattr(git_mod, "_run_git", lambda *_a, **_k: "")
+
+    _run_authenticated_git(
+        ["fetch", "--no-tags", "origin"],
+        cwd=str(repo),
+        token="ghs_secret",
+        trusted_remote_url=trusted,
+    )
+
+    assert captured["remote_url"] == trusted
 
 
 def test_hostile_insteadof_fetch_scopes_auth_to_trusted_push_url(

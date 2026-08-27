@@ -335,7 +335,13 @@ def setup_git(
         with contextlib.suppress(OSError):
             askpass_path.unlink()
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
-    push_url = f"https://github.com/{owner}/{name}.git"
+    from mergecraft.utils.git_hardening import read_remote_origin_url
+
+    try:
+        push_url = read_remote_origin_url(repo_dir)
+    except RuntimeError:
+        # Match actions/checkout: origin URL without a .git suffix.
+        push_url = f"https://github.com/{owner}/{name}"
     repo_state.push_url = push_url
     logger.info("» git credentials brokered for {}", f"{owner}/{name}")
 

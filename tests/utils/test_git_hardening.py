@@ -55,7 +55,22 @@ def test_git_authenticated_argv_pins_identity_rewrite_for_remote_url() -> None:
 
     remote = "https://github.com/acme/demo.git"
     argv = git_authenticated_argv(["fetch", "origin"], remote_url=remote)
-    assert f"url.{remote}.insteadOf={remote}" in " ".join(argv)
+    argv_text = " ".join(argv)
+    assert f"url.{remote}.insteadOf={remote}" in argv_text
+    assert "url.https://github.com/acme/demo.insteadOf=https://github.com/acme/demo" in argv_text
+
+
+def test_git_remote_identity_urls_includes_git_suffix_variants() -> None:
+    from mergecraft.utils.git_hardening import git_remote_identity_urls
+
+    assert git_remote_identity_urls("https://github.com/acme/demo") == (
+        "https://github.com/acme/demo.git",
+        "https://github.com/acme/demo",
+    )
+    assert git_remote_identity_urls("https://github.com/acme/demo.git") == (
+        "https://github.com/acme/demo.git",
+        "https://github.com/acme/demo",
+    )
 
 
 def test_git_env_for_token_scopes_bearer_header_to_trusted_host() -> None:

@@ -91,6 +91,30 @@ def _needs_no_ext_diff(args: Sequence[str]) -> bool:
     return _no_ext_diff_insertion_index(args) is not None
 
 
+def normalize_git_remote_url(url: str) -> str:
+    """Return *url* stripped of surrounding whitespace and a trailing slash."""
+    return url.strip().rstrip("/")
+
+
+def git_remote_identity_urls(url: str) -> tuple[str, ...]:
+    """Return HTTPS remote URL forms that need identity ``insteadOf`` pins.
+
+    ``actions/checkout`` stores ``remote.origin.url`` without a ``.git`` suffix
+    while other call sites may use the suffixed form. Pinning every equivalent
+    shape prevents a shorter hostile ``https://github.com/`` prefix from winning
+    when the live remote omits ``.git``.
+    """
+    base = normalize_git_remote_url(url)
+    if not base:
+        return ()
+    variants: set[str] = {base}
+    if base.endswith(".git"):
+        variants.add(base[: -len(".git")])
+    elif base.startswith(("http://", "https://")):
+        variants.add(f"{base}.git")
+    return tuple(sorted(variants, key=len, reverse=True))
+
+
 def read_remote_origin_url(cwd: str) -> str:
     """Return ``remote.origin.url`` without ``insteadOf`` expansion.
 
@@ -119,12 +143,19 @@ def url_rewrite_guard_config(canonical_url: str) -> tuple[str, ...]:
 
     Git unions ``insteadOf`` rules from every config scope and applies the
     longest matching prefix. A command-line identity rule whose base equals the
-    full remote URL beats shorter attacker prefixes.
+    full remote URL beats shorter attacker prefixes. Every equivalent remote
+    shape (with and without a ``.git`` suffix) is pinned so the guard matches
+    the live ``remote.origin.url`` from ``actions/checkout``.
     """
-    normalized = canonical_url.strip()
-    if not normalized:
-        return ()
-    return ("-c", f"url.{normalized}.insteadOf={normalized}")
+    pins: list[str] = []
+    seen: set[str] = set()
+    for variant in git_remote_identity_urls(canonical_url):
+        entry = f"url.{variant}.insteadOf={variant}"
+        if entry in seen:
+            continue
+        seen.add(entry)
+        pins.extend(("-c", entry))
+    return tuple(pins)
 
 
 def _git_argv_with_prefixes(
@@ -163,6 +194,8 @@ __all__ = [
     "git_argv",
     "git_authenticated_argv",
     "git_global_config_argv",
+    "git_remote_identity_urls",
+    "normalize_git_remote_url",
     "read_remote_origin_url",
     "url_rewrite_guard_config",
 ]
