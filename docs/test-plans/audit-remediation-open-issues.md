@@ -9,8 +9,8 @@ to RED tests authored in **DQ1** (`wave/dq1-issues-red`).
 | Issue | Impl wave | Test file(s) | Tests |
 | --- | --- | --- | --- |
 | [#493](https://github.com/alexhawat/mergeCraft/issues/493) fail-soft short-id render | DQ2 | `tests/analyzers/test_short_id_failsoft.py` | 5 (`xfail` until DQ2) |
-| [#497](https://github.com/alexhawat/mergeCraft/issues/497) cloud_chain fail-closed | DQ3 | `tests/cli/test_provider_cloud_chain_failclosed.py` | 4 (`xfail` on fail-closed cases until DQ3) |
-| [#501](https://github.com/alexhawat/mergeCraft/issues/501) getattr tautology calibration | DQ4 | `tests/ci/test_cheat_signature_lint.py` | 4 (`xfail` on fallback-default case until DQ4) |
+| [#497](https://github.com/alexhawat/mergeCraft/issues/497) cloud_chain fail-closed | DQ3 | `tests/cli/test_provider_cloud_chain_failclosed.py` | 4 |
+| [#501](https://github.com/alexhawat/mergeCraft/issues/501) getattr tautology calibration | DQ4 | `tests/ci/test_cheat_signature_lint.py` | 4 |
 | [#502](https://github.com/alexhawat/mergeCraft/issues/502) mutation harness plumbing | DQ5 | `tests/ci/test_mutate_decision_modules.py` | 5 |
 | [#503](https://github.com/alexhawat/mergeCraft/issues/503) ratchet honesty | DQ6 | `tests/ci/test_coverage_ratchet_honesty.py` | 2 new + 2 existing |
 | [#506](https://github.com/alexhawat/mergeCraft/issues/506) ratchet docs (PR-only guard) | DQ6 | — (docs-only; honesty tests pin comparison branch) | — |
@@ -29,6 +29,8 @@ to RED tests authored in **DQ1** (`wave/dq1-issues-red`).
 ## DQ1 reconciliation
 
 After each impl wave, remove satisfied `@pytest.mark.xfail(strict=False)` markers from the greened tests only.
+
+**2026-08-27 (post-DQ3/DQ4):** Removed xfails from `test_custom_label_does_not_return_bedrock_suffixes`, `test_error_names_the_label_and_the_supported_set` (DQ3/#497), and `test_legitimate_fallback_default_assertion_is_not_flagged` (DQ4/#501). DQ2 xfails in `test_short_id_failsoft.py` retained — `wave/dq2-short-id-failsoft` not yet on origin.
 
 ## Amendments
 
