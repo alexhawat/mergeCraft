@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Render path: skip short-id assignment for non-hex fingerprints instead of
+  aborting review output; export and explain paths stay strict (#493)
+
 ### Changed
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs

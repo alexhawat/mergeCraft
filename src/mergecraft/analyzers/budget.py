@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.analyzers.finding import Finding, resolve_finding_short_ids
+from mergecraft.analyzers.finding import Finding, try_resolve_finding_short_ids
 
 if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import AnalyzerRunState
@@ -98,6 +98,25 @@ def _placement_fingerprints(
     return fingerprints
 
 
+def _path_by_fingerprint(
+    inline: list[Any],
+    mechanical: list[Finding],
+    deferred: list[Finding],
+) -> dict[str, str]:
+    paths: dict[str, str] = {}
+    for item in inline:
+        if isinstance(item, Finding):
+            paths[item.fingerprint] = item.path
+            continue
+        if isinstance(item, dict):
+            fingerprint = _fingerprint_from_inline_item(item)
+            if fingerprint:
+                paths[fingerprint] = str(item.get("path", ""))
+    for finding in mechanical + deferred:
+        paths[finding.fingerprint] = finding.path
+    return paths
+
+
 def _overflow_fingerprint(item: dict[str, Any], *, path: str, message: str) -> str:
     """Return a per-finding fingerprint for an overflowed agent finding.
 
@@ -142,7 +161,8 @@ def _render_mechanical_section(
         short_id = short_ids.get(finding.fingerprint) if short_ids else None
         prefix = f"**{short_id}** " if short_id else ""
         lines.append(
-            f"- {prefix}**{finding.tool}** `{finding.rule_id}` — {_finding_anchor(finding)}"
+            f"- {prefix}**{finding.tool}** `{finding.rule_id}` — "
+            f"{_finding_anchor(finding)} — {finding.message}"
         )
     return "\n".join(lines)
 
@@ -210,6 +230,49 @@ def agent_dict_to_finding(item: dict[str, Any], *, rule_id: str = "review") -> F
     )
 
 
+def _demote_unidentified_inline(
+    inline: list[Any],
+    *,
+    short_ids: dict[str, str],
+    mechanical: list[Finding],
+    deferred: list[Finding],
+) -> tuple[list[Any], list[Finding], list[Finding], bool]:
+    """Move inline findings without short ids into mechanical/deferred lanes."""
+    demoted_any = False
+    kept_inline: list[Any] = []
+    for item in inline:
+        fingerprint = _fingerprint_from_inline_item(item)
+        if fingerprint and fingerprint not in short_ids:
+            demoted_any = True
+            if isinstance(item, Finding):
+                if item.source == "agent":
+                    deferred.append(item)
+                else:
+                    mechanical.append(item)
+            else:
+                deferred.append(agent_dict_to_finding(item))
+            continue
+        kept_inline.append(item)
+    return kept_inline, mechanical, deferred, demoted_any
+
+
+def _section_findings_with_inline(
+    section: list[Finding],
+    inline: list[Any],
+    *,
+    include_inline: bool,
+) -> list[Finding]:
+    if not include_inline:
+        return section
+    combined = list(section)
+    for item in inline:
+        if isinstance(item, Finding):
+            combined.append(item)
+        elif isinstance(item, dict):
+            combined.append(agent_dict_to_finding(item))
+    return combined
+
+
 def place_findings(
     findings: list[Finding],
     *,
@@ -239,14 +302,40 @@ def place_findings(
         elif not _is_body_only_finding(item):
             deferred.append(agent_dict_to_finding(item))
 
-    short_ids = resolve_finding_short_ids(_placement_fingerprints(inline, mechanical, deferred))
+    short_ids = try_resolve_finding_short_ids(
+        _placement_fingerprints(inline, mechanical, deferred),
+        path_by_fingerprint=_path_by_fingerprint(inline, mechanical, deferred),
+    )
+
+    inline, mechanical, deferred, demoted_due_to_short_id = _demote_unidentified_inline(
+        inline,
+        short_ids=short_ids,
+        mechanical=mechanical,
+        deferred=deferred,
+    )
+    mechanical_for_section = _section_findings_with_inline(
+        mechanical,
+        inline,
+        include_inline=demoted_due_to_short_id,
+    )
+    deferred_for_section = _section_findings_with_inline(
+        deferred,
+        inline,
+        include_inline=demoted_due_to_short_id,
+    )
 
     return FindingPlacement(
         inline=inline,
         mechanical=mechanical,
-        mechanical_section=_render_mechanical_section(mechanical, short_ids=short_ids),
+        mechanical_section=_render_mechanical_section(
+            mechanical_for_section,
+            short_ids=short_ids,
+        ),
         deferred=deferred,
-        deferred_section=render_deferred_section(deferred, short_ids=short_ids),
+        deferred_section=render_deferred_section(
+            deferred_for_section,
+            short_ids=short_ids,
+        ),
         short_ids=short_ids,
     )
 
@@ -275,7 +364,10 @@ def render_deferred_section_from_rows(
     resolved_short_ids = short_ids
     if resolved_short_ids is None:
         fingerprint_batch = all_fingerprints or [row.fingerprint for row in findings]
-        resolved_short_ids = resolve_finding_short_ids(fingerprint_batch)
+        resolved_short_ids = try_resolve_finding_short_ids(
+            fingerprint_batch,
+            path_by_fingerprint={row.fingerprint: row.path for row in findings},
+        )
     return render_deferred_section(findings, short_ids=resolved_short_ids)
 
 
