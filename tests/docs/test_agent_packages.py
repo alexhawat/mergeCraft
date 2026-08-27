@@ -13,7 +13,12 @@ from pathlib import Path
 import pytest
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
-from tests.docs.support import ci_steps, load_harness_manifest, load_script_module
+from tests.docs.support import (
+    ci_steps,
+    load_harness_manifest,
+    load_script_module,
+    readme_agent_section_region,
+)
 
 GEN_SCRIPT = REPO_ROOT / "scripts" / "gen_agent_packages.py"
 README = REPO_ROOT / "README.md"
@@ -30,14 +35,11 @@ _SKILL_PATH_RE = re.compile(
 
 
 def _readme_agent_region() -> str:
-    text = read_text("README.md")
-    match = re.search(
-        r"^##\s+.*(?:For LLM\s*/\s*Agents|For AI coding agents)[^\n]*\n(.*?)(?=^## |\Z)",
-        text,
-        re.MULTILINE | re.IGNORECASE | re.DOTALL,
-    )
-    assert match, "README agent section missing"
-    return match.group(1)
+    # Shared with test_agent_surfaces.py: accepts the H2 spelling and the
+    # collapsed ``<details>`` spelling alike.
+    region = readme_agent_section_region(read_text("README.md"))
+    assert region is not None, "README agent section missing"
+    return region
 
 
 def test_every_declared_harness_has_a_package_or_fallback() -> None:
