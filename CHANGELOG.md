@@ -41,7 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The self-review Action pin on both review steps moves to `b34e9f25`. The
+- The self-review Action pin on all three review rungs moves to `b3638ea7`,
+  the merge commit of #545. Every rung at the previous pin sent git the token
+  as `Authorization: Bearer`, which GitHub's git transport rejects, so
+  `checkout_pr` failed on every review and the scope guard then refused the
+  terminal verdict. A review that reached "approve" on #545 could not publish
+  it and the approval gate failed closed with no `mergecraft-approval` check at
+  all. `pull_request_target` resolves this workflow from the default branch, so
+  a self-review PR cannot consume its own fix; the bump has to follow the merge
+- The self-review Action pin on both review steps moved to `b34e9f25`. The
   previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
   `src/mergecraft/`, so every review since then ran product code that stale.
   The image at that pin carries no `[tracing]` extra, which would have left

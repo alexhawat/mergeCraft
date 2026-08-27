@@ -533,9 +533,18 @@ jobs:
         # #459 still appeared in Action logs, which is how #527 came to be filed
         # against bugs that no longer existed. `make action-pin-check` detects this
         # correctly but is wired into no gate — see #532, which fixes the guard.
-        # b34e9f25 is the pre-0.0.1 tip this PR promotes; it carries the Dockerfile
-        # `--extra tracing` line and the lane A hardening from #519.
-        uses: alexhawat/mergeCraft@b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5 # pre-0.0.1 (PR #533)
+        # b34e9f25 was the pre-0.0.1 tip promoted by #533; it carried the
+        # Dockerfile `--extra tracing` line and the lane A hardening from #519.
+        # 2026-08-28 (eleventh bump, PR #546): re-bumped to b3638ea7 so the
+        # reviewer can authenticate at all. Every rung at b34e9f25 brokered the
+        # GitHub token to git as `Authorization: Bearer`, which GitHub's git
+        # transport rejects, so `checkout_pr` failed on every review and the
+        # scope guard then refused the terminal verdict — a review that reached
+        # "approve" on PR #545 could not publish it, and the approval gate failed
+        # closed with no mergecraft-approval check at all. Fixed in #545
+        # (utils/git_setup.py — basic auth on the documented `x-access-token`
+        # username). b3638ea7 is #545's merge commit.
+        uses: alexhawat/mergeCraft@b3638ea760dad4e42cc75cbfd0de3bac1a207297 # main (PR #545)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -658,9 +667,18 @@ jobs:
         # #459 still appeared in Action logs, which is how #527 came to be filed
         # against bugs that no longer existed. `make action-pin-check` detects this
         # correctly but is wired into no gate — see #532, which fixes the guard.
-        # b34e9f25 is the pre-0.0.1 tip this PR promotes; it carries the Dockerfile
-        # `--extra tracing` line and the lane A hardening from #519.
-        uses: alexhawat/mergeCraft@b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5 # pre-0.0.1 (PR #533)
+        # b34e9f25 was the pre-0.0.1 tip promoted by #533; it carried the
+        # Dockerfile `--extra tracing` line and the lane A hardening from #519.
+        # 2026-08-28 (eleventh bump, PR #546): re-bumped to b3638ea7 so the
+        # reviewer can authenticate at all. Every rung at b34e9f25 brokered the
+        # GitHub token to git as `Authorization: Bearer`, which GitHub's git
+        # transport rejects, so `checkout_pr` failed on every review and the
+        # scope guard then refused the terminal verdict — a review that reached
+        # "approve" on PR #545 could not publish it, and the approval gate failed
+        # closed with no mergecraft-approval check at all. Fixed in #545
+        # (utils/git_setup.py — basic auth on the documented `x-access-token`
+        # username). b3638ea7 is #545's merge commit.
+        uses: alexhawat/mergeCraft@b3638ea760dad4e42cc75cbfd0de3bac1a207297 # main (PR #545)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -769,9 +787,9 @@ jobs:
         continue-on-error: true
         # Same mandatory full-SHA pin as the rungs above — keep all three in
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
-        # was authored against the pre-#533 pin; carried to b34e9f25 on the merge
-        # so all three rungs run the same product code (#532).
-        uses: alexhawat/mergeCraft@b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5 # pre-0.0.1 (PR #533)
+        # was authored against the pre-#533 pin; carried forward on each bump so
+        # all three rungs run the same product code (#532). Now b3638ea7 (#545).
+        uses: alexhawat/mergeCraft@b3638ea760dad4e42cc75cbfd0de3bac1a207297 # main (PR #545)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
