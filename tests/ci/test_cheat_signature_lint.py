@@ -12,8 +12,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT
 
 
@@ -54,7 +52,6 @@ def test_genuine_tautology_still_errors(tmp_path: Path) -> None:
     assert "getattr_tautology" in combined
 
 
-@pytest.mark.xfail(reason="green after DQ4: narrow getattr tautology AST match", strict=False)
 def test_legitimate_fallback_default_assertion_is_not_flagged(tmp_path: Path) -> None:
     """Legitimate attribute-absent → default asserts must not match the rule."""
     cheat_file = tmp_path / "test_fallback_default.py"
