@@ -47,7 +47,6 @@ def _capture_loguru_warnings() -> tuple[list[str], int]:
     return captured, sink_id
 
 
-@pytest.mark.xfail(reason="green after DQ2: fail-soft short-id render path", strict=False)
 def test_non_hex_fingerprint_still_renders() -> None:
     """Render path must produce output without assigning a short id."""
     finding = _finding(fingerprint=_NON_HEX_FINGERPRINT)
@@ -58,7 +57,6 @@ def test_non_hex_fingerprint_still_renders() -> None:
     assert _NON_HEX_FINGERPRINT not in placement.short_ids
 
 
-@pytest.mark.xfail(reason="green after DQ2: warning on non-hex fingerprint", strict=False)
 def test_non_hex_fingerprint_logs_a_warning_with_path_context() -> None:
     """Skip short-id assignment must warn with fingerprint and path context."""
     from loguru import logger as loguru_logger
@@ -76,7 +74,6 @@ def test_non_hex_fingerprint_logs_a_warning_with_path_context() -> None:
     assert "src/warn_ctx.py" in combined
 
 
-@pytest.mark.xfail(reason="green after DQ2: mixed hex/non-hex batch render", strict=False)
 def test_mixed_batch_renders_hex_findings_with_ids_and_others_without() -> None:
     """Hex fingerprints keep short ids; non-hex findings render without them."""
     hex_finding = _finding(fingerprint=_HEX_FINGERPRINT, path="src/hex.py", line=1)
