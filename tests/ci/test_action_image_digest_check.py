@@ -27,7 +27,7 @@ class TestGhcrDigestLookup:
         lookup = module._ghcr_digest_for_tag("b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5")
         assert lookup.status == module.TagLookupStatus.FOUND
         assert lookup.digest == (
-            "sha256:97fff2027a8bf26924a777a16e29177e694369bc43e4eaa980c0ef9d092f1f9f"
+            "sha256:f61310a72e7c763b1c07c769ef78c0b3746671bb3a5a39bd2ccb99cd021082a2"
         )
 
     def test_missing_tag_is_not_registry_error(self) -> None:
