@@ -321,6 +321,9 @@ jobs:
       # verdict and the approval gate fails closed on every PR at once. Anthropic
       # credentials fail independently of both.
       HAS_CLAUDE: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Duplicated verbatim as `approval-gate.env.HAS_AUTH` (jobs cannot share an
+      # `env` expression). Adding a provider here without updating that copy
+      # fails the required gate OPEN — see the comment there.
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       # The default github.token cannot submit an "Approve" review — GitHub
       # silently downgrades any attempt to a comment (a documented platform
@@ -826,7 +829,15 @@ jobs:
       contents: read
       checks: read
     env:
-      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Must stay character-for-character identical to the `review` job's
+      # HAS_AUTH. GitHub has no way to share one `env` expression across jobs,
+      # so the predicate is duplicated — and it drifted once already: Claude was
+      # added to the review job's copy and not to this one, which fails the gate
+      # OPEN on a Claude-only repo (the review runs, this job's only real step
+      # is skipped, and the required check goes green with no
+      # `mergecraft-approval=success` anywhere). When adding a provider, update
+      # both copies. `tests/ci/test_approval_gate_auth_predicate.py` pins them.
+      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - name: Fail when mergeCraft would not approve
         # Gate directly on the `mergecraft-approval` check-run, decoupled from the
