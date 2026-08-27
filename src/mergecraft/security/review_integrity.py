@@ -53,6 +53,12 @@ def _iter_tree_paths(root: Path) -> list[Path]:
             for name in dirnames
             if not _is_excluded_rel_path(Path(dirpath).relative_to(root).joinpath(name).as_posix())
         ]
+        for name in dirnames:
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                rel = path.relative_to(root).as_posix()
+                if not _is_excluded_rel_path(rel):
+                    paths.append(path)
         for name in filenames:
             path = Path(dirpath) / name
             rel = path.relative_to(root).as_posix()

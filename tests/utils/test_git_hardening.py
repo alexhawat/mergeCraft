@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 _EXPECTED_SAFE_KEYS: tuple[str, ...] = (
     "core.fsmonitor=false",
     "core.hooksPath=/dev/null",
@@ -66,3 +69,36 @@ def test_git_env_for_token_scopes_bearer_header_to_trusted_host() -> None:
     assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
     assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Bearer ghs_secret"
     assert "http.extraHeader" not in env.values()
+
+
+def test_read_remote_origin_url_ignores_insteadof(tmp_path: Path) -> None:
+    from mergecraft.utils.git_hardening import read_remote_origin_url
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    remote = "https://github.com/acme/demo.git"
+    subprocess.run(
+        ["git", "remote", "add", "origin", remote],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    config_path = repo / ".git" / "config"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + """
+[url "https://attacker.example/"]
+\tinsteadOf = https://github.com/
+""",
+        encoding="utf-8",
+    )
+    expanded = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert "attacker.example" in expanded
+    assert read_remote_origin_url(str(repo)) == remote

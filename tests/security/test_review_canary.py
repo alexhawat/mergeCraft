@@ -64,3 +64,23 @@ def test_hash_tree_does_not_follow_symlink_to_outside_file(tmp_path: Path) -> No
     (checkout / "escape").unlink()
     (checkout / "escape").symlink_to("../outside-secret.txt")
     assert hash_tree(checkout) != before
+
+
+def test_hash_tree_detects_directory_symlink_retarget(tmp_path: Path) -> None:
+    from mergecraft.security.review_integrity import hash_tree
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    target_a = tmp_path / "target-a"
+    target_b = tmp_path / "target-b"
+    target_a.mkdir()
+    target_b.mkdir()
+    (target_a / "marker.txt").write_text("a\n", encoding="utf-8")
+    (target_b / "marker.txt").write_text("b\n", encoding="utf-8")
+    link = checkout / "linked-dir"
+    link.symlink_to(target_a, target_is_directory=True)
+
+    before = hash_tree(checkout)
+    link.unlink()
+    link.symlink_to(target_b, target_is_directory=True)
+    assert hash_tree(checkout) != before

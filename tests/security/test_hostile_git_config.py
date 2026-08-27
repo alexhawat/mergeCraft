@@ -42,17 +42,34 @@ def test_commit_path_does_not_execute_fsmonitor(hostile_git_repo: HostileGitRepo
 def test_insteadof_rewrite_does_not_leak_git_config_value_0(
     hostile_git_repo: HostileGitRepo,
 ) -> None:
-    from mergecraft.utils.git_hardening import git_authenticated_argv
+    from mergecraft.mcp.git import _origin_remote_url, _run_git
+    from mergecraft.utils.git_hardening import git_authenticated_argv, read_remote_origin_url
     from mergecraft.utils.git_setup import git_env_for_token
 
     remote = "https://github.com/acme/demo.git"
     _run_git(["remote", "add", "origin", remote], cwd=str(hostile_git_repo.root))
+
+    expanded = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=hostile_git_repo.root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert "attacker.example" in expanded, "fixture must model insteadOf expansion"
+
+    raw = read_remote_origin_url(str(hostile_git_repo.root))
+    assert raw == remote
+    assert _origin_remote_url(str(hostile_git_repo.root)) == remote
+    assert "attacker.example" not in raw
+
     fetch_argv = git_authenticated_argv(["fetch", "--no-tags", "origin"], remote_url=remote)
     assert f"url.{remote}.insteadOf={remote}" in " ".join(fetch_argv)
 
     env = git_env_for_token("ghs_secret_token", remote_url=remote)
     assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
     assert "http.extraHeader" not in env.values()
+    assert "attacker.example" not in env.values()
 
     completed = subprocess.run(
         fetch_argv,
@@ -65,6 +82,41 @@ def test_insteadof_rewrite_does_not_leak_git_config_value_0(
     combined = f"{completed.stdout}\n{completed.stderr}"
     assert "evil.example" not in combined
     assert not hostile_git_repo.insteadof_leak_path.exists()
+
+
+def test_hostile_insteadof_fetch_scopes_auth_to_trusted_push_url(
+    hostile_git_repo: HostileGitRepo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Authenticated fetch must bind bearer auth to trusted push_url, not expanded origin."""
+    from mergecraft.mcp.git import _run_authenticated_git
+
+    remote = "https://github.com/acme/demo.git"
+    trusted = "https://github.com/trusted-owner/trusted-repo.git"
+    _run_git(["remote", "add", "origin", remote], cwd=str(hostile_git_repo.root))
+
+    captured: dict[str, str] = {}
+
+    def _capture_env(token: str, *, remote_url: str = "") -> dict[str, str]:
+        captured["remote_url"] = remote_url
+        return git_setup_mod.git_env_for_token(token, remote_url=remote_url)
+
+    import mergecraft.utils.git_setup as git_setup_mod
+
+    monkeypatch.setattr("mergecraft.mcp.git._git_env", _capture_env)
+    monkeypatch.setattr(
+        "mergecraft.mcp.git._run_git",
+        lambda *_a, **_k: "",
+    )
+
+    _run_authenticated_git(
+        ["fetch", "--no-tags", "origin"],
+        cwd=str(hostile_git_repo.root),
+        token="ghs_secret",
+        trusted_remote_url=trusted,
+    )
+    assert captured["remote_url"] == trusted
+    assert "attacker.example" not in captured["remote_url"]
 
 
 def test_xrepo_checkout_is_equally_protected(hostile_git_repo: HostileGitRepo) -> None:

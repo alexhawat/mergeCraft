@@ -7,6 +7,7 @@ hooks, fsmonitor, diff drivers, or other config-driven side effects.
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
@@ -90,6 +91,29 @@ def _needs_no_ext_diff(args: Sequence[str]) -> bool:
     return _no_ext_diff_insertion_index(args) is not None
 
 
+def read_remote_origin_url(cwd: str) -> str:
+    """Return ``remote.origin.url`` without ``insteadOf`` expansion.
+
+    ``git remote get-url`` applies checkout-local ``url.*.insteadOf`` rules,
+    so a hostile ``.git/config`` can make it return an attacker URL. Reading
+    the stored config key avoids that rewrite while still reflecting what the
+    checkout declares as origin.
+    """
+    result = subprocess.run(
+        git_argv(["config", "--get", "remote.origin.url"]),
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "").strip()
+        msg = f"git config --get remote.origin.url failed ({result.returncode}): {err}"
+        raise RuntimeError(msg)
+    return result.stdout.strip()
+
+
 def url_rewrite_guard_config(canonical_url: str) -> tuple[str, ...]:
     """Return ``-c`` pins that outrank hostile ``url.*.insteadOf`` rewrites.
 
@@ -139,5 +163,6 @@ __all__ = [
     "git_argv",
     "git_authenticated_argv",
     "git_global_config_argv",
+    "read_remote_origin_url",
     "url_rewrite_guard_config",
 ]

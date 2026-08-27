@@ -34,7 +34,7 @@ from mergecraft.mcp.git_guards import (
 )
 from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
 from mergecraft.mcp.tool_state import primary_repo_state
-from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv
+from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv, read_remote_origin_url
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -107,19 +107,7 @@ def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
 
 
 def _origin_remote_url(cwd: str) -> str:
-    result = subprocess.run(
-        git_argv(["remote", "get-url", "origin"]),
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    if result.returncode != 0:
-        err = (result.stderr or result.stdout or "").strip()
-        msg = f"git remote get-url origin failed ({result.returncode}): {err}"
-        raise RuntimeError(msg)
-    return result.stdout.strip()
+    return read_remote_origin_url(cwd)
 
 
 def _run_git(
@@ -151,8 +139,14 @@ def _run_git(
     return result.stdout
 
 
-def _run_authenticated_git(args: list[str], *, cwd: str, token: str) -> str:
-    remote_url = _origin_remote_url(cwd)
+def _run_authenticated_git(
+    args: list[str],
+    *,
+    cwd: str,
+    token: str,
+    trusted_remote_url: str | None = None,
+) -> str:
+    remote_url = trusted_remote_url or _origin_remote_url(cwd)
     return _run_git(
         args,
         cwd=cwd,
@@ -351,7 +345,10 @@ def git_fetch_tool(ctx: ToolContext):
         if refspec:
             reject_special_ref(str(refspec).split(":")[0], "refspec")
             args.append(str(refspec))
-        output = _run_authenticated_git(args, cwd=cwd, token=ctx.git_token)
+        trusted = primary_repo_state(ctx.tool_state).push_url
+        output = _run_authenticated_git(
+            args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
+        )
         return {"success": True, "output": output}
 
     return tool(
@@ -414,7 +411,10 @@ def push_branch_tool(ctx: ToolContext):
         args = ["push", "origin", str(branch)]
         if force:
             args.insert(1, "--force-with-lease")
-        output = _run_authenticated_git(args, cwd=cwd, token=ctx.git_token)
+        trusted = primary_repo_state(ctx.tool_state).push_url
+        output = _run_authenticated_git(
+            args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
+        )
         logger.info("pushed branch {}", branch)
         return {"success": True, "branch": branch, "output": output}
 
@@ -448,7 +448,13 @@ def push_tags_tool(ctx: ToolContext):
         for tag in tags:
             validate_tag_name(str(tag))
         refspecs = [f"refs/tags/{tag}" for tag in tags]
-        output = _run_authenticated_git(["push", "origin", *refspecs], cwd=cwd, token=ctx.git_token)
+        trusted = primary_repo_state(ctx.tool_state).push_url
+        output = _run_authenticated_git(
+            ["push", "origin", *refspecs],
+            cwd=cwd,
+            token=ctx.git_token,
+            trusted_remote_url=trusted,
+        )
         return {"success": True, "tags": tags, "output": output}
 
     repo_class = repository_mutation_class_for_push(ctx.payload.push)
@@ -478,10 +484,12 @@ def delete_branch_tool(ctx: ToolContext):
         remote = bool(params.get("remote", False))
         if remote:
             _require_push_allowed(ctx, branch=branch, action="delete")
+            trusted = primary_repo_state(ctx.tool_state).push_url
             output = _run_authenticated_git(
                 ["push", "origin", "--delete", branch],
                 cwd=cwd,
                 token=ctx.git_token,
+                trusted_remote_url=trusted,
             )
         else:
             output = _run_git(["branch", "-D", branch], cwd=cwd)
