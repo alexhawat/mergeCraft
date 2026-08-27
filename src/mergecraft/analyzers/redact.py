@@ -33,9 +33,17 @@ _BENIGN_HEX_64_RE = re.compile(r"^[a-f0-9]{64}$")
 _BENIGN_PURE_HEX_RE = re.compile(r"^[a-f0-9]+$")
 # Catalog identifiers only: snake_case, SCREAMING_SNAKE, and lowercase kebab.
 # Mixed-case alphanumeric blobs (e.g. ``AbCdEfGh…``) are not identifiers and
-# must fall through to the entropy pass. ``sk-…`` / ``ghp_…`` still match
-# ``_SECRET_PATTERNS`` first.
-_BENIGN_IDENTIFIER_RE = re.compile(r"^(?:[a-z_][a-z0-9_]*|[A-Z][A-Z0-9_]{2,}|[a-z][a-z0-9-]*)$")
+# must fall through to the entropy pass. Plain lowercase/uppercase runs without
+# ``_`` or ``-`` separators are not identifiers either. ``sk-…`` / ``ghp_…``
+# still match ``_SECRET_PATTERNS`` first.
+_BENIGN_IDENTIFIER_RE = re.compile(
+    r"^(?:_[a-z][a-z0-9_]*|[a-z][a-z0-9]*(?:_[a-z0-9_]+)+"
+    r"|[a-z][a-z0-9]*(?:-[a-z0-9]+)+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)$"
+)
+# Analyzer metadata assignments (``catalog=unavailable``, ``status=skipped``) —
+# exempt before the dense-token pass so glanceable catalog rows survive redaction.
+_METADATA_ASSIGNMENT_RE = re.compile(r"^(?P<key>[a-z][a-z0-9_]*)=(?P<value>[a-z][a-z0-9_-]*)$")
+_SIMPLE_METADATA_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
 def _shannon_entropy(value: str) -> float:
@@ -63,6 +71,29 @@ def _is_benign_entropy_token(token: str) -> bool:
     return False
 
 
+def _is_simple_metadata_token(token: str) -> bool:
+    """Low-entropy catalog/status tokens in ``key=value`` metadata assignments."""
+    if _BENIGN_IDENTIFIER_RE.match(token) is not None:
+        return True
+    if _SIMPLE_METADATA_TOKEN_RE.fullmatch(token) is None:
+        return False
+    if len(token) < _MIN_ENTROPY_LENGTH:
+        return True
+    if "_" in token or "-" in token:
+        return True
+    return _shannon_entropy(token) < _entropy_threshold(len(token))
+
+
+def _is_benign_metadata_assignment(token: str) -> bool:
+    """``key=value`` analyzer metadata where both sides are low-entropy identifiers."""
+    match = _METADATA_ASSIGNMENT_RE.match(token)
+    if match is None:
+        return False
+    key = match.group("key")
+    value = match.group("value")
+    return _is_simple_metadata_token(key) and _is_simple_metadata_token(value)
+
+
 def _should_force_redact_dense_token(token: str) -> bool:
     unique = len(set(token))
     if unique < 8 or len(token) >= 64:
@@ -85,6 +116,8 @@ def _entropy_redact(text: str) -> str:
         if _BENIGN_HEX_40_RE.match(token) or _BENIGN_HEX_64_RE.match(token):
             return token
         if _BENIGN_IDENTIFIER_RE.match(token):
+            return token
+        if _is_benign_metadata_assignment(token):
             return token
         if _should_force_redact_dense_token(token):
             return REDACTION_SENTINEL
@@ -113,6 +146,8 @@ def _maybe_redact_entire_string(text: str, redacted: str) -> str:
     if _BENIGN_HEX_40_RE.match(text) or _BENIGN_HEX_64_RE.match(text):
         return redacted
     if _BENIGN_IDENTIFIER_RE.match(text):
+        return redacted
+    if _is_benign_metadata_assignment(text):
         return redacted
     if _should_force_redact_dense_token(text):
         return REDACTION_SENTINEL
