@@ -24,10 +24,10 @@ def _load_module() -> Any:
 class TestGhcrDigestLookup:
     def test_published_sha_tag_has_digest(self) -> None:
         module = _load_module()
-        lookup = module._ghcr_digest_for_tag("cfdf38dcd062779aac3e141c51f134213d395b67")
+        lookup = module._ghcr_digest_for_tag("b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5")
         assert lookup.status == module.TagLookupStatus.FOUND
         assert lookup.digest == (
-            "sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90"
+            "sha256:97fff2027a8bf26924a777a16e29177e694369bc43e4eaa980c0ef9d092f1f9f"
         )
 
     def test_missing_tag_is_not_registry_error(self) -> None:
@@ -37,8 +37,7 @@ class TestGhcrDigestLookup:
 
     def test_old_published_digest_lacks_tracing_extra(self) -> None:
         module = _load_module()
-        digest = "sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90"
-        config = module._fetch_oci_config(digest)
+        config = module._fetch_oci_config_for_tag("cfdf38dcd062779aac3e141c51f134213d395b67")
         assert config is not None
         assert module._image_has_tracing_extra(config) is False
 
@@ -61,7 +60,19 @@ class TestMain:
         module.ACTION_YML = action
         assert module.main() != 0
 
-    def test_fails_on_pre_tracing_digest(self) -> None:
+    def test_fails_on_pre_tracing_digest(self, tmp_path: Path) -> None:
         """Pinned pre-#531 digests must not pass the tracing-extra contract."""
         module = _load_module()
+        action = tmp_path / "action.yml"
+        action.write_text(
+            "runs:\n  using: docker\n  image: "
+            "docker://ghcr.io/alexhawat/mergecraft@"
+            "sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90\n",
+            encoding="utf-8",
+        )
+        module.ACTION_YML = action
         assert module.main() != 0
+
+    def test_passes_on_repo_action_yml(self) -> None:
+        module = _load_module()
+        assert module.main() == 0

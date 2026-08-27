@@ -125,13 +125,13 @@ def _ghcr_digest_for_tag(tag: str) -> TagLookupResult:
     return TagLookupResult(status=TagLookupStatus.FOUND, digest=digest)
 
 
-def _fetch_oci_config(index_digest: str) -> dict[str, Any] | None:
-    """Return the OCI image config JSON for a manifest index digest."""
+def _fetch_oci_config_for_tag(tag: str) -> dict[str, Any] | None:
+    """Return the OCI image config JSON for a published slim image tag."""
     token = _ghcr_pull_token()
     if token is None:
         return None
     request = urllib.request.Request(
-        f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/manifests/{index_digest}",
+        f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/manifests/{tag}",
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": GHCR_MANIFEST_ACCEPT,
@@ -255,44 +255,13 @@ def main() -> int:
         )
         return 0
 
-    pinned_config = _fetch_oci_config(pinned)
-    if pinned_config is None:
-        print(
-            "action-image-digest-check FAILED: could not read OCI config for pinned digest "
-            f"{pinned}",
-            file=sys.stderr,
-        )
-        return 1
-
-    if not _image_has_tracing_extra(pinned_config):
-        print(
-            "action-image-digest-check FAILED: pinned slim image was built without "
-            "`uv sync --extra tracing` — Logfire/OTEL sinks degrade to NullSink (#531). "
-            f"Do not pin pre-#531 digests such as {pinned[:19]}…",
-            file=sys.stderr,
-        )
-        return 1
-
     action_sha = _self_review_action_sha()
     if action_sha is None:
         print(
-            "action-image-digest-check OK: digest-pinned slim image includes tracing extra "
+            "action-image-digest-check OK: digest-pinned slim image "
             f"({pinned[:19]}…) — no self-review Action SHA to compare"
         )
         return 0
-
-    pinned_revision = _revision_from_config(pinned_config)
-    if pinned_revision is not None and pinned_revision != action_sha:
-        print("action-image-digest-check FAILED:", file=sys.stderr)
-        print(
-            f"  action.yml pins {pinned} ({OCI_REVISION_LABEL}={pinned_revision})",
-            file=sys.stderr,
-        )
-        print(
-            f"  mergecraft.yml Action SHA is {action_sha}",
-            file=sys.stderr,
-        )
-        return 1
 
     lookup = _ghcr_digest_for_tag(action_sha)
     if lookup.status is TagLookupStatus.ERROR:
@@ -324,6 +293,37 @@ def main() -> int:
         print(f"  GHCR {SLIM_IMAGE}:{action_sha[:12]} publishes {published}", file=sys.stderr)
         print(
             "  Update action.yml runs.image to the published slim digest for this Action SHA.",
+            file=sys.stderr,
+        )
+        return 1
+
+    published_config = _fetch_oci_config_for_tag(action_sha)
+    if published_config is None:
+        print(
+            "action-image-digest-check FAILED: could not read OCI config for "
+            f"{SLIM_IMAGE}:{action_sha}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not _image_has_tracing_extra(published_config):
+        print(
+            "action-image-digest-check FAILED: published slim image was built without "
+            "`uv sync --extra tracing` — Logfire/OTEL sinks degrade to NullSink (#531). "
+            f"Do not pin pre-#531 digests such as {pinned[:19]}…",
+            file=sys.stderr,
+        )
+        return 1
+
+    published_revision = _revision_from_config(published_config)
+    if published_revision is not None and published_revision != action_sha:
+        print("action-image-digest-check FAILED:", file=sys.stderr)
+        print(
+            f"  GHCR tag {action_sha} ({OCI_REVISION_LABEL}={published_revision})",
+            file=sys.stderr,
+        )
+        print(
+            f"  mergecraft.yml Action SHA is {action_sha}",
             file=sys.stderr,
         )
         return 1
