@@ -332,6 +332,25 @@ def _short_circuit_setup_failure(
     return ("continue", None)
 
 
+def _approval_run_succeeded(ctx: RunContext, outcome: RunOutcome) -> bool:
+    """Whether the mergecraft-approval gate should treat the review as complete.
+
+    Post-run token budget exhaustion after a terminal verdict must not downgrade
+    the approval check to ``neutral`` when the reviewer already submitted — the
+    completion check still reports budget failure via ``outcome``.
+    """
+    if run_succeeded_for_outcome(outcome):
+        return True
+    if outcome is not RunOutcome.inconclusive or ctx.tool_state is None:
+        return False
+    if ctx.tool_state.terminal_submission is None:
+        return False
+    return ctx.budget_exhaustion is not None or (
+        ctx.budget_tracker is not None
+        and getattr(ctx.budget_tracker, "last_exhausted", None) is not None
+    )
+
+
 async def _publish(
     ctx: RunContext,
     *,
@@ -352,14 +371,14 @@ async def _publish(
     tool_context = ctx.tool_context
     if tool_context is None:
         return None
-    run_ok = run_succeeded_for_outcome(outcome)
-    prepared = prepare_run_packet(tool_context, run_succeeded=run_ok)
+    approval_ok = _approval_run_succeeded(ctx, outcome)
+    prepared = prepare_run_packet(tool_context, run_succeeded=approval_ok)
 
     async def _learnings_and_status() -> None:
         await persist_learnings(tool_context)
         await report_status_checks(
             tool_context,
-            run_succeeded=run_ok,
+            run_succeeded=approval_ok,
             failure_reason=failure_reason,
             conclusion=RUN_OUTCOME_CONCLUSION[outcome],
             packet=prepared,
