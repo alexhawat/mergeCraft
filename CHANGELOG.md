@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fail-open) (#528)
 - `e2e.yml` security slice runs on `push` (ci-cd release gate); `ci-cd.yml`
   stamps `org.opencontainers.image.revision` on published images; PR CI
-  bootstraps the slim GHCR tag for the workflow Action SHA when missing
+  bootstraps the slim GHCR tag for the workflow Action SHA when missing (skips
+  rebuild when the tag already exists so digest pins stay stable across pushes)
 - The self-review Action pin on both review steps moves to `b34e9f25`. The
   previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
   `src/mergecraft/`, so every review since then ran product code that stale.
