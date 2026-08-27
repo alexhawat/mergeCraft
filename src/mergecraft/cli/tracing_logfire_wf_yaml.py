@@ -75,7 +75,17 @@ def _is_action_uses(uses: str, action_uses: str = _ACTION_USES) -> bool:
 # Owned keys -- every key whose value this module is willing to insert
 # or strip. Kept as tuples so callers (and tests) can import them.
 OWNED_WITH_KEYS: tuple[str, ...] = ("tracing", "tracing-to", "logfire-token")
-OWNED_ENV_KEYS: tuple[str, ...] = ("MERGECRAFT_TRACING_PROJECT",)
+OWNED_ENV_KEYS: tuple[str, ...] = (
+    "MERGECRAFT_TRACING_PROJECT",
+    "MERGECRAFT_TRACING_REGION",
+)
+
+# The subset of ``OWNED_ENV_KEYS`` that must be present after a wire for the
+# result to count as fully wired. ``MERGECRAFT_TRACING_REGION`` is opt-in
+# (``wire-workflow --region``) because the resolver already defaults to ``us``
+# when it is absent, so a wire that omits it is complete, not partial. It still
+# belongs to ``OWNED_ENV_KEYS`` so ``unwire-workflow`` strips it.
+REQUIRED_ENV_KEYS: tuple[str, ...] = ("MERGECRAFT_TRACING_PROJECT",)
 
 # Indent units. The upstream convention is two-space indent for keys under a
 # step (``uses:`` at 8 spaces, ``with:``/``env:`` at 8 spaces, children at
@@ -864,7 +874,7 @@ def _assert_wired_semantics(text: str, *, step_identifiers: list[str]) -> None:
                     "cannot carry MERGECRAFT_TRACING_PROJECT"
                 )
             else:
-                for key in OWNED_ENV_KEYS:
+                for key in REQUIRED_ENV_KEYS:
                     if key not in env_map:
                         unwired.append(f"{step_id}: missing env.{key}")
     missing = targets - seen_targets
@@ -926,8 +936,18 @@ def apply_logfire_wiring(
     project_var_name: str,
     step_selector: str,
     force: bool,
+    region: str | None = None,
 ) -> WiringChange:
-    """Insert the four owned keys into every selected ``uses:`` step in ``workflow_path``."""
+    """Insert the owned keys into every selected ``uses:`` step in ``workflow_path``.
+
+    When *region* is ``"us"`` / ``"eu"``, an additional
+    ``MERGECRAFT_TRACING_REGION`` entry is written into the step's ``env:``
+    mapping. Logfire serves region-specific OTLP ingest hosts
+    (``logfire-us.pydantic.dev`` / ``logfire-eu.pydantic.dev``) and the
+    resolver defaults to ``us``; an EU write token therefore needs this key or
+    its spans are posted to the wrong host. ``None`` (the default) leaves the
+    key alone, preserving the pre-existing wiring shape.
+    """
     try:
         text = workflow_path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
@@ -945,6 +965,11 @@ def apply_logfire_wiring(
     env_canonical: list[tuple[str, str]] = [
         ("MERGECRAFT_TRACING_PROJECT", f"${{{{ vars.{_splice_secret(project_var_name)} }}}}"),
     ]
+    if region is not None:
+        normalised = region.strip().lower()
+        if normalised not in {"us", "eu"}:
+            raise LogfireWorkflowError(f"region must be 'us' or 'eu' (got {region!r})")
+        env_canonical.append(("MERGECRAFT_TRACING_REGION", normalised))
 
     def _do(block: str, step_indent: int) -> tuple[str, bool]:
         # Order matters: insert ``with:`` keys first so an existing ``env:``
@@ -982,7 +1007,7 @@ def apply_logfire_wiring(
         if not mod_env and _find_mapping_block(block2, "env", at_indent=step_indent) is None:
             # ``env:`` block is genuinely absent -- create one immediately
             # after the ``with:`` block (or after ``uses:`` if no ``with:``).
-            block3 = _create_env_block(block2, env_canonical[0], at_indent=step_indent)
+            block3 = _create_env_block(block2, env_canonical, at_indent=step_indent)
             mod_env = True
         return block3, mod_with or mod_env
 
@@ -1054,12 +1079,14 @@ def _create_with_block(
     return block[: m.end()] + insertion + block[m.end() :]
 
 
-def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | None = None) -> str:
+def _create_env_block(
+    block: str, canonical: list[tuple[str, str]], at_indent: int | None = None
+) -> str:
     """Insert a fresh ``env:`` block immediately after the ``with:`` block.
 
     When the step has no ``with:`` block the new ``env:`` is appended after
     the ``uses:`` line (the canonical sibling placement). The new block holds
-    a single child line ``MERGECRAFT_TRACING_PROJECT`` at the canonical
+    one child line per entry in *canonical*, in order, at the canonical
     child indent -- which we derive from the existing ``with:`` block's
     observed child indent when present (falling back to ``+2``), so the
     new ``env:`` mirrors the workflow's own style even on non-canonical
@@ -1072,7 +1099,17 @@ def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | N
     inside a block scalar from being mistaken for the step's real ``with:``
     mapping.
     """
-    canonical_key, canonical_value = canonical
+    if not canonical:
+        msg = "_create_env_block requires at least one canonical entry"
+        raise LogfireWorkflowError(msg)
+
+    def _children(child_indent: str) -> str:
+        # Every owned key the caller asked for, not just the first. Rendering
+        # a subset here silently drops keys (e.g. MERGECRAFT_TRACING_REGION)
+        # on the env-less step shape, and the wired-semantics check would not
+        # catch it because only REQUIRED_ENV_KEYS is asserted.
+        return "".join(f"{child_indent}{key}: {value}\n" for key, value in canonical)
+
     # Prefer inserting after the ``with:`` block (its trailing `block_end`).
     with_block = _find_mapping_block(block, "with", at_indent=at_indent)
     if with_block is not None:
@@ -1086,7 +1123,7 @@ def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | N
         # path, but be defensive for callers that go straight here).
         child_ws = _derive_child_indent(block, with_block[0], with_block[1], with_block[2])
         env_child_indent = child_ws if child_ws is not None else with_indent + "  "
-        insertion = f"{with_indent}env:\n{env_child_indent}{canonical_key}: {canonical_value}\n"
+        insertion = f"{with_indent}env:\n" + _children(env_child_indent)
         return block[:with_end] + insertion + block[with_end:]
     # No ``with:`` -- fall back to inserting after ``uses:``. Match both
     # step shapes documented by the README -- multi-line
@@ -1103,7 +1140,7 @@ def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | N
         )
     indent_str = " " * at_indent if at_indent is not None else ""
     env_indent = indent_str + "  "
-    insertion = f"{indent_str}env:\n{env_indent}{canonical_key}: {canonical_value}\n"
+    insertion = f"{indent_str}env:\n" + _children(env_indent)
     return block[: m.end()] + insertion + block[m.end() :]
 
 
@@ -1146,6 +1183,7 @@ __all__ = [
     "DEFAULT_WORKFLOW_RELATIVE_PATH",
     "OWNED_ENV_KEYS",
     "OWNED_WITH_KEYS",
+    "REQUIRED_ENV_KEYS",
     "LogfireWorkflowError",
     "WiringChange",
     "apply_logfire_wiring",
