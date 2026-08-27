@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `actions/checkout` no longer persists its token in the review workflow, the
+  shipped hardened example, its template, or the dogfood artifact. A persisted
+  `extraheader = AUTHORIZATION: basic ...` collided with the `Authorization:
+  Bearer ...` that mergeCraft's own git layer adds, and `extraHeader` is
+  multi-valued in git, so both headers went on one request and GitHub answered
+  `400 Duplicate header: "Authorization"`. `checkout_pr` failed, review scope
+  was never established, and every terminal verdict was rejected — a review
+  that found 45 issues posted none of them and burned 9.4M tokens against a 5M
+  budget before failing closed. The action authenticates from its own `token:`
+  input, so nothing needs persisting; the comment that claimed otherwise
+  predated lane A giving those tools header auth of their own
+
+
 ### Changed
 
 - The self-review Action pin on both review steps moves to `b34e9f25`. The

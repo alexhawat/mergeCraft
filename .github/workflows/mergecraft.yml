@@ -22,7 +22,10 @@
 #
 # Provider priority: Tencent HY3 via the Nous Portal is primary; OpenAI
 # (Codex) is the one-shot fallback when Nous is absent or its review posts no
-# verdict. Claude is not used.
+# verdict; Anthropic (Claude) is the cross-vendor backstop when an earlier rung
+# fails RETRYABLY (quota ceiling, timeout, transport death) without posting a
+# verdict. The two fallbacks route on different signals on purpose — see the
+# comments on each decide step.
 #
 # Codex reviews previously posted mergecraft-approval=neutral because every tool
 # call failed with "MCP server 'mergecraft' was not ready for this step". Root
@@ -54,6 +57,8 @@
 # - NOUS_API_KEY — Nous Portal API key — primary (Tencent HY3 via nous/tencent/hy3)
 # - CODEX_AUTH_JSON — ChatGPT/Codex subscription (`mergecraft auth codex`) — fallback
 # - OPENAI_API_KEY — OpenAI API key (same Codex harness as CODEX_AUTH_JSON)
+# - CLAUDE_CODE_OAUTH_TOKEN — Claude Pro/Max subscription (`mergecraft auth claude`) — backstop
+# - ANTHROPIC_API_KEY — Anthropic API key (same claude harness as CLAUDE_CODE_OAUTH_TOKEN)
 # The job skips gracefully when none are set (e.g. fork PRs). Without
 # NOUS_API_KEY the primary is inert and Codex is the only reviewer; without
 # CODEX_AUTH_JSON / OPENAI_API_KEY, Nous is the only reviewer.
@@ -298,15 +303,28 @@ jobs:
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
-    # > 2× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
-    timeout-minutes: 65
+    # > 3× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
+    # Three rungs now (Nous -> Codex -> Claude). This is a worst-case ceiling,
+    # not an expected cost: the Claude rung only runs when an earlier rung
+    # failed retryably, and a rung that dies on a quota ceiling returns in
+    # seconds rather than consuming its budget.
+    timeout-minutes: 95
     env:
       IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
       # Nous/DeepSeek primary; Codex fallback when Nous auth is absent or the
       # Nous review does not post a mergecraft-approval verdict.
       HAS_CODEX: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       HAS_NOUS: ${{ secrets.NOUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
-      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Claude is the cross-vendor backstop. Nous and Codex can go down together
+      # for reasons that have nothing to do with this repo — a shared account
+      # quota ceiling is the common one — and when they do, the cascade posts no
+      # verdict and the approval gate fails closed on every PR at once. Anthropic
+      # credentials fail independently of both.
+      HAS_CLAUDE: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Duplicated verbatim as `approval-gate.env.HAS_AUTH` (jobs cannot share an
+      # `env` expression). Adding a provider here without updating that copy
+      # fails the required gate OPEN — see the comment there.
+      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       # The default github.token cannot submit an "Approve" review — GitHub
       # silently downgrades any attempt to a comment (a documented platform
       # restriction, independent of PR author). A PAT from a genuinely
@@ -319,13 +337,21 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
-          # Persist the checkout token so the mergeCraft action's own git layer
-          # (checkout_pr / git_fetch) can authenticate. Without it those git ops
-          # fail and the action marks its `mergecraft` self-status check red even
-          # though the review completes via the GitHub API. Read-only escalation
-          # only: the action already sets ``push: disabled`` / ``shell: disabled``
-          # below, so a persisted token cannot be used to push.
-          persist-credentials: true
+          # MUST stay false. actions/checkout persists its token as
+          # `http.https://github.com/.extraheader = AUTHORIZATION: basic ...` in
+          # .git/config, and mergeCraft's git layer adds its own
+          # `Authorization: Bearer ...` (utils/git_setup.py:208, lane A D5).
+          # `extraHeader` is multi-valued in git, so the second does not replace
+          # the first — both go on the same request and GitHub answers
+          # 400 "Duplicate header: Authorization". checkout_pr then fails, review
+          # scope is never established, and every terminal verdict is rejected.
+          #
+          # The old comment here claimed persistence was required for
+          # checkout_pr / git_fetch to authenticate. That stopped being true when
+          # lane A gave those tools header-based auth of their own: checkout.py
+          # passes `env=_git_env(ctx.git_token)`, so the action authenticates
+          # from its `token:` input and needs nothing in .git/config.
+          persist-credentials: false
 
       - name: Ensure PR base ref exists locally
         if: github.event_name == 'pull_request_target'
@@ -348,7 +374,7 @@ jobs:
           if [ "${IS_SAME_REPO}" != "true" ]; then
             echo "::notice title=mergecraft skipped::Fork PR — review skipped (same as before)."
           else
-            echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, or NOUS_API_KEY to enable mergeCraft reviews."
+            echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, NOUS_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (mergecraft auth claude) to enable mergeCraft reviews."
           fi
 
       # Composed in a step rather than inline in `with:` so the CI-context clause
@@ -399,15 +425,21 @@ jobs:
             echo "MERGECRAFT_PROMPT_EOF"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Record mergecraft-approval baseline before the Nous review
+      - name: Record mergecraft-approval baseline before the review cascade
         id: approval_baseline
-        # The fallback below must judge THIS Nous attempt, not a verdict an
+        # Every fallback below must judge THIS run's attempts, not a verdict an
         # earlier run left on the same head SHA (a re-run, or the enforce step's
         # own retry loop). Capturing the newest check-run id first makes "did
-        # Nous post a verdict?" answerable by identity rather than by recency.
+        # this attempt post a verdict?" answerable by identity rather than by
+        # recency.
+        #
+        # Gated on HAS_AUTH rather than on a specific provider pair: the Claude
+        # rung needs this baseline even when Nous is absent, and reading it is
+        # cheap. Narrowing it to HAS_NOUS && HAS_CODEX left BASELINE_ID empty on
+        # a Codex-only repo, which would make a stale verdict from a previous
+        # run look like a fresh one and silently skip the backstop.
         if: >-
-          env.HAS_NOUS == 'true' &&
-          env.HAS_CODEX == 'true' &&
+          env.HAS_AUTH == 'true' &&
           github.event_name == 'pull_request_target'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -651,6 +683,113 @@ jobs:
           MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
           MERGECRAFT_TRACING_REGION: eu
 
+      - name: Decide Claude backstop after the provider cascade
+        id: claude_fallback
+        # Gated on a RETRYABLE provider failure, not on "no verdict posted".
+        #
+        # That is deliberately the opposite rule from the Nous -> Codex fallback
+        # above, because the two rungs exist for different failures. Codex backs
+        # up a Nous run that exits 0 while posting nothing usable (the
+        # mergecraft-approval=neutral / MCP handshake symptom), so it MUST route
+        # on verdict absence. Claude backs up a provider that could not run at
+        # all — quota ceiling, timeout, transport death — which the action
+        # surfaces by exiting non-zero, i.e. a step outcome of `failure` under
+        # continue-on-error.
+        #
+        # Routing Claude on verdict absence too would spend a third full attempt
+        # (and a third provider's quota) every time a reviewer legitimately
+        # declines to post one. Routing it on outcome keeps the backstop for the
+        # case it was added for: every earlier rung was unable to review.
+        #
+        # The verdict re-check below is a safety net, not the trigger: a rung can
+        # exit non-zero *after* posting a good verdict (the exhaustion arrives on
+        # a later retry), and re-reviewing then would overwrite a real verdict.
+        if: >-
+          env.HAS_CLAUDE == 'true' &&
+          (
+            steps.mergecraft_nous.outcome == 'failure' ||
+            steps.mergecraft_codex.outcome == 'failure'
+          )
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
+          NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
+          CODEX_OUTCOME: ${{ steps.mergecraft_codex.outcome }}
+        run: |
+          set -euo pipefail
+          need="true"
+          if [ "${EVENT_NAME}" = "pull_request_target" ]; then
+            latest=""
+            for attempt in $(seq 1 3); do
+              if latest="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+                --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
+                | sort_by(.completed_at // .started_at) | last
+                | "\(.id // "")|\(.conclusion // "")"')"; then
+                break
+              fi
+              echo "check-runs query failed (attempt ${attempt}/3); retrying in 3s…" >&2
+              sleep 3
+            done
+            id="${latest%%|*}"
+            conclusion="${latest#*|}"
+            # Same identity rule as the Codex fallback: a verdict only counts
+            # when it is NOT the one that was already on this SHA beforehand.
+            if [ -n "${id}" ] && [ "${id}" = "${BASELINE_ID}" ]; then
+              echo "mergecraft-approval ${id} predates this run — treating as no verdict."
+              conclusion=""
+            fi
+            case "${conclusion}" in
+              failure|success)
+                need="false"
+                echo "mergecraft-approval=${conclusion} — a rung posted a verdict despite failing later; not spending the Claude backstop."
+                ;;
+            esac
+          fi
+          if [ "${need}" = "true" ]; then
+            echo "::notice title=mergecraft Claude backstop::A provider failed retryably (nous=${NOUS_OUTCOME:-skipped}, codex=${CODEX_OUTCOME:-skipped}) and no verdict was posted; retrying with anthropic/claude-sonnet."
+          fi
+          echo "need=${need}" >> "${GITHUB_OUTPUT}"
+
+      - name: mergeCraft PR review (Claude)
+        # Two ways in: as the backstop after a retryable provider failure, or as
+        # the sole reviewer when Claude is the only credential this repo has.
+        # Without the second clause, a Claude-only repo would satisfy HAS_AUTH,
+        # skip the "not configured" notice, run no review at all, and fail the
+        # gate closed with no diagnostic.
+        if: >-
+          env.HAS_CLAUDE == 'true' &&
+          (
+            steps.claude_fallback.outputs.need == 'true' ||
+            (env.HAS_NOUS != 'true' && env.HAS_CODEX != 'true')
+          )
+        id: mergecraft_claude
+        continue-on-error: true
+        # Same mandatory full-SHA pin as the rungs above — keep all three in
+        # lockstep when bumping, and mirror to the sevn-side workflow. This rung
+        # was authored against the pre-#533 pin; carried to b34e9f25 on the merge
+        # so all three rungs run the same product code (#532).
+        uses: alexhawat/mergeCraft@b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5 # pre-0.0.1 (PR #533)
+        with:
+          prompt: ${{ steps.prompt.outputs.text }}
+          timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
+          model: anthropic/claude-sonnet
+          push: disabled
+          shell: disabled
+          status_checks: enabled
+          # See the matching comment on the Nous step above.
+          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          tracing: "true"
+          tracing-to: logfire
+          logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+          MERGECRAFT_TRACING_REGION: eu
+
       - name: mergeCraft review incomplete (non-fatal)
         if: >-
           env.HAS_AUTH == 'true' &&
@@ -669,7 +808,8 @@ jobs:
               env.HAS_NOUS != 'true' &&
               steps.mergecraft_codex.outcome != 'success'
             )
-          )
+          ) &&
+          steps.mergecraft_claude.outcome != 'success'
         run: |
           echo "::notice title=mergecraft incomplete::Review step did not finish successfully (see its log — e.g. provider session limit or a runtime error). Approval enforcement in the approval-gate job will fail closed on this."
 
@@ -689,7 +829,15 @@ jobs:
       contents: read
       checks: read
     env:
-      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Must stay character-for-character identical to the `review` job's
+      # HAS_AUTH. GitHub has no way to share one `env` expression across jobs,
+      # so the predicate is duplicated — and it drifted once already: Claude was
+      # added to the review job's copy and not to this one, which fails the gate
+      # OPEN on a Claude-only repo (the review runs, this job's only real step
+      # is skipped, and the required check goes green with no
+      # `mergecraft-approval=success` anywhere). When adding a provider, update
+      # both copies. `tests/ci/test_approval_gate_auth_predicate.py` pins them.
+      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - name: Fail when mergeCraft would not approve
         # Gate directly on the `mergecraft-approval` check-run, decoupled from the
