@@ -39,19 +39,20 @@ def _capture_argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     "isolate_network",
     [
         False,
-        pytest.param(
-            True,
-            marks=pytest.mark.xfail(
-                reason="green after AP4: sudo --preserve-env by name",
-                strict=False,
-            ),
-        ),
+        True,
     ],
     ids=["pid_only", "pid_and_net"],
 )
 def test_no_provider_key_value_appears_in_any_branch_argv(
     monkeypatch: pytest.MonkeyPatch, isolate_network: bool
 ) -> None:
+    # The netns probe is a property of the host, not of argv construction:
+    # macOS has no network namespaces and GitHub's runners fail
+    # ``unshare --net`` too, so without this stub the isolate_network=True case
+    # raises in shell.py:307 before reaching the assertion below. Stubbing it
+    # makes the branch reachable and the result host-independent -- which is
+    # what let the previous xfail(strict=False) sit here silently either way.
+    monkeypatch.setattr(shell_mod, "_network_namespace_available", lambda: True)
     for method in ("unshare", "sudo-unshare", "none"):
         monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
         if method == "unshare":
