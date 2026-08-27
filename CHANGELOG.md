@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The self-review Action pin on both review steps moves to `b34e9f25`. The
+  previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
+  `src/mergecraft/`, so every review since then ran product code that stale.
+  The image at that pin carries no `[tracing]` extra, which would have left
+  the Logfire wiring exporting nothing, and analyzer defects already fixed by
+  #458 / #459 kept surfacing in Action logs. `make action-pin-check` reports
+  the drift correctly but gates nothing; #532 tracks wiring it into `make ci`
+
 ### Security
 
 - Enterprise audit log defaults outside the agent-writable workspace tree
@@ -58,6 +68,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python ``prep`` installs into ``.mergecraft/prep-scratch/prep-venv`` with a
   default-deny env allowlist so PR build deps cannot mutate the reviewer's
   interpreter or inherit provider credentials (MCB-22 / D12)
+
+### Fixed
+
+- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``;
+  ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd()``
+  twice (MCB-22)
+- The Action image now installs the `[tracing]` extra
+  (`uv sync --frozen --no-dev --extra tracing`). Without it, a workflow wired
+  with `tracing-to: logfire` looked correct and exported nothing: the sink
+  factory degrades a `logfire`/`otel` sink to `NullSink` and only logs a
+  warning, so every Action review since tracing shipped silently dropped its
+  spans. Verified against `uv.lock` — omitting the extra uninstalls logfire
+  plus its seven OpenTelemetry dependencies
+- `mergecraft.yml` now actually passes the tracing inputs it has supported
+  since W8.5. Both review steps (Nous and the Codex fallback) carry
+  `tracing: "true"`, `tracing-to: logfire`, `logfire-token`, and the
+  `MERGECRAFT_TRACING_PROJECT` / `MERGECRAFT_TRACING_REGION` env pair
+
+### Added
+
+- `mergecraft tracing logfire wire-workflow --region us|eu` writes
+  `MERGECRAFT_TRACING_REGION` into the wired step's `env:`. Logfire serves
+  region-specific OTLP hosts and the resolver defaults to `us`, so an EU write
+  token (`pylf_v{N}_eu_…`) previously posted spans to the wrong host with no
+  way to fix it short of hand-editing the workflow. The key is owned (so
+  `unwire-workflow` strips it) but not required, keeping a region-less wire
+  complete rather than partial
 
 ### Changed
 
