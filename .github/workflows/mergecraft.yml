@@ -319,13 +319,21 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
-          # Persist the checkout token so the mergeCraft action's own git layer
-          # (checkout_pr / git_fetch) can authenticate. Without it those git ops
-          # fail and the action marks its `mergecraft` self-status check red even
-          # though the review completes via the GitHub API. Read-only escalation
-          # only: the action already sets ``push: disabled`` / ``shell: disabled``
-          # below, so a persisted token cannot be used to push.
-          persist-credentials: true
+          # MUST stay false. actions/checkout persists its token as
+          # `http.https://github.com/.extraheader = AUTHORIZATION: basic ...` in
+          # .git/config, and mergeCraft's git layer adds its own
+          # `Authorization: Bearer ...` (utils/git_setup.py:208, lane A D5).
+          # `extraHeader` is multi-valued in git, so the second does not replace
+          # the first — both go on the same request and GitHub answers
+          # 400 "Duplicate header: Authorization". checkout_pr then fails, review
+          # scope is never established, and every terminal verdict is rejected.
+          #
+          # The old comment here claimed persistence was required for
+          # checkout_pr / git_fetch to authenticate. That stopped being true when
+          # lane A gave those tools header-based auth of their own: checkout.py
+          # passes `env=_git_env(ctx.git_token)`, so the action authenticates
+          # from its `token:` input and needs nothing in .git/config.
+          persist-credentials: false
 
       - name: Ensure PR base ref exists locally
         if: github.event_name == 'pull_request_target'
