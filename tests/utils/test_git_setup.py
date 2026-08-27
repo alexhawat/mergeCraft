@@ -486,7 +486,7 @@ def test_git_env_for_token_no_token_skips_config_pairs() -> None:
 
 
 def test_git_env_for_token_hostile_rewritten_origin_stays_on_github() -> None:
-    """Bearer must scope to github.com even when checkout rewrites github URLs."""
+    """Auth must scope to github.com even when checkout rewrites github URLs."""
     env = git_env_for_token(
         "ghs_secret",
         remote_url="https://github.com/acme/demo.git",
