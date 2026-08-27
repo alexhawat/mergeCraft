@@ -113,7 +113,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft tracing logfire disable` | Disable Logfire tracing by removing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire enable` | Enable Logfire tracing by writing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire unwire-workflow` | Remove Logfire tracing wiring from the consumer workflow. |
-| `mergecraft tracing logfire wire-workflow` | Wire Logfire tracing into the consumer workflow. |
+| `mergecraft tracing logfire wire-workflow` | Wire Logfire tracing into the consumer workflow (`--region us\|eu` also writes `MERGECRAFT_TRACING_REGION`). |
 | `mergecraft update` | Reinstall mergecraft from GitHub using `uv tool install --reinstall`. |
 | `mergecraft version` | Show the mergeCraft package version. |
 | `mergecraft watch --pr N` | Stream a PR/issue timeline as one JSON line per new event. |

@@ -28,6 +28,7 @@ from mergecraft.cli.tracing_logfire_wf_yaml import (
     DEFAULT_WORKFLOW_RELATIVE_PATH,
     OWNED_ENV_KEYS,
     OWNED_WITH_KEYS,
+    REQUIRED_ENV_KEYS,
     LogfireWorkflowError,
     apply_logfire_wiring,
     remove_logfire_wiring,
@@ -131,8 +132,13 @@ def test_apply_logfire_wiring_adds_four_keys_to_one_step(tmp_path: Path) -> None
     new = change.new_text
     for key in OWNED_WITH_KEYS:
         assert f"{key}:" in new, f"missing {key} after wiring"
-    for key in OWNED_ENV_KEYS:
+    for key in REQUIRED_ENV_KEYS:
         assert f"{key}:" in new, f"missing {key} after wiring"
+    # ``MERGECRAFT_TRACING_REGION`` is opt-in (``--region``): it is owned for
+    # removal but must not be written by a default wire.
+    assert "MERGECRAFT_TRACING_REGION" in OWNED_ENV_KEYS
+    assert "MERGECRAFT_TRACING_REGION" not in REQUIRED_ENV_KEYS
+    assert "MERGECRAFT_TRACING_REGION:" not in new
     # The merged YAML re-parses cleanly.
     parsed = yaml.safe_load(new)
     assert parsed["jobs"]["review"]["steps"][0]["uses"].startswith("alexhawat/mergeCraft@")
@@ -169,6 +175,96 @@ def test_apply_logfire_wiring_is_idempotent(tmp_path: Path) -> None:
     )
     assert not second.was_modified
     assert second.new_text == first.new_text
+
+
+def test_apply_logfire_wiring_region_writes_env_key(tmp_path: Path) -> None:
+    """``--region eu`` writes MERGECRAFT_TRACING_REGION so EU tokens reach the EU host."""
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, ONE_STEP_TEMPLATE)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+        region="eu",
+    )
+    assert change.was_modified
+    parsed = yaml.safe_load(change.new_text)
+    env = parsed["jobs"]["review"]["steps"][0]["env"]
+    assert env["MERGECRAFT_TRACING_REGION"] == "eu"
+    assert env["MERGECRAFT_TRACING_PROJECT"] == "${{ vars.LOGFIRE_PROJECT }}"
+
+
+def test_apply_logfire_wiring_region_is_normalised(tmp_path: Path) -> None:
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, ONE_STEP_TEMPLATE)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+        region="  EU  ",
+    )
+    parsed = yaml.safe_load(change.new_text)
+    assert parsed["jobs"]["review"]["steps"][0]["env"]["MERGECRAFT_TRACING_REGION"] == "eu"
+
+
+def test_apply_logfire_wiring_rejects_unknown_region(tmp_path: Path) -> None:
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, ONE_STEP_TEMPLATE)
+    with pytest.raises(LogfireWorkflowError, match="region must be"):
+        apply_logfire_wiring(
+            workflow_path=workflow,
+            secret_name="LOGFIRE_TOKEN",
+            project_var_name="LOGFIRE_PROJECT",
+            step_selector="primary",
+            force=False,
+            region="apac",
+        )
+
+
+def test_apply_logfire_wiring_region_is_idempotent(tmp_path: Path) -> None:
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, ONE_STEP_TEMPLATE)
+    first = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+        region="eu",
+    )
+    workflow.write_text(first.new_text, encoding="utf-8")
+    second = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+        region="eu",
+    )
+    assert not second.was_modified
+    assert second.new_text == first.new_text
+
+
+def test_removal_strips_region_key(tmp_path: Path) -> None:
+    """``MERGECRAFT_TRACING_REGION`` is owned, so unwire must strip it too."""
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, ONE_STEP_TEMPLATE)
+    wired = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+        region="eu",
+    )
+    workflow.write_text(wired.new_text, encoding="utf-8")
+    removed = remove_logfire_wiring(workflow_path=workflow, step_selector="primary")
+    assert removed.was_modified
+    assert "MERGECRAFT_TRACING_REGION" not in removed.new_text
 
 
 def test_apply_logfire_wiring_step_all_wires_two_steps(tmp_path: Path) -> None:

@@ -94,7 +94,12 @@ WORKDIR /opt/mergecraft
 COPY pyproject.toml uv.lock README.md hatch_build.py ./
 COPY src/mergecraft ./src/mergecraft
 
-RUN uv sync --frozen --no-dev \
+# ``--extra tracing`` installs logfire + the OpenTelemetry SDK/exporter. Without
+# it the sink factory degrades a ``logfire`` / ``otel`` sink to ``NullSink``
+# with a warning (src/mergecraft/tracing/sinks.py), so an Action run wired with
+# ``tracing-to: logfire`` would silently export nothing. The extra is exact-pinned
+# in pyproject and covered by ``uv.lock``, so ``--frozen`` still applies.
+RUN uv sync --frozen --no-dev --extra tracing \
     && useradd -m -u 10001 -s /bin/bash mergecraft \
     && chown -R mergecraft:mergecraft /opt/mergecraft \
     && rm -f /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/uv_cache.json \

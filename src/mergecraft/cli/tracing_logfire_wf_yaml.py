@@ -75,7 +75,17 @@ def _is_action_uses(uses: str, action_uses: str = _ACTION_USES) -> bool:
 # Owned keys -- every key whose value this module is willing to insert
 # or strip. Kept as tuples so callers (and tests) can import them.
 OWNED_WITH_KEYS: tuple[str, ...] = ("tracing", "tracing-to", "logfire-token")
-OWNED_ENV_KEYS: tuple[str, ...] = ("MERGECRAFT_TRACING_PROJECT",)
+OWNED_ENV_KEYS: tuple[str, ...] = (
+    "MERGECRAFT_TRACING_PROJECT",
+    "MERGECRAFT_TRACING_REGION",
+)
+
+# The subset of ``OWNED_ENV_KEYS`` that must be present after a wire for the
+# result to count as fully wired. ``MERGECRAFT_TRACING_REGION`` is opt-in
+# (``wire-workflow --region``) because the resolver already defaults to ``us``
+# when it is absent, so a wire that omits it is complete, not partial. It still
+# belongs to ``OWNED_ENV_KEYS`` so ``unwire-workflow`` strips it.
+REQUIRED_ENV_KEYS: tuple[str, ...] = ("MERGECRAFT_TRACING_PROJECT",)
 
 # Indent units. The upstream convention is two-space indent for keys under a
 # step (``uses:`` at 8 spaces, ``with:``/``env:`` at 8 spaces, children at
@@ -864,7 +874,7 @@ def _assert_wired_semantics(text: str, *, step_identifiers: list[str]) -> None:
                     "cannot carry MERGECRAFT_TRACING_PROJECT"
                 )
             else:
-                for key in OWNED_ENV_KEYS:
+                for key in REQUIRED_ENV_KEYS:
                     if key not in env_map:
                         unwired.append(f"{step_id}: missing env.{key}")
     missing = targets - seen_targets
@@ -926,8 +936,18 @@ def apply_logfire_wiring(
     project_var_name: str,
     step_selector: str,
     force: bool,
+    region: str | None = None,
 ) -> WiringChange:
-    """Insert the four owned keys into every selected ``uses:`` step in ``workflow_path``."""
+    """Insert the owned keys into every selected ``uses:`` step in ``workflow_path``.
+
+    When *region* is ``"us"`` / ``"eu"``, an additional
+    ``MERGECRAFT_TRACING_REGION`` entry is written into the step's ``env:``
+    mapping. Logfire serves region-specific OTLP ingest hosts
+    (``logfire-us.pydantic.dev`` / ``logfire-eu.pydantic.dev``) and the
+    resolver defaults to ``us``; an EU write token therefore needs this key or
+    its spans are posted to the wrong host. ``None`` (the default) leaves the
+    key alone, preserving the pre-existing wiring shape.
+    """
     try:
         text = workflow_path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
@@ -945,6 +965,11 @@ def apply_logfire_wiring(
     env_canonical: list[tuple[str, str]] = [
         ("MERGECRAFT_TRACING_PROJECT", f"${{{{ vars.{_splice_secret(project_var_name)} }}}}"),
     ]
+    if region is not None:
+        normalised = region.strip().lower()
+        if normalised not in {"us", "eu"}:
+            raise LogfireWorkflowError(f"region must be 'us' or 'eu' (got {region!r})")
+        env_canonical.append(("MERGECRAFT_TRACING_REGION", normalised))
 
     def _do(block: str, step_indent: int) -> tuple[str, bool]:
         # Order matters: insert ``with:`` keys first so an existing ``env:``
@@ -1146,6 +1171,7 @@ __all__ = [
     "DEFAULT_WORKFLOW_RELATIVE_PATH",
     "OWNED_ENV_KEYS",
     "OWNED_WITH_KEYS",
+    "REQUIRED_ENV_KEYS",
     "LogfireWorkflowError",
     "WiringChange",
     "apply_logfire_wiring",

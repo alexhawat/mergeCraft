@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Action image now installs the `[tracing]` extra
+  (`uv sync --frozen --no-dev --extra tracing`). Without it, a workflow wired
+  with `tracing-to: logfire` looked correct and exported nothing: the sink
+  factory degrades a `logfire`/`otel` sink to `NullSink` and only logs a
+  warning, so every Action review since tracing shipped silently dropped its
+  spans. Verified against `uv.lock` — omitting the extra uninstalls logfire
+  plus its seven OpenTelemetry dependencies
+- `mergecraft.yml` now actually passes the tracing inputs it has supported
+  since W8.5. Both review steps (Nous and the Codex fallback) carry
+  `tracing: "true"`, `tracing-to: logfire`, `logfire-token`, and the
+  `MERGECRAFT_TRACING_PROJECT` / `MERGECRAFT_TRACING_REGION` env pair
+
+### Added
+
+- `mergecraft tracing logfire wire-workflow --region us|eu` writes
+  `MERGECRAFT_TRACING_REGION` into the wired step's `env:`. Logfire serves
+  region-specific OTLP hosts and the resolver defaults to `us`, so an EU write
+  token (`pylf_v{N}_eu_…`) previously posted spans to the wrong host with no
+  way to fix it short of hand-editing the workflow. The key is owned (so
+  `unwire-workflow` strips it) but not required, keeping a region-less wire
+  complete rather than partial
+
 ### Changed
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs

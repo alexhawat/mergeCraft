@@ -511,9 +511,14 @@ jobs:
           # See HAS_BOT_TOKEN above — falls back to github.token when the PAT
           # isn't configured (e.g. a fork of this repo without the secret).
           token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          tracing: "true"
+          tracing-to: logfire
+          logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+          MERGECRAFT_TRACING_REGION: eu
 
       - name: Decide Codex fallback after Nous
         id: fallback
@@ -617,9 +622,14 @@ jobs:
           status_checks: enabled
           # See the matching comment on the Nous step above.
           token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          tracing: "true"
+          tracing-to: logfire
+          logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+          MERGECRAFT_TRACING_REGION: eu
 
       - name: mergeCraft review incomplete (non-fatal)
         if: >-
