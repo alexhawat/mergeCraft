@@ -42,6 +42,7 @@ from mergecraft.evals.store import (
     replay_case,
 )
 from mergecraft.modes import modes
+from mergecraft.utils.git_hardening import git_argv
 
 RESULT_SET_SCHEMA_VERSION: Final[str] = "1.4.0"
 DEFAULT_RESULTS_DIR: Final[Path] = Path("evals/results")
@@ -399,7 +400,7 @@ def corpus_class_for(case: Case) -> str:
 def _git_head_sha() -> str:
     try:
         out = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
+            git_argv(["rev-parse", "HEAD"]),
             stderr=subprocess.DEVNULL,
             text=True,
         )
@@ -412,7 +413,7 @@ def _git_corpus_commit() -> str:
     """Pin the eval case tree, not bare HEAD (reproducible corpus snapshot)."""
     try:
         out = subprocess.check_output(
-            ["git", "rev-parse", "HEAD:evals/cases"],
+            git_argv(["rev-parse", "HEAD:evals/cases"]),
             stderr=subprocess.DEVNULL,
             text=True,
         )

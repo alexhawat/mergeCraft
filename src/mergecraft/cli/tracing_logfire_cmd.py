@@ -40,6 +40,7 @@ from mergecraft.cli.tracing_logfire_wf_yaml import (
     remove_logfire_wiring,
     render_workflow_diff,
 )
+from mergecraft.utils.git_hardening import git_argv
 
 # ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region; it is
 # written by ``tracing logfire enable --region`` and read by the precedence
@@ -96,7 +97,7 @@ def _parse_repo_slug() -> str:
 
     try:
         url = subprocess.check_output(
-            ["git", "remote", "get-url", "origin"],
+            git_argv(["remote", "get-url", "origin"]),
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()

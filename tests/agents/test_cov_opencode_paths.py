@@ -292,7 +292,7 @@ def test_security_config_without_a_model_omits_model_and_provider_keys(tmp_path:
     assert "enabled_providers" not in config
     assert "provider" not in config
     assert config["permission"]["bash"] == "deny"
-    assert config["permission"]["webfetch"] == "allow"
+    assert config["permission"]["webfetch"] == "deny"
 
 
 def test_unprefixed_model_registers_no_enabled_providers(tmp_path: Path) -> None:
@@ -1001,7 +1001,8 @@ async def test_run_falls_back_to_the_cli_when_serve_cannot_boot(
     assert result.success is True
     assert result.output == "cli fallback output"
     # The config file is still written before the boot attempt.
-    assert (tmp_path / "opencode.json").is_file()
+    evidence_dir = oc._evidence_dir(ctx)
+    assert (evidence_dir / "opencode.json").is_file()
 
 
 async def test_run_reports_a_session_creation_failure(

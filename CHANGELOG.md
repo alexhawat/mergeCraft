@@ -25,6 +25,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Entropy-based secret redaction uses a length-relative threshold with benign-shape
   exclusions for git SHAs, hex runs, and identifiers so legitimate code tokens in
   logs are not mangled unnecessarily
+- OpenCode review sessions deny ``webfetch``, ``external_directory``, and
+  ``edit``; ``read`` is allowlisted to the checkout and evidence scratch
+  instead of ``*`` (MCB-06)
+- Post-run checkout integrity verification via
+  ``security.review_integrity`` hashes the tree before review and fails closed
+  on mutation (MCB-06)
+- Privilege drop gates on action-image identity (``IS_SANDBOX`` + ``/opt/mergecraft``)
+  instead of uid alone; root outside the image refuses with a policy diagnostic and
+  ``MERGECRAFT_ALLOW_ROOT=1`` override (MCB-24 / D11)
+- ``setpriv`` argv carries ``--no-new-privs``, ``--inh-caps=-all``, and
+  ``--bounding-set=-all``; fails closed when ``setpriv`` lacks ``--bounding-set``
+  support (MCB-32)
+- Root-side ``git`` subprocesses route through ``utils/git_hardening.git_argv`` with
+  pinned safe-config keys; ``make lint`` enforces the route via
+  ``scripts/check_git_argv.py`` (MCB-01)
+- ``prepare_workspace_for_agent`` no longer recursively chowns ``.git``; sandbox shell
+  binds every registered workspace root's ``.git`` read-only (MCB-01 / D3)
+- Linked-repo ``_rev_parse_commit`` rejects leading-dash revs, validates pinned SHA
+  shape, and passes ``--end-of-options`` before the rev (MCB-33)
+- Sandbox capability probes run real isolation checks instead of gating on ``CI``;
+  untrusted MCP shell refuses unsandboxed spawn unless
+  ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1`` (MCB-07 / MCB-10)
+- Skipped untrusted analyzers emit a ``Minor`` finding
+  (``rule_id: analyzers.sandbox-unavailable``) naming missing isolation primitives
+  (MCB-09 / D7)
+- ``sudo-unshare`` shell spawn passes env by name via ``--preserve-env`` with
+  ``env=env`` on ``Popen`` so provider keys never appear in argv (MCB-08)
+- Namespaced shell spawn hides every ``git`` binary and binds ``.git`` read-only
+  inside ``unshare`` / ``sudo-unshare`` branches; unsandboxed opt-in runs the raw
+  command without host mount soup (MCB-25)
+- Python ``prep`` installs into ``.mergecraft/prep-scratch/prep-venv`` with a
+  default-deny env allowlist so PR build deps cannot mutate the reviewer's
+  interpreter or inherit provider credentials (MCB-22 / D12)
 
 ### Changed
 
@@ -42,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
 - `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
   `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
+- ``probe_capabilities()`` is ``lru_cache``-backed; ``reset_detection_cache()`` clears
+  the probe cache for xdist isolation (MCB-35 / D13)
+- ``detect_sandbox_method()`` and ``network_namespace_available()`` delegate to the
+  cached capability probe with one unified privilege ladder (D5)
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
   Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
   ``docs/agent-loop.md`` parity note, and ``skills/mergecraft/SKILL.md`` public stdio
@@ -108,6 +145,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``;
+  ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd()``
+  twice (MCB-22)
 - ``redact_tool_payload`` caps UTF-8 byte length (not Python character count)
   and keeps a head slice plus a visible truncation marker instead of discarding
   the whole body (MCB-28)

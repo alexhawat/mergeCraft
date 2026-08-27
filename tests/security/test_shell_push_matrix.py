@@ -73,6 +73,11 @@ class _RecordingGit:
 def recording_git(monkeypatch: pytest.MonkeyPatch) -> _RecordingGit:
     recorder = _RecordingGit()
     monkeypatch.setattr(git_mod, "_run_git", recorder)
+    monkeypatch.setattr(
+        git_mod,
+        "_origin_remote_url",
+        lambda cwd: "https://github.com/octo/repo.git",
+    )
     return recorder
 
 
