@@ -221,7 +221,7 @@ jobs:
           fetch-depth: 0
           # MUST stay false. actions/checkout persists its token as an
           # `extraheader = AUTHORIZATION: basic ...` entry in .git/config, and the
-          # mergeCraft action adds its own `Authorization: Bearer ...`. git treats
+          # mergeCraft action adds its own `Authorization` header. git treats
           # `extraHeader` as multi-valued, so both land on one request and GitHub
           # answers 400 "Duplicate header: Authorization" — checkout_pr fails and
           # the review never reaches a verdict. The action authenticates from its

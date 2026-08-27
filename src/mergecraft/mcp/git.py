@@ -110,6 +110,35 @@ def _origin_remote_url(cwd: str) -> str:
     return read_remote_origin_url(cwd)
 
 
+# Shapes GitHub's git transport returns when the brokered credential is not
+# accepted. Surfacing these as a distinct, non-retryable message keeps the
+# reviewing agent from re-running the same fetch — a rejected token cannot
+# resolve itself across attempts, and the retry loop is what turned a one-line
+# auth bug into multi-million-token runs (issue #544).
+_AUTH_FAILURE_MARKERS: tuple[str, ...] = (
+    "invalid credentials",
+    "authentication failed",
+    "could not read username",
+    "could not read password",
+    "terminal prompts disabled",
+    "403 forbidden",
+    "401 unauthorized",
+    "duplicate header",
+)
+
+_AUTH_FAILURE_HINT = (
+    "git rejected the brokered GitHub credential — the token is missing, expired, "
+    "or lacks access to this repository. Retrying will not help; the run needs a "
+    "valid token (contents: read for fetch, contents: write for push)"
+)
+
+
+def _is_auth_failure(stderr: str) -> bool:
+    """Return whether git's failure output shows a rejected/absent credential."""
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _AUTH_FAILURE_MARKERS)
+
+
 def _run_git(
     args: list[str],
     *,
@@ -135,6 +164,9 @@ def _run_git(
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "").strip()
         msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
+        if _is_auth_failure(err):
+            logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
+            msg = f"{msg}\n{_AUTH_FAILURE_HINT}"
         raise RuntimeError(msg)
     return result.stdout
 

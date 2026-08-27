@@ -340,7 +340,7 @@ jobs:
           # MUST stay false. actions/checkout persists its token as
           # `http.https://github.com/.extraheader = AUTHORIZATION: basic ...` in
           # .git/config, and mergeCraft's git layer adds its own
-          # `Authorization: Bearer ...` (utils/git_setup.py:208, lane A D5).
+          # `Authorization` header (utils/git_setup.py, lane A D5).
           # `extraHeader` is multi-valued in git, so the second does not replace
           # the first — both go on the same request and GitHub answers
           # 400 "Duplicate header: Authorization". checkout_pr then fails, review

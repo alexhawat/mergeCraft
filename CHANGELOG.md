@@ -9,16 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Authenticated git operations against GitHub now work at all. The token was
+  brokered as `Authorization: Bearer <token>`, which GitHub's git transport
+  rejects with `remote: invalid credentials` — `Bearer` is the REST API form,
+  and the git endpoint wants HTTP basic auth carrying the token as the password
+  under the documented `x-access-token` username. With `GIT_TERMINAL_PROMPT=0`
+  and the askpass helper shredded at startup, git had nothing to fall back on,
+  so `checkout_pr` failed in every observed review run: reviews either produced
+  no verdict at all or reached one only by improvising around the missing
+  checkout, at 1.5M-4.8M tokens a run. Removing the persisted `actions/checkout`
+  header changed the failure's shape but not its outcome — the header that had
+  been doing the real work was checkout's basic one, and mergeCraft's own
+  scheme never authenticated a fetch either way. A fetch against a local git
+  remote that models GitHub's auth now covers the whole path, so the contract
+  is that authentication succeeds rather than that a header string is present
+- Git failures that come from a rejected or missing credential are reported as
+  terminal instead of as a generic git error, so the reviewing agent stops
+  re-running a fetch that cannot start working across attempts
 - `actions/checkout` no longer persists its token in the review workflow, the
   shipped hardened example, its template, or the dogfood artifact. A persisted
   `extraheader = AUTHORIZATION: basic ...` collided with the `Authorization:
-  Bearer ...` that mergeCraft's own git layer adds, and `extraHeader` is
-  multi-valued in git, so both headers went on one request and GitHub answered
-  `400 Duplicate header: "Authorization"`. `checkout_pr` failed, review scope
-  was never established, and every terminal verdict was rejected — a review
-  that found 45 issues posted none of them and burned 9.4M tokens against a 5M
-  budget before failing closed. The action authenticates from its own `token:`
-  input, so nothing needs persisting; the comment that claimed otherwise
+  Bearer ...` that mergeCraft's own git layer added at the time, and
+  `extraHeader` is multi-valued in git, so both headers went on one request and
+  GitHub answered `400 Duplicate header: "Authorization"`. `checkout_pr` failed,
+  review scope was never established, and every terminal verdict was rejected —
+  a review that found 45 issues posted none of them and burned 9.4M tokens
+  against a 5M budget before failing closed. The action authenticates from its
+  own `token:` input, so nothing needs persisting; the comment that claimed otherwise
   predated lane A giving those tools header auth of their own
 
 
