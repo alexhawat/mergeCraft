@@ -83,9 +83,12 @@ def test_mixed_batch_renders_hex_findings_with_ids_and_others_without() -> None:
         line=2,
     )
     placement = place_findings([hex_finding, non_hex_finding], inline_budget=INLINE_BUDGET)
-    rendered = (placement.mechanical_section or "") + (placement.deferred_section or "")
     hex_short_id = finding_short_id(_HEX_FINGERPRINT)
-    assert hex_short_id in rendered
+    assert placement.short_ids.get(_HEX_FINGERPRINT) == hex_short_id
+    assert hex_finding in placement.inline
+    rendered = (placement.mechanical_section or "") + (placement.deferred_section or "")
+    assert hex_short_id not in rendered
+    assert non_hex_finding.message in rendered
     assert _NON_HEX_FINGERPRINT not in placement.short_ids
 
 

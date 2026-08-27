@@ -416,10 +416,10 @@ _PROCESS_TRACING_FINGERPRINT: str | None = None
 def _reset_bound_enterprise_runtime() -> None:
     """Clear process-local enterprise telemetry binding (xdist / test seam).
 
-      Programmatic ``bind_enterprise_from_settings`` calls — not live YAML or
+    Programmatic ``bind_enterprise_from_settings`` calls — not live YAML or
     deployed enterprise config — can leave ``telemetry: off`` on the worker.
-      ``reset_process_tracer_cache`` invokes this so a subsequent OTLP
-      ``claim_sink`` is not blocked by a leaked opt-out from an unrelated test.
+    ``reset_process_tracer_cache`` invokes this so a subsequent OTLP
+    ``claim_sink`` is not blocked by a leaked opt-out from an unrelated test.
     """
     try:
         from mergecraft.enterprise.runtime import reset_enterprise_runtime
