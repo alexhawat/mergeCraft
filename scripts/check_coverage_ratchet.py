@@ -20,13 +20,39 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 # Allow coverage to rise this many points above ``fail_under`` before the gate
 # nudges a deliberate floor bump in ``pyproject.toml``.
 DEFAULT_MARGIN = 5.0
 _EPS = 1e-9
 _COVERAGE_CONFIG_PATH = Path(__file__).resolve().parent / "coverage_config.py"
+
+FloorLoweringKind = Literal["merge_base_error", "floor_lowered"]
+
+
+class _FloorLoweringResult(NamedTuple):
+    """Outcome of the merge-base lowering guard (mutually exclusive failure kinds)."""
+
+    message: str | None
+    kind: FloorLoweringKind | None
+
+
+def _evaluate_floor_lowering_guard(
+    declared_floor: float,
+    baseline_floor: float | None,
+    merge_base_error: str | None,
+) -> _FloorLoweringResult:
+    """Return at most one lowering-guard failure — never both kinds at once."""
+    if merge_base_error is not None:
+        return _FloorLoweringResult(merge_base_error, "merge_base_error")
+    if baseline_floor is not None and declared_floor + _EPS < baseline_floor:
+        return _FloorLoweringResult(
+            f"fail_under {declared_floor:.2f}% is below merge-base floor "
+            f"{baseline_floor:.2f}% — bump fail_under only in a deliberate commit",
+            "floor_lowered",
+        )
+    return _FloorLoweringResult(None, None)
 
 
 def _load_coverage_config_module() -> Any:
@@ -69,9 +95,17 @@ def _fail_under_from_git_ref(repo_root: Path, ref: str) -> float | None:
 def _default_base_branch() -> str:
     """Resolve the branch used for merge-base ``fail_under`` comparisons.
 
-    ``GITHUB_BASE_REF`` is set for pull requests but empty on ``push`` /
-    ``workflow_dispatch``. Treat blank values as unset and fall back to the
-    branch being built (``GITHUB_REF``), then ``pre-0.0.1``.
+    Resolution order (pure environment lookup — no git remote required):
+
+    1. ``GITHUB_BASE_REF`` when non-blank (pull requests).
+    2. Branch name from ``GITHUB_REF`` when it is ``refs/heads/…``.
+    3. ``pre-0.0.1`` (detached HEAD, tags, or unset refs).
+
+    On ``push`` / ``workflow_dispatch``, ``GITHUB_BASE_REF`` is empty and the
+    gate compares HEAD to ``origin/<branch-being-built>``. That merge-base is
+    self-referential, so the **lowering guard** (blocking ``fail_under`` drops
+    without a deliberate baseline commit) is a **PR-only guarantee**. Absolute
+    ``fail_under`` checks still run on every event.
     """
     explicit = (os.environ.get("GITHUB_BASE_REF") or "").strip()
     if explicit:
@@ -153,7 +187,21 @@ def check_coverage_ratchet(
     allow_no_merge_base: bool = False,
     base_ref: str | None = None,
 ) -> int:
-    """Return 0 when coverage is acceptable; 1 on hard failures."""
+    """Return 0 when coverage is acceptable; 1 on hard failures.
+
+    Hard failures include measured coverage below ``fail_under``, an optional
+    hard ceiling when ``hard_ceiling`` is set, merge-base lookup errors in CI,
+    and a declared ``fail_under`` below the merge-base floor on pull requests.
+
+    The merge-base **lowering guard** is PR-only: on ``push`` /
+    ``workflow_dispatch`` the resolved base branch is the branch being built,
+    so merge-base comparisons cannot detect an undeclared floor drop. Absolute
+    floor checks (measured vs ``fail_under``) still apply on all events.
+
+    Lowering-guard failures are mutually exclusive: a merge-base lookup error
+    (``merge_base_error``) and a lowered-floor comparison (``floor_lowered``)
+    never both appear in the failure list.
+    """
     report_path = Path(report)
     root = _repo_root(repo_root)
     declared_floor = _fail_under_from_pyproject(root)
@@ -168,13 +216,13 @@ def check_coverage_ratchet(
         allow_no_merge_base=allow_no_merge_base,
         base_ref=base_ref,
     )
-    if merge_base_error is not None:
-        failures.append(merge_base_error)
-    elif baseline_floor is not None and declared_floor + _EPS < baseline_floor:
-        failures.append(
-            f"fail_under {declared_floor:.2f}% is below merge-base floor "
-            f"{baseline_floor:.2f}% — bump fail_under only in a deliberate commit"
-        )
+    lowering = _evaluate_floor_lowering_guard(
+        declared_floor,
+        baseline_floor,
+        merge_base_error,
+    )
+    if lowering.message is not None:
+        failures.append(lowering.message)
 
     if measured + _EPS < resolved_floor:
         failures.append(

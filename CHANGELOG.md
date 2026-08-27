@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Coverage ratchet: merge-base lookup failures and lowered-floor comparison
+  failures are mutually exclusive, so honesty tests can assert which guard fired
+  (#503)
+- Coverage ratchet: document that the merge-base lowering guard is PR-only on
+  ``push`` / ``workflow_dispatch``; absolute ``fail_under`` checks still run on
+  all events (#506)
+- Coverage ratchet: pin ``_default_base_branch`` resolution order
+  (``GITHUB_BASE_REF`` → ``GITHUB_REF`` branch → ``pre-0.0.1``) without requiring
+  a git remote (#507)
+
 ### Changed
 
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
