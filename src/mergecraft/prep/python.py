@@ -50,6 +50,8 @@ def _prep_env(cwd: Path | None = None) -> dict[str, str]:
         pipfile = cwd / "Pipfile"
         if pipfile.is_file():
             env["PIPENV_PIPFILE"] = str(pipfile)
+        # Keep ``uv sync`` out of the checkout's default ``.venv`` (MCB-22).
+        env["UV_PROJECT_ENVIRONMENT"] = str(_prep_venv_dir(cwd).relative_to(cwd.resolve()))
     return env
 
 
