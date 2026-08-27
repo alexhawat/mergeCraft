@@ -55,16 +55,19 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
         "cat-file",
         "rev-list",
         "branch",
+        "grep",
     }
 )
-# Rejected verbs that have a dedicated tool. Not an auth gate — a redirect
-# table, consulted before the allowlist so the agent is told where to go rather
-# than only that it cannot go here.
+# Rejected verbs that have a dedicated tool or a clear alternative. Not an
+# auth gate — a redirect table, consulted before the allowlist so the agent
+# is told where to go rather than only that it cannot go here.
 _REDIRECT_TO_TOOL: dict[str, str] = {
     "push": "use push_branch instead",
     "fetch": "use git_fetch instead",
     "pull": "use git_fetch then git merge",
     "clone": "use checkout_repo / checkout_pr",
+    "remote": "use git branch --remotes instead",
+    "config": "use git rev-parse for repository paths and refs",
 }
 # Flags that enable arbitrary code execution via git alias expansion.
 # Rejected unconditionally regardless of payload.shell (#257 / D7).
@@ -122,6 +125,9 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
     # write letter — ``d``/``D``/``m``/``M``/``c``/``C`` — is absent, which is
     # what keeps the bundled write forms refused.
     "branch": frozenset("arvi"),
+    # git grep: -c is --count (not git's config flag), -C is context lines
+    # (not chdir; see _SUBCOMMAND_OWNS_DASH_C), and -o is --only-matching.
+    "grep": frozenset("aABCcEefFGHhiIlLmnoPpqrvWwz"),
 }
 
 # ---------------------------------------------------------------------------
@@ -129,10 +135,13 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
 # ---------------------------------------------------------------------------
 # Subcommands that define ``-C`` themselves, where it is not git's chdir option
 # and must not be pulled into the global slot. It means find-copies to ``diff``,
-# ``log`` and ``show``, whitespace-insensitive blame to ``blame``, and
-# copy-force to ``branch`` — a write, which ``_reject_branch_writes`` refuses on
-# its own; what matters here is only that none of them is the chdir option.
-_SUBCOMMAND_OWNS_DASH_C: frozenset[str] = frozenset({"diff", "log", "show", "blame", "branch"})
+# ``log`` and ``show``, whitespace-insensitive blame to ``blame``, context
+# lines to ``grep``, and copy-force to ``branch`` — a write, which
+# ``_reject_branch_writes`` refuses on its own; what matters here is only that
+# none of them is the chdir option.
+_SUBCOMMAND_OWNS_DASH_C: frozenset[str] = frozenset(
+    {"diff", "log", "show", "blame", "branch", "grep"}
+)
 
 # ---------------------------------------------------------------------------
 # Q4 — Which ``--output``-family flags write a file?

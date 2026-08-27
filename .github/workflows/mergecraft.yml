@@ -351,17 +351,39 @@ jobs:
             echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, or NOUS_API_KEY to enable mergeCraft reviews."
           fi
 
+      - name: Resolve PR for workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: dispatch_pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Same-repo dispatch: the ref is the head branch. An empty number is a
+          # real outcome (no open PR) — Compose then falls back to the bare
+          # string rather than failing the job (#529).
+          pr_json="$(gh pr list --repo "${{ github.repository }}" \
+                --head "${{ github.ref_name }}" --state open \
+                --json number,baseRefName --jq '.[0] // {}')"
+          n="$(printf '%s' "${pr_json}" | jq -r '.number // ""')"
+          base="$(printf '%s' "${pr_json}" | jq -r '.baseRefName // ""')"
+          {
+            echo "number=${n}"
+            echo "base_ref=${base}"
+          } >> "${GITHUB_OUTPUT}"
+
       # Composed in a step rather than inline in `with:` so the CI-context clause
       # stays readable. Every interpolated value is repo-controlled (PR number,
       # base ref, our own wait-job outputs) — no PR-authored free text reaches the
-      # prompt.
+      # prompt. pull_request_target and workflow_dispatch share one prompt shape
+      # (#529): an explicit inputs.prompt stays verbatim; a resolved PR number
+      # gets the checkout_pr + CI-context text; no matching PR falls back to the
+      # bare string.
       - name: Compose review prompt
         id: prompt
         if: env.HAS_AUTH == 'true'
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || steps.dispatch_pr.outputs.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || steps.dispatch_pr.outputs.base_ref }}
           DISPATCH_PROMPT: ${{ inputs.prompt }}
           CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
           CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
@@ -369,8 +391,11 @@ jobs:
           CI_CHECK_SUITE_ID: ${{ needs.wait-for-ci.outputs.check_suite_id }}
         run: |
           set -euo pipefail
-          if [ "${EVENT_NAME}" != "pull_request_target" ]; then
-            text="${DISPATCH_PROMPT:-Review the current pull request.}"
+          if [ -n "${DISPATCH_PROMPT:-}" ]; then
+            # Operator override: pass through unchanged (#529).
+            text="${DISPATCH_PROMPT}"
+          elif [ -z "${PR_NUMBER:-}" ]; then
+            text="Review the current pull request."
           else
             # Codex presents mergeCraft MCP tools as mergecraft_. Naming the
             # bare tool (checkout_pr) makes Codex request a GitHub *plugin* that is
@@ -379,7 +404,8 @@ jobs:
             text="Review pull request #${PR_NUMBER}. First call the mergecraft MCP tool mergecraft_checkout_pr (the checkout_pr tool on the mergecraft MCP server — already configured). Do NOT install, request, or wait for any GitHub plugin. For base-side file reads use origin/${BASE_REF}:path, not bare branch names. If prior mergeCraft threads are resolved and the latest commits address them, submit approved:true with a short summary. Focus on correctness, security, regressions, missing tests, and maintainability. Leave concise, actionable comments only for issues that should be addressed before merge."
             # The Action runs with `shell: disabled`, so the reviewer cannot run
             # lint/typecheck/tests itself. Hand it the CI outcome instead — and the
-            # check_suite id, because no MCP tool can discover one.
+            # check_suite id, because no MCP tool can discover one. wait-for-ci
+            # outputs are available on workflow_dispatch too (#529).
             case "${CI_STATE}" in
               complete)
                 if [ "${CI_FAILED_COUNT}" -gt 0 ] 2>/dev/null && [ -n "${CI_CHECK_SUITE_ID}" ]; then

@@ -394,6 +394,10 @@ SUBCOMMAND_SCOPED_READONLY = [
     pytest.param("branch", ["-ar"], id="branch-bundled-all-remotes"),
     pytest.param("branch", ["-vvv"], id="branch-repeated-verbose"),
     pytest.param("branch", ["--list", "topic/*"], id="branch-list-pattern"),
+    pytest.param("grep", ["-n", "TODO"], id="grep-line-numbers"),
+    pytest.param("grep", ["-c", "TODO"], id="grep-count"),
+    pytest.param("grep", ["-C", "2", "TODO"], id="grep-context"),
+    pytest.param("grep", ["-ci", "TODO"], id="grep-bundled-count-ignore-case"),
 ]
 
 
@@ -422,6 +426,7 @@ SUBCOMMAND_SCOPED_STILL_BLOCKED = [
     pytest.param("branch", ["-aD"], id="branch-bundled-with-delete"),
     pytest.param("branch", ["-vd", "topic"], id="branch-bundled-with-lowercase-delete"),
     pytest.param("branch", ["topic"], id="branch-bare-creation-without-list"),
+    pytest.param("grep", ["-calias.x=!true"], id="glued-config-on-grep"),
 ]
 
 
@@ -516,6 +521,29 @@ async def test_auth_requiring_subcommands_name_their_dedicated_tool(
     assert any(name in text for name in ("push_branch", "git_fetch", "checkout_repo"))
 
 
+@pytest.mark.parametrize(
+    ("subcommand", "hint"),
+    [
+        ("remote", "git branch --remotes"),
+        ("config", "git rev-parse"),
+    ],
+)
+async def test_remote_and_config_name_an_alternative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, hint: str
+) -> None:
+    """#529 — refuse remote/config with a clear alternative, not a dead allowlist error."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand})
+    assert result.is_error is True
+    assert recorder.calls == []
+    text = result.content[0]["text"]
+    assert "read-only allowlist" not in text
+    assert hint in text
+    assert "use" in text
+
+
 async def test_relative_c_is_resolved_against_the_repo_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -589,6 +617,7 @@ async def test_a_registered_cross_repo_checkout_is_reachable(
         "cat-file",
         "rev-list",
         "branch",
+        "grep",
     ],
 )
 async def test_readonly_subcommands_allowed(
