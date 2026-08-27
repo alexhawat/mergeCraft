@@ -22,7 +22,7 @@ SHELL := /bin/bash
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check pins-check action-pin-check
+	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-image-digest-check action-image-digest-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
@@ -77,6 +77,7 @@ lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-
 	$(UV) run python scripts/check_cli_consoles.py
 	$(MAKE) action-yml-hygiene-check
 	$(MAKE) hook-pins-check
+	$(MAKE) action-image-digest-check
 	$(UV) run python scripts/check_privilege_drop_chown.py
 	$(UV) run python scripts/check_type_ignores.py
 	$(UV) run python scripts/check_called_workflow_permissions.py
@@ -94,6 +95,9 @@ hook-pins-check: ## Fail when .pre-commit-config.yaml hook revs drift from pypro
 
 action-pin-check: ## Fail when the default branch's self-review Action pin drifts too far behind (#450)
 	$(UV) run python scripts/check_action_pin_freshness.py
+
+action-image-digest-check: ## Fail when action.yml slim digest drifts from GHCR for the Action SHA (#526)
+	$(UV) run python scripts/check_action_image_digest.py
 
 lint-ruff-advisory: ## Ruff advisory families (non-blocking CI; #146)
 	$(RUFF) check src tests scripts --select $(RUFF_ADVISORY_FAMILIES)

@@ -68,7 +68,11 @@ Docker `:latest` promotion:
 
 1. Open [GitHub Marketplace new action](https://github.com/marketplace/actions/new).
 2. Point at `alexhawat/mergeCraft` and the release tag (`v0.1.0`).
-3. Use the Docker action entry (`action.yml` + `ghcr.io/alexhawat/mergecraft` image).
+3. Use the Docker action entry (`action.yml` + digest-pinned `ghcr.io/alexhawat/mergecraft` image).
+   The slim image is **public** on GHCR: anonymous pulls work via the registry token
+   endpoint (`curl "https://ghcr.io/token?service=ghcr.io&scope=repository:alexhawat/mergecraft:pull"`).
+   GitHub Actions runners pull the digest pinned in `action.yml` without extra registry
+   credentials when the package visibility is public.
 4. Categories: **Code review**, **Continuous integration**.
 5. Link docs: `docs/`, `REVIEW-CHECKS.md`, `docs/ANALYZERS.md`.
 6. Note BYOK / no SaaS backend in the listing description (see README positioning).

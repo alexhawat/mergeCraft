@@ -56,7 +56,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 - `tests/` — mirrors package areas
 - `tests/harness/` — deterministic provider-harness RED/GREEN suites (no live API keys on `make test`)
 - `Makefile` — single command surface (sevn-style)
-- Docker Action via root `Dockerfile` + `action.yml`
+- Docker Action via root `Dockerfile` + digest-pinned `action.yml` image (`make docker-build` for local)
 
 ## Notes
 

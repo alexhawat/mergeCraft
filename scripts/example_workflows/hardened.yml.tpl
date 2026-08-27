@@ -184,7 +184,7 @@ jobs:
               state="timeout"
               break
             fi
-            sleep 20
+            sleep 10
           done
 
           {
