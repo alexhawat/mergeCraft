@@ -1007,7 +1007,7 @@ def apply_logfire_wiring(
         if not mod_env and _find_mapping_block(block2, "env", at_indent=step_indent) is None:
             # ``env:`` block is genuinely absent -- create one immediately
             # after the ``with:`` block (or after ``uses:`` if no ``with:``).
-            block3 = _create_env_block(block2, env_canonical[0], at_indent=step_indent)
+            block3 = _create_env_block(block2, env_canonical, at_indent=step_indent)
             mod_env = True
         return block3, mod_with or mod_env
 
@@ -1079,12 +1079,14 @@ def _create_with_block(
     return block[: m.end()] + insertion + block[m.end() :]
 
 
-def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | None = None) -> str:
+def _create_env_block(
+    block: str, canonical: list[tuple[str, str]], at_indent: int | None = None
+) -> str:
     """Insert a fresh ``env:`` block immediately after the ``with:`` block.
 
     When the step has no ``with:`` block the new ``env:`` is appended after
     the ``uses:`` line (the canonical sibling placement). The new block holds
-    a single child line ``MERGECRAFT_TRACING_PROJECT`` at the canonical
+    one child line per entry in *canonical*, in order, at the canonical
     child indent -- which we derive from the existing ``with:`` block's
     observed child indent when present (falling back to ``+2``), so the
     new ``env:`` mirrors the workflow's own style even on non-canonical
@@ -1097,7 +1099,17 @@ def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | N
     inside a block scalar from being mistaken for the step's real ``with:``
     mapping.
     """
-    canonical_key, canonical_value = canonical
+    if not canonical:
+        msg = "_create_env_block requires at least one canonical entry"
+        raise LogfireWorkflowError(msg)
+
+    def _children(child_indent: str) -> str:
+        # Every owned key the caller asked for, not just the first. Rendering
+        # a subset here silently drops keys (e.g. MERGECRAFT_TRACING_REGION)
+        # on the env-less step shape, and the wired-semantics check would not
+        # catch it because only REQUIRED_ENV_KEYS is asserted.
+        return "".join(f"{child_indent}{key}: {value}\n" for key, value in canonical)
+
     # Prefer inserting after the ``with:`` block (its trailing `block_end`).
     with_block = _find_mapping_block(block, "with", at_indent=at_indent)
     if with_block is not None:
@@ -1111,7 +1123,7 @@ def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | N
         # path, but be defensive for callers that go straight here).
         child_ws = _derive_child_indent(block, with_block[0], with_block[1], with_block[2])
         env_child_indent = child_ws if child_ws is not None else with_indent + "  "
-        insertion = f"{with_indent}env:\n{env_child_indent}{canonical_key}: {canonical_value}\n"
+        insertion = f"{with_indent}env:\n" + _children(env_child_indent)
         return block[:with_end] + insertion + block[with_end:]
     # No ``with:`` -- fall back to inserting after ``uses:``. Match both
     # step shapes documented by the README -- multi-line
@@ -1128,7 +1140,7 @@ def _create_env_block(block: str, canonical: tuple[str, str], at_indent: int | N
         )
     indent_str = " " * at_indent if at_indent is not None else ""
     env_indent = indent_str + "  "
-    insertion = f"{indent_str}env:\n{env_indent}{canonical_key}: {canonical_value}\n"
+    insertion = f"{indent_str}env:\n" + _children(env_indent)
     return block[: m.end()] + insertion + block[m.end() :]
 
 
