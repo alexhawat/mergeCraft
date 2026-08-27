@@ -60,7 +60,37 @@ def _getattr_default_literal(call: ast.Call) -> object | None:
     return _const_value(call.args[2])
 
 
-def _is_getattr_tautology_compare(node: ast.Compare) -> str | None:
+def _is_object_constructor_call(node: ast.AST) -> bool:
+    """Return whether ``node`` is a bare ``object()`` call."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "object"
+        and not node.keywords
+    )
+
+
+def _getattr_target_cannot_have_attr(
+    call: ast.Call,
+    bindings: dict[str, ast.AST],
+) -> bool:
+    """Return whether ``getattr``'s object can never expose the requested name."""
+    if not call.args:
+        return False
+    obj = call.args[0]
+    if _is_object_constructor_call(obj):
+        return True
+    if isinstance(obj, ast.Name):
+        bound = bindings.get(obj.id)
+        if bound is not None and _is_object_constructor_call(bound):
+            return True
+    return False
+
+
+def _is_getattr_tautology_compare(
+    node: ast.Compare,
+    bindings: dict[str, ast.AST],
+) -> str | None:
     left = node.left
     call = _is_getattr_call(left)
     if call is None or len(node.ops) != 1 or not isinstance(node.ops[0], ast.Eq):
@@ -70,6 +100,8 @@ def _is_getattr_tautology_compare(node: ast.Compare) -> str | None:
     default = _getattr_default_literal(call)
     comparator = _const_value(node.comparators[0])
     if default is None or comparator is None or default != comparator:
+        return None
+    if not _getattr_target_cannot_have_attr(call, bindings):
         return None
     return f"getattr default {default!r} compared to the same literal"
 
@@ -147,11 +179,12 @@ class _FunctionCheatVisitor(ast.NodeVisitor):
         self.warnings: list[Finding] = []
         self._eval_result_vars: dict[str, int] = {}
         self._result_assertions: dict[str, list[tuple[int, str]]] = {}
+        self._simple_bindings: dict[str, ast.AST] = {}
 
     def visit_Assert(self, node: ast.Assert) -> None:
         test = node.test
         if isinstance(test, ast.Compare):
-            detail = _is_getattr_tautology_compare(test)
+            detail = _is_getattr_tautology_compare(test, self._simple_bindings)
             if detail is not None:
                 self.errors.append(Finding(self.path, node.lineno, "getattr_tautology", detail))
             warn = _is_verdict_auto_merge_tautology(test)
@@ -165,6 +198,9 @@ class _FunctionCheatVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self._simple_bindings[target.id] = node.value
         if isinstance(node.value, ast.Call) and _is_evaluate_decision_case(node.value):
             for target in node.targets:
                 if isinstance(target, ast.Name):

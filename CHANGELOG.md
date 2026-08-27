@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Render path: skip short-id assignment for non-hex fingerprints instead of
   aborting review output; export and explain paths stay strict (#493)
+- Cheat-signature lint: narrow ``getattr_tautology`` to ``object()`` targets so
+  legitimate missing-attribute fallback asserts are not flagged; severity stays
+  ``error`` (#501)
 
 ### Changed
 
