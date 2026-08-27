@@ -8,11 +8,13 @@ failure instead of a warning. TH6 implements D12.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import re
 import subprocess
 import sys
 import tomllib
+from contextlib import redirect_stderr
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -51,6 +53,61 @@ def _coverage_json(tmp_path: Path, percent: float) -> Path:
 def _fail_under_from_pyproject() -> float:
     data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     return float(data["tool"]["coverage"]["report"]["fail_under"])
+
+
+def test_lowering_fail_under_fails_via_the_floor_comparison(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Lowering ``fail_under`` must fail via the merge-base floor comparison (#503)."""
+    floor = _fail_under_from_pyproject()
+    lowered = max(floor - 2.0, 1.0)
+    report = _coverage_json(tmp_path, floor + 1.0)
+
+    module = _load_ratchet_module()
+    monkeypatch.setattr(module, "_fail_under_from_pyproject", lambda repo_root=None: lowered)
+    monkeypatch.setattr(
+        module,
+        "_fail_under_from_merge_base",
+        lambda *args, **kwargs: (floor + 5.0, None),
+    )
+
+    stderr = io.StringIO()
+    with redirect_stderr(stderr):
+        rc = int(module.check_coverage_ratchet(report, floor=lowered))
+
+    combined = stderr.getvalue()
+    assert rc != 0
+    assert "below merge-base floor" in combined
+    assert "merge-base lookup failed" not in combined
+
+
+def test_merge_base_error_is_a_distinct_failure_from_a_lowered_floor(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Merge-base errors must be separable from lowered-floor comparison failures (#503)."""
+    floor = _fail_under_from_pyproject()
+    lowered = max(floor - 2.0, 1.0)
+    report = _coverage_json(tmp_path, floor + 1.0)
+    merge_detail = "merge-base lookup failed for HEAD vs origin/pre-0.0.1"
+
+    module = _load_ratchet_module()
+    monkeypatch.setattr(module, "_fail_under_from_pyproject", lambda repo_root=None: lowered)
+    monkeypatch.setattr(
+        module,
+        "_fail_under_from_merge_base",
+        lambda *args, **kwargs: (None, merge_detail),
+    )
+
+    stderr = io.StringIO()
+    with redirect_stderr(stderr):
+        rc = int(module.check_coverage_ratchet(report, floor=lowered))
+
+    combined = stderr.getvalue()
+    assert rc != 0
+    assert merge_detail in combined
+    assert "below merge-base floor" not in combined
 
 
 def test_lowering_fail_under_without_baseline_commit_fails(

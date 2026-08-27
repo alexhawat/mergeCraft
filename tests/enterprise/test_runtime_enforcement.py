@@ -38,6 +38,17 @@ def test_telemetry_off_skips_remote_sinks() -> None:
     assert not has_active_tracer_provider()
 
 
+def test_reset_process_tracer_cache_clears_leaked_enterprise_opt_out() -> None:
+    """``reset_process_tracer_cache`` must undo telemetry opt-out without enterprise conftest."""
+    from mergecraft.enterprise.runtime import remote_export_allowed
+    from mergecraft.tracing.tracer import reset_process_tracer_cache
+
+    bind_enterprise_from_settings(EnterpriseSettings(telemetry="off"))
+    assert not remote_export_allowed()
+    reset_process_tracer_cache()
+    assert remote_export_allowed()
+
+
 def test_residency_policy_blocks_routed_us_model() -> None:
     """A bound EU-only allow-list refuses catalog models in us-east-1."""
     from mergecraft.agents.provider_health import route_model
