@@ -342,6 +342,7 @@ def prepare_workspace_for_agent(workspace: str) -> None:
             "-o",
             "-exec",
             "chown",
+            "-h",
             f"{pw.pw_uid}:{pw.pw_gid}",
             "{}",
             "+",
