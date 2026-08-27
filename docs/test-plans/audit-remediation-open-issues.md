@@ -9,8 +9,8 @@ to RED tests authored in **DQ1** (`wave/dq1-issues-red`).
 | Issue | Impl wave | Test file(s) | Tests |
 | --- | --- | --- | --- |
 | [#493](https://github.com/alexhawat/mergeCraft/issues/493) fail-soft short-id render | DQ2 | `tests/analyzers/test_short_id_failsoft.py` | 5 (`xfail` until DQ2) |
-| [#497](https://github.com/alexhawat/mergeCraft/issues/497) cloud_chain fail-closed | DQ3 | `tests/cli/test_provider_cloud_chain_failclosed.py` | 4 |
-| [#501](https://github.com/alexhawat/mergeCraft/issues/501) getattr tautology calibration | DQ4 | `tests/ci/test_cheat_signature_lint.py` | 4 |
+| [#497](https://github.com/alexhawat/mergeCraft/issues/497) cloud_chain fail-closed | DQ3 | `tests/cli/test_provider_cloud_chain_failclosed.py` | 4 (`xfail` on fail-closed cases until DQ3) |
+| [#501](https://github.com/alexhawat/mergeCraft/issues/501) getattr tautology calibration | DQ4 | `tests/ci/test_cheat_signature_lint.py` | 4 (`xfail` on fallback-default case until DQ4) |
 | [#502](https://github.com/alexhawat/mergeCraft/issues/502) mutation harness plumbing | DQ5 | `tests/ci/test_mutate_decision_modules.py` | 5 |
 | [#503](https://github.com/alexhawat/mergeCraft/issues/503) ratchet honesty | DQ6 | `tests/ci/test_coverage_ratchet_honesty.py` | 2 new + 2 existing |
 | [#506](https://github.com/alexhawat/mergeCraft/issues/506) ratchet docs (PR-only guard) | DQ6 | — (docs-only; honesty tests pin comparison branch) | — |
@@ -28,12 +28,21 @@ to RED tests authored in **DQ1** (`wave/dq1-issues-red`).
 
 ## DQ1 reconciliation
 
-After each impl wave, remove satisfied `@pytest.mark.xfail(strict=False)` markers from the greened tests only.
+After each impl wave, remove satisfied `@pytest.mark.xfail(strict=False)` markers on the **impl branch** (where `src/` exists). **Do not** merge impl into `wave/dq1-issues-red` — DQ1 stays RED with xfails for CI on that branch alone.
 
-**2026-08-27 (post-DQ3/DQ4):** Removed xfails from `test_custom_label_does_not_return_bedrock_suffixes`, `test_error_names_the_label_and_the_supported_set` (DQ3/#497), and `test_legitimate_fallback_default_assertion_is_not_flagged` (DQ4/#501). DQ2 xfails in `test_short_id_failsoft.py` retained — `wave/dq2-short-id-failsoft` not yet on origin.
+**2026-08-27:** Reconciled on impl branches (not DQ1):
+
+| Wave | Branch | Tests greened (xfail removed on impl branch) |
+| --- | --- | --- |
+| DQ2 | `wave/dq2-short-id-failsoft` | `test_non_hex_fingerprint_still_renders`, `test_non_hex_fingerprint_logs_a_warning_with_path_context`, `test_mixed_batch_renders_hex_findings_with_ids_and_others_without` |
+| DQ3 | `wave/dq3-cloudchain-failclosed` | `test_custom_label_does_not_return_bedrock_suffixes`, `test_error_names_the_label_and_the_supported_set` |
+| DQ4 | `wave/dq4-cheat-lint-severity` | `test_legitimate_fallback_default_assertion_is_not_flagged` |
+
+DQ1 retains xfails on the above until each impl branch merges to main.
 
 ## Amendments
 
 | Date | Change |
 | --- | --- |
 | 2026-08-27 | DQ1 initial RED suite — 27 named contract tests across 8 files |
+| 2026-08-27 | Reconciliation notes — xfails removed on DQ2/DQ3/DQ4 impl branches only |

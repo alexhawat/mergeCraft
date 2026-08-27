@@ -19,6 +19,7 @@ def _keys_for(label: str, env_index: int = 7) -> list[str]:
     return list(module.indexed_credential_keys(entry))
 
 
+@pytest.mark.xfail(reason="green after DQ3: cloud_chain fail-closed label guard", strict=False)
 def test_custom_label_does_not_return_bedrock_suffixes() -> None:
     """Unsupported labels must not silently inherit Bedrock suffix mapping."""
     try:
@@ -29,6 +30,7 @@ def test_custom_label_does_not_return_bedrock_suffixes() -> None:
         assert indexed_env_key(7, suffix) not in keys
 
 
+@pytest.mark.xfail(reason="green after DQ3: cloud_chain error message contract", strict=False)
 def test_error_names_the_label_and_the_supported_set() -> None:
     """Failure must name the offending label and the supported provider set (D10)."""
     label = "mycloud"
