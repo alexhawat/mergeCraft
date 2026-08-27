@@ -45,3 +45,24 @@ def test_git_argv_injects_no_ext_diff_for_diff_family() -> None:
     assert "--no-textconv" not in git_argv(["status"])
     assert "--no-ext-diff" not in git_argv(["log", "-1", "--oneline"])
     assert "--no-textconv" not in git_argv(["log", "-1", "--oneline"])
+
+
+def test_git_authenticated_argv_pins_identity_rewrite_for_remote_url() -> None:
+    from mergecraft.utils.git_hardening import git_authenticated_argv
+
+    remote = "https://github.com/acme/demo.git"
+    argv = git_authenticated_argv(["fetch", "origin"], remote_url=remote)
+    assert f"url.{remote}.insteadOf={remote}" in " ".join(argv)
+
+
+def test_git_env_for_token_scopes_bearer_header_to_trusted_host() -> None:
+    from mergecraft.utils.git_setup import git_env_for_token
+
+    env = git_env_for_token(
+        "ghs_secret",
+        remote_url="https://github.com/acme/demo.git",
+    )
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
+    assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Bearer ghs_secret"
+    assert "http.extraHeader" not in env.values()

@@ -90,9 +90,25 @@ def _needs_no_ext_diff(args: Sequence[str]) -> bool:
     return _no_ext_diff_insertion_index(args) is not None
 
 
-def git_argv(args: Sequence[str]) -> list[str]:
-    """Return ``git`` argv with every safe-config pin prepended before *args*."""
-    argv: list[str] = ["git", *GIT_SAFE_CONFIG]
+def url_rewrite_guard_config(canonical_url: str) -> tuple[str, ...]:
+    """Return ``-c`` pins that outrank hostile ``url.*.insteadOf`` rewrites.
+
+    Git unions ``insteadOf`` rules from every config scope and applies the
+    longest matching prefix. A command-line identity rule whose base equals the
+    full remote URL beats shorter attacker prefixes.
+    """
+    normalized = canonical_url.strip()
+    if not normalized:
+        return ()
+    return ("-c", f"url.{normalized}.insteadOf={normalized}")
+
+
+def _git_argv_with_prefixes(
+    args: Sequence[str],
+    *,
+    extra_config: Sequence[str] = (),
+) -> list[str]:
+    argv: list[str] = ["git", *GIT_SAFE_CONFIG, *extra_config]
     insert_at = _no_ext_diff_insertion_index(args)
     if insert_at is None:
         argv.extend(args)
@@ -103,9 +119,25 @@ def git_argv(args: Sequence[str]) -> list[str]:
     return argv
 
 
+def git_argv(args: Sequence[str]) -> list[str]:
+    """Return ``git`` argv with every safe-config pin prepended before *args*."""
+    return _git_argv_with_prefixes(args)
+
+
+def git_authenticated_argv(args: Sequence[str], *, remote_url: str) -> list[str]:
+    """Return hardened argv for authenticated fetch/push against *remote_url*."""
+    return _git_argv_with_prefixes(args, extra_config=url_rewrite_guard_config(remote_url))
+
+
 def git_global_config_argv(args: Sequence[str]) -> list[str]:
     """Return ``git config`` argv for global writes (no repo-local safe pins)."""
     return ["git", "config", *args]
 
 
-__all__ = ["GIT_SAFE_CONFIG", "git_argv", "git_global_config_argv"]
+__all__ = [
+    "GIT_SAFE_CONFIG",
+    "git_argv",
+    "git_authenticated_argv",
+    "git_global_config_argv",
+    "url_rewrite_guard_config",
+]

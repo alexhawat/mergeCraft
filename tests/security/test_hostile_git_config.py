@@ -42,16 +42,29 @@ def test_commit_path_does_not_execute_fsmonitor(hostile_git_repo: HostileGitRepo
 def test_insteadof_rewrite_does_not_leak_git_config_value_0(
     hostile_git_repo: HostileGitRepo,
 ) -> None:
+    from mergecraft.utils.git_hardening import git_authenticated_argv
+    from mergecraft.utils.git_setup import git_env_for_token
+
+    remote = "https://github.com/acme/demo.git"
+    _run_git(["remote", "add", "origin", remote], cwd=str(hostile_git_repo.root))
+    fetch_argv = git_authenticated_argv(["fetch", "--no-tags", "origin"], remote_url=remote)
+    assert f"url.{remote}.insteadOf={remote}" in " ".join(fetch_argv)
+
+    env = git_env_for_token("ghs_secret_token", remote_url=remote)
+    assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
+    assert "http.extraHeader" not in env.values()
+
     completed = subprocess.run(
-        ["git", "config", "--get", "url.https://attacker.example/.insteadof"],
+        fetch_argv,
         cwd=hostile_git_repo.root,
+        env=env,
         capture_output=True,
         text=True,
         check=False,
     )
-    assert completed.stdout.strip() == "https://github.com/"
-    _run_git(["status"], cwd=str(hostile_git_repo.root))
-    assert not hostile_git_repo.fsmonitor_sentinel.exists()
+    combined = f"{completed.stdout}\n{completed.stderr}"
+    assert "evil.example" not in combined
+    assert not hostile_git_repo.insteadof_leak_path.exists()
 
 
 def test_xrepo_checkout_is_equally_protected(hostile_git_repo: HostileGitRepo) -> None:

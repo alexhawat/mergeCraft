@@ -46,3 +46,21 @@ def test_config_yaml_is_unwritable_during_review(tmp_path: Path) -> None:
     config.write_text("review: false\n", encoding="utf-8")
     with pytest.raises(RuntimeError):
         verify_tree_unchanged(checkout, before)
+
+
+def test_hash_tree_does_not_follow_symlink_to_outside_file(tmp_path: Path) -> None:
+    from mergecraft.security.review_integrity import hash_tree
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("secret\n", encoding="utf-8")
+    (checkout / "escape").symlink_to(outside)
+
+    before = hash_tree(checkout)
+    outside.write_text("tampered\n", encoding="utf-8")
+    assert hash_tree(checkout) == before
+
+    (checkout / "escape").unlink()
+    (checkout / "escape").symlink_to("../outside-secret.txt")
+    assert hash_tree(checkout) != before

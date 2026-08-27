@@ -13,11 +13,12 @@ Exports:
 from __future__ import annotations
 
 import hashlib
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
 _SINK_SUFFIXES: frozenset[str] = frozenset({".log", ".txt", ".jsonl", ".ndjson"})
 _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
@@ -34,31 +35,48 @@ _HASH_EXCLUDE_DIRS: frozenset[str] = frozenset(
 )
 
 
-def _iter_tree_files(root: Path) -> list[Path]:
+def _is_excluded_rel_path(rel: str) -> bool:
+    return any(rel == excluded or rel.startswith(f"{excluded}/") for excluded in _HASH_EXCLUDE_DIRS)
+
+
+def _iter_tree_paths(root: Path) -> list[Path]:
     if not root.is_dir():
         return []
-    files: list[Path] = []
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
+    paths: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        rel_dir = Path(dirpath).relative_to(root).as_posix()
+        if rel_dir != "." and _is_excluded_rel_path(rel_dir):
+            dirnames.clear()
             continue
-        rel = path.relative_to(root).as_posix()
-        if any(
-            rel == excluded or rel.startswith(f"{excluded}/") for excluded in _HASH_EXCLUDE_DIRS
-        ):
-            continue
-        files.append(path)
-    return files
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not _is_excluded_rel_path(Path(dirpath).relative_to(root).joinpath(name).as_posix())
+        ]
+        for name in filenames:
+            path = Path(dirpath) / name
+            rel = path.relative_to(root).as_posix()
+            if _is_excluded_rel_path(rel):
+                continue
+            paths.append(path)
+    return sorted(paths)
+
+
+def _path_digest_payload(path: Path) -> bytes:
+    if path.is_symlink():
+        return b"symlink\0" + os.readlink(path).encode()
+    return path.read_bytes()
 
 
 def hash_tree(root: Path) -> str:
     """Return a stable digest of every file under ``root``."""
     resolved = root.resolve()
     digest = hashlib.sha256()
-    for path in _iter_tree_files(resolved):
+    for path in _iter_tree_paths(resolved):
         rel = path.relative_to(resolved).as_posix()
         digest.update(rel.encode())
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(_path_digest_payload(path))
         digest.update(b"\0")
     return digest.hexdigest()
 
