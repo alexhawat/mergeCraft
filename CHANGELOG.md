@@ -109,6 +109,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/mutate_decision_modules.py`: `_enumerate_line_mutants` and
   `_apply_mutant` are importable without reading `mutation_modules.toml` at
   module load; the module map is lazy-loaded on first CLI use (#502)
+- Regression coverage for the enterprise telemetry reset inside
+  ``reset_process_tracer_cache``: leaked ``telemetry: off`` bindings no longer
+  block OTLP ``claim_sink`` after cache reset under xdist (#509)
 - `validate_http_url` rejects whitespace and control characters anywhere in a
   provider URL, not just at the ends. A stored URL is written verbatim into the
   consumer workflow YAML, so an interior newline could open a new key or step
