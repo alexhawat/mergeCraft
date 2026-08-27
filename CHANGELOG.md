@@ -12,8 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `action.yml` resolves the published slim GHCR image by digest instead of
   rebuilding from `Dockerfile` on every Action run (#526); `make
   action-image-digest-check` guards drift against the workflow Action SHA pin
+  and rejects pre-#531 images missing ``--extra tracing``
 - `wait-for-ci` poll cadence halves from 20s to 10s (budgets unchanged; still
   fail-open) (#528)
+- `e2e.yml` security slice runs on `push` (ci-cd release gate); `ci-cd.yml`
+  stamps `org.opencontainers.image.revision` on published images; PR CI
+  bootstraps the slim GHCR tag for the workflow Action SHA when missing
 - The self-review Action pin on both review steps moves to `b34e9f25`. The
   previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
   `src/mergecraft/`, so every review since then ran product code that stale.

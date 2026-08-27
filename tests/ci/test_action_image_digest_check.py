@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,27 +16,34 @@ def _load_module() -> Any:
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
 
 class TestGhcrDigestLookup:
-    def test_published_latest_tag_has_known_digest(self) -> None:
+    def test_published_sha_tag_has_digest(self) -> None:
         module = _load_module()
-        digest = module._ghcr_digest_for_tag("cfdf38dcd062779aac3e141c51f134213d395b67")
-        assert digest == ("sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90")
+        lookup = module._ghcr_digest_for_tag("cfdf38dcd062779aac3e141c51f134213d395b67")
+        assert lookup.status == module.TagLookupStatus.FOUND
+        assert lookup.digest == (
+            "sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90"
+        )
 
-    def test_missing_tag_returns_none(self) -> None:
+    def test_missing_tag_is_not_registry_error(self) -> None:
         module = _load_module()
-        digest = module._ghcr_digest_for_tag("0000000000000000000000000000000000000000")
-        assert digest is None
+        lookup = module._ghcr_digest_for_tag("0000000000000000000000000000000000000000")
+        assert lookup.status == module.TagLookupStatus.MISSING
+
+    def test_old_published_digest_lacks_tracing_extra(self) -> None:
+        module = _load_module()
+        digest = "sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90"
+        config = module._fetch_oci_config(digest)
+        assert config is not None
+        assert module._image_has_tracing_extra(config) is False
 
 
 class TestMain:
-    def test_passes_on_repo_action_yml(self) -> None:
-        module = _load_module()
-        assert module.main() == 0
-
     def test_fails_when_image_is_dockerfile(self, tmp_path: Path) -> None:
         module = _load_module()
         action = tmp_path / "action.yml"
@@ -51,4 +59,9 @@ class TestMain:
             encoding="utf-8",
         )
         module.ACTION_YML = action
+        assert module.main() != 0
+
+    def test_fails_on_pre_tracing_digest(self) -> None:
+        """Pinned pre-#531 digests must not pass the tracing-extra contract."""
+        module = _load_module()
         assert module.main() != 0

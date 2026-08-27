@@ -27,6 +27,14 @@ def test_e2e_yml_on_includes_workflow_call() -> None:
         assert trigger in on_block, f"e2e.yml dropped existing trigger {trigger!r}"
 
 
+def test_e2e_pr_job_runs_for_push_event_name() -> None:
+    """ci-cd ``push`` calls ``e2e.yml``; the child inherits ``push``, not ``workflow_call``."""
+    e2e_pr = job(load_workflow("e2e.yml"), "e2e-pr")
+    condition = str(e2e_pr.get("if", ""))
+    assert "schedule" in condition
+    assert "pull_request" not in condition
+
+
 def test_ci_cd_has_e2e_gate_job() -> None:
     """``ci-cd.yml`` calls the reusable E2E workflow after ``verify``."""
     gate = job(load_workflow("ci-cd.yml"), "e2e-gate")

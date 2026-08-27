@@ -4,15 +4,16 @@
 The published Docker action must pull a digest-pinned ``ghcr.io/alexhawat/mergecraft``
 image instead of rebuilding from ``Dockerfile`` on every run (#526). When CI/CD
 has published a slim image for the self-review workflow's Action SHA pin, this
-script compares that registry digest to ``action.yml``'s ``runs.image`` pin.
+script compares that registry digest to ``action.yml``'s ``runs.image`` pin and
+verifies the image was built with ``--extra tracing`` (#531).
 
-When no GHCR tag exists yet for the pinned Action SHA (chicken-and-egg after a
-pin bump before the next ``build-images`` push), the registry half is skipped
-with a notice — same fail-open spirit as ``check_action_pin_freshness`` offline
-skips.
+Registry outcomes are handled separately:
+- reachable + tag present → digest must match ``action.yml``
+- reachable + tag missing → **fail** (chicken-and-egg blocks a stale digest)
+- unreachable → skip with a notice (offline / local ``make lint``)
 
 Module: scripts.check_action_image_digest
-Depends: re, sys, urllib.error, urllib.request, pathlib, yaml
+Depends: json, re, sys, urllib.error, urllib.request, pathlib, yaml
 
 Exports:
     main — CLI entry; compares action.yml digest vs published GHCR slim image.
@@ -25,23 +26,39 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 ACTION_YML = REPO / "action.yml"
-WORKFLOW_DIR = REPO / ".github" / "workflows"
-SELF_REVIEW_WORKFLOW = WORKFLOW_DIR / "mergecraft.yml"
+SELF_REVIEW_WORKFLOW = REPO / ".github" / "workflows" / "mergecraft.yml"
 
 SLIM_IMAGE_REPO = "alexhawat/mergecraft"
 SLIM_IMAGE = f"ghcr.io/{SLIM_IMAGE_REPO}"
 GHCR_MANIFEST_ACCEPT = (
     "application/vnd.oci.image.index.v1+json, "
+    "application/vnd.oci.image.manifest.v1+json, "
     "application/vnd.docker.distribution.manifest.list.v2+json, "
     "application/vnd.docker.distribution.manifest.v2+json"
 )
+OCI_REVISION_LABEL = "org.opencontainers.image.revision"
 
 _ACTION_PIN_RE = re.compile(r"uses:\s*alexhawat/mergeCraft@(?P<sha>[0-9a-f]{40})")
 _DIGEST_IMAGE_RE = re.compile(rf"^docker://{re.escape(SLIM_IMAGE)}@sha256:([a-f0-9]{{64}})$")
+
+
+class TagLookupStatus(Enum):
+    FOUND = "found"
+    MISSING = "missing"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class TagLookupResult:
+    status: TagLookupStatus
+    digest: str | None = None
 
 
 def _pins_in(text: str) -> list[str]:
@@ -81,11 +98,15 @@ def _ghcr_pull_token() -> str | None:
     return token if isinstance(token, str) and token else None
 
 
-def _ghcr_digest_for_tag(tag: str) -> str | None:
-    """Return ``sha256:…`` digest for the slim image tag, or ``None`` when absent."""
+def _registry_reachable() -> bool:
+    return _ghcr_pull_token() is not None
+
+
+def _ghcr_digest_for_tag(tag: str) -> TagLookupResult:
+    """Resolve the slim image digest for ``tag``, distinguishing missing vs errors."""
     token = _ghcr_pull_token()
     if token is None:
-        return None
+        return TagLookupResult(status=TagLookupStatus.ERROR)
     url = f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/manifests/{tag}"
     request = urllib.request.Request(url, method="HEAD")
     request.add_header("Authorization", f"Bearer {token}")
@@ -95,13 +116,92 @@ def _ghcr_digest_for_tag(tag: str) -> str | None:
             digest = response.headers.get("docker-content-digest")
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            return None
-        return None
+            return TagLookupResult(status=TagLookupStatus.MISSING)
+        return TagLookupResult(status=TagLookupStatus.ERROR)
     except OSError:
-        return None
+        return TagLookupResult(status=TagLookupStatus.ERROR)
     if not isinstance(digest, str) or not digest.startswith("sha256:"):
+        return TagLookupResult(status=TagLookupStatus.ERROR)
+    return TagLookupResult(status=TagLookupStatus.FOUND, digest=digest)
+
+
+def _fetch_oci_config(index_digest: str) -> dict[str, Any] | None:
+    """Return the OCI image config JSON for a manifest index digest."""
+    token = _ghcr_pull_token()
+    if token is None:
         return None
-    return digest
+    request = urllib.request.Request(
+        f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/manifests/{index_digest}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": GHCR_MANIFEST_ACCEPT,
+        },
+    )
+    try:
+        index = json.loads(urllib.request.urlopen(request, timeout=30).read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
+        return None
+    manifests = index.get("manifests")
+    if not isinstance(manifests, list) or not manifests:
+        return None
+    platform = manifests[0]
+    if not isinstance(platform, dict):
+        return None
+    manifest_digest = platform.get("digest")
+    if not isinstance(manifest_digest, str):
+        return None
+    request_manifest = urllib.request.Request(
+        f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/manifests/{manifest_digest}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": GHCR_MANIFEST_ACCEPT,
+        },
+    )
+    try:
+        manifest = json.loads(
+            urllib.request.urlopen(request_manifest, timeout=30).read().decode("utf-8")
+        )
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
+        return None
+    config = manifest.get("config")
+    if not isinstance(config, dict):
+        return None
+    config_digest = config.get("digest")
+    if not isinstance(config_digest, str):
+        return None
+    request_config = urllib.request.Request(
+        f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/blobs/{config_digest}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        payload = json.loads(
+            urllib.request.urlopen(request_config, timeout=30).read().decode("utf-8")
+        )
+    except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _image_has_tracing_extra(config: dict[str, Any]) -> bool:
+    """Return whether the slim image ``uv sync`` layer includes ``--extra tracing``."""
+    history = config.get("history")
+    if not isinstance(history, list):
+        return False
+    for entry in history:
+        if not isinstance(entry, dict):
+            continue
+        created_by = entry.get("created_by")
+        if isinstance(created_by, str) and "uv sync" in created_by:
+            return "--extra tracing" in created_by
+    return False
+
+
+def _revision_from_config(config: dict[str, Any]) -> str | None:
+    labels = config.get("config", {}).get("Labels")
+    if not isinstance(labels, dict):
+        return None
+    revision = labels.get(OCI_REVISION_LABEL)
+    return revision if isinstance(revision, str) and revision else None
 
 
 def _self_review_action_sha() -> str | None:
@@ -117,7 +217,7 @@ def _self_review_action_sha() -> str | None:
 
 
 def main() -> int:
-    """Validate action.yml image contract and optional GHCR parity."""
+    """Validate action.yml image contract and GHCR parity."""
     image = _read_action_image()
     if image is None:
         print("action-image-digest-check: action.yml missing runs.image", file=sys.stderr)
@@ -148,33 +248,80 @@ def main() -> int:
         )
         return 1
 
+    if not _registry_reachable():
+        print(
+            "action-image-digest-check: skipped GHCR parity — registry unreachable "
+            f"(action.yml pins {pinned[:19]}…)"
+        )
+        return 0
+
+    pinned_config = _fetch_oci_config(pinned)
+    if pinned_config is None:
+        print(
+            "action-image-digest-check FAILED: could not read OCI config for pinned digest "
+            f"{pinned}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not _image_has_tracing_extra(pinned_config):
+        print(
+            "action-image-digest-check FAILED: pinned slim image was built without "
+            "`uv sync --extra tracing` — Logfire/OTEL sinks degrade to NullSink (#531). "
+            f"Do not pin pre-#531 digests such as {pinned[:19]}…",
+            file=sys.stderr,
+        )
+        return 1
+
     action_sha = _self_review_action_sha()
     if action_sha is None:
         print(
-            "action-image-digest-check OK: action.yml digest-pinned "
+            "action-image-digest-check OK: digest-pinned slim image includes tracing extra "
             f"({pinned[:19]}…) — no self-review Action SHA to compare"
         )
         return 0
 
-    published = _ghcr_digest_for_tag(action_sha)
-    if published is None:
+    pinned_revision = _revision_from_config(pinned_config)
+    if pinned_revision is not None and pinned_revision != action_sha:
+        print("action-image-digest-check FAILED:", file=sys.stderr)
         print(
-            f"action-image-digest-check: skipped GHCR parity — no published slim image for "
-            f"Action SHA {action_sha[:12]} (tag missing or registry unreachable). "
-            f"action.yml pins {pinned[:19]}…; bump after the next ci-cd build-images push."
+            f"  action.yml pins {pinned} ({OCI_REVISION_LABEL}={pinned_revision})",
+            file=sys.stderr,
+        )
+        print(
+            f"  mergecraft.yml Action SHA is {action_sha}",
+            file=sys.stderr,
+        )
+        return 1
+
+    lookup = _ghcr_digest_for_tag(action_sha)
+    if lookup.status is TagLookupStatus.ERROR:
+        print(
+            "action-image-digest-check: skipped GHCR parity — registry error while "
+            f"resolving {SLIM_IMAGE}:{action_sha[:12]} (action.yml pins {pinned[:19]}…)"
         )
         return 0
 
-    if published != pinned:
+    if lookup.status is TagLookupStatus.MISSING:
         print("action-image-digest-check FAILED:", file=sys.stderr)
         print(
-            f"  action.yml pins {pinned}",
+            f"  no published slim image for Action SHA {action_sha} "
+            f"(expected tag {SLIM_IMAGE}:{action_sha})",
             file=sys.stderr,
         )
         print(
-            f"  GHCR {SLIM_IMAGE}:{action_sha[:12]} publishes {published}",
+            f"  action.yml pins {pinned} — run ci-cd build-images on pre-0.0.1, "
+            "then bump runs.image to that digest",
             file=sys.stderr,
         )
+        return 1
+
+    published = lookup.digest
+    assert published is not None
+    if published != pinned:
+        print("action-image-digest-check FAILED:", file=sys.stderr)
+        print(f"  action.yml pins {pinned}", file=sys.stderr)
+        print(f"  GHCR {SLIM_IMAGE}:{action_sha[:12]} publishes {published}", file=sys.stderr)
         print(
             "  Update action.yml runs.image to the published slim digest for this Action SHA.",
             file=sys.stderr,
@@ -183,7 +330,7 @@ def main() -> int:
 
     print(
         f"action-image-digest-check OK: action.yml matches GHCR slim digest for "
-        f"Action SHA {action_sha[:12]}"
+        f"Action SHA {action_sha[:12]} (tracing extra present)"
     )
     return 0
 
