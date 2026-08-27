@@ -176,6 +176,9 @@ def _line_intersects_hunks(
     return any(start_line <= hunk_end and end_line >= hunk_start for hunk_start, hunk_end in ranges)
 
 
+_INFRASTRUCTURE_RULE_IDS = frozenset({"analyzers.sandbox-unavailable"})
+
+
 def _matches_scope_exception(path: str, scope: DiffScope) -> bool:
     if path in scope.added_files:
         return True
@@ -213,6 +216,9 @@ def apply_scope_exceptions(
         # Project-level findings have no line; their path is often a config
         # file that is not in the diff (tsc → tsconfig.json on a .ts-only PR).
         if finding.start_line is None:
+            kept.append(finding)
+            continue
+        if finding.rule_id in _INFRASTRUCTURE_RULE_IDS:
             kept.append(finding)
             continue
         on_hunk = _line_intersects_hunks(finding.path, finding.start_line, finding.end_line, scope)

@@ -23,6 +23,7 @@ from mergecraft.review.completed import (
     lookup_finding_packet_in_review,
 )
 from mergecraft.review.explain import finding_explain_payload
+from mergecraft.utils.git_hardening import git_argv
 
 
 def _read_diff(repo_root: Path) -> str:
@@ -30,7 +31,7 @@ def _read_diff(repo_root: Path) -> str:
         return ""
     try:
         completed = subprocess.run(
-            ["git", "diff", "HEAD"],
+            git_argv(["diff", "HEAD"]),
             cwd=repo_root,
             capture_output=True,
             text=True,

@@ -133,19 +133,14 @@ def _early_unavailable_outcome(plan: AnalyzerPlan) -> AnalyzerOutcome | None:
 def _sandboxed_argv(
     plan: AnalyzerPlan, sandbox_context: SandboxContext | None
 ) -> tuple[list[str], Callable[[], None] | None]:
-    """Wrap ``plan.argv`` in an unshare/sudo-unshare sandbox when the context calls for one."""
+    """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it."""
     run_argv = list(plan.argv)
     if sandbox_context is None or not sandbox_context.read_only_source or sys.platform == "win32":
         return run_argv, None
     preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
-    from mergecraft.mcp.shell import detect_sandbox_method
+    from mergecraft.analyzers.sandbox import build_analyzer_sandbox_argv
 
-    method = detect_sandbox_method()
-    if method == "unshare":
-        run_argv = ["unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
-    elif method == "sudo-unshare":
-        run_argv = ["sudo", "unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
-    return run_argv, preexec_fn
+    return build_analyzer_sandbox_argv(plan.argv, context=sandbox_context), preexec_fn
 
 
 def _run_subprocess(

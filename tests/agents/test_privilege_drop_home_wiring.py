@@ -71,6 +71,8 @@ def _simulate_root_privilege_drop(monkeypatch: MonkeyPatch) -> None:
     and the current (inherited, GitHub-Actions-container-style) ``HOME`` is
     NOT owned by the resolved agent uid — the exact live-bug scenario."""
     monkeypatch.setattr(privilege_module.os, "getuid", lambda: 0)
+    monkeypatch.setattr(privilege_module, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege_module, "_setpriv_supports_bounding_set", lambda: True)
     monkeypatch.setattr(
         privilege_module.shutil,
         "which",
@@ -232,11 +234,10 @@ def test_build_env_chowns_codex_home_under_privilege_drop(
 ) -> None:
     _simulate_root_privilege_drop(monkeypatch)
 
-    captured: dict[str, Any] = {}
+    captured: list[list[str]] = []
 
     def _fake_chown_run(cmd: list[str], **kwargs: object) -> object:
-        captured["cmd"] = cmd
-        captured["kwargs"] = kwargs
+        captured.append(list(cmd))
         return MagicMock(returncode=0)
 
     monkeypatch.setattr(privilege_module.subprocess, "run", _fake_chown_run)
@@ -254,11 +255,11 @@ def test_build_env_chowns_codex_home_under_privilege_drop(
     ctx = make_agent_run_context(tmp_path, resolved_model="gpt-5.6-sol")
     env = codex_module._build_env(ctx)
 
-    assert captured["cmd"][0] == "chown"
-    assert captured["cmd"][1] == "-R"
-    assert captured["cmd"][2] == "1001:1001"
     codex_home = codex_module._codex_home(ctx)
-    assert captured["cmd"][3] == str(codex_home)
+    chown_call = next(c for c in captured if c[0] == "find")
+    assert "chown" in chown_call
+    assert chown_call[1] == str(codex_home)
+    assert chown_call[-3] == "1001:1001"
     assert env["CODEX_HOME"] == str(codex_home)
 
 
@@ -296,10 +297,10 @@ def test_gemini_write_mcp_config_chowns_gemini_home_under_privilege_drop(
 ) -> None:
     _simulate_root_privilege_drop(monkeypatch)
 
-    captured: dict[str, Any] = {}
+    captured: list[list[str]] = []
 
     def _fake_chown_run(cmd: list[str], **kwargs: object) -> object:
-        captured["cmd"] = cmd
+        captured.append(list(cmd))
         return MagicMock(returncode=0)
 
     monkeypatch.setattr(privilege_module.subprocess, "run", _fake_chown_run)
@@ -307,9 +308,11 @@ def test_gemini_write_mcp_config_chowns_gemini_home_under_privilege_drop(
     ctx = make_agent_run_context(tmp_path, resolved_model="gemini-pro")
     gemini_module.write_mcp_config(ctx)
 
-    assert captured["cmd"][0] == "chown"
-    assert captured["cmd"][2] == "1001:1001"
-    assert captured["cmd"][3] == str(gemini_module._gemini_home(ctx))
+    gemini_home = gemini_module._gemini_home(ctx)
+    chown_call = next(c for c in captured if c[0] == "find")
+    assert "chown" in chown_call
+    assert chown_call[1] == str(gemini_home)
+    assert chown_call[-3] == "1001:1001"
 
 
 def test_gemini_write_mcp_config_does_not_chown_when_not_root(
@@ -339,10 +342,10 @@ def test_claude_write_mcp_config_chowns_config_dir_under_privilege_drop(
 ) -> None:
     _simulate_root_privilege_drop(monkeypatch)
 
-    captured: dict[str, Any] = {}
+    captured: list[list[str]] = []
 
     def _fake_chown_run(cmd: list[str], **kwargs: object) -> object:
-        captured["cmd"] = cmd
+        captured.append(list(cmd))
         return MagicMock(returncode=0)
 
     monkeypatch.setattr(privilege_module.subprocess, "run", _fake_chown_run)
@@ -350,9 +353,11 @@ def test_claude_write_mcp_config_chowns_config_dir_under_privilege_drop(
     ctx = make_agent_run_context(tmp_path, resolved_model="claude-sonnet")
     claude_module.write_mcp_config(ctx)
 
-    assert captured["cmd"][0] == "chown"
-    assert captured["cmd"][2] == "1001:1001"
-    assert captured["cmd"][3] == str(tmp_path / ".claude")
+    config_dir = tmp_path / ".claude"
+    chown_call = next(c for c in captured if c[0] == "find")
+    assert "chown" in chown_call
+    assert chown_call[1] == str(config_dir)
+    assert chown_call[-3] == "1001:1001"
 
 
 def test_claude_write_mcp_config_does_not_chown_when_not_root(

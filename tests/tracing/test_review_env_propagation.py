@@ -123,6 +123,7 @@ def test_privilege_error_still_surfaces_first(
 
     rc = review_context_module
     monkeypatch.setattr(privilege_module.os, "getuid", lambda: 0)
+    monkeypatch.setattr(privilege_module, "_in_action_image", lambda: True)
     monkeypatch.setattr(privilege_module.shutil, "which", lambda _name: None)
 
     with (

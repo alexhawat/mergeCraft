@@ -67,6 +67,19 @@ make ci         # full pre-merge gate
 - **MCP:** `mergecraft mcp serve` (HTTP, Bearer-required per-run token on an ephemeral port;
   reviewer role at `/mcp/reviewer`) and `mergecraft mcp list` — see [`docs/cli.md`](docs/cli.md)
 
+**Optional local overrides**
+
+On hosts without Linux namespace isolation (`unshare`), mergeCraft refuses to run the MCP
+shell tool and may refuse root outside the Action image. For local debugging only:
+
+- `MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1` — allow the unsandboxed shell fallback when PID
+  namespace isolation is unavailable.
+- `MERGECRAFT_ALLOW_ROOT=1` — allow running as root outside the Action container image.
+- `MERGECRAFT_PROBE_ALLOW_SUDO=1` — allow the isolation probe to retry with `sudo`
+  when `CI` is unset (local capability probing only).
+
+Do not set these in CI or production workflows.
+
 ## Rules for agents
 
 - Do not weaken trust-tier or fail-closed security behaviour

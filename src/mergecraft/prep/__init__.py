@@ -11,6 +11,7 @@ from loguru import logger
 from mergecraft.prep.node import install_node_dependencies
 from mergecraft.prep.python import install_python_dependencies
 from mergecraft.prep.types import PrepOptions, PrepResult, is_prep_install_failure
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -25,10 +26,7 @@ _PREP_STEPS: Sequence[PrepDefinition] = (
 
 async def _dirty_tracked_paths() -> set[str]:
     proc = await asyncio.create_subprocess_exec(
-        "git",
-        "diff",
-        "--name-only",
-        "HEAD",
+        *git_argv(["diff", "--name-only", "HEAD"]),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -47,12 +45,7 @@ async def _restore_prep_dirtied_files(pre_dirty: set[str]) -> None:
     if not dirtied:
         return
     proc = await asyncio.create_subprocess_exec(
-        "git",
-        "restore",
-        "--staged",
-        "--worktree",
-        "--",
-        *dirtied,
+        *git_argv(["restore", "--staged", "--worktree", "--", *dirtied]),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

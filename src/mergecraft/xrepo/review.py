@@ -9,11 +9,14 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from mergecraft.mcp.git_guards import reject_if_leading_dash
+from mergecraft.utils.git_hardening import git_argv
 from mergecraft.xrepo.blast_radius import (
     ChangedContract,
     CrossRepoImpact,
     resolve_cross_repo_dependents,
 )
+from mergecraft.xrepo.citations import validate_pinned_sha
 from mergecraft.xrepo.contract_index import ContractIndex, index_contracts_at_commit
 from mergecraft.xrepo.linked_repos import (
     LinkedRepoEntry,
@@ -111,8 +114,21 @@ def _changed_from_index(*, repo: str, commit: str, index: ContractIndex) -> list
 
 
 def _rev_parse_commit(repo_root: Path, rev: str) -> str:
+    stripped = rev.strip()
+    reject_if_leading_dash(stripped, "rev")
+    if stripped != "HEAD":
+        validate_pinned_sha(stripped)
     completed = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--verify", f"{rev}^{{commit}}"],
+        git_argv(
+            [
+                "-C",
+                str(repo_root),
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                f"{stripped}^{{commit}}",
+            ]
+        ),
         capture_output=True,
         check=False,
         text=True,
@@ -136,7 +152,7 @@ def _require_head_matches_pin(repo_root: Path, commit_sha: str) -> None:
         msg = f"linked repo HEAD {head} does not match pinned {pin}"
         raise ValueError(msg)
     dirty = subprocess.run(
-        ["git", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=all"],
+        git_argv(["-C", str(repo_root), "status", "--porcelain", "--untracked-files=all"]),
         capture_output=True,
         check=False,
         text=True,

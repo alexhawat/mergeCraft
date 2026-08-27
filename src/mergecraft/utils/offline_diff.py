@@ -8,6 +8,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from mergecraft.utils.git_hardening import git_argv
+
 _DEFAULT_BASES = ("main", "master", "develop", "trunk")
 _MAX_UNTRACKED_FILE_BYTES = 256 * 1024
 
@@ -33,7 +35,7 @@ def _run_git(
 
         timeout_s = timeout_for_external_operation("git_diff")
     return subprocess.run(
-        ["git", *args],
+        git_argv(args),
         cwd=cwd,
         check=False,
         capture_output=True,

@@ -10,6 +10,8 @@ from typing import IO, TYPE_CHECKING
 
 from loguru import logger
 
+from mergecraft.utils.git_hardening import git_argv
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
@@ -47,7 +49,7 @@ def git_ls_tree_paths(
     """List tracked paths under ``tree_sha``, applying context exclusions."""
     try:
         completed = subprocess.run(
-            ["git", "ls-tree", "-r", "--name-only", tree_sha],
+            git_argv(["ls-tree", "-r", "--name-only", tree_sha]),
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -92,7 +94,7 @@ def _git_show_text_bounded(repo_root: Path, spec: str, max_bytes: int) -> str | 
     """
     try:
         proc = subprocess.Popen(
-            ["git", "cat-file", "--batch"],
+            git_argv(["cat-file", "--batch"]),
             cwd=repo_root,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -151,7 +153,7 @@ def git_show_text(
         return _git_show_text_bounded(repo_root, spec, max_bytes)
     try:
         completed = subprocess.run(
-            ["git", "show", spec],
+            git_argv(["show", spec]),
             cwd=repo_root,
             capture_output=True,
             check=False,
@@ -170,7 +172,7 @@ def git_blob_sha(repo_root: Path, tree_sha: str, rel_path: str) -> str:
     """Return the git blob SHA for ``rel_path`` at ``tree_sha``."""
     try:
         completed = subprocess.run(
-            ["git", "rev-parse", f"{tree_sha}:{rel_path}"],
+            git_argv(["rev-parse", f"{tree_sha}:{rel_path}"]),
             cwd=repo_root,
             capture_output=True,
             text=True,
