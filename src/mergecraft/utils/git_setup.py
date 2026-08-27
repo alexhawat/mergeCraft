@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
+from mergecraft.utils.git_hardening import git_argv
+
 if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.types import ShellPermission
@@ -161,7 +163,7 @@ def _prepare_temp_dir_for_agent(path: str) -> None:
 
 def _git_config(repo_dir: str, key: str, value: str) -> None:
     subprocess.run(
-        ["git", "config", "--local", key, value],
+        git_argv(["config", "--local", key, value]),
         cwd=repo_dir,
         check=False,
         capture_output=True,
@@ -172,7 +174,7 @@ def _git_config(repo_dir: str, key: str, value: str) -> None:
 def _git_get(repo_dir: str, key: str) -> str:
     try:
         return subprocess.check_output(
-            ["git", "config", "--get", key],
+            git_argv(["config", "--get", key]),
             cwd=repo_dir,
             text=True,
             stderr=subprocess.DEVNULL,
@@ -181,14 +183,35 @@ def _git_get(repo_dir: str, key: str) -> str:
         return ""
 
 
-def git_env_for_token(token: str) -> dict[str, str]:
+def _auth_header_prefixes(remote_url: str) -> tuple[str, ...]:
+    """Return ``http.<url>`` prefixes that may receive bearer auth headers."""
+    normalized = remote_url.strip()
+    if normalized.startswith("git@"):
+        host = normalized.split("@", 1)[1].split(":", 1)[0]
+        return (f"https://{host}/",)
+    if normalized.startswith(("http://", "https://")):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(normalized)
+        if parsed.scheme and parsed.netloc:
+            return (f"{parsed.scheme}://{parsed.netloc}/",)
+    return ("https://github.com/", "https://api.github.com/")
+
+
+def git_env_for_token(token: str, *, remote_url: str = "") -> dict[str, str]:
     """Build git subprocess env with header-based auth — never URL-embedded (D5)."""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
-    if token:
-        env["GIT_CONFIG_COUNT"] = "1"
-        env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
-        env["GIT_CONFIG_VALUE_0"] = f"Authorization: Bearer {token}"
+    if not token:
+        return env
+    pairs = [
+        (f"http.{prefix}.extraHeader", f"Authorization: Bearer {token}")
+        for prefix in _auth_header_prefixes(remote_url)
+    ]
+    env["GIT_CONFIG_COUNT"] = str(len(pairs))
+    for index, (key, value) in enumerate(pairs):
+        env[f"GIT_CONFIG_KEY_{index}"] = key
+        env[f"GIT_CONFIG_VALUE_{index}"] = value
     return env
 
 
@@ -204,7 +227,7 @@ def scrub_clone_credentials(repo_dir: Path | str) -> None:
         "credential.useHttpPath",
     ):
         subprocess.run(
-            ["git", "config", "--local", "--unset-all", key],
+            git_argv(["config", "--local", "--unset-all", key]),
             cwd=root,
             capture_output=True,
             text=True,
@@ -312,7 +335,13 @@ def setup_git(
         with contextlib.suppress(OSError):
             askpass_path.unlink()
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
-    push_url = f"https://github.com/{owner}/{name}.git"
+    from mergecraft.utils.git_hardening import read_remote_origin_url
+
+    try:
+        push_url = read_remote_origin_url(repo_dir)
+    except RuntimeError:
+        # Match actions/checkout: origin URL without a .git suffix.
+        push_url = f"https://github.com/{owner}/{name}"
     repo_state.push_url = push_url
     logger.info("» git credentials brokered for {}", f"{owner}/{name}")
 

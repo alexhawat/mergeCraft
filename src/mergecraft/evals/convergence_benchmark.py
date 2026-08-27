@@ -37,6 +37,7 @@ from mergecraft.evals.convergence_store import convergence_rounds_from_case, lis
 from mergecraft.evals.scoring import DEFAULT_LINE_SLACK
 from mergecraft.evals.store import DEFAULT_BANK_DIR
 from mergecraft.findings.ledger import FindingLedger
+from mergecraft.utils.git_hardening import git_argv
 
 RECALL_PASS_CORPUS_PATH: Final[Path] = Path("evals/corpora/recall_pass_corpus.json")
 _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
@@ -55,7 +56,7 @@ class RecallPassCorpusReport(BaseModel):
 def _git_head_sha() -> str:
     try:
         return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
+            git_argv(["rev-parse", "HEAD"]), text=True, stderr=subprocess.DEVNULL
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
@@ -64,7 +65,7 @@ def _git_head_sha() -> str:
 def _git_corpus_commit() -> str:
     try:
         return subprocess.check_output(
-            ["git", "rev-parse", "HEAD:evals/bank"],
+            git_argv(["rev-parse", "HEAD:evals/bank"]),
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()

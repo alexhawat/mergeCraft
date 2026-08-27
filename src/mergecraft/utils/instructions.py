@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING
 from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.fence import Fence, fence_unless_trusted, render_untrusted
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from mergecraft.config.settings import LearningsHeading, RepoInfo
@@ -181,7 +182,7 @@ def _build_runtime_context(
     try:
         git_status = (
             subprocess.check_output(
-                ["git", "status", "--short"],
+                git_argv(["status", "--short"]),
                 text=True,
                 stderr=subprocess.DEVNULL,
             ).strip()

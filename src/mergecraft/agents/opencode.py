@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from loguru import logger
 
-from mergecraft.agents.gates import build_opencode_native_fs_permission
+from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
@@ -39,6 +39,8 @@ from mergecraft.agents.shared import (
     resolve_cache_read,
     spawn_agent_cli,
 )
+from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.security.review_integrity import hash_tree, verify_tree_unchanged
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.genai import (
     ModelParams,
@@ -313,21 +315,69 @@ def _custom_provider_ids(model: str | None) -> list[str]:
     return [endpoint[0]]
 
 
+def _checkout_root(ctx: AgentRunContext) -> Path:
+    return Path(primary_repo_state(ctx.tool_state).dir or os.getcwd()).resolve()
+
+
+def _evidence_dir(ctx: AgentRunContext) -> Path:
+    from mergecraft.evidence.run_packet import resolve_packet_path
+
+    repo = primary_repo_state(ctx.tool_state)
+    slug = f"{repo.owner}-{repo.name}"
+    return resolve_packet_path(tmpdir=ctx.tmpdir, change_slug=slug).parent
+
+
+def _build_review_mode_external_directory_allowlist(
+    checkout: Path, evidence: Path
+) -> dict[str, str]:
+    """Allow only the checkout and evidence scratch roots (MCB-06 / D4)."""
+    perms: dict[str, str] = {"*": "deny"}
+    for root in (checkout.resolve(), evidence.resolve()):
+        root_posix = root.as_posix()
+        perms[root_posix] = "allow"
+        perms[f"{root_posix}/*"] = "allow"
+        perms[f"{root_posix}/**"] = "allow"
+    return perms
+
+
+def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[str, str]:
+    """Read paths allowlisted to the checkout and evidence scratch (MCB-06 / D4)."""
+    roots = (checkout.resolve(), evidence.resolve())
+    read: dict[str, str] = {}
+    for root in roots:
+        root_posix = root.as_posix()
+        read[root_posix] = "allow"
+        read[f"{root_posix}/*"] = "allow"
+        read[f"{root_posix}/**"] = "allow"
+    # Deny rules after broad allow patterns — matches gates.py spread order.
+    read.update(GIT_NATIVE_READ_DENY_OPENCODE)
+    for root in roots:
+        root_posix = root.as_posix()
+        read[f"{root_posix}/.git/config"] = "deny"
+        read[f"{root_posix}/.git/**"] = "deny"
+    return read
+
+
+def _build_review_mode_permissions(ctx: AgentRunContext) -> dict[str, object]:
+    checkout = _checkout_root(ctx)
+    evidence = _evidence_dir(ctx)
+    return {
+        "bash": "deny",
+        "edit": "deny",
+        "read": _build_review_mode_read_allowlist(checkout, evidence),
+        "webfetch": "deny",
+        "external_directory": _build_review_mode_external_directory_allowlist(checkout, evidence),
+        "skill": "allow",
+    }
+
+
 def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
     from mergecraft.agents.harness_render import render_for_run
 
-    fs_perm = build_opencode_native_fs_permission()
     render_result = render_for_run(ctx, "opencode")
     agent_block = render_result.payload["agent"] if isinstance(render_result.payload, dict) else {}
     config: dict[str, object] = {
-        "permission": {
-            "bash": "deny",
-            "edit": fs_perm["edit"],
-            "read": fs_perm["read"],
-            "webfetch": "allow",
-            "external_directory": "allow",
-            "skill": "allow",
-        },
+        "permission": _build_review_mode_permissions(ctx),
         "mcp": {
             MERGECRAFT_MCP_NAME: {
                 "type": "remote",
@@ -646,6 +696,30 @@ async def _prompt_session_http(
     return AgentResult(success=True, output=output or None, usage=usage)
 
 
+def _capture_integrity_baseline(ctx: AgentRunContext) -> tuple[Path, str] | None:
+    checkout = _checkout_root(ctx)
+    try:
+        return checkout, hash_tree(checkout)
+    except OSError as exc:
+        msg = f"review integrity baseline failed for {checkout}: {exc}"
+        logger.error(msg)
+        return None
+
+
+def _apply_integrity_gate(
+    result: AgentResult,
+    baseline: tuple[Path, str] | None,
+) -> AgentResult:
+    if baseline is None:
+        return result
+    checkout, digest = baseline
+    try:
+        verify_tree_unchanged(checkout, digest)
+    except RuntimeError as exc:
+        return AgentResult(success=False, error=str(exc))
+    return result
+
+
 async def _run(ctx: AgentRunContext) -> AgentResult:
     try:
         cli = await _install(None)
@@ -654,8 +728,24 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
     model = ctx.resolved_model
     config_json = build_security_config(ctx, model)
-    config_path = Path(ctx.tmpdir) / "opencode.json"
+    config_dir = _evidence_dir(ctx)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "opencode.json"
     config_path.write_text(config_json, encoding="utf-8")
+
+    # Baseline AFTER our own writes, before the agent runs. ``_evidence_dir``
+    # falls back to ``<tmpdir>/evidence`` when neither MERGECRAFT_EVIDENCE_DIR
+    # nor RUNNER_TEMP is set (evidence/run_packet.py:71); when that tmpdir sits
+    # inside the checkout, hashing first would make ``opencode.json`` — a file
+    # mergeCraft itself just wrote — read as tampering, and every review would
+    # fail closed. The gate still covers the whole agent session, which is the
+    # mutation this check exists to catch.
+    baseline = _capture_integrity_baseline(ctx)
+    if baseline is None:
+        return AgentResult(
+            success=False,
+            error="review integrity baseline could not be captured; refusing read-only review",
+        )
     extras: dict[str, str] = {
         "OPENCODE_CONFIG_CONTENT": config_json,
         "OPENCODE_CONFIG": str(config_path),
@@ -675,7 +765,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         handle = _boot_opencode_server(cli=cli, env=env, cwd=os.getcwd())
     except Exception as err:
         logger.info("opencode serve unavailable ({}), falling back to run", err)
-        return await _run_cli_fallback(cli=cli, ctx=ctx, env=env)
+        return _apply_integrity_gate(
+            await _run_cli_fallback(cli=cli, ctx=ctx, env=env),
+            baseline,
+        )
 
     assert handle is not None
     try:
@@ -689,14 +782,20 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 json={"title": "mergecraft"},
             )
             if created.status_code >= 400:
-                return AgentResult(
-                    success=False,
-                    error=f"failed to create opencode session: {created.text[:300]}",
+                return _apply_integrity_gate(
+                    AgentResult(
+                        success=False,
+                        error=f"failed to create opencode session: {created.text[:300]}",
+                    ),
+                    baseline,
                 )
             session = created.json()
             session_id = str(session.get("id") or session.get("sessionID") or "")
             if not session_id:
-                return AgentResult(success=False, error="opencode session missing id")
+                return _apply_integrity_gate(
+                    AgentResult(success=False, error="opencode session missing id"),
+                    baseline,
+                )
 
         model_obj = _parse_model(model)
         system = ctx.instructions.system
@@ -743,12 +842,18 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             # own tail the operator gets a bare "timed out:" and no lead (#449).
             tail = handle.recent_output()
             detail = f"{exc}\n\nrecent opencode serve output:\n{tail}" if tail else str(exc)
-            return AgentResult(
-                success=False,
-                error=detail,
-                metadata={"retryable": True},
+            return _apply_integrity_gate(
+                AgentResult(
+                    success=False,
+                    error=detail,
+                    metadata={"retryable": True},
+                ),
+                baseline,
             )
-        return await finalize_agent_result(ctx, result)
+        return _apply_integrity_gate(
+            await finalize_agent_result(ctx, result),
+            baseline,
+        )
     finally:
         handle.close()
 

@@ -514,7 +514,17 @@ jobs:
         # pull_request_target resolves this workflow and action pin from the repo
         # default branch (main), not the PR head — self-review PRs cannot bump the
         # pin until after merge.
-        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1 (PR #457)
+        # 2026-08-27 (tenth bump, PR #533): re-bumped to b34e9f25 — the ninth pin
+        # had drifted 107 commits on src/mergecraft/, so every review since
+        # 2026-08-23 ran product code that stale. Two concrete costs: the image at
+        # 5b9ded9f has no `[tracing]` extra, so #531's Logfire wiring resolves to a
+        # NullSink and exports nothing; and analyzer defects already fixed by #458 /
+        # #459 still appeared in Action logs, which is how #527 came to be filed
+        # against bugs that no longer existed. `make action-pin-check` detects this
+        # correctly but is wired into no gate — see #532, which fixes the guard.
+        # b34e9f25 is the pre-0.0.1 tip this PR promotes; it carries the Dockerfile
+        # `--extra tracing` line and the lane A hardening from #519.
+        uses: alexhawat/mergeCraft@b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5 # pre-0.0.1 (PR #533)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -532,9 +542,14 @@ jobs:
           # See HAS_BOT_TOKEN above — falls back to github.token when the PAT
           # isn't configured (e.g. a fork of this repo without the secret).
           token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          tracing: "true"
+          tracing-to: logfire
+          logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+          MERGECRAFT_TRACING_REGION: eu
 
       - name: Decide Codex fallback after Nous
         id: fallback
@@ -624,7 +639,17 @@ jobs:
         # pull_request_target resolves this workflow and action pin from the repo
         # default branch (main), not the PR head — self-review PRs cannot bump the
         # pin until after merge.
-        uses: alexhawat/mergeCraft@5b9ded9ff3a27090f5c6d3cf722b2452596360bd # pre-0.0.1 (PR #457)
+        # 2026-08-27 (tenth bump, PR #533): re-bumped to b34e9f25 — the ninth pin
+        # had drifted 107 commits on src/mergecraft/, so every review since
+        # 2026-08-23 ran product code that stale. Two concrete costs: the image at
+        # 5b9ded9f has no `[tracing]` extra, so #531's Logfire wiring resolves to a
+        # NullSink and exports nothing; and analyzer defects already fixed by #458 /
+        # #459 still appeared in Action logs, which is how #527 came to be filed
+        # against bugs that no longer existed. `make action-pin-check` detects this
+        # correctly but is wired into no gate — see #532, which fixes the guard.
+        # b34e9f25 is the pre-0.0.1 tip this PR promotes; it carries the Dockerfile
+        # `--extra tracing` line and the lane A hardening from #519.
+        uses: alexhawat/mergeCraft@b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5 # pre-0.0.1 (PR #533)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -638,9 +663,14 @@ jobs:
           status_checks: enabled
           # See the matching comment on the Nous step above.
           token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          tracing: "true"
+          tracing-to: logfire
+          logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+          MERGECRAFT_TRACING_REGION: eu
 
       - name: Decide Claude backstop after the provider cascade
         id: claude_fallback
