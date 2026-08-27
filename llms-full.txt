@@ -1657,6 +1657,44 @@ sets). The Action input `logfire-token` maps to the runtime
 `MERGECRAFT_LOGFIRE_TOKEN` env var; the project label is read from
 `MERGECRAFT_TRACING_PROJECT` or the YAML `tracing.sinks[].project` field.
 
+Rather than editing the workflow by hand, let the CLI write it:
+
+```bash
+mergecraft tracing logfire wire-workflow --step all --region eu   # dry-run diff
+mergecraft tracing logfire wire-workflow --step all --region eu --apply
+```
+
+This inserts `tracing: "true"`, `tracing-to: logfire`, and
+`logfire-token: ${{ secrets.LOGFIRE_TOKEN }}` into the step's `with:`, plus
+`MERGECRAFT_TRACING_PROJECT` (and, with `--region`, `MERGECRAFT_TRACING_REGION`)
+into its `env:`. `unwire-workflow` strips all of them.
+
+### Data region
+
+Logfire serves region-specific OTLP ingest hosts — `logfire-us.pydantic.dev`
+and `logfire-eu.pydantic.dev` — and the resolver **defaults to `us`**. A write
+token is regional: `pylf_v{N}_eu_…` belongs to the EU project and its spans are
+rejected by the US host. Set the region explicitly whenever the token is not a
+US one:
+
+| Surface | How |
+| ------- | --- |
+| Local   | `mergecraft tracing logfire enable --region eu` (writes `MERGECRAFT_TRACING_REGION` to `.env`) |
+| Action  | `mergecraft tracing logfire wire-workflow --region eu --apply` (writes it to the step's `env:`) |
+
+Both paths converge on the same precedence layer
+(`cli/tracing_precedence.py`) and the same resolver
+(`tracing/resolve.py`), so the local `.env` shape and the workflow `env:`
+shape carry identical meaning.
+
+### The `[tracing]` extra in the Action image
+
+The Action runs from `Dockerfile`, which installs
+`uv sync --frozen --no-dev --extra tracing`. Without that extra the sink
+factory degrades a `logfire` / `otel` sink to `NullSink` with a warning
+(`src/mergecraft/tracing/sinks.py`) — the workflow looks correctly wired and
+exports nothing. If you fork the image build, keep the extra.
+
 ## Config schema
 
 ```yaml
