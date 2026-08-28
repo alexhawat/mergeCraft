@@ -217,10 +217,12 @@ def resolve_repo_slug(cwd: Path) -> str:
     import re
     import subprocess
 
+    from mergecraft.utils.git_hardening import git_argv
+
     resolved = cwd.resolve()
     try:
         url = subprocess.check_output(
-            ["git", "remote", "get-url", "origin"],
+            git_argv(["remote", "get-url", "origin"]),
             cwd=str(resolved),
             text=True,
             stderr=subprocess.DEVNULL,
