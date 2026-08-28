@@ -464,6 +464,19 @@ def test_makefile_first_wave_tools_still_run() -> None:
     assert "bandit" in text
 
 
+def test_ci_yml_sarif_emit_uses_dev_venv() -> None:
+    """AG8: bare ``uv run`` in CI must target ``.venv-dev``, not a base-only ``.venv``."""
+    text = read_text(".github/workflows/ci.yml")
+    emit_idx = text.index("Emit ruff and mypy SARIF")
+    emit_block = text[emit_idx : emit_idx + 800]
+    assert "UV_PROJECT_ENVIRONMENT" in emit_block
+    assert ".venv-dev" in emit_block
+    bandit_idx = text.index("Convert bandit SARIF")
+    bandit_block = text[bandit_idx : bandit_idx + 400]
+    assert "UV_PROJECT_ENVIRONMENT" in bandit_block
+    assert ".venv-dev" in bandit_block
+
+
 def test_mergecraft_yml_is_not_the_sarif_upload_surface() -> None:
     """B/C own ``mergecraft.yml``; D8 SARIF upload lives on ``ci.yml``."""
     text = read_text(".github/workflows/mergecraft.yml")

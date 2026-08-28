@@ -1241,6 +1241,14 @@ def provider_auth_cmd(
     run_provider_auth(picked, scope, cwd=repo_root)
 
 
+# ``provider enable|disable`` (#520) live in their own module to keep this one
+# from growing further; they are attached here so they appear under the same
+# ``mergecraft provider`` app as ``auth``/``add``/``delete``.
+from mergecraft.cli.provider_toggle import register as _register_toggle  # noqa: E402
+
+_register_toggle(app)
+
+
 __all__ = [
     "AUTH_KIND_API_KEY",
     "AUTH_KIND_CLOUD_CHAIN",

@@ -20,7 +20,6 @@ from mergecraft.analyzers.finding import make_finding
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION
 from mergecraft.evidence.run_packet import (
     build_run_packet,
-    changed_paths_from_diff,
     classify_run_blast_radius,
     emit_run_packet,
     prepare_run_packet,
@@ -35,6 +34,7 @@ from mergecraft.mcp.tool_state import (
     primary_repo_state,
 )
 from mergecraft.modes import compute_modes
+from mergecraft.utils.diff_paths import changed_paths_from_diff
 from mergecraft.utils.github import GitHubClient
 
 _MIGRATION_DIFF = """\

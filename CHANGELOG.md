@@ -7,9 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Review publication refuses a model-supplied pull number or commit SHA that
+  differs from the run's bound scope, and those identity fields are no longer
+  exposed on the ``create_pull_request_review`` tool schema (MCB-05)
+
+### Fixed
+
+- Pipeline predicate validation no longer rejects repository paths whose names
+  contain substrings such as ``subprocess`` or ``import``; the closed regex is
+  the sole control (MCB-29)
+- Pipeline severity predicates include ``Trivial`` and rank unknown severities
+  below every taxonomy member instead of treating them as ``Minor`` (MCB-34)
+- Pipeline preview marks non-executing steps as ``dispatched`` instead of
+  ``ran``, derives terminal verdicts from collected evidence instead of
+  hardcoding ``approve``, and documents ``PipelineExecutor`` as experimental
+  (MCB-37)
+- ``ReviewEngine.run`` clears the timeout callback on every invocation so a
+  second run with ``on_timeout=None`` does not retain the first run's handler
+  (MCB-36)
+- The test suite no longer mutates the project virtualenv: ``make`` exports
+  ``UV_PROJECT_ENVIRONMENT`` to a separate dev env, subprocess ``uv run`` calls
+  pass ``--no-sync``, and a session guard detects interpreter replacement
+  (MCB-23)
+- Gateway credential resolution reads repo settings from the run-scope snapshot
+  instead of reloading ``.mergecraft/config.yaml`` on every model lookup, with a
+  live-load fallback when no snapshot is installed (#496)
+- Gate mode and per-gate action overrides resolve from the run-scope settings
+  snapshot instead of package defaults, and packet assembly in ``enforce`` mode
+  fails closed with a neutral decision when assembly raises (MCB-17)
+- Required static checks block approval unless every row is explicitly
+  ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``,
+  and unknown statuses no longer satisfy the gate (MCB-16)
+- Policy ``required`` enforcement consults ``policy.evidence`` and contributes a
+  blocker until declared evidence is present; ``blocking`` no longer promotes
+  declared ``Minor`` findings to ``Major`` (MCB-12)
+- Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
+  refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
+  explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
+  ``auto_merge`` (MCB-15)
+- Review publication reads repo settings from the run-scope snapshot taken before
+  untrusted execution instead of reloading ``.mergecraft/config.yaml`` from the mutable
+  checkout (MCB-19)
+- Verifier citation paths are confined to the checkout root via
+  ``resolve_confined_path``, rejecting traversal, absolute paths, prefix collisions,
+  and out-of-root symlinks, and must fall inside the changed-path set (MCB-20)
+- Shipped ``operational_readiness`` policy pack rules now declare required
+  evidence keys so ``enforcement: required`` can gate merge (MCB-12)
+
 ### Changed
 
-- The self-review Action pin on both review steps moves to `b34e9f25`. The
+- Policy enforcement modes are pairwise distinguishable: ``advisory`` caps blocking
+  severities to ``Trivial``, ``warning`` and ``required`` preserve declared
+  severity, and ``required`` clears only when ``policy.evidence`` is satisfied
+  (MCB-12)
+
+### Fixed
+
+- Authenticated git operations against GitHub now work at all. The token was
+  brokered as `Authorization: Bearer <token>`, which GitHub's git transport
+  rejects with `remote: invalid credentials` — `Bearer` is the REST API form,
+  and the git endpoint wants HTTP basic auth carrying the token as the password
+  under the documented `x-access-token` username. With `GIT_TERMINAL_PROMPT=0`
+  and the askpass helper shredded at startup, git had nothing to fall back on,
+  so `checkout_pr` failed in every observed review run: reviews either produced
+  no verdict at all or reached one only by improvising around the missing
+  checkout, at 1.5M-4.8M tokens a run. Removing the persisted `actions/checkout`
+  header changed the failure's shape but not its outcome — the header that had
+  been doing the real work was checkout's basic one, and mergeCraft's own
+  scheme never authenticated a fetch either way. A fetch against a local git
+  remote that models GitHub's auth now covers the whole path, so the contract
+  is that authentication succeeds rather than that a header string is present
+- Git failures that come from a rejected or missing credential are reported as
+  terminal instead of as a generic git error, so the reviewing agent stops
+  re-running a fetch that cannot start working across attempts
+- `actions/checkout` no longer persists its token in the review workflow, the
+  shipped hardened example, its template, or the dogfood artifact. A persisted
+  `extraheader = AUTHORIZATION: basic ...` collided with the `Authorization:
+  Bearer ...` that mergeCraft's own git layer added at the time, and
+  `extraHeader` is multi-valued in git, so both headers went on one request and
+  GitHub answered `400 Duplicate header: "Authorization"`. `checkout_pr` failed,
+  review scope was never established, and every terminal verdict was rejected —
+  a review that found 45 issues posted none of them and burned 9.4M tokens
+  against a 5M budget before failing closed. The action authenticates from its
+  own `token:` input, so nothing needs persisting; the comment that claimed otherwise
+  predated lane A giving those tools header auth of their own
+
+
+### Changed
+
+- The self-review Action pin on all three review rungs moves to `b3638ea7`,
+  the merge commit of #545. Every rung at the previous pin sent git the token
+  as `Authorization: Bearer`, which GitHub's git transport rejects, so
+  `checkout_pr` failed on every review and the scope guard then refused the
+  terminal verdict. A review that reached "approve" on #545 could not publish
+  it and the approval gate failed closed with no `mergecraft-approval` check at
+  all. `pull_request_target` resolves this workflow from the default branch, so
+  a self-review PR cannot consume its own fix; the bump has to follow the merge
+- The self-review Action pin on both review steps moved to `b34e9f25`. The
   previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
   `src/mergecraft/`, so every review since then ran product code that stale.
   The image at that pin carries no `[tracing]` extra, which would have left
@@ -124,6 +220,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft provider disable <label>` clears a provider's credentials so GitHub
+  CI stops using it, without hand-editing secrets or workflow YAML. Honours
+  `--scope local|github|both` like `tracing logfire disable`, deletes both the
+  flat Actions secret (`NOUS_API_KEY`) and the indexed registry key
+  (`LLM_PROVIDER_<N>_API_KEY`) plus every alias a provider recognises, treats an
+  already-absent secret as cleared, and leaves the `providers:` registration
+  intact so `provider enable` re-uses the same env index. Reporting is
+  all-or-nothing: one credential that cannot be cleared fails the command rather
+  than claiming the provider is off. `--cwd` selects both destructive targets
+  (the `.env` and the `origin` repository). `auth` names (`codex`, `claude`,
+  `gemini`) resolve onto their registry labels (#520)
+- `mergecraft provider enable <label>` names the authenticate half of that
+  toggle; it delegates to the existing `provider auth` flow (#520)
 - Public MCP product profile: ``mergecraft mcp serve --role public`` mounts six
   semantic tools at ``/mcp/public`` (``review_change``, ``get_review``,
   ``inspect_finding``, ``explain_finding``, ``get_capabilities``, ``get_policy``)

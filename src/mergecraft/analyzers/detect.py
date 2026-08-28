@@ -326,6 +326,7 @@ _REPO_LOCAL_ONLY_BINARIES: frozenset[str] = frozenset(
 def _candidate_bin_dirs(repo_root: Path) -> list[Path]:
     repo_root = repo_root.resolve()
     dirs = [
+        repo_root / ".venv-dev" / "bin",
         repo_root / ".venv" / "bin",
         repo_root / "venv" / "bin",
         repo_root / "node_modules" / ".bin",

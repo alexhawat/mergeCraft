@@ -12,6 +12,7 @@ def test_subprocess_without_tracing_extra_still_collects_repo() -> None:
         [
             "uv",
             "run",
+            "--no-sync",
             "python",
             "-m",
             "pytest",
@@ -32,6 +33,7 @@ def test_subprocess_with_tracing_extra_collects_exporter_tests() -> None:
         [
             "uv",
             "run",
+            "--no-sync",
             "--extra",
             "tracing",
             "python",

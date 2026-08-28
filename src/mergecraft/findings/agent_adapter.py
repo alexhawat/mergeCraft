@@ -72,7 +72,7 @@ def agent_finding_to_finding(
     )
 
 
-def _finding_to_agent_draft(
+def finding_to_agent_draft(
     finding: Finding,
     *,
     source: AgentFinding | None = None,
@@ -145,7 +145,7 @@ def normalize_agent_findings_via_pipeline(
         refined = [finding for _, finding in pairs]
         dedupe_result = dedupe_findings_with_indices(refined)
         return [
-            _finding_to_agent_draft(refined[index], source=pairs[index][0])
+            finding_to_agent_draft(refined[index], source=pairs[index][0])
             for index in dedupe_result.kept_indices
         ]
 
@@ -209,5 +209,6 @@ __all__ = [
     "agent_finding_to_finding",
     "coerce_agent_finding",
     "finding_for_publication_validation",
+    "finding_to_agent_draft",
     "normalize_agent_findings_via_pipeline",
 ]

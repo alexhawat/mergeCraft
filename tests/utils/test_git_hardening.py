@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import subprocess
 from pathlib import Path
 
@@ -73,16 +74,17 @@ def test_git_remote_identity_urls_includes_git_suffix_variants() -> None:
     )
 
 
-def test_git_env_for_token_scopes_bearer_header_to_trusted_host() -> None:
+def test_git_env_for_token_scopes_auth_header_to_trusted_host() -> None:
     from mergecraft.utils.git_setup import git_env_for_token
 
     env = git_env_for_token(
         "ghs_secret",
         remote_url="https://github.com/acme/demo.git",
     )
+    expected = base64.b64encode(b"x-access-token:ghs_secret").decode()
     assert env["GIT_CONFIG_COUNT"] == "1"
     assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraHeader"
-    assert env["GIT_CONFIG_VALUE_0"] == "Authorization: Bearer ghs_secret"
+    assert env["GIT_CONFIG_VALUE_0"] == f"Authorization: Basic {expected}"
     assert "http.extraHeader" not in env.values()
 
 

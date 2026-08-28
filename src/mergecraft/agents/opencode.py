@@ -726,18 +726,26 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    baseline = _capture_integrity_baseline(ctx)
-    if baseline is None:
-        return AgentResult(
-            success=False,
-            error="review integrity baseline could not be captured; refusing read-only review",
-        )
     model = ctx.resolved_model
     config_json = build_security_config(ctx, model)
     config_dir = _evidence_dir(ctx)
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "opencode.json"
     config_path.write_text(config_json, encoding="utf-8")
+
+    # Baseline AFTER our own writes, before the agent runs. ``_evidence_dir``
+    # falls back to ``<tmpdir>/evidence`` when neither MERGECRAFT_EVIDENCE_DIR
+    # nor RUNNER_TEMP is set (evidence/run_packet.py:71); when that tmpdir sits
+    # inside the checkout, hashing first would make ``opencode.json`` — a file
+    # mergeCraft itself just wrote — read as tampering, and every review would
+    # fail closed. The gate still covers the whole agent session, which is the
+    # mutation this check exists to catch.
+    baseline = _capture_integrity_baseline(ctx)
+    if baseline is None:
+        return AgentResult(
+            success=False,
+            error="review integrity baseline could not be captured; refusing read-only review",
+        )
     extras: dict[str, str] = {
         "OPENCODE_CONFIG_CONTENT": config_json,
         "OPENCODE_CONFIG": str(config_path),

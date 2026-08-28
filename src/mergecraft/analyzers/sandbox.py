@@ -426,7 +426,21 @@ def build_analyzer_sandbox_argv(
 
     method = detect_sandbox_method()
     wrapped = build_analyzer_sandbox_command(argv, context=context)
-    unshare_argv = _analyzer_unshare_argv(isolate_network=True)
+    # An analyzer that declares ``network_allowlist`` needs egress to do its job
+    # at all: ``osv-scanner`` fetches from api.osv.dev, ``trivy`` from
+    # ghcr.io / trivy-db.github.io. ``unshare --net`` gives a namespace with no
+    # external connectivity, so isolating those would not harden them, it would
+    # break them -- and silently, because an analyzer that errors is reported
+    # unavailable rather than as a finding, so dependency-vuln scanning would
+    # just stop producing results.
+    #
+    # LIMITATION: this honours the manifest's *declared* intent. Nothing yet
+    # restricts a network-declaring analyzer to the hosts it listed -- the
+    # allowlist reaches ``SandboxContext`` and is discarded at
+    # ``trust.py:228``. Until egress filtering exists, declaring a non-empty
+    # allowlist buys host networking, not filtered networking. Analyzers with
+    # an empty allowlist keep full network isolation.
+    unshare_argv = _analyzer_unshare_argv(isolate_network=not context.network_allowlist)
     if method == "sudo-unshare":
         return ["sudo", *unshare_argv, "bash", "-c", wrapped]
     if method == "unshare":
