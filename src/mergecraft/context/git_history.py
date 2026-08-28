@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 — used at runtime for repo traversal
 
 from mergecraft.context.provenance import ContextItem
+from mergecraft.utils.git_hardening import git_argv
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +61,7 @@ def targeted_blame(
 
 def _git_rev_parse(repo_root: Path, ref: str) -> str:
     completed = subprocess.run(
-        ["git", "rev-parse", ref],
+        git_argv(["rev-parse", ref]),
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -77,14 +78,15 @@ def _run_blame(
     end_line: int,
 ) -> tuple[BlameEntry, ...]:
     completed = subprocess.run(
-        [
-            "git",
-            "blame",
-            "-L",
-            f"{start_line},{end_line}",
-            "--line-porcelain",
-            path,
-        ],
+        git_argv(
+            [
+                "blame",
+                "-L",
+                f"{start_line},{end_line}",
+                "--line-porcelain",
+                path,
+            ]
+        ),
         cwd=repo_root,
         capture_output=True,
         text=True,

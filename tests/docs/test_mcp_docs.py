@@ -7,6 +7,7 @@ import re
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT
+from tests.docs.support import readme_agent_section_region
 from tests.mcp.public_mcp_support import PUBLIC_TOOL_NAMES
 
 _MCP_PAGE = REPO_ROOT / "docs" / "mcp.md"
@@ -70,17 +71,9 @@ def test_mcp_page_has_separate_openai_and_anthropic_sections() -> None:
 
 
 def test_readme_agent_section_links_docs_mcp() -> None:
-    text = _read(_README)
-    agent_match = re.search(
-        r"^##\s+.*(?:LLM|Agents?).*$",
-        text,
-        re.MULTILINE | re.IGNORECASE,
-    )
-    assert agent_match, "README needs an agent/LLM section"
-    start = agent_match.start()
-    rest = text[start:]
-    next_heading = re.search(r"^##\s+", rest[len(agent_match.group(0)) :], re.MULTILINE)
-    section = rest if next_heading is None else rest[: next_heading.start()]
+    # Shared parser: the section may be an H2 or a collapsed <details> block.
+    section = readme_agent_section_region(_read(_README))
+    assert section is not None, "README needs an agent/LLM section"
     assert "docs/mcp.md" in section
 
 

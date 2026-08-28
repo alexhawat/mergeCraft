@@ -294,7 +294,9 @@ def _run_osv_scan(
         scratch_dir=scratch,
     )
     if not sandbox.can_run:
-        return [], sandbox.skip_reason
+        from mergecraft.analyzers.sandbox import sandbox_skip_findings
+
+        return sandbox_skip_findings(sandbox), sandbox.skip_reason
 
     outcome = run_plan(finalized, sandbox_context=sandbox.context)
     if not outcome.ran:
@@ -418,7 +420,9 @@ def _run_trivy_fs(
         scratch_dir=scratch,
     )
     if not sandbox.can_run:
-        return [], sandbox.skip_reason
+        from mergecraft.analyzers.sandbox import sandbox_skip_findings
+
+        return sandbox_skip_findings(sandbox), sandbox.skip_reason
 
     findings, raw, error = _run_trivy_and_parse(
         finalized,
@@ -501,7 +505,9 @@ def _run_trivy_config(
         scratch_dir=scratch,
     )
     if not sandbox.can_run:
-        return [], sandbox.skip_reason
+        from mergecraft.analyzers.sandbox import sandbox_skip_findings
+
+        return sandbox_skip_findings(sandbox), sandbox.skip_reason
 
     findings, _raw, error = _run_trivy_and_parse(
         finalized,
@@ -585,7 +591,13 @@ def run_differential_scan(
         tier=tier,
         allow_repo_binaries=allow_repo_binaries,
     )
-    if head_err and not head_findings:
+    if head_err:
+        if head_findings:
+            return AdapterRunResult(
+                findings=head_findings,
+                skipped=True,
+                skip_reason=head_err,
+            )
         logger.info("{}", head_err)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=head_err)
 
@@ -598,7 +610,11 @@ def run_differential_scan(
         allow_repo_binaries=allow_repo_binaries,
     )
     if base_err and not base_findings and not head_findings:
-        return AdapterRunResult(findings=[], skipped=True, skip_reason=base_err)
+        return AdapterRunResult(
+            findings=base_findings,
+            skipped=True,
+            skip_reason=base_err,
+        )
 
     return AdapterRunResult(findings=_delta_findings(base_findings, head_findings))
 

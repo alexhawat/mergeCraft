@@ -107,18 +107,19 @@ def test_git_ref_exists_fetches_shallow_checkout_sha(monkeypatch: pytest.MonkeyP
     def fake_run(cmd: list[str], **kwargs: object) -> object:
         nonlocal rev_parse_attempts
         calls.append(cmd)
-        if cmd[:3] == ["git", "rev-parse", "--verify"] and len(cmd) > 3 and sha in cmd[3]:
+        joined = " ".join(cmd)
+        if "rev-parse" in cmd and "--verify" in cmd and sha in joined:
             rev_parse_attempts += 1
             if rev_parse_attempts == 1:
                 return type("R", (), {"returncode": 1})()
             return type("R", (), {"returncode": 0})()
-        if cmd[:3] == ["git", "fetch", "origin"] and len(cmd) > 3 and cmd[3] == sha:
+        if "fetch" in cmd and "origin" in cmd and sha in cmd:
             return type("R", (), {"returncode": 0})()
         return type("R", (), {"returncode": 1})()
 
     monkeypatch.setattr("mergecraft.utils.git_ref.subprocess.run", fake_run)
     assert support.git_ref_exists(sha) is True
-    assert any(cmd[:3] == ["git", "fetch", "origin"] for cmd in calls), (
+    assert any("fetch" in cmd and "origin" in cmd for cmd in calls), (
         "git_ref_exists must fetch missing SHAs before re-verify (landing_readme contract)"
     )
 

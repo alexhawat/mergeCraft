@@ -16,6 +16,7 @@ from mergecraft.analyzers.parsers.squawk_json import parse_squawk_json
 from mergecraft.analyzers.paths import safe_repo_relative_path
 from mergecraft.analyzers.registry import _matches_detect_patterns, get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, resolve_analyzer
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -61,7 +62,7 @@ def _fixture_base_rel(head_path: str) -> str:
 
 def _git_ref_available(repo_root: Path, base_ref: str) -> bool:
     result = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--verify", f"{base_ref}^{{commit}}"],
+        git_argv(["-C", str(repo_root), "rev-parse", "--verify", f"{base_ref}^{{commit}}"]),
         capture_output=True,
         text=True,
         check=False,
@@ -78,7 +79,7 @@ def _resolve_base_file(repo_root: Path, head_path: str, base_ref: str) -> Path |
     if not _git_ref_available(repo_root, base_ref):
         return None
     result = subprocess.run(
-        ["git", "-C", str(repo_root), "show", f"{base_ref}:{head_path}"],
+        git_argv(["-C", str(repo_root), "show", f"{base_ref}:{head_path}"]),
         capture_output=True,
         text=True,
         check=False,
@@ -111,7 +112,7 @@ def _run_argv(
     changed_files: list[str],
     tier: TrustTier,
     scratch_suffix: str = "",
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, list[Finding]]:
     return run_argv(
         manifest=manifest,
         repo_root=repo_root,
@@ -186,7 +187,7 @@ def _run_oasdiff(
 
         binary = provisioned.argv[0] if provisioned.argv else "oasdiff"
         argv = (binary, "breaking", "--format", "json", str(base_path), str(head_path))
-        raw, err = _run_argv(
+        raw, err, skip_findings = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=argv,
@@ -196,7 +197,11 @@ def _run_oasdiff(
         )
         if err and not raw:
             logger.info("{}", err)
-            return AdapterRunResult(findings=[], skipped=True, skip_reason=err)
+            return AdapterRunResult(
+                findings=skip_findings,
+                skipped=True,
+                skip_reason=err,
+            )
         if not raw:
             continue
         parsed = parse_oasdiff_json(raw, manifest=manifest, repo_root=repo_root)
@@ -244,7 +249,7 @@ def _run_squawk(
 
     binary = provisioned.argv[0] if provisioned.argv else "squawk"
     argv = (binary, "--reporter=json", "--assume-in-transaction", *paths)
-    raw, err = _run_argv(
+    raw, err, skip_findings = _run_argv(
         manifest=manifest,
         repo_root=repo_root,
         argv=argv,
@@ -253,7 +258,11 @@ def _run_squawk(
     )
     if err and not raw:
         logger.info("{}", err)
-        return AdapterRunResult(findings=[], skipped=True, skip_reason=err)
+        return AdapterRunResult(
+            findings=skip_findings,
+            skipped=True,
+            skip_reason=err,
+        )
     if not raw:
         return AdapterRunResult(findings=[])
 
@@ -319,7 +328,7 @@ def _run_buf(
             "--error-format",
             "json",
         )
-        raw, err = _run_argv(
+        raw, err, skip_findings = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=breaking_argv,
@@ -329,7 +338,11 @@ def _run_buf(
         )
         if err and not raw:
             logger.info("{}", err)
-            return AdapterRunResult(findings=[], skipped=True, skip_reason=err)
+            return AdapterRunResult(
+                findings=skip_findings,
+                skipped=True,
+                skip_reason=err,
+            )
         if raw:
             findings.extend(
                 parse_buf_breaking_json(
@@ -341,7 +354,7 @@ def _run_buf(
             )
 
         lint_argv = (binary, "lint", str(head_path), "--error-format", "json")
-        lint_raw, _ = _run_argv(
+        lint_raw, _, _ = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=lint_argv,

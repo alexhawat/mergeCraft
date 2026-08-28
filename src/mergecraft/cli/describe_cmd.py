@@ -31,6 +31,7 @@ from mergecraft.pr.similar import (
     find_similar_issues,
 )
 from mergecraft.review.split_advisor import recommend_pr_split
+from mergecraft.utils.git_hardening import git_argv
 
 
 def _read_diff(repo_root: Path) -> str:
@@ -38,7 +39,7 @@ def _read_diff(repo_root: Path) -> str:
         return ""
     try:
         completed = subprocess.run(
-            ["git", "diff", "HEAD"],
+            git_argv(["diff", "HEAD"]),
             cwd=repo_root,
             capture_output=True,
             text=True,

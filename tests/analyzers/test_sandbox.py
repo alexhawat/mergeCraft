@@ -10,11 +10,12 @@ from tests.analyzers.support import import_module
 def test_capability_probe_records_unavailable_primitives_by_name() -> None:
     sandbox = import_module("mergecraft.analyzers.sandbox")
     caps = sandbox.probe_capabilities()
-    # W0.4 probe: non-privileged Action container — net ns, tmpfs, ro bind all FAIL.
     assert hasattr(caps, "network_namespace")
     assert hasattr(caps, "pid_namespace")
-    assert caps.unavailable_reasons
-    assert any("net" in r.lower() or "unshare" in r.lower() for r in caps.unavailable_reasons)
+    if caps.unavailable_reasons:
+        assert all(isinstance(r, str) and r for r in caps.unavailable_reasons)
+    if not caps.network_namespace:
+        assert any("net" in r.lower() or "unshare" in r.lower() for r in caps.unavailable_reasons)
 
 
 def test_untrusted_analyzer_skipped_when_required_capability_missing(tmp_path: Path) -> None:

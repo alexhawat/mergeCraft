@@ -63,6 +63,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   severity, and ``required`` clears only when ``policy.evidence`` is satisfied
   (MCB-12)
 
+### Fixed
+
+- Authenticated git operations against GitHub now work at all. The token was
+  brokered as `Authorization: Bearer <token>`, which GitHub's git transport
+  rejects with `remote: invalid credentials` — `Bearer` is the REST API form,
+  and the git endpoint wants HTTP basic auth carrying the token as the password
+  under the documented `x-access-token` username. With `GIT_TERMINAL_PROMPT=0`
+  and the askpass helper shredded at startup, git had nothing to fall back on,
+  so `checkout_pr` failed in every observed review run: reviews either produced
+  no verdict at all or reached one only by improvising around the missing
+  checkout, at 1.5M-4.8M tokens a run. Removing the persisted `actions/checkout`
+  header changed the failure's shape but not its outcome — the header that had
+  been doing the real work was checkout's basic one, and mergeCraft's own
+  scheme never authenticated a fetch either way. A fetch against a local git
+  remote that models GitHub's auth now covers the whole path, so the contract
+  is that authentication succeeds rather than that a header string is present
+- Git failures that come from a rejected or missing credential are reported as
+  terminal instead of as a generic git error, so the reviewing agent stops
+  re-running a fetch that cannot start working across attempts
+- `actions/checkout` no longer persists its token in the review workflow, the
+  shipped hardened example, its template, or the dogfood artifact. A persisted
+  `extraheader = AUTHORIZATION: basic ...` collided with the `Authorization:
+  Bearer ...` that mergeCraft's own git layer added at the time, and
+  `extraHeader` is multi-valued in git, so both headers went on one request and
+  GitHub answered `400 Duplicate header: "Authorization"`. `checkout_pr` failed,
+  review scope was never established, and every terminal verdict was rejected —
+  a review that found 45 issues posted none of them and burned 9.4M tokens
+  against a 5M budget before failing closed. The action authenticates from its
+  own `token:` input, so nothing needs persisting; the comment that claimed otherwise
+  predated lane A giving those tools header auth of their own
+
+
+### Changed
+
+- The self-review Action pin on all three review rungs moves to `b3638ea7`,
+  the merge commit of #545. Every rung at the previous pin sent git the token
+  as `Authorization: Bearer`, which GitHub's git transport rejects, so
+  `checkout_pr` failed on every review and the scope guard then refused the
+  terminal verdict. A review that reached "approve" on #545 could not publish
+  it and the approval gate failed closed with no `mergecraft-approval` check at
+  all. `pull_request_target` resolves this workflow from the default branch, so
+  a self-review PR cannot consume its own fix; the bump has to follow the merge
+- The self-review Action pin on both review steps moved to `b34e9f25`. The
+  previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
+  `src/mergecraft/`, so every review since then ran product code that stale.
+  The image at that pin carries no `[tracing]` extra, which would have left
+  the Logfire wiring exporting nothing, and analyzer defects already fixed by
+  #458 / #459 kept surfacing in Action logs. `make action-pin-check` reports
+  the drift correctly but gates nothing; #532 tracks wiring it into `make ci`
+
+### Security
+
+- OpenCode review sessions deny ``webfetch``, ``external_directory``, and
+  ``edit``; ``read`` is allowlisted to the checkout and evidence scratch
+  instead of ``*`` (MCB-06)
+- Post-run checkout integrity verification via
+  ``security.review_integrity`` hashes the tree before review and fails closed
+  on mutation (MCB-06)
+- Privilege drop gates on action-image identity (``IS_SANDBOX`` + ``/opt/mergecraft``)
+  instead of uid alone; root outside the image refuses with a policy diagnostic and
+  ``MERGECRAFT_ALLOW_ROOT=1`` override (MCB-24 / D11)
+- ``setpriv`` argv carries ``--no-new-privs``, ``--inh-caps=-all``, and
+  ``--bounding-set=-all``; fails closed when ``setpriv`` lacks ``--bounding-set``
+  support (MCB-32)
+- Root-side ``git`` subprocesses route through ``utils/git_hardening.git_argv`` with
+  pinned safe-config keys; ``make lint`` enforces the route via
+  ``scripts/check_git_argv.py`` (MCB-01)
+- ``prepare_workspace_for_agent`` no longer recursively chowns ``.git``; sandbox shell
+  binds every registered workspace root's ``.git`` read-only (MCB-01 / D3)
+- Linked-repo ``_rev_parse_commit`` rejects leading-dash revs, validates pinned SHA
+  shape, and passes ``--end-of-options`` before the rev (MCB-33)
+- Sandbox capability probes run real isolation checks instead of gating on ``CI``;
+  untrusted MCP shell refuses unsandboxed spawn unless
+  ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1`` (MCB-07 / MCB-10)
+- Skipped untrusted analyzers emit a ``Minor`` finding
+  (``rule_id: analyzers.sandbox-unavailable``) naming missing isolation primitives
+  (MCB-09 / D7)
+- ``sudo-unshare`` shell spawn passes env by name via ``--preserve-env`` with
+  ``env=env`` on ``Popen`` so provider keys never appear in argv (MCB-08)
+- Namespaced shell spawn hides every ``git`` binary and binds ``.git`` read-only
+  inside ``unshare`` / ``sudo-unshare`` branches; unsandboxed opt-in runs the raw
+  command without host mount soup (MCB-25)
+- Python ``prep`` installs into ``.mergecraft/prep-scratch/prep-venv`` with a
+  default-deny env allowlist so PR build deps cannot mutate the reviewer's
+  interpreter or inherit provider credentials (MCB-22 / D12)
+
+### Fixed
+
+- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``;
+  ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd()``
+  twice (MCB-22)
+- The Action image now installs the `[tracing]` extra
+  (`uv sync --frozen --no-dev --extra tracing`). Without it, a workflow wired
+  with `tracing-to: logfire` looked correct and exported nothing: the sink
+  factory degrades a `logfire`/`otel` sink to `NullSink` and only logs a
+  warning, so every Action review since tracing shipped silently dropped its
+  spans. Verified against `uv.lock` — omitting the extra uninstalls logfire
+  plus its seven OpenTelemetry dependencies
+- `mergecraft.yml` now actually passes the tracing inputs it has supported
+  since W8.5. Both review steps (Nous and the Codex fallback) carry
+  `tracing: "true"`, `tracing-to: logfire`, `logfire-token`, and the
+  `MERGECRAFT_TRACING_PROJECT` / `MERGECRAFT_TRACING_REGION` env pair
+
+### Added
+
+- `mergecraft tracing logfire wire-workflow --region us|eu` writes
+  `MERGECRAFT_TRACING_REGION` into the wired step's `env:`. Logfire serves
+  region-specific OTLP hosts and the resolver defaults to `us`, so an EU write
+  token (`pylf_v{N}_eu_…`) previously posted spans to the wrong host with no
+  way to fix it short of hand-editing the workflow. The key is owned (so
+  `unwire-workflow` strips it) but not required, keeping a region-less wire
+  complete rather than partial
+
+### Changed
+
+- ``probe_capabilities()`` is ``lru_cache``-backed; ``reset_detection_cache()`` clears
+  the probe cache for xdist isolation (MCB-35 / D13)
+- ``detect_sandbox_method()`` and ``network_namespace_available()`` delegate to the
+  cached capability probe with one unified privilege ladder (D5)
+
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
   Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
   ``docs/agent-loop.md`` parity note, and ``skills/mergecraft/SKILL.md`` public stdio

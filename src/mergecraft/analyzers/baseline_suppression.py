@@ -12,6 +12,7 @@ from loguru import logger
 
 from mergecraft.analyzers.scope import DiffScope, changed_paths_from_scope, parse_diff_scope
 from mergecraft.review_policy.paths import normalize_repo_path
+from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -77,7 +78,7 @@ def should_run_baseline_suppression(*, diff_text: str, base_comparison: str) -> 
 def _checkout_base_worktree(repo_root: Path, base_ref: str) -> Path | None:
     worktree = Path(tempfile.mkdtemp(prefix="mergecraft-base-"))
     result = subprocess.run(
-        ["git", "-C", str(repo_root), "worktree", "add", "--detach", str(worktree), base_ref],
+        git_argv(["-C", str(repo_root), "worktree", "add", "--detach", str(worktree), base_ref]),
         capture_output=True,
         text=True,
         check=False,
@@ -95,7 +96,7 @@ def _checkout_base_worktree(repo_root: Path, base_ref: str) -> Path | None:
 
 def _remove_base_worktree(repo_root: Path, worktree: Path) -> None:
     subprocess.run(
-        ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree)],
+        git_argv(["-C", str(repo_root), "worktree", "remove", "--force", str(worktree)]),
         capture_output=True,
         text=True,
         check=False,

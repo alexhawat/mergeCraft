@@ -75,6 +75,7 @@ lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
+	$(UV) run python scripts/check_git_argv.py
 	$(UV) run python scripts/check_cli_consoles.py
 	$(MAKE) action-yml-hygiene-check
 	$(MAKE) hook-pins-check

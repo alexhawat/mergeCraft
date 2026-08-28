@@ -137,11 +137,11 @@ def record_agent_usage(tracker: BudgetTracker | None, usage: AgentUsage | None) 
     """Charge resolved agent usage against the per-run budget tracker."""
     if tracker is None or usage is None:
         return
+    # ``AgentUsage.input_tokens`` already folds disjoint Anthropic cache reads
+    # and cache writes per D16 / #273. ``cache_read_tokens`` /
+    # ``cache_write_tokens`` are observability fields only — adding them again
+    # here double-counts OpenAI-style cached input against the run budget.
     token_total = usage.input_tokens + usage.output_tokens
-    if usage.cache_read_tokens:
-        token_total += usage.cache_read_tokens
-    if usage.cache_write_tokens:
-        token_total += usage.cache_write_tokens
     tracker.record_tokens(token_total)
     if usage.cost_usd is not None:
         tracker.record_cost(usage.cost_usd)

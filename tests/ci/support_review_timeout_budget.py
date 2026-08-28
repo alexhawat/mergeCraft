@@ -24,8 +24,10 @@ DECLARED_ATTEMPT_TIMEOUT_ENV = "MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES"
 # per-attempt review time. D8: job > sum(attempts) + checkout slack.
 CHECKOUT_AND_SETUP_SLACK_MINUTES = 10
 
-# Worst-case sequential path: primary Nous attempt then Codex fallback.
-MAX_SEQUENTIAL_REVIEW_ATTEMPTS = 2
+# Worst-case sequential path: primary Nous attempt, Codex fallback on verdict
+# absence, then the Claude backstop on a retryable failure (#524). All three can
+# run in one job, so the job budget must cover 3x the per-attempt ceiling.
+MAX_SEQUENTIAL_REVIEW_ATTEMPTS = 3
 
 _MERGECRAFT_USES = re.compile(r"^\s+uses:\s+alexhawat/mergeCraft@", re.MULTILINE)
 _DURATION = re.compile(r"^(\d+)\s*([mhs])$", re.IGNORECASE)
