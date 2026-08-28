@@ -28,10 +28,20 @@ git worktree add "$worktree" "$base_ref"
 # BASE_WORKTREE_MEASURE_BLOCK — parsed by tests/ci/test_coverage_delta_wrapper.py (D10).
 (
   cd "$worktree"
-  # The base worktree gets its own fresh .venv. `dev` is a
+  # The base worktree gets its own fresh venv. `dev` is a
   # [project.optional-dependencies] extra, which `uv run` does not install, so
   # `make coverage-measure` died with "Failed to spawn: pytest" before measuring
   # anything. Sync the extra explicitly.
+  #
+  # Pin which venv that is, because this sync and the `make` below disagreed
+  # otherwise. MCB-23 made the Makefile export
+  # `UV_PROJECT_ENVIRONMENT ?= $(CURDIR)/.venv-dev`; this sync runs in a bare
+  # shell, so it filled `.venv` while `make coverage-measure` then looked in
+  # `.venv-dev` and hit the same "Failed to spawn: pytest" by a new route.
+  # Exporting it here settles both halves on one path, and `?=` means the
+  # Makefile defers to it — so this also works against an older base tree whose
+  # Makefile predates MCB-23 and would otherwise default to `.venv`.
+  export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$PWD/.venv-dev}"
   "${UV:-uv}" sync --extra dev --extra tracing
   # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
   # only runs on the PR checkout, not this detached base worktree.
