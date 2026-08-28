@@ -54,3 +54,66 @@ def test_trufflehog_fixture_canary_never_reaches_persisted_output(tmp_path: Path
     path = persist_analyzer_output(redacted, tmpdir=out_dir, tool_id="trufflehog")
     material = path.read_text(encoding="utf-8")
     assert_no_canary(material, _TRUFFLEHOG_CANARY)
+
+
+# --- Mixed JSON + plaintext -------------------------------------------------
+#
+# Output that *begins* with valid JSON routes into the mixed-content scanner,
+# which copied every non-JSON slice through verbatim. A plaintext secret after
+# the JSON was returned unredacted. Only this ordering leaked: text-first
+# output returns earlier, through the plain `redact_secrets` path.
+
+_TOKEN = "ghp_abcdefghijklmnopqrstuvwxyz1234"
+
+
+def test_a_secret_after_leading_json_is_redacted() -> None:
+    """The reported case."""
+    from mergecraft.analyzers.redact import redact_analyzer_output
+
+    out = redact_analyzer_output(f'{{"a":1}} token={_TOKEN}', tool_id="t")
+
+    assert _TOKEN not in out
+    assert '"a": 1' in out, "the JSON half must survive"
+
+
+def test_a_secret_between_two_json_documents_is_redacted() -> None:
+    from mergecraft.analyzers.redact import redact_analyzer_output
+
+    out = redact_analyzer_output(f'{{"a":1}} {_TOKEN} {{"b":2}}', tool_id="t")
+
+    assert _TOKEN not in out
+    assert '"a": 1' in out
+    assert '"b": 2' in out
+
+
+def test_a_secret_before_json_is_still_redacted() -> None:
+    """Guard the other ordering, which took a different code path."""
+    from mergecraft.analyzers.redact import redact_analyzer_output
+
+    out = redact_analyzer_output(f'token={_TOKEN} {{"a":1}}', tool_id="t")
+
+    assert _TOKEN not in out
+
+
+def test_a_secret_split_by_an_unparsable_brace_is_redacted() -> None:
+    """A stray brace must not split a secret out of the pattern's reach.
+
+    The scanner emits an unparsable ``{`` one character at a time. Redacting
+    each fragment as it was appended would let a brace inside a secret break
+    the match; the literal run is buffered and redacted whole instead.
+    """
+    from mergecraft.analyzers.redact import redact_analyzer_output
+
+    out = redact_analyzer_output(f'{{"a":1}} prefix{{ {_TOKEN}', tool_id="t")
+
+    assert _TOKEN not in out
+
+
+def test_benign_mixed_content_is_left_intact() -> None:
+    """Guard the guard: redacting literal runs must not mangle ordinary text."""
+    from mergecraft.analyzers.redact import redact_analyzer_output
+
+    out = redact_analyzer_output('{"a":1} plain tail', tool_id="t")
+
+    assert "plain tail" in out
+    assert '"a": 1' in out

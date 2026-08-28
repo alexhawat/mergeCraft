@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+import httpcore
 import httpx
 
 if TYPE_CHECKING:
@@ -234,6 +235,22 @@ def pinned_request_metadata(
     )
 
 
+# What a *backend* raises, which is not what the transport above it raises.
+# ``httpcore`` maps socket failures to ``httpcore.ConnectError`` /
+# ``ConnectTimeout`` inside ``connect_tcp``, and both derive from plain
+# ``Exception`` — neither ``OSError`` nor ``httpx.TransportError`` catches
+# them. httpx only wraps them into its own hierarchy further up, after this
+# code has already run. Catching the wrong pair meant the failover loop
+# exited on the first real connection failure while passing a test that
+# raised ``OSError``. ``OSError`` is kept for a backend that raises a raw
+# socket error without httpcore's mapping.
+_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
+    httpcore.ConnectError,
+    httpcore.ConnectTimeout,
+    OSError,
+)
+
+
 def _pinned_network_backend(
     hostname: str,
     addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
@@ -289,7 +306,7 @@ def _pinned_network_backend(
                         local_address=local_address,
                         socket_options=socket_options,
                     )
-                except (OSError, httpx.TransportError) as exc:
+                except _CONNECT_ERRORS as exc:
                     last_error = exc
             raise last_error
 

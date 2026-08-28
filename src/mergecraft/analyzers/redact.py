@@ -221,25 +221,40 @@ def _redact_json_text(raw: str) -> str | None:
     index = 0
     length = len(raw)
     parts: list[str] = []
+    # Text between JSON documents is a secret carrier like any other. It used
+    # to be copied through verbatim, so output that *began* with valid JSON --
+    # which is what routes here at all -- returned its plaintext tail
+    # unredacted: ``{"a":1} token=ghp_...`` leaked the token. Literal runs are
+    # buffered and redacted as a unit rather than per slice, so a brace that
+    # splits one run cannot split a secret out of the pattern's reach.
+    literal: list[str] = []
     found_json = False
+
+    def _flush_literal() -> None:
+        if literal:
+            parts.append(redact_secrets("".join(literal)))
+            literal.clear()
+
     while index < length:
         char = raw[index]
         if char not in "{[":
             next_json = index
             while next_json < length and raw[next_json] not in "{[":
                 next_json += 1
-            parts.append(raw[index:next_json])
+            literal.append(raw[index:next_json])
             index = next_json
             continue
         try:
             payload, end = decoder.raw_decode(raw, index)
         except json.JSONDecodeError:
-            parts.append(raw[index])
+            literal.append(raw[index])
             index += 1
             continue
         found_json = True
+        _flush_literal()
         parts.append(_json_dumps(_redact_json_value(payload)))
         index = end if end > index else index + 1
+    _flush_literal()
     if not found_json:
         return None
     return "".join(parts)
