@@ -15,6 +15,15 @@ credentials`` for anything else. A fetch is then driven through the production
 path (``_run_authenticated_git`` → ``git_env_for_token`` →
 ``git_authenticated_argv``). The old ``Bearer`` scheme fails that server; the
 basic scheme passes it.
+
+A second failure lives beside the first. Reporting an auth failure as terminal
+is what stops the reviewing agent re-running a fetch that cannot start working,
+but the marker set matched ``403 forbidden`` — a phrase git does not write. Its
+real shape is ``The requested URL returned error: 403``, which is the
+*permission* failure a valid token produces when it lacks access, and the one
+most in need of the hint. The remote here can now refuse with either status, so
+both the challenge path and the permission path are driven end to end rather
+than asserted against a string list.
 """
 
 from __future__ import annotations
@@ -64,13 +73,7 @@ class _GitHubLikeHandler(BaseHTTPRequestHandler):
         header = self.headers.get("Authorization", "")
         server.seen_auth.append(header)
         if not _authorized(header):
-            body = b"remote: invalid credentials\n"
-            self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="GitHub"')
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._deny(int(getattr(server, "deny_status", 401)))
             return
         parsed = urlparse(self.path)
         if not parsed.path.endswith("/info/refs") or "service=git-upload-pack" not in (
@@ -89,6 +92,29 @@ class _GitHubLikeHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _deny(self, status: int) -> None:
+        """Refuse the request the way the modelled remote would.
+
+        ``401`` carries ``WWW-Authenticate`` and GitHub's ``remote:`` body, so
+        git treats it as a challenge and dies on the prompt it cannot answer.
+        ``403`` carries neither: there is nothing for git to retry, so curl
+        surfaces the status verbatim as ``The requested URL returned error:
+        403``. The two shapes are why matching only ``403 forbidden`` never
+        recognised a permission failure (#544 follow-up).
+        """
+        if status == 401:
+            body = b"remote: invalid credentials\n"
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="GitHub"')
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def log_message(self, fmt: str, *args: Any) -> None:
         """Silence the stdlib access log — pytest output stays readable."""
@@ -118,8 +144,16 @@ def isolated_git_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.fixture
-def git_http_remote(tmp_path: Path, isolated_git_config: None) -> Iterator[tuple[str, list[str]]]:
-    """Yield the URL of a loopback git remote plus the auth headers it observed."""
+def git_http_remote(
+    request: pytest.FixtureRequest, tmp_path: Path, isolated_git_config: None
+) -> Iterator[tuple[str, list[str]]]:
+    """Yield the URL of a loopback git remote plus the auth headers it observed.
+
+    Indirect-parametrize with an HTTP status to choose how the remote refuses an
+    unauthenticated request; ``401`` (the GitHub-shaped challenge) is the
+    default, and ``403`` models a token that authenticated but lacks access.
+    """
+    deny_status = int(getattr(request, "param", 401))
     source = tmp_path / "source"
     source.mkdir()
     _git(["init", "--initial-branch=main"], cwd=source)
@@ -135,6 +169,7 @@ def git_http_remote(tmp_path: Path, isolated_git_config: None) -> Iterator[tuple
     server = ThreadingHTTPServer(("127.0.0.1", 0), _GitHubLikeHandler)
     server.repo_dir = str(bare)  # type: ignore[attr-defined]
     server.seen_auth = []  # type: ignore[attr-defined]
+    server.deny_status = deny_status  # type: ignore[attr-defined]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address[:2]
@@ -205,6 +240,118 @@ def test_the_remote_rejects_the_bearer_scheme_the_bug_used(
     message = str(excinfo.value).lower()
     assert "invalid credentials" in message or "could not read username" in message
     assert "retrying will not help" in message, "auth failures must be reported as terminal"
+
+
+@pytest.mark.parametrize("git_http_remote", [403], indirect=True)
+def test_a_permission_failure_is_reported_as_terminal(
+    consumer_repo: Path, git_http_remote: tuple[str, list[str]]
+) -> None:
+    """A 403 must carry the terminal hint, not read as a generic git error.
+
+    This is the failure a *valid* token produces when it lacks access — no
+    ``contents: read``, an unauthorized SSO grant, a fork — and it is the one
+    the hint exists for, because no number of retries grants a permission.
+    Unlike the 401 case it never reaches the askpass path: the remote sends no
+    challenge, so git has nothing to re-ask and curl surfaces the status
+    directly. Matching only ``403 forbidden`` never saw this string.
+    """
+    from mergecraft.mcp.git import _run_authenticated_git
+
+    url, seen = git_http_remote
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _run_authenticated_git(
+            ["ls-remote", "--heads", "origin"],
+            cwd=str(consumer_repo),
+            token="ghs_wrong_token_aaaaaaaaaaaaaaaaaaaaaaaa",
+            trusted_remote_url=url,
+        )
+
+    assert seen, "the remote never saw a request"
+    message = str(excinfo.value).lower()
+    assert "403" in message, message
+    assert "retrying will not help" in message, (
+        "a permission failure must be terminal, or the agent re-runs a fetch "
+        "that cannot start working"
+    )
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        pytest.param(
+            "fatal: unable to access 'https://github.com/acme/demo.git/': "
+            "The requested URL returned error: 403",
+            id="permission-denied-403",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://github.com/acme/demo.git/': "
+            "The requested URL returned error: 401",
+            id="unauthorized-401-without-challenge",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://github.com/acme/demo.git/': "
+            "The requested URL returned error: 403 Forbidden",
+            id="older-curl-appends-the-reason-phrase",
+        ),
+        pytest.param(
+            "remote: Permission to acme/demo.git denied to octocat.\n"
+            "fatal: unable to access 'https://github.com/acme/demo.git/': "
+            "The requested URL returned error: 403",
+            id="github-permission-body",
+        ),
+        pytest.param(
+            "remote: Write access to repository not granted.\n"
+            "fatal: unable to access 'https://github.com/acme/demo.git/': "
+            "The requested URL returned error: 403",
+            id="github-write-access-body",
+        ),
+        pytest.param(
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+            id="challenge-with-no-askpass",
+        ),
+        pytest.param("remote: invalid credentials", id="rejected-credential"),
+    ],
+)
+def test_is_auth_failure_matches_the_forms_git_actually_emits(stderr: str) -> None:
+    """Pin the literal shapes, so narrowing the marker set fails loudly.
+
+    Each string here is what git writes to stderr for a credential that cannot
+    work. The predicate gates the terminal hint, and a hint that does not fire
+    puts the reviewing agent back in the retry loop the marker set exists to
+    stop.
+    """
+    from mergecraft.mcp.git import _is_auth_failure
+
+    assert _is_auth_failure(stderr), stderr
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        pytest.param(
+            "fatal: unable to access 'https://github.com/acme/demo.git/': "
+            "The requested URL returned error: 500",
+            id="server-error-is-retryable",
+        ),
+        pytest.param(
+            "fatal: unable to access 'https://github.com/acme/demo.git/': "
+            "Could not resolve host: github.com",
+            id="dns-failure-is-retryable",
+        ),
+        pytest.param("fatal: not a git repository", id="unrelated-git-error"),
+    ],
+)
+def test_is_auth_failure_leaves_retryable_failures_alone(stderr: str) -> None:
+    """Guard the guard: a transient failure must stay retryable.
+
+    Calling everything terminal would be as wrong as calling nothing terminal —
+    a 500 or a DNS blip resolves itself on the next attempt, and marking it
+    terminal would abandon a review that only needed to try again.
+    """
+    from mergecraft.mcp.git import _is_auth_failure
+
+    assert not _is_auth_failure(stderr), stderr
 
 
 def test_git_env_for_token_emits_basic_auth_for_the_documented_username() -> None:
