@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Final, Union, overload
 
 from loguru import logger
 
+from mergecraft.analyzers.run import REQUIRED_CHECK_SATISFIED_STATUSES
 from mergecraft.evidence.gate_policy import (
     DEFAULT_GATE_POLICIES,
     NAMED_GATE_POLICY_ROWS,
@@ -156,22 +157,25 @@ def _trusted_positive_decision(packet: MergeEvidencePacket) -> bool:
     return not _packet_has_blockers(packet)
 
 
-_REQUIRED_STATIC_CHECK_SATISFIED: Final[frozenset[str]] = frozenset({"passed", "not_applicable"})
-"""Statuses that satisfy a required static check (AG0-G4a / MCB-16)."""
-
-
 def _required_static_check_row_satisfied(status: str | None) -> bool:
-    """True when a ``run_static_checks`` row explicitly satisfies the gate."""
-    return status in _REQUIRED_STATIC_CHECK_SATISFIED
+    """True when a ``run_static_checks`` row explicitly satisfies the gate.
+
+    Delegates to ``REQUIRED_CHECK_SATISFIED_STATUSES``, which ``analyzers/run.py``
+    derives from ``PASSING_CHECK_STATUSES`` — one definition of "passing", one
+    derivation for "satisfies a required gate". This function used to carry its
+    own independent allowlist, which is how it came to omit ``satisfied-by-ci``
+    and reject the terminal approve on evidence CI had already proved.
+    """
+    return status in REQUIRED_CHECK_SATISFIED_STATUSES
 
 
 def has_failed_required_static_check(static_checks: list[dict[str, str]]) -> bool:
     """True when any required static check row is not explicitly satisfied.
 
     The terminal-verdict validator consults this for ``approve`` submissions.
-    AG0-G4 (a): only ``passed`` and ``not_applicable`` satisfy a required check.
-    Every other status — ``failed``, ``unavailable``, ``error``, ``timeout``,
-    or unknown — blocks approval.
+    AG0-G4 (a): only a status in ``REQUIRED_CHECK_SATISFIED_STATUSES`` satisfies a required
+    check. Every other status — ``failed``, ``timed_out``, ``unavailable``,
+    ``declared-but-cannot-run``, or unknown — blocks approval.
     """
     return any(not _required_static_check_row_satisfied(row.get("status")) for row in static_checks)
 
@@ -448,15 +452,26 @@ def _is_high_risk_migration(packet: MergeEvidencePacket) -> bool:
 
 
 def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
-    """True only for a clean low-risk PR with an explicit positive verdict.
+    """True only for a blocker-free low-risk PR with an explicit positive verdict.
 
-    Requires empty findings, a ``blast_radius.lane`` of ``low``, and a trusted
-    ``Decision`` row whose ``verdict`` is ``success``. A missing decision,
-    forged ``decided_by``, ``neutral``, or ``failure`` verdict never satisfies
-    this predicate — the structural approval gate must have attested success
-    before ``auto_merge`` is eligible (D7 / MCB-15).
+    Requires no *blocking* finding, a ``blast_radius.lane`` of ``low``, and a
+    trusted ``Decision`` row whose ``verdict`` is ``success``. A missing
+    decision, forged ``decided_by``, ``neutral``, or ``failure`` verdict never
+    satisfies this predicate — the structural approval gate must have attested
+    success before ``auto_merge`` is eligible (D7 / MCB-15).
+
+    It reads *blockers*, not emptiness, and that is load-bearing.
+    ``_decide_approval_from_findings`` returns ``"neutral"`` for an empty
+    finding list and ``"success"`` only for a non-empty one, because a
+    non-empty list is the attestation that the review actually ran. Requiring
+    zero findings here therefore contradicted the verdict it also requires,
+    and no packet built by ``build_run_packet`` could satisfy both — the
+    ``low_risk_passing`` row was unreachable in production. Blocker-freedom is
+    the condition that was meant: two ``Minor`` findings on a low-risk diff are
+    still a clean low-risk PR, and ``_trusted_positive_decision`` already
+    re-checks blockers, so this cannot widen past the gate's own verdict.
     """
-    if packet.findings:
+    if _packet_has_blockers(packet):
         return False
     if not packet.blast_radius:
         return False

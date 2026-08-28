@@ -76,23 +76,17 @@ def test_never_auto_merge(case: str) -> None:
     elif case == "untrusted_tier":
         tier = "untrusted"
     elif case == "neutral_verdict":
-        packet = _packet(
-            findings=[
-                make_finding(
-                    tool="ruff",
-                    rule_id="F401",
-                    category="Maintainability & Code Quality",
-                    severity="Minor",
-                    confidence="likely",
-                    message="unused",
-                    path="src/x.py",
-                    start_line=1,
-                    end_line=1,
-                    source="analyzer",
-                )
-            ],
-            blast_radius=_low_blast_packet().blast_radius,
-        )
+        # Zero findings is what actually yields ``neutral`` from
+        # ``decide_approval`` — a non-empty list is its attestation that the
+        # review ran, so it returns ``success`` instead. This case previously
+        # built a packet with one ``Minor`` finding, which produced ``success``
+        # and never exercised the neutral path its name claims; it passed only
+        # because ``_is_low_risk_passing`` then required an empty finding list.
+        # That emptiness requirement contradicted the ``success`` verdict the
+        # same predicate demands, which is what made ``low_risk_passing``
+        # unreachable. See ``minor_findings_are_auto_merge_eligible`` below for
+        # the behaviour that replaced it.
+        packet = _low_blast_packet()
     elif case == "missing_decision":
         packet = _low_blast_packet(decision=None)
     elif case == "blocker_present":
@@ -123,6 +117,44 @@ def test_never_auto_merge(case: str) -> None:
     packet_with_decision = packet.model_copy(update={"decision": decision})
     action = _auto_merge_action(packet_with_decision)
     assert action != GateAction.AUTO_MERGE
+
+
+def test_minor_findings_are_auto_merge_eligible_on_a_low_risk_change() -> None:
+    """Pin the widening that reachability required, so it is reviewed not assumed.
+
+    ``_is_low_risk_passing`` reads *blockers* rather than emptiness, so a
+    low-risk change carrying only non-blocking findings can now select
+    ``low_risk_passing``. Before, that row could not be selected at all: it
+    demanded an empty finding list alongside a ``success`` verdict, and
+    ``decide_approval`` only returns ``success`` for a non-empty one.
+
+    This activates a previously dormant path, so state its bounds. The action
+    is *recorded*, not applied: ``gates.gate_action`` defaults to ``shadow``
+    (``config/settings.py``), and only an operator opting into ``enforce``
+    lets it act. Any ``Critical`` or ``Major`` finding still denies it, as
+    ``never_auto_merge[blocker_present]`` pins above.
+    """
+    from mergecraft.agents.gates import _is_low_risk_passing, decide_approval
+
+    minor = make_finding(
+        tool="ruff",
+        rule_id="F401",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="unused import",
+        path="src/x.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
+    )
+    packet = _packet(findings=[minor], blast_radius=_low_blast_packet().blast_radius)
+    decision = decide_approval(packet, run_succeeded=True, tier="trusted")
+    decided = packet.model_copy(update={"decision": decision})
+
+    assert decision.verdict == "success"
+    assert _is_low_risk_passing(decided)
+    assert _auto_merge_action(decided) == GateAction.AUTO_MERGE
 
 
 def test_low_risk_passing_requires_an_explicit_positive_decision() -> None:
