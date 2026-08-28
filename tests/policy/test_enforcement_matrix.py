@@ -52,19 +52,47 @@ def test_every_mode_pair_is_distinguishable() -> None:
                 pytest.fail(f"{left_mode!r} and {right_mode!r} are indistinguishable: {left_key!r}")
 
 
+def test_every_mode_agrees_with_the_gate() -> None:
+    """#554 acceptance: contributes_blocker and decide_approval never disagree."""
+    from mergecraft.agents.gates import decide_approval
+
+    rule = {"evidence": {"required": ["contract_schema"]}}
+    for mode in _ENFORCEMENT_MODES:
+        for severity in FINDING_SEVERITIES:
+            result = _evaluate(mode, severity=severity, rule=rule if mode == "required" else None)
+            assert result.finding is not None
+            conclusion = decide_approval([result.finding], run_succeeded=True, tier="trusted")
+            blocked = conclusion == "failure"
+            assert blocked is result.contributes_blocker, (
+                f"{mode}/{severity}: flag={result.contributes_blocker} gate={conclusion}"
+            )
+
+
 @pytest.mark.parametrize("severity", ["Critical", "Major", "Minor"])
-def test_non_blocking_modes_preserve_declared_severity(severity: str) -> None:
-    for mode in ("warning", "required"):
-        rule = {} if mode == "required" else None
-        result = _evaluate(mode, severity=severity, rule=rule)
-        assert result.finding is not None
-        assert result.finding.severity == severity
+def test_required_without_evidence_keys_preserves_declared_severity(severity: str) -> None:
+    result = _evaluate("required", severity=severity, rule={})
+    assert result.finding is not None
+    assert result.finding.severity == severity
 
 
-def test_blocking_does_not_promote_minor_to_major() -> None:
+@pytest.mark.parametrize("severity", ["Critical", "Major", "Minor"])
+def test_warning_never_reaches_a_blocking_severity(severity: str) -> None:
+    """#554: warning is non-blocking by construction, not by an unread flag."""
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES
+
+    result = _evaluate("warning", severity=severity)
+    assert result.finding is not None
+    assert result.finding.severity not in BLOCKING_SEVERITIES
+    assert result.contributes_blocker is False
+
+
+def test_blocking_floors_minor_to_a_blocking_severity() -> None:
+    """#554: reverses MCB-12 so blocking intent reaches the gate via severity."""
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES
+
     result = _evaluate("blocking", severity="Minor")
     assert result.finding is not None
-    assert result.finding.severity == "Minor"
+    assert result.finding.severity in BLOCKING_SEVERITIES
 
 
 def test_required_consults_evidence_when_declared() -> None:
