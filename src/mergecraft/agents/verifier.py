@@ -51,6 +51,7 @@ from mergecraft.review_taxonomy import (
     finding_fingerprint,
 )
 from mergecraft.types import VERIFIER_AGENT_NAME
+from mergecraft.utils.path_confinement import resolve_confined_path
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -274,6 +275,7 @@ def plan_agent_verifications(
     budget: int,
     learnings_text: str = "",
     repo_root: Path | None = None,
+    changed_paths: frozenset[str] | None = None,
 ) -> VerificationPlan:
     """Queue agent-authored Critical/Major findings for verification (C6).
 
@@ -293,6 +295,7 @@ def plan_agent_verifications(
         learnings_text: The learnings file contents, read for its
             ``WITHDRAWN_FINDINGS_HEADING`` section.
         repo_root: Checkout root, used to resolve each finding's cited file.
+        changed_paths: When set, citations must name a path in this set.
 
     Returns:
         A ``VerificationPlan`` naming what to dispatch and what was skipped.
@@ -325,9 +328,19 @@ def plan_agent_verifications(
     for identity, finding in capped:
         cited: str | None = None
         if repo_root is not None and finding.path:
-            candidate = repo_root / finding.path
-            if candidate.is_file():
-                cited = str(candidate)
+            try:
+                cited = resolve_confined_path(
+                    repo_root,
+                    finding.path,
+                    changed_paths=changed_paths,
+                )
+            except ValueError as exc:
+                logger.info(
+                    "verifier path confinement rejected {} — {}",
+                    finding.path,
+                    exc,
+                )
+                cited = None
         dispatch.append(
             VerificationDispatch(
                 fingerprint=identity,

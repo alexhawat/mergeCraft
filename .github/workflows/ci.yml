@@ -141,6 +141,10 @@ jobs:
       # the static tier failed so the review still sees the tool's findings.
       - name: Emit ruff and mypy SARIF
         if: always() && matrix.python == '3.14'
+        env:
+          # Makefile bootstrap installs dev tools into .venv-dev (AG8); bare
+          # `uv run` would create a base-only .venv and fail to spawn ruff/mypy.
+          UV_PROJECT_ENVIRONMENT: .venv-dev
         run: |
           mkdir -p .sarif
           uv run ruff check src tests scripts --output-format sarif --output-file .sarif/ruff.sarif || true
@@ -199,6 +203,8 @@ jobs:
           make security
       - name: Convert bandit SARIF
         if: always() && matrix.python == '3.14'
+        env:
+          UV_PROJECT_ENVIRONMENT: .venv-dev
         run: uv run python scripts/native_output_to_sarif.py bandit .sarif/bandit.json .sarif/bandit.sarif
       - name: Upload bandit SARIF
         if: always() && matrix.python == '3.14'
@@ -229,6 +235,31 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Integration suite (self-skips without live secrets)
         run: make test-integration
+
+  privilege-root:
+    name: Verify (root container privilege py3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Build action image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          load: true
+          tags: mergecraft:lane-a
+          cache-from: type=gha,scope=mergeCraft-slim-privilege
+          cache-to: type=gha,mode=max,scope=mergeCraft-slim-privilege
+      - name: Privilege identity + trust-ordering (root and uid 65534)
+        run: |
+          chmod +x docker/e2e/run_in_image_privilege.sh
+          docker/e2e/run_in_image_privilege.sh mergecraft:lane-a
 
   mutation-advisory:
     name: Verify (mutation advisory py3.14)

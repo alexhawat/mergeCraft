@@ -32,6 +32,16 @@ def _reset_process_tracer_cache() -> Iterator[None]:
     reset_process_tracer_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_run_scope_settings_snapshot() -> Iterator[None]:
+    """Clear run-scope settings ContextVar state so tests do not leak snapshots."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+
+    reset_gateway_settings_cache()
+    yield
+    reset_gateway_settings_cache()
+
+
 # ---------------------------------------------------------------------------
 # B — live opt-in once (CQ-2): skip ``live``-marked tests unless opted in
 # ---------------------------------------------------------------------------
@@ -72,6 +82,18 @@ def _load_check_xpass() -> Any:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _venv_inode_guard() -> Iterator[None]:
+    """Session guard: detect replacement of ``sys.prefix`` (MCB-23 / AG1.7).
+
+    Limit: catches directory replacement, not an in-place ``uv sync`` that adds
+    packages to the same directory inode.
+    """
+    baseline = Path(sys.prefix).stat().st_ino
+    yield
+    assert Path(sys.prefix).stat().st_ino == baseline
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int | pytest.ExitCode) -> None:

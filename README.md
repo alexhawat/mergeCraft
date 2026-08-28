@@ -26,7 +26,8 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 
 <span id="for-agents"></span>
 
-## For LLM / Agents
+<details>
+<summary><b>For LLM / Agents</b></summary>
 
 ### One-line setup prompts
 
@@ -265,6 +266,8 @@ open standard, verified against each tool's own docs on 2026-08-21. `AGENTS.md` 
 repo root is the fallback every one of them reads.</sub>
 
 ---
+</details>
+
 
 ## Problem
 

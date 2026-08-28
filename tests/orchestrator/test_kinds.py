@@ -56,8 +56,10 @@ def test_deterministic_kind_runs_the_pipeline(
     executor = PipelineExecutor(registry=registry, settings=settings)
     result = executor.run(pipeline, repo_root=tmp_path)
 
-    executed_ids = [record.step_id for record in result.step_records if record.status == "ran"]
-    assert executed_ids == ["classify", "review", "verify", "submit"]
+    dispatched = [record.step_id for record in result.step_records if record.status == "dispatched"]
+    assert dispatched == ["classify", "review", "verify"]
+    ran = [record.step_id for record in result.step_records if record.status == "ran"]
+    assert ran == ["submit"]
     assert result.orchestrator_kind == "deterministic"
     assert result.orchestrator_tokens == 0
 

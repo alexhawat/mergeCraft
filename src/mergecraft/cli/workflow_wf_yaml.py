@@ -175,7 +175,7 @@ def apply_provider_env_wiring(
             at_indent=step_indent,
         )
         if not mod_env and _find_mapping_block(block2, "env", at_indent=step_indent) is None:
-            block2 = _create_env_block(block2, env_canonical[0], at_indent=step_indent)
+            block2 = _create_env_block(block2, env_canonical, at_indent=step_indent)
             mod_env = True
         block3, mod_env2 = _insert_owned_keys_into_block(
             block2,

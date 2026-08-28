@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
+from mergecraft.utils.git_hardening import git_argv
+
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import TrustTier
 
@@ -222,7 +224,7 @@ def _find_references(
     """Return (capped references, whether more references existed than the cap)."""
     try:
         result = subprocess.run(
-            ["git", "-C", cwd, "grep", "-nw", "-F", "--no-color", "-e", symbol],
+            git_argv(["-C", cwd, "grep", "-nw", "-F", "--no-color", "-e", symbol]),
             capture_output=True,
             text=True,
             timeout=15,

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from mergecraft.config.settings_snapshot import RepoSettingsSnapshot
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.modes import Mode
     from mergecraft.review_checks import StaticCheckConfig
@@ -99,6 +100,7 @@ class ToolContext:
     resolved_model: str | None = None
     suggest_eval_add: bool = False
     budget_tracker: BudgetTracker | None = None
+    repo_settings_snapshot: RepoSettingsSnapshot | None = None
 
     def __init__(
         self,
@@ -140,6 +142,7 @@ class ToolContext:
         resolved_model: str | None = None,
         suggest_eval_add: bool = False,
         budget_tracker: BudgetTracker | None = None,
+        repo_settings_snapshot: RepoSettingsSnapshot | None = None,
     ) -> None:
         from mergecraft.scm.github import GitHubScmAdapter
 
@@ -190,3 +193,4 @@ class ToolContext:
         self.resolved_model = resolved_model
         self.suggest_eval_add = suggest_eval_add
         self.budget_tracker = budget_tracker
+        self.repo_settings_snapshot = repo_settings_snapshot

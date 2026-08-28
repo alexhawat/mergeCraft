@@ -435,7 +435,7 @@ def test_lock_skips_repo_native_and_declared_unavailable_tools(
     assert captured["path"] == tmp_path / ".mergecraft" / "analyzers.lock"
     assert captured["merge"] is True
     assert "lockfile updated" in text
-    assert "(1 tools)" in text
+    assert "(1 tools)" in _plain_oneline(result)
 
 
 def test_lock_reuses_an_existing_entry_unless_refresh_is_passed(

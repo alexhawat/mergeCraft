@@ -86,6 +86,29 @@ def test_record_agent_usage_charges_token_and_cost_budgets() -> None:
     assert exc_info.value.kind == "token"
 
 
+def test_record_agent_usage_does_not_double_count_cached_input() -> None:
+    """OpenAI-style cached input is already in ``input_tokens`` (D16 / #273)."""
+    from mergecraft.agents.shared import AgentUsage
+
+    tracker = BudgetTracker(_tight_bounds())
+    record_agent_usage(
+        tracker,
+        AgentUsage(
+            agent="test",
+            input_tokens=90,
+            output_tokens=5,
+            cache_read_tokens=40,
+        ),
+    )
+    assert tracker.tokens_used == 95
+    with pytest.raises(BudgetExhausted) as exc_info:
+        record_agent_usage(
+            tracker,
+            AgentUsage(agent="test", input_tokens=6, output_tokens=0, cache_read_tokens=40),
+        )
+    assert exc_info.value.kind == "token"
+
+
 def test_tracker_records_last_exhausted_for_orchestrator_drain() -> None:
     """``BudgetTracker`` records the ``BudgetExhausted`` it raises.
 

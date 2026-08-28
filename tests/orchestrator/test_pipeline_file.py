@@ -56,8 +56,10 @@ def test_steps_execute_in_order(
         repo_root=tmp_path,
     )
 
+    dispatched = [record.step_id for record in result.step_records if record.status == "dispatched"]
+    assert dispatched == ["classify", "review", "verify"]
     ran = [record.step_id for record in result.step_records if record.status == "ran"]
-    assert ran == ["classify", "review", "verify", "submit"]
+    assert ran == ["submit"]
 
 
 def test_conditional_step_is_skipped_with_a_recorded_reason(
@@ -94,7 +96,7 @@ def test_conditional_step_is_skipped_with_a_recorded_reason(
     assert "review" in skipped
     assert skipped["review"]
     assert "docs-only" in {
-        record.step_id for record in result.step_records if record.status == "ran"
+        record.step_id for record in result.step_records if record.status == "dispatched"
     }
 
 
@@ -124,7 +126,7 @@ def test_fan_out_dispatches_registry_agents(
     )
 
     fan_out = next(record for record in result.step_records if record.step_id == "lenses")
-    assert fan_out.status == "ran"
+    assert fan_out.status == "dispatched"
     assert set(fan_out.dispatched_agents) == {"reviewer", "verifier"}
 
 

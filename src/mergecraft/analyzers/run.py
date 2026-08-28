@@ -38,6 +38,34 @@ CheckStatus = Literal[
 # Statuses that mean "this environment produced no verdict about the diff".
 _NO_VERDICT: frozenset[str] = frozenset({"unavailable", "declared-but-cannot-run"})
 
+PASSING_CHECK_STATUSES: frozenset[str] = frozenset({"passed", "satisfied-by-ci"})
+"""The single answer to "does this gate row count as passing?".
+
+Every consumer imports this rather than spelling its own set. It lives beside
+``CheckStatus`` because that Literal is the closed vocabulary it partitions,
+so a new status cannot be added without deciding here whether it passes.
+
+Two readers disagreed before this existed: ``AnalyzerOutcome.passed`` accepted
+``satisfied-by-ci`` while the approval gate's own allowlist did not, so a repo
+whose ``ciEvidence`` proved a gate green had its terminal approve rejected. The
+If a new status is added to ``CheckStatus``, decide here whether it passes and
+both readers follow.
+"""
+
+REQUIRED_CHECK_SATISFIED_STATUSES: frozenset[str] = PASSING_CHECK_STATUSES | {"not_applicable"}
+"""Statuses that satisfy a *required* gate (AG0-G4a / MCB-16).
+
+Derived from ``PASSING_CHECK_STATUSES``, never spelled independently, so the
+two questions cannot drift: "was this gate proved green?" and "does this row
+satisfy a required gate?" differ only by ``not_applicable`` — a gate that does
+not apply to this diff satisfies the requirement without ever having passed.
+
+``not_applicable`` is absent from ``CheckStatus`` and no producer emits it
+today; it is kept because the required-gate contract is pinned on it
+(``tests/agents/test_required_static_checks.py``) and a consumer-declared gate
+is the obvious future source.
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class AnalyzerOutcome:
@@ -53,7 +81,7 @@ class AnalyzerOutcome:
     @property
     def passed(self) -> bool:
         """True when the gate is proved green — here, or by declared CI evidence."""
-        return self.status in {"passed", "satisfied-by-ci"}
+        return self.status in PASSING_CHECK_STATUSES
 
     @property
     def ran(self) -> bool:
@@ -133,19 +161,14 @@ def _early_unavailable_outcome(plan: AnalyzerPlan) -> AnalyzerOutcome | None:
 def _sandboxed_argv(
     plan: AnalyzerPlan, sandbox_context: SandboxContext | None
 ) -> tuple[list[str], Callable[[], None] | None]:
-    """Wrap ``plan.argv`` in an unshare/sudo-unshare sandbox when the context calls for one."""
+    """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it."""
     run_argv = list(plan.argv)
     if sandbox_context is None or not sandbox_context.read_only_source or sys.platform == "win32":
         return run_argv, None
     preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
-    from mergecraft.mcp.shell import detect_sandbox_method
+    from mergecraft.analyzers.sandbox import build_analyzer_sandbox_argv
 
-    method = detect_sandbox_method()
-    if method == "unshare":
-        run_argv = ["unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
-    elif method == "sudo-unshare":
-        run_argv = ["sudo", "unshare", "--pid", "--fork", "--mount-proc", *plan.argv]
-    return run_argv, preexec_fn
+    return build_analyzer_sandbox_argv(plan.argv, context=sandbox_context), preexec_fn
 
 
 def _run_subprocess(

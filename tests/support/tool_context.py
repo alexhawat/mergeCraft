@@ -37,3 +37,25 @@ def github_client_from_ctx(ctx: ToolContext) -> GitHubClient:
         msg = "ToolContext.scm is not a GitHub adapter"
         raise RuntimeError(msg)
     return client
+
+
+def bind_review_publication_scope(
+    ctx: ToolContext,
+    *,
+    pr_number: int = 7,
+    checkout_sha: str = "deadbeef",
+) -> None:
+    """Bind immutable run identity required by AG2 publication gates."""
+    from pathlib import Path
+
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    ctx.tool_state.pr_number = pr_number
+    if ctx.tool_state.selected_mode is None:
+        ctx.tool_state.selected_mode = "Review"
+    primary = primary_repo_state(ctx.tool_state)
+    primary.issue_number = pr_number
+    primary.checkout_sha = checkout_sha
+    diff_path = Path(ctx.tmpdir) / "diff.patch"
+    diff_path.write_text("diff --git a/x b/x\n", encoding="utf-8")
+    primary.diff_path = str(diff_path)

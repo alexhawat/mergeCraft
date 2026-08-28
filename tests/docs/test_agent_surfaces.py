@@ -15,7 +15,13 @@ from pathlib import Path
 import pytest
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
-from tests.docs.support import action_uses_pattern, git_ref_exists
+from tests.docs.support import (
+    AGENT_SECTION_MARKER_RE,
+    action_uses_pattern,
+    agent_section_precedes_body,
+    git_ref_exists,
+    readme_agent_section_region,
+)
 
 AGENTS_MD = REPO_ROOT / "AGENTS.md"
 SKILL_MD = REPO_ROOT / "skills" / "mergecraft" / "SKILL.md"
@@ -143,32 +149,17 @@ def test_copilot_instructions_point_at_agents_md() -> None:
     )
 
 
-_AGENT_SECTION_HEADING_RE = re.compile(
-    r"^##\s+.*For LLM\s*/\s*Agents",
-    re.MULTILINE | re.IGNORECASE,
-)
-_AGENT_SECTION_REGION_RE = re.compile(
-    r"^##\s+.*For LLM\s*/\s*Agents[^\n]*\n(.*?)(?=^## |\Z)",
-    re.MULTILINE | re.IGNORECASE | re.DOTALL,
-)
-
-
-def _readme_agent_section_region(text: str) -> str | None:
-    match = _AGENT_SECTION_REGION_RE.search(text)
-    return match.group(1) if match else None
-
-
-def _readme_h2_headings(text: str) -> list[str]:
-    return [
-        line[3:].strip()
-        for line in text.splitlines()
-        if line.startswith("## ") and not line.startswith("### ")
-    ]
+# Marker + region parsing live in tests.docs.support so this file and
+# test_agent_packages.py agree on what "the agent section" means.
+_AGENT_SECTION_HEADING_RE = AGENT_SECTION_MARKER_RE
+_readme_agent_section_region = readme_agent_section_region
 
 
 def test_readme_has_agent_section() -> None:
     text = read_text("README.md")
-    assert _AGENT_SECTION_HEADING_RE.search(text), "README must ship ## For LLM / Agents (D2)"
+    assert _AGENT_SECTION_HEADING_RE.search(text), (
+        "README must ship a For LLM / Agents section, as an H2 or a <details> block (D2)"
+    )
     region = _readme_agent_section_region(text)
     assert region is not None, "README agent section must contain copy/paste prompts"
     assert "mergecraft init" in region, (
@@ -177,12 +168,17 @@ def test_readme_has_agent_section() -> None:
 
 
 def test_agent_section_is_first_section() -> None:
+    """The agent section opens before any prose section (D2).
+
+    Checked by document offset, not by heading text: the section may be
+    collapsed into a ``<details>`` block, which emits a ``<summary>`` rather
+    than an H2 while keeping the same content and the same ``#for-agents``
+    anchor.
+    """
     text = read_text("README.md")
-    headings = _readme_h2_headings(text)
-    assert headings, "README must contain at least one H2"
-    first = headings[0]
-    assert re.search(r"For LLM\s*/\s*Agents", first, re.IGNORECASE), (
-        f"first H2 must be For LLM / Agents; got {first!r}"
+    assert AGENT_SECTION_MARKER_RE.search(text), "README must ship a For LLM / Agents section (D2)"
+    assert agent_section_precedes_body(text), (
+        "the For LLM / Agents section must come before the first prose H2 (D2)"
     )
 
 

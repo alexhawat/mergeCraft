@@ -1,0 +1,33 @@
+"""CI contracts — test suite must not mutate the project virtualenv (AG8 / MCB-23)."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from tests.ci.workflow_support import REPO_ROOT
+
+_REPO_ROOT = Path(REPO_ROOT)
+_TESTS_ROOT = _REPO_ROOT / "tests"
+_UV_RUN = re.compile(r"""['"]uv['"]\s*,\s*['"]run['"]""")
+
+
+def _uv_run_calls_missing_no_sync() -> list[str]:
+    offenders: list[str] = []
+    for path in sorted(_TESTS_ROOT.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"subprocess\.run\s*\(\s*\[([^\]]+)\]", source, re.DOTALL):
+            chunk = match.group(1)
+            if _UV_RUN.search(chunk) and "--no-sync" not in chunk:
+                offenders.append(f"{path.relative_to(_REPO_ROOT)}:{match.start()}")
+    return offenders
+
+
+def test_subprocess_uv_calls_pass_no_sync() -> None:
+    offenders = _uv_run_calls_missing_no_sync()
+    assert offenders == []
+
+
+def test_uv_project_environment_is_exported_by_the_makefile() -> None:
+    makefile = (_REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    assert re.search(r"^UV_PROJECT_ENVIRONMENT\s*\??=", makefile, re.MULTILINE)
