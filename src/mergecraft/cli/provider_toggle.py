@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from typing import Any
 
+
 # Provider labels whose credentials predate the indexed ``LLM_PROVIDER_<N>_*``
 # registry and are still what the shipped consumer workflow references by name.
 # ``mergecraft auth <name>`` writes these, so ``provider disable`` has to clear
@@ -54,25 +55,55 @@ if TYPE_CHECKING:
 # Keys are the *canonical registry label*; ``_LABEL_ALIASES`` maps the
 # ``auth`` subcommand names onto them so ``provider disable codex`` and
 # ``provider disable openai`` mean the same thing.
-_FLAT_SECRETS_BY_LABEL: dict[str, tuple[str, ...]] = {
-    "openai": ("CODEX_AUTH_JSON", "OPENAI_API_KEY"),
-    "anthropic": ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"),
-    # Both names are recognised credentials for Google: ``models.py`` lists
-    # them as that provider's ``env_vars`` and ``docs/authentication.md``
-    # documents the alias. Clearing only ``GEMINI_API_KEY`` would report the
-    # provider disabled while it stayed authenticated through the alias.
-    "google": ("GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"),
+def _flat_secret_names(canonical: str) -> tuple[str, ...]:
+    """Return every credential env var *canonical* authenticates with.
+
+    Derived from :data:`mergecraft.models.PROVIDERS`, which is the registry the
+    rest of the product authenticates from — not a second list maintained here.
+    A hand-kept copy had already drifted from it on six providers: ``xai``,
+    ``moonshotai``, ``opencode``, ``opencode-go``, ``openrouter`` and ``nous``
+    were missing credentials outright, and ``bedrock``'s entry named three AWS
+    keys the registry does not carry while missing all three it does. Every gap
+    is the same failure: ``disable`` reports success while the provider stays
+    authenticated through the key it did not clear.
+
+    Both halves of a provider's credentials are cleared — ``env_vars`` and the
+    ``managed_credentials`` a ``mergecraft auth`` flow mints — because either
+    one left behind keeps the provider usable.
+
+    Non-secret entries a provider declares (a region, a model id) are cleared
+    too. Disabling a provider is meant to leave nothing of it configured, and
+    over-clearing costs an operator a re-run of ``auth`` while under-clearing
+    leaves a live credential. ``cursor`` is listed separately: it predates the
+    registry and has no ``PROVIDERS`` row to derive from.
+    """
+    from mergecraft.models import PROVIDERS
+    from mergecraft.utils.secrets import CLOUD_BYOK_ENV_VARS_BY_LABEL
+
+    provider = PROVIDERS.get(canonical)
+    if provider is None:
+        return _UNREGISTERED_FLAT_SECRETS.get(canonical, ())
+    names: list[str] = []
+    for key in (
+        *(provider.managed_credentials or ()),
+        *(provider.env_vars or ()),
+        # Both registries, because neither is complete on its own: PROVIDERS
+        # lists AWS_BEARER_TOKEN_BEDROCK but not AWS_ACCESS_KEY_ID, and
+        # VERTEX_SERVICE_ACCOUNT_JSON but not GOOGLE_APPLICATION_CREDENTIALS.
+        # Deriving from PROVIDERS alone would have *removed* coverage the
+        # hand-kept map already had for those AWS keys.
+        *CLOUD_BYOK_ENV_VARS_BY_LABEL.get(canonical, ()),
+    ):
+        if key not in names:
+            names.append(key)
+    return tuple(names)
+
+
+_UNREGISTERED_FLAT_SECRETS: dict[str, tuple[str, ...]] = {
+    # No ``PROVIDERS`` row to derive from. Keep the count honest: if a row is
+    # added for one of these, delete it here rather than letting the two
+    # sources disagree again.
     "cursor": ("CURSOR_API_KEY",),
-    "deepseek": ("DEEPSEEK_API_KEY",),
-    "nous": ("NOUS_API_KEY",),
-    "tokenhub": ("TOKENHUB_API_KEY",),
-    "minimax": ("MERGECRAFT_CUSTOM_PROVIDER_API_KEY",),
-    "bedrock": (
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_SESSION_TOKEN",
-    ),
-    "vertex": ("GOOGLE_APPLICATION_CREDENTIALS",),
 }
 
 # ``mergecraft auth <name>`` subcommand names that are not themselves registry
@@ -125,7 +156,7 @@ def resolve_provider_secrets(
     from mergecraft.cli.provider_cmd import indexed_credential_keys
 
     canonical = canonical_provider_label(label)
-    names: list[str] = list(_FLAT_SECRETS_BY_LABEL.get(canonical, ()))
+    names: list[str] = list(_flat_secret_names(canonical))
 
     if entry is not None and entry.get("envIndex") is not None:
         for key in indexed_credential_keys(entry):
@@ -215,20 +246,19 @@ def resolve_repo_slug(cwd: Path) -> str:
     whichever repository the operator happens to be standing in.
     """
     import re
-    import subprocess
 
-    from mergecraft.utils.git_hardening import git_argv
+    from mergecraft.utils.git_hardening import read_remote_origin_url
 
     resolved = cwd.resolve()
+    # NOT ``git remote get-url``: that applies checkout-local ``url.*.insteadOf``
+    # rewrites, so a hostile ``.git/config`` can make it return an attacker's
+    # URL. The slug derived here selects the repository ``gh secret delete``
+    # then acts on, so the rewrite would redirect a destructive command at a
+    # repository the operator never named. ``read_remote_origin_url`` reads the
+    # stored config key instead, which no rewrite rule touches.
     try:
-        url = subprocess.check_output(
-            git_argv(["remote", "get-url", "origin"]),
-            cwd=str(resolved),
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        ).strip()
-    except (subprocess.SubprocessError, OSError) as exc:
+        url = read_remote_origin_url(str(resolved))
+    except (RuntimeError, OSError) as exc:
         cli_bail(f"could not read the git origin remote at {resolved}: {exc}")
     match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:

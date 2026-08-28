@@ -115,7 +115,9 @@ def test_resolve_works_for_an_unregistered_builtin() -> None:
     """A provider authed before the registry existed is still resolvable."""
     resolved = _toggle().resolve_provider_secrets("nous", None)
 
-    assert resolved.github == ("NOUS_API_KEY",)
+    # Nous authenticates through the custom-provider key as well; clearing
+    # only NOUS_API_KEY left it usable (mergeCraft review of #521).
+    assert resolved.github == ("NOUS_API_KEY", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY")
     assert bool(resolved) is True
 
 
