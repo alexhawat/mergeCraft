@@ -705,15 +705,6 @@ jobs:
           model: openai/gpt-codex
           push: disabled
           shell: disabled
-          # Codex's Linux platform sandbox is bubblewrap + Landlock, and the
-          # action runs inside a Docker container action — already namespaced —
-          # so bwrap cannot create a nested user namespace and every shell call
-          # dies with "No permissions to create a new namespace" before doing
-          # work. Run 33167090906 lost every command_execution to it.
-          # action.yml documents this exact remedy (#70): the runner IS the
-          # ephemeral isolated container the input asks about. mergeCraft's own
-          # shell (disabled above) and push controls are unaffected either way.
-          codex_sandbox: danger-full-access
           status_checks: enabled
           # Job token, not the PAT — see the matching comment on the Nous step.
           token: ${{ github.token }}
