@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from loguru import logger
 
-from mergecraft.analyzers.finding import FINDING_SHORT_ID_PREFIX, resolve_finding_short_ids
+from mergecraft.analyzers.finding import (
+    FINDING_SHORT_ID_PREFIX,
+    try_resolve_finding_short_ids,
+)
 from mergecraft.mcp.comment import add_footer
 from mergecraft.mcp.convergence_runtime import (
     collateral_by_fingerprint,
@@ -126,6 +129,27 @@ def _publish_fingerprint_batch(
 ) -> list[str]:
     """Collect inline and body-appended fingerprints for one publish batch."""
     return _comment_fingerprints(comments) + _analyzer_publish_fingerprints(ctx)
+
+
+def _publish_fingerprint_paths(
+    comments: list[dict[str, Any]],
+    ctx: ToolContext,
+) -> dict[str, str]:
+    """Map each publish-batch fingerprint to a path, so a skip warning can name it."""
+    paths: dict[str, str] = {}
+    for comment in comments:
+        fingerprint = _comment_fingerprint(comment)
+        if fingerprint:
+            paths.setdefault(fingerprint, str(comment.get("path") or "unknown"))
+    analyzer_run = ctx.tool_state.analyzer_run
+    if analyzer_run is not None:
+        for row in analyzer_run.findings:
+            if not isinstance(row, dict):
+                continue
+            fingerprint = str(row.get("fingerprint", "")).strip()
+            if fingerprint:
+                paths.setdefault(fingerprint, str(row.get("path") or "unknown"))
+    return paths
 
 
 def _body_has_short_id_line(body: str) -> bool:
@@ -453,7 +477,10 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
 
     review_settings = repo_settings_from_context(ctx).review
 
-    publish_short_ids = resolve_finding_short_ids(_publish_fingerprint_batch(comments, ctx))
+    publish_short_ids = try_resolve_finding_short_ids(
+        _publish_fingerprint_batch(comments, ctx),
+        path_by_fingerprint=_publish_fingerprint_paths(comments, ctx),
+    )
     analyzer_run = ctx.tool_state.analyzer_run
     if analyzer_run is not None:
         refresh_analyzer_sections_for_publish(

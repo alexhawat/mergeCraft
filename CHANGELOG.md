@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Render path: skip short-id assignment for non-hex fingerprints instead of
+  aborting review output; export and explain paths stay strict (#493)
+- Cheat-signature lint: narrow ``getattr_tautology`` to ``object()`` targets so
+  legitimate missing-attribute fallback asserts are not flagged; severity stays
+  ``error`` (#501)
+- Coverage ratchet: merge-base lookup failures and lowered-floor comparison
+  failures are mutually exclusive, so honesty tests can assert which guard fired
+  (#503)
+- Coverage ratchet: document that the merge-base lowering guard is PR-only on
+  ``push`` / ``workflow_dispatch``; absolute ``fail_under`` checks still run on
+  all events (#506)
+- Coverage ratchet: pin ``_default_base_branch`` resolution order
+  (``GITHUB_BASE_REF`` → ``GITHUB_REF`` branch → ``pre-0.0.1``) without requiring
+  a git remote (#507)
+- ``indexed_credential_keys`` rejects unsupported ``cloud_chain`` provider labels
+  instead of silently mapping them to Bedrock credential suffixes; the error names
+  the offending label and the supported set (``bedrock``, ``vertex``) (#497)
+- ``scripts/mutate_decision_modules.py``: ``_enumerate_line_mutants`` and
+  ``_apply_mutant`` are importable without reading ``mutation_modules.toml`` at
+  module load; the module map is lazy-loaded on first CLI use (#502)
+- Regression coverage for the enterprise telemetry reset inside
+  ``reset_process_tracer_cache``: leaked ``telemetry: off`` bindings no longer
+  block OTLP ``claim_sink`` after cache reset under xdist (#509)
+
 ### Security
 
 - Review publication refuses a model-supplied pull number or commit SHA that

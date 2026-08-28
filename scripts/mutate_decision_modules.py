@@ -24,6 +24,7 @@ import tokenize
 import tomllib
 import zlib
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,7 +42,11 @@ def _load_module_test_dirs() -> dict[str, tuple[str, ...]]:
     return {module: tuple(tests) for module, tests in modules.items()}
 
 
-MODULE_TEST_DIRS = _load_module_test_dirs()
+@lru_cache(maxsize=1)
+def _module_test_dirs() -> dict[str, tuple[str, ...]]:
+    """Return the module → pytest target map (lazy, cached)."""
+    return _load_module_test_dirs()
+
 
 DEFAULT_MAX_MUTANTS = 12
 DEFAULT_SEED = 42
@@ -362,7 +367,7 @@ def _mutate_module(
 ) -> ModuleResult:
     """Run up to ``max_mutants`` mutants for ``module`` in ``sandbox_root``."""
     canonical_path = resolve_module_path(module)
-    test_dirs = MODULE_TEST_DIRS[module]
+    test_dirs = _module_test_dirs()[module]
     original = canonical_path.read_text(encoding="utf-8")
     candidates = _enumerate_line_mutants(original)
     module_seed_offset = zlib.adler32(module.encode("utf-8"))
@@ -493,15 +498,16 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
     if args.list_modules:
-        for module, targets in sorted(MODULE_TEST_DIRS.items()):
+        for module, targets in sorted(_module_test_dirs().items()):
             print(f"{module}\t{','.join(targets)}")
         return 0
 
-    modules = args.modules or sorted(MODULE_TEST_DIRS)
-    unknown = [m for m in modules if m not in MODULE_TEST_DIRS]
+    module_test_dirs = _module_test_dirs()
+    modules = args.modules or sorted(module_test_dirs)
+    unknown = [m for m in modules if m not in module_test_dirs]
     if unknown:
         print(f"Unknown module(s): {unknown}", file=sys.stderr)
-        print("Known:", ", ".join(sorted(MODULE_TEST_DIRS)), file=sys.stderr)
+        print("Known:", ", ".join(sorted(module_test_dirs)), file=sys.stderr)
         return 2
 
     threshold = _resolve_threshold(args.threshold)
