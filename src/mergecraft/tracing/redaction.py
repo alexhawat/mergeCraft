@@ -189,9 +189,12 @@ def redact_tool_payload(payload: Any) -> str:
     ceiling, and the result is run through :func:`redact_secrets` so embedded
     tokens (``ghp_…`` / ``sk-…`` / bearer headers) cannot leak onto the span.
 
-    Non-string values are stringified via ``json.dumps(default=str)`` so dicts
-    and lists survive. The cap compares UTF-8 byte length, not Python character
-    count. A slightly-over-cap payload keeps a head slice plus a visible
+    Dicts and lists are redacted **as structures** before serialisation, so a
+    deny key such as ``password`` or ``token`` is matched on the key rather
+    than hoped for in the resulting text. Serialising first loses that: a
+    quoted key matches no text pattern and a short value clears no entropy
+    threshold. The cap compares UTF-8 byte length, not Python character count.
+    A slightly-over-cap payload keeps a head slice plus a visible
     ``… <truncated N bytes>`` marker rather than discarding the whole body.
 
     Args:
@@ -205,6 +208,8 @@ def redact_tool_payload(payload: Any) -> str:
     Examples:
         >>> redact_tool_payload({"q": "hello"})
         '{"q": "hello"}'
+        >>> "hunter2" in redact_tool_payload({"password": "hunter2"})
+        False
         >>> redact_tool_payload("Bearer ghp_abcdefghijklmnopqrstuvwxyz1234")
         'Bearer <redacted>'
     """
@@ -213,10 +218,19 @@ def redact_tool_payload(payload: Any) -> str:
     if isinstance(payload, str):
         text = payload
     elif isinstance(payload, (dict, list)):
+        # Redact the *structure*, then serialise. Serialising first destroys
+        # the only signal a deny-key match has: once ``{"password": "hunter2"}``
+        # is a string, the quoted key does not match the text patterns and a
+        # short value clears no entropy threshold, so the secret reached
+        # ``gen_ai.tool.output`` verbatim. ``redact_attrs`` above already
+        # takes this order for span attributes; this path was the exception.
+        # ``redact_structured_value`` recurses, so a deny key nested inside a
+        # list or a sub-dict is caught too.
+        redacted_payload = redact_structured_value(payload, redact_string=redact_secrets)
         try:
-            text = json.dumps(payload, default=str)
+            text = json.dumps(redacted_payload, default=str)
         except (TypeError, ValueError):  # fmt: skip
-            text = str(payload)
+            text = str(redacted_payload)
     elif isinstance(payload, bytes):
         text = payload.decode("utf-8", errors="replace")
     else:
