@@ -93,9 +93,16 @@ def extract_zip_texts(
                 expansion_cap=expansion_cap,
             )
             if not chunk:
+                # Two very different things produce an empty chunk, and reading
+                # them the same way silently dropped data: the budget being
+                # exhausted (stop, and say so), and a member that is genuinely
+                # zero bytes (skip it, the later members still matter). A CI
+                # archive whose first matching entry is an empty log discarded
+                # every log after it, with no truncation marker to show for it.
                 if member_truncated:
                     truncated = True
-                break
+                    break
+                continue
 
             total_read += len(chunk)
             text = chunk.decode("utf-8", errors="replace")

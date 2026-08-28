@@ -243,7 +243,8 @@ def _pinned_network_backend(
     from httpcore._backends.base import NetworkBackend
 
     normalized_hostname = _normalize_host(hostname)
-    address_cycle = itertools.cycle(tuple(addresses))
+    pinned_addresses = tuple(addresses)
+    address_cycle = itertools.cycle(pinned_addresses) if pinned_addresses else None
 
     class PinnedNetworkBackend(NetworkBackend):
         def connect_tcp(
@@ -254,16 +255,43 @@ def _pinned_network_backend(
             local_address: str | None = None,
             socket_options: Any | None = None,
         ) -> Any:
-            connect_host = host
-            if _normalize_host(host) == normalized_hostname:
-                connect_host = str(next(address_cycle))
-            return wrapped.connect_tcp(
-                connect_host,
-                port,
-                timeout=timeout,
-                local_address=local_address,
-                socket_options=socket_options,
+            if address_cycle is None or _normalize_host(host) != normalized_hostname:
+                return wrapped.connect_tcp(
+                    host,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            # Every validated address, not just the first. Resolution can
+            # return several and only some be reachable — a stale AAAA on a
+            # v4-only runner is the ordinary case — and the transport runs
+            # with httpx's default ``retries=0``, so a failure here ends the
+            # request. Pinning turned "the client would have failed over" into
+            # "the download aborts on the first unreachable answer".
+            #
+            # The cycle is retained so its rotation still spreads load across
+            # calls; the attempt count is bounded by the address count so an
+            # all-unreachable set cannot loop.
+            # Seeded rather than left ``None``: an ``assert`` here would be
+            # stripped under ``-O``, and this way an empty loop raises
+            # something a reader can act on instead of an AttributeError.
+            last_error: BaseException = RuntimeError(
+                f"no validated address reachable for {hostname}"
             )
+            for _ in range(len(pinned_addresses)):
+                candidate = str(next(address_cycle))
+                try:
+                    return wrapped.connect_tcp(
+                        candidate,
+                        port,
+                        timeout=timeout,
+                        local_address=local_address,
+                        socket_options=socket_options,
+                    )
+                except (OSError, httpx.TransportError) as exc:
+                    last_error = exc
+            raise last_error
 
         def connect_unix_socket(
             self,
