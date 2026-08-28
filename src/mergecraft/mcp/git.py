@@ -121,9 +121,27 @@ _AUTH_FAILURE_MARKERS: tuple[str, ...] = (
     "could not read username",
     "could not read password",
     "terminal prompts disabled",
+    # git surfaces an HTTP status curl could not resolve as a challenge in this
+    # exact shape: ``fatal: unable to access '<url>': The requested URL
+    # returned error: 403``. A 403 is the *permission* failure — a token that
+    # authenticated but lacks `contents: read`, an unauthorized SSO grant, a
+    # fork — so it is the one most in need of the terminal hint, and matching
+    # only ``403 forbidden`` never saw it. A 401 usually arrives here as a
+    # prompt failure instead (the server sends WWW-Authenticate, git re-asks,
+    # and ``GIT_TERMINAL_PROMPT=0`` kills it), but it takes this shape when the
+    # challenge header is absent, so both codes are matched.
+    "the requested url returned error: 401",
+    "the requested url returned error: 403",
+    # GitHub's own bodies for the same class. Neither carries a status code.
+    "remote: permission to",
+    "write access to repository not granted",
+    "duplicate header",
+    # Retained: older curl builds append the reason phrase to the message above
+    # (``... returned error: 403 Forbidden``), and proxies in front of a remote
+    # emit the bare phrase. Cheap to keep, and dropping them would narrow the
+    # match on exactly the environments hardest to reproduce.
     "403 forbidden",
     "401 unauthorized",
-    "duplicate header",
 )
 
 _AUTH_FAILURE_HINT = (
