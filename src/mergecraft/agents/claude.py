@@ -901,7 +901,47 @@ def _run_claude_once(
             usage=accumulator.to_usage(),
         )
 
-    return AgentResult(success=False, error="claude CLI produced no events")
+    # Zero parsed events is not the same as "nothing went wrong". The CLI can
+    # exit immediately -- a rejected credential, an unrecognised flag, a broken
+    # install -- with its explanation on stderr and a non-zero code. Both are
+    # already in hand here, and both used to be dropped: the run reported only
+    # "claude CLI produced no events", which names a symptom and deletes the
+    # evidence for it. Observed on run 33208727218, where the Claude backstop
+    # engaged correctly and then failed with nothing to diagnose from.
+    #
+    # It also skipped ``is_retryable_cli_failure`` entirely, so a transient
+    # failure was classified non-retryable and the model chain abandoned the
+    # rung after one attempt. Closed issue #445 is the same defect in the codex
+    # driver ("stdout error and turn.failed events are discarded, masking the
+    # real failure"); this is its Claude twin.
+    if stderr_text.strip():
+        for line in stderr_text.strip().splitlines()[-_STDERR_TAIL_LINES:]:
+            logger.warning("[claude] {}", line)
+    if returncode != 0:
+        error = _build_claude_failure_error(
+            returncode=returncode,
+            stderr=stderr_text,
+            model=model,
+            skip_permissions=skip_permissions,
+        )
+    else:
+        # Exited cleanly and said nothing. Rare, and worth distinguishing from
+        # a crash so the reader does not go looking for an exit code.
+        context = _claude_attempt_context(model=model, skip_permissions=skip_permissions)
+        lines = [line for line in stderr_text.strip().splitlines() if line.strip()]
+        detail = (
+            "; stderr tail: " + " | ".join(lines[-_STDERR_TAIL_LINES:])
+            if lines
+            else " (no stderr output)"
+        )
+        error = f"claude CLI produced no events and exited 0 ({context}){detail}"
+    retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
+    return AgentResult(
+        success=False,
+        error=error,
+        usage=accumulator.to_usage(),
+        metadata={"retryable": True} if retryable else {},
+    )
 
 
 def _run_claude_legacy_subprocess(
