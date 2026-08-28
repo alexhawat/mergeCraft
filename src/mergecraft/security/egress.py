@@ -3,6 +3,10 @@
 Network-boundary controls for deployments that can restrict outbound
 traffic. Approval still flows only through ``decide_approval()`` (D14).
 
+``PinnedHTTPTransport`` couples to httpx/httpcore private APIs
+(``HTTPTransport._pool`` and ``ConnectionPool._network_backend``). Pin
+``httpx`` in consuming deployments and re-verify on httpx upgrades.
+
 Exports:
     DEFAULT_EGRESS_ALLOWLIST: Default hosts when egress filtering is on.
     VulnerabilityGateReport: Named scan outcome (not ``make security``).
@@ -10,19 +14,24 @@ Exports:
     container_image_vulnerability_gate: Image scan (Trivy), not Bandit.
     dependency_vulnerability_gate: Dependency advisory scan (pip-audit).
     guard_external_url: Raise when a retrieval URL is an SSRF target.
+    pinned_http_transport: Per-client transport that pins DNS without global hooks.
+    pinned_request_metadata: Host/SNI/connect metadata for a pinned HTTPS request.
 """
 
 from __future__ import annotations
 
-import contextlib
 import ipaddress
+import itertools
 import socket
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+import httpcore
+import httpx
+
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
 DEFAULT_EGRESS_ALLOWLIST: frozenset[str] = frozenset(
     {
@@ -34,9 +43,6 @@ DEFAULT_EGRESS_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
-_BLOCKED_SCHEMES: frozenset[str] = frozenset(
-    {"file", "ftp", "gopher", "dict", "data", "javascript"}
-)
 _METADATA_HOSTS: frozenset[str] = frozenset(
     {
         "metadata.google.internal",
@@ -123,8 +129,6 @@ def _blocked_address(
         return "ssrf: blocked link-local / metadata address"
     if check.is_private or check.is_reserved or check.is_multicast:
         return "ssrf: blocked non-public address"
-    if check == ipaddress.ip_address("169.254.169.254"):
-        return "ssrf: blocked metadata address"
     return None
 
 
@@ -150,25 +154,28 @@ def _resolve_host_addresses(host: str) -> tuple[ipaddress.IPv4Address | ipaddres
     return tuple(addresses)
 
 
-def _ssrf_reason(host: str, scheme: str) -> str | None:
-    if scheme in _BLOCKED_SCHEMES:
-        if scheme == "file":
-            return "ssrf: blocked file: URL"
-        return f"ssrf: blocked scheme {scheme!r}"
+def _validate_retrieval_host(
+    host: str,
+) -> tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]:
+    """SSRF-check ``host`` and return the validated addresses (DNS resolved once)."""
     if not host:
-        return "ssrf: blocked URL with empty host"
+        raise SsrfBlockedError("ssrf: blocked URL with empty host")
     if host in _LOOPBACK_HOSTS:
-        return "ssrf: blocked loopback host"
+        raise SsrfBlockedError("ssrf: blocked loopback host")
     if host in _METADATA_HOSTS:
-        return "ssrf: blocked metadata host"
-    address = _ip_from_host(host)
-    if address is not None:
-        return _blocked_address(address)
-    for resolved in _resolve_host_addresses(host):
+        raise SsrfBlockedError("ssrf: blocked metadata host")
+    literal = _ip_from_host(host)
+    if literal is not None:
+        reason = _blocked_address(literal)
+        if reason is not None:
+            raise SsrfBlockedError(reason)
+        return (literal,)
+    addresses = _resolve_host_addresses(host)
+    for resolved in addresses:
         reason = _blocked_address(resolved)
         if reason is not None:
-            return reason
-    return None
+            raise SsrfBlockedError(reason)
+    return addresses
 
 
 def guard_external_url(url: str) -> str:
@@ -194,67 +201,175 @@ def inspect_external_url(url: str) -> GuardedUrl:
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").casefold()
     host = _normalize_host(parsed.hostname or "")
-    reason = _ssrf_reason(host, scheme)
-    if reason is not None:
-        raise SsrfBlockedError(reason)
     if scheme not in {"http", "https"}:
         raise SsrfBlockedError(f"ssrf: blocked scheme {scheme or 'missing'!r}")
-    literal = _ip_from_host(host)
-    if literal is not None:
-        addresses: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...] = (literal,)
-    else:
-        addresses = _resolve_host_addresses(host)
-        for resolved in addresses:
-            blocked = _blocked_address(resolved)
-            if blocked is not None:
-                raise SsrfBlockedError(blocked)
+    addresses = _validate_retrieval_host(host)
     return GuardedUrl(url=url, host=host, addresses=addresses)
 
 
-@contextlib.contextmanager
-def pin_host_resolution(
-    host: str,
+@dataclass(frozen=True, slots=True)
+class PinnedRequestMetadata:
+    """Connection metadata for a guarded HTTPS request pinned to validated IPs."""
+
+    host: str
+    server_hostname: str
+    connect_host: str
+
+
+def pinned_request_metadata(
+    url: str,
+    *,
+    pinned_ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> PinnedRequestMetadata:
+    """Return Host/SNI/connect targets for a pinned HTTPS request.
+
+    Test and documentation helper: production callers use
+    :func:`pinned_http_transport`, which applies the same Host/SNI pinning.
+    """
+    parsed = urlparse(url)
+    host = _normalize_host(parsed.hostname or "")
+    return PinnedRequestMetadata(
+        host=host,
+        server_hostname=host,
+        connect_host=str(pinned_ip),
+    )
+
+
+# What a *backend* raises, which is not what the transport above it raises.
+# ``httpcore`` maps socket failures to ``httpcore.ConnectError`` /
+# ``ConnectTimeout`` inside ``connect_tcp``, and both derive from plain
+# ``Exception`` — neither ``OSError`` nor ``httpx.TransportError`` catches
+# them. httpx only wraps them into its own hierarchy further up, after this
+# code has already run. Catching the wrong pair meant the failover loop
+# exited on the first real connection failure while passing a test that
+# raised ``OSError``. ``OSError`` is kept for a backend that raises a raw
+# socket error without httpcore's mapping.
+_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
+    httpcore.ConnectError,
+    httpcore.ConnectTimeout,
+    OSError,
+)
+
+
+def _pinned_network_backend(
+    hostname: str,
     addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
-) -> Iterator[None]:
-    """Force ``socket.getaddrinfo`` for ``host`` to the already-validated IPs."""
-    normalized = _normalize_host(host)
-    pinned = tuple(addresses)
-    original = socket.getaddrinfo
+    wrapped: Any,
+) -> Any:
+    """Return a ``NetworkBackend`` that dials validated IPs for ``hostname``."""
+    from httpcore._backends.base import NetworkBackend
 
-    def _pinned(
-        name: str,
-        port: Any,
-        family: int = 0,
-        type: int = 0,
-        proto: int = 0,
-        flags: int = 0,
-    ) -> list[tuple[Any, ...]]:
-        if _normalize_host(str(name)) != normalized:
-            return original(name, port, family, type, proto, flags)
-        port_i = 0
-        if port is not None and str(port).isdigit():
-            port_i = int(port)
-        results: list[tuple[Any, ...]] = []
-        for address in pinned:
-            if isinstance(address, ipaddress.IPv6Address):
-                sock_family = socket.AF_INET6
-                sockaddr: tuple[Any, ...] = (str(address), port_i, 0, 0)
-            else:
-                sock_family = socket.AF_INET
-                sockaddr = (str(address), port_i)
-            if family not in {0, sock_family}:
-                continue
-            results.append((sock_family, type or socket.SOCK_STREAM, proto, "", sockaddr))
-        if not results:
-            msg = f"ssrf: no pinned address for {host!r} (fail-closed)"
-            raise SsrfBlockedError(msg)
-        return results
+    normalized_hostname = _normalize_host(hostname)
+    pinned_addresses = tuple(addresses)
+    address_cycle = itertools.cycle(pinned_addresses) if pinned_addresses else None
 
-    socket.getaddrinfo = _pinned  # type: ignore[assignment]  # — stdlib getaddrinfo is overloaded; pin to validated IPs
-    try:
-        yield
-    finally:
-        socket.getaddrinfo = original
+    class PinnedNetworkBackend(NetworkBackend):
+        def connect_tcp(
+            self,
+            host: str,
+            port: int,
+            timeout: float | None = None,
+            local_address: str | None = None,
+            socket_options: Any | None = None,
+        ) -> Any:
+            if address_cycle is None or _normalize_host(host) != normalized_hostname:
+                return wrapped.connect_tcp(
+                    host,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            # Every validated address, not just the first. Resolution can
+            # return several and only some be reachable — a stale AAAA on a
+            # v4-only runner is the ordinary case — and the transport runs
+            # with httpx's default ``retries=0``, so a failure here ends the
+            # request. Pinning turned "the client would have failed over" into
+            # "the download aborts on the first unreachable answer".
+            #
+            # The cycle is retained so its rotation still spreads load across
+            # calls; the attempt count is bounded by the address count so an
+            # all-unreachable set cannot loop.
+            # Seeded rather than left ``None``: an ``assert`` here would be
+            # stripped under ``-O``, and this way an empty loop raises
+            # something a reader can act on instead of an AttributeError.
+            last_error: BaseException = RuntimeError(
+                f"no validated address reachable for {hostname}"
+            )
+            for _ in range(len(pinned_addresses)):
+                candidate = str(next(address_cycle))
+                try:
+                    return wrapped.connect_tcp(
+                        candidate,
+                        port,
+                        timeout=timeout,
+                        local_address=local_address,
+                        socket_options=socket_options,
+                    )
+                except _CONNECT_ERRORS as exc:
+                    last_error = exc
+            raise last_error
+
+        def connect_unix_socket(
+            self,
+            path: str,
+            timeout: float | None = None,
+            socket_options: Any | None = None,
+        ) -> Any:
+            return wrapped.connect_unix_socket(
+                path,
+                timeout=timeout,
+                socket_options=socket_options,
+            )
+
+        def sleep(self, seconds: float) -> None:
+            wrapped.sleep(seconds)
+
+    return PinnedNetworkBackend()
+
+
+class PinnedHTTPTransport(httpx.HTTPTransport):
+    """HTTP transport that connects to validated IPs but keeps hostname Host/SNI."""
+
+    def __init__(
+        self,
+        hostname: str,
+        addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
+        **kwargs: Any,
+    ) -> None:
+        # Coupled to httpx 0.28.x / httpcore: replaces ConnectionPool._network_backend
+        # after the public HTTPTransport constructor builds the pool.
+        super().__init__(**kwargs)
+        self._server_hostname = _normalize_host(hostname)
+        wrapped_backend = self._pool._network_backend
+        self._pool._network_backend = _pinned_network_backend(
+            self._server_hostname,
+            addresses,
+            wrapped_backend,
+        )
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host or ""
+        if _normalize_host(host) == self._server_hostname:
+            extensions = dict(request.extensions)
+            extensions.setdefault("sni_hostname", host)
+            request = httpx.Request(
+                method=request.method,
+                url=request.url,
+                headers=request.headers,
+                content=request.content,
+                extensions=extensions,
+            )
+        return super().handle_request(request)
+
+
+def pinned_http_transport(
+    hostname: str,
+    addresses: Sequence[ipaddress.IPv4Address | ipaddress.IPv6Address],
+    **kwargs: Any,
+) -> PinnedHTTPTransport:
+    """Build a per-client transport pinned to already-validated addresses."""
+    return PinnedHTTPTransport(hostname, addresses, **kwargs)
 
 
 def dependency_vulnerability_gate() -> VulnerabilityGateReport:

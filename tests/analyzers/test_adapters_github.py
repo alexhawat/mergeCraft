@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import import_module
+from tests.analyzers.support import finding_path_matches, import_module
 
 PLANTED: dict[str, tuple[str, int]] = {
     "actionlint": (".github/workflows/broken.yml", 2),
@@ -32,7 +32,7 @@ def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Pat
         changed_files=[path],
         tier="trusted",
     ).findings
-    matches = [f for f in findings if f.path == path and f.start_line == line]
+    matches = [f for f in findings if finding_path_matches(path, f.path) and f.start_line == line]
     assert matches, f"{tool_id} must catch planted finding at {path}:{line}"
 
 

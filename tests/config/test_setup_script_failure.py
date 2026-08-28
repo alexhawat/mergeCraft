@@ -23,6 +23,7 @@ import json
 from typing import TYPE_CHECKING
 
 from mergecraft.config.settings import RepoSettings
+from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome
 from tests.support.run_main_harness import run_main_for_test
 
@@ -129,7 +130,7 @@ async def test_setup_failure_reason_recorded_on_result_output(
     assert "ghp_abcdef0123456789abcdef" not in error["message"], (
         f"setup-script stderr carrying a GitHub PAT leaked into result payload: {error['message']!r}"
     )
-    assert "[REDACTED]" in error["message"], (
+    assert REDACTION_SENTINEL in error["message"], (
         f"redaction marker missing from result message: {error['message']!r}"
     )
     # And the failure reason itself must still surface (just redacted) — the
@@ -189,9 +190,9 @@ async def test_setup_script_stderr_is_redacted_before_surfacing(
         "OpenAI key from setup-script stderr leaked into the surfaced "
         f"setup_hook_failure: {surfaced_failure!r}"
     )
-    assert "[REDACTED]" in surfaced_failure or "[REDACT" in surfaced_failure, (
+    assert REDACTION_SENTINEL in surfaced_failure, (
         f"redaction marker missing from surfaced setup_hook_failure; "
-        f"expected at least one [REDACTED] marker: {surfaced_failure!r}"
+        f"expected {REDACTION_SENTINEL!r} marker: {surfaced_failure!r}"
     )
     # (2) The same applies to the consumer-facing status check — the
     # failure_reason that ``report_status_checks`` receives is the

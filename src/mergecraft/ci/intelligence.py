@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import re
 import zipfile
-from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.ci.archive_bounds import extract_sarif_documents
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 from mergecraft.scm.github import github_client_from_scm
 
@@ -21,9 +21,6 @@ if TYPE_CHECKING:
 
 _COMMAND_HINT = re.compile(r"(make\s+\S+|uv run\s+\S+|pytest[^\n]*)")
 _GITHUB_PROVIDER = GitHubActionsProvider()
-
-# A consumer's SARIF artifact is a zip; only these members are parsed.
-_SARIF_SUFFIXES = (".sarif", ".sarif.json")
 
 
 def provider_jobs_to_raw_failures(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -147,12 +144,7 @@ def intelligence_from_failures(
 def _sarif_documents(archive: bytes) -> list[str]:
     """Return every SARIF document inside an artifact zip."""
     try:
-        with zipfile.ZipFile(BytesIO(archive)) as zf:
-            return [
-                zf.read(name).decode("utf-8", errors="replace")
-                for name in zf.namelist()
-                if name.lower().endswith(_SARIF_SUFFIXES)
-            ]
+        return extract_sarif_documents(archive)
     except (zipfile.BadZipFile, OSError, KeyError) as err:
         logger.warning("ci evidence: unreadable SARIF artifact archive — {}", err)
         return []

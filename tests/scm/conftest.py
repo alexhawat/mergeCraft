@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+import pytest
+from tests.scm._httpx_compat import install_httpx_latin1_header_values
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -23,6 +25,12 @@ try:  # pragma: no cover — collection guard until DG9.2 lands ``mergecraft.scm
 except ImportError:
     _SCM_AVAILABLE = False
     _scm_protocol_mod = None  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True)
+def _httpx_latin1_header_values() -> None:
+    """Match HTTP latin-1 header bytes when httpx builds TestClient requests."""
+    install_httpx_latin1_header_values()
 
 
 def require_scm() -> None:

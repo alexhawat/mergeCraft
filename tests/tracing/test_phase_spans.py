@@ -29,6 +29,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests.tracing.conftest import as_sink_value
 
 from mergecraft.mcp.verdict import ReviewPhase
 
@@ -63,7 +64,7 @@ def test_each_review_phase_emits_a_span(
     assert len(events) == len(list(ReviewPhase))
     for event, phase in zip(events, ReviewPhase, strict=True):
         assert event.kind == "mergecraft.phase"
-        assert event.attrs["mergecraft.phase.name"] == phase.value
+        assert event.attrs["mergecraft.phase.name"] == as_sink_value(phase.value)
     # Convention 3 — total and non-throwing: the disabled path is a no-op.
     from mergecraft.tracing import NullTracer
 
@@ -93,7 +94,7 @@ def test_a_run_that_never_submits_shows_the_missing_phase(
         signals.emit_phase(tracer, phase=phase)
 
     names = [event.attrs["mergecraft.phase.name"] for event in sink.events]
-    assert names == [phase.value for phase in reached]
-    assert ReviewPhase.SUBMIT.value not in names
-    assert ReviewPhase.PUBLISH.value not in names
-    assert ReviewPhase.COMPLETE.value not in names
+    assert names == [as_sink_value(phase.value) for phase in reached]
+    assert as_sink_value(ReviewPhase.SUBMIT.value) not in names
+    assert as_sink_value(ReviewPhase.PUBLISH.value) not in names
+    assert as_sink_value(ReviewPhase.COMPLETE.value) not in names

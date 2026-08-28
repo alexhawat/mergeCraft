@@ -31,6 +31,7 @@ import hashlib
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from tests.tracing.conftest import as_sink_value
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,7 +81,7 @@ def test_review_id_lands_on_every_span(
 
     assert len(sink.events) == len(kinds)
     for event in sink.events:
-        assert event.attrs["review.id"] == "review-ob1-every-span", (
+        assert event.attrs["review.id"] == as_sink_value("review-ob1-every-span"), (
             f"{event.kind} span closed without the bound review.id"
         )
         assert event.attrs["review.correlation_key"] == ctx.correlation_key, (
@@ -110,7 +111,7 @@ def test_review_id_is_stable_within_a_review(
     events = [*sink_a.events, *sink_b.events]
     assert len(events) == 2
     for event in events:
-        assert event.attrs["review.id"] == "review-ob1-stable"
+        assert event.attrs["review.id"] == as_sink_value("review-ob1-stable")
 
 
 def test_trace_id_is_per_run_not_per_review(
@@ -140,7 +141,9 @@ def test_trace_id_is_per_run_not_per_review(
     assert len(events) == 3
     review_ids = {event.attrs["review.id"] for event in events}
     trace_ids = {event.trace_id for event in events}
-    assert review_ids == {"review-ob1-three-runs"}, "one review must have exactly one review.id"
+    assert review_ids == {as_sink_value("review-ob1-three-runs")}, (
+        "one review must have exactly one review.id"
+    )
     assert len(trace_ids) == 3, "three agent runs of one review must keep three trace_ids"
     assert all(trace_ids), "no run may fall back to an empty trace_id"
 
@@ -208,7 +211,7 @@ def test_correlation_key_is_empty_without_repo_context(
         pass
 
     event_attrs = sink.events[0].attrs
-    assert event_attrs["review.id"] == "review-ob1-local"
+    assert event_attrs["review.id"] == as_sink_value("review-ob1-local")
     assert "review.correlation_key" not in event_attrs
 
 
@@ -231,7 +234,7 @@ def test_context_bound_after_tracer_creation_still_reaches_spans(
         span.close()
 
     assert len(sink.events) == 1
-    assert sink.events[0].attrs["review.id"] == "review-ob1-late-bind"
+    assert sink.events[0].attrs["review.id"] == as_sink_value("review-ob1-late-bind")
 
 
 def test_precedence_explicit_attr_beats_review_context(
@@ -250,7 +253,7 @@ def test_precedence_explicit_attr_beats_review_context(
     ):
         span.set_attribute("review.id", "review-explicit")
 
-    assert sink.events[0].attrs["review.id"] == "review-explicit"
+    assert sink.events[0].attrs["review.id"] == as_sink_value("review-explicit")
 
 
 def test_baseline_attrs_carry_version_and_vcs_fields(

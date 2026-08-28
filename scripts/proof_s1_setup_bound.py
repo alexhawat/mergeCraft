@@ -122,7 +122,7 @@ async def main() -> int:
     transcript.append(f"  elapsed_s     : {rec_a['elapsed_s']}")
     transcript.append(f"  returncode    : {rec_a['returncode']}")
     transcript.append(f"  failure       : {rec_a['setup_hook_failure']}")
-    transcript.append("  redacted?     : yes — ghp_… token replaced by [REDACTED]")
+    transcript.append("  redacted?     : yes — ghp_… token replaced by <redacted>")
 
     # Scenario B — hanging setup with grandchildren, tight timeout.
     transcript.append("")

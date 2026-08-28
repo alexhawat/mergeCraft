@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests.tracing.conftest import as_sink_value
 
 
 @pytest.fixture
@@ -87,7 +88,7 @@ def test_agent_attempt_attrs(memory_sink: Any) -> None:
     events = _events_by_kind(memory_sink["sink"]).get("agent.attempt", [])
     assert len(events) == 1
     attrs = events[0].attrs
-    assert attrs["model.id"] == "anthropic/claude-sonnet"
+    assert attrs["model.id"] == as_sink_value("anthropic/claude-sonnet")
     assert attrs["agent.provider"] == "anthropic"
     assert attrs["gen_ai.system"] == "anthropic"
     assert "agent.cli_argv" in attrs

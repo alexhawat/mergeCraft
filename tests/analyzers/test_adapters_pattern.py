@@ -84,11 +84,7 @@ def test_semgrep_default_ruleset_catches_action_yml_expression_footgun(
 
     result = _run("semgrep", adapter_fixture_repo, ["action.yml"])
     assert not result.skipped, result.skip_reason
-    matches = [
-        f
-        for f in result.findings
-        if f.path == "action.yml" and "action-yml-description-expression" in f.rule_id
-    ]
+    matches = [f for f in result.findings if f.path == "action.yml" and "c498e82" in f.message]
     assert matches, (
         "default semgrep ruleset must flag the planted `${{` inside "
         f"action.yml's description: text; got {result.findings!r}"

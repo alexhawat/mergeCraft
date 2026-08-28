@@ -30,6 +30,8 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.redaction_sentinel import REDACTION_SENTINEL
+from mergecraft.redaction_structured import DENY_KEYS, redact_structured_value
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
 
 if TYPE_CHECKING:
@@ -42,20 +44,20 @@ if TYPE_CHECKING:
 _CLI_SECRET_FLAG = re.compile(
     r"^(?:--|[-/])?(?:token|api[-_]?key|secret|password|auth[-_]?token|access[-_]?token"
     r"|refresh[-_]?token|bearer[-_]?token|client[-_]?secret|private[-_]?key"
-    r"|pat|passwd|LOGFIRE_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY"
+    r"|pat|passwd|LOGFIRE_TOKEN|GITHUB_TOKEN|GH_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY"
     r"|GEMINI_API_KEY|CODEX_AUTH_JSON|NOUS_API_KEY|TOKENHUB_API_KEY)$",
     re.IGNORECASE,
 )
 _CLI_SECRET_VALUE = re.compile(
     r"^(?:sk-|ghp_|gho_|ghu_|ghs_|ghr_|eyJ|AKIA|Bearer\s|Basic\s)", re.IGNORECASE
 )
-REDACTED = "<redacted>"  # canonical sentinel — H4 / W4: was three different sentinels
+REDACTED = REDACTION_SENTINEL
 
 # Inline URL redaction markers — T2 / PR D9. ``redact_url`` masks the
 # credential-bearing portion of a URL while preserving scheme/host/path so
 # the URL stays readable (and parseable) in Logfire rows.
 _TELEGRAM_BOT_RE = re.compile(r"https?://api\.telegram\.org/bot[^/?\s]+")
-_BASIC_AUTH_RE = re.compile(r"https?://([^:@\s]+):[^@\s]+@")
+_BASIC_AUTH_RE = re.compile(r"(https?)://([^:@\s]+):[^@\s]+@")
 _QUERY_TOKEN_KEYS = ("api_key", "access_token", "token", "key", "secret")
 _QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(_QUERY_TOKEN_KEYS) + r")=([^&\s]+)")
 # ``Basic`` covers git-over-HTTPS auth: mergeCraft brokers the GitHub token as
@@ -64,44 +66,15 @@ _QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(_QUERY_TOKEN_KEYS)
 _BEARER_RE = re.compile(r"((?:Bearer|Basic)\s)[A-Za-z0-9+/=._-]{16,}")
 _EMBEDDED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(sk-|ghp_|eyJ)[A-Za-z0-9._-]{8,}")
 
-DENY_KEYS: tuple[str, ...] = (
-    "authorization",
-    "cookie",
-    "api_key",
-    "secret",
-    "password",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "bearer_token",
-    "auth_token",
-)
-
-
-def _redact_value(value: Any) -> Any:
-    """Recursively redact a value: strings via the shared helper, structures recursively."""
-    if isinstance(value, str):
-        return redact_secrets(value)
-    if isinstance(value, dict):
-        return {key: _redact_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_redact_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_redact_value(item) for item in value)
-    return value
-
 
 def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
     """Return a redacted copy of ``attrs`` (never the input dict)."""
     if not attrs:
         return {}
-    out: dict[str, Any] = {}
-    for key, value in attrs.items():
-        if key.lower() in DENY_KEYS:
-            out[key] = REDACTED
-            continue
-        out[key] = _redact_value(value)
-    return out
+    redacted = redact_structured_value(attrs, redact_string=redact_secrets)
+    if not isinstance(redacted, dict):
+        return {}
+    return redacted
 
 
 def redact_event(event: TraceEvent) -> TraceEvent:
@@ -133,7 +106,11 @@ def redact_cli_argv(argv: list[str]) -> str:
     if not argv:
         return ""
     masked: list[str] = []
+    skip_next = False
     for index, token in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
         if "=" in token:
             key, _, val = token.partition("=")
             if _CLI_SECRET_FLAG.match(key):
@@ -145,6 +122,7 @@ def redact_cli_argv(argv: list[str]) -> str:
         if _CLI_SECRET_FLAG.match(token) and index + 1 < len(argv):
             masked.append(token)
             masked.append(REDACTED)
+            skip_next = True
             continue
         if _CLI_SECRET_VALUE.match(token):
             masked.append(REDACTED)
@@ -191,7 +169,7 @@ def redact_url(url: str) -> str:
     # and the URL would lose its ``/bot<token>`` shape.
     url = _TELEGRAM_BOT_RE.sub(lambda _m: _m.group(0).split("/bot", 1)[0] + "/bot" + REDACTED, url)
     # Pattern 2 — basic-auth userinfo.
-    url = _BASIC_AUTH_RE.sub(r"https://\1:" + REDACTED + r"@", url)
+    url = _BASIC_AUTH_RE.sub(r"\1://\2:" + REDACTED + r"@", url)
     # Pattern 3 — known token query params. Per-key replace so non-token
     # params (``x=1``, ``stream=true``) survive untouched (test 6 contract).
     url = _QUERY_TOKEN_RE.sub(lambda m: f"{m.group(1)}={REDACTED}", url)
@@ -207,15 +185,17 @@ def redact_tool_payload(payload: Any) -> str:
     """Redact a tool input/output payload for safe attachment to a span (T1).
 
     The stringified payload is capped at :data:`TRACE_ATTRS_JSON_MAX_BYTES`
-    (64 KiB) so a 1 MB tool body cannot blow past the JSONL ceiling, and the
-    result is run through :func:`redact_secrets` so embedded tokens
-    (``ghp_…`` / ``sk-…`` / bearer headers) cannot leak onto the span.
+    (64 KiB UTF-8 bytes) so a large tool body cannot blow past the JSONL
+    ceiling, and the result is run through :func:`redact_secrets` so embedded
+    tokens (``ghp_…`` / ``sk-…`` / bearer headers) cannot leak onto the span.
 
-    Non-string values are stringified via ``json.dumps(default=str)`` so dicts
-    and lists survive. The cap is applied to the **final** string length, not
-    to any individual field — a single oversized value truncates the whole
-    payload to the sentinel ``"<truncated>"`` so the row stays a single JSON
-    line and Logfire's row inspector still surfaces the marker.
+    Dicts and lists are redacted **as structures** before serialisation, so a
+    deny key such as ``password`` or ``token`` is matched on the key rather
+    than hoped for in the resulting text. Serialising first loses that: a
+    quoted key matches no text pattern and a short value clears no entropy
+    threshold. The cap compares UTF-8 byte length, not Python character count.
+    A slightly-over-cap payload keeps a head slice plus a visible
+    ``… <truncated N bytes>`` marker rather than discarding the whole body.
 
     Args:
         payload: The raw input/output payload from a driver event or the MCP
@@ -228,7 +208,9 @@ def redact_tool_payload(payload: Any) -> str:
     Examples:
         >>> redact_tool_payload({"q": "hello"})
         '{"q": "hello"}'
-        >>> redact_tool_payload("Bearer ghp_longtoken123…")
+        >>> "hunter2" in redact_tool_payload({"password": "hunter2"})
+        False
+        >>> redact_tool_payload("Bearer ghp_abcdefghijklmnopqrstuvwxyz1234")
         'Bearer <redacted>'
     """
     if payload is None:
@@ -236,18 +218,48 @@ def redact_tool_payload(payload: Any) -> str:
     if isinstance(payload, str):
         text = payload
     elif isinstance(payload, (dict, list)):
+        # Redact the *structure*, then serialise. Serialising first destroys
+        # the only signal a deny-key match has: once ``{"password": "hunter2"}``
+        # is a string, the quoted key does not match the text patterns and a
+        # short value clears no entropy threshold, so the secret reached
+        # ``gen_ai.tool.output`` verbatim. ``redact_attrs`` above already
+        # takes this order for span attributes; this path was the exception.
+        # ``redact_structured_value`` recurses, so a deny key nested inside a
+        # list or a sub-dict is caught too.
+        redacted_payload = redact_structured_value(payload, redact_string=redact_secrets)
         try:
-            text = json.dumps(payload, default=str)
+            text = json.dumps(redacted_payload, default=str)
         except (TypeError, ValueError):  # fmt: skip
-            text = str(payload)
+            text = str(redacted_payload)
     elif isinstance(payload, bytes):
         text = payload.decode("utf-8", errors="replace")
     else:
         text = str(payload)
     text = redact_secrets(text)
-    if len(text) > TRACE_ATTRS_JSON_MAX_BYTES:
-        return "<truncated>"
-    return text
+    encoded = text.encode("utf-8")
+    if len(encoded) <= TRACE_ATTRS_JSON_MAX_BYTES:
+        return text
+    return _truncate_utf8_payload(text, encoded, TRACE_ATTRS_JSON_MAX_BYTES)
+
+
+def _truncate_utf8_payload(text: str, encoded: bytes, max_bytes: int) -> str:
+    low = 0
+    high = min(max_bytes, len(encoded))
+    best = ""
+    while low <= high:
+        mid = (low + high) // 2
+        head = encoded[:mid].decode("utf-8", errors="ignore")
+        truncated_bytes = len(encoded) - mid
+        marker = f"… <truncated {truncated_bytes} bytes>"
+        result = head + marker
+        if len(result.encode("utf-8")) <= max_bytes:
+            best = result
+            low = mid + 1
+        else:
+            high = mid - 1
+    if best:
+        return best
+    return f"… <truncated {len(encoded)} bytes>"
 
 
 __all__ = [

@@ -104,7 +104,7 @@ together with their own `setupScript`:
 
 Setup-script stderr that surfaces to the agent prompt **or** the `result`
 payload is passed through `analyzers.redact.redact_secrets` first.
-Secrets (`ghp_…`, `sk-…`, `AKIA…`, etc.) become `[REDACTED]` in both
+Secrets (`ghp_…`, `sk-…`, `AKIA…`, etc.) become `<redacted>` in both
 output channels.
 
 ### Skipping on untrusted tiers (convention 8)

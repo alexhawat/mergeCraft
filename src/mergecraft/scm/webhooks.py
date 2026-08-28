@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -25,7 +27,11 @@ if TYPE_CHECKING:
 
 SUPPORTED_WEBHOOK_PROVIDERS: frozenset[str] = frozenset({"github", "gitlab"})
 
-_MAX_REPLAY_SKEW_SECONDS = 300
+REPLAY_SKEW_SECONDS = 300
+_MAX_DELIVERY_STORE_ENTRIES = 1024
+_MAX_SIGNATURE_HEADER_BYTES = 8192
+_SIGNATURE_HEADER_TOO_LONG_MSG = "webhook signature/header exceeds maximum length"
+
 _REVIEW_ONLY_FORBIDDEN: frozenset[str] = frozenset(
     {
         "commit",
@@ -85,34 +91,63 @@ class _WebhookDeliveryStore:
 
     Missing delivery ids / nonces are fail-closed — callers must not invent
     ``{provider}:anonymous`` keys. Restarting the process clears this map.
+    Entries expire after the replay window and are capped at
+    ``_MAX_DELIVERY_STORE_ENTRIES``; this is per-process only and does not
+    coordinate across uvicorn workers.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._deliveries: dict[str, WebhookProcessResult] = {}
-        self._nonces: set[str] = set()
+        self._deliveries: OrderedDict[str, tuple[WebhookProcessResult, float]] = OrderedDict()
+        self._nonces: OrderedDict[str, float] = OrderedDict()
 
-    def remember_nonce(self, nonce: str) -> None:
+    def _evict(self, ttl_seconds: int) -> None:
+        now = time.monotonic()
+        while self._deliveries:
+            _, inserted_at = next(iter(self._deliveries.values()))
+            if now - inserted_at <= ttl_seconds:
+                break
+            self._deliveries.popitem(last=False)
+        while self._nonces:
+            inserted_at = next(iter(self._nonces.values()))
+            if now - inserted_at <= ttl_seconds:
+                break
+            self._nonces.popitem(last=False)
+        while len(self._deliveries) >= _MAX_DELIVERY_STORE_ENTRIES:
+            self._deliveries.popitem(last=False)
+        while len(self._nonces) >= _MAX_DELIVERY_STORE_ENTRIES:
+            self._nonces.popitem(last=False)
+
+    def remember_nonce(self, nonce: str, *, ttl_seconds: int) -> None:
         if not nonce.strip():
             msg = "missing webhook delivery id"
             raise ValueError(msg)
         with self._lock:
+            self._evict(ttl_seconds)
             if nonce in self._nonces:
                 msg = f"replay of webhook nonce {nonce!r} rejected"
                 raise ValueError(msg)
-            self._nonces.add(nonce)
+            self._nonces[nonce] = time.monotonic()
 
-    def process(self, key: str, result: WebhookProcessResult) -> WebhookProcessResult:
+    def process(
+        self,
+        key: str,
+        result: WebhookProcessResult,
+        *,
+        ttl_seconds: int,
+    ) -> WebhookProcessResult:
         with self._lock:
-            existing = self._deliveries.get(key)
-            if existing is not None:
+            self._evict(ttl_seconds)
+            existing_entry = self._deliveries.get(key)
+            if existing_entry is not None:
+                existing = existing_entry[0]
                 return WebhookProcessResult(
                     result_id=existing.result_id,
                     duplicate=True,
                     provider=existing.provider,
                     event=existing.event,
                 )
-            self._deliveries[key] = result
+            self._deliveries[key] = (result, time.monotonic())
             return result
 
 
@@ -153,6 +188,20 @@ def _format_signature(provider: str, digest: str) -> str:
     return digest
 
 
+def _reject_overlong_signature_value(value: str) -> None:
+    if len(value.encode("utf-8", "surrogateescape")) > _MAX_SIGNATURE_HEADER_BYTES:
+        raise PermissionError(_SIGNATURE_HEADER_TOO_LONG_MSG)
+
+
+def _timing_safe_compare(left: str, right: str) -> bool:
+    _reject_overlong_signature_value(left)
+    _reject_overlong_signature_value(right)
+    return hmac.compare_digest(
+        left.encode("utf-8", "surrogateescape"),
+        right.encode("utf-8", "surrogateescape"),
+    )
+
+
 def sign_webhook_payload(provider: str, *, body: bytes, secret: str) -> dict[str, str]:
     """Return the signature header map for ``body`` under ``secret``.
 
@@ -180,13 +229,13 @@ def verify_webhook_signature(
     name = _require_supported(provider)
     if name == "gitlab":
         presented = _header(headers, _GITLAB_TOKEN_HEADER)
-        if presented is None or not hmac.compare_digest(presented, secret):
+        if presented is None or not _timing_safe_compare(presented, secret):
             msg = "invalid webhook signature (shared-secret mismatch)"
             raise PermissionError(msg)
         return
     expected = _format_signature(name, _hmac_digest(body, secret))
     presented = _header(headers, _signature_header_name(name))
-    if presented is None or not hmac.compare_digest(presented, expected):
+    if presented is None or not _timing_safe_compare(presented, expected):
         msg = "invalid webhook signature (hmac mismatch)"
         raise PermissionError(msg)
 
@@ -220,6 +269,13 @@ def _delivery_nonce(provider: str, headers: dict[str, str]) -> str:
     return nonce
 
 
+def raise_on_replay_skew(received_at_skew_seconds: int) -> None:
+    """Reject webhook deliveries outside the replay freshness window."""
+    if abs(received_at_skew_seconds) > REPLAY_SKEW_SECONDS:
+        msg = f"stale webhook timestamp (skew {received_at_skew_seconds}s exceeds replay window)"
+        raise ValueError(msg)
+
+
 def reject_webhook_replay(
     provider: str,
     *,
@@ -230,10 +286,11 @@ def reject_webhook_replay(
     """Reject a stale timestamp or a reused delivery nonce."""
     _ = body
     name = _require_supported(provider)
-    if received_at_skew_seconds > _MAX_REPLAY_SKEW_SECONDS:
-        msg = f"stale webhook timestamp (skew {received_at_skew_seconds}s exceeds replay window)"
-        raise ValueError(msg)
-    _store.remember_nonce(_delivery_nonce(name, headers))
+    raise_on_replay_skew(received_at_skew_seconds)
+    _store.remember_nonce(
+        _delivery_nonce(name, headers),
+        ttl_seconds=REPLAY_SKEW_SECONDS,
+    )
 
 
 def process_webhook_event(
@@ -256,7 +313,7 @@ def process_webhook_event(
         provider=name,
         event=event,
     )
-    return _store.process(key, result)
+    return _store.process(key, result, ttl_seconds=REPLAY_SKEW_SECONDS)
 
 
 def handle_webhook_rate_limit(
@@ -316,6 +373,7 @@ def assert_review_only_webhook_capabilities(*, requested_capability: str) -> Non
 
 
 __all__ = [
+    "REPLAY_SKEW_SECONDS",
     "SUPPORTED_WEBHOOK_PROVIDERS",
     "ConformingReviewRequest",
     "WebhookProcessResult",
@@ -325,6 +383,7 @@ __all__ = [
     "conforming_review_request",
     "handle_webhook_rate_limit",
     "process_webhook_event",
+    "raise_on_replay_skew",
     "reject_webhook_replay",
     "sign_webhook_payload",
     "verify_webhook_signature",

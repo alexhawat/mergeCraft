@@ -148,6 +148,7 @@ test-otlp-collector: ## OTLP collector integration — spans must leave the proc
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
 coverage-measure: ## Unit tests with coverage report only (no floor/ratchet gates)
+	rm -f coverage.json .coverage .coverage.*
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
 		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
