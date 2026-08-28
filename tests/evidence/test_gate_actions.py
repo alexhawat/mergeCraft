@@ -88,7 +88,9 @@ def _changed_unread_packet() -> MergeEvidencePacket:
 
 def _low_risk_passing_packet() -> MergeEvidencePacket:
     """A packet with no findings, no trajectory findings, low blast radius."""
+    from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
     from mergecraft.classify.blast_radius import BlastRadiusClassification
+    from mergecraft.evidence.packet import Decision
 
     classification = BlastRadiusClassification(
         lane="low",
@@ -97,7 +99,13 @@ def _low_risk_passing_packet() -> MergeEvidencePacket:
         next_action="Eligible for automatic merge after required checks pass.",
         categories=[],
     )
-    return _packet(findings=[], blast_radius=classification)
+    packet = _packet(findings=[], blast_radius=classification)
+    decision = Decision(
+        verdict="success",
+        reason="low-risk passing: trusted structural success with no blockers",
+        decided_by=TRUSTED_PACKET_DECIDED_BY,
+    )
+    return packet.model_copy(update={"decision": decision})
 
 
 def _tool_loop_packet() -> MergeEvidencePacket:

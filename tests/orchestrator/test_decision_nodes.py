@@ -191,9 +191,9 @@ def test_pipeline_owns_control_flow_not_the_model(
         decision_overrides={DecisionNodeKind.triviality_gate: client},
     )
 
-    ran = [record.step_id for record in result.step_records if record.status == "ran"]
-    assert "review" in ran, "pipeline must route on typed answer, not model prose"
-    assert "verify" in ran
+    dispatched = [record.step_id for record in result.step_records if record.status == "dispatched"]
+    assert "review" in dispatched, "pipeline must route on typed answer, not model prose"
+    assert "verify" in dispatched
     assert result.structural_approval is False
 
 
@@ -311,11 +311,11 @@ def test_hybrid_preserves_the_trivial_skip_behaviour(
         diff_path=billing_diff,
         decision_overrides={DecisionNodeKind.triviality_gate: client},
     )
-    billing_ran = {
-        record.step_id for record in billing_result.step_records if record.status == "ran"
+    billing_dispatched = {
+        record.step_id for record in billing_result.step_records if record.status == "dispatched"
     }
-    assert "review" in billing_ran
-    assert "verify" in billing_ran
+    assert "review" in billing_dispatched
+    assert "verify" in billing_dispatched
     assert (
         billing_result.decision_answers[DecisionNodeKind.triviality_gate].outcome == "not_trivial"
     )

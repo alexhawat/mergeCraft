@@ -137,6 +137,9 @@ def _pytest_env(*, repo_root: Path) -> dict[str, str]:
     """Build a subprocess env whose venv resolves to ``repo_root``."""
     env = os.environ.copy()
     venv = repo_root / ".venv"
+    # Sandbox uses an isolated default ``.venv``; do not inherit the dev env
+    # (``UV_PROJECT_ENVIRONMENT=.venv-dev``) from the parent ``make`` process.
+    env.pop("UV_PROJECT_ENVIRONMENT", None)
     env["VIRTUAL_ENV"] = str(venv)
     venv_bin = str(venv / "bin")
     env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"

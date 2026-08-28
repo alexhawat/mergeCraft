@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from tests.support.tool_context import github_client_from_ctx
+from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 from mergecraft.analyzers.budget import DEFERRED_SECTION_HEADING
 from mergecraft.mcp.context import (
@@ -41,7 +41,7 @@ class _RecordingGitHub(GitHubClient):
 
 
 def _tool_ctx(tmp_path: Path) -> ToolContext:
-    return ToolContext(
+    ctx = ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
         payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request")),
@@ -54,6 +54,8 @@ def _tool_ctx(tmp_path: Path) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
     )
+    bind_review_publication_scope(ctx)
+    return ctx
 
 
 def test_merge_recall_preserves_analyzer_overflow_in_deferred_section() -> None:

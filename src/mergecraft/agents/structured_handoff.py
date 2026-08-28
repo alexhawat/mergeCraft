@@ -95,6 +95,7 @@ def verification_plan_from_handoff(
     budget: int,
     learnings_text: str = "",
     repo_root: Path | None = None,
+    changed_paths: frozenset[str] | None = None,
 ) -> object:
     """Queue verifier dispatches from typed handoff findings."""
     return plan_agent_verifications(
@@ -102,6 +103,7 @@ def verification_plan_from_handoff(
         budget=budget,
         learnings_text=learnings_text,
         repo_root=repo_root,
+        changed_paths=changed_paths,
     )
 
 

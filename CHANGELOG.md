@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Review publication refuses a model-supplied pull number or commit SHA that
+  differs from the run's bound scope, and those identity fields are no longer
+  exposed on the ``create_pull_request_review`` tool schema (MCB-05)
+
+### Fixed
+
+- Pipeline predicate validation no longer rejects repository paths whose names
+  contain substrings such as ``subprocess`` or ``import``; the closed regex is
+  the sole control (MCB-29)
+- Pipeline severity predicates include ``Trivial`` and rank unknown severities
+  below every taxonomy member instead of treating them as ``Minor`` (MCB-34)
+- Pipeline preview marks non-executing steps as ``dispatched`` instead of
+  ``ran``, derives terminal verdicts from collected evidence instead of
+  hardcoding ``approve``, and documents ``PipelineExecutor`` as experimental
+  (MCB-37)
+- ``ReviewEngine.run`` clears the timeout callback on every invocation so a
+  second run with ``on_timeout=None`` does not retain the first run's handler
+  (MCB-36)
+- The test suite no longer mutates the project virtualenv: ``make`` exports
+  ``UV_PROJECT_ENVIRONMENT`` to a separate dev env, subprocess ``uv run`` calls
+  pass ``--no-sync``, and a session guard detects interpreter replacement
+  (MCB-23)
+- Gateway credential resolution reads repo settings from the run-scope snapshot
+  instead of reloading ``.mergecraft/config.yaml`` on every model lookup, with a
+  live-load fallback when no snapshot is installed (#496)
+- Gate mode and per-gate action overrides resolve from the run-scope settings
+  snapshot instead of package defaults, and packet assembly in ``enforce`` mode
+  fails closed with a neutral decision when assembly raises (MCB-17)
+- Required static checks block approval unless every row is explicitly
+  ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``,
+  and unknown statuses no longer satisfy the gate (MCB-16)
+- Policy ``required`` enforcement consults ``policy.evidence`` and contributes a
+  blocker until declared evidence is present; ``blocking`` no longer promotes
+  declared ``Minor`` findings to ``Major`` (MCB-12)
+- Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
+  refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
+  explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
+  ``auto_merge`` (MCB-15)
+- Review publication reads repo settings from the run-scope snapshot taken before
+  untrusted execution instead of reloading ``.mergecraft/config.yaml`` from the mutable
+  checkout (MCB-19)
+- Verifier citation paths are confined to the checkout root via
+  ``resolve_confined_path``, rejecting traversal, absolute paths, prefix collisions,
+  and out-of-root symlinks, and must fall inside the changed-path set (MCB-20)
+- Shipped ``operational_readiness`` policy pack rules now declare required
+  evidence keys so ``enforcement: required`` can gate merge (MCB-12)
+
+### Changed
+
+- Policy enforcement modes are pairwise distinguishable: ``advisory`` caps blocking
+  severities to ``Trivial``, ``warning`` and ``required`` preserve declared
+  severity, and ``required`` clears only when ``policy.evidence`` is satisfied
+  (MCB-12)
+
 ### Fixed
 
 - Authenticated git operations against GitHub now work at all. The token was

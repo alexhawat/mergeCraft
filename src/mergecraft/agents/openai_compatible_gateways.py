@@ -14,7 +14,6 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import urlparse
 
@@ -220,9 +219,9 @@ def has_gateway_credentials(provider_id: str) -> bool:
     if has_custom_provider_env():
         return True
     from mergecraft.config.runtime_provider_registry import has_registry_credentials
-    from mergecraft.config.settings import load_repo_settings
+    from mergecraft.config.settings_snapshot import repo_settings_for_gateway_resolvers
 
-    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    settings = repo_settings_for_gateway_resolvers()
     if has_registry_credentials(settings, provider_id.lower()):
         return True
     return _legacy_gateway_preset_credentials(provider_id)
@@ -252,9 +251,9 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
         resolve_legacy_nous_gateway_endpoint,
         resolve_registry_gateway_endpoint,
     )
-    from mergecraft.config.settings import load_repo_settings
+    from mergecraft.config.settings_snapshot import repo_settings_for_gateway_resolvers
 
-    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    settings = repo_settings_for_gateway_resolvers()
     registry_endpoint = resolve_registry_gateway_endpoint(model, settings=settings)
     if registry_endpoint is not None:
         return registry_endpoint
@@ -461,11 +460,9 @@ def _provider_config_for_model(model: str) -> ProviderConfig | None:
 
 def _registry_env_index_for_provider(provider_id: str) -> int | None:
     from mergecraft.config.runtime_provider_registry import lookup_registry_entry
-    from mergecraft.config.settings import load_repo_settings
+    from mergecraft.config.settings_snapshot import repo_settings_for_gateway_resolvers
 
-    entry = lookup_registry_entry(
-        load_repo_settings(root=Path.cwd(), load_learnings_files=False), provider_id
-    )
+    entry = lookup_registry_entry(repo_settings_for_gateway_resolvers(), provider_id)
     if entry is None:
         return None
     return entry.env_index
