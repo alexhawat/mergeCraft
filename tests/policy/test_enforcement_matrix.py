@@ -107,3 +107,52 @@ def test_required_consults_evidence_when_declared() -> None:
     assert evidence_outcome.status == "inconclusive"
     result = _evaluate("required", severity="Major", rule=rule)
     assert result.contributes_blocker or result.finding.severity == "Major"
+
+
+_EVIDENCE_RULE: dict[str, Any] = {"evidence": {"required": ["contract_schema"]}}
+
+
+def _evaluate_required(*, severity: str, available: dict[str, Any]) -> Any:
+    from mergecraft.policy.enforcement import evaluate_enforcement
+
+    violation = dict(_VIOLATION)
+    violation["severity"] = severity
+    violation["rule"] = _EVIDENCE_RULE
+    violation["available_evidence"] = available
+    return evaluate_enforcement("required", violation=violation)
+
+
+@pytest.mark.parametrize("severity", ["Critical", "Major", "Minor", "Trivial"])
+def test_required_blocks_at_every_declared_severity_while_evidence_is_missing(
+    severity: str,
+) -> None:
+    """#554 follow-up: a low declared severity must not let an obligation pass.
+
+    ``required`` is documented to block until evidence is present, and the
+    schema permits ``Minor`` and ``Trivial``. Deriving the flag from severity
+    alone left those two below the gate, so the obligation silently cleared.
+    """
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES, decide_approval
+
+    result = _evaluate_required(severity=severity, available={})
+
+    assert result.finding is not None
+    assert result.finding.severity in BLOCKING_SEVERITIES
+    assert result.contributes_blocker is True
+    assert decide_approval([result.finding], run_succeeded=True, tier="trusted") == "failure"
+
+
+@pytest.mark.parametrize("severity", ["Critical", "Major", "Minor", "Trivial"])
+def test_required_stops_blocking_once_evidence_is_satisfied(severity: str) -> None:
+    """A cleared obligation must not block, at any declared severity."""
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES, decide_approval
+
+    result = _evaluate_required(
+        severity=severity,
+        available={"contract_schema": "docs/api.yaml"},
+    )
+
+    assert result.finding is not None
+    assert result.finding.severity not in BLOCKING_SEVERITIES
+    assert result.contributes_blocker is False
+    assert decide_approval([result.finding], run_succeeded=True, tier="trusted") == "success"

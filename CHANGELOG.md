@@ -13,8 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gate-facing severity is the single authority, so ``contributes_blocker`` is
   read off it rather than computed beside it. ``blocking`` floors a
   non-blocking declared severity to ``Major`` and ``warning`` caps blocking
-  severities to ``Minor``; the declared severity is preserved on the finding's
-  ``evidence`` list. **This reverses MCB-12's "blocking no longer promotes
+  severities to ``Minor``, and ``required`` resolves to ``Major`` while declared
+  evidence is outstanding so a ``Minor`` or ``Trivial`` obligation still blocks;
+  the declared severity is preserved on the finding's ``evidence`` list. **This reverses MCB-12's "blocking no longer promotes
   Minor"**, which left the blocking intent in a field ``decide_approval`` never
   read, so a ``blocking`` rule silently passed while a ``warning`` rule blocked
   (#554)

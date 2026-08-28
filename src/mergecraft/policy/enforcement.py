@@ -69,8 +69,9 @@ def _gate_facing_severity(
     but below the gate. ``required`` preserves the declared value when the rule
     carries no evidence keys, caps blocking severities to ``Trivial`` once
     declared evidence is satisfied so a cleared obligation cannot block, and
-    downgrades ``Critical`` to ``Major`` while evidence is outstanding so the
-    mode stays distinguishable from ``blocking``. ``blocking`` floors a
+    resolves to ``Major`` while evidence is outstanding — flooring a declared
+    ``Minor`` or ``Trivial`` up so the obligation actually blocks, and holding
+    ``Critical`` down so the mode stays distinguishable from ``blocking``. ``blocking`` floors a
     non-blocking declared severity up to ``Major`` so a blocking rule actually
     blocks (#554; reverses MCB-12, which left the intent in an unread flag).
 
@@ -87,7 +88,7 @@ def _gate_facing_severity(
             if _evidence_cleared(violation):
                 if declared in BLOCKING_SEVERITIES:
                     return "Trivial"
-            elif declared == "Critical":
+            else:
                 return "Major"
     if mode == "blocking" and declared not in BLOCKING_SEVERITIES:
         return "Major"
@@ -138,8 +139,8 @@ def evaluate_enforcement(
 
     Blocking intent lives in one place: the gate-facing severity. ``blocking``
     floors a non-blocking declared severity to ``Major`` so the rule blocks.
-    ``required`` consults ``policy.evidence`` and blocks until declared evidence
-    is present. ``warning`` and ``advisory`` never block — ``advisory`` caps
+    ``required`` consults ``policy.evidence`` and blocks at ``Major`` until
+    declared evidence is present, whatever severity the rule declared. ``warning`` and ``advisory`` never block — ``advisory`` caps
     blocking severities to ``Trivial`` and ``warning`` to ``Minor``. The
     declared severity is kept on the finding's ``evidence`` list whenever the
     gate-facing value differs.
