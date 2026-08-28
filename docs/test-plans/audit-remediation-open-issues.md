@@ -1,8 +1,8 @@
 # Test plan — audit remediation open issues (lane D)
 
-Maps GitHub issues in
-[`.ignorelocal/waves/10-audit-remediation-d-open-issues-wave-plan.md`](../../.ignorelocal/waves/10-audit-remediation-d-open-issues-wave-plan.md)
-to RED tests authored in **DQ1** (`wave/dq1-issues-red`).
+Maps the lane D audit-remediation issues below to RED tests authored in **DQ1**
+(`wave/dq1-issues-red`). The wave plan driving that lane is operator-local and is
+not tracked in this repo, so each issue is linked directly instead.
 
 ## Issue → test mapping
 
