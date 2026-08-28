@@ -2,7 +2,7 @@
 
 actions/checkout persists its token as
 ``http.https://github.com/.extraheader = AUTHORIZATION: basic ...`` in
-``.git/config``. mergeCraft's git layer adds its own ``Authorization: Bearer``
+``.git/config``. mergeCraft's git layer adds its own ``Authorization`` header
 (``utils/git_setup.py`` ``git_env_for_token``). ``extraHeader`` is multi-valued
 in git, so the second does not replace the first — both go on one request and
 GitHub answers ``400 Duplicate header: "Authorization"``. ``checkout_pr`` then

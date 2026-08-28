@@ -47,7 +47,7 @@ _CLI_SECRET_FLAG = re.compile(
     re.IGNORECASE,
 )
 _CLI_SECRET_VALUE = re.compile(
-    r"^(?:sk-|ghp_|gho_|ghu_|ghs_|ghr_|eyJ|AKIA|Bearer\s)", re.IGNORECASE
+    r"^(?:sk-|ghp_|gho_|ghu_|ghs_|ghr_|eyJ|AKIA|Bearer\s|Basic\s)", re.IGNORECASE
 )
 REDACTED = "<redacted>"  # canonical sentinel — H4 / W4: was three different sentinels
 
@@ -58,7 +58,10 @@ _TELEGRAM_BOT_RE = re.compile(r"https?://api\.telegram\.org/bot[^/?\s]+")
 _BASIC_AUTH_RE = re.compile(r"https?://([^:@\s]+):[^@\s]+@")
 _QUERY_TOKEN_KEYS = ("api_key", "access_token", "token", "key", "secret")
 _QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(_QUERY_TOKEN_KEYS) + r")=([^&\s]+)")
-_BEARER_RE = re.compile(r"(Bearer\s)[A-Za-z0-9._-]{16,}")
+# ``Basic`` covers git-over-HTTPS auth: mergeCraft brokers the GitHub token as
+# ``Authorization: Basic base64("x-access-token:<token>")`` (issue #544), so the
+# raw ``ghs_``/``gho_`` prefix is no longer visible to the prefix patterns.
+_BEARER_RE = re.compile(r"((?:Bearer|Basic)\s)[A-Za-z0-9+/=._-]{16,}")
 _EMBEDDED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(sk-|ghp_|eyJ)[A-Za-z0-9._-]{8,}")
 
 DENY_KEYS: tuple[str, ...] = (
@@ -158,7 +161,7 @@ def redact_url(url: str) -> str:
     1. ``api.telegram.org/bot<TOKEN>`` → ``api.telegram.org/bot<redacted>``
     2. ``https://user:pass@host`` → ``https://user:<redacted>@host`` (basic auth)
     3. ``?api_key=…&token=…&key=…`` → ``?<key>=<redacted>`` (query token params)
-    4. ``Bearer sk-…`` → ``Bearer <redacted>`` (header values; URL-safe)
+    4. ``Bearer sk-…`` / ``Basic <b64>`` → ``<scheme> <redacted>`` (header values)
     5. Catch-all for embedded ``sk-*`` / ``ghp_*`` / ``eyJ*`` substrings.
 
     The URL stays parseable (D9 "inline, not opaque"): scheme, host, port,
@@ -192,8 +195,8 @@ def redact_url(url: str) -> str:
     # Pattern 3 — known token query params. Per-key replace so non-token
     # params (``x=1``, ``stream=true``) survive untouched (test 6 contract).
     url = _QUERY_TOKEN_RE.sub(lambda m: f"{m.group(1)}={REDACTED}", url)
-    # Pattern 4 — Bearer tokens (header-shaped; URL-safe because URLs do not
-    # embed "Bearer" tokens, but a query string carrying one is still scrubbed).
+    # Pattern 4 — Bearer/Basic credentials (header-shaped; URL-safe because URLs
+    # do not embed them, but a query string carrying one is still scrubbed).
     url = _BEARER_RE.sub(r"\1" + REDACTED, url)
     # Pattern 5 — embedded sk-/ghp-/eyJ substrings (catch-all, mirrors
     # ``redact_cli_argv`` so behaviour stays consistent across surfaces).

@@ -110,6 +110,53 @@ def _origin_remote_url(cwd: str) -> str:
     return read_remote_origin_url(cwd)
 
 
+# Shapes GitHub's git transport returns when the brokered credential is not
+# accepted. Surfacing these as a distinct, non-retryable message keeps the
+# reviewing agent from re-running the same fetch — a rejected token cannot
+# resolve itself across attempts, and the retry loop is what turned a one-line
+# auth bug into multi-million-token runs (issue #544).
+_AUTH_FAILURE_MARKERS: tuple[str, ...] = (
+    "invalid credentials",
+    "authentication failed",
+    "could not read username",
+    "could not read password",
+    "terminal prompts disabled",
+    # git surfaces an HTTP status curl could not resolve as a challenge in this
+    # exact shape: ``fatal: unable to access '<url>': The requested URL
+    # returned error: 403``. A 403 is the *permission* failure — a token that
+    # authenticated but lacks `contents: read`, an unauthorized SSO grant, a
+    # fork — so it is the one most in need of the terminal hint, and matching
+    # only ``403 forbidden`` never saw it. A 401 usually arrives here as a
+    # prompt failure instead (the server sends WWW-Authenticate, git re-asks,
+    # and ``GIT_TERMINAL_PROMPT=0`` kills it), but it takes this shape when the
+    # challenge header is absent, so both codes are matched.
+    "the requested url returned error: 401",
+    "the requested url returned error: 403",
+    # GitHub's own bodies for the same class. Neither carries a status code.
+    "remote: permission to",
+    "write access to repository not granted",
+    "duplicate header",
+    # Retained: older curl builds append the reason phrase to the message above
+    # (``... returned error: 403 Forbidden``), and proxies in front of a remote
+    # emit the bare phrase. Cheap to keep, and dropping them would narrow the
+    # match on exactly the environments hardest to reproduce.
+    "403 forbidden",
+    "401 unauthorized",
+)
+
+_AUTH_FAILURE_HINT = (
+    "git rejected the brokered GitHub credential — the token is missing, expired, "
+    "or lacks access to this repository. Retrying will not help; the run needs a "
+    "valid token (contents: read for fetch, contents: write for push)"
+)
+
+
+def _is_auth_failure(stderr: str) -> bool:
+    """Return whether git's failure output shows a rejected/absent credential."""
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _AUTH_FAILURE_MARKERS)
+
+
 def _run_git(
     args: list[str],
     *,
@@ -135,6 +182,9 @@ def _run_git(
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "").strip()
         msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
+        if _is_auth_failure(err):
+            logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
+            msg = f"{msg}\n{_AUTH_FAILURE_HINT}"
         raise RuntimeError(msg)
     return result.stdout
 
