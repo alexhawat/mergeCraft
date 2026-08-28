@@ -339,6 +339,8 @@ def run_analyzer_pipeline(
                     continue
 
                 if result.skipped:
+                    if result.findings:
+                        raw_findings.extend(result.findings)
                     rows.append(
                         AnalyzerStatusRow(
                             id=manifest.id,

@@ -49,3 +49,45 @@ def test_support_bundle_rejects_non_archive_suffix(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"bundle|archive|tgz"):
         write_support_bundle(tmp_path / "notes.txt", extra_text="ok")
+
+
+def test_support_bundle_resolves_audit_path_from_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``write_support_bundle(..., root=workspace)`` uses ``resolve_audit_log_path``."""
+    from mergecraft.enterprise.audit import (
+        MERGECRAFT_AUDIT_ROOT_ENV,
+        append_audit_event,
+        resolve_audit_log_path,
+    )
+    from mergecraft.enterprise.support_bundle import write_support_bundle
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    audit_root = tmp_path / "audit-root"
+    audit_root.mkdir()
+    monkeypatch.setenv(MERGECRAFT_AUDIT_ROOT_ENV, str(audit_root))
+
+    append_audit_event(
+        {
+            "event_type": "terminal_verdict",
+            "outcome": "approved",
+            "artifact_id": "support-bundle-audit-canary",
+            "context": {},
+        },
+        root=workspace,
+    )
+    audit_path = resolve_audit_log_path(root=workspace)
+    assert audit_path.is_file()
+
+    destination = tmp_path / "bundle.tgz"
+    write_support_bundle(destination, extra_text="ok", root=workspace)
+
+    with tarfile.open(destination, "r:gz") as archive:
+        extracted = archive.extractfile("diagnostics.txt")
+        assert extracted is not None
+        content = extracted.read().decode("utf-8")
+
+    assert f"audit_log: {audit_path}" in content
+    assert "audit_chain: ok" in content

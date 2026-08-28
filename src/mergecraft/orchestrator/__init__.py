@@ -1,11 +1,20 @@
-"""Pluggable orchestrator — declarative pipeline file and deterministic executor (AP6)."""
+"""Pluggable orchestrator — declarative pipeline file and deterministic executor (AP6).
+
+.. warning:: Experimental. ``PipelineExecutor`` is a preview stub for
+   ``mergecraft pipeline show``; it does not run registry agents or gate
+   production reviews.
+"""
 
 from mergecraft.orchestrator.decisions import (
     DecisionNodeKind,
     DecisionSchemaError,
     run_decision_node,
 )
-from mergecraft.orchestrator.executor import PipelineExecutor, PipelineRunResult, StepRecord
+from mergecraft.orchestrator.executor import (
+    PipelineExecutor,  # experimental preview stub
+    PipelineRunResult,
+    StepRecord,
+)
 from mergecraft.orchestrator.pipeline import (
     PipelineDefinition,
     PipelineValidationError,

@@ -76,7 +76,11 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 # - 1.9.0 — ``Decision.verdict`` is the GitHub check-run conclusion
 #   (``success`` / ``failure`` / ``neutral``). Gate actions such as
 #   ``block`` live on ``action``, not ``verdict``.
-PACKET_SCHEMA_VERSION = "1.9.0"
+# - 1.10.0 — gate predicates consult the attached ``decision`` row before
+#   ``decide_action`` runs; untrusted ``decided_by`` values are refused and
+#   a missing or non-success verdict can no longer satisfy ``auto_merge``
+#   (MCB-15 / D7 / D9).
+PACKET_SCHEMA_VERSION = "1.10.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional

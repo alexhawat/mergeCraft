@@ -14,6 +14,7 @@ from mergecraft.cli.provider_cmd import seed_builtin_providers
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.pins import action_pin_minimal
 from mergecraft.review.completed import COMPLETED_REVIEWS_GITIGNORE_LINE
+from mergecraft.utils.git_hardening import git_argv
 
 DEFAULT_CONFIG: dict[str, object] = {
     "models": ["anthropic/claude-sonnet"],
@@ -113,7 +114,7 @@ def _ensure_reviews_gitignore(root: Path) -> None:
 def _parse_git_remote() -> tuple[str, str] | None:
     try:
         url = subprocess.check_output(
-            ["git", "remote", "get-url", "origin"],
+            git_argv(["remote", "get-url", "origin"]),
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()

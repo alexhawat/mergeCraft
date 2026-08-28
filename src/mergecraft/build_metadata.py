@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from mergecraft._build_metadata import __commit__ as _baked_commit
+from mergecraft.utils.git_hardening import git_argv
 
 
 @lru_cache(maxsize=1)
@@ -34,7 +35,7 @@ def _git_head_commit(root: Path) -> str | None:
         return None
     try:
         output = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"],
+            git_argv(["rev-parse", "HEAD"]),
             cwd=root,
             text=True,
             stderr=subprocess.DEVNULL,

@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.config import load_repo_settings
 from mergecraft.findings.agent_adapter import (
     finding_for_publication_validation,
     normalize_agent_findings_via_pipeline,
@@ -303,7 +302,20 @@ def verify_agent_findings_tool(ctx: ToolContext):
 
         state = primary_repo_state(ctx.tool_state)
         repo_root = Path(state.dir)
-        repo_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
+        from mergecraft.config.settings_snapshot import repo_settings_from_context
+
+        repo_settings = repo_settings_from_context(ctx)
+
+        changed_paths: frozenset[str] | None = None
+        if state.diff_path:
+            from mergecraft.utils.diff_paths import changed_paths_from_diff
+
+            diff_text = Path(state.diff_path).read_text(encoding="utf-8")
+            changed_paths = frozenset(changed_paths_from_diff(diff_text))
+        elif state.issue_number is not None or ctx.tool_state.pr_number is not None:
+            # PR-bound runs without a diff cannot attest changed paths — fail closed
+            # so verifier citations cannot cite arbitrary checkout files (MCB-20).
+            changed_paths = frozenset()
 
         findings = [
             AgentFinding(
@@ -345,6 +357,7 @@ def verify_agent_findings_tool(ctx: ToolContext):
             budget=_verification_budget_for_round(repo_settings, ctx),
             learnings_text=_learnings_text(ctx),
             repo_root=repo_root,
+            changed_paths=changed_paths,
         )
         from mergecraft.findings.ledger import (
             ensure_finding_ledger,

@@ -81,6 +81,8 @@ dev = [
     "vulture==2.14",
     # Pinned to analyzers/catalog/typos.yaml — repo-native typo checker (#427).
     "typos==1.32.0",
+    # BR0 / D14b — property-based tests for redaction transforms (BR1 RED suite).
+    "hypothesis==6.165.10",
 ]
 
 [tool.hatch.build.targets.wheel]

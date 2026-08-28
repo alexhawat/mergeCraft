@@ -72,6 +72,7 @@ def _resolved_version(repo_root: Path, binary: str, manifest: AnalyzerManifest) 
 def _repo_tooling_prefixes(repo_root: Path) -> tuple[Path, ...]:
     repo_root = repo_root.resolve()
     prefixes: list[Path] = [
+        repo_root / ".venv-dev" / "bin",
         repo_root / ".venv" / "bin",
         repo_root / "venv" / "bin",
         repo_root / "node_modules" / ".bin",
@@ -114,7 +115,7 @@ def test_find_repo_binary_resolves_after_make_setup(tool_id: str) -> None:
     assert path.is_file()
     assert os.access(path, os.X_OK)
     assert _is_under_repo_tooling(_REPO_ROOT, resolution.path), (
-        f"{binary} must resolve from .venv/bin or */node_modules/.bin, not arbitrary PATH"
+        f"{binary} must resolve from .venv-dev/bin, .venv/bin, or */node_modules/.bin, not arbitrary PATH"
     )
     reported = _resolved_version(_REPO_ROOT, binary, manifest)
     assert _catalog_version_matches(reported, manifest.version), (

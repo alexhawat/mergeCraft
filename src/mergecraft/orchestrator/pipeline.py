@@ -7,30 +7,24 @@ from enum import StrEnum
 from typing import Any, Literal
 
 import yaml
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mergecraft.utils.path_globs import path_matches_glob
 from mergecraft.utils.risk_bands import RISK_BANDS, risk_at_or_above
 
-_SEVERITIES: frozenset[str] = frozenset({"Minor", "Major", "Critical"})
-_SEVERITY_ORDER: dict[str, int] = {"Minor": 0, "Major": 1, "Critical": 2}
-
-_FORBIDDEN_SUBSTRINGS: frozenset[str] = frozenset(
-    {
-        "eval(",
-        "__import__",
-        "exec(",
-        "os.system",
-        "subprocess",
-        "import ",
-    }
-)
+_SEVERITY_ORDER: dict[str, int] = {
+    "Trivial": 0,
+    "Minor": 1,
+    "Major": 2,
+    "Critical": 3,
+}
 
 _ALLOWED_PREDICATE_RE = re.compile(
     r"^(changed_paths matches '([^']*)'"
     r"|risk_band >= (low|medium|high|critical)"
     r"|languages includes ([a-zA-Z0-9_.+-]+)"
-    r"|analyzer_findings\.severity >= (Minor|Major|Critical)"
+    r"|analyzer_findings\.severity >= (Trivial|Minor|Major|Critical)"
     r"|decision\.([a-z_]+) is (trivial|not_trivial))$"
 )
 
@@ -92,20 +86,23 @@ class PipelineDefinition(BaseModel):
         return [step.id for step in self.steps]
 
 
+def _rank(severity: str) -> int:
+    """Return the pipeline predicate rank for ``severity``, or -1 when unknown."""
+    if severity in _SEVERITY_ORDER:
+        return _SEVERITY_ORDER[severity]
+    logger.warning("unknown severity in pipeline predicate: {}", severity)
+    return -1
+
+
 def validate_predicate(expression: str) -> None:
     """Validate a ``when`` predicate against the closed vocabulary (convention 7)."""
     expr = expression.strip()
-    lowered = expr.lower()
-    for forbidden in _FORBIDDEN_SUBSTRINGS:
-        if forbidden in lowered:
-            msg = f"forbidden executable predicate fragment in expression: {forbidden!r}"
-            raise PipelineValidationError(msg)
 
     if not _ALLOWED_PREDICATE_RE.match(expr):
         msg = (
             f"predicate outside closed vocabulary: {expression!r} "
             "(allowed: changed_paths matches, risk_band >=, languages includes, "
-            "analyzer_findings.severity >=)"
+            "analyzer_findings.severity >=, decision.<node> is trivial|not_trivial)"
         )
         raise PipelineValidationError(msg)
 
@@ -155,12 +152,12 @@ def evaluate_predicate(
         findings = signals.get("analyzer_findings", [])
         if not isinstance(findings, list):
             return False
-        max_severity = 0
+        max_severity = -1
         for item in findings:
             if isinstance(item, dict):
                 severity = str(item.get("severity", "Minor"))
-                max_severity = max(max_severity, _SEVERITY_ORDER.get(severity, 0))
-        return max_severity >= _SEVERITY_ORDER.get(threshold, 0)
+                max_severity = max(max_severity, _rank(severity))
+        return max_severity >= _rank(threshold)
 
     msg = f"unknown predicate operator in {expression!r}"
     raise PipelineValidationError(msg)

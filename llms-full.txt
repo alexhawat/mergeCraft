@@ -30,7 +30,8 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 
 <span id="for-agents"></span>
 
-## For LLM / Agents
+<details>
+<summary><b>For LLM / Agents</b></summary>
 
 ### One-line setup prompts
 
@@ -269,6 +270,8 @@ open standard, verified against each tool's own docs on 2026-08-21. `AGENTS.md` 
 repo root is the fallback every one of them reads.</sub>
 
 ---
+</details>
+
 
 ## Problem
 
@@ -544,6 +547,19 @@ make ci         # full pre-merge gate
 - **Examples:** generated under `examples/` — edit templates in `scripts/`, not generated files
 - **MCP:** `mergecraft mcp serve` (HTTP, Bearer-required per-run token on an ephemeral port;
   reviewer role at `/mcp/reviewer`) and `mergecraft mcp list` — see [`docs/cli.md`](docs/cli.md)
+
+**Optional local overrides**
+
+On hosts without Linux namespace isolation (`unshare`), mergeCraft refuses to run the MCP
+shell tool and may refuse root outside the Action image. For local debugging only:
+
+- `MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1` — allow the unsandboxed shell fallback when PID
+  namespace isolation is unavailable.
+- `MERGECRAFT_ALLOW_ROOT=1` — allow running as root outside the Action container image.
+- `MERGECRAFT_PROBE_ALLOW_SUDO=1` — allow the isolation probe to retry with `sudo`
+  when `CI` is unset (local capability probing only).
+
+Do not set these in CI or production workflows.
 
 ## Rules for agents
 
@@ -1657,6 +1673,44 @@ sets). The Action input `logfire-token` maps to the runtime
 `MERGECRAFT_LOGFIRE_TOKEN` env var; the project label is read from
 `MERGECRAFT_TRACING_PROJECT` or the YAML `tracing.sinks[].project` field.
 
+Rather than editing the workflow by hand, let the CLI write it:
+
+```bash
+mergecraft tracing logfire wire-workflow --step all --region eu   # dry-run diff
+mergecraft tracing logfire wire-workflow --step all --region eu --apply
+```
+
+This inserts `tracing: "true"`, `tracing-to: logfire`, and
+`logfire-token: ${{ secrets.LOGFIRE_TOKEN }}` into the step's `with:`, plus
+`MERGECRAFT_TRACING_PROJECT` (and, with `--region`, `MERGECRAFT_TRACING_REGION`)
+into its `env:`. `unwire-workflow` strips all of them.
+
+### Data region
+
+Logfire serves region-specific OTLP ingest hosts — `logfire-us.pydantic.dev`
+and `logfire-eu.pydantic.dev` — and the resolver **defaults to `us`**. A write
+token is regional: `pylf_v{N}_eu_…` belongs to the EU project and its spans are
+rejected by the US host. Set the region explicitly whenever the token is not a
+US one:
+
+| Surface | How |
+| ------- | --- |
+| Local   | `mergecraft tracing logfire enable --region eu` (writes `MERGECRAFT_TRACING_REGION` to `.env`) |
+| Action  | `mergecraft tracing logfire wire-workflow --region eu --apply` (writes it to the step's `env:`) |
+
+Both paths converge on the same precedence layer
+(`cli/tracing_precedence.py`) and the same resolver
+(`tracing/resolve.py`), so the local `.env` shape and the workflow `env:`
+shape carry identical meaning.
+
+### The `[tracing]` extra in the Action image
+
+The Action runs from `Dockerfile`, which installs
+`uv sync --frozen --no-dev --extra tracing`. Without that extra the sink
+factory degrades a `logfire` / `otel` sink to `NullSink` with a warning
+(`src/mergecraft/tracing/sinks.py`) — the workflow looks correctly wired and
+exports nothing. If you fork the image build, keep the extra.
+
 ## Config schema
 
 ```yaml
@@ -1741,7 +1795,7 @@ ever reachable without going through the redaction boundary.
 - A deny-key list (`authorization`, `cookie`, `api_key`, `secret`,
   `password`, `access_token`, `refresh_token`, `id_token`, `bearer_token`,
   `auth_token`) — case-insensitive — replaces matching attribute values
-  with `[REDACTED]`.
+  with `<redacted>`.
 - The shared helper applies to every string attribute value (recursively
   into nested dicts and lists) so `ghp_…` and `sk-…` substrings cannot
   escape.
@@ -2355,6 +2409,44 @@ override inference; unsupported combinations are configuration errors naming bot
 Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
 — the same credential your local coding agent uses. Only set env vars for
 providers you actually use.
+
+### Turning a provider off
+
+`mergecraft provider disable <label>` is the inverse of `auth` / `provider auth`:
+it deletes the provider's GitHub Actions secret and/or blanks its `.env` entry,
+so CI stops selecting that provider on the next run.
+
+```bash
+mergecraft provider disable nous                  # Actions secrets (default)
+mergecraft provider disable nous --scope both     # Actions secrets + local .env
+mergecraft provider enable nous --scope both      # re-authenticate
+```
+
+It takes the same `--scope local|github|both` as `auth` and
+`mergecraft tracing logfire disable`, and the `auth` subcommand names work as
+labels (`provider disable codex` is `provider disable openai`). Both credential
+shapes are cleared — the flat secret the workflow names (`NOUS_API_KEY`) and the
+indexed registry key (`LLM_PROVIDER_<N>_API_KEY`), and every alias a provider
+recognises (`google` clears `GEMINI_API_KEY` *and*
+`GOOGLE_GENERATIVE_AI_API_KEY`) — so a provider is off however it was
+authenticated.
+
+"Disabled" is all-or-nothing. A provider stays usable through **any** of its
+credentials, so the command reports success only when every credential in the
+requested scope reaches the absent-or-blank state; if one cannot be cleared it
+exits non-zero and names what is left. A credential that was already absent
+counts as cleared.
+
+`--cwd` selects the repository the command acts on — both the `.env` it blanks
+and the `origin` whose Actions secrets it deletes — so it is safe to disable a
+provider in a repository you are not standing in. `MERGECRAFT_ENV`, when set,
+still names the `.env` explicitly.
+
+Disable clears **credentials**, not registration: the `providers:` row and its
+`LLM_PROVIDER_<N>` label survive, so `provider enable` re-authenticates the same
+env index. Use `mergecraft provider delete` to drop the registration itself.
+Workflow YAML is never rewritten — the shipped cascade already skips a provider
+whose secret is missing.
 
 > **Codex on container runners:** Codex CLI's nested bubblewrap sandbox fails
 > inside namespaced containers. On an already-isolated ephemeral runner, pass

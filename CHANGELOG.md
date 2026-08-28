@@ -33,8 +33,211 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``reset_process_tracer_cache``: leaked ``telemetry: off`` bindings no longer
   block OTLP ``claim_sink`` after cache reset under xdist (#509)
 
+### Security
+
+- Review publication refuses a model-supplied pull number or commit SHA that
+  differs from the run's bound scope, and those identity fields are no longer
+  exposed on the ``create_pull_request_review`` tool schema (MCB-05)
+
+### Fixed
+
+- Pipeline predicate validation no longer rejects repository paths whose names
+  contain substrings such as ``subprocess`` or ``import``; the closed regex is
+  the sole control (MCB-29)
+- Pipeline severity predicates include ``Trivial`` and rank unknown severities
+  below every taxonomy member instead of treating them as ``Minor`` (MCB-34)
+- Pipeline preview marks non-executing steps as ``dispatched`` instead of
+  ``ran``, derives terminal verdicts from collected evidence instead of
+  hardcoding ``approve``, and documents ``PipelineExecutor`` as experimental
+  (MCB-37)
+- ``ReviewEngine.run`` clears the timeout callback on every invocation so a
+  second run with ``on_timeout=None`` does not retain the first run's handler
+  (MCB-36)
+- The test suite no longer mutates the project virtualenv: ``make`` exports
+  ``UV_PROJECT_ENVIRONMENT`` to a separate dev env, subprocess ``uv run`` calls
+  pass ``--no-sync``, and a session guard detects interpreter replacement
+  (MCB-23)
+- Gateway credential resolution reads repo settings from the run-scope snapshot
+  instead of reloading ``.mergecraft/config.yaml`` on every model lookup, with a
+  live-load fallback when no snapshot is installed (#496)
+- Gate mode and per-gate action overrides resolve from the run-scope settings
+  snapshot instead of package defaults, and packet assembly in ``enforce`` mode
+  fails closed with a neutral decision when assembly raises (MCB-17)
+- Required static checks block approval unless every row is explicitly
+  ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``,
+  and unknown statuses no longer satisfy the gate (MCB-16)
+- Policy ``required`` enforcement consults ``policy.evidence`` and contributes a
+  blocker until declared evidence is present; ``blocking`` no longer promotes
+  declared ``Minor`` findings to ``Major`` (MCB-12)
+- Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
+  refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
+  explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
+  ``auto_merge`` (MCB-15)
+- Review publication reads repo settings from the run-scope snapshot taken before
+  untrusted execution instead of reloading ``.mergecraft/config.yaml`` from the mutable
+  checkout (MCB-19)
+- Verifier citation paths are confined to the checkout root via
+  ``resolve_confined_path``, rejecting traversal, absolute paths, prefix collisions,
+  and out-of-root symlinks, and must fall inside the changed-path set (MCB-20)
+- Shipped ``operational_readiness`` policy pack rules now declare required
+  evidence keys so ``enforcement: required`` can gate merge (MCB-12)
+
 ### Changed
 
+- Policy enforcement modes are pairwise distinguishable: ``advisory`` caps blocking
+  severities to ``Trivial``, ``warning`` and ``required`` preserve declared
+  severity, and ``required`` clears only when ``policy.evidence`` is satisfied
+  (MCB-12)
+
+### Fixed
+
+- Authenticated git operations against GitHub now work at all. The token was
+  brokered as `Authorization: Bearer <token>`, which GitHub's git transport
+  rejects with `remote: invalid credentials` — `Bearer` is the REST API form,
+  and the git endpoint wants HTTP basic auth carrying the token as the password
+  under the documented `x-access-token` username. With `GIT_TERMINAL_PROMPT=0`
+  and the askpass helper shredded at startup, git had nothing to fall back on,
+  so `checkout_pr` failed in every observed review run: reviews either produced
+  no verdict at all or reached one only by improvising around the missing
+  checkout, at 1.5M-4.8M tokens a run. Removing the persisted `actions/checkout`
+  header changed the failure's shape but not its outcome — the header that had
+  been doing the real work was checkout's basic one, and mergeCraft's own
+  scheme never authenticated a fetch either way. A fetch against a local git
+  remote that models GitHub's auth now covers the whole path, so the contract
+  is that authentication succeeds rather than that a header string is present
+- Git failures that come from a rejected or missing credential are reported as
+  terminal instead of as a generic git error, so the reviewing agent stops
+  re-running a fetch that cannot start working across attempts
+- `actions/checkout` no longer persists its token in the review workflow, the
+  shipped hardened example, its template, or the dogfood artifact. A persisted
+  `extraheader = AUTHORIZATION: basic ...` collided with the `Authorization:
+  Bearer ...` that mergeCraft's own git layer added at the time, and
+  `extraHeader` is multi-valued in git, so both headers went on one request and
+  GitHub answered `400 Duplicate header: "Authorization"`. `checkout_pr` failed,
+  review scope was never established, and every terminal verdict was rejected —
+  a review that found 45 issues posted none of them and burned 9.4M tokens
+  against a 5M budget before failing closed. The action authenticates from its
+  own `token:` input, so nothing needs persisting; the comment that claimed otherwise
+  predated lane A giving those tools header auth of their own
+
+
+### Changed
+
+- The self-review Action pin on all three review rungs moves to `b3638ea7`,
+  the merge commit of #545. Every rung at the previous pin sent git the token
+  as `Authorization: Bearer`, which GitHub's git transport rejects, so
+  `checkout_pr` failed on every review and the scope guard then refused the
+  terminal verdict. A review that reached "approve" on #545 could not publish
+  it and the approval gate failed closed with no `mergecraft-approval` check at
+  all. `pull_request_target` resolves this workflow from the default branch, so
+  a self-review PR cannot consume its own fix; the bump has to follow the merge
+- The self-review Action pin on both review steps moved to `b34e9f25`. The
+  previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
+  `src/mergecraft/`, so every review since then ran product code that stale.
+  The image at that pin carries no `[tracing]` extra, which would have left
+  the Logfire wiring exporting nothing, and analyzer defects already fixed by
+  #458 / #459 kept surfacing in Action logs. `make action-pin-check` reports
+  the drift correctly but gates nothing; #532 tracks wiring it into `make ci`
+
+### Security
+
+- Enterprise audit log defaults outside the agent-writable workspace tree
+  (``MERGECRAFT_AUDIT_ROOT`` or ``~/.local/share/mergecraft/audit``); each
+  record is hash-chained and verifiable via ``mergecraft audit verify`` (MCB-21)
+- MCP HTTP startup no longer treats a TCP connect probe as proof of identity;
+  server-thread failures propagate and ``GET /health`` requires a per-run nonce
+  (MCB-27)
+- Trace span redaction no longer leaks CLI secrets after a flagged argv token
+  (MCB-02), applies deny-key scrubbing at every nested depth including
+  list/tuple containers (MCB-03), and redacts Basic-auth material via the
+  shared secret matcher
+- Analyzer JSON and JSONL outputs are structurally redacted by key and value before
+  persist, so non-prefixed secrets in trufflehog-style payloads do not reach
+  prompts or ``.mergecraft/analyzer-runs/``
+- Entropy-based secret redaction uses a length-relative threshold with benign-shape
+  exclusions for git SHAs, hex runs, and identifiers so legitimate code tokens in
+  logs are not mangled unnecessarily
+- OpenCode review sessions deny ``webfetch``, ``external_directory``, and
+  ``edit``; ``read`` is allowlisted to the checkout and evidence scratch
+  instead of ``*`` (MCB-06)
+- Post-run checkout integrity verification via
+  ``security.review_integrity`` hashes the tree before review and fails closed
+  on mutation (MCB-06)
+- Privilege drop gates on action-image identity (``IS_SANDBOX`` + ``/opt/mergecraft``)
+  instead of uid alone; root outside the image refuses with a policy diagnostic and
+  ``MERGECRAFT_ALLOW_ROOT=1`` override (MCB-24 / D11)
+- ``setpriv`` argv carries ``--no-new-privs``, ``--inh-caps=-all``, and
+  ``--bounding-set=-all``; fails closed when ``setpriv`` lacks ``--bounding-set``
+  support (MCB-32)
+- Root-side ``git`` subprocesses route through ``utils/git_hardening.git_argv`` with
+  pinned safe-config keys; ``make lint`` enforces the route via
+  ``scripts/check_git_argv.py`` (MCB-01)
+- ``prepare_workspace_for_agent`` no longer recursively chowns ``.git``; sandbox shell
+  binds every registered workspace root's ``.git`` read-only (MCB-01 / D3)
+- Linked-repo ``_rev_parse_commit`` rejects leading-dash revs, validates pinned SHA
+  shape, and passes ``--end-of-options`` before the rev (MCB-33)
+- Sandbox capability probes run real isolation checks instead of gating on ``CI``;
+  untrusted MCP shell refuses unsandboxed spawn unless
+  ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1`` (MCB-07 / MCB-10)
+- Skipped untrusted analyzers emit a ``Minor`` finding
+  (``rule_id: analyzers.sandbox-unavailable``) naming missing isolation primitives
+  (MCB-09 / D7)
+- ``sudo-unshare`` shell spawn passes env by name via ``--preserve-env`` with
+  ``env=env`` on ``Popen`` so provider keys never appear in argv (MCB-08)
+- Namespaced shell spawn hides every ``git`` binary and binds ``.git`` read-only
+  inside ``unshare`` / ``sudo-unshare`` branches; unsandboxed opt-in runs the raw
+  command without host mount soup (MCB-25)
+- Python ``prep`` installs into ``.mergecraft/prep-scratch/prep-venv`` with a
+  default-deny env allowlist so PR build deps cannot mutate the reviewer's
+  interpreter or inherit provider credentials (MCB-22 / D12)
+
+### Fixed
+
+- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``;
+  ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd()``
+  twice (MCB-22)
+- The Action image now installs the `[tracing]` extra
+  (`uv sync --frozen --no-dev --extra tracing`). Without it, a workflow wired
+  with `tracing-to: logfire` looked correct and exported nothing: the sink
+  factory degrades a `logfire`/`otel` sink to `NullSink` and only logs a
+  warning, so every Action review since tracing shipped silently dropped its
+  spans. Verified against `uv.lock` — omitting the extra uninstalls logfire
+  plus its seven OpenTelemetry dependencies
+- `mergecraft.yml` now actually passes the tracing inputs it has supported
+  since W8.5. Both review steps (Nous and the Codex fallback) carry
+  `tracing: "true"`, `tracing-to: logfire`, `logfire-token`, and the
+  `MERGECRAFT_TRACING_PROJECT` / `MERGECRAFT_TRACING_REGION` env pair
+
+### Added
+
+- `mergecraft tracing logfire wire-workflow --region us|eu` writes
+  `MERGECRAFT_TRACING_REGION` into the wired step's `env:`. Logfire serves
+  region-specific OTLP hosts and the resolver defaults to `us`, so an EU write
+  token (`pylf_v{N}_eu_…`) previously posted spans to the wrong host with no
+  way to fix it short of hand-editing the workflow. The key is owned (so
+  `unwire-workflow` strips it) but not required, keeping a region-less wire
+  complete rather than partial
+
+### Changed
+
+- **Breaking:** enterprise audit events are no longer written to
+  ``.mergecraft/audit.jsonl`` inside the workspace by default; set
+  ``MERGECRAFT_AUDIT_ROOT`` or read from the new default location (MCB-21)
+- Analyzer and trace redactors now emit the shared ``<redacted>`` placeholder from
+  ``mergecraft.redaction_sentinel`` instead of the legacy ``[REDACTED]`` analyzer spelling
+  (MCB-30)
+- Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings` (RC1, RC2)
+- `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget` (RC3, D2)
+- Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
+  `install()` via `action_pin_minimal()` instead of calling it at module import (#403)
+- Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
+  auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
+- `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
+  `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
+- ``probe_capabilities()`` is ``lru_cache``-backed; ``reset_detection_cache()`` clears
+  the probe cache for xdist isolation (MCB-35 / D13)
+- ``detect_sandbox_method()`` and ``network_namespace_available()`` delegate to the
+  cached capability probe with one unified privilege ladder (D5)
 - Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
   Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
   ``docs/agent-loop.md`` parity note, and ``skills/mergecraft/SKILL.md`` public stdio
@@ -43,6 +246,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft provider disable <label>` clears a provider's credentials so GitHub
+  CI stops using it, without hand-editing secrets or workflow YAML. Honours
+  `--scope local|github|both` like `tracing logfire disable`, deletes both the
+  flat Actions secret (`NOUS_API_KEY`) and the indexed registry key
+  (`LLM_PROVIDER_<N>_API_KEY`) plus every alias a provider recognises, treats an
+  already-absent secret as cleared, and leaves the `providers:` registration
+  intact so `provider enable` re-uses the same env index. Reporting is
+  all-or-nothing: one credential that cannot be cleared fails the command rather
+  than claiming the provider is off. `--cwd` selects both destructive targets
+  (the `.env` and the `origin` repository). `auth` names (`codex`, `claude`,
+  `gemini`) resolve onto their registry labels (#520)
+- `mergecraft provider enable <label>` names the authenticate half of that
+  toggle; it delegates to the existing `provider auth` flow (#520)
 - Public MCP product profile: ``mergecraft mcp serve --role public`` mounts six
   semantic tools at ``/mcp/public`` (``review_change``, ``get_review``,
   ``inspect_finding``, ``explain_finding``, ``get_capabilities``, ``get_policy``)
@@ -99,19 +315,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   base branch via ``scripts/check_coverage_delta.py``, distinguishing inherited floor
   breaches from regressions caused by the PR (#432)
 
-### Changed
-
-- Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings` (RC1, RC2)
-- `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget` (RC3, D2)
-- Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
-  `install()` via `action_pin_minimal()` instead of calling it at module import (#403)
-- Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
-  auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
-- `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
-  `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
-
 ### Fixed
 
+- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``;
+  ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd()``
+  twice (MCB-22)
+- ``redact_tool_payload`` caps UTF-8 byte length (not Python character count)
+  and keeps a head slice plus a visible truncation marker instead of discarding
+  the whole body (MCB-28)
+- ``redact_url`` preserves ``http`` vs ``https`` when redacting basic-auth
+  userinfo (MCB-31)
+- ``tests/tracing/test_redaction_doctests.py`` executes
+  ``mergecraft.tracing.redaction`` doctests (D3)
+- SCM webhook ingress encodes signature operands with UTF-8 surrogateescape before
+  ``compare_digest``, so non-ASCII header bytes return 401 instead of raising
+  ``TypeError`` on unauthenticated paths (MCB-11)
+- Webhook redelivery through ``accept_webhook`` returns ``duplicate=True`` instead
+  of rejecting a reused delivery nonce; the replay store is bounded with TTL and
+  ``max_entries``, and far-future skew is rejected with ``abs()`` (MCB-13)
+- CI workflow log and SARIF artifact zip ingestion now use bounded
+  `zf.open(info).read(n)` decompression with per-member, aggregate, member-count,
+  and expansion-ratio caps instead of unbounded `zf.read(name)` (MCB-14)
+- Egress DNS pinning no longer replaces the process-global ``socket.getaddrinfo``;
+  guarded downloads use a per-client ``httpx`` transport that connects to
+  validated IPs while preserving hostname ``Host`` headers and TLS SNI (MCB-18)
 - `validate_http_url` rejects whitespace and control characters anywhere in a
   provider URL, not just at the ends. A stored URL is written verbatim into the
   consumer workflow YAML, so an interior newline could open a new key or step

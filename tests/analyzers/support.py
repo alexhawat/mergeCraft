@@ -16,6 +16,19 @@ MANIFEST_FIXTURES = FIXTURES_DIR / "manifests"
 # W0.8 canary — must never escape any output path (D8).
 CANARY_SECRET = "sk-canary-w0-8-do-not-leak-7f3a9b2c1d4e5f6a"
 
+
+def redacted_text(text: str) -> str:
+    """Text after the analyzer/tracing redaction boundary (BR8 ``<redacted>``)."""
+    from mergecraft.analyzers.redact import redact_secrets
+
+    return redact_secrets(text)
+
+
+def finding_path_matches(expected: str, actual: str) -> bool:
+    """Match repo-relative or redacted parser paths (workflow JSONL vs native stdout)."""
+    return actual == expected or actual == redacted_text(expected)
+
+
 # W0.2 measured inline cap (D14).
 INLINE_BUDGET = 8
 

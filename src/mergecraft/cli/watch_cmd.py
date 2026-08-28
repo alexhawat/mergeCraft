@@ -15,6 +15,7 @@ from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.utils.git_hardening import git_argv
 from mergecraft.yes import OpOptions, op
 
 REQUEST_TIMEOUT_MS = 35_000
@@ -33,7 +34,7 @@ def _get_gh_token() -> str:
 def _parse_git_remote() -> tuple[str, str]:
     try:
         url = subprocess.check_output(
-            ["git", "remote", "get-url", "origin"], text=True, stderr=subprocess.DEVNULL
+            git_argv(["remote", "get-url", "origin"]), text=True, stderr=subprocess.DEVNULL
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
         cli_bail("not a git repository or no 'origin' remote found.")

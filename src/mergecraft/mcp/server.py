@@ -58,6 +58,7 @@ from mergecraft.mcp.ports import (
     MCP_HOST as MCP_HOST,
 )
 from mergecraft.mcp.ports import (
+    attach_serve_error_sink,
     resolve_uvicorn_bind_port,
     wait_for_bound_port,
 )
@@ -86,7 +87,12 @@ from mergecraft.mcp.shared import (
     ToolSpec,
     admits_readonly_role,
 )
-from mergecraft.mcp.shell import detect_sandbox_method, kill_background_tool, shell_tool
+from mergecraft.mcp.shell import (
+    detect_sandbox_method,
+    kill_background_tool,
+    network_namespace_available,
+    shell_tool,
+)
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
 from mergecraft.mcp.verdict import submit_review_verdict_tool
@@ -105,6 +111,18 @@ if TYPE_CHECKING:
     from jsonschema.protocols import Validator
 
     from mergecraft.mcp.context import ToolContext
+
+
+def _shell_tools_available(ctx: ToolContext) -> bool:
+    """Whether restricted shell tools may be registered for this context."""
+    if ctx.payload.shell != "restricted":
+        return False
+    if ctx.trust_tier == "untrusted":
+        if detect_sandbox_method() == "none":
+            return False
+        if not network_namespace_available():
+            return False
+    return True
 
 
 def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None) -> list[ToolSpec]:
@@ -151,9 +169,7 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
     is_standalone = ctx.payload.event.trigger == "unknown"
     if is_standalone or output_schema is not None:
         tools.append(set_output_tool(ctx, output_schema))
-    if ctx.payload.shell == "restricted" and not (
-        ctx.trust_tier == "untrusted" and detect_sandbox_method() == "none"
-    ):
+    if _shell_tools_available(ctx):
         tools.extend([shell_tool(ctx), kill_background_tool(ctx)])
     return tools
 
@@ -333,6 +349,7 @@ def create_mcp_app(
     auth_token: str | None = None,
     orchestrator_auth_token: str | None = None,
     return_tool_errors: bool = False,
+    health_nonce: str | None = None,
 ) -> FastAPI:
     """Build the MCP app.
 
@@ -354,8 +371,13 @@ def create_mcp_app(
     app = FastAPI(title=MERGECRAFT_MCP_NAME, version=package_version())
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health(nonce: str | None = None) -> dict[str, str]:
+        if health_nonce is not None and nonce != health_nonce:
+            return {"status": "forbidden"}
+        payload: dict[str, str] = {"status": "ok"}
+        if health_nonce is not None:
+            payload["nonce"] = health_nonce
+        return payload
 
     @app.post("/webhooks/{provider}")
     async def inbound_webhook(provider: str, request: Request) -> JSONResponse:
@@ -415,10 +437,14 @@ def _serve_in_thread(
     """
     server = uvicorn.Server(config)
     loop = asyncio.new_event_loop()
+    serve_errors = attach_serve_error_sink(server)
 
     def _run() -> None:
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(server.serve())
+        try:
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(server.serve())
+        except BaseException as exc:
+            serve_errors.append(exc)
 
     thread = threading.Thread(target=_run, name=thread_name, daemon=True)
     thread.start()
@@ -440,6 +466,7 @@ def start_mcp_http_server(
     # call orchestrator-only tools after dispatch.
     agent_token = secrets.token_hex(32)
     orchestrator_token = secrets.token_hex(32)
+    health_nonce = secrets.token_hex(16)
     ctx.mcp_auth_token = agent_token
     ctx.mcp_orchestrator_auth_token = orchestrator_token
 
@@ -452,6 +479,7 @@ def start_mcp_http_server(
         role_tools={"reviewer": reviewer_tools, "verifier": verifier_tools},
         auth_token=agent_token,
         orchestrator_auth_token=orchestrator_token,
+        health_nonce=health_nonce,
     )
     bind_port = resolve_uvicorn_bind_port()
     http_config = uvicorn.Config(
@@ -463,7 +491,7 @@ def start_mcp_http_server(
     )
     server, thread, loop = _serve_in_thread(http_config, thread_name="mergecraft-mcp")
 
-    port = wait_for_bound_port(server, bind_port)
+    port = wait_for_bound_port(server, bind_port, health_nonce=health_nonce)
 
     url = f"http://{MCP_HOST}:{port}{MCP_ENDPOINT}"
     ctx.mcp_server_url = url

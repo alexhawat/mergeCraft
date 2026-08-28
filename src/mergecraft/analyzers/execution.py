@@ -24,6 +24,7 @@ from mergecraft.analyzers.sandbox import plan_sandbox
 from mergecraft.analyzers.trust import build_analyzer_env
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 TrustTier = Literal["trusted", "untrusted"]
@@ -187,12 +188,14 @@ def run_argv(
     changed_files: list[str],
     tier: TrustTier,
     scratch_suffix: str = "",
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, list[Finding]]:
     """Provision, sandbox, run, and return raw analyzer output."""
+    from mergecraft.analyzers.sandbox import sandbox_skip_findings
+
     plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
     provisioned = provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
-        return None, plan.reason or f"skipped {manifest.id}: provisioning failed"
+        return None, plan.reason or f"skipped {manifest.id}: provisioning failed", []
 
     finalized = finalize_plan(
         replace(provisioned, argv=argv, cwd=repo_root),
@@ -202,7 +205,7 @@ def run_argv(
         tier=tier,
     )
     if finalized.mode == "skip":
-        return None, finalized.reason or f"skipped {manifest.id}"
+        return None, finalized.reason or f"skipped {manifest.id}", []
 
     scratch = repo_root / ".mergecraft" / "analyzer-scratch" / f"{manifest.id}{scratch_suffix}"
     scratch.mkdir(parents=True, exist_ok=True)
@@ -213,18 +216,18 @@ def run_argv(
         scratch_dir=scratch,
     )
     if not sandbox.can_run:
-        return None, sandbox.skip_reason
+        return None, sandbox.skip_reason, sandbox_skip_findings(sandbox)
 
     outcome = run_plan(finalized, sandbox_context=sandbox.context)
     if not outcome.ran:
-        return None, outcome.output
+        return None, outcome.output, []
 
     raw = (
         Path(outcome.output_path).read_text(encoding="utf-8")
         if outcome.output_path
         else outcome.output
     )
-    return raw, None
+    return raw, None, []
 
 
 __all__ = [

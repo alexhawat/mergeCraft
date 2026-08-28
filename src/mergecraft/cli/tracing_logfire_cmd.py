@@ -40,6 +40,7 @@ from mergecraft.cli.tracing_logfire_wf_yaml import (
     remove_logfire_wiring,
     render_workflow_diff,
 )
+from mergecraft.utils.git_hardening import git_argv
 
 # ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region; it is
 # written by ``tracing logfire enable --region`` and read by the precedence
@@ -81,9 +82,39 @@ def _delete_gh_secret(*, name: str, repo_slug: str) -> bool:
         return False
     if completed.returncode == 0:
         return True
-    # ``gh secret delete`` exits 1 when the secret does not exist — treat as
-    # success because the post-condition we want (secret is absent) holds.
-    return "not found" in (completed.stderr or "").lower()
+    # A non-zero exit is ambiguous. ``gh secret delete`` reports "not found"
+    # both for a secret that does not exist and for a repository the token
+    # cannot see, and telling those apart from stderr is gh-version dependent.
+    # Reading the second as the first is the dangerous direction: the command
+    # prints "disabled" while every credential stays live.
+    #
+    # So verify the post-condition the operator actually asked for — "the
+    # secret is not set" — against the repository's own secret list, rather
+    # than inferring it from an error string.
+    return _github_secret_absent(name=name, repo_slug=repo_slug)
+
+
+def _github_secret_absent(*, name: str, repo_slug: str) -> bool:
+    """Return whether *name* is demonstrably absent from *repo_slug*'s secrets.
+
+    Fails closed: an unreachable repository, an unauthenticated ``gh``, or a
+    listing that cannot be parsed all answer ``False``. Only a listing that
+    succeeds and does not contain *name* proves the secret is gone.
+    """
+    import subprocess
+
+    try:
+        listed = subprocess.run(  # nosec B603 B607 — fixed argv, gh binary
+            ["gh", "secret", "list", "--repo", repo_slug, "--json", "name", "-q", ".[].name"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False
+    if listed.returncode != 0:
+        return False
+    return name not in listed.stdout.split()
 
 
 def _parse_repo_slug() -> str:
@@ -96,7 +127,7 @@ def _parse_repo_slug() -> str:
 
     try:
         url = subprocess.check_output(
-            ["git", "remote", "get-url", "origin"],
+            git_argv(["remote", "get-url", "origin"]),
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
@@ -392,6 +423,16 @@ def logfire_wire_workflow(
             "target a specific step exactly."
         ),
     ),
+    region: str | None = typer.Option(
+        None,
+        "--region",
+        help=(
+            "Logfire data region: 'us' or 'eu'. When given, writes "
+            "``MERGECRAFT_TRACING_REGION`` into the step's ``env:``. Omit to leave "
+            "the key alone (the resolver defaults to 'us'). An EU write token "
+            "(``pylf_v{N}_eu_…``) needs --region eu or spans go to the US host."
+        ),
+    ),
     apply: bool = typer.Option(
         False,
         "--apply",
@@ -415,6 +456,7 @@ def logfire_wire_workflow(
         mergecraft tracing logfire wire-workflow
         mergecraft tracing logfire wire-workflow --workflow .github/workflows/ci.yml \
             --secret LOGFIRE_TOKEN --project-var LOGFIRE_PROJECT --apply
+        mergecraft tracing logfire wire-workflow --region eu --step all --apply
 
     Refuses to add an obvious mismatch (e.g. existing ``tracing-to: otel``)
     unless ``--force`` is given. Dry-run by default; ``--apply`` writes.
@@ -423,6 +465,10 @@ def logfire_wire_workflow(
         cli_bail("--secret cannot be empty")
     if not project_var:
         cli_bail("--project-var cannot be empty")
+    if region is not None:
+        region = region.strip().lower()
+        if region not in _VALID_REGIONS:
+            cli_bail(f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).")
     try:
         proposed = apply_logfire_wiring(
             workflow_path=workflow,
@@ -430,6 +476,7 @@ def logfire_wire_workflow(
             project_var_name=project_var,
             step_selector=step,
             force=force,
+            region=region,
         )
     except LogfireWorkflowError as exc:
         cli_bail(str(exc))

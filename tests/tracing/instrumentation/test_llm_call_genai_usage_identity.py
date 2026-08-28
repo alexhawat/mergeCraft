@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 import httpx
 import pytest
+from tests.tracing.conftest import as_sink_value
 from tests.tracing.instrumentation.conftest import make_agent_usage
 from tests.tracing.streaming.conftest import CLAUDE_TOOL_CALL_STREAM, serialize_stream
 
@@ -79,7 +80,7 @@ def _assert_usage_reported_bundle(
         f"got {attrs.get('gen_ai.system')!r}; keys={sorted(attrs)}"
     )
     if response_model is not None:
-        assert attrs.get("gen_ai.response.model") == response_model, (
+        assert attrs.get("gen_ai.response.model") == as_sink_value(response_model), (
             f"llm.call must stamp gen_ai.response.model when known; "
             f"expected {response_model!r}, got {attrs.get('gen_ai.response.model')!r}"
         )

@@ -7,6 +7,8 @@ RUFF_ADVISORY_FAMILIES ?= BLE,PTH,PERF,C901
 MYPY ?= $(UV) run mypy
 PYTEST ?= $(UV) run pytest
 MERGECRAFT_PYTEST_JOBS ?= auto
+UV_PROJECT_ENVIRONMENT ?= $(CURDIR)/.venv-dev
+export UV_PROJECT_ENVIRONMENT
 MUTATION_ESCAPE_THRESHOLD_PCT ?= 45
 PYTEST_XDIST := $(if $(filter 0,$(MERGECRAFT_PYTEST_JOBS)),,$(if $(MERGECRAFT_PYTEST_JOBS),-n $(MERGECRAFT_PYTEST_JOBS),))
 BANDIT ?= $(UV) run bandit
@@ -73,6 +75,7 @@ lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
+	$(UV) run python scripts/check_git_argv.py
 	$(UV) run python scripts/check_cli_consoles.py
 	$(MAKE) action-yml-hygiene-check
 	$(MAKE) hook-pins-check
@@ -145,6 +148,7 @@ test-otlp-collector: ## OTLP collector integration — spans must leave the proc
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
 coverage-measure: ## Unit tests with coverage report only (no floor/ratchet gates)
+	rm -f coverage.json .coverage .coverage.*
 	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
 		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \

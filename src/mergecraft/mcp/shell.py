@@ -22,6 +22,7 @@ from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import resolve_env
 from mergecraft.utils.workspace import (
     WorkspacePathError,
+    allowed_workspace_roots,
     git_repo_root,
     resolve_allowed_working_directory,
 )
@@ -36,11 +37,18 @@ _detected_sandbox: SandboxMethod | None = None
 _detected_netns: bool | None = None
 
 
-def reset_detection_cache() -> None:
-    """Clear cached sandbox / netns probe results (xdist isolation / #421)."""
+def _reset_shell_detection_globals() -> None:
     global _detected_sandbox, _detected_netns
     _detected_sandbox = None
     _detected_netns = None
+
+
+def reset_detection_cache() -> None:
+    """Clear cached sandbox / netns probe results (xdist isolation / #421)."""
+    _reset_shell_detection_globals()
+    from mergecraft.analyzers.sandbox import probe_capabilities
+
+    probe_capabilities.cache_clear()
 
 
 def get_sandbox_method() -> SandboxMethod:
@@ -51,34 +59,12 @@ def detect_sandbox_method() -> SandboxMethod:
     global _detected_sandbox
     if _detected_sandbox is not None:
         return _detected_sandbox
-    if os.environ.get("CI") != "true":
-        _detected_sandbox = "none"
-        logger.debug("sandbox disabled (CI !== true)")
-        return "none"
-    try:
-        result = subprocess.run(
-            ["unshare", "--pid", "--fork", "--mount-proc", "true"],
-            timeout=5,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            _detected_sandbox = "unshare"
-            return "unshare"
-    except Exception as exc:
-        logger.warning("unshare probe failed: {}", exc)
-    try:
-        result = subprocess.run(
-            ["sudo", "unshare", "--pid", "--fork", "--mount-proc", "true"],
-            timeout=5,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            _detected_sandbox = "sudo-unshare"
-            return "sudo-unshare"
-    except Exception as exc:
-        logger.warning("sudo-unshare probe failed: {}", exc)
+    from mergecraft.analyzers.sandbox import probe_capabilities
+
+    caps = probe_capabilities()
+    if caps.pid_namespace and caps.pid_namespace_method in {"unshare", "sudo-unshare"}:
+        _detected_sandbox = caps.pid_namespace_method
+        return _detected_sandbox
     _detected_sandbox = "none"
     logger.info("PID namespace isolation not available")
     return "none"
@@ -87,26 +73,15 @@ def detect_sandbox_method() -> SandboxMethod:
 def network_namespace_available() -> bool:
     """True when ``unshare --net`` works in this environment (W12.7 / #35).
 
-    Probed once and cached. Outside CI the probe is skipped (same policy as
-    PID namespaces) — callers treat that as unavailable and lean on credential
-    isolation instead.
+    Probed once and cached via :func:`mergecraft.analyzers.sandbox.probe_capabilities`.
     """
     global _detected_netns
     if _detected_netns is not None:
         return _detected_netns
-    if os.environ.get("CI") != "true":
-        _detected_netns = False
-        return False
-    try:
-        result = subprocess.run(
-            ["unshare", "--net", "true"],
-            timeout=5,
-            capture_output=True,
-            check=False,
-        )
-        _detected_netns = result.returncode == 0
-    except OSError:
-        _detected_netns = False
+    from mergecraft.analyzers.sandbox import probe_capabilities
+
+    caps = probe_capabilities()
+    _detected_netns = caps.network_namespace
     if not _detected_netns:
         logger.debug(
             "network namespace unavailable (unshare --net failed); "
@@ -206,8 +181,10 @@ def _is_git_command(command: str) -> bool:
     Defence in depth, not a shell parser: arbitrarily quoted payloads
     (``sh -c 'g''it'``), variable indirection (``G=git; $G status``) and
     ``printf 'git …' | sh`` are out of reach of any token scan, and no addition
-    here changes that. The tool allowlist in the git tools remains the primary
-    control; this only raises the cost of the spellings that cost nothing.
+    here changes that. The load-bearing controls are the read-only ``.git`` bind
+    (``_git_readonly_bind_mounts``) and git-binary hiding inside the namespace
+    (``_git_binary_unavailable_fragment``); the git-tool allowlist is separate.
+    This scan only raises the cost of spellings that cost nothing.
     """
     for segment in _COMMAND_SEGMENT.split(command):
         after_wrapper = False
@@ -253,9 +230,68 @@ def _cap_output(output: str, tmpdir: str) -> str:
 
 def _unshare_argv(*, isolate_network: bool) -> list[str]:
     argv = ["unshare", "--pid", "--fork", "--mount-proc"]
-    if isolate_network and network_namespace_available():
+    if isolate_network and _network_namespace_available():
         argv.append("--net")
     return argv
+
+
+def _network_namespace_available() -> bool:
+    """Whether ``unshare --net`` works; uses the shared capability probe cache."""
+    return network_namespace_available()
+
+
+def _git_readonly_bind_mounts() -> str:
+    """Shell fragment: bind every registered checkout ``.git`` read-only."""
+    parts: list[str] = []
+    seen: set[str] = set()
+    for root in allowed_workspace_roots():
+        key = str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        escaped = key.replace("'", "'\\''")
+        parts.append(
+            f"if [ -e '{escaped}/.git' ]; then "
+            f"mount --bind '{escaped}/.git' '{escaped}/.git' || exit 1; "
+            f"mount -o remount,bind,ro '{escaped}/.git' || exit 1; "
+            "fi; "
+        )
+    if not parts:
+        parts.append(
+            "for _ws in .; do "
+            'if [ -e "$_ws/.git" ]; then '
+            'mount --bind "$_ws/.git" "$_ws/.git" || exit 1; '
+            'mount -o remount,bind,ro "$_ws/.git" || exit 1; '
+            "fi; "
+            "done; "
+        )
+    return "".join(parts)
+
+
+def _git_binary_unavailable_fragment() -> str:
+    """Shell fragment: hide every ``git`` binary from the untrusted namespace."""
+    return (
+        "while IFS= read -r _g; do "
+        'if [ -n "$_g" ] && [ -x "$_g" ]; then mount --bind /dev/null "$_g" || exit 1; fi; '
+        "done < <(type -a git 2>/dev/null | awk '{print $NF}' | sort -u); "
+        'IFS=: read -ra _path_dirs <<< "${PATH:-}"; '
+        'for _dir in "${_path_dirs[@]}"; do '
+        'if [ -x "$_dir/git" ]; then mount --bind /dev/null "$_dir/git" || exit 1; fi; '
+        "done; "
+        '_git_exec="$({ command -v git >/dev/null 2>&1 && git --exec-path 2>/dev/null || true; })"; '
+        'if [ -n "$_git_exec" ] && [ -d "$_git_exec" ]; then '
+        'for _g in "$_git_exec"/git "$_git_exec"/git-*; do '
+        'if [ -x "$_g" ]; then mount --bind /dev/null "$_g" || exit 1; fi; '
+        "done; fi; "
+        "for _g in /usr/lib/git-core/git /usr/lib/git-core/git-* "
+        "/usr/local/libexec/git-core/git /usr/local/libexec/git-core/git-*; do "
+        'if [ -x "$_g" ]; then mount --bind /dev/null "$_g" || exit 1; fi; '
+        "done; "
+    )
+
+
+def _allow_unsandboxed_shell() -> bool:
+    return os.environ.get("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL") == "1"
 
 
 def _spawn_shell(
@@ -268,20 +304,18 @@ def _spawn_shell(
     isolate_network: bool = False,
 ) -> subprocess.Popen[bytes]:
     method = detect_sandbox_method()
-    if os.environ.get("CI") == "true" and method == "none":
+    if isolate_network and not _network_namespace_available():
         msg = (
-            "pid namespace isolation is required in CI but unavailable "
-            "(both unshare and sudo unshare failed)"
+            "network namespace isolation is required but unavailable "
+            "(unshare --net and sudo unshare --net failed)"
         )
         raise RuntimeError(msg)
 
-    repo_root = os.environ.get("GITHUB_WORKSPACE") or primary_repo_state_dir_safe(cwd)
-    escaped = repo_root.replace("'", "'\\''")
     fs_mounts = (
         "mkdir -p /var/lib/mergecraft 2>/dev/null; "
         "mount -t tmpfs tmpfs /var/lib/mergecraft 2>/dev/null; "
-        f"[ -e '{escaped}/.git' ] && mount --bind '{escaped}/.git' '{escaped}/.git' "
-        f"2>/dev/null && mount -o remount,bind,ro '{escaped}/.git' 2>/dev/null; "
+        f"{_git_readonly_bind_mounts()}"
+        f"{_git_binary_unavailable_fragment()}"
     )
     proc_cleanup = (
         "umount /proc 2>/dev/null; umount /proc 2>/dev/null; mount -t proc proc /proc 2>/dev/null;"
@@ -310,22 +344,27 @@ def _spawn_shell(
             start_new_session=True,
         )
     if method == "sudo-unshare":
+        sudo_argv = ["sudo"]
+        if env:
+            sudo_argv.append(f"--preserve-env={','.join(env)}")
+        sudo_argv.extend([*unshare_argv, "bash", "-c", wrapped])
+        # env=env: values stay in the Popen environment, not argv (MCB-08 / D9).
+        # Do not revert to sudo env KEY=val — that leaks secrets into ps(1).
         return subprocess.Popen(
-            [
-                "sudo",
-                "env",
-                *[f"{k}={v}" for k, v in env.items()],
-                *unshare_argv,
-                "bash",
-                "-c",
-                wrapped,
-            ],
+            sudo_argv,
             cwd=cwd,
-            env={},
+            env=env,
             stdout=stdout,
             stderr=stderr,
             start_new_session=True,
         )
+    if not _allow_unsandboxed_shell():
+        msg = (
+            "pid namespace isolation is unavailable and unsandboxed shell is "
+            "refused by default; set MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1 to override"
+        )
+        raise RuntimeError(msg)
+    # Unsandboxed opt-in: run the command directly — no mount/chmod soup on the host.
     return subprocess.Popen(
         ["bash", "-c", command],
         cwd=cwd,

@@ -21,6 +21,12 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 
+def _force_action_image_root(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
+
+
 def test_agent_user_name_default(monkeypatch: MonkeyPatch) -> None:
     """Direct ``agent_user_name`` — defaults to ``mergecraft`` when unset/blank."""
     monkeypatch.delenv("MERGECRAFT_AGENT_USER", raising=False)
@@ -59,7 +65,7 @@ def test_wrap_agent_command_prefixes_setpriv_when_root(
     fake_pwd = MagicMock()
     fake_pwd.getpwnam.return_value = _Pw()
     monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setattr(privilege.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
     wrapped = wrap_agent_command(["codex", "exec"])
@@ -81,7 +87,7 @@ def test_wrap_agent_command_skips_setpriv_when_missing(
     """
     from mergecraft.main import _ConfigurationError
 
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setattr(privilege.shutil, "which", lambda _name: None)
     with pytest.raises(_ConfigurationError, match="setpriv"):
         wrap_agent_command(["gemini", "run"])
@@ -103,7 +109,7 @@ def test_wrap_agent_subprocess_delegates_to_wrap_agent_command(
     fake_pwd = MagicMock()
     fake_pwd.getpwnam.return_value = _Pw()
     monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setattr(privilege.shutil, "which", lambda name: f"/usr/bin/{name}")
     wrapped = wrap_agent_subprocess(["opencode", "serve"])
     assert wrapped[0] == "setpriv"
@@ -146,7 +152,7 @@ def test_prepare_workspace_for_agent_chowns_when_root(
 
     fake_pwd = MagicMock()
     fake_pwd.getpwnam.return_value = _Pw()
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
     monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
     monkeypatch.setattr(privilege.subprocess, "run", _fake_run)
@@ -154,10 +160,10 @@ def test_prepare_workspace_for_agent_chowns_when_root(
     prepare_workspace_for_agent(str(tmp_path))
 
     assert calls, "prepare_workspace_for_agent must chown when root"
-    assert calls[0][0] == "chown"
-    assert calls[0][1] == "-R"
-    assert calls[0][2] == "1001:1001"
-    assert calls[0][3] == str(tmp_path)
+    assert calls[0][0] == "find"
+    assert "chown" in calls[0]
+    assert calls[0][-3] == "1001:1001"
+    assert calls[0][1] == str(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +213,7 @@ def test_agent_subprocess_env_redirects_inherited_home_when_root(
     the runner's original uid), setpriv drops uid/gid but not HOME, and the
     agent CLI then hits EACCES trying to write dotfiles under it.
     """
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
     _install_fake_pwd(monkeypatch, _PwWithHome())
     # /github/home is not owned by uid 1001 in this scenario.
@@ -234,7 +240,7 @@ def test_agent_subprocess_env_preserves_home_already_owned_by_agent_user(
     clobber that back to the passwd home directory, or Gemini's MCP config
     silently stops resolving under the privilege drop.
     """
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
     entry = _PwWithHome()
     _install_fake_pwd(monkeypatch, entry)
@@ -251,7 +257,7 @@ def test_agent_subprocess_env_preserves_home_already_owned_by_agent_user(
 
 def test_agent_subprocess_env_fills_missing_home(monkeypatch: MonkeyPatch) -> None:
     """No ``HOME`` key at all → still filled in with the agent user's real home."""
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
     _install_fake_pwd(monkeypatch, _PwWithHome())
 
@@ -264,7 +270,7 @@ def test_agent_subprocess_env_missing_user_fails_closed(monkeypatch: MonkeyPatch
     """Same fail-closed contract as ``wrap_agent_command`` — missing agent user raises."""
     from mergecraft.main import _ConfigurationError
 
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
 
     import sys
@@ -285,7 +291,7 @@ def test_agent_subprocess_env_uid_zero_fails_closed(monkeypatch: MonkeyPatch) ->
     """Same fail-closed contract — a user resolving to UID/GID 0 raises, not redirects."""
     from mergecraft.main import _ConfigurationError
 
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "mergecraft")
     _install_fake_pwd(monkeypatch, _PwWithHome(uid=0, gid=0))
 
@@ -295,7 +301,7 @@ def test_agent_subprocess_env_uid_zero_fails_closed(monkeypatch: MonkeyPatch) ->
 
 def test_agent_subprocess_env_custom_agent_user_via_env(monkeypatch: MonkeyPatch) -> None:
     """``MERGECRAFT_AGENT_USER`` drives which pwd entry is resolved, same as ``wrap_agent_command``."""
-    monkeypatch.setattr(privilege.os, "getuid", lambda: 0)
+    _force_action_image_root(monkeypatch)
     monkeypatch.setenv("MERGECRAFT_AGENT_USER", "reviewer")
     _install_fake_pwd(
         monkeypatch, _PwWithHome(name="reviewer", uid=1002, gid=1002, home="/home/reviewer")

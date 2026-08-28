@@ -1,9 +1,11 @@
 """Batch HK RED — audit.jsonl producer for audit export (#417).
 
-Pins D10: append-only JSONL at ``.mergecraft/audit.jsonl`` with timestamp,
-event type, decision/outcome, run/artifact ids, and redacted context.
-``load_audit_events`` / ``mergecraft audit export`` stay the read path;
-``policy-audit.json`` remains separate. Implementation lands in W22.
+Pins D10: append-only JSONL with timestamp, event type, decision/outcome,
+run/artifact ids, and redacted context. MCB-21 (BR7): default persistence is
+outside the workspace via ``resolve_audit_log_path``; legacy
+``.mergecraft/audit.jsonl`` is read-only fallback. ``load_audit_events`` /
+``mergecraft audit export`` stay the read path; ``policy-audit.json`` remains
+separate.
 """
 
 from __future__ import annotations
@@ -18,9 +20,12 @@ from typer.testing import CliRunner
 
 from mergecraft.enterprise.audit import (
     AUDIT_IDENTIFIER_FIELDS,
+    AUDIT_LOG_FILENAME,
     AUDIT_STORED_EVENT_FIELDS,
     DEFAULT_AUDIT_REL,
+    MERGECRAFT_AUDIT_ROOT_ENV,
     load_audit_events,
+    resolve_audit_log_path,
 )
 from mergecraft.policy.lifecycle import write_policy_audit
 
@@ -54,8 +59,16 @@ def _require_record_blocking_decision() -> Any:
     return fn
 
 
+@pytest.fixture(autouse=True)
+def _external_audit_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin MCB-21 audit sink under ``MERGECRAFT_AUDIT_ROOT`` for deterministic paths."""
+    audit_root = tmp_path / "audit-root"
+    audit_root.mkdir()
+    monkeypatch.setenv(MERGECRAFT_AUDIT_ROOT_ENV, str(audit_root))
+
+
 def _audit_jsonl_path(root: Path) -> Path:
-    return root / DEFAULT_AUDIT_REL
+    return resolve_audit_log_path(root=root)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -128,8 +141,8 @@ def test_append_audit_event_writes_required_schema_fields(tmp_path: Path) -> Non
     _assert_schema(events[0])
 
 
-def test_append_audit_event_writes_under_default_audit_rel(tmp_path: Path) -> None:
-    """HK417c: producer persists under ``DEFAULT_AUDIT_REL``."""
+def test_append_audit_event_writes_under_external_audit_path(tmp_path: Path) -> None:
+    """HK417c / MCB-21: producer persists outside the workspace audit sink."""
     append = _require_append_audit_event()
     append(
         {
@@ -142,7 +155,9 @@ def test_append_audit_event_writes_under_default_audit_rel(tmp_path: Path) -> No
     )
     path = _audit_jsonl_path(tmp_path)
     assert path.is_file()
-    assert path.parent.name == ".mergecraft"
+    assert path.name == AUDIT_LOG_FILENAME
+    assert path == resolve_audit_log_path(root=tmp_path)
+    assert not (tmp_path / DEFAULT_AUDIT_REL).is_file()
 
 
 def test_append_audit_event_is_append_only(tmp_path: Path) -> None:

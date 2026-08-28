@@ -12,6 +12,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+def as_sink_value(value: str) -> str:
+    """String span attrs as stored by ``MemorySink`` (post-``redact_secrets``)."""
+    from mergecraft.analyzers.redact import redact_secrets
+
+    return redact_secrets(value)
+
+
 @pytest.fixture
 def trace_dir(tmp_path: Path) -> Path:
     return tmp_path / ".mergecraft" / "traces"

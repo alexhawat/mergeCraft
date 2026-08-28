@@ -12,6 +12,12 @@ make setup
 
 Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
 
+`make setup` and all Makefile targets use a dedicated project virtualenv at
+`.venv-dev` (via `UV_PROJECT_ENVIRONMENT` in the Makefile). This keeps the dev
+venv separate from the default `.venv` that `uv sync` would create at the repo
+root, so subprocess test helpers that invoke `uv run` do not mutate the
+environment the test runner itself is using (AG8 / MCB-23).
+
 ## Checks
 
 ```bash

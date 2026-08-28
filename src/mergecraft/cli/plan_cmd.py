@@ -24,6 +24,7 @@ from mergecraft.utils.agent_resolve import (
     resolve_model,
     resolve_runtime_agent,
 )
+from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.offline_diff import materialize_diff
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.source_resolve import SourceResolverSpec, resolve_workspace
@@ -32,7 +33,7 @@ from mergecraft.utils.source_resolve import SourceResolverSpec, resolve_workspac
 def _git_changed_files(repo_root: Path) -> list[str]:
     try:
         completed = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"],
+            git_argv(["diff", "--name-only", "HEAD"]),
             cwd=repo_root,
             capture_output=True,
             text=True,

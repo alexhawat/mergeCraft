@@ -195,6 +195,22 @@ _VERTEX_AGENT_ENV_VARS: tuple[str, ...] = (
 )
 
 
+CLOUD_BYOK_ENV_VARS_BY_LABEL: dict[str, tuple[str, ...]] = {
+    "bedrock": _BEDROCK_AGENT_ENV_VARS,
+    "vertex": _VERTEX_AGENT_ENV_VARS,
+}
+"""Cloud BYOK credentials keyed by provider label.
+
+The same tuples ``build_agent_env`` strips, published so a consumer that must
+clear a provider's credentials cannot miss the cloud half. ``models.PROVIDERS``
+carries a *different* subset for these two providers — it lists
+``AWS_BEARER_TOKEN_BEDROCK`` but not ``AWS_ACCESS_KEY_ID``, and
+``VERTEX_SERVICE_ACCOUNT_JSON`` but not ``GOOGLE_APPLICATION_CREDENTIALS`` — so
+either registry alone leaves a live credential behind. Consolidating the two is
+worth doing; until then, a consumer clearing credentials must union them.
+"""
+
+
 def build_agent_env(
     agent_id: str,
     extras: dict[str, str] | None = None,

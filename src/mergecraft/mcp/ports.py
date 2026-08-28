@@ -13,11 +13,13 @@ must rely on :func:`wait_for_bound_port` polling or an explicit
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import time
 from typing import TYPE_CHECKING
 
+import httpx
 from loguru import logger
 
 if TYPE_CHECKING:
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
 MCP_HOST = "127.0.0.1"
 _DEFAULT_BIND_WAIT_TIMEOUT_S = 2.5
 _DEFAULT_BIND_POLL_INTERVAL_S = 0.05
+_SERVE_ERRORS_ATTR = "mergecraft_serve_errors"
 
 
 def read_env_port() -> int | None:
@@ -119,6 +122,39 @@ def bound_listen_port(server: uvicorn.Server, configured_port: int) -> int:
     return _bound_port_from_uvicorn_server(server, configured_port)
 
 
+def _serve_errors(server: uvicorn.Server) -> list[BaseException]:
+    errors = getattr(server, _SERVE_ERRORS_ATTR, None)
+    if isinstance(errors, list):
+        return errors
+    return []
+
+
+def _raise_serve_error(server: uvicorn.Server) -> None:
+    errors = _serve_errors(server)
+    if not errors:
+        return
+    exc = errors[0]
+    if isinstance(exc, RuntimeError):
+        raise exc
+    if isinstance(exc, OSError):
+        raise exc
+    if isinstance(exc, SystemExit):
+        msg = "MCP HTTP server startup failed"
+        raise RuntimeError(msg) from exc
+    raise RuntimeError(str(exc)) from exc
+
+
+def _health_identity_ok(client: httpx.Client, host: str, port: int, health_nonce: str) -> bool:
+    url = f"http://{host}:{port}/health?nonce={health_nonce}"
+    try:
+        response = client.get(url)
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, json.JSONDecodeError, ValueError):
+        return False
+    return payload.get("status") == "ok" and payload.get("nonce") == health_nonce
+
+
 def wait_for_bound_port(
     server: uvicorn.Server,
     bind_port: int,
@@ -126,23 +162,36 @@ def wait_for_bound_port(
     host: str = MCP_HOST,
     timeout_s: float = _DEFAULT_BIND_WAIT_TIMEOUT_S,
     poll_interval_s: float = _DEFAULT_BIND_POLL_INTERVAL_S,
+    health_nonce: str | None = None,
 ) -> int:
     """Poll until uvicorn binds, returning the resolved listen port."""
-    port = bind_port
     deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if getattr(server, "started", False):
-            try:
-                port = bound_listen_port(server, bind_port)
-            except RuntimeError:
-                pass
-            else:
-                return port
-        if bind_port != 0:
-            try:
-                with socket.create_connection((host, bind_port), timeout=0.1):
-                    return bind_port
-            except OSError:
-                pass
-        time.sleep(poll_interval_s)
-    return bound_listen_port(server, bind_port)
+    with httpx.Client(timeout=0.25) as client:
+        while time.monotonic() < deadline:
+            _raise_serve_error(server)
+            if getattr(server, "started", False):
+                try:
+                    port = bound_listen_port(server, bind_port)
+                except RuntimeError:
+                    pass
+                else:
+                    if health_nonce is not None and not _health_identity_ok(
+                        client, host, port, health_nonce
+                    ):
+                        time.sleep(poll_interval_s)
+                        continue
+                    return port
+            time.sleep(poll_interval_s)
+        _raise_serve_error(server)
+        port = bound_listen_port(server, bind_port)
+        if health_nonce is not None and not _health_identity_ok(client, host, port, health_nonce):
+            msg = "MCP HTTP /health identity check failed"
+            raise RuntimeError(msg)
+        return port
+
+
+def attach_serve_error_sink(server: uvicorn.Server) -> list[BaseException]:
+    """Attach a list on *server* that the serve thread records exceptions into."""
+    errors: list[BaseException] = []
+    setattr(server, _SERVE_ERRORS_ATTR, errors)
+    return errors

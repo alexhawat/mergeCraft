@@ -80,6 +80,7 @@ def _ruff_reports(snippet: str, family: str, tmp_path: Path) -> bool:
         [
             "uv",
             "run",
+            "--no-sync",
             "ruff",
             "check",
             str(source),
