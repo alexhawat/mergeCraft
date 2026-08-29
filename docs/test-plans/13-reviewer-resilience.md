@@ -12,6 +12,12 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | Removed `@pytest.mark.xfail` from 9 ergonomics tests | W3 git verb/config allowlist landed; tests pass without xfail |
 | `test_checkout_pr_parameter_aliases_resolve_to_pull_number` | Already green; no xfail was present |
 
+## W8 reconciliation (post-`519a2f3b`)
+
+| Fix | Rationale |
+| --- | --- |
+| Removed `@pytest.mark.xfail` from 4 decorators covering 5 environment tests | W8 bubblewrap hint once + `::warning::`, `checkov`/`yamllint` catalog `declared_unavailability`, and `make catalog-check` provisioning rows landed |
+
 ## W7 reconciliation (post-`694f4d51`)
 
 | Fix | Rationale |

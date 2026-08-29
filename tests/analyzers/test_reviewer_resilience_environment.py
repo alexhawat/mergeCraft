@@ -1,4 +1,4 @@
-"""Plan 13 W1.6 — environment honesty RED contracts (green after W8)."""
+"""Plan 13 W1.6 — environment honesty contracts (W8 green)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ def _command_execution_item(signature: str) -> dict[str, Any]:
     }
 
 
-@pytest.mark.xfail(reason="green after W8: USER_NAMESPACE_FAILURES hint once", strict=False)
 def test_user_namespace_failure_hint_logged_once_on_exit_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -47,7 +46,6 @@ def test_user_namespace_failure_hint_logged_once_on_exit_zero(
     assert len(hints) == 1
 
 
-@pytest.mark.xfail(reason="green after W8: emit one ::warning:: for bwrap failures", strict=False)
 def test_user_namespace_failure_emits_single_github_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -66,9 +64,6 @@ def test_user_namespace_failure_emits_single_github_warning(
 
 
 @pytest.mark.parametrize("analyzer_id", ["checkov", "yamllint"])
-@pytest.mark.xfail(
-    reason="green after W8: catalog-level unavailability on linux-amd64", strict=False
-)
 def test_managed_analyzers_declared_unavailable_on_linux_amd64(analyzer_id: str) -> None:
     from mergecraft.analyzers.registry import get_manifest
 
@@ -79,7 +74,6 @@ def test_managed_analyzers_declared_unavailable_on_linux_amd64(analyzer_id: str)
     assert "linux" in reason.lower() or "linux-amd64" in reason.lower()
 
 
-@pytest.mark.xfail(reason="green after W8: catalog-check passes with corrected rows", strict=False)
 def test_catalog_check_passes_after_provisioning_fix() -> None:
     proc = subprocess.run(
         ["make", "catalog-check"],
