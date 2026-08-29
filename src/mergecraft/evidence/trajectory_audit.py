@@ -13,9 +13,10 @@ is *unknown*, not *unread*. Every check that could fire on missing signal is
 gated on the record carrying that signal at all (``read_coverage``, a non-empty
 ``tool_calls``). A check that fires on every run is noise, not a gate.
 
-**No second gate path.** The checks emit ordinary :class:`Finding` rows that go
-into the packet's finding list, where ``decide_approval()`` — the one gate —
-reads them (D5, W8.2). Nothing here decides anything.
+**No second gate path.** The checks emit ordinary :class:`Finding` rows with
+``scope="run"`` into the packet's ``run_health`` section (D2, W7). They attest
+that the review ran but never block approval. ``decide_approval()`` — the one
+gate — reads change-scoped findings only. Nothing here decides anything.
 
 Exports:
     TrajectoryCheck: One named check's metadata (severity, recommended action).

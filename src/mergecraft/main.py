@@ -24,7 +24,7 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
-from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
+from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.main_outcome import (
     _classify_outcome,
     _publish_span_attrs,
@@ -431,7 +431,7 @@ async def _publish(
     if tool_context is None:
         return None
     run_ok = run_succeeded_for_outcome(outcome)
-    prepared = prepare_run_packet(tool_context, run_succeeded=run_ok)
+    prepared = resolve_prepared_run_packet(tool_context, run_succeeded=run_ok)
 
     async def _learnings_and_status() -> None:
         await persist_learnings(tool_context)

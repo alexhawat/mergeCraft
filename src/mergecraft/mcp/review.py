@@ -85,17 +85,15 @@ def merge_deterministic_preamble_into_review_body(
 def _deterministic_review_block(
     ctx: ToolContext,
     *,
+    packet: Any,
     rejection_reason: str | None = None,
     run_outcome: RunOutcome | None = None,
     verdict_diagnostic: VerdictDiagnostic | str | None = None,
 ) -> str:
-    from mergecraft.evidence.run_packet import prepare_run_packet
     from mergecraft.findings.ledger import render_deterministic_review_block
     from mergecraft.utils.status_checks import _run_url
 
     tool_state = ctx.tool_state
-    run_succeeded = run_outcome is None or str(run_outcome) == "passed"
-    packet = prepare_run_packet(ctx, run_succeeded=run_succeeded)
     analyzer_run = tool_state.analyzer_run
     analyzer_summary = analyzer_run.pre_merge_summary if analyzer_run is not None else None
     submission = tool_state.terminal_submission
@@ -654,7 +652,14 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
         )
 
     payload: dict[str, Any] = {"event": event}
-    deterministic_block = _deterministic_review_block(ctx)
+    from mergecraft.evidence.run_packet import resolve_prepared_run_packet
+
+    run_succeeded = True
+    packet = resolve_prepared_run_packet(ctx, run_succeeded=run_succeeded)
+    deterministic_block = _deterministic_review_block(
+        ctx,
+        packet=packet,
+    )
     await ensure_learnings_review_delta(ctx.tool_state)
     body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body or ""))
     body_with_sections = merge_analyzer_sections_into_review_body(ctx, body_with_delta)

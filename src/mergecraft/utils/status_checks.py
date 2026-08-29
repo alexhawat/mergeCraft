@@ -358,6 +358,8 @@ async def report_status_checks(
             approval_conclusion = packet.decision.verdict
             decision_reason = packet.decision.reason
         findings = list(packet.findings)
+        if packet.run_health is not None:
+            findings.extend(packet.run_health.findings)
         decision_inputs = approval_decision_inputs(
             findings,
             run_succeeded=run_succeeded,

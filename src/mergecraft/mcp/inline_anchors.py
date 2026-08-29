@@ -218,7 +218,11 @@ def adjust_inline_comment_anchor(
         logger.warning("re-anchoring inline comment on {}:{} → {}:{}", path, line, path, nearest)
         return InlineAnchorAdjustment(comment=adjusted, demoted_body=None, action="reanchored")
 
-    logger.warning("dropping inline comment on {}:{} — path not in diff", path, line)
+    logger.warning(
+        "demoting inline comment on {}:{} — no valid anchor in diff hunk",
+        path,
+        line,
+    )
     return InlineAnchorAdjustment(
         comment=None,
         demoted_body=format_demoted_inline_comment(comment),

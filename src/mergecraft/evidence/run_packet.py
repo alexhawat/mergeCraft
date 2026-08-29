@@ -15,6 +15,7 @@ only assembles and emits packets for a completed run.
 Exports:
     build_run_packet: Assemble the packet for a completed run (decision included).
     prepare_run_packet: Assemble once with enforce-mode fail-closed fallback.
+    resolve_prepared_run_packet: Return the cached packet snapshot (D7).
     emit_run_packet: Write a pre-assembled packet; never rebuilds.
     resolve_packet_path: Resolve the stable on-disk destination.
 """
@@ -23,7 +24,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 from pydantic import ValidationError
@@ -322,7 +323,7 @@ def build_run_packet(
     # Plan 12 D2/D4: trajectory findings are run-scoped and partition into
     # ``run_health`` at build time. They are advisory-only — never block via
     # ``blocking_findings`` — while gate-policy predicates still read them from
-    # ``run_health.findings`` (see ``agents/gates._combined_packet_findings``).
+    # ``run_health.findings`` (see ``agents/gates._packet_attested_findings``).
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
     trajectory_findings = audit_trajectory(trajectory)
 
@@ -469,6 +470,33 @@ def _fail_closed_assembly_packet(
     )
 
 
+def resolve_prepared_run_packet(
+    ctx: ToolContext,
+    *,
+    run_succeeded: bool,
+    change_id: str | None = None,
+    extra_findings: list[Finding] | None = None,
+) -> MergeEvidencePacket | None:
+    """Return the run's cached packet snapshot, assembling it at most once (D7).
+
+    The review-body preamble and the sticky progress comment must render from
+    the same ``MergeEvidencePacket`` instance so findings and decision rows
+    cannot drift between publish time and finalize.
+    """
+    cached = ctx.tool_state.prepared_run_packet
+    if cached is not None:
+        return cast("MergeEvidencePacket", cached)
+    packet = prepare_run_packet(
+        ctx,
+        run_succeeded=run_succeeded,
+        change_id=change_id,
+        extra_findings=extra_findings,
+    )
+    if packet is not None:
+        ctx.tool_state.prepared_run_packet = packet
+    return packet
+
+
 def prepare_run_packet(
     ctx: ToolContext,
     *,
@@ -596,4 +624,5 @@ __all__ = [
     "emit_run_packet",
     "prepare_run_packet",
     "resolve_packet_path",
+    "resolve_prepared_run_packet",
 ]

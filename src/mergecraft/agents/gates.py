@@ -155,7 +155,10 @@ def _has_blocker(findings: list[Finding]) -> bool:
 
 
 def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
-    """True iff ``packet`` carries any blocking finding."""
+    """True iff ``packet.findings`` carries a change-scoped blocking row (D2).
+
+    ``run_health`` findings are advisory-only and are excluded here.
+    """
     return _has_blocker(packet.findings)
 
 
@@ -248,8 +251,9 @@ def decide_approval(
       explicit ``Decision``, that row is honoured only when ``decided_by`` is
       the trusted decider and the verdict is consistent with typed findings
       (D9 / LR-1 — forged or permissive rows are refused). Otherwise the same
-      monotone blocker logic runs against ``packet.findings`` and the result is
-      wrapped in a :class:`Decision`.
+      monotone blocker logic runs against attested findings (change-scoped rows
+      from ``packet.findings`` plus run-health rows for attestation only) and
+      the result is wrapped in a :class:`Decision`.
 
     The decision is monotone in blockers:
 
@@ -320,7 +324,8 @@ def _decide_approval_from_packet(
     ``decided_by`` matches :data:`TRUSTED_PACKET_DECIDED_BY` and the verdict
     is consistent with typed findings; otherwise a :class:`ValueError` is
     raised. When the packet does not carry an explicit verdict, the legacy
-    blocker logic runs against ``packet.findings`` and the ``Conclusion``
+    blocker logic runs against :func:`_packet_attested_findings` (change-scoped
+    rows block; ``run_health`` rows attest only per D2) and the ``Conclusion``
     literal is wrapped in a ``Decision`` with a stable ``decided_by`` and a
     reason that names the signal the verdict came from.
 
@@ -456,25 +461,17 @@ def log_decision(
 # recorder is the only caller that *records* it (shadow mode).
 
 
-def _combined_packet_findings(packet: MergeEvidencePacket) -> list[Finding]:
-    """Change-scoped plus run-health rows (trajectory lives in ``run_health`` since W7)."""
-    combined = list(packet.findings)
-    if packet.run_health is not None:
-        combined.extend(packet.run_health.findings)
-    return combined
-
-
 def _has_changed_unread_file(packet: MergeEvidencePacket) -> bool:
     """A trajectory finding flagged a file modified but never read."""
     return any(
-        finding.rule_id == "changed-unread-file" for finding in _combined_packet_findings(packet)
+        finding.rule_id == "changed-unread-file" for finding in _packet_attested_findings(packet)
     )
 
 
 def _has_tool_loop(packet: MergeEvidencePacket) -> bool:
     """A trajectory finding flagged a repeated call loop."""
     return any(
-        finding.rule_id == "repeated-tool-loop" for finding in _combined_packet_findings(packet)
+        finding.rule_id == "repeated-tool-loop" for finding in _packet_attested_findings(packet)
     )
 
 
