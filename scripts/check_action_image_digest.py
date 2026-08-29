@@ -22,8 +22,10 @@ Exports:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -106,8 +108,33 @@ def _registry_reachable() -> bool:
     return _ghcr_pull_token() is not None
 
 
+# A tag pushed by action-slim-bootstrap is not always visible on the very next
+# read: GHCR settles a moment behind the push, and the gates start seconds after
+# it. Retry only MISSING, and only a few times — a genuinely unpublished SHA
+# must still fail rather than stall the job.
+_MISSING_RETRIES = int(os.environ.get("MERGECRAFT_GHCR_MISSING_RETRIES", "3"))
+_MISSING_BACKOFF_SECONDS = float(os.environ.get("MERGECRAFT_GHCR_MISSING_BACKOFF", "3"))
+
+
 def _ghcr_digest_for_tag(tag: str) -> TagLookupResult:
-    """Resolve the slim image digest for ``tag``, distinguishing missing vs errors."""
+    """Resolve the slim image digest for ``tag``, retrying a not-yet-visible push.
+
+    ``MISSING`` is retried because it is the one status that is routinely
+    transient right after a push. ``ERROR`` is not: a registry fault or a bad
+    token will not resolve itself inside a few seconds, and retrying it would
+    only delay a failure the caller already treats as non-fatal.
+    """
+    result = _ghcr_digest_for_tag_once(tag)
+    attempts = 0
+    while result.status is TagLookupStatus.MISSING and attempts < _MISSING_RETRIES:
+        time.sleep(_MISSING_BACKOFF_SECONDS)
+        attempts += 1
+        result = _ghcr_digest_for_tag_once(tag)
+    return result
+
+
+def _ghcr_digest_for_tag_once(tag: str) -> TagLookupResult:
+    """One HEAD against the registry, distinguishing missing from errors."""
     token = _ghcr_pull_token()
     if token is None:
         return TagLookupResult(status=TagLookupStatus.ERROR)

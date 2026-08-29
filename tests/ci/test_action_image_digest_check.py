@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import urllib.error
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,24 +25,136 @@ def _load_module() -> Any:
     return module
 
 
-class TestGhcrDigestLookup:
-    def test_published_sha_tag_has_digest(self) -> None:
-        module = _load_module()
-        lookup = module._ghcr_digest_for_tag("b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5")
-        assert lookup.status == module.TagLookupStatus.FOUND
-        assert lookup.digest == (
-            "sha256:3765b55ae73a0974d5fa14842bb73e80a347c2f7d66cb8bbfd5394806b6fae58"
-        )
+def _stub_manifest_head(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    digest: str | None = None,
+    http_error: int | None = None,
+) -> None:
+    """Stub the registry HEAD so status classification is tested, not the network."""
+    monkeypatch.setattr(module, "_ghcr_pull_token", lambda: "stub-token")
 
-    def test_missing_tag_is_not_registry_error(self) -> None:
+    class _Response:
+        def __init__(self) -> None:
+            self.headers = {"docker-content-digest": digest}
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+    def _urlopen(request: object, timeout: int = 30) -> _Response:
+        if http_error is not None:
+            raise urllib.error.HTTPError(
+                url="https://ghcr.io", code=http_error, msg="stub", hdrs=None, fp=None
+            )
+        return _Response()
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", _urlopen)
+
+
+class TestGhcrDigestLookup:
+    """Status classification, stubbed at the HTTP boundary.
+
+    These once queried GHCR directly and asserted a hardcoded digest. That put
+    an assertion about mutable external state in the unit tier: the jobs running
+    them do not depend on ``action-slim-bootstrap``, so a tag pushed moments
+    earlier read as MISSING and failed the run. What belongs here is the
+    parsing contract; live parity is the checker's own job in CI.
+    """
+
+    def test_a_digest_header_is_reported_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
         module = _load_module()
-        lookup = module._ghcr_digest_for_tag("0000000000000000000000000000000000000000")
+        digest = "sha256:" + "a" * 64
+        _stub_manifest_head(module, monkeypatch, digest=digest)
+
+        lookup = module._ghcr_digest_for_tag("b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5")
+
+        assert lookup.status == module.TagLookupStatus.FOUND
+        assert lookup.digest == digest
+
+    def test_404_is_missing_not_a_registry_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MISSING and ERROR drive different outcomes; 404 must not look like a fault."""
+        module = _load_module()
+        _stub_manifest_head(module, monkeypatch, http_error=404)
+        monkeypatch.setattr(module, "_MISSING_RETRIES", 0)
+
+        lookup = module._ghcr_digest_for_tag("0" * 40)
+
         assert lookup.status == module.TagLookupStatus.MISSING
 
-    def test_old_published_digest_lacks_tracing_extra(self) -> None:
+    def test_500_is_a_registry_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         module = _load_module()
-        config = module._fetch_oci_config_for_tag("cfdf38dcd062779aac3e141c51f134213d395b67")
-        assert config is not None
+        _stub_manifest_head(module, monkeypatch, http_error=500)
+
+        lookup = module._ghcr_digest_for_tag("0" * 40)
+
+        assert lookup.status == module.TagLookupStatus.ERROR
+
+    def test_a_missing_tag_is_retried_then_reported(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A push GHCR has not surfaced yet must be retried, not failed outright."""
+        module = _load_module()
+        digest = "sha256:" + "b" * 64
+        calls: list[int] = []
+
+        def _flaky(tag: str) -> object:
+            calls.append(1)
+            if len(calls) < 3:
+                return module.TagLookupResult(status=module.TagLookupStatus.MISSING)
+            return module.TagLookupResult(status=module.TagLookupStatus.FOUND, digest=digest)
+
+        monkeypatch.setattr(module, "_ghcr_digest_for_tag_once", _flaky)
+        monkeypatch.setattr(module, "_MISSING_BACKOFF_SECONDS", 0)
+
+        lookup = module._ghcr_digest_for_tag("0" * 40)
+
+        assert lookup.status == module.TagLookupStatus.FOUND
+        assert lookup.digest == digest
+        assert len(calls) == 3
+
+    def test_retries_are_bounded_so_an_unpublished_sha_still_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Retry must not turn a genuinely absent image into a stalled job."""
+        module = _load_module()
+        calls: list[int] = []
+
+        def _always_missing(tag: str) -> object:
+            calls.append(1)
+            return module.TagLookupResult(status=module.TagLookupStatus.MISSING)
+
+        monkeypatch.setattr(module, "_ghcr_digest_for_tag_once", _always_missing)
+        monkeypatch.setattr(module, "_MISSING_RETRIES", 2)
+        monkeypatch.setattr(module, "_MISSING_BACKOFF_SECONDS", 0)
+
+        lookup = module._ghcr_digest_for_tag("0" * 40)
+
+        assert lookup.status == module.TagLookupStatus.MISSING
+        assert len(calls) == 3
+
+    def test_a_registry_error_is_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ERROR will not resolve itself in seconds; retrying only delays the caller."""
+        module = _load_module()
+        calls: list[int] = []
+
+        def _always_error(tag: str) -> object:
+            calls.append(1)
+            return module.TagLookupResult(status=module.TagLookupStatus.ERROR)
+
+        monkeypatch.setattr(module, "_ghcr_digest_for_tag_once", _always_error)
+        monkeypatch.setattr(module, "_MISSING_BACKOFF_SECONDS", 0)
+
+        lookup = module._ghcr_digest_for_tag("0" * 40)
+
+        assert lookup.status == module.TagLookupStatus.ERROR
+        assert len(calls) == 1
+
+    def test_an_image_without_the_tracing_extra_is_detected(self) -> None:
+        module = _load_module()
+        config = {"config": {"Env": ["PATH=/usr/bin"]}, "history": [{"created_by": "RUN uv sync"}]}
+
         assert module._image_has_tracing_extra(config) is False
 
 
