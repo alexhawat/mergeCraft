@@ -29,7 +29,8 @@
 - docs/cli.md — full mergecraft CLI reference
 - docs/cli-examples.md — runnable offline CLI example trees (examples/cli/)
 - docs/action-reference.md — action.yml inputs and outputs
-- docs/authentication.md — providers, custom gateways, model chains
+- docs/authentication.md — providers, custom gateways, model chains, init→auth→review
+- docs/agent-roster.md — agent roster, slots, multi-reviewer, trust snapshot
 - docs/workflows.md — workflow examples, trust tiers, pull_request_target
 - docs/glossary.md — plain-language definitions for landing-page jargon
 - REVIEW-CHECKS.md — every check a review applies
