@@ -77,7 +77,6 @@ def test_concurrent_logger_and_stream_writes_do_not_interleave(
             assert isinstance(parsed, dict)
 
 
-@pytest.mark.xfail(reason="green after W7: consume_stream calls mark_activity", strict=False)
 def test_consume_stream_marks_activity_per_event(monkeypatch: pytest.MonkeyPatch) -> None:
     marks: list[str] = []
     monkeypatch.setattr(
@@ -130,7 +129,6 @@ def test_consume_stream_does_not_echo_raw_lines(monkeypatch: pytest.MonkeyPatch)
         ),
     ],
 )
-@pytest.mark.xfail(reason="green after W7: stream_render line shapes", strict=False)
 def test_stream_render_emits_expected_line_shape(event: dict[str, Any], needle: str) -> None:
     from mergecraft.agents.stream_render import render_stream_event
 
@@ -139,9 +137,6 @@ def test_stream_render_emits_expected_line_shape(event: dict[str, Any], needle: 
     assert line.endswith("\n") or "→" in line or "✓" in line or "✗" in line
 
 
-@pytest.mark.xfail(
-    reason="green after W7: ACTIONS_STEP_DEBUG keeps raw NDJSON pre-D8", strict=False
-)
 def test_actions_step_debug_still_emits_raw_line(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -157,7 +152,6 @@ def test_actions_step_debug_still_emits_raw_line(
     assert raw in captured.out or raw in captured.err
 
 
-@pytest.mark.xfail(reason="green after W7: drop duplicate INFO error in mcp execute", strict=False)
 @pytest.mark.asyncio
 async def test_mcp_execute_emits_single_error_log_line() -> None:
     from loguru import logger

@@ -12,6 +12,13 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | Removed `@pytest.mark.xfail` from 9 ergonomics tests | W3 git verb/config allowlist landed; tests pass without xfail |
 | `test_checkout_pr_parameter_aliases_resolve_to_pull_number` | Already green; no xfail was present |
 
+## W7 reconciliation (post-`694f4d51`)
+
+| Fix | Rationale |
+| --- | --- |
+| Removed `@pytest.mark.xfail` from 6 W7 stream/logging tests | W7 `mark_activity` per event, `render_stream_event` line shapes, and `ACTIONS_STEP_DEBUG` raw NDJSON landed |
+| `test_mcp_execute_emits_single_error_log_line` | W7 deduplicates duplicate INFO error lines in `mcp/shared.py::execute` |
+
 ## W6 reconciliation (post-`8c18875e`)
 
 | Fix | Rationale |
