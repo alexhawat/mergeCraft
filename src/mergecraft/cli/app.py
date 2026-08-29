@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import mergecraft
 from mergecraft import __version__, format_version_display, version_json_payload
 from mergecraft.cli import (
+    agent_cmd,
     agents_cmd,
     analyzers_cmd,
     ask_cmd,
@@ -95,6 +96,7 @@ app = typer.Typer(
     cls=MergecraftTyperGroup,
 )
 
+app.add_typer(agent_cmd.app, name="agent")
 app.add_typer(agents_cmd.app, name="agents")
 app.add_typer(lens_cmd.app, name="lens")
 app.add_typer(pipeline_cmd.app, name="pipeline")

@@ -49,6 +49,21 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+_AGENTS_MODEL_DEPRECATION_EMITTED = False
+
+
+def _warn_agents_model_deprecation(verb: str, replacement: str) -> None:
+    """Point operators at ``mergecraft agent`` model verbs (wave plan 11 / W3)."""
+    global _AGENTS_MODEL_DEPRECATION_EMITTED
+    message = (
+        f"mergecraft agents {verb} is deprecated — use mergecraft agent {replacement} instead."
+    )
+    if not _AGENTS_MODEL_DEPRECATION_EMITTED:
+        console.print(f"[yellow]warning:[/yellow] {message}")
+        _AGENTS_MODEL_DEPRECATION_EMITTED = True
+    else:
+        console.print(message, markup=False)
+
 
 def _tool_ctx(target_dir: Path) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(target_dir))
@@ -326,6 +341,7 @@ def setmodel_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Replace the primary model for an agent role; backups are preserved (D8)."""
+    _warn_agents_model_deprecation("setmodel", "assign-model <name> p0 <slug>")
     if all_agents and agent is not None:
         cli_bail("pass either --agent or --all, not both")
 
@@ -365,6 +381,7 @@ def addbackupmodel_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Append a registered model to an agent's backup chain."""
+    _warn_agents_model_deprecation("addbackupmodel", "add-model <name> <slug>")
     target_dir = resolve_target_dir(cwd)
     config_path = _config_path(target_dir)
     raw, agents = _load_agents_block(config_path)

@@ -241,6 +241,7 @@ class AgentBindingOverride(BaseModel):
 
     role: str | None = None
     lens: str | None = None
+    after: str | None = None
     model: str | None = None
     model_chain: list[str] | None = Field(default=None, alias="modelChain")
     prompt_id: str | None = Field(default=None, alias="promptId")

@@ -11,6 +11,14 @@ Pass `--help` to any invocation below for its full flag set.
 <!-- BEGIN:cli-commands -->
 | Command | Description |
 |---------|-------------|
+| `mergecraft agent add-model <name> <slug>` | Append a registered model to an agent's chain (no-op when duplicate, D4). |
+| `mergecraft agent assign-model <name> <slot> <slug>` | Assign a registered model to a positional slot (idempotent, D4). |
+| `mergecraft agent create <name>` | Create a new roster entry with role defaults. |
+| `mergecraft agent delete <name>` | Remove an agent binding (refuses the last required reviewer or verifier). |
+| `mergecraft agent list` | List every agent, role, model chain, and dispatch level. |
+| `mergecraft agent remove-model <name> <token>` | Remove a model slot and compact the chain. |
+| `mergecraft agent set-after <name> <after>` | Change dispatch ordering after agent creation (D15). |
+| `mergecraft agent show <name>` | Show one agent's chain, resolved model, and effective limits. |
 | `mergecraft agents addbackupmodel` | Append a registered model to an agent's backup chain. |
 | `mergecraft agents list` | List agent bindings with model chain, prompt id, and tool count. |
 | `mergecraft agents set <role>` | Write a single agent binding override into `.mergecraft/config.yaml`. |
