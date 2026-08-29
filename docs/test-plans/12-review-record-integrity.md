@@ -51,6 +51,10 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 | **W1.8** `ci.yml` non-zero on stale pin | W8 | `test_w18_action_pin_gate.py::test_ci_yml_fails_on_stale_pin_instead_of_warning_only` |
 | **W1.8** single pin, three rungs | W8 | `test_w18_action_pin_gate.py::test_mergecraft_workflow_three_rungs_share_one_pin_value` |
 | **W1.8** partial bump fails | W8 | `test_w18_action_pin_gate.py::test_partial_pin_bump_fails_action_pin_check` |
+| **W8 / #535** digest guard script | W8 | `test_action_image_digest_check.py` (pre-tracing case stubs workflow SHA when current pin lacks GHCR tag) |
+| **W8 / #535** digest pin in `action.yml` | W8 | `test_action_image_digest_sync.py`, `test_action_yml_contract.py::test_docker_action_pulls_digest_pinned_slim_image` |
+| **W8 / #535** `action-image-digest-check` in `make lint` | W8 | `test_action_image_digest_sync.py::test_action_image_digest_check_runs_via_make_lint` |
+| **W2** `Finding.scope` on CI evidence path | W2 | `test_evidence.py::test_no_new_finding_fields_introduced` |
 
 ## Deliverable symbols
 
@@ -69,6 +73,7 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 | `render_step_summary` / `append_step_summary` | `utils/step_summary.py` | `test_w17_packet_artifact_summary.py` |
 | workflow packet `env:` artifact steps | `.github/workflows/mergecraft.yml` | `test_w17_packet_artifact_summary.py` |
 | `action-pin-check` in `ci-static` / `CI_STEPS` | `Makefile` | `test_w18_action_pin_gate.py` |
+| `action-image-digest-check` / `check_action_image_digest.py` | `scripts/`, `Makefile` | `test_action_image_digest_check.py`, `test_action_image_digest_sync.py` |
 
 ## Fixtures
 
