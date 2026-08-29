@@ -10,13 +10,13 @@ from mergecraft.agents.registry import load_registry, resolve_agent_model
 from mergecraft.config.settings_snapshot import (
     assert_config_unchanged,
     capture_repo_settings_snapshot,
-    repo_settings_from_context,
+    pinned_repo_settings_from_context,
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
-from tests.cli.support_agent_roster import W2_XFAIL, write_config
+from tests.cli.support_agent_roster import write_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,7 +39,6 @@ def _tool_context(tmp_path: Path, *, snapshot: object) -> ToolContext:
     )
 
 
-@W2_XFAIL
 def test_pr_head_agents_edit_cannot_change_reviewing_model(tmp_path: Path) -> None:
     write_config(
         tmp_path,
@@ -56,7 +55,11 @@ agents:
     snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
     registry_before = load_registry(settings=snapshot.settings, repo_root=tmp_path)
     reviewer_before = registry_before.resolve_role("reviewer")
-    resolved_before = resolve_agent_model(reviewer_before, settings=snapshot.settings)
+    resolved_before = resolve_agent_model(
+        reviewer_before,
+        settings=snapshot.settings,
+        slug_runnable=lambda _slug: True,
+    )
 
     (tmp_path / ".mergecraft" / "config.yaml").write_text(
         """
@@ -73,7 +76,8 @@ agents:
     )
 
     ctx = _tool_context(tmp_path, snapshot=snapshot)
-    pinned_settings = repo_settings_from_context(ctx)
+    pinned_settings = pinned_repo_settings_from_context(ctx)
+    assert pinned_settings is not None
     registry_after = load_registry(settings=pinned_settings, repo_root=tmp_path)
     reviewer_after = registry_after.resolve_role("reviewer")
     resolved_after = resolve_agent_model(

@@ -14,8 +14,11 @@ Source plan: `.ignorelocal/waves/11-agent-roster-model-priority-wave-plan.md`.
 | duplicate `add_model` no-op (D4) | `…::test_add_model_duplicate_is_noop_with_message` | unit |
 | `pN` parsing rejects malformed tokens | `…::test_parse_slot_rejects_malformed_tokens[*]` | unit / error |
 | `parse_slot("p0")` → 0 | `…::test_parse_slot_accepts_p0` | unit |
+| `remove_slot` compacts chain | `…::test_remove_slot_compacts_chain` | unit |
+| `remove_slot` refuses empty chain | `…::test_remove_slot_refuses_empty_chain` | unit / error |
+| `write_roster` omits unset `after:` | `…::test_write_roster_omits_after_when_unset` | unit |
 
-Pinned module: `mergecraft.config.agent_roster` (`parse_slot`, `assign_slot`, `add_model`).
+Pinned module: `mergecraft.config.agent_roster` (`parse_slot`, `assign_slot`, `add_model`, `remove_slot`, `write_roster`).
 
 ## W1.2 — named agents → W3
 
@@ -111,7 +114,7 @@ Pinned API: `mergecraft.cli.workflow_cmd.parse_auth_manifest`, roster run-start 
 
 | Wave greens | Remove xfail from |
 | --- | --- |
-| W2 | `tests/config/test_agent_roster.py`, `tests/config/test_agent_roster_trust.py::test_pr_head_*` |
+| W2 | reconciled — `tests/config/test_agent_roster.py`, `tests/config/test_agent_roster_trust.py::test_pr_head_*` |
 | W3 | `tests/cli/test_agent_cmd.py` |
 | W4 | `tests/cli/test_agent_local_cmd.py` |
 | W5 | `tests/agents/test_agent_roster_registry.py` |

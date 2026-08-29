@@ -4,21 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from tests.cli.support_agent_roster import (
-    MALFORMED_SLOTS,
-    W2_XFAIL,
-    import_agent_roster,
-)
+from tests.cli.support_agent_roster import MALFORMED_SLOTS, import_agent_roster
 
 
-@W2_XFAIL
 def test_assign_slot_on_empty_chain_at_p0_creates_one_long_chain() -> None:
     mod = import_agent_roster()
     chain, _msg = mod.assign_slot([], 0, "nous/tencent/hy3")
     assert chain == ["nous/tencent/hy3"]
 
 
-@W2_XFAIL
 def test_assign_slot_at_existing_index_replaces_preserves_other_slots() -> None:
     mod = import_agent_roster()
     chain = ["anthropic/claude-sonnet", "openai/gpt-5.3-codex"]
@@ -27,7 +21,6 @@ def test_assign_slot_at_existing_index_replaces_preserves_other_slots() -> None:
     assert len(updated) == len(chain)
 
 
-@W2_XFAIL
 def test_assign_slot_beyond_end_names_next_assignable_slot() -> None:
     mod = import_agent_roster()
     chain = ["anthropic/claude-sonnet", "openai/gpt-5.3-codex"]
@@ -35,7 +28,6 @@ def test_assign_slot_beyond_end_names_next_assignable_slot() -> None:
         mod.assign_slot(chain, 3, "nous/tencent/hy3")
 
 
-@W2_XFAIL
 def test_add_model_appends_to_tail() -> None:
     mod = import_agent_roster()
     chain = ["anthropic/claude-sonnet"]
@@ -44,7 +36,6 @@ def test_add_model_appends_to_tail() -> None:
     assert updated == ["anthropic/claude-sonnet", "openai/gpt-5.3-codex"]
 
 
-@W2_XFAIL
 def test_add_model_duplicate_is_noop_with_message() -> None:
     mod = import_agent_roster()
     chain = ["anthropic/claude-sonnet", "openai/gpt-5.3-codex"]
@@ -54,14 +45,55 @@ def test_add_model_duplicate_is_noop_with_message() -> None:
 
 
 @pytest.mark.parametrize("token", list(MALFORMED_SLOTS))
-@W2_XFAIL
 def test_parse_slot_rejects_malformed_tokens(token: str) -> None:
     mod = import_agent_roster()
     with pytest.raises(Exception, match=r"p\d|slot|invalid|malformed"):
         mod.parse_slot(token)
 
 
-@W2_XFAIL
 def test_parse_slot_accepts_p0() -> None:
     mod = import_agent_roster()
     assert mod.parse_slot("p0") == 0
+
+
+def test_remove_slot_compacts_chain() -> None:
+    mod = import_agent_roster()
+    chain = ["anthropic/claude-sonnet", "openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]
+    assert mod.remove_slot(chain, 1) == [
+        "anthropic/claude-sonnet",
+        "google/gemini-3.1-pro-preview",
+    ]
+
+
+def test_remove_slot_refuses_empty_chain() -> None:
+    mod = import_agent_roster()
+    with pytest.raises(Exception, match=r"empty"):
+        mod.remove_slot(["anthropic/claude-sonnet"], 0)
+
+
+def test_write_roster_omits_after_when_unset() -> None:
+    mod = import_agent_roster()
+    raw: dict[str, object] = {
+        "agents": {
+            "reviewer": {
+                "role": "reviewer",
+                "after": "verifier",
+                "modelChain": ["anthropic/claude-sonnet"],
+            },
+            "verifier": {
+                "modelChain": ["openai/gpt-5.3-codex"],
+            },
+        },
+    }
+    roster = mod.load_roster(raw)
+    reviewer = roster.entry_by_name()["reviewer"]
+    cleared = mod.RosterEntry(
+        name=reviewer.name,
+        model_chain=reviewer.model_chain,
+        role=reviewer.role,
+        after=None,
+    )
+    mod.write_roster(raw, mod.Roster(entries=(cleared,)))
+    reviewer_entry = raw["agents"]["reviewer"]
+    assert isinstance(reviewer_entry, dict)
+    assert "after" not in reviewer_entry
