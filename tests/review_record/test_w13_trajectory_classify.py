@@ -216,9 +216,6 @@ def test_repeated_tool_loop_does_not_fire_on_immutable_git_show_with_intervening
     assert "repeated-tool-loop" not in {f.rule_id for f in findings}
 
 
-@pytest.mark.xfail(
-    reason="green after W3: adjacent identical run_static_checks loops", strict=False
-)
 def test_repeated_tool_loop_fires_on_three_adjacent_identical_run_static_checks() -> None:
     findings = _audit(
         _record(
