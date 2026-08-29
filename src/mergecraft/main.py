@@ -21,7 +21,6 @@ from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
     allow_repo_command_overrides,
-    derive_trust_tier,
     resolve_analyzers_mode,
 )
 from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
@@ -164,6 +163,8 @@ class RunContext:
 
     # -- populated by ``_resolve_credentials`` (security boundary) ----------
     trust_tier: TrustTier = "untrusted"
+    authority_trust: TrustTier = "untrusted"
+    trust_self_review_level: str = "off"
     token_ref: TokenRef | None = None
 
     # -- populated by ``_execute_agent`` -------------------------------------
@@ -554,9 +555,35 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     assert ctx.tool_state is not None
     assert ctx.scm is not None
 
-    trust_tier = derive_trust_tier(event=ctx.gh_event)
+    from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
+    from mergecraft.config.trust_policy import (
+        log_trust_policy_at_run_start,
+        resolve_trust_policy,
+        trust_policy_manifest_fields,
+    )
+
+    repo_root = Path.cwd()
+    snapshot = capture_repo_settings_snapshot(root=repo_root, settings=ctx.settings)
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    shell = str(ctx.payload.get("shell") or "restricted")
+    policy = resolve_trust_policy(
+        event=ctx.gh_event or {},
+        config_root=repo_root,
+        event_name=event_name,
+        settings_snapshot=snapshot,
+        shell=shell,
+    )
+    log_trust_policy_at_run_start(policy)
+
+    trust_tier = policy.execution_trust
+    authority_trust = policy.authority_trust
     ctx.trust_tier = trust_tier
+    ctx.authority_trust = authority_trust
+    ctx.trust_self_review_level = policy.level
     ctx.tool_state.trust_tier = trust_tier
+    ctx.tool_state.authority_trust = authority_trust
+    ctx.tool_state.trust_self_review_level = policy.level
+    ctx.tool_state.run_manifest_trust = trust_policy_manifest_fields(policy)
 
     assert ctx.settings is not None
     from mergecraft.config.settings import (
@@ -768,6 +795,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
         analyzers_mode=analyzers_mode,
         trust_tier=ctx.trust_tier,
+        authority_trust=ctx.authority_trust,
         analyzers_settings_enabled=settings.analyzers.enabled,
         sarif_upload_enabled=sarif_upload_enabled,
         run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,

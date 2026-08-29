@@ -356,8 +356,14 @@ class ToolState:
     author: str | None = None
     # GitHub ``author_association`` of the triggering comment / event.
     author_association: str | None = None
-    # ``derive_trust_tier()``'s return value for this run (trusted|untrusted).
+    # ``derive_trust_tier()``'s execution-trust value for this run (trusted|untrusted).
     trust_tier: str | None = None
+    # Authority axis — whether terminal approval semantics may apply (plan 13 D13).
+    authority_trust: str | None = None
+    # Resolved ``trust.selfReview`` level from the base snapshot (plan 13 W9).
+    trust_self_review_level: str | None = None
+    # Trust policy fields for evidence run manifest (plan 13 W9).
+    run_manifest_trust: dict[str, str] = field(default_factory=dict)
     # When ``setup_script`` is skipped on an untrusted tier (W1.2), the reason
     # string is recorded here for harness/tests and later RunOutcome mapping.
     setup_script_skip_reason: str | None = None

@@ -241,9 +241,10 @@ def build_analyzer_env(
 
 
 def evaluate_manifest_for_tier(
-    *,
     manifest: AnalyzerManifest,
-    tier: TrustTier,
+    tier_or_ctx: TrustTier | ToolContext | None = None,
+    *,
+    tier: TrustTier | None = None,
     cause: str = "fork PR / pull_request_target",
 ) -> ManifestTierDecision:
     """Skip trusted-only manifests on untrusted runs (D7).
@@ -252,8 +253,24 @@ def evaluate_manifest_for_tier(
     string stays true when the tier was chosen by the operator rather than
     derived from the event — ``analyzers: untrusted-only`` on a same-repo PR
     is a real untrusted selection, but it is not a fork (D9, #38).
+
+    The second positional argument may be a :class:`~mergecraft.mcp.context.ToolContext`
+    — execution trust is read from ``ctx.trust_tier``.
     """
-    if tier == "untrusted" and manifest.trust == "trusted":
+    from mergecraft.mcp.context import ToolContext
+
+    resolved_tier: TrustTier
+    if isinstance(tier_or_ctx, ToolContext):
+        resolved_tier = tier_or_ctx.trust_tier
+    elif tier_or_ctx is not None:
+        resolved_tier = tier_or_ctx
+    elif tier is not None:
+        resolved_tier = tier
+    else:
+        msg = "evaluate_manifest_for_tier requires tier or ToolContext"
+        raise TypeError(msg)
+
+    if resolved_tier == "untrusted" and manifest.trust == "trusted":
         reason = f"skipped {manifest.id}: requires trusted tier ({cause})"
         logger.info("{}", reason)
         return ManifestTierDecision(skipped=True, reason=reason)

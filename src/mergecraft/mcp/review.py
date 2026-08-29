@@ -231,7 +231,7 @@ def _maybe_suggest_eval_add(ctx: ToolContext) -> None:
     """
     if not getattr(ctx, "suggest_eval_add", False):
         return
-    if ctx.trust_tier != "trusted":
+    if ctx.authority_trust != "trusted":
         return
     trigger = ctx.payload.event.trigger
     if not _is_rereview_trigger(trigger):
@@ -465,7 +465,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     primary.issue_number = pull_number
 
     event = "COMMENT"
-    if approved and ctx.pr_approve_enabled and ctx.trust_tier == "trusted":
+    if approved and ctx.pr_approve_enabled and ctx.authority_trust == "trusted":
         event = "APPROVE"
     elif request_changes:
         event = "REQUEST_CHANGES"
@@ -657,8 +657,31 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
     return result
 
 
+def _wants_approve_review(params: dict[str, Any]) -> bool:
+    if bool(params.get("approved")):
+        return True
+    event = params.get("event")
+    return isinstance(event, str) and event.upper() == "APPROVE"
+
+
+def _normalize_review_params(params: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(params)
+    event = normalized.get("event")
+    if isinstance(event, str) and event.upper() == "APPROVE" and "approved" not in normalized:
+        normalized["approved"] = True
+    return normalized
+
+
 def create_pull_request_review_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
+        params = _normalize_review_params(params)
+        if _wants_approve_review(params) and ctx.authority_trust != "trusted":
+            msg = (
+                "APPROVE is not permitted on this run: authority trust is untrusted "
+                "(trust.selfReview must be full with explicit operator confirmation)"
+            )
+            raise ValueError(msg)
+
         approved = bool(params.get("approved"))
         request_changes = bool(params.get("request_changes"))
         if approved and request_changes:
