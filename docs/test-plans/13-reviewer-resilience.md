@@ -12,6 +12,14 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | Removed `@pytest.mark.xfail` from 9 ergonomics tests | W3 git verb/config allowlist landed; tests pass without xfail |
 | `test_checkout_pr_parameter_aliases_resolve_to_pull_number` | Already green; no xfail was present |
 
+## W9 reconciliation (post-`00f46afe`)
+
+| Fix | Rationale |
+| --- | --- |
+| Removed `@pytest.mark.xfail` from 8 W9 trust-policy tests | W9 `resolve_trust_policy`, trust CLI (`show` / `set-self-review`), D15 snapshot/hash fail-closed, and analyzer authority gates landed |
+| `_trust_config_yaml` quotes `selfReview` values | YAML 1.1 coerces unquoted `off` to boolean `false`; tests must pin string literals |
+| `test_derive_trust_tier_unchanged_for_pull_request_target` | Already green at W1; no xfail was present |
+
 ## W8 reconciliation (post-`519a2f3b`)
 
 | Fix | Rationale |
@@ -92,7 +100,7 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | Bubblewrap hint once + `::warning::` on exit 0 | W8 | `tests/analyzers/test_reviewer_resilience_environment.py` |
 | `checkov` / `yamllint` catalog unavailability on linux-amd64 | W8 | `tests/analyzers/test_reviewer_resilience_environment.py` |
 | `make catalog-check` passes with corrected rows | W8 | `tests/analyzers/test_reviewer_resilience_environment.py` |
-| Default policy `off`; `derive_trust_tier` unchanged (partial green) | W9 | `tests/config/test_reviewer_resilience_trust_policy.py` |
+| Default policy `off`; `derive_trust_tier` unchanged | W9 | `tests/config/test_reviewer_resilience_trust_policy.py` |
 | Trust level execution/authority pairs | W9 | `tests/config/test_reviewer_resilience_trust_policy.py` |
 | Fork PR unaffected | W9 | `tests/config/test_reviewer_resilience_trust_policy.py` |
 | `analyzers` runs trusted tools; cannot APPROVE | W9 | `tests/config/test_reviewer_resilience_trust_policy.py` |
