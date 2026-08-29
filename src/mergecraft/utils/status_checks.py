@@ -33,15 +33,157 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.run_outcome import CompletionConclusion
+from mergecraft.utils import gha_log
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ApprovalRecord
 
 COMPLETION_CHECK = "mergecraft"
 APPROVAL_CHECK = "mergecraft-approval"
 Conclusion = Literal["success", "failure", "neutral"]
+
+
+def _run_url(ctx: ToolContext) -> str | None:
+    if not ctx.run_id:
+        return None
+    return f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{ctx.run_id}"
+
+
+def _reviewed_sha(
+    approval: ApprovalRecord | None,
+    packet: MergeEvidencePacket | None,
+) -> str | None:
+    if approval and approval.sha:
+        return approval.sha
+    if packet is not None and packet.self_assessment is not None and packet.self_assessment.sha:
+        return packet.self_assessment.sha
+    return None
+
+
+def _http_status_from_error(err: BaseException) -> int | None:
+    response = getattr(err, "response", None)
+    status = getattr(response, "status_code", None)
+    return int(status) if isinstance(status, int) else None
+
+
+def _log_check_post_failure(
+    *,
+    check_name: str,
+    head_sha: str,
+    err: BaseException,
+) -> None:
+    status = _http_status_from_error(err)
+    status_text = f" HTTP {status}" if status is not None else ""
+    message = f"status checks: {check_name} post failed on {head_sha[:7]}{status_text}: {err}"
+    logger.warning(message)
+    gha_log.warning(message)
+
+
+def _change_findings(findings: list[Finding]) -> list[Finding]:
+    return [finding for finding in findings if finding.scope != "run"]
+
+
+def _run_health_findings(findings: list[Finding]) -> list[Finding]:
+    return [finding for finding in findings if finding.scope == "run"]
+
+
+def _finding_label(finding: Finding) -> str:
+    return f"{finding.severity} · {finding.tool}/{finding.rule_id}"
+
+
+def _append_run_metadata(
+    lines: list[str],
+    *,
+    run_url: str | None,
+    reviewed_sha: str | None,
+) -> None:
+    if run_url:
+        lines.append(f"Run: {run_url}")
+    if reviewed_sha:
+        lines.append(f"Reviewed commit: {reviewed_sha}")
+
+
+def _run_health_lines(findings: list[Finding]) -> list[str]:
+    run_health = _run_health_findings(findings)
+    if not run_health:
+        return []
+    lines = ["Run-health findings:"]
+    lines.extend(f"- {_finding_label(finding)}: {finding.message}" for finding in run_health)
+    return lines
+
+
+def _build_completion_summary(
+    *,
+    run_succeeded: bool,
+    failure_reason: str | None,
+    findings: list[Finding],
+    catalog_banner: str | None,
+    run_url: str | None,
+    reviewed_sha: str | None,
+) -> str:
+    if run_succeeded:
+        lead = "The mergeCraft run finished successfully."
+    else:
+        lead = (
+            failure_reason
+            or "The mergeCraft run failed or timed out. See the run logs for details."
+        )
+    lines = [lead, *_run_health_lines(findings)]
+    if catalog_banner:
+        lines.append(catalog_banner)
+    _append_run_metadata(lines, run_url=run_url, reviewed_sha=reviewed_sha)
+    return "\n".join(lines)
+
+
+def _build_approval_lead(
+    approval_conclusion: Conclusion,
+    findings: list[Finding],
+    *,
+    decision_reason: str | None,
+) -> str:
+    from mergecraft.agents.gates import blocking_findings
+
+    if approval_conclusion == "success":
+        return "mergeCraft approved this PR."
+    if approval_conclusion == "failure":
+        blockers = blocking_findings(findings)
+        if blockers:
+            names = ", ".join(_finding_label(finding) for finding in blockers)
+            count = len(blockers)
+            noun = "finding" if count == 1 else "findings"
+            return f"mergeCraft found {count} blocking change {noun}: {names}."
+        return "mergeCraft would not approve this PR."
+    reason = decision_reason or "review did not complete"
+    lead = f"The mergeCraft review did not complete: {reason}."
+    run_health = _run_health_lines(findings)
+    if run_health and not _change_findings(findings):
+        return "\n".join([lead, *run_health])
+    return lead
+
+
+def _build_approval_summary(
+    *,
+    approval_conclusion: Conclusion,
+    findings: list[Finding],
+    decision_reason: str | None,
+    decision_inputs: dict[str, object],
+    catalog_banner: str | None,
+    run_url: str | None,
+    reviewed_sha: str | None,
+) -> str:
+    from mergecraft.agents.gates import decision_summary_lines
+
+    lines = [_build_approval_lead(approval_conclusion, findings, decision_reason=decision_reason)]
+    _append_run_metadata(lines, run_url=run_url, reviewed_sha=reviewed_sha)
+    lines.append("Decision inputs:")
+    lines.extend(decision_summary_lines(decision_inputs))
+    if catalog_banner:
+        lines.append(catalog_banner)
+    return "\n".join(lines)
 
 
 async def _create_check_run(
@@ -124,7 +266,12 @@ async def report_status_checks(
         if not head_sha:
             return
     except Exception as err:
-        logger.debug("status checks: failed to resolve PR #{} head sha: {}", pull_number, err)
+        logger.warning(
+            "status checks: failed to resolve PR #{} head sha: {}",
+            pull_number,
+            err,
+        )
+        gha_log.warning(f"status checks: failed to resolve PR #{pull_number} head sha: {err}")
         return
 
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -134,16 +281,18 @@ async def report_status_checks(
         "success" if run_succeeded else "failure"
     )
     catalog_banner = _catalog_unavailable_banner(ctx)
-    completion_summary = (
-        "The mergeCraft run finished successfully."
-        if run_succeeded
-        else (
-            failure_reason
-            or "The mergeCraft run failed or timed out. See the run logs for details."
-        )
+    packet_findings = list(packet.findings) if packet is not None else []
+    approval = ctx.tool_state.approval
+    run_url = _run_url(ctx)
+    reviewed_sha = _reviewed_sha(approval, packet)
+    completion_summary = _build_completion_summary(
+        run_succeeded=run_succeeded,
+        failure_reason=failure_reason,
+        findings=packet_findings,
+        catalog_banner=catalog_banner,
+        run_url=run_url,
+        reviewed_sha=reviewed_sha,
     )
-    if catalog_banner:
-        completion_summary = f"{completion_summary}\n{catalog_banner}"
     try:
         await _create_check_run(
             ctx,
@@ -154,7 +303,11 @@ async def report_status_checks(
             summary=completion_summary,
         )
     except Exception as err:
-        logger.debug("status checks: {} post failed: {}", COMPLETION_CHECK, err)
+        _log_check_post_failure(
+            check_name=COMPLETION_CHECK,
+            head_sha=completion_sha,
+            err=err,
+        )
 
     # --- Approval gate (W8.2): post ``packet.decision.verdict``. -------------
     # The agent's boolean is still in ApprovalRecord.would_approve (W8.3) as an
@@ -162,7 +315,6 @@ async def report_status_checks(
     # ``neutral`` so the check still lands; do not rebuild the packet.
     from mergecraft.agents.gates import (
         approval_decision_inputs,
-        decision_summary_lines,
         log_decision,
     )
 
@@ -171,6 +323,10 @@ async def report_status_checks(
     # Best-effort: never raise after the completion check-run has posted.
     if packet is None:
         logger.debug("status checks: no packet; posting neutral approval")
+        neutral_lines = [
+            "The mergeCraft evidence packet was not assembled, so no approval decision was recorded.",
+        ]
+        _append_run_metadata(neutral_lines, run_url=run_url, reviewed_sha=reviewed_sha)
         try:
             await _create_check_run(
                 ctx,
@@ -178,22 +334,25 @@ async def report_status_checks(
                 head_sha=head_sha,
                 conclusion="neutral",
                 title="mergeCraft review did not complete",
-                summary=(
-                    "The mergeCraft evidence packet was not assembled, so no "
-                    "approval decision was recorded."
-                ),
+                summary="\n".join(neutral_lines),
             )
         except Exception as err:
-            logger.debug("status checks: {} post failed: {}", APPROVAL_CHECK, err)
+            _log_check_post_failure(
+                check_name=APPROVAL_CHECK,
+                head_sha=head_sha,
+                err=err,
+            )
         return
 
     try:
         tier: TrustTier = ctx.trust_tier
+        decision_reason: str | None = None
         if packet.decision is None:
             logger.debug("status checks: packet has no decision; posting neutral approval")
             approval_conclusion: Conclusion = "neutral"
         else:
             approval_conclusion = packet.decision.verdict
+            decision_reason = packet.decision.reason
         findings = list(packet.findings)
         decision_inputs = approval_decision_inputs(
             findings,
@@ -207,28 +366,22 @@ async def report_status_checks(
             conclusion=approval_conclusion,
         )
 
-        approval = ctx.tool_state.approval
         if approval_conclusion == "success":
             approval_title = "mergeCraft would approve"
-            approval_summary = "mergeCraft has no outstanding review feedback on this PR."
         elif approval_conclusion == "failure":
             approval_title = "mergeCraft would not approve"
-            approval_summary = (
-                "mergeCraft has outstanding review feedback or requested changes on this PR."
-            )
         else:
             approval_title = "mergeCraft review did not complete"
-            approval_summary = (
-                "The mergeCraft review did not complete, so no approval decision was recorded."
-            )
 
-        if approval and approval.sha:
-            approval_summary = f"{approval_summary} Reviewed commit: {approval.sha}."
-        approval_summary = f"{approval_summary}\nDecision inputs:\n" + "\n".join(
-            decision_summary_lines(decision_inputs)
+        approval_summary = _build_approval_summary(
+            approval_conclusion=approval_conclusion,
+            findings=findings,
+            decision_reason=decision_reason,
+            decision_inputs=decision_inputs,
+            catalog_banner=catalog_banner,
+            run_url=run_url,
+            reviewed_sha=reviewed_sha,
         )
-        if catalog_banner:
-            approval_summary = f"{approval_summary}\n{catalog_banner}"
 
         await _create_check_run(
             ctx,
@@ -239,7 +392,11 @@ async def report_status_checks(
             summary=approval_summary,
         )
     except Exception as err:
-        logger.debug("status checks: {} post failed: {}", APPROVAL_CHECK, err)
+        _log_check_post_failure(
+            check_name=APPROVAL_CHECK,
+            head_sha=head_sha,
+            err=err,
+        )
 
 
 __all__ = [

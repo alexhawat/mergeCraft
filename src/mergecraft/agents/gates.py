@@ -384,9 +384,13 @@ def approval_decision_inputs(
     ``decide_approval`` decision from the stored summary without re-running the
     analysis path.
     """
+    change_findings = [f for f in findings if f.scope != "run"]
+    run_findings = [f for f in findings if f.scope == "run"]
     severities = sorted({f.severity for f in findings})
     return {
         "findings_count": len(findings),
+        "change_findings_count": len(change_findings),
+        "run_findings_count": len(run_findings),
         "severities": severities,
         "has_blocker": _has_blocker(findings),
         "run_succeeded": run_succeeded,
@@ -396,17 +400,17 @@ def approval_decision_inputs(
 
 def decision_summary_lines(inputs: dict[str, object]) -> list[str]:
     """Render ``approval_decision_inputs`` as human-readable check-run summary lines (W8.6)."""
-    findings_count_raw = inputs.get("findings_count", 0)
-    findings_count = int(findings_count_raw) if isinstance(findings_count_raw, (int, float)) else 0
-    severities_raw = inputs.get("severities") or []
-    severities = [str(item) for item in severities_raw] if isinstance(severities_raw, list) else []
+    change_count_raw = inputs.get("change_findings_count", inputs.get("findings_count", 0))
+    run_count_raw = inputs.get("run_findings_count", 0)
+    change_count = int(change_count_raw) if isinstance(change_count_raw, (int, float)) else 0
+    run_count = int(run_count_raw) if isinstance(run_count_raw, (int, float)) else 0
     tier_raw = inputs.get("tier", "trusted")
     tier = str(tier_raw) if tier_raw is not None else "trusted"
     run_succeeded = bool(inputs.get("run_succeeded"))
     has_blocker = bool(inputs.get("has_blocker"))
-    severities_text = ", ".join(severities) if severities else "(none)"
     return [
-        f"- Findings: {findings_count} (severities: {severities_text})",
+        f"- Change findings: {change_count}",
+        f"- Run-health findings: {run_count}",
         f"- Run succeeded: {run_succeeded}",
         f"- Trust tier: {tier}",
         f"- Has blocker: {has_blocker}",
