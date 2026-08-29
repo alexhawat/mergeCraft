@@ -14,9 +14,6 @@ def _blocking_findings(findings: list[object]) -> list[object]:
     return list(require_symbol(gates, "blocking_findings")(findings))  # type: ignore[arg-type]
 
 
-@pytest.mark.xfail(
-    reason="green after W3: schema slip self-corrects within three calls", strict=False
-)
 def test_schema_rejection_self_corrected_within_three_calls_produces_no_finding() -> None:
     findings = _audit(
         _record(

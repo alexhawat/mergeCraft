@@ -8,7 +8,7 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 
 | Wave | Test file / test | Reason |
 |------|------------------|--------|
-| **W3** | `test_w13_trajectory_classify.py` (5 xfailed tests, `strict=False`) | classify-before-count + run 33126460925 fixture |
+| **W3** | `test_w13_trajectory_classify.py` (4 xfailed tests, `strict=False`) | classify-before-count + run 33126460925 fixture |
 | — | all other files | bare `assert` / `pytest.fail` / `require_symbol` RED (no xfail) |
 
 ## Contract matrix
