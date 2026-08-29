@@ -5,6 +5,17 @@ Worktree: `../mergecraft-resilience` on `wave/reviewer-resilience`
 Authoring wave: **W1** (`test-creator`). Implementation: **W2–W9**.
 xfail-reconciliation: per impl wave (`strict=False` until green).
 
+## Thermos HIGH #1 — git config credential leak (post-W10)
+
+| Contract | Test |
+| --- | --- |
+| `git config --list` refused or omits `credential.*`, `url.*`, and `*.extraHeader` keys | `test_config_list_refused_or_omits_credential_keys` |
+| `git config --get-all http.https://github.com/.extraHeader` refused | `test_config_get_all_extra_header_refused` |
+| `git config --get-all credential.helper` refused | `test_config_get_all_credential_helper_refused` |
+
+RED until `_reject_config_invocation` applies the `--get` deny-list to `--get-all` and
+blocks or filters `--list` output.
+
 ## Final reconciliation (post-`35ff1ef4`)
 
 | Fix | Rationale |
@@ -82,6 +93,9 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | Legitimate readonly invocations still pass | W2 | `tests/mcp/test_reviewer_resilience_containment.py` |
 | Allow `show-ref`, `for-each-ref`, `ls-remote` | W3 | `tests/mcp/test_reviewer_resilience_ergonomics.py` |
 | `config --get remote.origin.url`; refuse credential keys | W3 | `tests/mcp/test_reviewer_resilience_ergonomics.py` |
+| Thermos HIGH #1 — `config --list` refused or omits credential keys | post-W10 | `tests/mcp/test_reviewer_resilience_ergonomics.py::test_config_list_refused_or_omits_credential_keys` |
+| Thermos HIGH #1 — `config --get-all` on `http.*.extraHeader` refused | post-W10 | `tests/mcp/test_reviewer_resilience_ergonomics.py::test_config_get_all_extra_header_refused` |
+| Thermos HIGH #1 — `config --get-all` on `credential.*` refused | post-W10 | `tests/mcp/test_reviewer_resilience_ergonomics.py::test_config_get_all_credential_helper_refused` |
 | Refuse `config --unset` / set forms | W3 | `tests/mcp/test_reviewer_resilience_ergonomics.py` |
 | `checkout_pr` aliases `pr_number` / `issue_number` | W3 | `tests/mcp/test_reviewer_resilience_ergonomics.py` |
 | Unknown alias → schema error (green today) | W3 | `tests/mcp/test_reviewer_resilience_ergonomics.py` |

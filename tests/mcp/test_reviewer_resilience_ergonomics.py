@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from tests.mcp.reviewer_resilience_support import git_ctx, init_git_repo, tool_e
 
 from mergecraft.mcp.checkout import checkout_pr_tool
 from mergecraft.mcp.git import git_tool
+from mergecraft.mcp.git_guards import _is_denied_config_key
 from mergecraft.utils.github import GitHubClient
 
 
@@ -70,6 +72,95 @@ async def test_config_get_credential_keys_refused(
 
     result = await git_tool(git_ctx(tmp_path)).execute(
         {"command": "config", "args": ["--get", key]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+def _seed_repo_credential_config(root: Path) -> None:
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "http.https://github.com/.extraHeader",
+            "Authorization: Basic deadbeef",
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "credential.helper", "store"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_config_list_refused_or_omits_credential_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos HIGH #1 — ``git config --list`` must not dump credential keys."""
+    init_git_repo(tmp_path)
+    _seed_repo_credential_config(tmp_path)
+
+    recorder = _RunGitRecorder(
+        output=(
+            "user.name=Test\n"
+            "http.https://github.com/.extraHeader=Authorization: Basic deadbeef\n"
+            "credential.helper=store\n"
+        )
+    )
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute({"command": "config", "args": ["--list"]})
+
+    if result.is_error:
+        assert recorder.calls == []
+        return
+
+    output = json.loads(result.content[0]["text"])["output"]
+    for line in output.splitlines():
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        assert not _is_denied_config_key(key), f"credential key leaked in --list: {key}={value}"
+        assert "Authorization: Basic deadbeef" not in value
+
+
+@pytest.mark.asyncio
+async def test_config_get_all_extra_header_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos HIGH #1 — ``config --get-all`` on extraHeader keys is refused."""
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {
+            "command": "config",
+            "args": ["--get-all", "http.https://github.com/.extraHeader"],
+        }
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.asyncio
+async def test_config_get_all_credential_helper_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos HIGH #1 — ``config --get-all`` on credential.* keys is refused."""
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {"command": "config", "args": ["--get-all", "credential.helper"]}
     )
     assert result.is_error is True, result.content[0]["text"]
     assert recorder.calls == []
