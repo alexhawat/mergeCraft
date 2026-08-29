@@ -116,7 +116,7 @@ Pinned API: `mergecraft.cli.workflow_cmd.parse_auth_manifest`, roster run-start 
 | --- | --- |
 | W2 | reconciled — `tests/config/test_agent_roster.py`, `tests/config/test_agent_roster_trust.py::test_pr_head_*` |
 | W3 | `tests/cli/test_agent_cmd.py` |
-| W4 | `tests/cli/test_agent_local_cmd.py` |
+| W4 | reconciled — `tests/cli/test_agent_local_cmd.py` |
 | W5 | `tests/agents/test_agent_roster_registry.py` |
 | W6 | `tests/agents/test_multi_reviewer_execution.py` |
 | W7 | `tests/cli/test_agent_roster_auth_manifest.py` |

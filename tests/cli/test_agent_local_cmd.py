@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import yaml
 from tests.cli.support_agent_roster import (
     LOCAL_CONFIG_GITIGNORE_LINE,
-    W4_XFAIL,
     bootstrap_review_repo,
     config_text,
     git_check_ignores,
@@ -39,7 +38,6 @@ def _invoke(*argv: str, env: dict[str, str] | None = None) -> object:
     return runner.invoke(app, list(argv), env=merged)
 
 
-@W4_XFAIL
 def test_agent_local_writes_local_file_not_committed_config(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -54,7 +52,6 @@ def test_agent_local_writes_local_file_not_committed_config(
     assert local["agents"]["reviewer"]["modelChain"][0] == slug
 
 
-@W4_XFAIL
 def test_agent_local_config_is_gitignored(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     init_git_repo(tmp_path)
     bootstrap_review_repo(tmp_path, monkeypatch)
@@ -66,7 +63,6 @@ def test_agent_local_config_is_gitignored(tmp_path: Path, monkeypatch: MonkeyPat
     assert git_check_ignores(tmp_path, LOCAL_CONFIG_GITIGNORE_LINE)
 
 
-@W4_XFAIL
 def test_agent_local_overrides_win_for_cli_runs(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     bootstrap_review_repo(tmp_path, monkeypatch)
     slug = register_nous_model(tmp_path, _invoke)
@@ -80,7 +76,6 @@ def test_agent_local_overrides_win_for_cli_runs(tmp_path: Path, monkeypatch: Mon
     assert read_config(tmp_path)["agents"]["reviewer"]["modelChain"][0] == "anthropic/claude-sonnet"
 
 
-@W4_XFAIL
 def test_github_actions_ignores_local_file(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     bootstrap_review_repo(tmp_path, monkeypatch)
     slug = register_nous_model(tmp_path, _invoke)
