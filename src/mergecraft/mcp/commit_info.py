@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -29,6 +30,17 @@ def get_commit_info_tool(ctx: ToolContext):
         diff_file = str(Path(temp) / f"commit-{sha[:7]}.diff")
         Path(diff_file).write_text(content, encoding="utf-8")
         logger.debug("wrote commit diff to {} ({} bytes)", diff_file, len(content))
+        primary = primary_repo_state(ctx.tool_state)
+        pr_head = (primary.checkout_sha or "").strip().lower()
+        if pr_head and sha.strip().lower() == pr_head:
+            from mergecraft.mcp.verdict import register_review_scope
+
+            register_review_scope(
+                ctx.tool_state,
+                diff_path=diff_file,
+                provenance="commit-info",
+                review_scope=ctx.tool_state.review_scope,
+            )
         stats = data.get("stats") or {}
         return {
             "sha": data.get("sha"),

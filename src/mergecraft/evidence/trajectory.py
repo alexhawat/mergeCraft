@@ -73,6 +73,7 @@ Intent = Literal["read", "modify", "verify", "complete", "report", "other"]
 _TOOL_INTENTS: Final[dict[str, Intent]] = {
     # read
     "checkout_pr": "read",
+    "establish_review_scope": "read",
     "checkout_repo": "read",
     "list_repos": "read",
     "get_pull_request": "read",

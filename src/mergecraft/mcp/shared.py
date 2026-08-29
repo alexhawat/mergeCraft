@@ -69,7 +69,9 @@ VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
 # ``checkout_pr`` is SCOPE + mutates=True but must stay on the reviewer surface
 # (HA4.2 / D14). Every other mutating tool is orchestrator-only even when its
 # class is otherwise allowed on a read-only role.
-READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset({"checkout_pr"})
+READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset(
+    {"checkout_pr", "establish_review_scope"}
+)
 # Primary reviewer additionally allows review publication (D9) and the three
 # session tools the primary must be able to call:
 #   - ``set_output``      (ANALYSIS, mutates=True) — Action output_schema + offline --json

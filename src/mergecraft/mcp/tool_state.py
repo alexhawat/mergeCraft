@@ -418,6 +418,14 @@ class ToolState:
     finding_ledger_loaded: bool = False
     # RC12 — 1-based review round, set by ``checkout_pr`` from prior PR reviews.
     review_round_index: int = 1
+    # Plan 13 W4 — ``api-only`` when the PR diff is authoritative but the head
+    # ref is not checked out locally; ``None`` means full local scope.
+    review_scope: str | None = None
+    # How review scope was established (``checkout_pr`` api fallback,
+    # ``establish_review_scope``, or ``get_commit_info`` at PR head).
+    scope_provenance: Literal["api", "local-diff", "commit-info"] | None = None
+    # Memoized ``git show <rev>:<path>`` output paths keyed ``rev\\0path``.
+    git_show_cache: dict[str, str] = field(default_factory=dict)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     agent_findings: list[dict[str, Any]] = field(default_factory=list)
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until

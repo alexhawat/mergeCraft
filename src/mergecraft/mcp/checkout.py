@@ -12,11 +12,13 @@ from loguru import logger
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.settings import load_repo_settings
-from mergecraft.mcp.git import _git_env, _run_git
+from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
+from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
+from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
 
@@ -129,6 +131,66 @@ async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head
     return last_reviewed_sha(reviews, head_sha=head_sha) or ""
 
 
+def _remote_url_for_cwd(cwd: str) -> str:
+    try:
+        return read_remote_origin_url(cwd)
+    except RuntimeError:
+        return ""
+
+
+def _git_env_for_cwd(cwd: str, token: str) -> tuple[dict[str, str], str]:
+    remote_url = _remote_url_for_cwd(cwd)
+    return _git_env(token, remote_url=remote_url), remote_url
+
+
+async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> str:
+    files = await ctx.scm.get(f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files")
+    parts: list[str] = []
+    for f in files or []:
+        parts.append(f"diff --git a/{f.get('filename')} b/{f.get('filename')}\n")
+        if f.get("patch"):
+            parts.append(f.get("patch") + "\n")
+    return "".join(parts)
+
+
+def _fetch_head_with_retry(
+    *,
+    cwd: str,
+    pull_number: int,
+    local_branch: str,
+    git_token: str,
+) -> tuple[bool, str | None]:
+    """Fetch PR head; retry once on transient failure, never on auth-class (D3)."""
+    env, remote_url = _git_env_for_cwd(cwd, git_token)
+    refspec = f"pull/{pull_number}/head:{local_branch}"
+    last_err: str | None = None
+    detached = False
+    for attempt in range(2):
+        try:
+            _run_git(
+                ["fetch", "--no-tags", "origin", refspec],
+                cwd=cwd,
+                env=env,
+                remote_url=remote_url or None,
+            )
+            return True, None
+        except RuntimeError as err:
+            last_err = str(err)
+            if _is_auth_failure(last_err):
+                break
+            lowered = last_err.lower()
+            if not detached and "refusing to fetch into branch" in lowered:
+                detached = True
+                try:
+                    _run_git(["checkout", "--detach", "HEAD"], cwd=cwd)
+                except RuntimeError as detach_err:
+                    last_err = str(detach_err)
+                continue
+            if attempt == 1:
+                break
+    return False, last_err
+
+
 def _write_incremental_diff(
     *, cwd: str, temp: str, pull_number: int, prior_sha: str, git_token: str
 ) -> tuple[str, list[str]] | None:
@@ -141,11 +203,13 @@ def _write_incremental_diff(
     try:
         _run_git(["cat-file", "-e", f"{prior_sha}^{{commit}}"], cwd=cwd)
     except RuntimeError:
+        env, remote_url = _git_env_for_cwd(cwd, git_token)
         try:
             _run_git(
                 ["fetch", "--no-tags", "--depth=1000", "origin", prior_sha],
                 cwd=cwd,
-                env=_git_env(git_token),
+                env=env,
+                remote_url=remote_url or None,
             )
             _run_git(["cat-file", "-e", f"{prior_sha}^{{commit}}"], cwd=cwd)
         except RuntimeError as err:
@@ -206,16 +270,66 @@ def checkout_pr_tool(ctx: ToolContext):
         # check above already guarantees no uncommitted work to lose — means
         # the fetch target is never the current HEAD, regardless of what an
         # earlier checkout_pr call left behind.
-        _run_git(["checkout", "--detach", "HEAD"], cwd=cwd)
-
-        # Fetch PR head via GitHub's pull/<n>/head ref
-        _run_git(
-            ["fetch", "--no-tags", "origin", f"pull/{pull_number}/head:{local_branch}"],
+        fetched, fetch_err = _fetch_head_with_retry(
             cwd=cwd,
-            env=_git_env(ctx.git_token),
+            pull_number=pull_number,
+            local_branch=local_branch,
+            git_token=ctx.git_token,
         )
+        temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
+        diff_path = str(Path(temp) / f"pr-{pull_number}.diff")
+
+        if not fetched:
+            degraded_reason = degraded_checkout_reason(
+                detail=(fetch_err or "git fetch failed").splitlines()[0]
+            )
+            warning(degraded_reason)
+            diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            Path(diff_path).write_text(diff, encoding="utf-8")
+            state.issue_number = pull_number
+            state.checkout_sha = head_sha
+            from mergecraft.mcp.review_context import hydrate_review_context
+            from mergecraft.mcp.verdict import ReviewPhase, register_review_scope
+
+            register_review_scope(
+                ctx.tool_state,
+                diff_path=diff_path,
+                provenance="api",
+                review_scope=API_ONLY_SCOPE,
+            )
+            prior_reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
+            round_index = review_round_index(prior_reviews)
+            ctx.tool_state.review_round_index = round_index
+            result: dict[str, Any] = {
+                "pullNumber": pull_number,
+                "remoteBranch": head_ref,
+                "base": base_ref,
+                "headSha": head_sha,
+                "checkoutSha": head_sha,
+                "isFork": is_fork,
+                "diffPath": diff_path,
+                "title": pr.get("title"),
+                "url": pr.get("html_url"),
+                "scope": API_ONLY_SCOPE,
+                "degraded": degraded_reason,
+                "reviewPhase": ReviewPhase.ESTABLISH_SCOPE.value,
+            }
+
+            await hydrate_review_context(
+                ctx,
+                round_index=round_index,
+                incremental_changed_paths=None,
+            )
+            logger.warning(
+                "checked out PR #{} in {} scope (head fetch failed)",
+                pull_number,
+                API_ONLY_SCOPE,
+            )
+            return result
+
         _run_git(["checkout", local_branch], cwd=cwd)
         # Ensure base is available for merge-base diffs
+        base_env, base_remote_url = _git_env_for_cwd(cwd, ctx.git_token)
         try:
             _run_git(
                 [
@@ -226,7 +340,8 @@ def checkout_pr_tool(ctx: ToolContext):
                     f"{base_ref}:refs/remotes/origin/{base_ref}",
                 ],
                 cwd=cwd,
-                env=_git_env(ctx.git_token),
+                env=base_env,
+                remote_url=base_remote_url or None,
             )
         except Exception as err:
             logger.info("base fetch soft-failed: {}", err)
@@ -253,27 +368,17 @@ def checkout_pr_tool(ctx: ToolContext):
                 state.push_url = f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}"
 
         # Write a basic diff file for reviewers
-        temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
-        diff_path = str(Path(temp) / f"pr-{pull_number}.diff")
         try:
             diff = _run_git(
                 ["diff", "--merge-base", f"origin/{base_ref}", "HEAD"],
                 cwd=cwd,
             )
         except Exception:
-            files = await ctx.scm.get(
-                f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
-            )
-            parts: list[str] = []
-            for f in files or []:
-                parts.append(f"diff --git a/{f.get('filename')} b/{f.get('filename')}\n")
-                if f.get("patch"):
-                    parts.append(f.get("patch") + "\n")
-            diff = "".join(parts)
+            diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
         Path(diff_path).write_text(diff, encoding="utf-8")
         state.diff_path = diff_path
 
-        result: dict[str, Any] = {
+        result = {
             "pullNumber": pull_number,
             "localBranch": local_branch,
             "remoteBranch": head_ref,

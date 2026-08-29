@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
@@ -168,6 +169,10 @@ _AUTH_FAILURE_MARKERS: tuple[str, ...] = (
     # match on exactly the environments hardest to reproduce.
     "403 forbidden",
     "401 unauthorized",
+    # mergecraft's ``_run_git`` wrapper prefixes stderr as
+    # ``git <args> failed (<code>): …``; keep these terminal when stderr is terse.
+    "failed (403)",
+    "failed (401)",
 )
 
 _AUTH_FAILURE_HINT = (
@@ -175,6 +180,41 @@ _AUTH_FAILURE_HINT = (
     "or lacks access to this repository. Retrying will not help; the run needs a "
     "valid token (contents: read for fetch, contents: write for push)"
 )
+
+_SHOW_REV_PATH_RE = re.compile(r"^([^:]+):(.+)$")
+_GIT_SHOW_PREVIEW_LINES = 5
+
+
+def _parse_show_rev_path(args: list[str]) -> tuple[str, str] | None:
+    for raw in args:
+        if raw == "--":
+            continue
+        if raw.startswith("-"):
+            continue
+        match = _SHOW_REV_PATH_RE.fullmatch(raw)
+        if match is not None:
+            rev, path = match.group(1), match.group(2)
+            if rev and path:
+                return rev, path
+    return None
+
+
+def _git_show_cache_key(rev: str, path: str) -> str:
+    return f"{rev}\0{path}"
+
+
+def _git_show_output_path(temp: str, rev: str, path: str) -> str:
+    digest = hashlib.sha256(_git_show_cache_key(rev, path).encode()).hexdigest()[:16]
+    return str(Path(temp) / f"git-show-{digest}.txt")
+
+
+def _git_show_preview(output_path: str) -> str:
+    text = Path(output_path).read_text(encoding="utf-8")
+    lines = text.splitlines()
+    preview = "\n".join(lines[:_GIT_SHOW_PREVIEW_LINES])
+    if len(lines) > _GIT_SHOW_PREVIEW_LINES:
+        preview = f"{preview}\n... [truncated; full body saved to {output_path}] ..."
+    return preview
 
 
 def _is_auth_failure(stderr: str) -> bool:
@@ -384,10 +424,32 @@ def git_tool(ctx: ToolContext):
         cwd = primary_repo_state(ctx.tool_state).dir
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         _validate_git_invocation(command, args, global_opts, cwd, tmpdir=tmpdir)
+        show_target = _parse_show_rev_path(args) if command == "show" else None
+        if show_target is not None:
+            rev, file_path = show_target
+            cache_key = _git_show_cache_key(rev, file_path)
+            cached_path = ctx.tool_state.git_show_cache.get(cache_key)
+            if cached_path and Path(cached_path).is_file():
+                return {
+                    "output": _git_show_preview(cached_path),
+                    "outputPath": cached_path,
+                    "cached": True,
+                }
         try:
             output = _run_git([*global_opts, command, *args], cwd=cwd)
         except RuntimeError as err:
             raise RuntimeError(redact_secrets(str(err))) from err
+        if show_target is not None:
+            rev, file_path = show_target
+            cache_key = _git_show_cache_key(rev, file_path)
+            temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
+            path = _git_show_output_path(temp, rev, file_path)
+            Path(path).write_text(output, encoding="utf-8")
+            ctx.tool_state.git_show_cache[cache_key] = path
+            return {
+                "output": _git_show_preview(path),
+                "outputPath": path,
+            }
         if len(output) > 50_000:
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
             path = str(Path(temp) / f"git-{command}-{uuid.uuid4().hex[:8]}.txt")

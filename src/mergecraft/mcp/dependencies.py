@@ -7,36 +7,47 @@ from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.shared import EMPTY_SCHEMA, ToolClass, execute, tool
 from mergecraft.mcp.tool_state import DependencyInstallationState
+from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, API_ONLY_SCOPE_GUIDANCE
 from mergecraft.prep import PrepOptions, PrepResult, is_prep_install_failure, run_prep_phase
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 
-def _format_prep_results(results: list[PrepResult]) -> str:
+def _format_prep_results(results: list[PrepResult], *, scope_notice: str | None = None) -> str:
     if not results:
-        return (
+        body = (
             "No supported language detected in this repository "
             "(checked for package.json, requirements.txt, pyproject.toml, etc.).\n\n"
             "Inspect the repository structure to determine how dependencies should be "
             "installed, then use shell to install them."
         )
-    lines: list[str] = []
-    for result in results:
-        if result.language == "unknown":
-            continue
-        lang = "Node.js" if result.language == "node" else "Python"
-        if result.dependencies_installed:
-            lines.append(
-                f"{lang} dependencies installed successfully via {result.package_manager}."
-            )
-        elif result.skipped:
-            reason = result.issues[0] if result.issues else "skipped by policy"
-            lines.append(f"{lang} dependency installation skipped: {reason}")
-        else:
-            err = "\n".join(result.issues) if result.issues else "unknown error"
-            lines.append(f"{lang} dependency installation failed.\n\nError:\n{err}")
-    return "\n\n".join(lines) if lines else _format_prep_results([])
+    else:
+        lines: list[str] = []
+        for result in results:
+            if result.language == "unknown":
+                continue
+            lang = "Node.js" if result.language == "node" else "Python"
+            if result.dependencies_installed:
+                lines.append(
+                    f"{lang} dependencies installed successfully via {result.package_manager}."
+                )
+            elif result.skipped:
+                reason = result.issues[0] if result.issues else "skipped by policy"
+                lines.append(f"{lang} dependency installation skipped: {reason}")
+            else:
+                err = "\n".join(result.issues) if result.issues else "unknown error"
+                lines.append(f"{lang} dependency installation failed.\n\nError:\n{err}")
+        body = "\n\n".join(lines) if lines else _format_prep_results([], scope_notice=scope_notice)
+    if scope_notice:
+        return f"{scope_notice}\n\n{body}"
+    return body
+
+
+def _prep_scope_notice(ctx: ToolContext) -> str | None:
+    if ctx.tool_state.review_scope == API_ONLY_SCOPE:
+        return API_ONLY_SCOPE_GUIDANCE
+    return None
 
 
 def start_installation(ctx: ToolContext) -> None:
@@ -78,7 +89,9 @@ def start_dependency_installation_tool(ctx: ToolContext):
             return {
                 "status": state.status,
                 "message": "Dependency installation already completed.",
-                "summary": _format_prep_results(state.results or []),
+                "summary": _format_prep_results(
+                    state.results or [], scope_notice=_prep_scope_notice(ctx)
+                ),
             }
         if state and state.status == "in_progress":
             return {
@@ -120,13 +133,18 @@ def await_dependency_installation_tool(ctx: ToolContext):
         if state.status in {"completed", "failed"}:
             return {
                 "status": state.status,
-                "message": _format_prep_results(state.results or []),
+                "message": _format_prep_results(
+                    state.results or [], scope_notice=_prep_scope_notice(ctx)
+                ),
             }
         if state.promise is None:
             msg = "dependency installation state is corrupted - no promise found"
             raise RuntimeError(msg)
         results = await state.promise
-        return {"status": state.status, "message": _format_prep_results(results)}
+        return {
+            "status": state.status,
+            "message": _format_prep_results(results, scope_notice=_prep_scope_notice(ctx)),
+        }
 
     return tool(
         name="await_dependency_installation",

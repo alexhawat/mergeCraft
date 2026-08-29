@@ -95,7 +95,7 @@ from mergecraft.mcp.shell import (
 )
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
-from mergecraft.mcp.verdict import submit_review_verdict_tool
+from mergecraft.mcp.verdict import establish_review_scope_tool, submit_review_verdict_tool
 from mergecraft.mcp.verification import (
     record_finding_verdict_tool,
     verify_agent_findings_tool,
@@ -142,6 +142,7 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
         get_pull_request_tool(ctx),
         get_commit_info_tool(ctx),
         checkout_pr_tool(ctx),
+        establish_review_scope_tool(ctx),
         get_review_comments_tool(ctx),
         list_pull_request_reviews_tool(ctx),
         resolve_review_thread_tool(ctx),

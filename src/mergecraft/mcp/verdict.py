@@ -26,6 +26,7 @@ from mergecraft.findings.agent_adapter import (
 )
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import TerminalSubmission, ToolState, primary_repo_state
+from mergecraft.modes._api_only_scope import API_ONLY_SCOPE
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 from mergecraft.tracing.redaction import redact_attrs
 
@@ -39,6 +40,8 @@ _ALLOWED_VERDICTS = frozenset({"approve", "request_changes"})
 _ALLOWED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary", "findings"})
 _REQUIRED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary"})
 _REVIEW_MODES = frozenset({"Review", "IncrementalReview"})
+_SCOPE_PROVENANCE = frozenset({"api", "local-diff", "commit-info"})
+_UNIFIED_DIFF_MARKERS = ("diff --git", "--- a/", "+++ b/")
 
 REJECTION_INVALID_VERDICT = "invalid_verdict"
 REJECTION_UNKNOWN_FIELDS = "unknown_fields"
@@ -119,6 +122,44 @@ def _current_review_phase(tool_state: ToolState) -> ReviewPhase:
     return ReviewPhase(tool_state.review_phase)
 
 
+def _looks_like_unified_diff(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return any(marker in stripped for marker in _UNIFIED_DIFF_MARKERS)
+
+
+def _scope_refusal_detail(tool_state: ToolState) -> str:
+    primary = primary_repo_state(tool_state)
+    if primary.diff_path:
+        return "diff_path is set but review_phase is still INIT"
+    if primary.incremental_changed_paths:
+        return "incremental_changed_paths is set but diff_path is missing"
+    return "no materialized diff has been recorded yet (review_phase is INIT)"
+
+
+def register_review_scope(
+    tool_state: ToolState,
+    *,
+    diff_path: str,
+    provenance: Literal["api", "local-diff", "commit-info"],
+    review_scope: str | None = None,
+) -> None:
+    """Record evidence-backed review scope and advance past ``INIT`` (D4)."""
+    if provenance not in _SCOPE_PROVENANCE:
+        msg = f"invalid scope provenance: {provenance!r}"
+        raise ValueError(msg)
+    primary_repo_state(tool_state).diff_path = diff_path
+    tool_state.scope_provenance = provenance
+    tool_state.review_scope = (
+        review_scope
+        if review_scope is not None
+        else (API_ONLY_SCOPE if provenance == "api" else None)
+    )
+    tool_state.review_phase = ReviewPhase.ESTABLISH_SCOPE.value
+    stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
+
+
 def establish_offline_review_scope(tool_state: ToolState, *, diff_path: str) -> None:
     """Advance an offline run past ``INIT`` once its diff scope is materialized.
 
@@ -129,18 +170,49 @@ def establish_offline_review_scope(tool_state: ToolState, *, diff_path: str) -> 
     by :func:`ensure_review_scope_for_terminal`, so an offline review could
     never record a verdict (issue #470).
     """
-    primary_repo_state(tool_state).diff_path = diff_path
-    tool_state.review_phase = ReviewPhase.ESTABLISH_SCOPE.value
-    stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
+    register_review_scope(tool_state, diff_path=diff_path, provenance="local-diff")
+
+
+async def _resolve_pr_head_sha(ctx: ToolContext, *, pull_number: int) -> str:
+    pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
+    head = pr.get("head") or {}
+    return str(head.get("sha") or "").strip().lower()
+
+
+async def validate_review_scope_evidence(
+    ctx: ToolContext,
+    *,
+    diff_path: str,
+    head_sha: str,
+) -> None:
+    """Validate diff evidence and PR-head binding before scope is recorded (D4)."""
+    path = Path(diff_path)
+    if not path.is_file():
+        msg = f"diff_path does not exist: {diff_path}"
+        raise ValueError(msg)
+    text = path.read_text(encoding="utf-8")
+    if not _looks_like_unified_diff(text):
+        msg = f"diff_path is empty or not a unified diff: {diff_path}"
+        raise ValueError(msg)
+    pull_number = ctx.tool_state.pr_number or primary_repo_state(ctx.tool_state).issue_number
+    if pull_number is None:
+        msg = "establish_review_scope requires a PR number on this run"
+        raise ValueError(msg)
+    api_head = await _resolve_pr_head_sha(ctx, pull_number=int(pull_number))
+    if not api_head:
+        msg = "could not resolve PR head sha from the API"
+        raise ValueError(msg)
+    if head_sha.strip().lower() != api_head:
+        msg = f"head_sha {head_sha!r} does not match the PR head {api_head!r} from the API"
+        raise ValueError(msg)
 
 
 def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> None:
     """Raise when a Review-mode terminal tool runs before review scope exists (D10).
 
-    Scope is established by ``checkout_pr`` on the Action path and by
-    :func:`establish_offline_review_scope` on the offline path; a run that
-    already carries a materialized diff satisfies the precondition either
-    way, so the message names both routes rather than only the PR one.
+    Scope is evidence-backed (D4) and may be established by ``checkout_pr``,
+    :func:`establish_review_scope`, :func:`establish_offline_review_scope`, or
+    ``get_commit_info`` when its SHA equals the PR head.
     """
     mode = tool_state.selected_mode
     if mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT:
@@ -151,10 +223,17 @@ def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> N
         primary = primary_repo_state(tool_state)
         if primary.incremental_changed_paths:
             return
+    detail = _scope_refusal_detail(tool_state)
+    routes = (
+        "checkout_pr (fetch the PR branch or degrade to api-only with diffPath)",
+        "establish_review_scope (diff_path + base_sha + head_sha matching the PR head)",
+        "get_commit_info (when sha equals the PR head — writes commit-<sha>.diff)",
+        "offline runs via --base/--head, --diff, or --cwd (establish_offline_review_scope)",
+    )
     msg = (
         f"{tool_name} requires review scope before the terminal verdict can be "
-        "recorded — run checkout_pr, or start the run against a diff "
-        "(--base/--head, --diff, --cwd)"
+        f"recorded. Establish scope via one of: {'; '.join(routes)}. "
+        f"This run: {detail}."
     )
     raise ValueError(msg)
 
@@ -739,6 +818,43 @@ def submit_review_verdict_tool(ctx: ToolContext):
     )
 
 
+def establish_review_scope_tool(ctx: ToolContext):
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
+        diff_path = str(params["diff_path"])
+        head_sha = str(params["head_sha"])
+        await validate_review_scope_evidence(ctx, diff_path=diff_path, head_sha=head_sha)
+        register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="local-diff")
+        return {
+            "diffPath": diff_path,
+            "headSha": head_sha,
+            "baseSha": str(params.get("base_sha") or ""),
+            "provenance": "local-diff",
+            "reviewPhase": ReviewPhase.ESTABLISH_SCOPE.value,
+        }
+
+    return tool(
+        name="establish_review_scope",
+        tool_class=ToolClass.SCOPE,
+        mutates=True,
+        description=(
+            "Establish review scope from an on-disk unified diff that describes the "
+            "PR head. Validates that diff_path exists, is non-empty, and head_sha "
+            "matches the PR head from the API."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "diff_path": {"type": "string"},
+                "base_sha": {"type": "string"},
+                "head_sha": {"type": "string"},
+            },
+            "required": ["diff_path", "base_sha", "head_sha"],
+            "additionalProperties": False,
+        },
+        execute=execute(_run, "establish_review_scope"),
+    )
+
+
 __all__ = [
     "REJECTION_APPROVE_CONFIRMED_BLOCKER",
     "REJECTION_APPROVE_FAILED_GATE",
@@ -756,8 +872,10 @@ __all__ = [
     "build_validation_state",
     "ensure_review_scope_for_terminal",
     "establish_offline_review_scope",
+    "establish_review_scope_tool",
     "record_validated_terminal_submission",
     "recorded_submission_payload",
+    "register_review_scope",
     "revalidate_recorded_submission",
     "span_attrs_for_verdict_diagnostic",
     "stamp_review_phase_on_active_span",
