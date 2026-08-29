@@ -40,7 +40,6 @@ class _RunGitRecorder:
     ["--no-index", "--no-index=/tmp/x", "--no-index=."],
     ids=["bare", "equals-path", "equals-dot"],
 )
-@pytest.mark.xfail(reason="green after W2: refuse --no-index on all subcommands", strict=False)
 @pytest.mark.asyncio
 async def test_no_index_refused_for_allowlisted_subcommands(
     tmp_path: Path,
@@ -67,7 +66,6 @@ async def test_no_index_refused_for_allowlisted_subcommands(
         ([OUTSIDE], "before --"),
     ],
 )
-@pytest.mark.xfail(reason="green after W2: confine positional paths", strict=False)
 @pytest.mark.asyncio
 async def test_positional_path_outside_workspace_refused(
     tmp_path: Path,
@@ -90,7 +88,6 @@ async def test_positional_path_outside_workspace_refused(
         ".git/credentials",
     ],
 )
-@pytest.mark.xfail(reason="green after W2: deny credential paths", strict=False)
 @pytest.mark.asyncio
 async def test_credential_git_paths_refused(
     tmp_path: Path,
@@ -113,7 +110,6 @@ async def test_credential_git_paths_refused(
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(reason="green after W2: deny askpass tree", strict=False)
 @pytest.mark.asyncio
 async def test_askpass_path_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     askpass_dir = tmp_path / "credentials"
@@ -134,7 +130,6 @@ async def test_askpass_path_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert recorder.calls == []
 
 
-@pytest.mark.xfail(reason="green after W2: redact git failure stderr", strict=False)
 @pytest.mark.asyncio
 async def test_git_failure_stderr_token_redacted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -150,7 +145,6 @@ async def test_git_failure_stderr_token_redacted(
     assert "ghp_" not in text or "***" in text
 
 
-@pytest.mark.xfail(reason="green after W2: reproduce run 33126460925 refusal", strict=False)
 @pytest.mark.asyncio
 async def test_run_33126460925_no_index_git_config_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

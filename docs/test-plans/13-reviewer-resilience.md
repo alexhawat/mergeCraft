@@ -5,6 +5,13 @@ Worktree: `../mergecraft-resilience` on `wave/reviewer-resilience`
 Authoring wave: **W1** (`test-creator`). Implementation: **W2–W9**.
 xfail-reconciliation: per impl wave (`strict=False` until green).
 
+## Final reconciliation (post-`35ff1ef4`)
+
+| Fix | Rationale |
+| --- | --- |
+| Removed `@pytest.mark.xfail` from 6 decorators covering 52 containment tests | W2 git containment (`--no-index`, positional path confinement, credential/askpass denial, stderr redaction, run 33126460925) landed; prior W2 reconciliation missed `tests/mcp/test_reviewer_resilience_containment.py` |
+| Zero remaining `@pytest.mark.xfail` in plan 13 suite | All W2–W9 contracts green; `xfail_strict=true` / `make ci-resume` coverage-gate no longer XPASS-fails |
+
 ## W3 reconciliation (post-`d625ff4a`)
 
 | Fix | Rationale |
