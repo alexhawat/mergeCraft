@@ -578,7 +578,7 @@ jobs:
         # closed with no mergecraft-approval check at all. Fixed in #545
         # (utils/git_setup.py — basic auth on the documented `x-access-token`
         # username). b3638ea7 is #545's merge commit.
-        uses: alexhawat/mergeCraft@16ce04413932eb74957d394d2aa376b2af39f0b8 # main (PR #558)
+        uses: alexhawat/mergeCraft@53a657fbfef0aaaf2a5e2608020cd92b105754b7 # main (PR #564)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -726,7 +726,7 @@ jobs:
         # closed with no mergecraft-approval check at all. Fixed in #545
         # (utils/git_setup.py — basic auth on the documented `x-access-token`
         # username). b3638ea7 is #545's merge commit.
-        uses: alexhawat/mergeCraft@16ce04413932eb74957d394d2aa376b2af39f0b8 # main (PR #558)
+        uses: alexhawat/mergeCraft@53a657fbfef0aaaf2a5e2608020cd92b105754b7 # main (PR #564)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -837,7 +837,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now b3638ea7 (#545).
-        uses: alexhawat/mergeCraft@16ce04413932eb74957d394d2aa376b2af39f0b8 # main (PR #558)
+        uses: alexhawat/mergeCraft@53a657fbfef0aaaf2a5e2608020cd92b105754b7 # main (PR #564)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
