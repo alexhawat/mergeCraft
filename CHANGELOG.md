@@ -21,8 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only git MCP verbs (`show-ref`, `for-each-ref`, `ls-remote`, `config
   --get`) and `checkout_pr` parameter aliases (`pr_number`, `issue_number`)
 - Agent stream logs render human-readable lines instead of dumping raw provider
-  NDJSON; raw lines appear only when `LOG_LEVEL=debug` or
-  `ACTIONS_STEP_DEBUG=true`
+  NDJSON. The raw dump is gone rather than demoted: the evidence packet now
+  ships as a workflow artifact, so the trajectory record — tool identity,
+  outcome, paths, failure class — is the forensic surface, and an interleaved
+  raw dump is not reinstated even under `ACTIONS_STEP_DEBUG`
 - Every review run that resolves a pull request number posts a deterministic run
   record — a sticky progress comment and a mandatory review-body preamble rendered
   from the same function, so a green review that says nothing is no longer
@@ -44,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `wait-for-ci` poll cadence (20s → 10s, #528)
 
 ### Fixed
+
+- A refused terminal verdict now reaches the deterministic run record by name.
+  `rejection_reason` — and the record's reason line — were both gated on the
+  packet having no decision, but `decide_approval` always returns one, so
+  neither could fire: a run that refused for lack of review scope rendered
+  identically to a clean one. The refusal is read from the run state instead,
+  and the non-retryable post-run path records it rather than publishing a
+  second record that the finalize-time upsert would overwrite
 
 - Git MCP containment: refuse `--no-index`, confine positional paths, deny
   credential paths (`.git/config`, askpass tree), and redact git failure text

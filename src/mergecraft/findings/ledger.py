@@ -737,10 +737,15 @@ def render_deterministic_review_block(
                 "",
                 f"> {summary.replace(chr(10), chr(10) + '> ')}",
             ]
-    elif rejection_reason:
-        verdict_lines = [
+    if rejection_reason:
+        # The agent's terminal verdict was refused (scope, schema, semantic or
+        # policy). This used to be an ``elif`` on ``decision is None``, which the
+        # packet pipeline never produces — ``decide_approval`` always returns a
+        # ``PacketDecision`` — so a refused run rendered identically to a clean
+        # one. The structural decision and the refusal are separate facts.
+        verdict_lines += [
             "",
-            f"**No verdict recorded — reason:** `{rejection_reason}`",
+            f"**No agent verdict recorded — reason:** `{rejection_reason}`",
         ]
 
     return (

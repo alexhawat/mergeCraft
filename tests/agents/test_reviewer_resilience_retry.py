@@ -150,28 +150,31 @@ async def test_stop_hook_remains_retryable_once(
 
 
 @pytest.mark.asyncio
-async def test_non_retryable_scope_emits_diagnostic_and_publishes(
+async def test_non_retryable_scope_records_rejection_without_resuming(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    published: list[str] = []
+    """D5 — the loop skips the resume and leaves publication to ``main._publish``.
 
-    def _publish_scope_unavailable(**kwargs: object) -> None:
-        published.append(str(kwargs.get("verdict_diagnostic")))
-
-    monkeypatch.setattr(
-        "mergecraft.review.deterministic_publish.publish_scope_unavailable_review",
-        _publish_scope_unavailable,
-        raising=False,
-    )
+    The refusal is recorded on ``tool_state``, which ``_publish`` reads to build
+    the single deterministic record for the PR. Publishing a second record from
+    here would be upserted over moments later, so this path must not publish.
+    """
     monkeypatch.setattr("mergecraft.agents.post_run.get_git_status", lambda: "")
     tool_ctx = _tool_ctx(tmp_path)
     tool_ctx.tool_state.selected_mode = "Review"
     tool_ctx.tool_state.review_phase = "INIT"
 
+    resumed: list[str] = []
+
+    async def _resume(prompt: str) -> AgentResult:
+        resumed.append(prompt)
+        return AgentResult(success=True)
+
     final = await run_post_run_retry_loop(
         _run_ctx(tool_ctx),
         initial=AgentResult(success=True, terminal_submission_received=False),
-        resume=lambda _p: AgentResult(success=True),
+        resume=_resume,
     )
-    assert final.diagnostics.get("verdict_diagnostic") == "scope_unavailable"
-    assert published == ["scope_unavailable"]
+    assert resumed == [], "a deterministic refusal must not spend a resume turn"
+    assert tool_ctx.tool_state.last_terminal_rejection == "scope_unavailable"
+    assert final.success is True

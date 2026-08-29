@@ -137,9 +137,16 @@ def test_stream_render_emits_expected_line_shape(event: dict[str, Any], needle: 
     assert line.endswith("\n") or "→" in line or "✓" in line or "✗" in line
 
 
-def test_actions_step_debug_still_emits_raw_line(
+def test_actions_step_debug_no_longer_dumps_raw_line(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """D8 — the raw NDJSON dump is dropped, not demoted, now the packet survives.
+
+    Plan 12's W7 (``f34b2ef4``) uploads the evidence packet as a workflow
+    artifact on every review rung, so the trajectory record — tool identity,
+    outcome, paths, failure class — is the forensic surface. The interleaved
+    raw dump is not reinstated, even under ``ACTIONS_STEP_DEBUG``.
+    """
     monkeypatch.setenv("ACTIONS_STEP_DEBUG", "true")
     configure_logging(force=True)
     raw = json.dumps({"type": "item.completed", "item": {"id": "debug"}})
@@ -149,7 +156,8 @@ def test_actions_step_debug_still_emits_raw_line(
         handler=lambda *_a, **_k: None,
     )
     captured = capsys.readouterr()
-    assert raw in captured.out or raw in captured.err
+    assert raw not in captured.out
+    assert raw not in captured.err
 
 
 @pytest.mark.asyncio

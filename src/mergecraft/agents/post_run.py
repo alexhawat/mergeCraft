@@ -44,17 +44,20 @@ def _apply_non_retryable_scope_outcome(
     *,
     rejection: str,
 ) -> AgentResult:
-    """Skip resume for deterministic refusals; record and publish once (D5)."""
-    from mergecraft.review.deterministic_publish import publish_scope_unavailable_review
+    """Skip the resume for a deterministic refusal (D5).
 
+    Publication is **not** performed here. ``tool_state.last_terminal_rejection``
+    already carries the refusal, and ``main._publish`` renders exactly one
+    deterministic record per resolved PR from it — an upsert onto the sticky
+    comment that runs after this loop returns. Publishing a second record here
+    would be overwritten moments later.
+    """
+    _ = ctx
     logger.info(
         "post-run resume skipped — terminal refusal is not retryable ({})",
         rejection,
     )
-    diagnostics = dict(result.diagnostics)
-    diagnostics["verdict_diagnostic"] = rejection
-    publish_scope_unavailable_review(ctx=ctx, verdict_diagnostic=rejection)
-    return replace(result, diagnostics=diagnostics)
+    return result
 
 
 def get_unsubmitted_review(tool_state: ToolState) -> str | None:

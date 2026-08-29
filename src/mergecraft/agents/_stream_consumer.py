@@ -60,7 +60,6 @@ from loguru import logger
 from mergecraft.agents.shared import resolve_cache_read
 from mergecraft.agents.stream_render import emit_rendered_stream_line
 from mergecraft.utils import activity
-from mergecraft.utils.log import drain_loguru_queue, is_debug_enabled
 
 if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentUsage
@@ -298,9 +297,6 @@ def consume_stream(
 
         activity.mark_activity()
         emit_rendered_stream_line(event)
-        if is_debug_enabled():
-            logger.debug("{}", stripped)
-            drain_loguru_queue()
 
         # T3.2 — when a mergeCraft span is active, wrap the handler call in
         # ``attach_trace_context`` so any nested OTel auto-instrumented

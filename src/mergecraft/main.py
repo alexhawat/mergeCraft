@@ -447,9 +447,15 @@ async def _publish(
         pull_number = tool_context.tool_state.pr_number
         if pull_number is None and tool_context.payload.event.issue_number is not None:
             pull_number = int(tool_context.payload.event.issue_number)
-        rejection_reason = (
-            failure_reason if prepared is not None and prepared.decision is None else None
-        )
+        # A refused terminal verdict (scope, schema, semantic or policy) is
+        # recorded on ``tool_state``; it names the actual cause, so it wins over
+        # the generic run failure reason. This is deliberately not gated on
+        # ``prepared.decision is None``: ``decide_approval`` always returns a
+        # ``PacketDecision``, so that condition never holds and the reason never
+        # reached the record — a refused run read as a clean one (plan 13 D5).
+        rejection_reason = tool_context.tool_state.last_terminal_rejection
+        if rejection_reason is None and prepared is not None and prepared.decision is None:
+            rejection_reason = failure_reason
         if pull_number is not None and prepared is not None:
             await publish_deterministic_record(
                 pull_number=int(pull_number),
