@@ -29,7 +29,9 @@ FINDING_EFFORTS: Final[tuple[str, ...]] = ("Quick win", "Heavy lift", "Low value
 
 FINDING_CONFIDENCES: Final[tuple[str, ...]] = ("certain", "likely", "possible")
 
-FindingSource = Literal["analyzer", "agent", "ci"]
+FindingSource = Literal["analyzer", "agent", "ci", "trajectory"]
+
+FindingScope = Literal["change", "run"]
 
 # A finding at one of these grades never occupies an inline anchor — it belongs
 # in the body's Nitpicks section instead.
@@ -88,6 +90,7 @@ __all__ = [
     "FINDING_SEVERITIES",
     "VERIFY_FIRST_PREAMBLE",
     "WITHDRAWN_FINDINGS_HEADING",
+    "FindingScope",
     "FindingSource",
     "finding_fingerprint",
     "stamp_finding_fingerprint",

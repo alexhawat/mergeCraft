@@ -297,6 +297,13 @@ class TestActionYmlHygiene:
             "delete the value: keys, keep the descriptions"
         )
 
+    def test_docker_action_pulls_digest_pinned_slim_image(self, action_yml: dict[str, Any]) -> None:
+        """#526 — published Action must resolve to a GHCR pull, not a Dockerfile build."""
+        image = action_yml["runs"]["image"]
+        assert image != "Dockerfile"
+        assert image.startswith("docker://ghcr.io/alexhawat/mergecraft@sha256:")
+        assert "analyzers" not in image
+
     def test_every_output_keeps_its_description(self, action_yml: dict[str, Any]) -> None:
         """W8.1 deletes ``value:`` only — the consumer-facing prose must survive."""
         outputs = action_yml.get("outputs") or {}

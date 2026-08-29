@@ -27,12 +27,27 @@ if TYPE_CHECKING:
 LEDGER_MARKER_PREFIX: str = "<!-- mergecraft-ledger:v1:"
 LEDGER_MARKER_V2_PREFIX: str = "<!-- mergecraft-ledger:v2:"
 LEDGER_SCHEMA_VERSION: str = "v2"
+DETERMINISTIC_RECORD_MARKER: str = "<!-- mergecraft-deterministic-record:v1 -->"
 
 _PROGRESS_HEADING = "## mergeCraft progress"
 _VIA_MERGECRAFT_MARKER = "*via mergecraft*"
 
 _LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+)(?::([^>]*?))? -->")
 _LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-]+):([^>]+) -->")
+# Agent prose: the block must end at a real terminator. Falling back to ``\Z``
+# here meant a marker the agent merely quoted — plausible in a repo that reviews
+# its own reviewer — swallowed every finding after it. A bare marker with no
+# terminator is removed on its own by the ``replace`` in the stripper below.
+_DETERMINISTIC_RECORD_BLOCK_RE = re.compile(
+    rf"{re.escape(DETERMINISTIC_RECORD_MARKER)}[\s\S]*?"
+    r"(?=\n<!-- mergecraft-ledger:|\n\*via mergecraft\*)",
+)
+# Our own progress comment, where the record legitimately ends the body.
+_DETERMINISTIC_RECORD_BLOCK_EOF_RE = re.compile(
+    rf"{re.escape(DETERMINISTIC_RECORD_MARKER)}[\s\S]*?"
+    r"(?=\n<!-- mergecraft-ledger:|\n\*via mergecraft\*|\Z)",
+)
+_RECORD_SLOT = "\x00mergecraft-deterministic-record\x00"
 
 _ISSUE_COMMENT_PAGE_SIZE = 100
 # GitHub issue comments are paginated at 100/page; cap total scanned comments
@@ -153,7 +168,8 @@ def is_sticky_progress_comment(body: str) -> bool:
     """Return whether ``body`` looks like the mergeCraft sticky progress comment."""
     lowered = body.lower()
     return (
-        LEDGER_MARKER_PREFIX in body
+        DETERMINISTIC_RECORD_MARKER in body
+        or LEDGER_MARKER_PREFIX in body
         or LEDGER_MARKER_V2_PREFIX in body
         or _PROGRESS_HEADING in body
         or _VIA_MERGECRAFT_MARKER in lowered
@@ -553,7 +569,262 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
         logger.info("finding ledger: could not persist progress comment: {}", err)
 
 
+def _strip_deterministic_record_markers(body: str) -> str:
+    """Remove forged or stale deterministic-record markers from agent prose."""
+    without_block = _DETERMINISTIC_RECORD_BLOCK_RE.sub("", body)
+    return without_block.replace(DETERMINISTIC_RECORD_MARKER, "").strip()
+
+
+def merge_deterministic_record_into_comment(body: str, *, record_block: str) -> str:
+    """Insert or replace the deterministic record block in a progress comment.
+
+    When the comment already carries a record, the new one replaces it **in
+    place** so any surrounding prose keeps its position. The replacement is
+    staged through a sentinel because the rendered block itself opens with
+    ``DETERMINISTIC_RECORD_MARKER``; substituting it directly would leave the
+    freshly-inserted block matching the same pattern as the stale ones being
+    cleared.
+    """
+    block = record_block.strip()
+    if DETERMINISTIC_RECORD_MARKER in body:
+        staged = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub(_RECORD_SLOT, body, count=1)
+        staged = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub("", staged)
+        staged = staged.replace(DETERMINISTIC_RECORD_MARKER, "")
+        if _PROGRESS_HEADING not in staged:
+            staged = f"{_PROGRESS_HEADING}\n\n{staged.lstrip()}"
+        return f"{staged.replace(_RECORD_SLOT, block).strip()}\n"
+    cleaned = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub("", body)
+    cleaned = cleaned.replace(DETERMINISTIC_RECORD_MARKER, "").strip()
+    if not cleaned:
+        return f"{_PROGRESS_HEADING}\n\n{block}\n"
+    if _PROGRESS_HEADING not in cleaned:
+        cleaned = f"{_PROGRESS_HEADING}\n\n{cleaned}"
+    parts = cleaned.split("\n", 1)
+    if parts[0].strip() == _PROGRESS_HEADING:
+        tail = parts[1].strip() if len(parts) > 1 else ""
+        if tail:
+            return f"{_PROGRESS_HEADING}\n\n{block}\n\n{tail}\n"
+        return f"{_PROGRESS_HEADING}\n\n{block}\n"
+    return f"{block}\n\n{cleaned}\n"
+
+
+def render_deterministic_review_block(
+    *,
+    packet: Any,
+    rejection_reason: str | None = None,
+    run_url: str | None = None,
+    run_outcome: Any | None = None,
+    verdict_diagnostic: Any | None = None,
+    analyzer_summary: str | None = None,
+    agent_summary: str | None = None,
+    trust_tier: str | None = None,
+    attempt_count: int | None = None,
+    token_summary: str | None = None,
+) -> str:
+    """Render the authoritative deterministic review record (D6/D7).
+
+    Pure leaf: no I/O. Both the sticky progress comment and the review-body
+    preamble render from this single function so the two surfaces cannot drift.
+    """
+    from mergecraft.analyzers.finding import Finding
+
+    decision = getattr(packet, "decision", None)
+    agent_meta = getattr(packet, "agent", None)
+    self_assessment = getattr(packet, "self_assessment", None)
+    findings_raw = list(getattr(packet, "findings", []) or [])
+    findings = [
+        row if isinstance(row, Finding) else Finding.model_validate(row) for row in findings_raw
+    ]
+    change_findings = [finding for finding in findings if finding.scope != "run"]
+    run_health = getattr(packet, "run_health", None)
+    if run_health is not None:
+        run_findings = [
+            row if isinstance(row, Finding) else Finding.model_validate(row)
+            for row in list(getattr(run_health, "findings", []) or [])
+        ]
+    else:
+        run_findings = [finding for finding in findings if finding.scope == "run"]
+    deterministic_checks = list(getattr(packet, "deterministic_checks", []) or [])
+
+    model = ""
+    if agent_meta is not None:
+        executed = str(getattr(agent_meta, "executed_model", "") or "").strip()
+        model = executed or str(getattr(agent_meta, "model", "") or "").strip()
+
+    reviewed_sha = ""
+    if self_assessment is not None and getattr(self_assessment, "sha", None):
+        reviewed_sha = str(self_assessment.sha)
+
+    header_lines = [
+        DETERMINISTIC_RECORD_MARKER,
+        "### mergeCraft run record",
+        "",
+    ]
+    if run_outcome is not None:
+        header_lines.append(f"- **Outcome:** `{run_outcome}`")
+    if verdict_diagnostic is not None:
+        diagnostic = (
+            verdict_diagnostic.value
+            if hasattr(verdict_diagnostic, "value")
+            else str(verdict_diagnostic)
+        )
+        header_lines.append(f"- **Verdict diagnostic:** `{diagnostic}`")
+    if decision is not None:
+        header_lines.append(f"- **Decision:** `{decision.verdict}` — {decision.reason}")
+    if model:
+        header_lines.append(f"- **Model:** `{model}`")
+    if attempt_count is not None:
+        header_lines.append(f"- **Attempts:** {attempt_count}")
+    if token_summary:
+        header_lines.append(f"- **Tokens:** {token_summary}")
+    if run_url:
+        header_lines.append(f"- **Run:** {run_url}")
+    if reviewed_sha:
+        header_lines.append(f"- **Reviewed SHA:** `{reviewed_sha}`")
+
+    pre_merge_lines = ["", "### Pre-merge checks", ""]
+    if analyzer_summary:
+        pre_merge_lines.append(f"- **Analyzers:** {analyzer_summary}")
+    elif agent_meta is not None and getattr(agent_meta, "dispatched_lens_ids", None):
+        lens_ids = ", ".join(agent_meta.dispatched_lens_ids)
+        pre_merge_lines.append(f"- **Analyzers:** dispatched lenses: {lens_ids}")
+    else:
+        pre_merge_lines.append("- **Analyzers:** not recorded on packet")
+
+    if deterministic_checks:
+        check_bits = [
+            f"{check.name} ({check.status})"
+            for check in deterministic_checks
+            if getattr(check, "name", None)
+        ]
+        pre_merge_lines.append(
+            f"- **Static checks:** {', '.join(check_bits) if check_bits else 'none recorded'}"
+        )
+    else:
+        pre_merge_lines.append("- **Static checks:** none recorded")
+
+    pre_merge_lines.append("- **CI intelligence:** see packet findings")
+    pre_merge_lines.append(f"- **Trust tier:** `{trust_tier or 'unknown'}`")
+
+    finding_lines = ["", "### Change-scoped findings", ""]
+    if change_findings:
+        for finding in change_findings:
+            location = f"`{finding.path}` — " if finding.path else ""
+            finding_lines.append(f"- **{finding.severity}** · {location}{finding.message}")
+    else:
+        finding_lines.append("_No change-scoped findings recorded._")
+
+    run_health_lines: list[str] = []
+    if run_findings:
+        run_health_lines = [
+            "",
+            "<details>",
+            "<summary>Run health</summary>",
+            "",
+        ]
+        for finding in run_findings:
+            run_health_lines.append(f"- **{finding.severity}** · {finding.message}")
+        run_health_lines.append("")
+        run_health_lines.append("</details>")
+
+    verdict_lines: list[str] = []
+    if decision is not None:
+        summary = (agent_summary or "").strip()
+        if summary:
+            verdict_lines = [
+                "",
+                "### Agent summary",
+                "",
+                f"> {summary.replace(chr(10), chr(10) + '> ')}",
+            ]
+    elif rejection_reason:
+        verdict_lines = [
+            "",
+            f"**No verdict recorded — reason:** `{rejection_reason}`",
+        ]
+
+    return (
+        "\n".join(
+            header_lines + pre_merge_lines + finding_lines + run_health_lines + verdict_lines
+        ).rstrip()
+        + "\n"
+    )
+
+
+async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) -> None:
+    """Upsert the sticky progress comment with the deterministic record (D6)."""
+    from mergecraft.mcp.comment import add_footer
+    from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
+    from mergecraft.utils import gha_log
+
+    tool_state = ctx.tool_state
+    if tool_state.progress_comment is False:
+        return
+
+    issue_number = primary_repo_state(tool_state).issue_number or tool_state.pr_number
+    if issue_number is None:
+        return
+
+    try:
+        base_body = str(tool_state.last_progress_body or "").strip()
+        body_with_record = merge_deterministic_record_into_comment(
+            base_body,
+            record_block=record_block,
+        )
+        body_with_footer = add_footer(ctx, body_with_record)
+
+        if isinstance(tool_state.progress_comment, ProgressComment):
+            await ctx.scm.update_issue_comment(
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(tool_state.progress_comment.id),
+                body_with_footer,
+            )
+            tool_state.last_progress_body = body_with_footer
+            return
+
+        sticky = await fetch_sticky_progress_comment(
+            ctx.scm,
+            ctx.repo.owner,
+            ctx.repo.name,
+            int(issue_number),
+        )
+        if sticky is not None:
+            existing_body = str(sticky.get("body") or "")
+            merged = merge_deterministic_record_into_comment(
+                existing_body,
+                record_block=record_block,
+            )
+            body_with_footer = add_footer(ctx, merged)
+            await ctx.scm.update_issue_comment(
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(sticky["id"]),
+                body_with_footer,
+            )
+            tool_state.progress_comment = ProgressComment(
+                id=str(sticky["id"]),
+                type="issue",
+            )
+            tool_state.last_progress_body = body_with_footer
+            return
+
+        result = await ctx.scm.create_issue_comment(
+            ctx.repo.owner,
+            ctx.repo.name,
+            int(issue_number),
+            body_with_footer,
+        )
+        tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
+        tool_state.last_progress_body = body_with_footer
+    except Exception as err:
+        message = f"deterministic record: could not persist progress comment: {err}"
+        logger.info(message)
+        gha_log.warning(message)
+
+
 __all__ = [
+    "DETERMINISTIC_RECORD_MARKER",
     "LEDGER_MARKER_PREFIX",
     "LEDGER_MARKER_V2_PREFIX",
     "LEDGER_SCHEMA_VERSION",
@@ -564,11 +835,14 @@ __all__ = [
     "hydrate_finding_ledger_from_progress_comment",
     "is_sticky_progress_comment",
     "ledger_round_index",
+    "merge_deterministic_record_into_comment",
     "merge_ledger_into_comment",
     "persist_finding_ledger_to_progress_comment",
     "record_deferred_from_analyzer_run",
     "record_over_budget_verifications",
     "record_published_findings_in_ledger",
     "record_withdrawn_in_ledger",
+    "render_deterministic_review_block",
     "sticky_progress_comment_body",
+    "upsert_sticky_progress_comment",
 ]
