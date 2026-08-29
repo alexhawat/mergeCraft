@@ -142,6 +142,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft workflow model prioritize` | Promote one model ahead of another in the workflow fallback chain. |
 | `mergecraft workflow provider add --label LABEL` | Register a provider and wire indexed custom-provider env keys into the workflow. |
 | `mergecraft workflow provider harnesses` | List supported agent harnesses (generated from code). |
+| `mergecraft workflow sync` | Keep mergecraft.yml auth wiring in sync with the committed agent roster. |
 | `mergecraft xrepo explain` | Explain a cross-repo finding, or report producer/consumer contract breakage. |
 <!-- END:cli-commands -->
 

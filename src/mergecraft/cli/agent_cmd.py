@@ -37,6 +37,8 @@ from mergecraft.cli.provider_cmd import (
     _write_config_dict,
 )
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.cli.workflow_cmd import parse_auth_manifest
+from mergecraft.cli.workflow_wf_yaml import DEFAULT_WORKFLOW_RELATIVE_PATH
 from mergecraft.config.agent_roster import (
     AgentRosterError,
     RosterEntry,
@@ -187,6 +189,40 @@ def _validate_slug(
     if isinstance(models, list) and slug in [str(item) for item in models]:
         return slug
     return validate_registered_model_slug(validation_raw, provider, model_id)
+
+
+def _ensure_provider_wired_in_workflow(
+    target_dir: Path,
+    target: AgentRosterTarget,
+    slug: str,
+    *,
+    allow_unwired: bool,
+) -> None:
+    if target == AgentRosterTarget.LOCAL:
+        return
+    provider, _model_id = parse_model(slug)
+    workflow_path = target_dir / DEFAULT_WORKFLOW_RELATIVE_PATH
+    if not workflow_path.is_file():
+        cli_bail(
+            f"provider {provider!r} is not wired in mergecraft.yml — no workflow at "
+            f"{workflow_path}; run [cyan]mergecraft workflow provider add --label {provider}[/cyan] "
+            "or choose a different model"
+        )
+    wired = parse_auth_manifest(workflow_path)
+    if provider.lower() in wired:
+        return
+    if allow_unwired:
+        console.print(
+            f"[yellow]warning:[/yellow] provider {provider!r} has no credential step in "
+            f"mergecraft.yml — roster saved, but CI will fail until you run "
+            f"[cyan]mergecraft workflow sync --apply[/cyan] or "
+            f"[cyan]mergecraft workflow provider add --label {provider}[/cyan]"
+        )
+        return
+    cli_bail(
+        f"provider {provider!r} has no credential step in mergecraft.yml — wire it with "
+        f"[cyan]mergecraft workflow provider add --label {provider}[/cyan] or choose a different model"
+    )
 
 
 def _persist_entry(
@@ -478,6 +514,11 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         name: str = typer.Argument(..., help="Agent name."),
         slot: str = typer.Argument(..., help="Priority slot (p0, p1, …)."),
         slug: str = typer.Argument(..., help="Registered provider/model slug."),
+        allow_unwired: bool = typer.Option(
+            False,
+            "--allow-unwired",
+            help="Permit assigning a provider that is not wired into mergecraft.yml (warns).",
+        ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
         """Assign a registered model to a positional slot (idempotent, D4)."""
@@ -491,6 +532,12 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
             create_if_missing=target == AgentRosterTarget.LOCAL or _is_role_named_agent(agent_name),
         )
         validated_slug = _validate_slug(target_dir, target, raw, slug)
+        _ensure_provider_wired_in_workflow(
+            target_dir,
+            target,
+            validated_slug,
+            allow_unwired=allow_unwired,
+        )
 
         try:
             index = parse_slot(slot)
@@ -506,6 +553,11 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
     def add_model_cmd(
         name: str = typer.Argument(..., help="Agent name."),
         slug: str = typer.Argument(..., help="Registered provider/model slug."),
+        allow_unwired: bool = typer.Option(
+            False,
+            "--allow-unwired",
+            help="Permit appending a provider that is not wired into mergecraft.yml (warns).",
+        ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
         """Append a registered model to an agent's chain (no-op when duplicate, D4)."""
@@ -519,6 +571,12 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
             create_if_missing=target == AgentRosterTarget.LOCAL or _is_role_named_agent(agent_name),
         )
         validated_slug = _validate_slug(target_dir, target, raw, slug)
+        _ensure_provider_wired_in_workflow(
+            target_dir,
+            target,
+            validated_slug,
+            allow_unwired=allow_unwired,
+        )
         chain, was_duplicate = add_model(_model_chain_from_entry(entry), validated_slug)
         if was_duplicate:
             console.print(

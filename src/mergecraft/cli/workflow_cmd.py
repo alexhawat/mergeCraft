@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,7 @@ from mergecraft.cli.provider_cmd import (
     load_provider_registry,
     resolve_provider_harness,
 )
+from mergecraft.cli.provider_toggle import _flat_secret_names
 from mergecraft.cli.tracing_logfire_wf_yaml import _is_action_uses
 from mergecraft.cli.workflow_wf_yaml import (
     DEFAULT_WORKFLOW_RELATIVE_PATH,
@@ -35,11 +38,13 @@ from mergecraft.cli.workflow_wf_yaml import (
     apply_provider_env_wiring,
     render_workflow_diff,
 )
+from mergecraft.config.agent_roster import load_roster
 from mergecraft.config.provider_registry import (
     allocate_env_index,
     list_supported_harnesses,
     validate_http_url,
 )
+from mergecraft.models import parse_model
 
 app = typer.Typer(
     help="Author provider and model wiring in the consumer GitHub Actions workflow.",
@@ -252,6 +257,263 @@ def _resolve_registered_model(
     config_path = _config_path(repo_root)
     data = _load_config_dict(config_path)
     return validate_registered_model_slug(data, provider, model)
+
+
+_SECRET_REF_RE = re.compile(r"^\$\{\{\s*secrets\.([A-Za-z0-9_]+)\s*\}\}$")
+_INDEXED_LABEL_RE = re.compile(r"^LLM_PROVIDER_(\d+)$")
+_INDEXED_CREDENTIAL_RE = re.compile(r"^LLM_PROVIDER_(\d+)_(.+)$")
+
+
+@lru_cache(maxsize=1)
+def _secret_name_to_provider_label_map() -> dict[str, str]:
+    from mergecraft.models import PROVIDERS
+
+    mapping: dict[str, str] = {}
+    for label in (*PROVIDERS.keys(), "cursor"):
+        for secret_name in _flat_secret_names(label):
+            mapping.setdefault(secret_name, label)
+    return mapping
+
+
+def secret_name_to_provider_label(secret_name: str) -> str | None:
+    """Map a credential env var or Actions secret name to a provider label."""
+    return _secret_name_to_provider_label_map().get(secret_name)
+
+
+def _secret_names_from_env_value(value: object) -> tuple[str, ...]:
+    if not isinstance(value, str):
+        return ()
+    match = _SECRET_REF_RE.match(value.strip())
+    if match is None:
+        return ()
+    return (match.group(1),)
+
+
+def _indexed_labels_from_env(env_map: dict[str, Any]) -> dict[int, str]:
+    labels: dict[int, str] = {}
+    for key, value in env_map.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        match = _INDEXED_LABEL_RE.match(key)
+        if match is None:
+            continue
+        stripped = value.strip()
+        if not stripped or _SECRET_REF_RE.match(stripped):
+            continue
+        labels[int(match.group(1))] = stripped.lower()
+    return labels
+
+
+def _labels_from_env_map(env_map: dict[str, Any]) -> set[str]:
+    wired: set[str] = set()
+    secret_to_label = _secret_name_to_provider_label_map()
+    indexed_labels = _indexed_labels_from_env(env_map)
+
+    for label in indexed_labels.values():
+        wired.add(label)
+
+    for key, value in env_map.items():
+        if not isinstance(key, str):
+            continue
+        indexed_match = _INDEXED_CREDENTIAL_RE.match(key)
+        if indexed_match is not None:
+            index = int(indexed_match.group(1))
+            if index in indexed_labels:
+                wired.add(indexed_labels[index])
+            for secret_name in _secret_names_from_env_value(value):
+                mapped = secret_to_label.get(secret_name)
+                if mapped is not None:
+                    wired.add(mapped)
+            continue
+        mapped_key = secret_to_label.get(key)
+        if mapped_key is not None:
+            wired.add(mapped_key)
+        for secret_name in _secret_names_from_env_value(value):
+            mapped = secret_to_label.get(secret_name)
+            if mapped is not None:
+                wired.add(mapped)
+    return wired
+
+
+def parse_auth_manifest(workflow_path: Path) -> frozenset[str]:
+    """Return provider labels CI can authenticate from mergeCraft review steps."""
+    try:
+        text = workflow_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        cli_bail(f"could not read {workflow_path}: {exc}")
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        cli_bail(f"could not parse {workflow_path}: {exc}")
+    if not isinstance(parsed, dict):
+        cli_bail(f"{workflow_path} must be a mapping at the top level")
+
+    wired: set[str] = set()
+    jobs = parsed.get("jobs")
+    if not isinstance(jobs, dict):
+        return frozenset()
+
+    for job_def in jobs.values():
+        if not isinstance(job_def, dict):
+            continue
+        steps = job_def.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str) or not _is_action_uses(uses):
+                continue
+            env_map = step.get("env")
+            if isinstance(env_map, dict):
+                wired.update(_labels_from_env_map(env_map))
+    return frozenset(wired)
+
+
+def _reviewer_p0_slug(repo_root: Path) -> str | None:
+    raw = _load_config_dict(_config_path(repo_root))
+    roster = load_roster(raw)
+    for entry in roster.entries:
+        if (entry.name == "reviewer" or entry.role == "reviewer") and entry.model_chain:
+            return entry.model_chain[0]
+    for entry in roster.entries:
+        if entry.model_chain:
+            return entry.model_chain[0]
+    return None
+
+
+def _collect_unwired_roster_models(
+    repo_root: Path,
+    workflow_path: Path,
+) -> list[tuple[str, str, str, str]]:
+    wired = parse_auth_manifest(workflow_path)
+    roster = load_roster(_load_config_dict(_config_path(repo_root)))
+    unwired: list[tuple[str, str, str, str]] = []
+    for entry in roster.entries:
+        for index, slug in enumerate(entry.model_chain):
+            try:
+                provider, _model_id = parse_model(slug)
+            except ValueError:
+                continue
+            provider_key = provider.lower()
+            if provider_key not in wired:
+                unwired.append((entry.name, f"p{index}", slug, provider_key))
+    return unwired
+
+
+def _apply_workflow_sync(repo_root: Path, workflow_path: Path) -> WorkflowChange | None:
+    unwired = _collect_unwired_roster_models(repo_root, workflow_path)
+    if not unwired:
+        return None
+
+    original = workflow_path.read_text(encoding="utf-8")
+    scratch = workflow_path.parent / f".{workflow_path.name}.sync.tmp"
+    scratch.write_text(original, encoding="utf-8")
+    try:
+        registry = load_provider_registry(_config_path(repo_root))
+        wired_labels: set[str] = set(parse_auth_manifest(workflow_path))
+        unique_providers: list[str] = []
+        for _agent, _slot, _slug, provider_label in unwired:
+            if provider_label in wired_labels or provider_label in unique_providers:
+                continue
+            unique_providers.append(provider_label)
+
+        affected: list[str] = []
+        current_text = original
+        for provider_label in unique_providers:
+            entry = registry.lookup(provider_label)
+            if entry is None:
+                cli_bail(
+                    f"provider {provider_label!r} is not registered — run "
+                    f"[cyan]mergecraft provider add --label {provider_label}[/cyan] first"
+                )
+            base_url = str(entry.get("url", "")).strip()
+            if not base_url:
+                cli_bail(f"provider {provider_label!r} has no base URL in the registry")
+            provider_change = apply_provider_env_wiring(
+                workflow_path=scratch,
+                env_index=int(entry["envIndex"]),
+                label=str(entry.get("label", provider_label)),
+                base_url=base_url,
+                secret_name=_primary_secret_name(entry),
+                step_selector="primary",
+                force=False,
+            )
+            if provider_change.was_modified:
+                scratch.write_text(provider_change.new_text, encoding="utf-8")
+                current_text = provider_change.new_text
+                affected.extend(provider_change.affected_steps)
+            wired_labels.add(provider_label)
+
+        p0_slug = _reviewer_p0_slug(repo_root)
+        if p0_slug is not None:
+            model_change = apply_model_wiring(
+                workflow_path=scratch,
+                model_slug=p0_slug,
+                step_selector="primary",
+                force=True,
+            )
+            if model_change.was_modified:
+                current_text = model_change.new_text
+                affected.extend(model_change.affected_steps)
+
+        if current_text == original:
+            return None
+        return WorkflowChange(old_text=original, new_text=current_text, affected_steps=affected)
+    finally:
+        scratch.unlink(missing_ok=True)
+
+
+@app.command("sync")
+def sync_cmd(
+    check: bool = typer.Option(
+        False, "--check", help="Exit non-zero when roster models are unwired."
+    ),
+    apply: bool = typer.Option(False, "--apply", help="Wire missing providers into the workflow."),
+    workflow: Path = typer.Option(
+        _workflow_option(),
+        "--workflow",
+        "-w",
+        help=f"Path to the consumer workflow YAML (default: {DEFAULT_WORKFLOW_RELATIVE_PATH}).",
+        exists=False,
+    ),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+) -> None:
+    """Keep mergecraft.yml auth wiring in sync with the committed agent roster."""
+    if check == apply:
+        cli_bail("pass exactly one of --check or --apply")
+    repo_root = cwd.resolve()
+    workflow = _resolve_workflow_path(workflow, repo_root)
+    if not workflow.is_file():
+        cli_bail(f"workflow file not found: {workflow}")
+
+    unwired = _collect_unwired_roster_models(repo_root, workflow)
+    if check:
+        if unwired:
+            agent, slot, slug, provider = unwired[0]
+            cli_bail(
+                f"roster model {slug!r} on agents.{agent} {slot} references unwired provider "
+                f"{provider!r} — run [cyan]mergecraft workflow sync --apply[/cyan] or "
+                f"[cyan]mergecraft workflow provider add --label {provider}[/cyan]"
+            )
+        console.print("[green]workflow auth manifest matches the committed roster[/green]")
+        return
+
+    change = _apply_workflow_sync(repo_root, workflow)
+    if change is None or not change.was_modified:
+        console.print(
+            f"[dim]{workflow} already matches the committed roster; no changes needed.[/dim]"
+        )
+        return
+
+    if change.was_modified:
+        console.print(render_workflow_diff(workflow, change))
+    try:
+        _atomic_write_text(workflow, change.new_text)
+    except OSError as exc:
+        cli_bail(f"could not write {workflow}: {exc}")
+    console.print(f"[green]wrote[/green] {workflow}")
 
 
 def _iter_mergecraft_steps(workflow_path: Path) -> list[dict[str, Any]]:
@@ -531,7 +793,10 @@ __all__ = [
     "model_add_cmd",
     "model_app",
     "model_prioritize_cmd",
+    "parse_auth_manifest",
     "provider_add_cmd",
     "provider_app",
     "provider_harnesses_cmd",
+    "secret_name_to_provider_label",
+    "sync_cmd",
 ]
