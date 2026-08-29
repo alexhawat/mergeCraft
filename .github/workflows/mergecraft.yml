@@ -619,6 +619,21 @@ jobs:
           MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
           MERGECRAFT_TRACING_REGION: eu
 
+      - name: Persist evidence packet (Nous)
+        if: always()
+        env:
+          PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
+        run: printf '%s' "$PACKET" > packet-nous.json
+
+      - name: Upload packet artifact (Nous)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mergecraft-evidence-nous
+          path: packet-nous.json
+          retention-days: 30
+          if-no-files-found: ignore
+
       - name: Decide Codex fallback after Nous
         id: fallback
         # Deliberately NOT gated on steps.mergecraft_nous.outcome. The failure
@@ -637,10 +652,22 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
           NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
+          NOUS_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
         run: |
           set -euo pipefail
           need="false"
-          if [ "${EVENT_NAME}" = "pull_request_target" ]; then
+          if [ -n "${NOUS_PACKET:-}" ]; then
+            verdict="$(printf '%s' "$NOUS_PACKET" | jq -r '.decision.verdict // empty')"
+            case "${verdict}" in
+              failure|success)
+                echo "packet decision.verdict=${verdict} — Nous review posted a verdict; not falling back to Codex."
+                ;;
+              *)
+                need="true"
+                echo "::notice title=mergecraft Codex fallback::Nous review posted no verdict in evidence packet (action outcome: ${NOUS_OUTCOME}); retrying with openai/gpt-codex."
+                ;;
+            esac
+          elif [ "${EVENT_NAME}" = "pull_request_target" ]; then
             latest=""
             for attempt in $(seq 1 3); do
               if latest="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
@@ -749,6 +776,21 @@ jobs:
           MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
           MERGECRAFT_TRACING_REGION: eu
 
+      - name: Persist evidence packet (Codex)
+        if: always()
+        env:
+          PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
+        run: printf '%s' "$PACKET" > packet-codex.json
+
+      - name: Upload packet artifact (Codex)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mergecraft-evidence-codex
+          path: packet-codex.json
+          retention-days: 30
+          if-no-files-found: ignore
+
       - name: Decide Claude backstop after the provider cascade
         id: claude_fallback
         # Gated on a RETRYABLE provider failure, not on "no verdict posted".
@@ -784,10 +826,21 @@ jobs:
           BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
           NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
           CODEX_OUTCOME: ${{ steps.mergecraft_codex.outcome }}
+          NOUS_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
+          CODEX_PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
         run: |
           set -euo pipefail
           need="true"
-          if [ "${EVENT_NAME}" = "pull_request_target" ]; then
+          packet="${CODEX_PACKET:-${NOUS_PACKET:-}}"
+          if [ -n "${packet}" ]; then
+            verdict="$(printf '%s' "$packet" | jq -r '.decision.verdict // empty')"
+            case "${verdict}" in
+              failure|success)
+                need="false"
+                echo "packet decision.verdict=${verdict} — a rung posted a verdict despite failing later; not spending the Claude backstop."
+                ;;
+            esac
+          elif [ "${EVENT_NAME}" = "pull_request_target" ]; then
             latest=""
             for attempt in $(seq 1 3); do
               if latest="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
@@ -855,6 +908,21 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
           MERGECRAFT_TRACING_REGION: eu
+
+      - name: Persist evidence packet (Claude)
+        if: always()
+        env:
+          PACKET: ${{ steps.mergecraft_claude.outputs.evidence_packet }}
+        run: printf '%s' "$PACKET" > packet-claude.json
+
+      - name: Upload packet artifact (Claude)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mergecraft-evidence-claude
+          path: packet-claude.json
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: mergeCraft review incomplete (non-fatal)
         if: >-

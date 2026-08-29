@@ -444,8 +444,10 @@ async def _publish(
         pull_number = tool_context.tool_state.pr_number
         if pull_number is None and tool_context.payload.event.issue_number is not None:
             pull_number = int(tool_context.payload.event.issue_number)
+        rejection_reason = (
+            failure_reason if prepared is not None and prepared.decision is None else None
+        )
         if pull_number is not None and prepared is not None:
-            rejection_reason = failure_reason if prepared.decision is None else None
             await publish_deterministic_record(
                 pull_number=int(pull_number),
                 packet=prepared,
@@ -454,6 +456,28 @@ async def _publish(
                 ctx=tool_context,
                 run_outcome=outcome,
             )
+        if prepared is not None:
+            from mergecraft.utils.status_checks import _run_url
+            from mergecraft.utils.step_summary import append_step_summary, render_step_summary
+
+            submission = tool_context.tool_state.terminal_submission
+            analyzer_run = tool_context.tool_state.analyzer_run
+            outcome_label = (
+                "no_verdict" if prepared.decision is None else ("success" if run_ok else "failure")
+            )
+            summary_body = render_step_summary(
+                packet=prepared,
+                outcome_label=outcome_label,
+                rejection_reason=rejection_reason,
+                run_url=_run_url(tool_context),
+                run_outcome=outcome,
+                analyzer_summary=analyzer_run.pre_merge_summary
+                if analyzer_run is not None
+                else None,
+                agent_summary=submission.summary if submission is not None else None,
+                trust_tier=tool_context.trust_tier,
+            )
+            append_step_summary(summary_body)
 
     if not emit:
         await _learnings_and_status()

@@ -43,8 +43,8 @@ def test_packet_run_health_round_trips_and_schema_version_bumps() -> None:
         "schema_version": PACKET_SCHEMA_VERSION,
         "change_id": "acme/demo#546",
         "agent": {
-            "agent_id": "claude",
-            "agent_version": "0.0.1",
+            "id": "claude",
+            "version": "0.0.1",
             "model": "claude-sonnet-4-5",
         },
         "files_changed": [],

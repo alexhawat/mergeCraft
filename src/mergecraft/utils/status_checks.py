@@ -282,6 +282,8 @@ async def report_status_checks(
     )
     catalog_banner = _catalog_unavailable_banner(ctx)
     packet_findings = list(packet.findings) if packet is not None else []
+    if packet is not None and packet.run_health is not None:
+        packet_findings.extend(packet.run_health.findings)
     approval = ctx.tool_state.approval
     run_url = _run_url(ctx)
     reviewed_sha = _reviewed_sha(approval, packet)

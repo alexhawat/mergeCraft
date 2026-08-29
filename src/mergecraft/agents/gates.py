@@ -159,6 +159,14 @@ def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
     return _has_blocker(packet.findings)
 
 
+def _packet_attested_findings(packet: MergeEvidencePacket) -> list[Finding]:
+    """Return all findings that attest the review ran, including run-health rows."""
+    attested = list(packet.findings)
+    if packet.run_health is not None:
+        attested.extend(packet.run_health.findings)
+    return attested
+
+
 def _trusted_positive_decision(packet: MergeEvidencePacket) -> bool:
     """True when the packet carries a trusted structural success verdict with no blockers."""
     decision = packet.decision
@@ -336,7 +344,7 @@ def _decide_approval_from_packet(
         return packet.decision
 
     conclusion = _decide_approval_from_findings(
-        packet.findings, run_succeeded=run_succeeded, tier=tier
+        _packet_attested_findings(packet), run_succeeded=run_succeeded, tier=tier
     )
     return PacketDecision(
         verdict=conclusion,
@@ -364,7 +372,7 @@ def _packet_decision_reason(
             f"{conclusion}: structural evidence — agent's self_assessment.approved=true "
             "is advisory only and did not override the verdict"
         )
-    if not packet.findings:
+    if not _packet_attested_findings(packet):
         return f"{conclusion}: no typed findings to attest to the review"
     return f"{conclusion}: derived from typed findings and run state"
 

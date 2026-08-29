@@ -612,8 +612,16 @@ def render_deterministic_review_block(
     findings = [
         row if isinstance(row, Finding) else Finding.model_validate(row) for row in findings_raw
     ]
-    change_findings = [finding for finding in findings if finding.scope != "run"]
-    run_findings = [finding for finding in findings if finding.scope == "run"]
+    change_findings = list(findings)
+    run_health = getattr(packet, "run_health", None)
+    if run_health is not None:
+        run_findings = [
+            row if isinstance(row, Finding) else Finding.model_validate(row)
+            for row in list(getattr(run_health, "findings", []) or [])
+        ]
+    else:
+        change_findings = [finding for finding in findings if finding.scope != "run"]
+        run_findings = [finding for finding in findings if finding.scope == "run"]
     deterministic_checks = list(getattr(packet, "deterministic_checks", []) or [])
 
     model = ""
