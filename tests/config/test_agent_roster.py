@@ -88,23 +88,24 @@ def test_write_roster_omits_after_when_unset() -> None:
         "agents": {
             "reviewer": {
                 "role": "reviewer",
-                "after": "verifier",
                 "modelChain": ["anthropic/claude-sonnet"],
             },
-            "verifier": {
+            "reviewer2": {
+                "role": "reviewer",
+                "after": "reviewer",
                 "modelChain": ["openai/gpt-5.3-codex"],
             },
         },
     }
     roster = mod.load_roster(raw)
-    reviewer = roster.entry_by_name()["reviewer"]
+    reviewer2 = roster.entry_by_name()["reviewer2"]
     cleared = mod.RosterEntry(
-        name=reviewer.name,
-        model_chain=reviewer.model_chain,
-        role=reviewer.role,
+        name=reviewer2.name,
+        model_chain=reviewer2.model_chain,
+        role=reviewer2.role,
         after=None,
     )
     mod.write_roster(raw, mod.Roster(entries=(cleared,)))
-    reviewer_entry = raw["agents"]["reviewer"]
-    assert isinstance(reviewer_entry, dict)
-    assert "after" not in reviewer_entry
+    reviewer2_entry = raw["agents"]["reviewer2"]
+    assert isinstance(reviewer2_entry, dict)
+    assert "after" not in reviewer2_entry

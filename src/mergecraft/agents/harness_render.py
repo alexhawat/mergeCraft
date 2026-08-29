@@ -98,6 +98,38 @@ def append_reviewer_dispatch_instructions(
     return f"{system.rstrip()}\n\n{block}"
 
 
+_OPENCODE_DISPATCH_INJECTED = "_opencode_dispatch_injected"
+
+
+def _inject_opencode_orchestrator_dispatch(
+    ctx: AgentRunContext,
+    metadata: dict[str, Any],
+) -> None:
+    """Append reviewer dispatch rules to the OpenCode orchestrator system prompt.
+
+    OpenCode reads ``ctx.instructions.system`` when building the session prompt.
+    ``build_security_config`` already calls ``render_for_run(ctx, "opencode")`` before
+    that path runs, so injection here keeps ``opencode.py`` unchanged (AG9 guard).
+    """
+    instructions = ctx.instructions
+    extra = getattr(instructions, "extra", None)
+    if isinstance(extra, dict) and extra.get(_OPENCODE_DISPATCH_INJECTED):
+        return
+    block = metadata.get("reviewer_dispatch_instructions")
+    if not isinstance(block, str) or not block.strip():
+        return
+    if not hasattr(instructions, "system"):
+        return
+    current = instructions.system or ""
+    if block in current:
+        if isinstance(extra, dict):
+            extra[_OPENCODE_DISPATCH_INJECTED] = True
+        return
+    instructions.system = append_reviewer_dispatch_instructions(current, metadata)
+    if isinstance(extra, dict):
+        extra[_OPENCODE_DISPATCH_INJECTED] = True
+
+
 def _repo_root_from_ctx(ctx: AgentRunContext | ToolContext) -> Path | None:
     tool_state = getattr(ctx, "tool_state", None)
     if tool_state is not None:
@@ -508,12 +540,15 @@ def render_for_run(
         ctx=ctx,
         dispatch_instructions=dispatch_instructions,
     )
-    if not batches:
-        return result
     meta = dict(result.metadata)
-    meta["reviewer_dispatch_batches"] = [list(batch) for batch in batches]
+    if batches:
+        meta["reviewer_dispatch_batches"] = [list(batch) for batch in batches]
     if dispatch_instructions:
         meta["reviewer_dispatch_instructions"] = dispatch_instructions
+    if harness == "opencode":
+        _inject_opencode_orchestrator_dispatch(ctx, meta)
+    if not batches and not dispatch_instructions:
+        return result
     return HarnessRenderResult(
         harness=result.harness,
         payload=result.payload,
