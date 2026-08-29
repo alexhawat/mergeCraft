@@ -180,6 +180,8 @@ def _fetch_head_with_retry(
                 break
             lowered = last_err.lower()
             if not detached and "refusing to fetch into branch" in lowered:
+                # A prior checkout_pr may have left HEAD on local_branch; detach
+                # before retrying so the fetch target is not the current HEAD.
                 detached = True
                 try:
                     _run_git(["checkout", "--detach", "HEAD"], cwd=cwd)
@@ -260,16 +262,13 @@ def checkout_pr_tool(ctx: ToolContext):
         )
         local_branch = f"pr-{pull_number}"
 
-        # Detach HEAD before fetching into local_branch. checkout_pr can run
-        # more than once against the same shared workspace within a single
-        # job (e.g. a Nous review, then a Codex fallback both calling
-        # checkout_pr against /github/workspace) — if a prior call already
-        # left HEAD on local_branch, `git fetch ... :local_branch` fails with
-        # "refusing to fetch into branch ... checked out" and the second
-        # review never completes. Detaching first — safe, since the dirty
-        # check above already guarantees no uncommitted work to lose — means
-        # the fetch target is never the current HEAD, regardless of what an
-        # earlier checkout_pr call left behind.
+        # Fetch PR head into local_branch. checkout_pr can run more than once
+        # against the same shared workspace within a single job (e.g. a Nous
+        # review, then a Codex fallback both calling checkout_pr against
+        # /github/workspace). When a prior call left HEAD on local_branch,
+        # ``_fetch_head_with_retry`` detaches before retrying on the
+        # "refusing to fetch into branch" error — safe because the dirty check
+        # above already guarantees no uncommitted work to lose.
         fetched, fetch_err = _fetch_head_with_retry(
             cwd=cwd,
             pull_number=pull_number,
@@ -376,7 +375,9 @@ def checkout_pr_tool(ctx: ToolContext):
         except Exception:
             diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
         Path(diff_path).write_text(diff, encoding="utf-8")
-        state.diff_path = diff_path
+        from mergecraft.mcp.verdict import register_review_scope
+
+        register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
 
         result = {
             "pullNumber": pull_number,
@@ -484,16 +485,13 @@ def checkout_pr_tool(ctx: ToolContext):
             logger.info("linked-repo review soft-failed: {}", xrepo_err)
 
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
-        ctx.tool_state.review_phase = "ESTABLISH_SCOPE"
         from mergecraft.mcp.review_context import hydrate_review_context
-        from mergecraft.mcp.verdict import ReviewPhase, stamp_review_phase_on_active_span
 
         await hydrate_review_context(
             ctx,
             round_index=round_index,
             incremental_changed_paths=state.incremental_changed_paths,
         )
-        stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
         return result
 
     return tool(

@@ -116,7 +116,7 @@ _BRANCH_FLAGS_TAKING_VALUE: frozenset[str] = frozenset(
 )
 # ``config`` is read-only only for lookups. Writes and credential-bearing keys
 # stay off the reviewer surface (plan 13 / D12).
-_CONFIG_READONLY_FLAGS: frozenset[str] = frozenset({"--get", "--get-all", "--list"})
+_CONFIG_READONLY_FLAGS: frozenset[str] = frozenset({"--get", "--get-all"})
 _CONFIG_FLAGS_TAKING_VALUE: frozenset[str] = frozenset({"--get", "--get-all"})
 
 # ---------------------------------------------------------------------------
@@ -465,8 +465,14 @@ def _reject_config_invocation(args: list[str]) -> None:
         if arg.startswith("--"):
             name = arg.split("=", 1)[0]
             if name not in _CONFIG_READONLY_FLAGS:
+                if name == "--list":
+                    msg = (
+                        "Blocked: 'config --list' enumerates all configuration including "
+                        "credential material — not permitted on the reviewer surface."
+                    )
+                    raise ValueError(msg)
                 msg = (
-                    f"Blocked: 'config {arg}' — only --get, --get-all and --list "
+                    f"Blocked: 'config {arg}' — only --get and --get-all "
                     "are permitted on the reviewer surface."
                 )
                 raise ValueError(msg)
@@ -480,21 +486,19 @@ def _reject_config_invocation(args: list[str]) -> None:
                     raise ValueError(msg)
                 continue
             if name == "--get-all":
-                if "=" not in arg and idx + 1 < len(args) and not args[idx + 1].startswith("-"):
-                    idx += 2
-                else:
-                    idx += 1
-                continue
-            if name == "--list":
-                idx += 1
-                if idx < len(args) and not args[idx].startswith("-"):
-                    idx += 1
+                key, idx = _config_key_from_get_arg(arg, args, idx)
+                if _is_denied_config_key(key):
+                    msg = (
+                        f"Blocked: 'config --get-all {key}' reads credential material — "
+                        "not permitted on the reviewer surface."
+                    )
+                    raise ValueError(msg)
                 continue
             idx += 1
             continue
         if arg.startswith("-") and len(arg) > 1:
             msg = (
-                f"Blocked: 'config {arg}' — only --get, --get-all and --list "
+                f"Blocked: 'config {arg}' — only --get and --get-all "
                 "are permitted on the reviewer surface."
             )
             raise ValueError(msg)

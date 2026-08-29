@@ -33,8 +33,9 @@ def get_commit_info_tool(ctx: ToolContext):
         primary = primary_repo_state(ctx.tool_state)
         pr_head = (primary.checkout_sha or "").strip().lower()
         if pr_head and sha.strip().lower() == pr_head:
-            from mergecraft.mcp.verdict import register_review_scope
+            from mergecraft.mcp.verdict import register_review_scope, validate_review_scope_evidence
 
+            await validate_review_scope_evidence(ctx, diff_path=diff_file, head_sha=sha)
             register_review_scope(
                 ctx.tool_state,
                 diff_path=diff_file,

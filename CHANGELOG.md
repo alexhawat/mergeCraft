@@ -37,9 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per run (not gated behind a non-zero Codex exit code)
 - `checkov` and `yamllint` catalog rows document linux-amd64 manifest-only
   provisioning instead of presenting as runtime failures
-
-### Fixed
-
+- Git config MCP: deny `config --list` and credential-bearing keys on
+  `config --get-all` so brokered auth headers cannot leak through enumeration
+- `get_commit_info` validates unified diff evidence before establishing review
+  scope; successful `checkout_pr` records scope via `register_review_scope`
 - Enforcement modes and the approval gate now agree on what blocks. The
   gate-facing severity is the single authority, so ``contributes_blocker`` is
   read off it rather than computed beside it. ``blocking`` floors a

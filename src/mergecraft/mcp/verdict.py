@@ -40,7 +40,7 @@ _ALLOWED_VERDICTS = frozenset({"approve", "request_changes"})
 _ALLOWED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary", "findings"})
 _REQUIRED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary"})
 _REVIEW_MODES = frozenset({"Review", "IncrementalReview"})
-_SCOPE_PROVENANCE = frozenset({"api", "local-diff", "commit-info"})
+_SCOPE_PROVENANCE = frozenset({"api", "checkout", "local-diff", "commit-info"})
 _UNIFIED_DIFF_MARKERS = ("diff --git", "--- a/", "+++ b/")
 
 REJECTION_INVALID_VERDICT = "invalid_verdict"
@@ -175,7 +175,7 @@ def register_review_scope(
     tool_state: ToolState,
     *,
     diff_path: str,
-    provenance: Literal["api", "local-diff", "commit-info"],
+    provenance: Literal["api", "checkout", "local-diff", "commit-info"],
     review_scope: str | None = None,
 ) -> None:
     """Record evidence-backed review scope and advance past ``INIT`` (D4)."""

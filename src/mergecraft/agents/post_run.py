@@ -27,10 +27,11 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 
-def _maybe_record_scope_guard_refusal(tool_state: ToolState) -> None:
-    """Mirror a scope-guard refusal onto ``last_terminal_rejection`` when replayed."""
+def _record_scope_refusal_if_needed(tool_state: ToolState) -> None:
+    """Record or prime a scope-guard refusal for post-run classification (W5)."""
     from mergecraft.mcp.verdict import (
         REJECTION_SCOPE_UNAVAILABLE,
+        ensure_review_scope_for_terminal,
         record_terminal_rejection,
         scope_blocks_terminal,
         terminal_tool_was_attempted,
@@ -40,9 +41,17 @@ def _maybe_record_scope_guard_refusal(tool_state: ToolState) -> None:
         return
     if not scope_blocks_terminal(tool_state):
         return
-    if not terminal_tool_was_attempted(tool_state):
+    if terminal_tool_was_attempted(tool_state):
+        record_terminal_rejection(tool_state, REJECTION_SCOPE_UNAVAILABLE)
         return
-    record_terminal_rejection(tool_state, REJECTION_SCOPE_UNAVAILABLE)
+    if tool_state.selected_mode not in ("Review", "IncrementalReview"):
+        return
+    if get_unsubmitted_review(tool_state) is None:
+        return
+    try:
+        ensure_review_scope_for_terminal(tool_state, "submit_review_verdict")
+    except ValueError:
+        pass
 
 
 def _post_run_issues_retryable(issues: PostRunIssues, tool_state: ToolState) -> bool:
@@ -73,35 +82,6 @@ def _apply_non_retryable_scope_outcome(
     diagnostics["verdict_diagnostic"] = rejection
     publish_scope_unavailable_review(ctx=ctx, verdict_diagnostic=rejection)
     return replace(result, diagnostics=diagnostics)
-
-
-def _prime_scope_rejection_state(ctx: AgentRunContext) -> None:
-    """Record a scope-guard refusal before classifying post-run retries (W5)."""
-    from mergecraft.mcp.verdict import (
-        ensure_review_scope_for_terminal,
-        scope_blocks_terminal,
-        terminal_tool_was_attempted,
-    )
-
-    ts = ctx.tool_state
-    if ts.last_terminal_rejection is not None:
-        return
-    if ts.selected_mode not in ("Review", "IncrementalReview"):
-        return
-    if get_unsubmitted_review(ts) is None:
-        return
-    if not scope_blocks_terminal(ts):
-        return
-    if terminal_tool_was_attempted(ts):
-        try:
-            ensure_review_scope_for_terminal(ts, "submit_review_verdict")
-        except ValueError:
-            pass
-        return
-    try:
-        ensure_review_scope_for_terminal(ts, "submit_review_verdict")
-    except ValueError:
-        pass
 
 
 def get_unsubmitted_review(tool_state: ToolState) -> str | None:
@@ -193,7 +173,7 @@ async def collect_post_run_issues(
     skip_summary_stale: bool = False,
 ) -> PostRunIssues:
     issues = PostRunIssues()
-    _maybe_record_scope_guard_refusal(ctx.tool_state)
+    _record_scope_refusal_if_needed(ctx.tool_state)
     status = get_git_status()
     mode = ctx.tool_state.selected_mode
     if status:
@@ -352,7 +332,7 @@ async def run_post_run_retry_loop(
     usage = result.usage
     skip_summary = False
     previous_signature: tuple[Any, ...] | None = None
-    _prime_scope_rejection_state(ctx)
+    _record_scope_refusal_if_needed(ctx.tool_state)
     for attempt in range(MAX_POST_RUN_RETRIES):
         issues = await collect_post_run_issues(ctx, skip_summary_stale=skip_summary)
         if not has_post_run_issues(issues):

@@ -430,7 +430,7 @@ class ToolState:
     review_scope: str | None = None
     # How review scope was established (``checkout_pr`` api fallback,
     # ``establish_review_scope``, or ``get_commit_info`` at PR head).
-    scope_provenance: Literal["api", "local-diff", "commit-info"] | None = None
+    scope_provenance: Literal["api", "checkout", "local-diff", "commit-info"] | None = None
     # Memoized ``git show <rev>:<path>`` output paths keyed ``rev\\0path``.
     git_show_cache: dict[str, str] = field(default_factory=dict)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)

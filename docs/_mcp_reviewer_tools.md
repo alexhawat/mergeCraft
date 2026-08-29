@@ -20,7 +20,7 @@ regardless of `payload.shell`. Full guard tables:
 | `show-ref` | List refs without mutating |
 | `for-each-ref` | Structured ref listing |
 | `ls-remote` | Remote refs when fetch is blocked |
-| `config` | **Lookup only** — `--get`, `--get-all`, `--list` |
+| `config` | **Lookup only** — `--get`, `--get-all` (credential-bearing keys denied) |
 
 Credential-bearing `config` keys (`credential.*`, `url.*`) are refused. Writes
 (`--set`, `--unset`, …) are refused.
