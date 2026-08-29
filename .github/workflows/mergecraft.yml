@@ -325,13 +325,15 @@ jobs:
       # `env` expression). Adding a provider here without updating that copy
       # fails the required gate OPEN — see the comment there.
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
-      # The default github.token cannot submit an "Approve" review — GitHub
-      # silently downgrades any attempt to a comment (a documented platform
-      # restriction, independent of PR author). A PAT from a genuinely
+      # MERGECRAFT_REVIEWER_PAT is deliberately absent from this job. The
+      # default github.token cannot submit an "Approve" review — GitHub
+      # silently downgrades any attempt to a comment — and a PAT from a
       # distinct account (sevn-one, a collaborator + CODEOWNERS entry) can.
-      # Only used for same-repo runs — fork PRs still rely purely on the
-      # review's findings, never on an approval identity to route around.
-      HAS_BOT_TOKEN: ${{ secrets.MERGECRAFT_REVIEWER_PAT != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # But a PAT also cannot create the check-run the approval gate reads, so
+      # handing it to the review steps disabled the gate and the approval both.
+      # The approve lane lives in mergecraft-approve.yml, which holds its own
+      # copy of the PAT and never re-reads PR content — see the review steps'
+      # `token:` comment and PR #200.
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -377,17 +379,45 @@ jobs:
             echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, NOUS_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (mergecraft auth claude) to enable mergeCraft reviews."
           fi
 
+      - name: Resolve PR for workflow_dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: dispatch_pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Never interpolate these into the script body. A branch name is
+          # attacker-influenced text and can carry shell syntax; expanded by
+          # `${{ }}` it would run as code under this job's write-scoped token.
+          # Passed as env and quoted, it stays one literal argv element.
+          DISPATCH_REPO: ${{ github.repository }}
+          DISPATCH_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Same-repo dispatch: the ref is the head branch. An empty number is a
+          # real outcome (no open PR) — Compose then falls back to the bare
+          # string rather than failing the job (#529).
+          pr_json="$(gh pr list --repo "${DISPATCH_REPO}" \
+                --head "${DISPATCH_REF}" --state open \
+                --json number,baseRefName --jq '.[0] // {}')"
+          n="$(printf '%s' "${pr_json}" | jq -r '.number // ""')"
+          base="$(printf '%s' "${pr_json}" | jq -r '.baseRefName // ""')"
+          {
+            echo "number=${n}"
+            echo "base_ref=${base}"
+          } >> "${GITHUB_OUTPUT}"
+
       # Composed in a step rather than inline in `with:` so the CI-context clause
       # stays readable. Every interpolated value is repo-controlled (PR number,
       # base ref, our own wait-job outputs) — no PR-authored free text reaches the
-      # prompt.
+      # prompt. pull_request_target and workflow_dispatch share one prompt shape
+      # (#529): an explicit inputs.prompt stays verbatim; a resolved PR number
+      # gets the checkout_pr + CI-context text; no matching PR falls back to the
+      # bare string.
       - name: Compose review prompt
         id: prompt
         if: env.HAS_AUTH == 'true'
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || steps.dispatch_pr.outputs.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || steps.dispatch_pr.outputs.base_ref }}
           DISPATCH_PROMPT: ${{ inputs.prompt }}
           CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
           CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
@@ -395,8 +425,11 @@ jobs:
           CI_CHECK_SUITE_ID: ${{ needs.wait-for-ci.outputs.check_suite_id }}
         run: |
           set -euo pipefail
-          if [ "${EVENT_NAME}" != "pull_request_target" ]; then
-            text="${DISPATCH_PROMPT:-Review the current pull request.}"
+          if [ -n "${DISPATCH_PROMPT:-}" ]; then
+            # Operator override: pass through unchanged (#529).
+            text="${DISPATCH_PROMPT}"
+          elif [ -z "${PR_NUMBER:-}" ]; then
+            text="Review the current pull request."
           else
             # Codex presents mergeCraft MCP tools as mergecraft_. Naming the
             # bare tool (checkout_pr) makes Codex request a GitHub *plugin* that is
@@ -405,7 +438,8 @@ jobs:
             text="Review pull request #${PR_NUMBER}. First call the mergecraft MCP tool mergecraft_checkout_pr (the checkout_pr tool on the mergecraft MCP server — already configured). Do NOT install, request, or wait for any GitHub plugin. For base-side file reads use origin/${BASE_REF}:path, not bare branch names. If prior mergeCraft threads are resolved and the latest commits address them, submit approved:true with a short summary. Focus on correctness, security, regressions, missing tests, and maintainability. Leave concise, actionable comments only for issues that should be addressed before merge."
             # The Action runs with `shell: disabled`, so the reviewer cannot run
             # lint/typecheck/tests itself. Hand it the CI outcome instead — and the
-            # check_suite id, because no MCP tool can discover one.
+            # check_suite id, because no MCP tool can discover one. wait-for-ci
+            # outputs are available on workflow_dispatch too (#529).
             case "${CI_STATE}" in
               complete)
                 if [ "${CI_FAILED_COUNT}" -gt 0 ] 2>/dev/null && [ -n "${CI_CHECK_SUITE_ID}" ]; then
@@ -544,7 +578,7 @@ jobs:
         # closed with no mergecraft-approval check at all. Fixed in #545
         # (utils/git_setup.py — basic auth on the documented `x-access-token`
         # username). b3638ea7 is #545's merge commit.
-        uses: alexhawat/mergeCraft@b3638ea760dad4e42cc75cbfd0de3bac1a207297 # main (PR #545)
+        uses: alexhawat/mergeCraft@16ce04413932eb74957d394d2aa376b2af39f0b8 # main (PR #558)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -559,9 +593,23 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # See HAS_BOT_TOKEN above — falls back to github.token when the PAT
-          # isn't configured (e.g. a fork of this repo without the secret).
-          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          # The workflow job token, NOT MERGECRAFT_REVIEWER_PAT. mergeCraft
+          # posts the `mergecraft` / `mergecraft-approval` check-runs from this
+          # input, and `POST /repos/{owner}/{repo}/check-runs` answers any
+          # classic or OAuth user token with `403 You must authenticate via a
+          # GitHub App` — no scope unlocks it. GITHUB_TOKEN *is* an App
+          # installation token, and this job already grants checks: write.
+          #
+          # Under the PAT neither check-run had EVER posted (verified across
+          # #519, #524, #533, #534, #542, #545, #546, #548), so `mergecraft
+          # review` failed closed on every PR AND mergecraft-approve.yml, which
+          # gates on reading that conclusion, could never submit its approval.
+          # The PAT bought only the comment byline; it cost the whole gate.
+          #
+          # MERGECRAFT_REVIEWER_PAT stays where it works: mergecraft-approve.yml
+          # holds its own copy and submits the sevn-one APPROVE from there.
+          # Restoring a distinct byline here needs a GitHub App, not a PAT.
+          token: ${{ github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
@@ -678,7 +726,7 @@ jobs:
         # closed with no mergecraft-approval check at all. Fixed in #545
         # (utils/git_setup.py — basic auth on the documented `x-access-token`
         # username). b3638ea7 is #545's merge commit.
-        uses: alexhawat/mergeCraft@b3638ea760dad4e42cc75cbfd0de3bac1a207297 # main (PR #545)
+        uses: alexhawat/mergeCraft@16ce04413932eb74957d394d2aa376b2af39f0b8 # main (PR #558)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -690,8 +738,8 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # See the matching comment on the Nous step above.
-          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          # Job token, not the PAT — see the matching comment on the Nous step.
+          token: ${{ github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
@@ -789,7 +837,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now b3638ea7 (#545).
-        uses: alexhawat/mergeCraft@b3638ea760dad4e42cc75cbfd0de3bac1a207297 # main (PR #545)
+        uses: alexhawat/mergeCraft@16ce04413932eb74957d394d2aa376b2af39f0b8 # main (PR #558)
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -797,8 +845,8 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # See the matching comment on the Nous step above.
-          token: ${{ env.HAS_BOT_TOKEN == 'true' && secrets.MERGECRAFT_REVIEWER_PAT || github.token }}
+          # Job token, not the PAT — see the matching comment on the Nous step.
+          token: ${{ github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
