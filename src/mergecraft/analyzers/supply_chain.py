@@ -583,6 +583,12 @@ def run_differential_scan(
             skip_reason=f"skipped {tool_id}: no head manifest paths",
         )
 
+    if head_files == base_files:
+        # Head and base resolve to the same manifest paths (e.g. scanning an
+        # unchanged ``*.base`` lockfile). The CVE delta is empty by definition;
+        # skip duplicate network scans that can flake under parallel xdist.
+        return AdapterRunResult(findings=[])
+
     head_findings, head_err = _scan_side(
         tool_id,
         manifest=manifest,

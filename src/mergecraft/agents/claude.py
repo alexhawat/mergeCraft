@@ -768,6 +768,7 @@ def _run_claude_once(
     cmd = [
         cli,
         "--print",
+        "--verbose",
         "--output-format",
         "stream-json",
         "--mcp-config",
