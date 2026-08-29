@@ -87,8 +87,8 @@ CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
 
 _LEGACY_CREDENTIAL_WARNED_KEYS: set[str] = set()
 
-_PROVIDER_AUTH_SCOPE_OPTION: str = typer.Option(
-    "github",
+_PROVIDER_AUTH_SCOPE_OPTION: str | None = typer.Option(
+    None,
     "--scope",
     "-s",
     help=(
@@ -485,7 +485,7 @@ def _persist_indexed_credentials(
         _single_line_credential,
         _write_env_value,
     )
-    from mergecraft.config.agent_roster import AgentRosterError, seed_reviewer_p0_if_empty
+    from mergecraft.cli.roster_seed import seed_reviewer_p0_after_auth
 
     env_index = int(entry["envIndex"])
     label = str(entry["label"])
@@ -494,25 +494,6 @@ def _persist_indexed_credentials(
     env_path = _env_path(cwd)
     label_key = _indexed_label_key(env_index)
     any_local_written = False
-
-    def _seed_reviewer_roster() -> None:
-        from mergecraft.cli.provider_toggle import canonical_provider_label
-
-        repo_root = (cwd or Path.cwd()).resolve()
-        config_path = _config_path(repo_root)
-        data = _load_config_dict(config_path)
-        catalog_label = canonical_provider_label(label)
-        try:
-            slug = seed_reviewer_p0_if_empty(data, catalog_label)
-        except AgentRosterError:
-            return
-        if slug is None:
-            return
-        _write_config_dict(config_path, data)
-        console.print(
-            f"[green]seeded[/green] agents.reviewer p0 with [cyan]{slug}[/cyan] "
-            f"in {config_path.relative_to(repo_root)}"
-        )
 
     if target.local:
         if not _write_env_value(env_path, label_key, label):
@@ -525,7 +506,7 @@ def _persist_indexed_credentials(
         landed = ", ".join([label_key, *credential_map.keys()])
         console.print(f"[green]wrote {landed}[/green] to {env_path}")
         any_local_written = True
-        _seed_reviewer_roster()
+        seed_reviewer_p0_after_auth(cwd=cwd or Path.cwd(), provider_label=label)
 
     if target.github is not None:
         wrote_any_github = False
@@ -554,7 +535,7 @@ def _persist_indexed_credentials(
                 "retry with --scope local or --scope github to isolate the failure."
             )
         if wrote_any_github:
-            _seed_reviewer_roster()
+            seed_reviewer_p0_after_auth(cwd=cwd or Path.cwd(), provider_label=label)
         return
 
     if not any_local_written:
@@ -1255,7 +1236,7 @@ def provider_auth_cmd(
         None,
         help="Provider label (interactive picker when omitted).",
     ),
-    scope: str = _PROVIDER_AUTH_SCOPE_OPTION,
+    scope: str | None = _PROVIDER_AUTH_SCOPE_OPTION,
     api_key: str | None = typer.Option(
         None,
         "--api-key",
@@ -1281,7 +1262,14 @@ def provider_auth_cmd(
         if entry is None:
             cli_bail(f"unknown provider label {normalised!r}")
         console.print(f"authenticating provider [cyan]{entry.get('label', normalised)}[/cyan]")
-        auth_scope = "local" if api_key is not None else scope
+        resolved_scope = (scope or "github").strip().lower()
+        if api_key is not None and scope is not None and resolved_scope == "github":
+            cli_bail(
+                "--api-key writes credentials to the local .env only — "
+                "use --scope local (or omit --scope) with --api-key, "
+                "or omit --api-key to store GitHub Actions secrets interactively"
+            )
+        auth_scope = "local" if api_key is not None else resolved_scope
         run_provider_auth(entry, auth_scope, cwd=repo_root, api_key=api_key)
         return
 
@@ -1290,7 +1278,7 @@ def provider_auth_cmd(
 
     picked = _interactive_provider_picker(registry)
     console.print(f"authenticating provider [cyan]{picked.get('label')}[/cyan]")
-    run_provider_auth(picked, scope, cwd=repo_root)
+    run_provider_auth(picked, (scope or "github"), cwd=repo_root)
 
 
 # ``provider enable|disable`` (#520) live in their own module to keep this one

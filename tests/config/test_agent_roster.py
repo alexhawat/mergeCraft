@@ -71,6 +71,17 @@ def test_remove_slot_refuses_empty_chain() -> None:
         mod.remove_slot(["anthropic/claude-sonnet"], 0)
 
 
+def test_seed_reviewer_p0_if_empty_creates_models_list() -> None:
+    mod = import_agent_roster()
+    raw: dict[str, object] = {"agents": {"reviewer": {"role": "reviewer"}}}
+    slug = mod.seed_reviewer_p0_if_empty(raw, "anthropic")
+    assert slug is not None
+    assert raw["models"] == [slug]
+    reviewer = raw["agents"]["reviewer"]
+    assert isinstance(reviewer, dict)
+    assert reviewer["modelChain"] == [slug]
+
+
 def test_write_roster_omits_after_when_unset() -> None:
     mod = import_agent_roster()
     raw: dict[str, object] = {

@@ -32,13 +32,9 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.init_cmd import _ensure_gitignore_line
 from mergecraft.cli.provider_cmd import (
-    _config_path,
-    _load_config_dict,
     _write_config_dict,
 )
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
-from mergecraft.cli.workflow_cmd import parse_auth_manifest
-from mergecraft.cli.workflow_wf_yaml import DEFAULT_WORKFLOW_RELATIVE_PATH
 from mergecraft.config.agent_roster import (
     AgentRosterError,
     RosterEntry,
@@ -48,11 +44,17 @@ from mergecraft.config.agent_roster import (
     parse_slot,
     remove_slot,
 )
+from mergecraft.config.io import config_path_for_root, load_config_dict
+from mergecraft.config.roster_graph import AfterEdge, dispatch_levels
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.models import parse_model
+from mergecraft.workflow.auth_manifest import (
+    DEFAULT_WORKFLOW_RELATIVE_PATH,
+    WorkflowAuthManifestError,
+    parse_auth_manifest,
+)
 
 _AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-_SLOT_TOKEN_RE = re.compile(r"^p(\d+)$")
 _REQUIRED_ROLES = frozenset({AgentRole.reviewer.value, AgentRole.verifier.value})
 _LOCAL_CONFIG_GITIGNORE_LINE = ".mergecraft/config.local.yaml"
 
@@ -96,12 +98,12 @@ def _effective_role(agent_name: str, entry: dict[str, Any]) -> str | None:
 
 def _scope_config_path(target_dir: Path, target: AgentRosterTarget) -> Path:
     if target == AgentRosterTarget.COMMITTED:
-        return _config_path(target_dir)
+        return config_path_for_root(target_dir)
     return local_config_path(target_dir)
 
 
 def _ensure_committed_config(target_dir: Path) -> Path:
-    config_path = _config_path(target_dir)
+    config_path = config_path_for_root(target_dir)
     if not config_path.is_file():
         cli_bail(f"no config at {config_path} — run mergecraft init first")
     return config_path
@@ -116,9 +118,9 @@ def _load_scope_raw(target_dir: Path, target: AgentRosterTarget) -> tuple[Path, 
     config_path = _scope_config_path(target_dir, target)
     if target == AgentRosterTarget.LOCAL:
         _ensure_local_gitignore(target_dir)
-        raw = _load_config_dict(config_path) if config_path.is_file() else {}
+        raw = load_config_dict(config_path) if config_path.is_file() else {}
     else:
-        raw = _load_config_dict(config_path)
+        raw = load_config_dict(config_path)
     return config_path, raw
 
 
@@ -133,7 +135,7 @@ def _load_agents_block(
 
 
 def _merged_raw_for_validation(target_dir: Path, scope_raw: dict[str, Any]) -> dict[str, Any]:
-    committed = _load_config_dict(_config_path(target_dir))
+    committed = load_config_dict(config_path_for_root(target_dir))
     return merge_config_dicts(committed, scope_raw)
 
 
@@ -208,7 +210,7 @@ def _ensure_provider_wired_in_workflow(
             f"{workflow_path}; run [cyan]mergecraft workflow provider add --label {provider}[/cyan] "
             "or choose a different model"
         )
-    wired = parse_auth_manifest(workflow_path)
+    wired = _wired_providers_from_workflow(workflow_path)
     if provider.lower() in wired:
         return
     if allow_unwired:
@@ -279,33 +281,18 @@ def _orchestrator_exists(agents: dict[str, Any]) -> bool:
     return _count_role_bindings(agents, AgentRole.orchestrator.value) > 0
 
 
+def _wired_providers_from_workflow(workflow_path: Path) -> frozenset[str]:
+    try:
+        return parse_auth_manifest(workflow_path)
+    except WorkflowAuthManifestError as exc:
+        cli_bail(str(exc))
+    return frozenset()  # unreachable — cli_bail exits
+
+
 def _dispatch_levels(entries: tuple[RosterEntry, ...]) -> dict[str, int]:
-    by_name = {entry.name: entry for entry in entries}
-    levels: dict[str, int] = {}
-
-    def level_for(name: str, visiting: set[str]) -> int:
-        cached = levels.get(name)
-        if cached is not None:
-            return cached
-        entry = by_name.get(name)
-        if entry is None:
-            return 0
-        if entry.after is None:
-            levels[name] = 0
-            return 0
-        if name in visiting:
-            cycle = " -> ".join([*visiting, name])
-            msg = f"after: cycle detected: {cycle}"
-            raise AgentRosterError(msg)
-        visiting.add(name)
-        dep_level = level_for(entry.after, visiting)
-        result = dep_level + 1
-        levels[name] = result
-        return result
-
-    for entry in entries:
-        level_for(entry.name, set())
-    return levels
+    return dispatch_levels(
+        tuple(AfterEdge(name=entry.name, after=entry.after) for entry in entries)
+    )
 
 
 def _local_override_slot_indices(
@@ -356,8 +343,10 @@ def _format_chain(
 
 
 def _resolve_remove_index(chain: list[str], token: str) -> int:
-    if _SLOT_TOKEN_RE.match(token):
+    try:
         return parse_slot(token)
+    except AgentRosterError:
+        pass
     if token in chain:
         return chain.index(token)
     cli_bail(f"model {token!r} is not in the chain (expected pN or a chain slug)")
@@ -387,8 +376,8 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         merged_raw = load_layered_config_dict(root=target_dir)
         roster = load_roster(merged_raw)
         levels = _dispatch_levels(roster.entries)
-        committed_raw = _load_config_dict(committed_config_path(target_dir))
-        local_raw = _load_config_dict(local_config_path(target_dir))
+        committed_raw = load_config_dict(committed_config_path(target_dir))
+        local_raw = load_config_dict(local_config_path(target_dir))
 
         table = Table(title="Agent roster")
         table.add_column("agent")

@@ -12,12 +12,7 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from typing import Any
 
-from mergecraft.config.settings_snapshot import (
-    RepoSettingsSnapshot,
-    assert_config_unchanged,
-    capture_repo_settings_snapshot,
-    config_yaml_hash,
-)
+from mergecraft.config.roster_graph import AfterEdge, RosterGraphError, validate_after_graph
 from mergecraft.models import PROVIDERS
 
 _SLOT_RE = re.compile(r"^p(\d+)$")
@@ -120,44 +115,6 @@ def _after_from_entry(entry: Mapping[str, Any]) -> str | None:
     return str(value)
 
 
-def _validate_after_graph(entries: tuple[RosterEntry, ...]) -> None:
-    by_name = {entry.name: entry for entry in entries}
-    for entry in entries:
-        if entry.after is None:
-            continue
-        if entry.after == entry.name:
-            cycle = f"{entry.name} -> {entry.after}"
-            msg = f"after: cycle detected: {cycle}"
-            raise AgentRosterError(msg)
-        if entry.after not in by_name:
-            msg = f"after: unknown agent {entry.after!r} on {entry.name!r}"
-            raise AgentRosterError(msg)
-
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(name: str, path: list[str]) -> None:
-        if name in visiting:
-            start = path.index(name)
-            cycle_path = [*path[start:], name]
-            cycle = " -> ".join(cycle_path)
-            msg = f"after: cycle detected: {cycle}"
-            raise AgentRosterError(msg)
-        if name in visited:
-            return
-        entry = by_name.get(name)
-        if entry is None or entry.after is None:
-            visited.add(name)
-            return
-        visiting.add(name)
-        visit(entry.after, [*path, name])
-        visiting.remove(name)
-        visited.add(name)
-
-    for entry in entries:
-        visit(entry.name, [])
-
-
 def load_roster(config: Mapping[str, Any]) -> Roster:
     """Load and validate the ``agents:`` roster from a config mapping."""
     agents = config.get(_AGENTS_KEY)
@@ -185,7 +142,12 @@ def load_roster(config: Mapping[str, Any]) -> Roster:
         )
 
     roster = Roster(entries=tuple(entries))
-    _validate_after_graph(roster.entries)
+    try:
+        validate_after_graph(
+            tuple(AfterEdge(name=entry.name, after=entry.after) for entry in roster.entries)
+        )
+    except RosterGraphError as exc:
+        raise AgentRosterError(str(exc)) from exc
     return roster
 
 
@@ -238,8 +200,11 @@ def seed_reviewer_p0_if_empty(
     reviewer[_ROLE_KEY] = "reviewer"
     reviewer[_MODEL_CHAIN_KEY] = [slug]
     models = config.get("models")
-    if isinstance(models, list) and slug not in [str(item) for item in models]:
-        models.insert(0, slug)
+    if isinstance(models, list):
+        if slug not in [str(item) for item in models]:
+            models.insert(0, slug)
+    else:
+        config["models"] = [slug]
     return slug
 
 
@@ -278,14 +243,10 @@ def write_roster(config: MutableMapping[str, Any], roster: Roster) -> None:
 
 __all__ = [
     "AgentRosterError",
-    "RepoSettingsSnapshot",
     "Roster",
     "RosterEntry",
     "add_model",
-    "assert_config_unchanged",
     "assign_slot",
-    "capture_repo_settings_snapshot",
-    "config_yaml_hash",
     "load_roster",
     "parse_slot",
     "preferred_model_slug",

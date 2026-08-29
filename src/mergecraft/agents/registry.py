@@ -17,6 +17,12 @@ from mergecraft.agents.recall import RECALL_SYSTEM_PROMPT
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.structured_handoff import agent_finding_output_schema_id
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
+from mergecraft.config.roster_graph import (
+    AfterEdge,
+    RosterGraphError,
+    ordered_level_groups,
+    validate_after_graph,
+)
 from mergecraft.config.settings import (  # noqa: TC001
     AgentBindingOverride,
     DispatchMode,
@@ -338,15 +344,6 @@ class Registry:
     def _ordered_role_bindings(self, role: AgentRole) -> tuple[AgentBinding, ...]:
         return tuple(binding for _, binding in self._ordered_role_entries(role))
 
-    def _dependency_level(self, agent_key: str, *, visiting: frozenset[str]) -> int:
-        binding = self._bindings[agent_key]
-        if binding.after is None:
-            return 0
-        dep = binding.after
-        if dep not in self._bindings or dep in visiting:
-            return 0
-        return self._dependency_level(dep, visiting=visiting | {agent_key}) + 1
-
     def resolve_role(self, role: AgentRole | str) -> AgentBinding:
         key = AgentRole(role) if isinstance(role, str) else role
         ordered = self._ordered_role_bindings(key)
@@ -365,11 +362,13 @@ class Registry:
         entries = self._ordered_role_entries(key)
         if not entries:
             return ()
-        levels: dict[int, list[AgentBinding]] = {}
-        for agent_key, binding in entries:
-            level = self._dependency_level(agent_key, visiting=frozenset())
-            levels.setdefault(level, []).append(binding)
-        return tuple(tuple(levels[level_index]) for level_index in range(max(levels) + 1))
+        nodes = tuple(
+            AfterEdge(name=agent_key, after=binding.after) for agent_key, binding in entries
+        )
+        ordered_keys = tuple(agent_key for agent_key, _binding in entries)
+        level_groups = ordered_level_groups(nodes, names_in_order=ordered_keys)
+        by_key = {agent_key: binding for agent_key, binding in entries}
+        return tuple(tuple(by_key[agent_key] for agent_key in group) for group in level_groups)
 
     def resolve_agent_ref(self, ref: str) -> AgentBinding:
         """Resolve a pipeline agent reference (role name or custom agent id)."""
@@ -505,6 +504,21 @@ def load_registry(
         joined = ", ".join(orchestrator_keys)
         msg = f"cannot load multiple orchestrator bindings (D7): {joined}"
         raise RegistryValidationError(msg)
+
+    after_nodes = tuple(
+        AfterEdge(name=agent_key, after=binding.after)
+        for agent_key, binding in bindings.items()
+        if binding.after is not None
+    )
+    if after_nodes:
+        all_nodes = tuple(
+            AfterEdge(name=agent_key, after=binding.after)
+            for agent_key, binding in bindings.items()
+        )
+        try:
+            validate_after_graph(all_nodes)
+        except RosterGraphError as exc:
+            raise RegistryValidationError(str(exc)) from exc
 
     return Registry(bindings, configured_keys=frozenset(settings.agents.keys()))
 

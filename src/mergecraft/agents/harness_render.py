@@ -397,9 +397,11 @@ def default_subagent_selection(
     recall_pass: bool = False,
 ) -> tuple[str, ...]:
     """Default routed roster before AP4 lens routing — every reviewer + verifier (+ recall)."""
-    reviewers = registry.resolve_roles(AgentRole.reviewer)
+    from mergecraft.agents.reviewer_merge import reviewer_dispatch_batches
+
+    batches = reviewer_dispatch_batches(registry)
+    roster: list[str] = [agent_id for batch in batches for agent_id in batch]
     verifier = registry.resolve_role(AgentRole.verifier)
-    roster: list[str] = [binding.agent_id for binding in reviewers]
     roster.append(verifier.agent_id)
     if recall_pass:
         recall = registry.resolve_role(AgentRole.recall)
@@ -444,7 +446,20 @@ def render_for_run(
         if selected is not None
         else default_subagent_selection(registry, recall_pass=settings.review.recall_pass)
     )
-    return render_agents(registry, selected=roster, harness=harness, ctx=ctx)
+    result = render_agents(registry, selected=roster, harness=harness, ctx=ctx)
+    from mergecraft.agents.reviewer_merge import reviewer_dispatch_batches
+
+    batches = reviewer_dispatch_batches(registry)
+    if not batches:
+        return result
+    meta = dict(result.metadata)
+    meta["reviewer_dispatch_batches"] = [list(batch) for batch in batches]
+    return HarnessRenderResult(
+        harness=result.harness,
+        payload=result.payload,
+        selected_agent_ids=result.selected_agent_ids,
+        metadata=meta,
+    )
 
 
 def merge_manifest_metadata(

@@ -35,11 +35,32 @@ class RepoSettingsSnapshot:
 
 
 def config_yaml_hash(*, root: Path) -> str:
-    """Return a SHA-256 digest of ``.mergecraft/config.yaml``, or ``""`` when absent."""
-    config_path = root / _CONFIG_REL
-    if not config_path.is_file():
+    """Return a SHA-256 digest of layered config inputs pinned at snapshot time.
+
+    Always includes committed ``.mergecraft/config.yaml``. When a local overlay
+    is active (off-CI), ``.mergecraft/config.local.yaml`` is hashed too so
+    mid-run edits to either file are detected (D2 / W4).
+    """
+    from mergecraft.config.layered import local_config_path, running_in_github_actions
+
+    repo_root = root.resolve()
+    digest = sha256()
+    saw_bytes = False
+
+    committed = repo_root / _CONFIG_REL
+    if committed.is_file():
+        digest.update(committed.read_bytes())
+        saw_bytes = True
+
+    if not running_in_github_actions():
+        local_path = local_config_path(repo_root)
+        if local_path.is_file():
+            digest.update(local_path.read_bytes())
+            saw_bytes = True
+
+    if not saw_bytes:
         return ""
-    return sha256(config_path.read_bytes()).hexdigest()
+    return digest.hexdigest()
 
 
 def reset_gateway_settings_cache() -> None:
@@ -87,10 +108,13 @@ def capture_run_scope_snapshot(
 
 
 def assert_config_unchanged(snapshot: RepoSettingsSnapshot) -> None:
-    """Refuse when ``.mergecraft/config.yaml`` changed after the snapshot was taken."""
+    """Refuse when pinned config inputs changed after the snapshot was taken."""
     current = config_yaml_hash(root=snapshot.repo_root)
     if current != snapshot.config_hash:
-        msg = ".mergecraft/config.yaml changed after settings were snapshotted; refusing to proceed"
+        msg = (
+            ".mergecraft/config.yaml changed after settings were snapshotted "
+            "(including any active local overlay); refusing to proceed"
+        )
         raise ValueError(msg)
 
 

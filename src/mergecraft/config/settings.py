@@ -847,7 +847,7 @@ def load_repo_settings(
             else:
                 raw = migrate_config(loaded)
     else:
-        from mergecraft.cli.config_precedence import load_layered_config_dict
+        from mergecraft.config.layered import load_layered_config_dict
 
         base = _workspace_root(root)
         layered = load_layered_config_dict(root=base)

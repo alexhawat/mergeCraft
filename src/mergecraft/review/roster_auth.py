@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
-from mergecraft.cli.workflow_cmd import parse_auth_manifest
-from mergecraft.cli.workflow_wf_yaml import DEFAULT_WORKFLOW_RELATIVE_PATH
 from mergecraft.config.agent_roster import load_roster
+from mergecraft.config.io import config_path_for_root, load_config_dict
+from mergecraft.config.roster_unwired import collect_unwired_roster_models, iter_roster_model_slots
 from mergecraft.models import parse_model
+from mergecraft.workflow.auth_manifest import (
+    DEFAULT_WORKFLOW_RELATIVE_PATH,
+    WorkflowAuthManifestError,
+    parse_auth_manifest,
+    secret_name_to_provider_label,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,7 +31,7 @@ class RosterSecretEmptyError(RuntimeError):
 
 
 def _roster_slugs_from_config(repo_root: Path) -> tuple[str, ...]:
-    raw = _load_config_dict(_config_path(repo_root))
+    raw = load_config_dict(config_path_for_root(repo_root))
     roster = load_roster(raw)
     slugs: list[str] = []
     for entry in roster.entries:
@@ -52,12 +57,22 @@ def _format_unwired_message(*, agent: str, slot: str, provider: str) -> str:
     )
 
 
-def _format_empty_secret_message(*, secret_name: str, provider: str) -> str:
-    return (
-        f"GitHub Actions secret {secret_name!r} is empty for provider {provider!r} — "
-        f"set the secret (for example `mergecraft provider auth {provider}` or "
-        f"`gh secret set {secret_name}`)"
-    )
+def _format_empty_secrets_message(*, entries: tuple[tuple[str, str], ...]) -> str:
+    lines = [
+        "one or more GitHub Actions secrets required by the roster are empty — "
+        "set each secret (for example `mergecraft provider auth <label>` or "
+        "`gh secret set <name>`):"
+    ]
+    for secret_name, provider in entries:
+        lines.append(f"- {secret_name!r} (provider {provider!r})")
+    return "\n".join(lines)
+
+
+def _parse_auth_manifest_or_raise(workflow_path: Path) -> frozenset[str]:
+    try:
+        return parse_auth_manifest(workflow_path)
+    except WorkflowAuthManifestError as exc:
+        raise RosterAuthError(str(exc)) from exc
 
 
 def validate_roster_against_auth_manifest(
@@ -73,40 +88,44 @@ def validate_roster_against_auth_manifest(
     if not slugs and empty_secrets is None:
         return
 
-    wired = parse_auth_manifest(workflow_path)
-    raw = _load_config_dict(_config_path(resolved_root))
-    roster = load_roster(raw)
-    agent_slots: list[tuple[str, str, str]] = []
+    wired = _parse_auth_manifest_or_raise(workflow_path)
     if roster_slugs is None:
-        for entry in roster.entries:
-            for index, slug in enumerate(entry.model_chain):
-                agent_slots.append((entry.name, f"p{index}", slug))
+        raw = load_config_dict(config_path_for_root(resolved_root))
+        roster = load_roster(raw)
+        unwired = collect_unwired_roster_models(roster=roster, wired_providers=wired)
+        for agent_name, slot, _slug, provider_key in unwired:
+            raise RosterAuthError(
+                _format_unwired_message(agent=agent_name, slot=slot, provider=provider_key)
+            )
     else:
+        slug_to_slots: dict[str, list[tuple[str, str]]] = {}
+        raw = load_config_dict(config_path_for_root(resolved_root))
+        roster = load_roster(raw)
+        for agent_name, slot, slug in iter_roster_model_slots(roster):
+            slug_to_slots.setdefault(slug, []).append((agent_name, slot))
         for slug in slugs:
-            agent_slots.append(("roster", "p0", slug))
-
-    for agent_name, slot, slug in agent_slots:
-        try:
-            provider, _model_id = parse_model(slug)
-        except ValueError as exc:
-            raise RosterAuthError(str(exc)) from exc
-        provider_key = provider.lower()
-        if provider_key not in wired:
+            try:
+                provider, _model_id = parse_model(slug)
+            except ValueError as exc:
+                raise RosterAuthError(str(exc)) from exc
+            provider_key = provider.lower()
+            if provider_key in wired:
+                continue
+            slots = slug_to_slots.get(slug, [("roster", "p0")])
+            agent_name, slot = slots[0]
             raise RosterAuthError(
                 _format_unwired_message(agent=agent_name, slot=slot, provider=provider_key)
             )
 
     if empty_secrets:
+        entries: list[tuple[str, str]] = []
         for secret_name in empty_secrets:
             provider = _provider_for_secret(secret_name)
-            raise RosterSecretEmptyError(
-                _format_empty_secret_message(secret_name=secret_name, provider=provider)
-            )
+            entries.append((secret_name, provider))
+        raise RosterSecretEmptyError(_format_empty_secrets_message(entries=tuple(entries)))
 
 
 def _provider_for_secret(secret_name: str) -> str:
-    from mergecraft.cli.workflow_cmd import secret_name_to_provider_label
-
     label = secret_name_to_provider_label(secret_name)
     return label or secret_name.lower().removesuffix("_api_key")
 

@@ -49,20 +49,13 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-_AGENTS_MODEL_DEPRECATION_EMITTED = False
-
 
 def _warn_agents_model_deprecation(verb: str, replacement: str) -> None:
     """Point operators at ``mergecraft agent`` model verbs (wave plan 11 / W3)."""
-    global _AGENTS_MODEL_DEPRECATION_EMITTED
     message = (
         f"mergecraft agents {verb} is deprecated — use mergecraft agent {replacement} instead."
     )
-    if not _AGENTS_MODEL_DEPRECATION_EMITTED:
-        console.print(f"[yellow]warning:[/yellow] {message}")
-        _AGENTS_MODEL_DEPRECATION_EMITTED = True
-    else:
-        console.print(message, markup=False)
+    console.print(f"[yellow]warning:[/yellow] {message}")
 
 
 def _tool_ctx(target_dir: Path) -> ToolContext:

@@ -10,7 +10,8 @@ import yaml
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.provider_cmd import _load_config_dict, seed_builtin_providers
+from mergecraft.cli.provider_cmd import seed_builtin_providers
+from mergecraft.config.io import load_config_dict
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.pins import action_pin_minimal
 from mergecraft.review.completed import COMPLETED_REVIEWS_GITIGNORE_LINE
@@ -152,7 +153,7 @@ def run(
     else:
         config_to_write: dict[str, object] = dict(DEFAULT_CONFIG)
         if config_path.is_file():
-            existing = _load_config_dict(config_path)
+            existing = load_config_dict(config_path)
             existing_agents = existing.get("agents")
             if existing_agents is not None:
                 config_to_write["agents"] = existing_agents

@@ -157,6 +157,74 @@ agents:
     )
 
 
+def test_prepare_terminal_submission_enforces_strictest_verdict() -> None:
+    from mergecraft.agents.registry import AgentBinding, AgentRole, Registry
+    from mergecraft.agents.reviewer_merge import prepare_terminal_submission
+
+    binding = AgentBinding(
+        agent_id="mergecraft-reviewer",
+        role=AgentRole.reviewer,
+        model_chain=("anthropic/claude-sonnet",),
+        prompt_id="mergecraft.reviewer",
+        prompt_version="1.0.0",
+        tool_classes=frozenset(),
+        budget=8,
+        timeout_s=600,
+    )
+    registry = Registry({"reviewer": binding})
+    findings = [{"path": "a.py", "body": "major", "severity": "Major", "line": 1}]
+    merged, verdict = prepare_terminal_submission(
+        registry=registry,
+        findings=findings,
+        verdict="approve",
+    )
+    assert merged
+    assert verdict == "request_changes"
+
+
+def test_prepare_terminal_submission_groups_by_raised_by() -> None:
+    from mergecraft.agents.registry import AgentBinding, AgentRole, Registry
+    from mergecraft.agents.reviewer_merge import prepare_terminal_submission
+
+    primary = AgentBinding(
+        agent_id="mergecraft-reviewer",
+        role=AgentRole.reviewer,
+        model_chain=("anthropic/claude-sonnet",),
+        prompt_id="mergecraft.reviewer",
+        prompt_version="1.0.0",
+        tool_classes=frozenset(),
+        budget=8,
+        timeout_s=600,
+    )
+    secondary = AgentBinding(
+        agent_id="reviewer2",
+        role=AgentRole.reviewer,
+        model_chain=("openai/gpt-5.3-codex",),
+        prompt_id="mergecraft.reviewer",
+        prompt_version="1.0.0",
+        tool_classes=frozenset(),
+        budget=8,
+        timeout_s=600,
+    )
+    registry = Registry({"reviewer": primary, "reviewer2": secondary})
+    findings = [
+        {
+            "path": "a.py",
+            "body": "from reviewer2",
+            "severity": "Minor",
+            "line": 1,
+            "raised_by": "reviewer2",
+        },
+    ]
+    merged, _verdict = prepare_terminal_submission(
+        registry=registry,
+        findings=findings,
+        verdict="comment",
+    )
+    assert len(merged) == 1
+    assert merged[0]["raised_by"] == "reviewer2"
+
+
 def test_reviewer_dispatch_batches_diamond_two_siblings_same_level(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
