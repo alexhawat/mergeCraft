@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Enforcement modes and the approval gate now agree on what blocks. The
+  gate-facing severity is the single authority, so ``contributes_blocker`` is
+  read off it rather than computed beside it. ``blocking`` floors a
+  non-blocking declared severity to ``Major`` and ``warning`` caps blocking
+  severities to ``Minor``, and ``required`` resolves to ``Major`` while declared
+  evidence is outstanding so a ``Minor`` or ``Trivial`` obligation still blocks;
+  the declared severity is preserved on the finding's ``evidence`` list. **This reverses MCB-12's "blocking no longer promotes
+  Minor"**, which left the blocking intent in a field ``decide_approval`` never
+  read, so a ``blocking`` rule silently passed while a ``warning`` rule blocked
+  (#554)
 - Render path: skip short-id assignment for non-hex fingerprints instead of
   aborting review output; export and explain paths stay strict (#493)
 - Cheat-signature lint: narrow ``getattr_tautology`` to ``object()`` targets so

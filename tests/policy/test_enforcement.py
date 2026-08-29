@@ -30,8 +30,13 @@ def test_blocking_rule_contributes_a_blocking_finding_not_a_second_gate() -> Non
     assert not hasattr(evaluate_enforcement, "decide_policy_approval")
 
 
-def test_blocking_mode_preserves_minor_declared_severity() -> None:
-    """D12: blocking keeps a declared ``Minor`` finding at ``Minor``."""
+def test_blocking_minor_blocks_at_the_gate() -> None:
+    """#554: a blocking rule must block, so declared ``Minor`` is floored to ``Major``.
+
+    This deliberately reverses MCB-12's "blocking no longer promotes Minor".
+    That change left the blocking intent in ``contributes_blocker``, which
+    ``decide_approval`` never reads, so a blocking rule silently passed.
+    """
     from mergecraft.policy.enforcement import evaluate_enforcement
 
     violation = {
@@ -44,7 +49,43 @@ def test_blocking_mode_preserves_minor_declared_severity() -> None:
 
     assert result.contributes_blocker is True
     assert result.finding is not None
-    assert result.finding.severity == "Minor"
+    assert result.finding.severity == "Major"
+    assert decide_approval([result.finding], run_succeeded=True, tier="trusted") == "failure"
+
+
+def test_blocking_minor_keeps_the_declared_severity_visible() -> None:
+    """Flooring must not hide what the rule actually declared."""
+    from mergecraft.policy.enforcement import evaluate_enforcement
+
+    violation = {
+        "rule_id": "style-block",
+        "path": "src/app.py",
+        "message": "policy violation",
+        "severity": "Minor",
+    }
+    result = evaluate_enforcement(mode="blocking", violation=violation)
+
+    assert result.finding is not None
+    assert any("Minor" in item for item in result.finding.evidence)
+
+
+def test_warning_major_does_not_block_at_the_gate() -> None:
+    """#554: warning never blocks, so a declared blocking severity is capped."""
+    from mergecraft.policy.enforcement import evaluate_enforcement
+
+    violation = {
+        "rule_id": "style-warn",
+        "path": "src/app.py",
+        "message": "policy violation",
+        "severity": "Major",
+    }
+    result = evaluate_enforcement(mode="warning", violation=violation)
+
+    assert result.contributes_blocker is False
+    assert result.finding is not None
+    assert result.finding.severity not in BLOCKING_SEVERITIES
+    assert decide_approval([result.finding], run_succeeded=True, tier="trusted") == "success"
+    assert any("Major" in item for item in result.finding.evidence)
 
 
 def test_advisory_mode_caps_critical_declared_severity_to_non_blocker() -> None:
