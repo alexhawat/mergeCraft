@@ -74,6 +74,9 @@ evals/results/structural-replay-convergence-*.json
 # `git worktree remove`, this just keeps them out of `git status`/`find`).
 /mergecraft-*/
 
+# Isolated git worktrees (local operator checkouts)
+.worktrees/
+
 # mergeCraft's own runtime cache/scratch state, provisioned into <repo>/.mergecraft/
 # on every self-review run (analyzer-cache/, analyzer-scratch/, analyzer-runs/,
 # analyzers.lock, .provision.lock, traces/) — regenerated every run, never source
