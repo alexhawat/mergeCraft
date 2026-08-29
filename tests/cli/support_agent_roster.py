@@ -57,6 +57,7 @@ jobs:
         env:
           LLM_PROVIDER_1: nous
           LLM_PROVIDER_1_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 """
 
 WORKFLOW_GATED_STEP = """\
