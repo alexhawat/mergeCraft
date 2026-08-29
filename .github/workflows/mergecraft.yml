@@ -384,13 +384,19 @@ jobs:
         id: dispatch_pr
         env:
           GH_TOKEN: ${{ github.token }}
+          # Never interpolate these into the script body. A branch name is
+          # attacker-influenced text and can carry shell syntax; expanded by
+          # `${{ }}` it would run as code under this job's write-scoped token.
+          # Passed as env and quoted, it stays one literal argv element.
+          DISPATCH_REPO: ${{ github.repository }}
+          DISPATCH_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           # Same-repo dispatch: the ref is the head branch. An empty number is a
           # real outcome (no open PR) — Compose then falls back to the bare
           # string rather than failing the job (#529).
-          pr_json="$(gh pr list --repo "${{ github.repository }}" \
-                --head "${{ github.ref_name }}" --state open \
+          pr_json="$(gh pr list --repo "${DISPATCH_REPO}" \
+                --head "${DISPATCH_REF}" --state open \
                 --json number,baseRefName --jq '.[0] // {}')"
           n="$(printf '%s' "${pr_json}" | jq -r '.number // ""')"
           base="$(printf '%s' "${pr_json}" | jq -r '.baseRefName // ""')"

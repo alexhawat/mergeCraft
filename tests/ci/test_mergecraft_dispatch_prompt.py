@@ -97,8 +97,30 @@ class TestDispatchResolveStep:
         assert isinstance(run, str)
         assert "gh pr list" in run
         assert "--state open" in run
-        assert "github.ref_name" in run
         assert "number=" in run
+
+    def test_resolve_step_takes_ref_and_repo_from_env_not_interpolation(self) -> None:
+        """The ref must reach the script as data, never as expanded template text."""
+        step = _step(_RESOLVE_STEP)
+        env = step.get("env")
+        assert isinstance(env, dict), "resolve step must declare env"
+        assert env.get("DISPATCH_REF") == "${{ github.ref_name }}"
+        assert env.get("DISPATCH_REPO") == "${{ github.repository }}"
+
+        run = step.get("run")
+        assert isinstance(run, str)
+        assert "${DISPATCH_REF}" in run
+        assert "${DISPATCH_REPO}" in run
+
+    def test_resolve_step_interpolates_nothing_into_its_script(self) -> None:
+        """zizmor template-injection: no ``${{ }}`` may appear in the run body.
+
+        A branch name is attacker-influenced text. Expanded by ``${{ }}`` into
+        bash it executes under this job's write-scoped token.
+        """
+        run = _step(_RESOLVE_STEP).get("run")
+        assert isinstance(run, str)
+        assert "${{" not in run, f"template expansion in run body: {run!r}"
 
     def test_resolve_step_does_not_fail_the_job_on_empty_match(self) -> None:
         run = _step(_RESOLVE_STEP).get("run")
@@ -237,3 +259,86 @@ class TestComposePromptBehaviour:
 @pytest.mark.parametrize("name", [_RESOLVE_STEP, _COMPOSE_STEP])
 def test_required_review_steps_exist(name: str) -> None:
     _step(name)
+
+
+_HOSTILE_REFS: tuple[str, ...] = (
+    'evil"; touch INJECTED; echo "',
+    "evil'; touch INJECTED; echo '",
+    "evil$(touch INJECTED)",
+    "evil`touch INJECTED`",
+    "evil; touch INJECTED",
+    "evil && touch INJECTED",
+    "evil | touch INJECTED",
+    "evil\ntouch INJECTED",
+)
+
+
+def _resolve_script() -> str:
+    run = _step(_RESOLVE_STEP).get("run")
+    assert isinstance(run, str), "resolve step has no run script"
+    return run
+
+
+def _run_resolve(tmp_path: Path, *, ref: str) -> tuple[Path, Path]:
+    """Execute the real resolve script with a stub ``gh``; return argv log and cwd."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    argv_log = tmp_path / "gh_argv.txt"
+    stub = bin_dir / "gh"
+    stub.write_text(
+        f'#!/usr/bin/env bash\nprintf "%s\\n" "$@" >> {argv_log}\nprintf "%s" "{{}}"\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    script_env = {
+        "PATH": f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+        "GITHUB_OUTPUT": str(output),
+        "HOME": str(tmp_path),
+        "DISPATCH_REPO": "acme/demo",
+        "DISPATCH_REF": ref,
+    }
+    completed = subprocess.run(
+        ["bash", "-c", _resolve_script()],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=script_env,
+    )
+    assert completed.returncode == 0, (
+        f"resolve script failed ({completed.returncode}): "
+        f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
+    )
+    return argv_log, tmp_path
+
+
+@pytest.mark.parametrize("ref", _HOSTILE_REFS)
+def test_shell_metacharacters_in_a_branch_name_do_not_execute(
+    tmp_path: Path,
+    ref: str,
+) -> None:
+    """A branch name carrying shell syntax must stay data (#529 injection review).
+
+    ``workflow_dispatch`` runs with a write-scoped token, so a ref expanded into
+    the script body would execute with it.
+    """
+    argv_log, workdir = _run_resolve(tmp_path, ref=ref)
+
+    assert not (workdir / "INJECTED").exists(), f"branch name executed as code: {ref!r}"
+    logged = argv_log.read_text(encoding="utf-8").splitlines()
+    assert ref.splitlines()[0] in "\n".join(logged), (
+        f"gh never received the ref as an argument: {logged!r}"
+    )
+
+
+def test_a_plain_branch_name_still_reaches_gh_unchanged(tmp_path: Path) -> None:
+    """The hardening must not mangle an ordinary ref."""
+    argv_log, _ = _run_resolve(tmp_path, ref="feat/plain-branch")
+
+    logged = argv_log.read_text(encoding="utf-8").splitlines()
+    assert "feat/plain-branch" in logged
+    assert "--state" in logged
+    assert "open" in logged
