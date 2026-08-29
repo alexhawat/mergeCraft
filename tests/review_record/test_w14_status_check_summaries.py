@@ -107,9 +107,10 @@ async def test_zero_change_findings_never_claim_outstanding_feedback(tmp_path: P
         make_scoped_finding(scope="run", severity="Critical", rule_id="ignored-tool-error"),
     ]
     packet = _packet_with_findings(run_only, verdict="success", reason="run health advisory only")
-    ctx = _ctx(tmp_path)
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
     await report_status_checks(ctx, run_succeeded=True, packet=packet)
-    summary = _approval_summary(ctx.github)  # type: ignore[arg-type]
+    summary = _approval_summary(github)
     assert "outstanding review feedback" not in summary.lower()
 
 
@@ -168,7 +169,13 @@ async def test_failed_check_run_post_emits_warning_and_annotation(
 
     import mergecraft.utils.gha_log as gha_log
 
-    monkeypatch.setattr(gha_log, "warning", lambda message: warnings.append(message))
+    real_warning = gha_log.warning
+
+    def _spy_warning(message: str) -> None:
+        warnings.append(message)
+        real_warning(message)
+
+    monkeypatch.setattr(gha_log, "warning", _spy_warning)
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
 
     github = _RecordingGitHub()
