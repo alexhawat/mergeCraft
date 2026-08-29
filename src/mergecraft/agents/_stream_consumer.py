@@ -11,9 +11,9 @@ a sequence of NDJSON events (Claude ``stream-json``, ``codex exec --json``,
 pathway, so the existing ``MemorySink`` / ``JSONLFileSink`` surface sees it.
 
 The consumer is intentionally **driver-agnostic**: it knows how to read lines
-from a stream, parse them as JSON, skip malformed lines (W6.5), echo lines
-to stdout so the activity monitor stays armed (D13), and surface a classifier
-callback for driver-specific span emission.
+from a stream, parse them as JSON, skip malformed lines (W6.5), render
+operator-facing lines through ``stream_render`` (plan 13 W7), and surface a
+classifier callback for driver-specific span emission.
 
 Per-harness payload coverage (OB3 — recorded, not faked; plan §OB3.1 note):
     - **OpenCode HTTP path** (``opencode.py::_prompt_session``): full
@@ -58,6 +58,9 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.agents.shared import resolve_cache_read
+from mergecraft.agents.stream_render import emit_rendered_stream_line
+from mergecraft.utils import activity
+from mergecraft.utils.log import drain_loguru_queue, is_debug_enabled
 
 if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentUsage
@@ -233,18 +236,6 @@ def _resolve_active_span_for_otel_bridge() -> Span | None:
     return None
 
 
-def _echo_line_to_log(line: str) -> None:
-    """Emit a streamed NDJSON line through the shared loguru queue (D6).
-
-    Stream output and structured logs share one ``enqueue=True`` sink so the
-    runner never merges unsynchronised writes from two descriptors.
-    """
-    try:
-        logger.info("{}", line)
-    except Exception as exc:
-        logger.debug("stream consumer log echo failed: {}", exc)
-
-
 def consume_stream(
     *,
     raw_stream: Iterable[str],
@@ -286,9 +277,11 @@ def consume_stream(
 
         accumulator.parsed_event_count += 1
 
-        # Route every well-formed line through the log queue (D6). Malformed
-        # lines are noise and are not echoed.
-        _echo_line_to_log(stripped)
+        activity.mark_activity()
+        emit_rendered_stream_line(event)
+        if is_debug_enabled():
+            logger.debug("{}", stripped)
+            drain_loguru_queue()
 
         # T3.2 — when a mergeCraft span is active, wrap the handler call in
         # ``attach_trace_context`` so any nested OTel auto-instrumented

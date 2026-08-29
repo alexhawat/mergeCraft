@@ -11,6 +11,8 @@ from typing import Any, Final, Literal
 
 from loguru import logger
 
+from mergecraft.agents.stream_render import emit_tool_failure_line
+
 JsonSchema = dict[str, Any]
 # Tool bodies vary across modules; wrap loosely then normalize in ``execute``.
 ToolBody = Callable[..., Awaitable[Any]]
@@ -287,8 +289,10 @@ def execute(fn: ToolBody, tool_name: str | None = None) -> ToolHandler:
             return handle_tool_success({"result": result})
         except Exception as error:
             prefix = f"[{tool_name}]" if tool_name else "tool"
-            logger.info("{} error: {}", prefix, error)
+            message = str(error)
+            logger.debug("{} error: {}", prefix, message)
             logger.debug("{} params: {}", prefix, params)
+            emit_tool_failure_line(tool_name or "tool", message)
             return handle_tool_error(error)
 
     return _fn
