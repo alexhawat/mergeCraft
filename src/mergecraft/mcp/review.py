@@ -24,6 +24,15 @@ from mergecraft.mcp.deferred_publish import (
     merge_analyzer_sections_into_review_body,
     refresh_analyzer_sections_for_publish,
 )
+from mergecraft.mcp.inline_anchors import (
+    InlineAnchorIndex,
+    adjust_inline_comment_anchor,
+    append_demoted_inline_comments,
+    build_inline_anchor_index,
+    format_demoted_inline_comment,
+    is_comments_anchor_422_response,
+    parse_comment_422_index,
+)
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
@@ -506,6 +515,92 @@ def _assert_publication_scope(
         raise PublicationScopeError(msg)
 
 
+def _load_inline_anchor_index(primary: Any) -> InlineAnchorIndex | None:
+    """Return anchor index from the checkout diff when ``diffPath`` is available."""
+    diff_path = getattr(primary, "diff_path", None)
+    if not diff_path:
+        return None
+    from pathlib import Path
+
+    path = Path(str(diff_path))
+    if not path.is_file():
+        return None
+    return build_inline_anchor_index(path.read_text(encoding="utf-8"))
+
+
+def _demote_inline_comment_from_payload(payload: dict[str, Any], index: int) -> dict[str, Any]:
+    """Move one inline comment into the review body and remove it from the payload."""
+    comments = list(payload.get("comments") or [])
+    if index < 0 or index >= len(comments):
+        return payload
+    comment = comments.pop(index)
+    demoted = format_demoted_inline_comment(comment)
+    updated = dict(payload)
+    updated["body"] = append_demoted_inline_comments(str(payload.get("body") or ""), [demoted])
+    if comments:
+        updated["comments"] = comments
+    else:
+        updated.pop("comments", None)
+    return updated
+
+
+async def _create_github_review_with_anchor_recovery(
+    ctx: ToolContext,
+    *,
+    pull_number: int,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Post a review, recovering APPROVE and inline-anchor 422 rejections (D8, #530)."""
+    scm = ctx.scm
+    current = dict(payload)
+    approve_fallback = False
+
+    while True:
+        try:
+            result = await scm.create_review(
+                ctx.repo.owner,
+                ctx.repo.name,
+                pull_number,
+                **current,
+            )
+            return result, approve_fallback
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 422:
+                raise
+
+            if current.get("comments") and is_comments_anchor_422_response(exc.response):
+                index = parse_comment_422_index(exc.response)
+                if index is None:
+                    logger.warning(
+                        "review comment 422 on PR #{} without index; demoting all inline comments",
+                        pull_number,
+                    )
+                    while current.get("comments"):
+                        current = _demote_inline_comment_from_payload(current, 0)
+                    continue
+
+                logger.warning(
+                    "review comment 422 on PR #{} at index {}; demoting inline comment to body",
+                    pull_number,
+                    index,
+                )
+                current = _demote_inline_comment_from_payload(current, index)
+                continue
+
+            event = str(current.get("event") or "COMMENT")
+            if event == "APPROVE":
+                logger.info(
+                    "APPROVE review rejected with 422 on PR #{}; falling back to COMMENT",
+                    pull_number,
+                )
+                current = dict(current)
+                current["event"] = "COMMENT"
+                approve_fallback = True
+                continue
+
+            raise
+
+
 async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> dict[str, Any]:
     """Post a GitHub review after a validated terminal submission exists (V6)."""
     primary = primary_repo_state(ctx.tool_state)
@@ -581,6 +676,8 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             incremental_diff_text = Path(incremental_path).read_text(encoding="utf-8")
 
     collateral_map = collateral_by_fingerprint(ctx)
+    anchor_index = _load_inline_anchor_index(primary)
+    demoted_bodies: list[str] = []
 
     inline: list[dict[str, Any]] = []
     for c in comments:
@@ -631,11 +728,26 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
         if "start_line" in c:
             item["start_line"] = int(c["start_line"])
             item["start_side"] = c.get("start_side") or c.get("side") or "RIGHT"
-        inline.append(item)
+        if anchor_index is not None:
+            adjustment = adjust_inline_comment_anchor(item, index=anchor_index)
+            if adjustment.comment is None:
+                if adjustment.demoted_body:
+                    demoted_bodies.append(adjustment.demoted_body)
+                continue
+            inline.append(adjustment.comment)
+        else:
+            inline.append(item)
     if review_settings.recall_pass:
         inline = strip_recall_inline_comments(ctx, inline, publish_sets=publish_sets)
+    if demoted_bodies:
+        payload["body"] = add_footer(
+            ctx,
+            append_demoted_inline_comments(str(payload.get("body") or ""), demoted_bodies),
+        )
     if inline:
         payload["comments"] = inline
+    else:
+        payload.pop("comments", None)
 
     from mergecraft.findings.ledger import (
         persist_finding_ledger_to_progress_comment,
@@ -644,21 +756,11 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
 
     record_published_findings_in_ledger(ctx.tool_state, inline)
 
-    scm = ctx.scm
-    approve_fallback = False
-    try:
-        result = await scm.create_review(ctx.repo.owner, ctx.repo.name, pull_number, **payload)
-    except httpx.HTTPStatusError as exc:
-        if event != "APPROVE" or exc.response.status_code != 422:
-            raise
-        logger.info(
-            "APPROVE review rejected with 422 on PR #{}; falling back to COMMENT",
-            pull_number,
-        )
-        fallback = dict(payload)
-        fallback["event"] = "COMMENT"
-        result = await scm.create_review(ctx.repo.owner, ctx.repo.name, pull_number, **fallback)
-        approve_fallback = True
+    result, approve_fallback = await _create_github_review_with_anchor_recovery(
+        ctx,
+        pull_number=pull_number,
+        payload=payload,
+    )
     review_id = int(result["id"])
     ctx.tool_state.review = ReviewRecord(
         id=review_id,
