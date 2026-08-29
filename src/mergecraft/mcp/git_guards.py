@@ -29,6 +29,8 @@ Exports:
     _subcommand_declares_shorts -- true when subcommand owns every letter in token.
     _reject_config_flags -- raise on config flags or unrecognised short bundles.
     _reject_namespace_flag -- raise on --namespace spellings.
+    _reject_no_index -- raise on --no-index spellings.
+    _reject_credential_path_operands -- raise on credential-bearing path operands.
     _reject_branch_writes -- raise on branch write flags/positionals.
     _reject_file_writing_flags -- raise on --output-family flags for a subcommand.
 """
@@ -36,6 +38,12 @@ Exports:
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+from mergecraft.utils.git_setup import (
+    reviewer_askpass_credentials_dir,
+    reviewer_denied_relative_paths,
+)
 
 # ---------------------------------------------------------------------------
 # Q1 — Which subcommands are read-only? (#257 / D7)
@@ -308,6 +316,119 @@ def _reject_namespace_flag(tokens: list[str]) -> None:
             raise ValueError(msg)
 
 
+def _no_index_message(token: str) -> str:
+    return (
+        f"Blocked: '{token}' makes git compare files outside any repository — "
+        "the reviewer surface cannot confine paths when --no-index is set, "
+        "and no read-only workflow needs it."
+    )
+
+
+def _reject_no_index(tokens: list[str]) -> None:
+    """Raise ValueError if any token is a ``--no-index`` spelling (plan 13 / D9).
+
+    ``--no-index`` tells git to diff paths without a repository, which bypasses
+    every workspace confinement rule on the operands that follow.
+    """
+    for tok in tokens:
+        if tok == "--no-index" or tok.startswith("--no-index="):
+            raise ValueError(_no_index_message(tok))
+
+
+def _split_end_of_options(args: list[str]) -> tuple[list[str], list[str]]:
+    if "--" in args:
+        idx = args.index("--")
+        return args[:idx], args[idx + 1 :]
+    return args, []
+
+
+def _operands_for_credential_scan(args: list[str]) -> list[str]:
+    """Collect subcommand operands that may name a filesystem path."""
+    before, after = _split_end_of_options(args)
+    operands = list(after)
+    for tok in before:
+        if tok.startswith("-"):
+            continue
+        operands.append(tok)
+    return operands
+
+
+def _path_from_git_operand(operand: str) -> str:
+    """Extract the file path from a ``rev:path`` operand, or return *operand*."""
+    if ":" in operand:
+        return operand.split(":", 1)[1]
+    return operand
+
+
+def _path_matches_denied_relative(resolved: Path, denied_rel: str) -> bool:
+    denied_parts = Path(denied_rel).parts
+    return (
+        len(resolved.parts) >= len(denied_parts)
+        and resolved.parts[-len(denied_parts) :] == denied_parts
+    )
+
+
+def _resolve_operand_path(path: str, *, cwd: str) -> Path | None:
+    candidate = Path(path)
+    try:
+        if candidate.is_absolute():
+            return candidate.resolve()
+        return (Path(cwd) / candidate).resolve()
+    except OSError:
+        return None
+
+
+def _is_denied_credential_path(path: str, *, cwd: str, tmpdir: str) -> bool:
+    resolved = _resolve_operand_path(path, cwd=cwd)
+    if resolved is None:
+        return False
+    for rel in reviewer_denied_relative_paths():
+        if _path_matches_denied_relative(resolved, rel):
+            return True
+    if tmpdir:
+        askpass_root = reviewer_askpass_credentials_dir(tmpdir)
+        try:
+            askpass_resolved = askpass_root.resolve()
+        except OSError:
+            return False
+        try:
+            resolved.relative_to(askpass_resolved)
+        except ValueError:
+            return False
+        else:
+            return True
+    return False
+
+
+def _credential_path_message(path: str) -> str:
+    name = Path(path).name or path
+    return (
+        f"Blocked: reading '{name}' is not permitted — credential material "
+        "must not reach tool output."
+    )
+
+
+def _reject_credential_path_operands(args: list[str], *, cwd: str, tmpdir: str) -> None:
+    """Refuse operands that name git credential stores or the askpass tree (D10)."""
+    for operand in _operands_for_credential_scan(args):
+        path = _path_from_git_operand(operand)
+        if _is_denied_credential_path(path, cwd=cwd, tmpdir=tmpdir):
+            raise ValueError(_credential_path_message(path))
+
+
+def shell_command_denies_credential_paths(command: str, *, tmpdir: str) -> str | None:
+    """Return a refusal reason when *command* names a denied credential path."""
+    for rel in reviewer_denied_relative_paths():
+        if rel in command:
+            return _credential_path_message(rel)
+    if tmpdir:
+        askpass_root = reviewer_askpass_credentials_dir(tmpdir)
+        askpass_text = str(askpass_root)
+        if askpass_text in command or "git-askpass" in command:
+            return _credential_path_message("askpass")
+    return None
+
+
 def _reject_branch_writes(args: list[str]) -> None:
     """Keep ``git branch`` to listing only (H2, #257 / D7).
 
@@ -394,10 +515,13 @@ __all__ = [
     "_is_config_flag",
     "_reject_branch_writes",
     "_reject_config_flags",
+    "_reject_credential_path_operands",
     "_reject_file_writing_flags",
     "_reject_namespace_flag",
+    "_reject_no_index",
     "_subcommand_declares_shorts",
     "reject_if_leading_dash",
     "reject_special_ref",
+    "shell_command_denies_credential_paths",
     "validate_tag_name",
 ]

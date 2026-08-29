@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.mcp.git_guards import (
     _BAD_REF_CHARS,
     _BRANCH_FLAGS_TAKING_VALUE,
@@ -25,8 +26,11 @@ from mergecraft.mcp.git_guards import (
     _is_config_flag,
     _reject_branch_writes,
     _reject_config_flags,
+    _reject_credential_path_operands,
     _reject_file_writing_flags,
     _reject_namespace_flag,
+    _reject_no_index,
+    _split_end_of_options,
     _subcommand_declares_shorts,
     reject_if_leading_dash,
     reject_special_ref,
@@ -53,8 +57,11 @@ __all__ = [
     "_is_config_flag",
     "_reject_branch_writes",
     "_reject_config_flags",
+    "_reject_credential_path_operands",
     "_reject_file_writing_flags",
     "_reject_namespace_flag",
+    "_reject_no_index",
+    "_split_end_of_options",
     "_subcommand_declares_shorts",
     "reject_if_leading_dash",
     "reject_special_ref",
@@ -104,6 +111,23 @@ def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
             idx += 1
         else:
             idx += 1
+
+
+def _validate_positional_path_confinement(args: list[str], cwd: str) -> None:
+    """Confine positional path operands to the workspace (plan 13 / D9).
+
+    After ``--``, every operand is a filesystem path and must stay inside an
+    allowed root. Before ``--``, only operands that are already absolute paths
+    are confined — revision specs such as ``origin/main:file`` are left alone.
+    """
+    before, after = _split_end_of_options(args)
+    for operand in after:
+        _confine_to_repo_root(operand, "path", cwd)
+    for operand in before:
+        if operand.startswith("-"):
+            continue
+        if Path(operand).is_absolute():
+            _confine_to_repo_root(operand, "path", cwd)
 
 
 def _origin_remote_url(cwd: str) -> str:
@@ -180,9 +204,10 @@ def _run_git(
         check=False,
     )
     if result.returncode != 0:
-        err = (result.stderr or result.stdout or "").strip()
+        raw_err = (result.stderr or result.stdout or "").strip()
+        err = redact_secrets(raw_err)
         msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-        if _is_auth_failure(err):
+        if _is_auth_failure(raw_err):
             logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
             msg = f"{msg}\n{_AUTH_FAILURE_HINT}"
         raise RuntimeError(msg)
@@ -276,7 +301,7 @@ def _extract_global_opts(
 
 
 def _validate_git_invocation(
-    command: str, args: list[str], global_opts: list[str], cwd: str
+    command: str, args: list[str], global_opts: list[str], cwd: str, *, tmpdir: str = ""
 ) -> None:
     """Run every guard a normalized git invocation must pass, in order.
 
@@ -296,6 +321,8 @@ def _validate_git_invocation(
     # verb to scope short flags against, so the strict reading applies there.
     _reject_config_flags(global_opts)
     _reject_config_flags(args, subcommand=command)
+    _reject_no_index(global_opts)
+    _reject_no_index(args)
     # Unconditional: --namespace reaches the same pre-subcommand slot and is
     # the one extracted global option no path rule can confine.
     _reject_namespace_flag(global_opts)
@@ -314,6 +341,8 @@ def _validate_git_invocation(
     if command == "branch":
         _reject_branch_writes(args)
     _reject_file_writing_flags(command, args)
+    _reject_credential_path_operands(args, cwd=cwd, tmpdir=tmpdir)
+    _validate_positional_path_confinement(args, cwd)
     # Confine -C / --git-dir / --work-tree to an allowed workspace root, with
     # relative values resolved against the cwd git will run in (#257 / D7).
     _validate_path_confinement(global_opts, cwd)
@@ -349,8 +378,12 @@ def git_tool(ctx: ToolContext):
             # the call rather than rejecting it.
             args.pop(0)
         cwd = primary_repo_state(ctx.tool_state).dir
-        _validate_git_invocation(command, args, global_opts, cwd)
-        output = _run_git([*global_opts, command, *args], cwd=cwd)
+        tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
+        _validate_git_invocation(command, args, global_opts, cwd, tmpdir=tmpdir)
+        try:
+            output = _run_git([*global_opts, command, *args], cwd=cwd)
+        except RuntimeError as err:
+            raise RuntimeError(redact_secrets(str(err))) from err
         if len(output) > 50_000:
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
             path = str(Path(temp) / f"git-{command}-{uuid.uuid4().hex[:8]}.txt")

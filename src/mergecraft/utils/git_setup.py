@@ -233,6 +233,24 @@ def git_env_for_token(token: str, *, remote_url: str = "") -> dict[str, str]:
     return env
 
 
+# Relative paths under a checkout whose contents must never reach tool output.
+# Keep aligned with :func:`scrub_clone_credentials` — if scrub removes a key
+# from ``.git/config``, the reviewer must not read it back through a tool.
+_REVIEWER_DENIED_RELATIVE_PATHS: tuple[str, ...] = (".git/config", ".git/credentials")
+# Subdirectory of the run temp dir where :func:`write_askpass_script` stores helpers.
+ASKPASS_CREDENTIALS_DIRNAME = "credentials"
+
+
+def reviewer_denied_relative_paths() -> tuple[str, ...]:
+    """Repo-relative paths the git and shell tools must never read (plan 13 / D10)."""
+    return _REVIEWER_DENIED_RELATIVE_PATHS
+
+
+def reviewer_askpass_credentials_dir(tmpdir: str) -> Path:
+    """Return the askpass credential tree root for a run temp directory."""
+    return Path(tmpdir) / ASKPASS_CREDENTIALS_DIRNAME
+
+
 def scrub_clone_credentials(repo_dir: Path | str) -> None:
     """Remove credential material from a clone's local git config after fetch (D5)."""
     import re
@@ -435,6 +453,7 @@ def wipe_runner_leak_surface() -> None:
 
 
 __all__ = [
+    "ASKPASS_CREDENTIALS_DIRNAME",
     "GIT_AUTH_USERNAME",
     "MERGECRAFT_BOT_EMAIL",
     "MERGECRAFT_BOT_NAME",
@@ -443,6 +462,8 @@ __all__ = [
     "git_auth_header_value",
     "git_env_for_token",
     "register_created_path",
+    "reviewer_askpass_credentials_dir",
+    "reviewer_denied_relative_paths",
     "scrub_clone_credentials",
     "setup_git",
     "wipe_runner_leak_surface",
