@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -101,6 +101,9 @@ class StreamSpanAccumulator:
     # them the run's only failure signal is whatever unrelated text the CLI
     # happened to leave on stderr (#445).
     stream_error: str | None = None
+    # Bubblewrap namespace failures on command_execution items (plan 13 W8 / #553).
+    user_namespace_failure_reported: bool = False
+    run_health_notes: list[str] = field(default_factory=list)
 
     def set_stream_error(self, message: str | None) -> None:
         """Record the first provider-reported fatal error on this stream."""
