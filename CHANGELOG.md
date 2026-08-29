@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Operator trust knob (`trust.selfReview`: `off` / `analyzers` / `full`) with
+  two-axis resolution — execution trust for analyzers vs authority trust for
+  approval semantics — resolved from the base config snapshot so a PR cannot
+  raise its own tier; `mergecraft trust show` / `set-self-review` CLI
+- Degraded review scope: when the PR head cannot be fetched, `checkout_pr`
+  returns `scope: api-only` with an API-built diff and the run may still reach
+  a terminal verdict (including approve when findings allow)
+- `establish_review_scope` — evidence-backed second route into review scope
+  when a materialized diff already describes the PR head
+- Read-only git MCP verbs (`show-ref`, `for-each-ref`, `ls-remote`, `config
+  --get`) and `checkout_pr` parameter aliases (`pr_number`, `issue_number`)
+- Agent stream logs render human-readable lines instead of dumping raw provider
+  NDJSON; raw lines appear only when `LOG_LEVEL=debug` or
+  `ACTIONS_STEP_DEBUG=true`
+
+### Fixed
+
+- Git MCP containment: refuse `--no-index`, confine positional paths, deny
+  credential paths (`.git/config`, askpass tree), and redact git failure text
+  before it becomes a tool result
+- Post-run retry loop classifies scope and policy refusals before resuming —
+  deterministic refusals no longer spend a second provider turn
+- Single Loguru writer with `enqueue=True` and explicit queue drain — runner
+  logs no longer interleave mid-line from concurrent stdout/stderr writers
+- Bubblewrap namespace failures surface `user_namespace_failure_hint()` once
+  per run (not gated behind a non-zero Codex exit code)
+- `checkov` and `yamllint` catalog rows document linux-amd64 manifest-only
+  provisioning instead of presenting as runtime failures
+
 ### Fixed
 
 - Enforcement modes and the approval gate now agree on what blocks. The

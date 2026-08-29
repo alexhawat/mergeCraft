@@ -29,3 +29,15 @@ ciEvidence:
     - ruff-sarif
     - mypy-sarif
     - bandit-sarif
+
+# Operator trust knob for same-repo pull_request_target (plan 13 D14–D16).
+# Resolved from the BASE snapshot at run start — a PR-head edit cannot raise
+# its own tier. Default when absent: off (today's untrusted posture).
+#   off       — no change from pre-knob behaviour
+#   analyzers — trusted-tier analyzers on same-repo PRs; agent still cannot APPROVE
+#   full      — authority trust too; requires mergecraft trust set-self-review full
+#               --i-understand-this-grants-approval-authority (exceptional opt-out)
+# Real PAT-backed APPROVE for self-review still flows through mergecraft-approve.yml
+# when the structural mergecraft-approval check passes — see docs/trust-policy.md.
+trust:
+  selfReview: "off"

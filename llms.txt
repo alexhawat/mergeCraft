@@ -31,6 +31,7 @@
 - docs/action-reference.md — action.yml inputs and outputs
 - docs/authentication.md — providers, custom gateways, model chains
 - docs/workflows.md — workflow examples, trust tiers, pull_request_target
+- docs/trust-policy.md — operator trust knob (execution vs authority, selfReview levels)
 - docs/glossary.md — plain-language definitions for landing-page jargon
 - REVIEW-CHECKS.md — every check a review applies
 - docs/ANALYZERS.md — shipped analyzer catalog

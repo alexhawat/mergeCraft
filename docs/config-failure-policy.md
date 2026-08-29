@@ -116,18 +116,27 @@ reason is recorded on `tool_state.setup_script_skip_reason` and threaded
 into the agent prompt as a `SETUP SCRIPT SKIPPED` section so the agent
 knows the setup did not run.
 
-## MCP git tool — reviewer-surface enforcement (#257 / D7)
+## MCP git tool — reviewer-surface enforcement (#257 / D7, plan 13 W2–W3)
 
 The `git` MCP tool (``ToolClass.REPOSITORY_READ``) is on the reviewer surface
 and enforces fail-closed restrictions regardless of ``payload.shell``:
 
 | Guard | What it rejects | Rationale |
 |-------|-----------------|-----------|
-| Read-only allowlist (`_READONLY_SUBCOMMANDS`) | Any subcommand not in `{status, log, diff, show, rev-parse, describe, ls-files, blame, cat-file, rev-list, branch}` — including `reset`, `clean`, `stash`, `update-ref` | The reviewer has no legitimate reason to mutate the tree |
+| Read-only allowlist (`_READONLY_SUBCOMMANDS`) | Any subcommand not in `{status, log, diff, show, rev-parse, describe, ls-files, blame, cat-file, rev-list, branch, show-ref, for-each-ref, ls-remote, config}` — including `reset`, `clean`, `stash`, `update-ref` | The reviewer has no legitimate reason to mutate the tree |
+| `config` write forms | Any `config` invocation outside `{--get, --get-all, --list}`; credential-bearing keys (`credential.*`, `url.*`) even on `--get` | `config` is lookup-only on the reviewer surface; credential keys are denied regardless of confinement |
 | `branch` write forms | Any `branch` argument that is not on the listing-flag allowlist (`-a`/`-r`/`-v`/`--all`/`--remotes`/`--merged`/`--no-merged`/`--contains`/…), including bare `git branch <name>` creation | `branch` is allowlisted read-only; deletion, rename, copy, upstream edits and creation are writes, and a rename of the checked-out branch changes what a later `commit_changes` / `push_branch` targets |
 | File-writing flags | `--output` and every unambiguous prefix of it (`--out`, `--outp`, …) on any allowlisted subcommand, plus `-o` on the subcommands that do not define it themselves | The subcommand allowlist constrains the verb, not its flags — `git diff --output=<path>` writes an arbitrary file. `-o` is scoped because it means `--others` to `ls-files` and writes nothing there |
 | `-c` / `--config-env` unconditional block | Both flags in `command` string and `args`, in spaced (`-c key=v`), glued (`-ckey=v`) and inline (`--config-env=…`) spellings, regardless of `payload.shell`. Read against the subcommand's own short flags first, so `ls-files -co` and `log -c` are forwarded while every glued config payload stays refused | `git -c alias.x='!cmd'` expands arbitrary shell even with `shell: disabled`; there is no safe-key allowlist |
-| Path confinement | `-C`, `--git-dir`, `--work-tree` resolving outside the repo checkout, a registered cross-repo checkout, or the session tmpdir — with relative values resolved against the cwd git will run in, and successive `-C` applied cumulatively as git applies them | Prevents redirect to an attacker-controlled repo or credentials store; shares `utils/workspace.confine_to_workspace` with `upload_file` and shell cwd containment so the rule cannot drift |
+| `--no-index` (plan 13 / D9) | Any `--no-index` spelling — operates outside a repository so positional confinement cannot apply | The bypass used to read `.git/config` via `git diff --no-index` in run 33126460925 |
+| Positional path confinement (plan 13 / D9) | Path operands resolving outside the repo checkout, registered cross-repo checkout, or session tmpdir | Confinement on global options alone left positional operands unchecked |
+| Credential path deny-list (plan 13 / D10) | Operands naming `.git/config`, `.git/credentials`, or the reviewer askpass tree — even when inside the workspace | Confinement answers "in the repo"; this answers "should the reviewer ever see it" |
+| Path confinement (global options) | `-C`, `--git-dir`, `--work-tree` resolving outside allowed roots — with relative values resolved against the cwd git will run in, and successive `-C` applied cumulatively as git applies them | Prevents redirect to an attacker-controlled repo or credentials store; shares `utils/workspace.confine_to_workspace` with `upload_file` and shell cwd containment so the rule cannot drift |
+| Redacted failures (plan 13 / D11) | Raw stderr/stdout embedded in `_run_git` ``RuntimeError`` strings | Routed through `analyzers/redact.redact_secrets` before becoming a tool result |
+
+Runtime reviewer scope tools (`establish_review_scope`, degraded `checkout_pr`)
+are documented in [`docs/mcp-tools.md`](mcp-tools.md#runtime-reviewer-mcp-tools-mcpreviewer)
+and [`docs/trust-policy.md`](trust-policy.md).
 
 ## MCP upload tool — orchestrator-surface enforcement (#258 / D8)
 

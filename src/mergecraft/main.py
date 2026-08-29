@@ -21,6 +21,7 @@ from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
 from mergecraft.analyzers.trust import (
     allow_repo_command_overrides,
+    derive_trust_tier,
     resolve_analyzers_mode,
 )
 from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
@@ -1487,7 +1488,6 @@ def _action_review_context() -> ReviewContext:
     # (`derive_trust_tier`, fail-closed `untrusted`) — never the
     # `MERGECRAFT_TRUST_TIER` env var, which only the CLI path sets; reading it
     # here would omit the tier on Action runs.
-    from mergecraft.analyzers.trust import derive_trust_tier
     from mergecraft.utils.payload import read_github_event
 
     try:

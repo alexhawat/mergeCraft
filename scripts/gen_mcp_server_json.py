@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER_JSON_PATH = REPO_ROOT / "server.json"
 MCP_TOOLS_MD_PATH = REPO_ROOT / "docs" / "mcp-tools.md"
+MCP_REVIEWER_TOOLS_MD_PATH = REPO_ROOT / "docs" / "_mcp_reviewer_tools.md"
 SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "mcp" / "server.schema.2025-12-11.json"
 SCHEMA_URI = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 REGISTRY_NAME = "io.github.alexhawat/mergecraft"
@@ -109,6 +110,10 @@ def render_mcp_tools_md() -> str:
                 "",
             ]
         )
+    if MCP_REVIEWER_TOOLS_MD_PATH.is_file():
+        reviewer_body = MCP_REVIEWER_TOOLS_MD_PATH.read_text(encoding="utf-8").strip()
+        if reviewer_body:
+            lines.extend(["", reviewer_body, ""])
     return "\n".join(lines)
 
 
