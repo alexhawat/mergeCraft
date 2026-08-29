@@ -105,8 +105,8 @@ def _nearest_line_in_hunks(
         return None
     ranges = index.hunk_ranges.get(path, {}).get(side) or []
     in_range = any(start <= requested_line <= end for start, end in ranges)
-    if in_range:
-        return min(valid, key=lambda line: (abs(line - requested_line), line))
+    if not in_range:
+        return None
     return min(valid, key=lambda line: (abs(line - requested_line), line))
 
 

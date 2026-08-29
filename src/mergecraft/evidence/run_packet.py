@@ -319,9 +319,10 @@ def build_run_packet(
     from mergecraft.evidence.trajectory_audit import audit_trajectory
 
     changed_paths = changed_paths_from_diff(diff_text)
-    # #43/#49: the record is built from the tool calls mergeCraft mediated, and
-    # its findings join the ordinary finding list rather than a parallel gate —
-    # so `decide_approval` below weighs them exactly like any other evidence.
+    # Plan 12 D2/D4: trajectory findings are run-scoped and partition into
+    # ``run_health`` at build time. They are advisory-only — never block via
+    # ``blocking_findings`` — while gate-policy predicates still read them from
+    # ``run_health.findings`` (see ``agents/gates._combined_packet_findings``).
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
     trajectory_findings = audit_trajectory(trajectory)
 

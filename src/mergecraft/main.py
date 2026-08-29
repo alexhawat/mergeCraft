@@ -417,6 +417,7 @@ async def _publish(
     attrs_source: Callable[[], dict[str, Any]] | None = None,
     verdict_prediction: VerdictProtocolPrediction | None = None,
     actual_outcome: str | None = None,
+    verdict_diagnostic: Any | None = None,
     emit: bool = True,
 ) -> str | None:
     """Prepare packet + persist learnings + status checks, then optionally emit.
@@ -455,6 +456,7 @@ async def _publish(
                 tmpdir=tool_context.tmpdir,
                 ctx=tool_context,
                 run_outcome=outcome,
+                verdict_diagnostic=verdict_diagnostic,
             )
         if prepared is not None:
             from mergecraft.utils.status_checks import _run_url
@@ -471,6 +473,7 @@ async def _publish(
                 rejection_reason=rejection_reason,
                 run_url=_run_url(tool_context),
                 run_outcome=outcome,
+                verdict_diagnostic=verdict_diagnostic,
                 analyzer_summary=analyzer_run.pre_merge_summary
                 if analyzer_run is not None
                 else None,
@@ -1501,6 +1504,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         attrs_source=lambda: _publish_span_attrs(outcome, selected_mode_obj) | diagnostic_attrs,
         verdict_prediction=verdict_prediction,
         actual_outcome=str(outcome) if verdict_prediction is not None else None,
+        verdict_diagnostic=verdict_diagnostic_code,
     )
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted

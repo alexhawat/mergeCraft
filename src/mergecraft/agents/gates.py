@@ -456,14 +456,26 @@ def log_decision(
 # recorder is the only caller that *records* it (shadow mode).
 
 
+def _combined_packet_findings(packet: MergeEvidencePacket) -> list[Finding]:
+    """Change-scoped plus run-health rows (trajectory lives in ``run_health`` since W7)."""
+    combined = list(packet.findings)
+    if packet.run_health is not None:
+        combined.extend(packet.run_health.findings)
+    return combined
+
+
 def _has_changed_unread_file(packet: MergeEvidencePacket) -> bool:
     """A trajectory finding flagged a file modified but never read."""
-    return any(finding.rule_id == "changed-unread-file" for finding in packet.findings)
+    return any(
+        finding.rule_id == "changed-unread-file" for finding in _combined_packet_findings(packet)
+    )
 
 
 def _has_tool_loop(packet: MergeEvidencePacket) -> bool:
     """A trajectory finding flagged a repeated call loop."""
-    return any(finding.rule_id == "repeated-tool-loop" for finding in packet.findings)
+    return any(
+        finding.rule_id == "repeated-tool-loop" for finding in _combined_packet_findings(packet)
+    )
 
 
 def _is_high_risk_migration(packet: MergeEvidencePacket) -> bool:

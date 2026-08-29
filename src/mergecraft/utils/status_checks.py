@@ -178,6 +178,8 @@ def _build_approval_summary(
     from mergecraft.agents.gates import decision_summary_lines
 
     lines = [_build_approval_lead(approval_conclusion, findings, decision_reason=decision_reason)]
+    if _change_findings(findings) and _run_health_lines(findings):
+        lines.extend(_run_health_lines(findings))
     _append_run_metadata(lines, run_url=run_url, reviewed_sha=reviewed_sha)
     lines.append("Decision inputs:")
     lines.extend(decision_summary_lines(decision_inputs))
