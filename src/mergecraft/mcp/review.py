@@ -525,7 +525,15 @@ def _load_inline_anchor_index(primary: Any) -> InlineAnchorIndex | None:
     path = Path(str(diff_path))
     if not path.is_file():
         return None
-    return build_inline_anchor_index(path.read_text(encoding="utf-8"))
+    return _inline_anchor_index_for_diff(path.read_text(encoding="utf-8"))
+
+
+def _inline_anchor_index_for_diff(diff_text: str) -> InlineAnchorIndex | None:
+    """Build an anchor index when the diff carries at least one hunk."""
+    index = build_inline_anchor_index(diff_text)
+    if not index.hunk_ranges:
+        return None
+    return index
 
 
 def _demote_inline_comment_from_payload(payload: dict[str, Any], index: int) -> dict[str, Any]:
