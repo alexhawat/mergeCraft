@@ -429,7 +429,7 @@ def run_analyzer_pipeline(
                     "finding": _serialize_finding(item),
                     "inlineBody": format_analyzer_inline_body(
                         item,
-                        short_id=inline_short_ids[item.fingerprint],
+                        short_id=inline_short_ids.get(item.fingerprint),
                     ),
                     "path": item.path,
                 }

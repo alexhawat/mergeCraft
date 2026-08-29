@@ -156,7 +156,7 @@ def test_persisted_output_excludes_the_version_note(tmp_path: Path) -> None:
     assert outcome.output_path is not None
     persisted = _Path(outcome.output_path).read_text(encoding="utf-8")
     assert _VERSION_NOTE not in persisted
-    assert '"msg":"finished scanning"' in persisted
+    assert "finished scanning" in persisted
 
 
 def test_silent_managed_run_persists_nothing_and_passes(

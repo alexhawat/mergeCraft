@@ -179,7 +179,7 @@ ever reachable without going through the redaction boundary.
 - A deny-key list (`authorization`, `cookie`, `api_key`, `secret`,
   `password`, `access_token`, `refresh_token`, `id_token`, `bearer_token`,
   `auth_token`) — case-insensitive — replaces matching attribute values
-  with `[REDACTED]`.
+  with `<redacted>`.
 - The shared helper applies to every string attribute value (recursively
   into nested dicts and lists) so `ghp_…` and `sk-…` substrings cannot
   escape.

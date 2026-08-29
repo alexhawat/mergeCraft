@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from tests.harness._helpers import snapshot
 
 _MIN_CHAT_BODY = {
@@ -68,7 +69,7 @@ def test_diagnostics_do_not_include_provider_keys_or_github_tokens() -> None:
 
     assert "sk-abc12345ghi" not in redacted
     assert "ghp_" + "x" * 36 not in redacted
-    assert "[REDACTED]" in redacted
+    assert REDACTION_SENTINEL in redacted
 
 
 def test_failure_diagnostic_contains_fixture_usage_and_latency() -> None:

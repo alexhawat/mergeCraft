@@ -425,7 +425,10 @@ def indexed_credential_keys(entry: Mapping[str, Any]) -> Sequence[str]:
         elif label == "vertex":
             suffixes = VERTEX_CLOUD_SUFFIXES
         else:
-            suffixes = BEDROCK_CLOUD_SUFFIXES
+            raise ValueError(
+                f"cloud_chain auth is not configured for provider {label!r}; "
+                "supported providers: bedrock, vertex"
+            )
     else:
         suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
         suffixes = (suffix,)
@@ -1239,6 +1242,14 @@ def provider_auth_cmd(
     picked = _interactive_provider_picker(registry)
     console.print(f"authenticating provider [cyan]{picked.get('label')}[/cyan]")
     run_provider_auth(picked, scope, cwd=repo_root)
+
+
+# ``provider enable|disable`` (#520) live in their own module to keep this one
+# from growing further; they are attached here so they appear under the same
+# ``mergecraft provider`` app as ``auth``/``add``/``delete``.
+from mergecraft.cli.provider_toggle import register as _register_toggle  # noqa: E402
+
+_register_toggle(app)
 
 
 __all__ = [

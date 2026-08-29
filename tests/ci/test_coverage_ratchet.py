@@ -144,3 +144,45 @@ def test_ratchet_passes_when_github_base_ref_empty_on_push(
     report = _coverage_json(tmp_path, floor + 1.0)
     rc = _run_ratchet(check, report, margin=5.0)
     assert rc == 0
+
+
+def test_default_base_branch_without_a_git_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_default_base_branch`` resolves without any git remote configured (#507)."""
+    monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
+    monkeypatch.delenv("GITHUB_REF", raising=False)
+
+    module = _load_ratchet()
+    assert module._default_base_branch() == "pre-0.0.1"
+
+
+def test_default_base_branch_prefers_github_base_ref_when_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``GITHUB_BASE_REF`` wins when non-blank."""
+    monkeypatch.setenv("GITHUB_BASE_REF", "feature-branch")
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/other")
+
+    module = _load_ratchet()
+    assert module._default_base_branch() == "feature-branch"
+
+
+def test_default_base_branch_falls_back_to_github_ref_branch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``GITHUB_REF`` branch is used when ``GITHUB_BASE_REF`` is unset."""
+    monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/wave/dq6-ratchet")
+
+    module = _load_ratchet()
+    assert module._default_base_branch() == "wave/dq6-ratchet"
+
+
+def test_default_base_branch_falls_back_to_pre_0_0_1_when_detached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detached refs fall back to ``pre-0.0.1``."""
+    monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
+    monkeypatch.setenv("GITHUB_REF", "9276d6dbf15afabb9faff955955fa0a9aa7adc32")
+
+    module = _load_ratchet()
+    assert module._default_base_branch() == "pre-0.0.1"

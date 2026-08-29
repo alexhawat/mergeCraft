@@ -7,3 +7,7 @@ rules:
     enforcement: required
     scope:
       path: "src/**"
+    evidence:
+      required:
+        - health_check
+        - rollback_plan

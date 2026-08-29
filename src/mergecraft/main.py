@@ -7,6 +7,7 @@ import contextlib
 import os
 import time
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -487,6 +488,8 @@ async def _setup_run(ctx: RunContext) -> RunContext:
         dir=os.getcwd(),
         progress_comment=progress,
     )
+    if pr_number is not None:
+        tool_state.pr_number = int(pr_number)
     ctx.tool_state = tool_state
     tmpdir = create_temp_directory()
     ctx.tmpdir = tmpdir
@@ -727,6 +730,8 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         repo_setting=settings.analyzers.sarif_upload,
     )
     ctx.sarif_upload_enabled = sarif_upload_enabled
+    from mergecraft.mcp.tool_state import primary_repo_state
+
     ctx.tool_context = ToolContext(
         agent_id=ctx.agent_id,
         repo=RepoIdentity(owner=run_context.repo.owner, name=run_context.repo.name),
@@ -772,6 +777,14 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         budget_tracker=ctx.budget_tracker,
+    )
+    from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
+
+    capture_run_scope_snapshot(
+        ctx.tool_context,
+        root=Path(primary_repo_state(tool_state).dir),
+        settings=settings,
+        load_learnings_files=False,
     )
 
 
@@ -1550,6 +1563,9 @@ async def main() -> MainResult:
             if ctx.scm is not None:
                 with contextlib.suppress(Exception):
                     await ctx.scm.aclose()
+            from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+
+            reset_gateway_settings_cache()
 
 
 __all__ = ["MainResult", "RunOutcome", "main"]

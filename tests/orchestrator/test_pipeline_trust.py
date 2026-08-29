@@ -79,8 +79,8 @@ def test_untrusted_pipeline_cannot_skip_the_verifier(
         effective,
         repo_root=tmp_path,
     )
-    ran = {record.step_id for record in result.step_records if record.status == "ran"}
-    assert "verify" in ran
+    dispatched = {record.step_id for record in result.step_records if record.status == "dispatched"}
+    assert "verify" in dispatched
     assert result.verifier_skipped_by_repo_pipeline is False
 
 

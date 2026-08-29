@@ -413,6 +413,21 @@ _PROCESS_TRACER: Tracer | None = None
 _PROCESS_TRACING_FINGERPRINT: str | None = None
 
 
+def _reset_bound_enterprise_runtime() -> None:
+    """Clear process-local enterprise telemetry binding (xdist / test seam).
+
+    Programmatic ``bind_enterprise_from_settings`` calls — not live YAML or
+    deployed enterprise config — can leave ``telemetry: off`` on the worker.
+    ``reset_process_tracer_cache`` invokes this so a subsequent OTLP
+    ``claim_sink`` is not blocked by a leaked opt-out from an unrelated test.
+    """
+    try:
+        from mergecraft.enterprise.runtime import reset_enterprise_runtime
+    except ImportError:
+        return
+    reset_enterprise_runtime()
+
+
 def reset_process_tracer_cache() -> None:
     """Drop the process-wide ``Tracer`` cache (test seam for MCP-style reuse)."""
     global _PROCESS_TRACER, _PROCESS_TRACING_FINGERPRINT
@@ -431,15 +446,7 @@ def reset_process_tracer_cache() -> None:
         _PENDING_SINK.set(None)
     except ImportError:
         pass
-    # Enterprise telemetry opt-out/off is process-local; a prior test that bound
-    # it without the enterprise package conftest must not make ``sink_factory``
-    # skip OTLP children when ``claim_sink`` rebuilds after a discarded handoff.
-    try:
-        from mergecraft.enterprise.runtime import reset_enterprise_runtime
-
-        reset_enterprise_runtime()
-    except ImportError:
-        pass
+    _reset_bound_enterprise_runtime()
 
 
 def resolve_trace_id(*, pin: bool = False) -> str:

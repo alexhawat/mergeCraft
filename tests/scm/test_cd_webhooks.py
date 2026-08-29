@@ -243,7 +243,7 @@ def test_webhook_ingress_rejects_invalid_hmac_before_processing() -> None:
 
 
 def test_webhook_ingress_verifies_then_processes_a_valid_payload() -> None:
-    """Happy: ingress HMAC + replay check then processes the delivery once."""
+    """Happy: ingress HMAC + replay check then processes the delivery once (D9 redelivery is duplicate)."""
     from mergecraft.scm.ingress import accept_webhook
 
     module = require_module(WEBHOOK_MODULE)
@@ -254,11 +254,9 @@ def test_webhook_ingress_verifies_then_processes_a_valid_payload() -> None:
     headers = {**signed, "X-GitHub-Delivery": "ing-valid-1", "X-GitHub-Event": "pull_request"}
     first = accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
     assert first.duplicate is False
-    with pytest.raises(
-        (ValueError, PermissionError, RuntimeError),
-        match=r"replay|timestamp|nonce|stale",
-    ):
-        accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
+    second = accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
+    assert second.duplicate is True
+    assert second.result_id == first.result_id
 
 
 def test_http_webhook_route_rejects_empty_secret_for_github_and_gitlab(

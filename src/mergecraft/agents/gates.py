@@ -1,6 +1,11 @@
 """Subagent mutates deny + native FS denies + structural approval gate (ported from
 subagentToolGates / nativeFsDenies and extended by the security-trust-boundary plan
 Batch D and the merge-evidence plan Batch A - W2, Batches C - W7/W8, Batch D - W9).
+
+Internal gate helpers — :func:`has_failed_required_static_check`,
+:func:`decide_approval`, :func:`decide_action`, and the predicate table behind
+:func:`select_rule_id` — are the single authority for terminal verdict and gate
+action decisions; callers must not re-derive parallel approval paths.
 """
 
 from __future__ import annotations
@@ -9,6 +14,7 @@ from typing import TYPE_CHECKING, Final, Union, overload
 
 from loguru import logger
 
+from mergecraft.analyzers.run import REQUIRED_CHECK_SATISFIED_STATUSES
 from mergecraft.evidence.gate_policy import (
     DEFAULT_GATE_POLICIES,
     NAMED_GATE_POLICY_ROWS,
@@ -62,6 +68,10 @@ GIT_NATIVE_READ_DENY_CLAUDE: list[str] = [f"{tool}(.git/config)" for tool in CLA
 # merge-evidence plan's W2 (D12) and the analyzer plan's blocker taxonomy share
 # one source of truth.
 BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
+
+# Only rows attributed to the structural approval gate may be honoured when a
+# packet already carries an explicit ``decision`` (D9 / LR-1).
+TRUSTED_PACKET_DECIDED_BY: Final[str] = "mergecraft.agents.gates.decide_approval"
 
 # Terminal-protocol tools are orchestrator-only even when ``mutates=False``.
 TERMINAL_PROTOCOL_DENIED_TOOL_NAMES: Final[frozenset[str]] = frozenset({"submit_review_verdict"})
@@ -135,14 +145,39 @@ def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
     return _has_blocker(packet.findings)
 
 
+def _trusted_positive_decision(packet: MergeEvidencePacket) -> bool:
+    """True when the packet carries a trusted structural success verdict with no blockers."""
+    decision = packet.decision
+    if decision is None:
+        return False
+    if decision.decided_by != TRUSTED_PACKET_DECIDED_BY:
+        return False
+    if decision.verdict != "success":
+        return False
+    return not _packet_has_blockers(packet)
+
+
+def _required_static_check_row_satisfied(status: str | None) -> bool:
+    """True when a ``run_static_checks`` row explicitly satisfies the gate.
+
+    Delegates to ``REQUIRED_CHECK_SATISFIED_STATUSES``, which ``analyzers/run.py``
+    derives from ``PASSING_CHECK_STATUSES`` — one definition of "passing", one
+    derivation for "satisfies a required gate". This function used to carry its
+    own independent allowlist, which is how it came to omit ``satisfied-by-ci``
+    and reject the terminal approve on evidence CI had already proved.
+    """
+    return status in REQUIRED_CHECK_SATISFIED_STATUSES
+
+
 def has_failed_required_static_check(static_checks: list[dict[str, str]]) -> bool:
-    """True when any ``run_static_checks`` row reports ``status: failed``.
+    """True when any required static check row is not explicitly satisfied.
 
     The terminal-verdict validator consults this for ``approve`` submissions.
-    Only ``failed`` is a negative gate signal — ``unavailable`` and friends are
-    honest skips, not blockers.
+    AG0-G4 (a): only a status in ``REQUIRED_CHECK_SATISFIED_STATUSES`` satisfies a required
+    check. Every other status — ``failed``, ``timed_out``, ``unavailable``,
+    ``declared-but-cannot-run``, or unknown — blocks approval.
     """
-    return any(row.get("status") == "failed" for row in static_checks)
+    return any(not _required_static_check_row_satisfied(row.get("status")) for row in static_checks)
 
 
 @overload
@@ -188,10 +223,11 @@ def decide_approval(
       returns a :class:`mergecraft.evidence.packet.Decision` row with
       ``verdict`` / ``reason`` / ``decided_by``. The packet's existing
       ``self_assessment`` row is **advisory only**; if the packet carries an
-      explicit ``Decision``, that decision is returned verbatim (#41 hard rule —
-      the structural verdict is authoritative). Otherwise the same monotone
-      blocker logic runs against ``packet.findings`` and the result is wrapped
-      in a :class:`Decision`.
+      explicit ``Decision``, that row is honoured only when ``decided_by`` is
+      the trusted decider and the verdict is consistent with typed findings
+      (D9 / LR-1 — forged or permissive rows are refused). Otherwise the same
+      monotone blocker logic runs against ``packet.findings`` and the result is
+      wrapped in a :class:`Decision`.
 
     The decision is monotone in blockers:
 
@@ -258,20 +294,31 @@ def _decide_approval_from_packet(
     """Packet-aware structural approval decision (#41, W2.2, W2.3).
 
     Returns a :class:`mergecraft.evidence.packet.Decision` row. When the packet
-    carries an explicit ``decision`` row, that row is returned verbatim — the
-    structural verdict is authoritative over the agent's recorded
-    ``self_assessment``. When the packet does not carry an explicit verdict,
-    the legacy blocker logic runs against ``packet.findings`` and the
-    ``Conclusion`` literal is wrapped in a ``Decision`` with a stable
-    ``decided_by`` and a reason that names the signal the verdict came from.
+    carries an explicit ``decision`` row, that row is accepted only when
+    ``decided_by`` matches :data:`TRUSTED_PACKET_DECIDED_BY` and the verdict
+    is consistent with typed findings; otherwise a :class:`ValueError` is
+    raised. When the packet does not carry an explicit verdict, the legacy
+    blocker logic runs against ``packet.findings`` and the ``Conclusion``
+    literal is wrapped in a ``Decision`` with a stable ``decided_by`` and a
+    reason that names the signal the verdict came from.
 
     The function is pure: no I/O, no logging, no module state.
     """
     # #41 hard rule — if the packet already carries an explicit decision
     # (set by an upstream layer, e.g. a W9 thermostat overlay), honour it
-    # verbatim. The agent's recorded ``self_assessment`` cannot override
-    # the structural verdict.
+    # only when the row is trusted and consistent with the typed findings.
+    # ``MergeEvidencePacket`` validates from dicts; this guard keeps a forged
+    # row from becoming a permissive gate input (D9 / LR-1).
     if packet.decision is not None:
+        if packet.decision.decided_by != TRUSTED_PACKET_DECIDED_BY:
+            msg = (
+                f"packet decision refused: decided_by {packet.decision.decided_by!r} "
+                f"is not the trusted decider {TRUSTED_PACKET_DECIDED_BY!r}"
+            )
+            raise ValueError(msg)
+        if packet.decision.verdict == "success" and not _trusted_positive_decision(packet):
+            msg = "packet decision refused: blocker finding present; success verdict cannot stand"
+            raise ValueError(msg)
         return packet.decision
 
     conclusion = _decide_approval_from_findings(
@@ -405,16 +452,32 @@ def _is_high_risk_migration(packet: MergeEvidencePacket) -> bool:
 
 
 def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
-    """A clean low-risk PR: no findings, low blast radius, run succeeded."""
-    if packet.findings:
+    """True only for a blocker-free low-risk PR with an explicit positive verdict.
+
+    Requires no *blocking* finding, a ``blast_radius.lane`` of ``low``, and a
+    trusted ``Decision`` row whose ``verdict`` is ``success``. A missing
+    decision, forged ``decided_by``, ``neutral``, or ``failure`` verdict never
+    satisfies this predicate — the structural approval gate must have attested
+    success before ``auto_merge`` is eligible (D7 / MCB-15).
+
+    It reads *blockers*, not emptiness, and that is load-bearing.
+    ``_decide_approval_from_findings`` returns ``"neutral"`` for an empty
+    finding list and ``"success"`` only for a non-empty one, because a
+    non-empty list is the attestation that the review actually ran. Requiring
+    zero findings here therefore contradicted the verdict it also requires,
+    and no packet built by ``build_run_packet`` could satisfy both — the
+    ``low_risk_passing`` row was unreachable in production. Blocker-freedom is
+    the condition that was meant: two ``Minor`` findings on a low-risk diff are
+    still a clean low-risk PR, and ``_trusted_positive_decision`` already
+    re-checks blockers, so this cannot widen past the gate's own verdict.
+    """
+    if _packet_has_blockers(packet):
         return False
     if not packet.blast_radius:
         return False
     if packet.blast_radius.lane != "low":
         return False
-    # The legacy approval verdict is the gate's own input; refusing
-    # ``auto_merge`` from the structural side is #41's hard rule.
-    return packet.decision is None or packet.decision.verdict != "failure"
+    return _trusted_positive_decision(packet)
 
 
 # Ordered ``(predicate, rule_id, action)`` rows; first match wins.

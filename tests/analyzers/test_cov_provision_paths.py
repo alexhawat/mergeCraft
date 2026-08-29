@@ -8,8 +8,8 @@ member that escapes its extraction directory, a cache entry that cannot be
 purged, and the second cache check taken after another worker won the lock.
 
 No test here reaches the network. ``_download_pinned_url`` is replaced with a
-local write, and the two tests that exercise the downloader itself replace
-``httpx.stream`` and the egress guards with in-memory fakes.
+local write, and the downloader tests replace ``httpx.Client`` with a
+``MockTransport`` and neutralise the egress guard with in-memory fakes.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import pytest
 
 from mergecraft.analyzers import provision
@@ -310,20 +311,26 @@ def scripted_http(monkeypatch: pytest.MonkeyPatch) -> dict[str, _FakeResponse]:
 
         return GuardedUrl(url=url, host=urlparse(url).hostname or "", addresses=(localhost,))
 
-    @contextlib.contextmanager
-    def _pin(host: str, addresses: Any) -> Iterator[None]:
-        _ = (host, addresses)
-        yield
-
-    @contextlib.contextmanager
-    def _stream(method: str, url: str, **kwargs: Any) -> Iterator[_FakeResponse]:
-        _ = (method, kwargs)
+    def _handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
         assert url in responses, f"unscripted request to {url}"
-        yield responses[url]
+        fake = responses[url]
+        return httpx.Response(
+            status_code=fake.status_code,
+            headers=fake.headers,
+            content=fake._body,
+            request=request,
+        )
+
+    mock_transport = httpx.MockTransport(_handler)
+    real_client = httpx.Client
+
+    def _client_factory(*args: Any, **kwargs: Any) -> httpx.Client:
+        kwargs["transport"] = mock_transport
+        return real_client(*args, **kwargs)
 
     monkeypatch.setattr(provision, "inspect_external_url", _guard)
-    monkeypatch.setattr(provision, "pin_host_resolution", _pin)
-    monkeypatch.setattr(provision.httpx, "stream", _stream)
+    monkeypatch.setattr(provision.httpx, "Client", _client_factory)
     return responses
 
 

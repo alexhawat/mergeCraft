@@ -771,14 +771,31 @@ def _resolve_config_path(
     return None
 
 
+def _known_analyzer_ids_from_catalog() -> frozenset[str]:
+    """Catalog ids without importing ``mergecraft.analyzers`` (avoids loguru re-init)."""
+    catalog_dir = Path(__file__).resolve().parent.parent / "analyzers" / "catalog"
+    if not catalog_dir.is_dir():
+        return frozenset()
+    return frozenset(path.stem for path in catalog_dir.glob("*.yaml"))
+
+
+def _warn_unknown_analyzer_overrides(analyzers: dict[str, Any]) -> None:
+    """Log override keys that do not match a bundled catalog id."""
+    overrides = analyzers.get("overrides") or {}
+    if not overrides:
+        return
+    known = _known_analyzer_ids_from_catalog()
+    for analyzer_id in overrides:
+        if analyzer_id not in known:
+            logger.warning("unknown analyzer id in config overrides: {}", analyzer_id)
+
+
 def _merge_settings(raw: dict[str, Any] | None) -> RepoSettings:
     base = default_settings()
     if not raw:
         return base
     if analyzers := raw.get("analyzers"):
-        from mergecraft.analyzers.registry import warn_unknown_analyzer_overrides
-
-        warn_unknown_analyzer_overrides({"analyzers": analyzers})
+        _warn_unknown_analyzer_overrides(analyzers)
     overlay = RepoSettings.model_validate(raw)
     unset = overlay.model_dump(exclude_unset=True)
     if not unset:

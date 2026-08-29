@@ -10,6 +10,7 @@ import pytest
 from tests.analyzers.support import (
     C1_LANGUAGE_TOOLS,
     C1_TYPE_CHECKERS,
+    finding_path_matches,
     import_module,
 )
 
@@ -100,5 +101,7 @@ def test_language_tool_catches_planted_finding(
 
     result = _run(tool_id, adapter_fixture_repo, [path])
     assert not result.skipped, result.skip_reason
-    matches = [f for f in result.findings if f.path == path and f.start_line == line]
+    matches = [
+        f for f in result.findings if finding_path_matches(path, f.path) and f.start_line == line
+    ]
     assert matches, f"{tool_id} must catch planted finding at {path}:{line}"

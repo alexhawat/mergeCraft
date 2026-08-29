@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
-from tests.support.tool_context import github_client_from_ctx
+from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -52,7 +52,7 @@ class _RecordingGitHub(GitHubClient):
 
 @pytest.fixture
 def ctx(tmp_path: Path) -> ToolContext:
-    return ToolContext(
+    tool_ctx = ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
         payload=ResolvedPayload(event=PayloadEvent(trigger="unknown")),
@@ -65,6 +65,8 @@ def ctx(tmp_path: Path) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
     )
+    bind_review_publication_scope(tool_ctx)
+    return tool_ctx
 
 
 async def _submit(ctx: ToolContext, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -400,6 +402,7 @@ async def test_approve_422_falls_back_to_comment_and_keeps_approval(tmp_path: Pa
         tmpdir=str(tmp_path),
         pr_approve_enabled=True,
     )
+    bind_review_publication_scope(ctx)
     spec = create_pull_request_review_tool(ctx)
     result = await spec.execute(
         {"pull_number": 7, "body": "Looks good.", "approved": True},
@@ -456,7 +459,7 @@ def _incremental_ctx(github: GitHubClient, tmp_path: Path, changed: list[str]) -
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
     state.selected_mode = "IncrementalReview"
     primary_repo_state(state).incremental_changed_paths = changed
-    return ToolContext(
+    ctx = ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
         payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request_synchronize")),
@@ -469,6 +472,8 @@ def _incremental_ctx(github: GitHubClient, tmp_path: Path, changed: list[str]) -
         mcp_server_url="",
         tmpdir=str(tmp_path),
     )
+    bind_review_publication_scope(ctx)
+    return ctx
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,12 @@ make setup
 
 Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
 
+`make setup` and all Makefile targets use a dedicated project virtualenv at
+`.venv-dev` (via `UV_PROJECT_ENVIRONMENT` in the Makefile). This keeps the dev
+venv separate from the default `.venv` that `uv sync` would create at the repo
+root, so subprocess test helpers that invoke `uv run` do not mutate the
+environment the test runner itself is using (AG8 / MCB-23).
+
 ## Checks
 
 ```bash
@@ -23,6 +29,11 @@ make ci
 
 `make test` runs the unit and mocked-integration suite — **no API keys or secrets required**.
 Live-provider tests are excluded by default (`-m "not integration"`).
+
+`make coverage-gate` enforces the ``fail_under`` floor on every CI event; the
+merge-base **lowering guard** that blocks undeclared ``fail_under`` drops runs
+only on pull requests, because on ``push`` / ``workflow_dispatch`` the
+merge-base comparison is self-referential.
 
 To run the live slice (requires provider secrets such as `ANTHROPIC_API_KEY`):
 

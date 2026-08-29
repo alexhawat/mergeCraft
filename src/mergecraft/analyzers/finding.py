@@ -23,8 +23,10 @@ from mergecraft.review_taxonomy import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
+
+from loguru import logger
 
 STRUCTURED_OUTPUT_REQUIRED_MSG = (
     "output_schema was provided but agent did not call set_output — structured output is required"
@@ -302,6 +304,32 @@ def resolve_finding_short_ids(fingerprints: Sequence[str]) -> dict[str, str]:
     return {fp: assigned[validated_by_input[fp]] for fp in fingerprints}
 
 
+def try_resolve_finding_short_ids(
+    fingerprints: Sequence[str],
+    *,
+    path_by_fingerprint: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Assign short ids for render paths; skip invalid fingerprints with a warning."""
+    paths = path_by_fingerprint or {}
+    valid: list[str] = []
+    for fingerprint in fingerprints:
+        try:
+            _validate_fingerprint_for_short_id(fingerprint)
+        except (TypeError, ValueError) as exc:
+            path = paths.get(fingerprint, "unknown")
+            logger.warning(
+                "skipping short-id assignment for fingerprint {!r} at {}: {}",
+                fingerprint,
+                path,
+                exc,
+            )
+            continue
+        valid.append(fingerprint)
+    if not valid:
+        return {}
+    return resolve_finding_short_ids(valid)
+
+
 def _finding_location(finding: Finding) -> str:
     """Return ``path:line`` when line-anchored, else ``path`` alone."""
     if finding.start_line is not None:
@@ -356,6 +384,7 @@ __all__ = [
     "render_finding_markdown",
     "render_finding_pr_comment",
     "resolve_finding_short_ids",
+    "try_resolve_finding_short_ids",
     "validate_findings_export",
     "write_findings_json",
 ]

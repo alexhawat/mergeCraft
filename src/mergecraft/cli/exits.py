@@ -22,6 +22,7 @@ from mergecraft.run_outcome import (
 )
 
 CLI_SUCCESS_EXIT_CODE: Final[int] = 0
+CLI_AUDIT_VERIFY_FAILED_EXIT_CODE: Final[int] = 1
 CLI_USAGE_EXIT_CODE: Final[int] = 2
 
 CLI_CONFIGURATION_EXIT_CODE: int = RUN_OUTCOME_EXIT_CODE[RunOutcome.configuration_error]
@@ -31,6 +32,7 @@ CLI_INFRA_EXIT_CODE: int = RUN_OUTCOME_EXIT_CODE[RunOutcome.infra_error]
 CLI_TIMEOUT_EXIT_CODE: int = RUN_OUTCOME_EXIT_CODE[RunOutcome.timed_out]
 
 __all__ = [
+    "CLI_AUDIT_VERIFY_FAILED_EXIT_CODE",
     "CLI_BLOCKED_EXIT_CODE",
     "CLI_CONFIGURATION_EXIT_CODE",
     "CLI_FAILED_EXIT_CODE",

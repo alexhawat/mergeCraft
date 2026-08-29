@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.tracing.conftest import as_sink_value
 from tests.tracing.instrumentation.conftest import (
     make_agent_result,
     make_agent_usage,
@@ -130,7 +131,8 @@ def test_correlation_attributes_present(
     assert len(roots) == 1
     root_attrs = roots[0].attrs
     for field_name, expected in correlation_fields.items():
-        assert root_attrs.get(field_name) == expected, (
+        expected_value = as_sink_value(expected) if isinstance(expected, str) else expected
+        assert root_attrs.get(field_name) == expected_value, (
             f"correlation attribute {field_name!r} missing or wrong on root span "
             f"(got {root_attrs.get(field_name)!r})"
         )
