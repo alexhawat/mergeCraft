@@ -10,6 +10,7 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | Fix | Rationale |
 | --- | --- |
 | `test_gh_secret_receives_the_uncompacted_payload` expects compact JSON on both paths | W0 landing strip applies `_single_line_credential()` to `gh secret set` (ledger B2) |
+| `test_checkout_pr_parameter_aliases_resolve_to_pull_number` | Stub `GitHubClient` via `git_ctx(github=)` — classmethod patch omitted `self` through `ctx.scm` |
 
 ## Contract → tests
 

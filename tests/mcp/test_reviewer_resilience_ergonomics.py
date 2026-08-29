@@ -10,6 +10,7 @@ from tests.mcp.reviewer_resilience_support import git_ctx, init_git_repo, tool_e
 
 from mergecraft.mcp.checkout import checkout_pr_tool
 from mergecraft.mcp.git import git_tool
+from mergecraft.utils.github import GitHubClient
 
 
 class _RunGitRecorder:
@@ -98,8 +99,20 @@ async def test_config_write_forms_refused(
     assert recorder.calls == []
 
 
+class _AliasCheckoutStub(GitHubClient):
+    """Records alias-normalized pull_number via ctx.scm → GitHubScmAdapter."""
+
+    async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, object]:
+        assert pull_number == 546
+        return {
+            "head": {"ref": "feature", "sha": "a" * 40, "repo": {"full_name": "acme/demo"}},
+            "base": {"ref": "main", "repo": {"full_name": "acme/demo"}},
+            "title": "t",
+            "html_url": "https://x/1",
+        }
+
+
 @pytest.mark.parametrize("alias_key", ["pr_number", "issue_number"])
-@pytest.mark.xfail(reason="green after W3: checkout_pr parameter aliases", strict=False)
 @pytest.mark.asyncio
 async def test_checkout_pr_parameter_aliases_resolve_to_pull_number(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, alias_key: str
@@ -110,17 +123,9 @@ async def test_checkout_pr_parameter_aliases_resolve_to_pull_number(
         lambda *args, **kwargs: "deadbeef\n" if args[0] == ["rev-parse", "HEAD"] else "ok\n",
     )
 
-    async def _pull(_owner: str, _repo: str, pull_number: int) -> dict[str, object]:
-        return {
-            "head": {"ref": "feature", "sha": "a" * 40, "repo": {"full_name": "acme/demo"}},
-            "base": {"ref": "main", "repo": {"full_name": "acme/demo"}},
-            "title": "t",
-            "html_url": "https://x/1",
-        }
-
-    monkeypatch.setattr("mergecraft.mcp.checkout.GitHubClient.get_pull", _pull, raising=False)
-
-    result = await checkout_pr_tool(git_ctx(tmp_path)).execute({alias_key: 546})
+    result = await checkout_pr_tool(
+        git_ctx(tmp_path, github=_AliasCheckoutStub(token="test-token"))
+    ).execute({alias_key: 546})
     assert result.is_error is False, result.content[0]["text"]
     payload = json.loads(result.content[0]["text"])
     assert payload.get("pullNumber") == 546 or payload.get("pull_number") == 546
