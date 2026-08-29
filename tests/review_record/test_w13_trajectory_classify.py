@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.agents import gates
 from mergecraft.evidence.trajectory_audit import audit_trajectory
 from tests.evidence.test_trajectory import _audit, _call, _record
@@ -50,9 +48,6 @@ def test_schema_rejection_self_corrected_within_three_calls_produces_no_finding(
     assert "ignored-tool-error" not in {f.rule_id for f in findings}
 
 
-@pytest.mark.xfail(
-    reason="green after W3: guard refusal is at most Trivial run-scoped", strict=False
-)
 def test_guard_refusal_produces_at_most_trivial_run_scoped_observation() -> None:
     findings = _audit(
         _record(
@@ -81,7 +76,6 @@ def test_guard_refusal_produces_at_most_trivial_run_scoped_observation() -> None
         assert getattr(finding, "scope", "change") == "run"
 
 
-@pytest.mark.xfail(reason="green after W3: bubblewrap environment rollup", strict=False)
 def test_bubblewrap_namespace_failure_produces_one_rolled_up_environment_finding() -> None:
     findings = _audit(
         _record(
@@ -170,7 +164,6 @@ def test_transient_failure_without_retry_fires_ignored_tool_error() -> None:
     assert "ignored-tool-error" in {f.rule_id for f in findings}
 
 
-@pytest.mark.xfail(reason="green after W3: immutable git show repeats are not loops", strict=False)
 def test_repeated_tool_loop_does_not_fire_on_immutable_git_show_with_intervening_work() -> None:
     signature = "git:show:deadbeef:README.md"
     findings = _audit(
@@ -229,7 +222,6 @@ def test_repeated_tool_loop_fires_on_three_adjacent_identical_run_static_checks(
     assert "repeated-tool-loop" in {f.rule_id for f in findings}
 
 
-@pytest.mark.xfail(reason="green after W3: run 33126460925 fixture replay", strict=False)
 def test_run_33126460925_fixture_zero_blocking_at_most_three_run_scoped() -> None:
     record = trajectory_record_from_fixture("run_33126460925_trajectory.json")
     findings = audit_trajectory(record)

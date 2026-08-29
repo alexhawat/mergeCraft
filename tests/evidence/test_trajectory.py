@@ -190,34 +190,33 @@ def test_no_post_edit_verification_fires() -> None:
 
 
 def test_repeated_tool_loop_fires() -> None:
-    """The same call, with the same arguments, three times over."""
+    """Three adjacent identical verify calls with the same signature."""
     findings = _audit(
         _record(
             tool_calls=[
-                _call(index, "shell", intent="read", command="ls", signature="shell:ls")
-                for index in range(1, 4)
-            ]
-            + [_call(4, "create_pull_request_review", intent="complete")],
+                _call(1, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(2, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(3, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(4, "create_pull_request_review", intent="complete"),
+            ],
             files_read=[],
             files_modified=[],
-            retries=2,
         )
     )
     assert "repeated-tool-loop" in _rule_ids(findings)
 
 
 def test_repeated_tool_loop_does_not_fire_below_the_threshold() -> None:
-    """Two identical calls is a retry; the check is about a *loop*."""
+    """Two adjacent identical verify calls is a retry; the check is about a *loop*."""
     findings = _audit(
         _record(
             tool_calls=[
-                _call(index, "shell", intent="read", command="ls", signature="shell:ls")
-                for index in range(1, 3)
-            ]
-            + [_call(3, "create_pull_request_review", intent="complete")],
+                _call(1, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(2, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(3, "create_pull_request_review", intent="complete"),
+            ],
             files_read=[],
             files_modified=[],
-            retries=1,
         )
     )
     assert "repeated-tool-loop" not in _rule_ids(findings)
