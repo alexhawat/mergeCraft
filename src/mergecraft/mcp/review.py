@@ -49,6 +49,67 @@ from mergecraft.utils.learnings import (
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.verdict import VerdictDiagnostic
+    from mergecraft.run_outcome import RunOutcome
+
+
+def merge_deterministic_preamble_into_review_body(
+    *,
+    agent_body: str,
+    deterministic_block: str,
+) -> str:
+    """Prepend the server-owned deterministic record; agent copies cannot win (D7)."""
+    from mergecraft.findings.ledger import (
+        DETERMINISTIC_RECORD_MARKER,
+        _strip_deterministic_record_markers,
+    )
+
+    cleaned_agent = _strip_deterministic_record_markers(agent_body)
+    block = deterministic_block.strip()
+    if not block.startswith(DETERMINISTIC_RECORD_MARKER):
+        block = f"{DETERMINISTIC_RECORD_MARKER}\n{block}"
+    if cleaned_agent:
+        return f"{block.rstrip()}\n\n{cleaned_agent.strip()}\n"
+    return f"{block.rstrip()}\n"
+
+
+def _deterministic_review_block(
+    ctx: ToolContext,
+    *,
+    rejection_reason: str | None = None,
+    run_outcome: RunOutcome | None = None,
+    verdict_diagnostic: VerdictDiagnostic | str | None = None,
+) -> str:
+    from mergecraft.evidence.run_packet import prepare_run_packet
+    from mergecraft.findings.ledger import render_deterministic_review_block
+    from mergecraft.utils.status_checks import _run_url
+
+    tool_state = ctx.tool_state
+    run_succeeded = run_outcome is None or str(run_outcome) == "passed"
+    packet = prepare_run_packet(ctx, run_succeeded=run_succeeded)
+    analyzer_run = tool_state.analyzer_run
+    analyzer_summary = analyzer_run.pre_merge_summary if analyzer_run is not None else None
+    submission = tool_state.terminal_submission
+    agent_summary = submission.summary if submission is not None else None
+    attempt_count = len(tool_state.usage_entries) if tool_state.usage_entries else None
+    token_bits: list[str] = []
+    for usage in tool_state.usage_entries or []:
+        total = getattr(usage, "total_tokens", None)
+        if total:
+            token_bits.append(str(total))
+    token_summary = ", ".join(token_bits) if token_bits else None
+    return render_deterministic_review_block(
+        packet=packet,
+        rejection_reason=rejection_reason,
+        run_url=_run_url(ctx),
+        run_outcome=run_outcome,
+        verdict_diagnostic=verdict_diagnostic,
+        analyzer_summary=analyzer_summary,
+        agent_summary=agent_summary,
+        trust_tier=ctx.trust_tier,
+        attempt_count=attempt_count,
+        token_summary=token_summary,
+    )
 
 
 class PublicationScopeError(ValueError):
@@ -490,20 +551,24 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
         )
 
     payload: dict[str, Any] = {"event": event}
-    if body:
-        await ensure_learnings_review_delta(ctx.tool_state)
-        body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body))
-        body_with_sections = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
-        if ctx.tool_state.dispatched_lens_ids:
-            from mergecraft.modes._pr_summary_format import (
-                merge_dispatched_lenses_into_review_metadata,
-            )
+    deterministic_block = _deterministic_review_block(ctx)
+    await ensure_learnings_review_delta(ctx.tool_state)
+    body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body or ""))
+    body_with_sections = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
+    if ctx.tool_state.dispatched_lens_ids:
+        from mergecraft.modes._pr_summary_format import (
+            merge_dispatched_lenses_into_review_metadata,
+        )
 
-            body_with_sections = merge_dispatched_lenses_into_review_metadata(
-                body_with_sections,
-                dispatched_lens_ids=ctx.tool_state.dispatched_lens_ids,
-            )
-        payload["body"] = add_footer(ctx, body_with_sections)
+        body_with_sections = merge_dispatched_lenses_into_review_metadata(
+            body_with_sections,
+            dispatched_lens_ids=ctx.tool_state.dispatched_lens_ids,
+        )
+    body_with_preamble = merge_deterministic_preamble_into_review_body(
+        agent_body=body_with_sections,
+        deterministic_block=deterministic_block,
+    )
+    payload["body"] = add_footer(ctx, body_with_preamble)
     if commit_id:
         payload["commit_id"] = commit_id
 

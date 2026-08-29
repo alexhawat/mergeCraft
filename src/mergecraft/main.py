@@ -333,6 +333,82 @@ def _short_circuit_setup_failure(
     return ("continue", None)
 
 
+async def publish_deterministic_record(
+    *,
+    pull_number: int,
+    packet: Any,
+    rejection_reason: str | None = None,
+    tmpdir: str | None = None,
+    ctx: ToolContext | None = None,
+    run_outcome: RunOutcome | None = None,
+    verdict_diagnostic: Any | None = None,
+) -> None:
+    """Publish the deterministic sticky record for a resolved PR (D6, plan 13 A4).
+
+    Plan 13 ``run_post_run_retry_loop`` routes non-retryable rejections here.
+    Stable signature for cross-plan callers::
+
+        publish_deterministic_record(
+            *,
+            pull_number: int,
+            packet: MergeEvidencePacket,
+            rejection_reason: str | None = None,
+            tmpdir: str | None = None,
+            ctx: ToolContext | None = None,
+            run_outcome: RunOutcome | None = None,
+            verdict_diagnostic: VerdictDiagnostic | None = None,
+        ) -> None
+    """
+    from mergecraft.findings.ledger import (
+        render_deterministic_review_block,
+        upsert_sticky_progress_comment,
+    )
+    from mergecraft.scm.github import create_github_scm
+    from mergecraft.utils.status_checks import _run_url
+
+    resolved_ctx = ctx
+    if resolved_ctx is None:
+        tool_state = init_tool_state(owner="local", name="local", dir=tmpdir or ".")
+        tool_state.pr_number = pull_number
+        resolved_ctx = ToolContext(
+            agent_id="claude",
+            repo=RepoIdentity(owner="local", name="local"),
+            payload=ResolvedPayload(
+                event=PayloadEvent(trigger="pull_request", issue_number=pull_number, is_pr=True),
+            ),
+            scm=create_github_scm(""),
+            modes=compute_modes("claude"),
+            tool_state=tool_state,
+            tmpdir=tmpdir or ".",
+        )
+
+    tool_state = resolved_ctx.tool_state
+    submission = tool_state.terminal_submission
+    analyzer_run = tool_state.analyzer_run
+    block = render_deterministic_review_block(
+        packet=packet,
+        rejection_reason=rejection_reason,
+        run_url=_run_url(resolved_ctx),
+        run_outcome=run_outcome,
+        verdict_diagnostic=verdict_diagnostic,
+        analyzer_summary=analyzer_run.pre_merge_summary if analyzer_run is not None else None,
+        agent_summary=submission.summary if submission is not None else None,
+        trust_tier=resolved_ctx.trust_tier,
+        attempt_count=len(tool_state.usage_entries) if tool_state.usage_entries else None,
+        token_summary=_token_summary(tool_state.usage_entries),
+    )
+    await upsert_sticky_progress_comment(resolved_ctx, block)
+
+
+def _token_summary(usage_entries: list[Any]) -> str | None:
+    totals = [
+        str(row.total_tokens)
+        for row in usage_entries
+        if getattr(row, "total_tokens", None) is not None
+    ]
+    return ", ".join(totals) if totals else None
+
+
 async def _publish(
     ctx: RunContext,
     *,
@@ -365,6 +441,19 @@ async def _publish(
             conclusion=RUN_OUTCOME_CONCLUSION[outcome],
             packet=prepared,
         )
+        pull_number = tool_context.tool_state.pr_number
+        if pull_number is None and tool_context.payload.event.issue_number is not None:
+            pull_number = int(tool_context.payload.event.issue_number)
+        if pull_number is not None and prepared is not None:
+            rejection_reason = failure_reason if prepared.decision is None else None
+            await publish_deterministic_record(
+                pull_number=int(pull_number),
+                packet=prepared,
+                rejection_reason=rejection_reason,
+                tmpdir=tool_context.tmpdir,
+                ctx=tool_context,
+                run_outcome=outcome,
+            )
 
     if not emit:
         await _learnings_and_status()
@@ -1568,4 +1657,4 @@ async def main() -> MainResult:
             reset_gateway_settings_cache()
 
 
-__all__ = ["MainResult", "RunOutcome", "main"]
+__all__ = ["MainResult", "RunOutcome", "main", "publish_deterministic_record"]
