@@ -20,8 +20,10 @@ def git_ctx(
     shell: Shell = "restricted",
     push: Literal["disabled", "restricted", "enabled"] = "restricted",
     github: GitHubClient | None = None,
+    repo_dir: Path | None = None,
 ) -> ToolContext:
-    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    root = repo_dir if repo_dir is not None else tmp_path
+    state = init_tool_state(owner="acme", name="demo", dir=str(root))
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -35,6 +37,35 @@ def git_ctx(
         mcp_server_url="",
         tmpdir=str(tmp_path),
     )
+
+
+def init_pr_clone(tmp_path: Path) -> tuple[Path, str]:
+    """Bare origin with ``refs/pull/1/head``; return ``(clone, head_sha)``."""
+    import subprocess
+
+    def _git(cwd: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+    origin = tmp_path / "origin.git"
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init")
+    _git(work, "config", "user.email", "test@example.com")
+    _git(work, "config", "user.name", "Test")
+    (work / "README.md").write_text("base\n", encoding="utf-8")
+    _git(work, "add", "README.md")
+    _git(work, "commit", "-m", "base")
+    _git(work, "branch", "-M", "base")
+    _git(work, "checkout", "-b", "feature")
+    (work / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git(work, "add", "app.py")
+    _git(work, "commit", "-m", "feature")
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=work, text=True).strip()
+    _git(work, "clone", "--bare", str(work), str(origin))
+    _git(work, "push", str(origin), "feature:refs/pull/1/head")
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", str(origin), str(clone))
+    return clone, head
 
 
 def init_git_repo(root: Path) -> None:

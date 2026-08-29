@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.mcp.reviewer_resilience_support import git_ctx, init_pr_clone, tool_error_text
 
 from mergecraft.mcp.checkout import checkout_pr_tool
 from mergecraft.mcp.commit_info import get_commit_info_tool
@@ -51,6 +52,13 @@ class _StubGitHub(GitHubClient):
             "stats": {"additions": 1, "deletions": 0, "total": 1},
             "files": self._files,
         }
+
+
+class _EmptyCommitFilesGitHub(_StubGitHub):
+    async def get_commit(self, owner: str, repo: str, sha: str) -> dict[str, Any]:
+        data = await super().get_commit(owner, repo, sha)
+        data["files"] = []
+        return data
 
 
 def _ctx(tmp_path: Path, github: GitHubClient) -> ToolContext:
@@ -262,6 +270,58 @@ async def test_establish_review_scope_refuses_wrong_head_sha(tmp_path: Path) -> 
         {"diff_path": str(diff_path), "base_sha": "0" * 40, "head_sha": "4" * 40}
     )
     assert result.is_error is True
+
+
+@pytest.mark.parametrize("empty_files", [True, False], ids=["empty", "non-unified"])
+@pytest.mark.asyncio
+async def test_get_commit_info_invalid_diff_keeps_init_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    empty_files: bool,
+) -> None:
+    head_sha = "9" * 40
+    github: GitHubClient = (
+        _EmptyCommitFilesGitHub(head_sha=head_sha)
+        if empty_files
+        else _StubGitHub(head_sha=head_sha)
+    )
+    ctx = _ctx(tmp_path, github)
+    ctx.tool_state.pr_number = 1
+    primary = primary_repo_state(ctx.tool_state)
+    primary.checkout_sha = head_sha
+    ctx.tool_state.review_phase = "INIT"
+
+    if not empty_files:
+        original_write_text = Path.write_text
+
+        def _write_text(self: Path, data: str, *args: Any, **kwargs: Any) -> int | None:
+            if self.name.startswith("commit-") and self.suffix == ".diff":
+                data = "not-a-diff"
+            return original_write_text(self, data, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", _write_text)
+
+    result = await get_commit_info_tool(ctx).execute({"sha": head_sha})
+    text = tool_error_text(result)
+    assert "unified diff" in text.lower() or "empty" in text.lower()
+    assert ctx.tool_state.review_phase == "INIT"
+    assert ctx.tool_state.scope_provenance is None
+    assert primary.diff_path is None
+
+
+@pytest.mark.asyncio
+async def test_successful_checkout_pr_sets_scope_provenance_checkout(tmp_path: Path) -> None:
+    clone, head_sha = init_pr_clone(tmp_path)
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    ctx = git_ctx(tmp_path, repo_dir=clone, github=_StubGitHub(head_sha=head_sha))
+    ctx.tmpdir = str(artifacts)
+    ctx.git_token = "token"
+
+    result = await checkout_pr_tool(ctx).execute({"pull_number": 1})
+    assert result.is_error is False, result.content[0]["text"]
+    assert ctx.tool_state.scope_provenance == "checkout"
+    assert ctx.tool_state.review_phase == ReviewPhase.ESTABLISH_SCOPE.value
 
 
 @pytest.mark.asyncio

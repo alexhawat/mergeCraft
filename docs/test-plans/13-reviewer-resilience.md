@@ -13,6 +13,13 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | `git config --get-all http.https://github.com/.extraHeader` refused | `test_config_get_all_extra_header_refused` |
 | `git config --get-all credential.helper` refused | `test_config_get_all_credential_helper_refused` |
 
+## Thermos regression — review scope evidence (post-`a6b96018`)
+
+| Contract | Test |
+| --- | --- |
+| `get_commit_info` with empty or non-unified diff keeps `INIT` via `validate_review_scope_evidence` | `test_get_commit_info_invalid_diff_keeps_init_scope` |
+| Successful `checkout_pr` sets `scope_provenance == "checkout"` | `test_successful_checkout_pr_sets_scope_provenance_checkout` |
+
 RED until `_reject_config_invocation` applies the `--get` deny-list to `--get-all` and
 blocks or filters `--list` output.
 
@@ -106,6 +113,8 @@ blocks or filters `--list` output.
 | Transient fetch retries once; auth-class does not | W4 | `tests/mcp/test_reviewer_resilience_degraded_scope.py` |
 | `establish_review_scope` validates diff evidence (D4) | W4 | `tests/mcp/test_reviewer_resilience_degraded_scope.py` |
 | `get_commit_info` registers scope at PR head | W4 | `tests/mcp/test_reviewer_resilience_degraded_scope.py` |
+| `get_commit_info` refuses empty/non-unified diff at PR head (D4) | post-`a6b96018` | `tests/mcp/test_reviewer_resilience_degraded_scope.py::test_get_commit_info_invalid_diff_keeps_init_scope` |
+| Successful `checkout_pr` records `scope_provenance: checkout` | post-`a6b96018` | `tests/mcp/test_reviewer_resilience_degraded_scope.py::test_successful_checkout_pr_sets_scope_provenance_checkout` |
 | Memoize `git show <rev>:<path>` with `cached: true` | W4 | `tests/mcp/test_reviewer_resilience_degraded_scope.py` |
 | Record `ToolState.last_terminal_rejection` | W5 | `tests/agents/test_reviewer_resilience_retry.py` |
 | Zero resumes for scope rejection | W5 | `tests/agents/test_reviewer_resilience_retry.py` |
