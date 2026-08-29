@@ -40,7 +40,6 @@ MALFORMED_SLOTS: tuple[str, ...] = ("p-1", "pX", "1", "p 0")
 W2_XFAIL = pytest.mark.xfail(reason="green after W2: slot primitives", strict=False)
 W4_XFAIL = pytest.mark.xfail(reason="green after W4: agent-local scope", strict=False)
 W5_XFAIL = pytest.mark.xfail(reason="green after W5: registry multiplicity", strict=False)
-W6_XFAIL = pytest.mark.xfail(reason="green after W6: multi-reviewer execution", strict=False)
 W7_XFAIL = pytest.mark.xfail(reason="green after W7: auth manifest fail-closed", strict=False)
 W8_XFAIL = pytest.mark.xfail(reason="green after W8: init seeds p0", strict=False)
 
@@ -248,7 +247,6 @@ __all__ = [
     "W2_XFAIL",
     "W4_XFAIL",
     "W5_XFAIL",
-    "W6_XFAIL",
     "W7_XFAIL",
     "W8_XFAIL",
     "WORKFLOW_GATED_STEP",

@@ -1,11 +1,10 @@
-"""W1.5 — multi-reviewer execution (wave plan 11, green after W6)."""
+"""W1.5 — multi-reviewer execution (wave plan 11)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 from tests.cli.support_agent_roster import (
-    W6_XFAIL,
     import_reviewer_merge,
     two_reviewer_config,
     write_config,
@@ -13,6 +12,7 @@ from tests.cli.support_agent_roster import (
 
 from mergecraft.agents.harness_render import default_subagent_selection
 from mergecraft.agents.registry import load_registry
+from mergecraft.agents.reviewer_merge import reviewer_dispatch_batches
 from mergecraft.config.settings import load_repo_settings
 
 if TYPE_CHECKING:
@@ -35,7 +35,6 @@ def _load_registry(tmp_path: Path) -> object:
     return load_registry(settings=settings, repo_root=tmp_path)
 
 
-@W6_XFAIL
 def test_default_subagent_selection_returns_every_reviewer_plus_verifier(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -50,7 +49,6 @@ def test_default_subagent_selection_returns_every_reviewer_plus_verifier(
     assert len(reviewer_ids) >= 2
 
 
-@W6_XFAIL
 def test_merge_dedupes_identical_path_body_line() -> None:
     mod = import_reviewer_merge()
     left = [_finding(path="a.py", body="bug", line=10)]
@@ -60,7 +58,6 @@ def test_merge_dedupes_identical_path_body_line() -> None:
     assert len(keys) == 1
 
 
-@W6_XFAIL
 def test_merge_preserves_critical_findings_at_different_lines() -> None:
     mod = import_reviewer_merge()
     left = [_finding(path="a.py", body="bug one", line=10)]
@@ -70,7 +67,6 @@ def test_merge_preserves_critical_findings_at_different_lines() -> None:
     assert lines == {10, 20}
 
 
-@W6_XFAIL
 def test_merged_findings_yield_one_verdict_and_one_terminal_submission() -> None:
     mod = import_reviewer_merge()
     findings = mod.merge_reviewer_findings(
@@ -90,7 +86,6 @@ def test_merged_findings_yield_one_verdict_and_one_terminal_submission() -> None
     assert submissions == 1
 
 
-@W6_XFAIL
 def test_critical_from_reviewer2_blocks_when_reviewer_approves() -> None:
     mod = import_reviewer_merge()
     findings = mod.merge_reviewer_findings(
@@ -103,7 +98,6 @@ def test_critical_from_reviewer2_blocks_when_reviewer_approves() -> None:
     assert verdict == "request_changes"
 
 
-@W6_XFAIL
 def test_one_reviewer_failing_does_not_void_other_findings() -> None:
     mod = import_reviewer_merge()
     surviving = [_finding(path="a.py", body="still here", line=3)]
@@ -118,3 +112,79 @@ def test_one_reviewer_failing_does_not_void_other_findings() -> None:
     assert merged[0]["body"] == "still here"
     summary = mod.format_reviewer_degradation_summary(errors={"reviewer2": "quota exceeded"})
     assert "reviewer2" in summary.lower()
+
+
+def test_reviewer_dispatch_batches_parallel_one_level(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    write_config(tmp_path, two_reviewer_config())
+    monkeypatch.chdir(tmp_path)
+    registry = _load_registry(tmp_path)
+    assert reviewer_dispatch_batches(registry) == (("mergecraft-reviewer", "reviewer2"),)
+
+
+def test_reviewer_dispatch_batches_chain_one_per_level(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    write_config(
+        tmp_path,
+        """
+models:
+  - anthropic/claude-sonnet
+  - openai/gpt-5.3-codex
+agents:
+  reviewer:
+    modelChain:
+      - anthropic/claude-sonnet
+  reviewer2:
+    role: reviewer
+    after: reviewer
+    modelChain:
+      - openai/gpt-5.3-codex
+  reviewer3:
+    role: reviewer
+    after: reviewer2
+    modelChain:
+      - anthropic/claude-sonnet
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+    registry = _load_registry(tmp_path)
+    assert reviewer_dispatch_batches(registry) == (
+        ("mergecraft-reviewer",),
+        ("reviewer2",),
+        ("reviewer3",),
+    )
+
+
+def test_reviewer_dispatch_batches_diamond_two_siblings_same_level(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    write_config(
+        tmp_path,
+        """
+models:
+  - anthropic/claude-sonnet
+  - openai/gpt-5.3-codex
+agents:
+  reviewer:
+    modelChain:
+      - anthropic/claude-sonnet
+  reviewer-b:
+    role: reviewer
+    after: reviewer
+    modelChain:
+      - openai/gpt-5.3-codex
+  reviewer-c:
+    role: reviewer
+    after: reviewer
+    modelChain:
+      - anthropic/claude-sonnet
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+    registry = _load_registry(tmp_path)
+    assert reviewer_dispatch_batches(registry) == (
+        ("mergecraft-reviewer",),
+        ("reviewer-b", "reviewer-c"),
+    )

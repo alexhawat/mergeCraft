@@ -72,8 +72,11 @@ Pinned API: `Registry.resolve_roles`, `Registry.resolve_role_levels` (W5).
 | one verdict + one terminal submission (D7) | `…::test_merged_findings_yield_one_verdict_and_one_terminal_submission` | unit |
 | Critical from reviewer2 blocks (strictest wins) | `…::test_critical_from_reviewer2_blocks_when_reviewer_approves` | unit |
 | one reviewer failing does not void other findings | `…::test_one_reviewer_failing_does_not_void_other_findings` | unit |
+| `reviewer_dispatch_batches` — all-parallel (one batch) | `…::test_reviewer_dispatch_batches_parallel_one_level` | unit |
+| `reviewer_dispatch_batches` — full chain (one per level) | `…::test_reviewer_dispatch_batches_chain_one_per_level` | unit |
+| `reviewer_dispatch_batches` — diamond (siblings share level) | `…::test_reviewer_dispatch_batches_diamond_two_siblings_same_level` | unit |
 
-Pinned module: `mergecraft.agents.reviewer_merge` (`merge_reviewer_findings`, `verdict_from_merged_findings`, `ReviewerRun`, `terminal_submission_count_from_review_runs`, `format_reviewer_degradation_summary`).
+Pinned module: `mergecraft.agents.reviewer_merge` (`reviewer_dispatch_batches`, `merge_reviewer_findings`, `verdict_from_merged_findings`, `ReviewerRun`, `terminal_submission_count_from_review_runs`, `format_reviewer_degradation_summary`).
 
 ## W1.6 — trust (D9)
 
@@ -121,7 +124,7 @@ Pinned API: `mergecraft.cli.workflow_cmd.parse_auth_manifest`, roster run-start 
 | W3 | `tests/cli/test_agent_cmd.py` |
 | W4 | reconciled — `tests/cli/test_agent_local_cmd.py` |
 | W5 | reconciled — `tests/agents/test_agent_roster_registry.py` |
-| W6 | `tests/agents/test_multi_reviewer_execution.py` |
+| W6 | reconciled — `tests/agents/test_multi_reviewer_execution.py` |
 | W7 | `tests/cli/test_agent_roster_auth_manifest.py` |
 | W8 | `tests/cli/test_agent_roster_init.py` |
 
