@@ -13,13 +13,17 @@ from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.mcp.git import _git_env, _run_git
-from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
+from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
 from mergecraft.utils.git_hardening import read_remote_origin_url
+from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+
+__all__ = ["GitHubClient", "checkout_pr_tool", "ensure_local_base_branch_alias", "get_git_status"]
 
 # A review authored by mergeCraft carries the run footer, or (for a review whose
 # body was suppressed) at least one finding marker. Reviews from humans and other
@@ -29,6 +33,12 @@ _MERGECRAFT_REVIEW_MARKERS = ("*via mergecraft*", "mergecraft-finding:v1:")
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
+_CHECKOUT_PR_INPUT_SCHEMA: JsonSchema = {
+    "type": "object",
+    "properties": {"pull_number": {"type": "number"}},
+    "required": ["pull_number"],
+    "additionalProperties": False,
+}
 
 
 def ensure_local_base_branch_alias(*, cwd: str, base_ref: str) -> None:
@@ -154,14 +164,20 @@ def _write_incremental_diff(
     return path, changed_paths_in_diff(diff)
 
 
+def get_git_status(cwd: str) -> str:
+    """Return porcelain status for *cwd* (monkeypatch hook for tests and callers)."""
+    return _run_git(["status", "--porcelain"], cwd=cwd).strip()
+
+
 def checkout_pr_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
+        params = normalize_pull_number_aliases(params, _CHECKOUT_PR_INPUT_SCHEMA)
         pull_number = int(params["pull_number"])
         state = primary_repo_state(ctx.tool_state)
         cwd = state.dir
         prior_reviews: list[dict[str, Any]] = []
 
-        dirty = _run_git(["status", "--porcelain"], cwd=cwd).strip()
+        dirty = get_git_status(cwd)
         if dirty:
             msg = (
                 f"cannot checkout PR #{pull_number} while the working tree has "
@@ -388,11 +404,6 @@ def checkout_pr_tool(ctx: ToolContext):
             "analyzers.impact, also returns impactPath pointing to a JSON file listing "
             "declaration-level reference leads for the changed files."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {"pull_number": {"type": "number"}},
-            "required": ["pull_number"],
-            "additionalProperties": False,
-        },
+        input_schema=_CHECKOUT_PR_INPUT_SCHEMA,
         execute=execute(_run, "checkout_pr"),
     )

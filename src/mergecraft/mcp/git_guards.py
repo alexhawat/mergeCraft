@@ -63,6 +63,10 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
         "cat-file",
         "rev-list",
         "branch",
+        "show-ref",
+        "for-each-ref",
+        "ls-remote",
+        "config",
     }
 )
 # Rejected verbs that have a dedicated tool. Not an auth gate — a redirect
@@ -110,6 +114,10 @@ _BRANCH_READONLY_FLAGS: frozenset[str] = frozenset(
 _BRANCH_FLAGS_TAKING_VALUE: frozenset[str] = frozenset(
     {"--contains", "--no-contains", "--points-at", "--merged", "--no-merged", "--sort", "--format"}
 )
+# ``config`` is read-only only for lookups. Writes and credential-bearing keys
+# stay off the reviewer surface (plan 13 / D12).
+_CONFIG_READONLY_FLAGS: frozenset[str] = frozenset({"--get", "--get-all", "--list"})
+_CONFIG_FLAGS_TAKING_VALUE: frozenset[str] = frozenset({"--get", "--get-all"})
 
 # ---------------------------------------------------------------------------
 # Q2 — Which short flags does each allowlisted subcommand declare?
@@ -130,6 +138,10 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
     # write letter — ``d``/``D``/``m``/``M``/``c``/``C`` — is absent, which is
     # what keeps the bundled write forms refused.
     "branch": frozenset("arvi"),
+    "show-ref": frozenset("dhns"),
+    "for-each-ref": frozenset("cq"),
+    "ls-remote": frozenset("ht"),
+    "config": frozenset(),
 }
 
 # ---------------------------------------------------------------------------
@@ -429,6 +441,70 @@ def shell_command_denies_credential_paths(command: str, *, tmpdir: str) -> str |
     return None
 
 
+def _is_denied_config_key(key: str) -> bool:
+    """Whether a ``git config --get`` key may expose credential material."""
+    if key.startswith(("credential.", "url.")):
+        return True
+    return ".extraHeader" in key
+
+
+def _config_key_from_get_arg(arg: str, args: list[str], idx: int) -> tuple[str, int]:
+    if "=" in arg:
+        return arg.split("=", 1)[1], idx + 1
+    if idx + 1 < len(args):
+        return args[idx + 1], idx + 2
+    msg = "Blocked: 'config --get' requires a key."
+    raise ValueError(msg)
+
+
+def _reject_config_invocation(args: list[str]) -> None:
+    """Keep ``git config`` to read-only lookups with a credential-key deny-list."""
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+        if arg.startswith("--"):
+            name = arg.split("=", 1)[0]
+            if name not in _CONFIG_READONLY_FLAGS:
+                msg = (
+                    f"Blocked: 'config {arg}' — only --get, --get-all and --list "
+                    "are permitted on the reviewer surface."
+                )
+                raise ValueError(msg)
+            if name == "--get":
+                key, idx = _config_key_from_get_arg(arg, args, idx)
+                if _is_denied_config_key(key):
+                    msg = (
+                        f"Blocked: 'config --get {key}' reads credential material — "
+                        "not permitted on the reviewer surface."
+                    )
+                    raise ValueError(msg)
+                continue
+            if name == "--get-all":
+                if "=" not in arg and idx + 1 < len(args) and not args[idx + 1].startswith("-"):
+                    idx += 2
+                else:
+                    idx += 1
+                continue
+            if name == "--list":
+                idx += 1
+                if idx < len(args) and not args[idx].startswith("-"):
+                    idx += 1
+                continue
+            idx += 1
+            continue
+        if arg.startswith("-") and len(arg) > 1:
+            msg = (
+                f"Blocked: 'config {arg}' — only --get, --get-all and --list "
+                "are permitted on the reviewer surface."
+            )
+            raise ValueError(msg)
+        msg = (
+            f"Blocked: 'config {arg}' would write configuration — "
+            "config writes are not available on the reviewer surface."
+        )
+        raise ValueError(msg)
+
+
 def _reject_branch_writes(args: list[str]) -> None:
     """Keep ``git branch`` to listing only (H2, #257 / D7).
 
@@ -504,6 +580,8 @@ __all__ = [
     "_BRANCH_FLAGS_TAKING_VALUE",
     "_BRANCH_READONLY_FLAGS",
     "_CONFIG_FLAGS",
+    "_CONFIG_FLAGS_TAKING_VALUE",
+    "_CONFIG_READONLY_FLAGS",
     "_OUTPUT_FLAG_SPELLINGS",
     "_READONLY_SUBCOMMANDS",
     "_REDIRECT_TO_TOOL",
@@ -513,8 +591,10 @@ __all__ = [
     "_bare_dash_c_message",
     "_config_flag_message",
     "_is_config_flag",
+    "_is_denied_config_key",
     "_reject_branch_writes",
     "_reject_config_flags",
+    "_reject_config_invocation",
     "_reject_credential_path_operands",
     "_reject_file_writing_flags",
     "_reject_namespace_flag",
