@@ -144,10 +144,11 @@ def _finding(
         path=path,
         start_line=1,
         end_line=1,
-        source="agent",
+        source="trajectory",
+        scope="run",
         evidence=evidence or [],
         remediation=check.recommended_action,
-        introduced_by_pr="true",
+        introduced_by_pr="false",
     )
 
 

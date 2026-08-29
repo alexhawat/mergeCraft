@@ -18,6 +18,7 @@ from mergecraft.review_taxonomy import (
     FINDING_CATEGORIES,
     FINDING_CONFIDENCES,
     FINDING_SEVERITIES,
+    FindingScope,
     FindingSource,
     finding_fingerprint,
 )
@@ -63,6 +64,7 @@ class Finding(BaseModel):
     autofix: str | None
     introduced_by_pr: IntroducedByPr
     source: FindingSource
+    scope: FindingScope = "change"
     cluster_id: str | None
     lens: str | None = None
     collateral: list[str] = Field(default_factory=list)
@@ -114,6 +116,7 @@ def make_finding(
     remediation: str | None = None,
     autofix: str | None = None,
     introduced_by_pr: IntroducedByPr = "unknown",
+    scope: FindingScope = "change",
     cluster_id: str | None = None,
     fingerprint: str | None = None,
     lens: str | None = None,
@@ -141,6 +144,7 @@ def make_finding(
             autofix=autofix,
             introduced_by_pr=introduced_by_pr,
             source=source,
+            scope=scope,
             cluster_id=cluster_id,
             lens=lens,
             collateral=collateral or [],

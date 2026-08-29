@@ -135,9 +135,23 @@ def build_opencode_native_fs_permission() -> dict[str, object]:
     }
 
 
+def blocking_findings(findings: list[Finding]) -> list[Finding]:
+    """Return change-scoped findings that block after causality policy (D3)."""
+    from mergecraft.findings.causality import apply_causality_policy
+
+    blockers: list[Finding] = []
+    for finding in findings:
+        if finding.scope == "run":
+            continue
+        adjusted = apply_causality_policy(finding)
+        if adjusted.severity in BLOCKING_SEVERITIES:
+            blockers.append(adjusted)
+    return blockers
+
+
 def _has_blocker(findings: list[Finding]) -> bool:
     """True iff any finding carries a severity the gate treats as blocking."""
-    return any(f.severity in BLOCKING_SEVERITIES for f in findings)
+    return bool(blocking_findings(findings))
 
 
 def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
@@ -581,6 +595,7 @@ __all__ = [
     "BLOCKING_SEVERITIES",
     "GateAction",
     "approval_decision_inputs",
+    "blocking_findings",
     "build_claude_native_fs_denies",
     "build_opencode_native_fs_permission",
     "decide_action",
