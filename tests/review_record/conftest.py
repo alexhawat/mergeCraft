@@ -65,9 +65,13 @@ def make_scoped_finding(
         kwargs["scope"] = "run"
         kwargs["source"] = "trajectory"
         kwargs["introduced_by_pr"] = "false"
-        kwargs.setdefault("path", "")
+        kwargs["path"] = ""
     else:
         kwargs["scope"] = "change"
+    if "message" not in overrides:
+        rule_id = kwargs.get("rule_id", "RR-FIXTURE")
+        if rule_id != "RR-FIXTURE":
+            kwargs["message"] = f"fixture finding ({rule_id})"
     return make_finding(**kwargs)
 
 
