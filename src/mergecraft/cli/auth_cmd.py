@@ -209,8 +209,9 @@ def _persist_credential(
     ``name``/``value`` are the Actions-secret pair. ``local_entries`` names what
     goes into ``.env`` when that differs from the secret: ``auth logfire``
     writes a runtime-only token env var plus a project label behind a single
-    ``LOGFIRE_TOKEN`` secret. Only the local write is compacted onto one line —
-    an Actions secret has no such constraint, so ``gh`` gets ``value`` verbatim.
+    ``LOGFIRE_TOKEN`` secret. Both the local write and the ``gh secret set``
+    path compact multi-line JSON credentials onto one line so job logs do not
+    redact every ``{`` in the stored secret (ledger B2).
 
     ``github`` (the default) keeps the pre-``--scope`` contract exactly: one
     ``gh secret set``, no ``.env``, and a hard bail when the secret write
@@ -257,7 +258,8 @@ def _persist_credential(
         return
 
     console.print(f"saving [cyan]{name}[/cyan] via gh secret set...")
-    wrote_github = _set_gh_secret(name=name, value=value, repo_slug=target.github.repo_slug)
+    secret_value = _single_line_credential(name=name, value=value)
+    wrote_github = _set_gh_secret(name=name, value=secret_value, repo_slug=target.github.repo_slug)
     secrets_url = f"https://github.com/{target.github.repo_slug}/settings/secrets/actions"
     if wrote_github:
         console.print(f"[green]saved {name}[/green] to GitHub Actions secrets")
