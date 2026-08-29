@@ -38,6 +38,7 @@ Exports:
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 
 from mergecraft.utils.git_setup import (
@@ -428,8 +429,35 @@ def _reject_credential_path_operands(args: list[str], *, cwd: str, tmpdir: str) 
             raise ValueError(_credential_path_message(path))
 
 
-def shell_command_denies_credential_paths(command: str, *, tmpdir: str) -> str | None:
-    """Return a refusal reason when *command* names a denied credential path."""
+def _command_path_operands(command: str) -> list[str]:
+    """Best-effort operand extraction from a shell command line."""
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    operands: list[str] = []
+    for token in tokens:
+        candidate = token
+        if candidate.startswith("-") and "=" in candidate:
+            candidate = candidate.split("=", 1)[1]
+        candidate = candidate.strip("\"'")
+        if candidate and not candidate.startswith("-"):
+            operands.append(candidate)
+    return operands
+
+
+def shell_command_denies_credential_paths(
+    command: str, *, tmpdir: str, cwd: str | None = None
+) -> str | None:
+    """Return a refusal reason when *command* names a denied credential path.
+
+    Literal containment alone does not hold: ``.git//config`` and
+    ``.git/objects/../config`` name the same file without containing the
+    substring being matched. When *cwd* is known each operand is resolved the
+    way the git tool's own ``_is_denied_credential_path`` resolves it, so the
+    two tools refuse the same set of files rather than the same set of
+    spellings.
+    """
     for rel in reviewer_denied_relative_paths():
         if rel in command:
             return _credential_path_message(rel)
@@ -438,14 +466,25 @@ def shell_command_denies_credential_paths(command: str, *, tmpdir: str) -> str |
         askpass_text = str(askpass_root)
         if askpass_text in command or "git-askpass" in command:
             return _credential_path_message("askpass")
+    if cwd:
+        for operand in _command_path_operands(command):
+            if _is_denied_credential_path(operand, cwd=cwd, tmpdir=tmpdir):
+                return _credential_path_message(operand)
     return None
 
 
 def _is_denied_config_key(key: str) -> bool:
-    """Whether a ``git config --get`` key may expose credential material."""
-    if key.startswith(("credential.", "url.")):
+    """Whether a ``git config --get`` key may expose credential material.
+
+    Git treats config section and variable names as case-insensitive, so the key
+    is lowercased once before every check. Matching the raw key let
+    ``Credential.helper`` and ``URL.insteadOf`` name exactly the settings this
+    deny-list exists to withhold while spelling past it.
+    """
+    lowered = key.lower()
+    if lowered.startswith(("credential.", "url.")):
         return True
-    return ".extraheader" in key.lower()
+    return ".extraheader" in lowered
 
 
 def _config_key_from_get_arg(arg: str, args: list[str], idx: int) -> tuple[str, int]:

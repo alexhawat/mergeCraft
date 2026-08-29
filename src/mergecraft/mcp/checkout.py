@@ -143,13 +143,38 @@ def _git_env_for_cwd(cwd: str, token: str) -> tuple[dict[str, str], str]:
     return _git_env(token, remote_url=remote_url), remote_url
 
 
+# GitHub caps ``pulls/{n}/files`` at 100 per page and defaults to 30. This diff
+# is the degraded ``api-only`` scope's only view of the change, and a run may
+# still reach an approvable verdict from it, so a silently short page would
+# approve a PR whose later files were never seen.
+_PULL_FILES_PAGE_SIZE = 100
+# A PR larger than this is beyond what a review can meaningfully cover; stop
+# paging rather than loop unbounded against a paginating API.
+_PULL_FILES_MAX_PAGES = 30
+
+
 async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> str:
-    files = await ctx.scm.get(f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files")
+    """Build a unified diff from the PR files API, following pagination."""
     parts: list[str] = []
-    for f in files or []:
-        parts.append(f"diff --git a/{f.get('filename')} b/{f.get('filename')}\n")
-        if f.get("patch"):
-            parts.append(f.get("patch") + "\n")
+    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
+    for page in range(1, _PULL_FILES_MAX_PAGES + 1):
+        files = await ctx.scm.get(
+            endpoint, params={"per_page": _PULL_FILES_PAGE_SIZE, "page": page}
+        )
+        batch = list(files or [])
+        for f in batch:
+            parts.append(f"diff --git a/{f.get('filename')} b/{f.get('filename')}\n")
+            if f.get("patch"):
+                parts.append(f.get("patch") + "\n")
+        if len(batch) < _PULL_FILES_PAGE_SIZE:
+            break
+    else:
+        logger.warning(
+            "api-only diff: stopped after {} pages of pull files for #{}; "
+            "the diff may be incomplete",
+            _PULL_FILES_MAX_PAGES,
+            pull_number,
+        )
     return "".join(parts)
 
 

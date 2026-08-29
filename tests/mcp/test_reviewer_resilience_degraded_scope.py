@@ -379,3 +379,45 @@ async def test_git_show_immutable_read_returns_cached_on_repeat(
     assert first["outputPath"] == second["outputPath"]
     assert second.get("cached") is True
     assert calls["n"] == 1
+
+
+# --- Review round 2 finding (PR #567) --------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_api_only_diff_follows_pull_files_pagination() -> None:
+    """The api-only diff must page; a short first page is not the whole PR.
+
+    ``pulls/{n}/files`` returns at most 100 per page and defaults to 30. This
+    diff is the degraded scope's only view of the change and a run may still
+    reach an approvable verdict from it, so stopping at page one would approve a
+    PR whose later files were never read.
+    """
+    from types import SimpleNamespace
+
+    from mergecraft.mcp.checkout import _PULL_FILES_PAGE_SIZE, _diff_from_pull_files
+
+    total = _PULL_FILES_PAGE_SIZE + 7
+    all_files = [
+        {"filename": f"src/file_{i:03d}.py", "patch": f"@@ -0,0 +1 @@\n+line {i}"}
+        for i in range(total)
+    ]
+    requested_pages: list[int] = []
+
+    async def _get(_path: str, *, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        page = int((params or {}).get("page", 1))
+        per_page = int((params or {}).get("per_page", 30))
+        requested_pages.append(page)
+        start = (page - 1) * per_page
+        return all_files[start : start + per_page]
+
+    ctx = SimpleNamespace(
+        scm=SimpleNamespace(get=_get),
+        repo=SimpleNamespace(owner="acme", name="demo"),
+    )
+
+    diff = await _diff_from_pull_files(ctx, pull_number=546)
+
+    assert requested_pages == [1, 2], "must request the second page after a full first page"
+    for i in (0, _PULL_FILES_PAGE_SIZE - 1, _PULL_FILES_PAGE_SIZE, total - 1):
+        assert f"src/file_{i:03d}.py" in diff, f"file {i} missing from the api-only diff"

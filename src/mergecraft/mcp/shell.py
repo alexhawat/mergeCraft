@@ -386,9 +386,6 @@ def shell_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         command = str(params["command"])
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
-        credential_refusal = shell_command_denies_credential_paths(command, tmpdir=tmpdir)
-        if credential_refusal:
-            raise RuntimeError(credential_refusal)
         if _is_git_command(command):
             msg = (
                 "git commands are not allowed in the shell tool. use the dedicated "
@@ -405,6 +402,11 @@ def shell_tool(ctx: ToolContext):
             )
         except WorkspacePathError as exc:
             raise RuntimeError(str(exc)) from exc
+        # Checked once the working directory is known, so a relative operand
+        # resolves against the directory the command will actually run in.
+        credential_refusal = shell_command_denies_credential_paths(command, tmpdir=tmpdir, cwd=cwd)
+        if credential_refusal:
+            raise RuntimeError(credential_refusal)
         env = resolve_env("inherit" if ctx.payload.shell == "enabled" else "restricted")
         # W12.7 — untrusted MCP shell gets ``unshare --net`` when the host
         # supports it; otherwise network stays outside the sandbox guarantee.

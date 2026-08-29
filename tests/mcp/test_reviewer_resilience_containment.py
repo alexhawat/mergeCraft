@@ -199,3 +199,68 @@ async def test_legitimate_readonly_invocations_still_forwarded(
     assert result.is_error is False, result.content[0]["text"]
     assert "ok" in payload["output"]
     assert recorder.calls == [expected_prefix]
+
+
+# --- Review round 2 findings (PR #567) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Credential.helper",
+        "CREDENTIAL.helper",
+        "URL.https://github.com/.insteadOf",
+        "Url.insteadOf",
+        "http.https://github.com/.ExtraHeader",
+    ],
+)
+def test_denied_config_keys_are_matched_case_insensitively(key: str) -> None:
+    """Git config names are case-insensitive; the deny-list must be too.
+
+    Matching the raw key let ``Credential.helper`` name exactly the setting the
+    deny-list exists to withhold while spelling past it.
+    """
+    from mergecraft.mcp.git_guards import _is_denied_config_key
+
+    assert _is_denied_config_key(key) is True
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "cat .git//config",
+        "cat .git/objects/../config",
+        "cat ./.git/./config",
+    ],
+)
+def test_shell_guard_resolves_alternate_credential_path_spellings(
+    tmp_path: Path, spelling: str
+) -> None:
+    """Alternate spellings resolve to the same file and must be refused alike.
+
+    Literal substring containment refused only the exact spelling; the git tool
+    already resolves operands, so the shell tool refused a strictly smaller set
+    of files than the git tool did.
+    """
+    from mergecraft.mcp.git_guards import shell_command_denies_credential_paths
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+
+    assert (
+        shell_command_denies_credential_paths(spelling, tmpdir=str(tmp_path), cwd=str(tmp_path))
+        is not None
+    )
+
+
+def test_shell_guard_allows_an_ordinary_path(tmp_path: Path) -> None:
+    """Resolution must not over-refuse a file that merely sits near the repo."""
+    from mergecraft.mcp.git_guards import shell_command_denies_credential_paths
+
+    (tmp_path / "README.md").write_text("hi\n", encoding="utf-8")
+    assert (
+        shell_command_denies_credential_paths(
+            "cat README.md", tmpdir=str(tmp_path), cwd=str(tmp_path)
+        )
+        is None
+    )
