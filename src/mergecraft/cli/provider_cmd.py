@@ -496,13 +496,16 @@ def _persist_indexed_credentials(
     any_local_written = False
 
     def _seed_reviewer_roster() -> None:
+        from mergecraft.cli.provider_toggle import canonical_provider_label
+
         repo_root = (cwd or Path.cwd()).resolve()
         config_path = _config_path(repo_root)
         data = _load_config_dict(config_path)
+        catalog_label = canonical_provider_label(label)
         try:
-            slug = seed_reviewer_p0_if_empty(data, label)
-        except AgentRosterError as exc:
-            cli_bail(str(exc))
+            slug = seed_reviewer_p0_if_empty(data, catalog_label)
+        except AgentRosterError:
+            return
         if slug is None:
             return
         _write_config_dict(config_path, data)
