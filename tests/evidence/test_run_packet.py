@@ -24,6 +24,7 @@ from mergecraft.evidence.run_packet import (
     emit_run_packet,
     prepare_run_packet,
     resolve_packet_path,
+    resolve_prepared_run_packet,
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import (
@@ -196,6 +197,26 @@ def test_deterministic_checks_carry_the_catalog_command(tmp_path: Path) -> None:
     assert [check["name"] for check in checks] == ["ruff"]
     assert checks[0]["status"] == "completed"
     assert checks[0]["command"], "command must be recorded, not blank"
+
+
+def test_resolve_prepared_run_packet_refinalizes_on_outcome_change(tmp_path: Path) -> None:
+    """Publish-time success must not stick when finalize reports run failure (cd6ff87c)."""
+    ctx = _make_ctx(tmp_path, diff_text=_TRIVIAL_DIFF)
+
+    first = resolve_prepared_run_packet(ctx, run_succeeded=True)
+    assert first is not None
+    assert first.decision is not None
+    assert first.decision.verdict == "success"
+
+    cached = ctx.tool_state.prepared_run_packet
+    assert cached is not None
+    assert cached.decision is None, "cache must hold the evidence shell without a baked verdict"
+
+    second = resolve_prepared_run_packet(ctx, run_succeeded=False)
+    assert second is not None
+    assert second.decision is not None
+    assert second.decision.verdict != "success"
+    assert second.decision.verdict == "neutral"
 
 
 def test_failed_run_still_emits_a_packet(tmp_path: Path) -> None:

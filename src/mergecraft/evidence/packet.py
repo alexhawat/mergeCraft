@@ -80,7 +80,9 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   ``decide_action`` runs; untrusted ``decided_by`` values are refused and
 #   a missing or non-success verdict can no longer satisfy ``auto_merge``
 #   (MCB-15 / D7 / D9).
-PACKET_SCHEMA_VERSION = "1.10.0"
+# - 1.11.0 — W7 (plan 12) adds ``run_health``: run-scoped findings and their
+#   advisory conclusion, partitioned out of the top-level ``findings`` list.
+PACKET_SCHEMA_VERSION = "1.11.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -200,6 +202,19 @@ class SelfAssessment(BaseModel):
     sha: str | None = None
 
 
+class RunHealth(BaseModel):
+    """Run-scoped findings and an advisory conclusion (plan 12 W7).
+
+    Change-scoped findings live on ``findings``; trajectory and environment
+    observations that never block merge land here instead.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    findings: list[Finding]
+    conclusion: Literal["clean", "advisory"]
+
+
 class ModePromptVersion(BaseModel):
     """Identifies the prompt body that produced a run for one mode (#145).
 
@@ -238,6 +253,7 @@ class MergeEvidencePacket(BaseModel):
     agent: AgentMetadata
     files_changed: list[str]
     findings: list[Finding]
+    run_health: RunHealth | None = None
     deterministic_checks: list[DeterministicCheck]
     self_assessment: SelfAssessment | None = None
     decision: Decision | None = None
@@ -276,6 +292,10 @@ def packet_output_schema() -> dict[str, Any]:
     if isinstance(trajectory, dict) and "$ref" in trajectory:
         trajectory.clear()
         trajectory.update(TrajectoryRecord.model_json_schema())
+    run_health = schema.get("properties", {}).get("run_health")
+    if isinstance(run_health, dict) and "$ref" in run_health:
+        run_health.clear()
+        run_health.update(RunHealth.model_json_schema())
     return schema
 
 
@@ -286,6 +306,7 @@ __all__ = [
     "DeterministicCheck",
     "MergeEvidencePacket",
     "ModePromptVersion",
+    "RunHealth",
     "SelfAssessment",
     "packet_output_schema",
 ]

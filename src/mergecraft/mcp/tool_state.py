@@ -439,6 +439,9 @@ class ToolState:
     # a CI source is actually read, so a run that consulted no CI records
     # nothing rather than an empty section.
     ci_evidence: CiEvidenceState | None = None
+    # D7 — single evidence-packet snapshot for the review preamble and sticky
+    # record; assembled once via ``resolve_prepared_run_packet`` and reused.
+    prepared_run_packet: Any | None = None
     # True once ``run_static_checks`` has been called this session. Read by the
     # verification tools (D14): an LLM judge may not evaluate a finding before
     # the deterministic checks it is meant to supplement have had their turn.

@@ -580,8 +580,7 @@ def _blocks_approve(state: ValidationState) -> bool:
         >>> _blocks_approve(build_validation_state())
         False
     """
-    from mergecraft.agents.gates import BLOCKING_SEVERITIES
-    from mergecraft.findings.causality import apply_causality_policy
+    from mergecraft.agents.gates import blocking_findings
 
     if state.ungradable_fingerprints:
         logger.warning(
@@ -590,10 +589,7 @@ def _blocks_approve(state: ValidationState) -> bool:
             ", ".join(state.ungradable_fingerprints),
         )
         return True
-    for finding in (*state.confirmed_findings, *state.unverified_findings):
-        if apply_causality_policy(finding).severity in BLOCKING_SEVERITIES:
-            return True
-    return False
+    return bool(blocking_findings([*state.confirmed_findings, *state.unverified_findings]))
 
 
 def withdrawn_fingerprints_for_state(tool_state: ToolState, *, tmpdir: str | None) -> set[str]:

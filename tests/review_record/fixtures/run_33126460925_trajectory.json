@@ -1,0 +1,192 @@
+{
+  "sources": ["mcp-tool-calls"],
+  "tool_calls": [
+    {
+      "sequence": 1,
+      "tool": "checkout_pr",
+      "signature": "checkout_pr:546",
+      "intent": "read",
+      "ok": true,
+      "outcome_ok": null,
+      "error": null,
+      "command": null,
+      "paths": []
+    },
+    {
+      "sequence": 2,
+      "tool": "git",
+      "signature": "git:fetch-pr-546",
+      "intent": "read",
+      "ok": false,
+      "outcome_ok": null,
+      "error": "Invalid parameters for tool git: invalid subcommand",
+      "command": "git fetch pull/546/head:pr-546",
+      "paths": []
+    },
+    {
+      "sequence": 3,
+      "tool": "git",
+      "signature": "git:fetch-pr-546-retry",
+      "intent": "read",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": "git fetch pull/546/head:pr-546",
+      "paths": []
+    },
+    {
+      "sequence": 4,
+      "tool": "shell",
+      "signature": "shell:bwrap-fail-1",
+      "intent": "verify",
+      "ok": false,
+      "outcome_ok": null,
+      "error": "newuidmap: operation not permitted",
+      "command": "bwrap --unshare-user ...",
+      "paths": []
+    },
+    {
+      "sequence": 5,
+      "tool": "shell",
+      "signature": "shell:bwrap-fail-2",
+      "intent": "verify",
+      "ok": false,
+      "outcome_ok": null,
+      "error": "newuidmap: operation not permitted",
+      "command": "bwrap --unshare-user ...",
+      "paths": []
+    },
+    {
+      "sequence": 6,
+      "tool": "run_static_checks",
+      "signature": "run_static_checks:schema-fail",
+      "intent": "verify",
+      "ok": false,
+      "outcome_ok": null,
+      "error": "Input validation error: '-32602' invalid type",
+      "command": null,
+      "paths": []
+    },
+    {
+      "sequence": 7,
+      "tool": "run_static_checks",
+      "signature": "run_static_checks:schema-ok",
+      "intent": "verify",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": null,
+      "paths": []
+    },
+    {
+      "sequence": 8,
+      "tool": "git",
+      "signature": "git:show:deadbeef:README.md",
+      "intent": "read",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": "git show deadbeef:README.md",
+      "paths": ["README.md"]
+    },
+    {
+      "sequence": 9,
+      "tool": "shell",
+      "signature": "shell:intervening",
+      "intent": "read",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": "ls",
+      "paths": []
+    },
+    {
+      "sequence": 10,
+      "tool": "git",
+      "signature": "git:show:deadbeef:README.md",
+      "intent": "read",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": "git show deadbeef:README.md",
+      "paths": ["README.md"]
+    },
+    {
+      "sequence": 11,
+      "tool": "git",
+      "signature": "git:show:deadbeef:README.md",
+      "intent": "read",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": "git show deadbeef:README.md",
+      "paths": ["README.md"]
+    },
+    {
+      "sequence": 12,
+      "tool": "run_static_checks",
+      "signature": "run_static_checks:loop",
+      "intent": "verify",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": null,
+      "paths": []
+    },
+    {
+      "sequence": 13,
+      "tool": "run_static_checks",
+      "signature": "run_static_checks:loop",
+      "intent": "verify",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": null,
+      "paths": []
+    },
+    {
+      "sequence": 14,
+      "tool": "run_static_checks",
+      "signature": "run_static_checks:loop",
+      "intent": "verify",
+      "ok": true,
+      "outcome_ok": true,
+      "error": null,
+      "command": null,
+      "paths": []
+    },
+    {
+      "sequence": 15,
+      "tool": "shell",
+      "signature": "shell:transient",
+      "intent": "verify",
+      "ok": false,
+      "outcome_ok": null,
+      "error": "connection reset by peer",
+      "command": "curl https://example.test",
+      "paths": []
+    },
+    {
+      "sequence": 16,
+      "tool": "create_pull_request_review",
+      "signature": "create_pull_request_review:complete",
+      "intent": "complete",
+      "ok": true,
+      "outcome_ok": null,
+      "error": null,
+      "command": null,
+      "paths": []
+    }
+  ],
+  "files_read": ["README.md"],
+  "files_modified": [],
+  "commands_run": [],
+  "tests_run": [],
+  "failures_observed": [],
+  "fixes_after_failures": 0,
+  "retries": 0,
+  "unresolved_errors": [],
+  "completion_claims": ["create_pull_request_review"],
+  "read_coverage": true,
+  "external_trace": null
+}

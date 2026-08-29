@@ -768,6 +768,11 @@ def _run_claude_once(
     cmd = [
         cli,
         "--print",
+        # The CLI refuses `--print --output-format=stream-json` without
+        # `--verbose` ("requires --verbose") and exits 1 before emitting a
+        # single event, so the whole run reads as "no events". Keep these
+        # three together; dropping --verbose silently kills the backstop.
+        "--verbose",
         "--output-format",
         "stream-json",
         "--mcp-config",
