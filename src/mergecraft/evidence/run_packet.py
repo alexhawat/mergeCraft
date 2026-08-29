@@ -470,6 +470,13 @@ def _fail_closed_assembly_packet(
     )
 
 
+def _cached_packet_shell(cached: MergeEvidencePacket) -> MergeEvidencePacket:
+    """Return the cached evidence shell without a baked-in decision row."""
+    if cached.decision is None:
+        return cached
+    return cached.model_copy(update={"decision": None})
+
+
 def resolve_prepared_run_packet(
     ctx: ToolContext,
     *,
@@ -480,12 +487,19 @@ def resolve_prepared_run_packet(
     """Return the run's cached packet snapshot, assembling it at most once (D7).
 
     The review-body preamble and the sticky progress comment must render from
-    the same ``MergeEvidencePacket`` instance so findings and decision rows
-    cannot drift between publish time and finalize.
+    the same evidence shell so findings cannot drift between publish time and
+    finalize. The structural decision is re-finalized on every call so a
+    publish-time ``run_succeeded=True`` snapshot does not stick when finalize
+    reports failed, timed_out, or inconclusive.
     """
     cached = ctx.tool_state.prepared_run_packet
     if cached is not None:
-        return cast("MergeEvidencePacket", cached)
+        shell = _cached_packet_shell(
+            cast("MergeEvidencePacket", cached),  # prepared_run_packet is Any on ToolState
+        )
+        if shell is not cached:
+            ctx.tool_state.prepared_run_packet = shell
+        return _finalize_packet_with_gate(shell, ctx=ctx, run_succeeded=run_succeeded)
     packet = prepare_run_packet(
         ctx,
         run_succeeded=run_succeeded,
@@ -493,7 +507,7 @@ def resolve_prepared_run_packet(
         extra_findings=extra_findings,
     )
     if packet is not None:
-        ctx.tool_state.prepared_run_packet = packet
+        ctx.tool_state.prepared_run_packet = _cached_packet_shell(packet)
     return packet
 
 
