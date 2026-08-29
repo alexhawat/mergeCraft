@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.cli.support_agent_roster import W5_XFAIL, two_reviewer_config, write_config
+from tests.cli.support_agent_roster import two_reviewer_config, write_config
 
 from mergecraft.agents.registry import AgentRole, RegistryValidationError, load_registry
 from mergecraft.config.settings import load_repo_settings
@@ -26,6 +26,14 @@ def _reviewer_bindings(registry: object) -> list[object]:
     if resolve_roles is None:
         pytest.fail("Registry.resolve_roles is not implemented")
     return list(resolve_roles(AgentRole.reviewer))
+
+
+def _reviewer_level_ids(registry: object) -> list[tuple[str, ...]]:
+    resolve_role_levels = getattr(registry, "resolve_role_levels", None)
+    if resolve_role_levels is None:
+        pytest.fail("Registry.resolve_role_levels is not implemented")
+    levels = resolve_role_levels(AgentRole.reviewer)
+    return [tuple(binding.agent_id for binding in level) for level in levels]
 
 
 def test_two_lensless_reviewer_bindings_survive_load_registry(
@@ -84,7 +92,6 @@ agents:
         registry.validate()
 
 
-@W5_XFAIL
 def test_registry_validate_rejects_unreachable_lens(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -102,5 +109,84 @@ agents:
 """,
     )
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(RegistryValidationError, match=r"lens|unreachable|unknown"):
-        _load(tmp_path)
+    registry = _load(tmp_path)
+    with pytest.raises(RegistryValidationError, match=r"unreachable lens|lens missing trigger"):
+        registry.validate()
+
+
+def test_resolve_role_levels_all_parallel_one_level(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    write_config(tmp_path, two_reviewer_config())
+    monkeypatch.chdir(tmp_path)
+    registry = _load(tmp_path)
+    assert _reviewer_level_ids(registry) == [
+        ("mergecraft-reviewer", "reviewer2"),
+    ]
+
+
+def test_resolve_role_levels_full_chain_one_per_level(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    write_config(
+        tmp_path,
+        """
+models:
+  - anthropic/claude-sonnet
+  - openai/gpt-5.3-codex
+agents:
+  reviewer:
+    modelChain:
+      - anthropic/claude-sonnet
+  reviewer2:
+    role: reviewer
+    after: reviewer
+    modelChain:
+      - openai/gpt-5.3-codex
+  reviewer3:
+    role: reviewer
+    after: reviewer2
+    modelChain:
+      - anthropic/claude-sonnet
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+    registry = _load(tmp_path)
+    assert _reviewer_level_ids(registry) == [
+        ("mergecraft-reviewer",),
+        ("reviewer2",),
+        ("reviewer3",),
+    ]
+
+
+def test_resolve_role_levels_diamond_two_siblings_same_level(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    write_config(
+        tmp_path,
+        """
+models:
+  - anthropic/claude-sonnet
+  - openai/gpt-5.3-codex
+agents:
+  reviewer:
+    modelChain:
+      - anthropic/claude-sonnet
+  reviewer-b:
+    role: reviewer
+    after: reviewer
+    modelChain:
+      - openai/gpt-5.3-codex
+  reviewer-c:
+    role: reviewer
+    after: reviewer
+    modelChain:
+      - anthropic/claude-sonnet
+""",
+    )
+    monkeypatch.chdir(tmp_path)
+    registry = _load(tmp_path)
+    assert _reviewer_level_ids(registry) == [
+        ("mergecraft-reviewer",),
+        ("reviewer-b", "reviewer-c"),
+    ]

@@ -56,6 +56,9 @@ Pinned module: `mergecraft.cli.agent_local_cmd`.
 | `resolve_roles(reviewer)` returns both, stable order | `…::test_resolve_roles_returns_both_reviewers_in_stable_order` | unit |
 | `validate()` rejects empty chain | `…::test_registry_validate_rejects_empty_model_chain` | unit / error |
 | `validate()` rejects unreachable lens | `…::test_registry_validate_rejects_unreachable_lens` | unit / error |
+| `resolve_role_levels` — all-parallel (one level) | `…::test_resolve_role_levels_all_parallel_one_level` | unit |
+| `resolve_role_levels` — full chain (one per level) | `…::test_resolve_role_levels_full_chain_one_per_level` | unit |
+| `resolve_role_levels` — diamond (`b`/`c` after `a`) | `…::test_resolve_role_levels_diamond_two_siblings_same_level` | unit |
 
 Pinned API: `Registry.resolve_roles`, `Registry.resolve_role_levels` (W5).
 
@@ -117,7 +120,7 @@ Pinned API: `mergecraft.cli.workflow_cmd.parse_auth_manifest`, roster run-start 
 | W2 | reconciled — `tests/config/test_agent_roster.py`, `tests/config/test_agent_roster_trust.py::test_pr_head_*` |
 | W3 | `tests/cli/test_agent_cmd.py` |
 | W4 | reconciled — `tests/cli/test_agent_local_cmd.py` |
-| W5 | `tests/agents/test_agent_roster_registry.py` |
+| W5 | reconciled — `tests/agents/test_agent_roster_registry.py` |
 | W6 | `tests/agents/test_multi_reviewer_execution.py` |
 | W7 | `tests/cli/test_agent_roster_auth_manifest.py` |
 | W8 | `tests/cli/test_agent_roster_init.py` |
