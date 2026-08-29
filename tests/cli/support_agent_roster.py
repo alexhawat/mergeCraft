@@ -38,7 +38,6 @@ models:
 MALFORMED_SLOTS: tuple[str, ...] = ("p-1", "pX", "1", "p 0")
 
 W2_XFAIL = pytest.mark.xfail(reason="green after W2: slot primitives", strict=False)
-W3_XFAIL = pytest.mark.xfail(reason="green after W3: mergecraft agent CLI", strict=False)
 W4_XFAIL = pytest.mark.xfail(reason="green after W4: agent-local scope", strict=False)
 W5_XFAIL = pytest.mark.xfail(reason="green after W5: registry multiplicity", strict=False)
 W6_XFAIL = pytest.mark.xfail(reason="green after W6: multi-reviewer execution", strict=False)
@@ -247,7 +246,6 @@ __all__ = [
     "MALFORMED_SLOTS",
     "REVIEWER_MERGE_MODULE",
     "W2_XFAIL",
-    "W3_XFAIL",
     "W4_XFAIL",
     "W5_XFAIL",
     "W6_XFAIL",

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 from tests.cli.support_agent_roster import (
-    W3_XFAIL,
     bootstrap_review_repo,
     config_text,
     import_agent_roster,
@@ -42,7 +41,6 @@ def _require_agent_namespace() -> None:
     assert "assign-model" in output
 
 
-@W3_XFAIL
 def test_agent_create_reviewer2_writes_role(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _require_agent_namespace()
     write_config(tmp_path)
@@ -54,7 +52,6 @@ def test_agent_create_reviewer2_writes_role(tmp_path: Path, monkeypatch: MonkeyP
     assert entry.get("role") == "reviewer"
 
 
-@W3_XFAIL
 def test_agent_create_with_after_writes_after_key(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _require_agent_namespace()
     write_config(tmp_path)
@@ -76,7 +73,6 @@ def test_agent_create_with_after_writes_after_key(tmp_path: Path, monkeypatch: M
     assert "after" not in config["agents"]["reviewer2"]
 
 
-@W3_XFAIL
 def test_after_unknown_agent_is_load_time_error(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     mod = import_agent_roster()
     raw = {
@@ -93,7 +89,6 @@ def test_after_unknown_agent_is_load_time_error(tmp_path: Path, monkeypatch: Mon
         mod.load_roster(raw)
 
 
-@W3_XFAIL
 def test_after_cycle_is_load_time_error(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     mod = import_agent_roster()
     raw = {
@@ -119,7 +114,6 @@ def test_after_cycle_is_load_time_error(tmp_path: Path, monkeypatch: MonkeyPatch
     "bad_name",
     ["Reviewer", "-bad", "bad name", "a" * 33, "reviewer!"],
 )
-@W3_XFAIL
 def test_agent_create_rejects_d11_pattern_violations(
     bad_name: str,
     tmp_path: Path,
@@ -134,7 +128,6 @@ def test_agent_create_rejects_d11_pattern_violations(
     assert "pattern" in output or "invalid" in output or "name" in output
 
 
-@W3_XFAIL
 def test_agent_create_rejects_second_orchestrator(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _require_agent_namespace()
     write_config(tmp_path)
@@ -145,7 +138,6 @@ def test_agent_create_rejects_second_orchestrator(tmp_path: Path, monkeypatch: M
     assert "orchestrator" in output
 
 
-@W3_XFAIL
 def test_agent_assign_model_works_on_non_agent_role_name(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -161,7 +153,6 @@ def test_agent_assign_model_works_on_non_agent_role_name(
     assert chain[0] == slug
 
 
-@W3_XFAIL
 def test_agent_delete_refuses_last_reviewer(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _require_agent_namespace()
     write_config(
@@ -184,7 +175,6 @@ agents:
     assert "reviewer:" in config_text(tmp_path)
 
 
-@W3_XFAIL
 def test_agent_delete_refuses_last_verifier(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _require_agent_namespace()
     write_config(
