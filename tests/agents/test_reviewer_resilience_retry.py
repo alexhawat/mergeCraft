@@ -46,7 +46,6 @@ def _run_ctx(tool_ctx: ToolContext) -> AgentRunContext:
     )
 
 
-@pytest.mark.xfail(reason="green after W5: record last_terminal_rejection", strict=False)
 def test_scope_rejection_records_last_terminal_rejection(tmp_path: Path) -> None:
     from mergecraft.mcp.verdict import ensure_review_scope_for_terminal
 
@@ -58,7 +57,6 @@ def test_scope_rejection_records_last_terminal_rejection(tmp_path: Path) -> None
     assert getattr(state, "last_terminal_rejection", None) == "scope_unavailable"
 
 
-@pytest.mark.xfail(reason="green after W5: zero resumes for scope rejection", strict=False)
 @pytest.mark.asyncio
 async def test_retry_loop_performs_zero_resumes_for_scope_rejection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -151,7 +149,6 @@ async def test_stop_hook_remains_retryable_once(
     assert len(prompts) == 1
 
 
-@pytest.mark.xfail(reason="green after W5: scope_unavailable deterministic publish", strict=False)
 @pytest.mark.asyncio
 async def test_non_retryable_scope_emits_diagnostic_and_publishes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

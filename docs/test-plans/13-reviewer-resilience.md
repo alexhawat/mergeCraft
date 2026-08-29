@@ -12,6 +12,13 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | Removed `@pytest.mark.xfail` from 9 ergonomics tests | W3 git verb/config allowlist landed; tests pass without xfail |
 | `test_checkout_pr_parameter_aliases_resolve_to_pull_number` | Already green; no xfail was present |
 
+## W5 reconciliation (post-`6f97c882`)
+
+| Fix | Rationale |
+| --- | --- |
+| Removed `@pytest.mark.xfail` from 3 retry tests | W5 post-run classification, `last_terminal_rejection`, and deterministic publish landed |
+| `test_phase_guards.py` fresh-state assertions | W5 changed `init_tool_state` default `review_phase` from implicit `"INIT"` to `""`; scope gate still maps empty → INIT via `_current_review_phase` |
+
 ## W4 reconciliation (post-`d625ff4a`)
 
 | Fix | Rationale |
