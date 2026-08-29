@@ -116,10 +116,20 @@ def _parse_git_remote() -> tuple[str, str]:
     return match.group(1), match.group(2)
 
 
-def _set_gh_secret(*, name: str, value: str, repo_slug: str) -> bool:
+def _set_gh_secret(*, name: str, value: str, repo_slug: str | None = None) -> bool:
+    if "\n" in value:
+        logger.warning(
+            "refusing to set Actions secret {} — multi-line values break GitHub "
+            "log masking and redact every subsequent `{{` in job output",
+            name,
+        )
+        return False
+    cmd = ["gh", "secret", "set", name]
+    if repo_slug:
+        cmd.extend(["--repo", repo_slug])
     try:
         subprocess.run(
-            ["gh", "secret", "set", name, "--repo", repo_slug],
+            cmd,
             input=value,
             text=True,
             check=True,

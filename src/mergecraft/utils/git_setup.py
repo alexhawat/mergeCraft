@@ -81,11 +81,19 @@ def register_created_path(path: str) -> None:
     _created_paths.add(resolved)
 
 
+def _register_log_drain() -> None:
+    """Register loguru queue drain beside temp cleanup (D6)."""
+    from mergecraft.utils.log import register_log_drain_at_exit
+
+    register_log_drain_at_exit()
+
+
 def _register_atexit_cleanup() -> None:
     global _atexit_registered
     if _atexit_registered:
         return
     atexit.register(cleanup_temp_directory)
+    _register_log_drain()
     _atexit_registered = True
 
 

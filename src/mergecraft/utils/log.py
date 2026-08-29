@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import sys
 from contextlib import suppress
@@ -11,6 +12,7 @@ from loguru import logger
 
 _CONFIGURED = False
 _STDERR_HANDLER_ID: int | None = None
+_DRAIN_REGISTERED = False
 _BOUND_CONTEXT: dict[str, Any] = {
     "run_id": None,
     "repo": None,
@@ -121,7 +123,7 @@ def configure_logging(*, force: bool = False, level: str | None = None) -> None:
             sys.stderr,
             level=effective_level,
             serialize=True,
-            enqueue=False,
+            enqueue=True,
             backtrace=effective_level == "DEBUG",
             diagnose=False,
         )
@@ -137,11 +139,30 @@ def configure_logging(*, force: bool = False, level: str | None = None) -> None:
                 if effective_level == "DEBUG"
                 else "<level>{message}</level>"
             ),
-            enqueue=False,
+            enqueue=True,
             backtrace=effective_level == "DEBUG",
             diagnose=False,
         )
     _CONFIGURED = True
+    register_log_drain_at_exit()
+
+
+def drain_loguru_queue() -> None:
+    """Flush enqueued log records before process exit (D6).
+
+    ``enqueue=True`` sinks defer writes to a background thread; without an
+    explicit drain a short-lived Action step can lose its tail.
+    """
+    logger.complete()
+
+
+def register_log_drain_at_exit() -> None:
+    """Register ``drain_loguru_queue`` once per process (idempotent)."""
+    global _DRAIN_REGISTERED
+    if _DRAIN_REGISTERED:
+        return
+    atexit.register(drain_loguru_queue)
+    _DRAIN_REGISTERED = True
 
 
 # Configure on import so ``from mergecraft.utils.log import logger`` just works.
@@ -151,8 +172,10 @@ __all__ = [
     "bind_run_context",
     "clear_run_context",
     "configure_logging",
+    "drain_loguru_queue",
     "is_debug_enabled",
     "logger",
+    "register_log_drain_at_exit",
     "resolve_log_format",
     "resolve_log_level",
 ]

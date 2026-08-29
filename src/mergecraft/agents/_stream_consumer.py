@@ -51,7 +51,6 @@ Exports:
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -234,21 +233,16 @@ def _resolve_active_span_for_otel_bridge() -> Span | None:
     return None
 
 
-def _echo_line_to_stdout(line: str) -> None:
-    """Echo a streamed line to ``sys.stdout`` so the activity monitor stays armed.
+def _echo_line_to_log(line: str) -> None:
+    """Emit a streamed NDJSON line through the shared loguru queue (D6).
 
-    The activity monitor (``utils/activity.py``) patches ``sys.stdout.write``
-    to call ``mark_activity`` on every non-noise chunk. Without this echo,
-    the W6 streaming read loop bypasses stdout entirely and the activity
-    monitor can time out on a long, quiet run (D13). A newline is appended
-    so a partial chunk still triggers the patched write.
+    Stream output and structured logs share one ``enqueue=True`` sink so the
+    runner never merges unsynchronised writes from two descriptors.
     """
     try:
-        sys.stdout.write(line)
-        if not line.endswith("\n"):
-            sys.stdout.write("\n")
+        logger.info("{}", line)
     except Exception as exc:
-        logger.debug("stream consumer stdout echo failed: {}", exc)
+        logger.debug("stream consumer log echo failed: {}", exc)
 
 
 def consume_stream(
@@ -292,10 +286,9 @@ def consume_stream(
 
         accumulator.parsed_event_count += 1
 
-        # The activity monitor is patched onto ``sys.stdout.write``. Echo
-        # every well-formed line so a streaming run keeps the monitor armed
-        # (D13). Malformed lines do not echo — they're noise by definition.
-        _echo_line_to_stdout(stripped)
+        # Route every well-formed line through the log queue (D6). Malformed
+        # lines are noise and are not echoed.
+        _echo_line_to_log(stripped)
 
         # T3.2 — when a mergeCraft span is active, wrap the handler call in
         # ``attach_trace_context`` so any nested OTel auto-instrumented

@@ -60,6 +60,7 @@ from mergecraft.cli.global_surface import (
     ColorMode,
     OutputFormat,
     apply_global_cli_options,
+    drain_log_queue_after_command,
     emit_cli_json,
     validate_log_level_option,
 )
@@ -143,7 +144,7 @@ app.add_typer(audit_cmd.app, name="audit")
 app.add_typer(support_bundle_cmd.app, name="support-bundle")
 
 
-@app.callback(invoke_without_command=True)
+@app.callback(invoke_without_command=True, result_callback=drain_log_queue_after_command)
 def _root(
     ctx: typer.Context,
     version: bool = typer.Option(
