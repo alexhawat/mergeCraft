@@ -24,6 +24,7 @@ class _RecordingGitHub(GitHubClient):
         self, *, reject_all_comments: bool = False, approve_rejected: bool = False
     ) -> None:
         super().__init__(token="test-token")
+        self.review_payload: dict[str, Any] = {}
         self.review_payloads: list[dict[str, Any]] = []
         self.reject_all_comments = reject_all_comments
         self.approve_rejected = approve_rejected
@@ -31,6 +32,7 @@ class _RecordingGitHub(GitHubClient):
     async def create_review(
         self, owner: str, repo: str, pull_number: int, **payload: Any
     ) -> dict[str, Any]:
+        self.review_payload = payload
         self.review_payloads.append(payload)
         if self.approve_rejected and payload.get("event") == "APPROVE":
             request = httpx.Request("POST", "https://api.github.com/reviews")
