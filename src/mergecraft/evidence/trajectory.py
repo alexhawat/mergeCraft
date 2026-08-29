@@ -40,6 +40,7 @@ Exports:
     TrajectoryRecord: The full record, ready for the packet and the auditor.
     build_trajectory_record: Assemble the record from run state (pure).
     classify_tool_intent: Map a tool call onto its trajectory intent.
+    classify_failure_class: Derive a failure class from recorded error text.
     record_tool_call: Append one mediated call to the run's state.
 """
 
@@ -47,9 +48,9 @@ from __future__ import annotations
 
 import hashlib
 import shlex
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mergecraft.analyzers.redact import redact_secrets
 
@@ -65,6 +66,46 @@ SOURCE_EXTERNAL_TRACE: Final[str] = "external-trace"
 
 Intent = Literal["read", "modify", "verify", "complete", "report", "other"]
 """What a tool call was *for*, as far as the trajectory is concerned."""
+
+FailureClass = Literal["schema", "policy", "environment", "transient", "unknown"]
+"""How a failed tool call should be interpreted by the trajectory auditor."""
+
+# JSON-RPC ``-32602`` and pydantic/jsonschema validation shapes recorded in error
+# text. Classifying here by string match is weaker than inspecting the typed
+# exception at ``mcp/shared.py::execute`` (plan 13's seam) — follow-up:
+# ``classify_failure_at_execute`` should stamp ``failure_class`` at the choke
+# point so this module never re-parses prose.
+_SCHEMA_FAILURE_MARKERS: Final[tuple[str, ...]] = (
+    "-32602",
+    "invalid arguments for",
+    "input validation error",
+    "validation error",
+    "pydantic",
+)
+
+# Guard refusals and mode/policy blocks surfaced as tool errors.
+_POLICY_FAILURE_MARKERS: Final[tuple[str, ...]] = (
+    "invalid git subcommand",
+    "not available through this tool",
+    "invalid parameters for tool",
+    "refused",
+    "mode_not_implemented",
+)
+
+# Network / overload signatures that warrant a retry, not a process indictment.
+_TRANSIENT_FAILURE_MARKERS: Final[tuple[str, ...]] = (
+    "connection reset",
+    "reset by peer",
+    "temporarily unavailable",
+    "timeout",
+    "timed out",
+    "broken pipe",
+    "502",
+    "503",
+    "504",
+    "429",
+    "rate limit",
+)
 
 # Intent by MCP tool name. `shell` and `git` are absent on purpose: both are
 # general-purpose, so their intent is derived from the command (see
@@ -207,8 +248,16 @@ class ToolCallRecord(BaseModel):
     ok: bool
     outcome_ok: bool | None = None
     error: str | None = None
+    failure_class: FailureClass = "unknown"
+    """Classifier for ``ok=False`` rows; derived from ``error`` when unset."""
     command: str | None = None
     paths: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _derive_failure_class(self) -> Self:
+        if not self.ok and self.error and self.failure_class == "unknown":
+            self.failure_class = classify_failure_class(self.error)
+        return self
 
 
 class ExternalTraceRef(BaseModel):
@@ -331,6 +380,38 @@ def _command_intent(tool: str, command: str) -> Intent:
     return "other"
 
 
+def classify_failure_class(error: str | None) -> FailureClass:
+    """Derive a failure class from the error text stored on a tool call.
+
+    String matching on recorded prose is a deliberate trade-off: it lets plan 12
+    classify failures in the auditor without editing ``mcp/shared.py::execute``,
+    which plan 13 owns. The follow-up is to stamp ``failure_class`` from the
+    typed exception at that choke point and treat this function as a fallback
+    for records that predate the seam.
+    """
+    if not error:
+        return "unknown"
+    lowered = error.lower()
+    if any(marker in lowered for marker in _SCHEMA_FAILURE_MARKERS):
+        return "schema"
+    if any(marker in lowered for marker in _POLICY_FAILURE_MARKERS):
+        return "policy"
+    from mergecraft.agents.codex import USER_NAMESPACE_FAILURES, is_user_namespace_failure
+    from mergecraft.mcp.git import _AUTH_FAILURE_MARKERS
+
+    if is_user_namespace_failure(error) or any(
+        marker in error for marker in USER_NAMESPACE_FAILURES
+    ):
+        return "environment"
+    if any(marker in lowered for marker in _AUTH_FAILURE_MARKERS):
+        return "environment"
+    if "newuidmap" in lowered or "bwrap" in lowered:
+        return "environment"
+    if any(marker in lowered for marker in _TRANSIENT_FAILURE_MARKERS):
+        return "transient"
+    return "unknown"
+
+
 def classify_tool_intent(tool: str, arguments: dict[str, Any] | None) -> Intent:
     """Return the trajectory intent of one tool call.
 
@@ -382,6 +463,7 @@ def record_tool_call(
     and surfaced as an Action output.
     """
     command_raw = str((arguments or {}).get("command") or "") or None
+    error_text = _truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None
     row = ToolCallRecord(
         sequence=len(state.tool_calls) + 1,
         tool=tool,
@@ -389,7 +471,8 @@ def record_tool_call(
         intent=classify_tool_intent(tool, arguments),
         ok=ok,
         outcome_ok=outcome_ok,
-        error=_truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None,
+        error=error_text,
+        failure_class=classify_failure_class(error_text) if not ok and error_text else "unknown",
         command=_truncate(redact_secrets(command_raw), _MAX_COMMAND_CHARS) if command_raw else None,
         paths=_paths_in(arguments),
     )
@@ -517,10 +600,12 @@ __all__ = [
     "SOURCE_RUN_DIFF",
     "TRAJECTORY_SCHEMA_VERSION",
     "ExternalTraceRef",
+    "FailureClass",
     "Intent",
     "ToolCallRecord",
     "TrajectoryRecord",
     "build_trajectory_record",
+    "classify_failure_class",
     "classify_tool_intent",
     "outcome_ok_from_result",
     "record_tool_call",

@@ -25,7 +25,7 @@ Exports:
 
 from __future__ import annotations
 
-from collections import Counter
+import re
 from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, ConfigDict
@@ -50,6 +50,16 @@ BROAD_EDIT_FILE_THRESHOLD: Final[int] = 25
 
 # Two identical calls is a retry. Three is a loop.
 REPEATED_CALL_THRESHOLD: Final[int] = 3
+
+# Schema slips the agent corrects within this window are not process defects.
+SCHEMA_SELF_CORRECT_WINDOW: Final[int] = 3
+
+_PR_COMMAND_RE: Final[re.Pattern[str]] = re.compile(r"pull/(?P<pr>\d+)/|pr-(?P<pr2>\d+)")
+_CHECKOUT_PR_SIGNATURE_RE: Final[re.Pattern[str]] = re.compile(r":(?P<pr>\d+)$")
+_IMMUTABLE_GIT_SHOW_RE: Final[re.Pattern[str]] = re.compile(
+    r"git\s+show\s+[0-9a-f]{4,40}:",
+    re.IGNORECASE,
+)
 
 _TOOL = "trajectory"
 _CATEGORY = "Maintainability & Code Quality"
@@ -126,6 +136,7 @@ def _finding(
     message: str,
     path: str = "",
     evidence: list[str] | None = None,
+    severity: str | None = None,
 ) -> Finding:
     """Build a `Finding` for a named check, carrying its severity and action."""
     check = _BY_ID[rule_id]
@@ -138,7 +149,7 @@ def _finding(
         tool=_TOOL,
         rule_id=rule_id,
         category=_CATEGORY,
-        severity=check.severity,
+        severity=severity or check.severity,
         confidence="certain",
         message=message,
         path=path,
@@ -170,17 +181,142 @@ def _changed_unread_file(record: TrajectoryRecord) -> list[Finding]:
     ]
 
 
+def _pr_target(call: ToolCallRecord) -> str | None:
+    if call.command:
+        match = _PR_COMMAND_RE.search(call.command)
+        if match is not None:
+            return match.group("pr") or match.group("pr2")
+    if call.tool == "checkout_pr" and call.signature:
+        match = _CHECKOUT_PR_SIGNATURE_RE.search(call.signature)
+        if match is not None:
+            return match.group("pr")
+    return None
+
+
+def _call_target(call: ToolCallRecord) -> str:
+    pr = _pr_target(call)
+    if pr is not None:
+        return f"pr:{pr}"
+    if call.intent in {"verify", "modify"} and call.tool not in {"shell", "git"}:
+        return call.tool
+    if call.paths:
+        return f"{call.tool}:path:{','.join(sorted(call.paths))}"
+    if call.command:
+        return f"{call.tool}:cmd:{call.command}"
+    return call.signature
+
+
+def _same_intent_and_target(left: ToolCallRecord, right: ToolCallRecord) -> bool:
+    return left.intent == right.intent and _call_target(left) == _call_target(right)
+
+
+def _was_retried(call: ToolCallRecord, calls: list[ToolCallRecord]) -> bool:
+    return any(
+        later.sequence > call.sequence and _same_intent_and_target(call, later) for later in calls
+    )
+
+
+def _schema_self_corrected(call: ToolCallRecord, calls: list[ToolCallRecord]) -> bool:
+    if call.failure_class != "schema":
+        return False
+    window_end = call.sequence + SCHEMA_SELF_CORRECT_WINDOW
+    for later in calls:
+        if later.sequence <= call.sequence or later.sequence > window_end:
+            continue
+        if later.ok and (later.signature == call.signature or later.tool == call.tool):
+            return True
+    return False
+
+
+def _is_immutable_rev_read(call: ToolCallRecord) -> bool:
+    if call.tool != "git" or not call.command:
+        return False
+    return _IMMUTABLE_GIT_SHOW_RE.search(call.command) is not None
+
+
+def _mutable_target_read(call: ToolCallRecord) -> bool:
+    if call.tool in {"list_check_runs", "get_pull_request"}:
+        return True
+    if call.tool == "git" and call.command:
+        head = call.command.strip().split(maxsplit=2)
+        if len(head) >= 2 and head[0] == "git" and head[1] == "status":
+            return True
+        if head and head[0] == "status":
+            return True
+    return False
+
+
+def _qualifies_for_loop(call: ToolCallRecord) -> bool:
+    if call.intent in {"modify", "verify"}:
+        return True
+    if call.intent != "read":
+        return False
+    if _is_immutable_rev_read(call):
+        return False
+    return _mutable_target_read(call)
+
+
+def _environment_failure_rollup(record: TrajectoryRecord) -> list[Finding]:
+    env_calls = [
+        call for call in record.tool_calls if not call.ok and call.failure_class == "environment"
+    ]
+    if not env_calls:
+        return []
+    namespace = any(
+        "newuidmap" in (call.error or "").lower()
+        or "bwrap" in (call.command or "").lower()
+        or "namespace" in (call.error or "").lower()
+        for call in env_calls
+    )
+    if namespace:
+        from mergecraft.agents.codex import user_namespace_failure_hint
+
+        return [
+            _finding(
+                "ignored-tool-error",
+                message=user_namespace_failure_hint(),
+                evidence=[call.error or call.command or call.tool for call in env_calls[:3]],
+                severity="Major",
+            )
+        ]
+    sample = env_calls[0]
+    return [
+        _finding(
+            "ignored-tool-error",
+            message=f"{sample.tool} failed due to an environment constraint and was not retried",
+            evidence=[sample.error or "environment failure"],
+            severity="Major",
+        )
+    ]
+
+
 def _ignored_tool_error(record: TrajectoryRecord) -> list[Finding]:
-    """A call raised and that tool was never invoked again."""
-    findings: list[Finding] = []
-    for call in record.tool_calls:
+    """A call raised and that intent on that target was never invoked again."""
+    findings: list[Finding] = list(_environment_failure_rollup(record))
+    policy_observed = False
+    calls = list(record.tool_calls)
+    for call in calls:
         if call.ok:
             continue
-        retried = any(
-            later.tool == call.tool and later.sequence > call.sequence
-            for later in record.tool_calls
-        )
-        if retried:
+        if call.failure_class == "schema" and _schema_self_corrected(call, calls):
+            continue
+        if call.failure_class == "policy":
+            if not policy_observed and not _was_retried(call, calls):
+                findings.append(
+                    _finding(
+                        "ignored-tool-error",
+                        message=f"{call.tool} was refused by a guard: {call.error or 'policy refusal'}",
+                        evidence=[call.error or "policy refusal"],
+                        severity="Trivial",
+                    )
+                )
+                policy_observed = True
+            continue
+        if call.failure_class == "environment":
+            continue
+        if call.failure_class not in {"transient", "unknown"}:
+            continue
+        if _was_retried(call, calls):
             continue
         findings.append(
             _finding(
@@ -214,16 +350,33 @@ def _no_post_edit_verification(record: TrajectoryRecord) -> list[Finding]:
 
 
 def _repeated_tool_loop(record: TrajectoryRecord) -> list[Finding]:
-    counts = Counter(call.signature for call in record.tool_calls)
-    return [
-        _finding(
-            "repeated-tool-loop",
-            message=f"the same call was repeated {count} times with identical arguments",
-            evidence=[f"signature={signature!r}"],
-        )
-        for signature, count in sorted(counts.items())
-        if count >= REPEATED_CALL_THRESHOLD
-    ]
+    findings: list[Finding] = []
+    calls = list(record.tool_calls)
+    index = 0
+    while index < len(calls):
+        call = calls[index]
+        if not _qualifies_for_loop(call):
+            index += 1
+            continue
+        signature = call.signature
+        count = 1
+        next_index = index + 1
+        while next_index < len(calls):
+            later = calls[next_index]
+            if not _qualifies_for_loop(later) or later.signature != signature:
+                break
+            count += 1
+            next_index += 1
+        if count >= REPEATED_CALL_THRESHOLD:
+            findings.append(
+                _finding(
+                    "repeated-tool-loop",
+                    message=(f"the same call was repeated {count} times with identical arguments"),
+                    evidence=[f"signature={signature!r}"],
+                )
+            )
+        index = next_index if next_index > index + 1 else index + 1
+    return findings
 
 
 def _unresolved_failure(record: TrajectoryRecord) -> list[Finding]:
