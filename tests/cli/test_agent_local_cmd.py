@@ -64,6 +64,13 @@ def test_agent_local_config_is_gitignored(tmp_path: Path, monkeypatch: MonkeyPat
 
 
 def test_agent_local_overrides_win_for_cli_runs(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    # Local overrides are deliberately ignored under GitHub Actions
+    # (``load_layered_config_dict`` gates the merge on
+    # ``not running_in_github_actions()``, which reads ``os.environ``
+    # directly, so ``CliRunner(env=...)`` cannot neutralize it). Clear the
+    # ambient CI variable so this test asserts the local-run behaviour it
+    # names — ``test_github_actions_ignores_local_file`` covers the CI side.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     bootstrap_review_repo(tmp_path, monkeypatch)
     slug = register_nous_model(tmp_path, _invoke)
     committed = _invoke("agent", "assign-model", "reviewer", "p0", "anthropic/claude-sonnet")
