@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
-from mergecraft.config.io import committed_config_path
+from mergecraft.config.io import config_path_for_root
 from mergecraft.config.layered import (
     load_layered_config_dict,
     local_config_path,
@@ -207,7 +207,7 @@ def explain_setting(
 
 __all__ = [
     "ConfigLayer",
-    "committed_config_path",
+    "config_path_for_root",
     "explain_setting",
     "load_layered_config_dict",
     "local_config_path",

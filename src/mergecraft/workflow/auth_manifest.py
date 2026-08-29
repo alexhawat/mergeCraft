@@ -35,6 +35,11 @@ def is_mergecraft_action_uses(uses: str, action_uses: str = _ACTION_USES) -> boo
     return bool(ref)
 
 
+def flat_credential_env_keys(provider_label: str) -> tuple[str, ...]:
+    """Return flat credential env var names for a built-in provider label."""
+    return _flat_secret_names(provider_label.strip().lower())
+
+
 def _flat_secret_names(canonical: str) -> tuple[str, ...]:
     from mergecraft.models import PROVIDERS
     from mergecraft.utils.secrets import CLOUD_BYOK_ENV_VARS_BY_LABEL
@@ -124,8 +129,7 @@ def _labels_from_env_map(env_map: dict[str, Any]) -> set[str]:
     return wired
 
 
-def parse_auth_manifest(workflow_path: Path) -> frozenset[str]:
-    """Return provider labels CI can authenticate from mergeCraft review steps."""
+def _iter_mergecraft_env_maps(workflow_path: Path) -> tuple[dict[str, Any], ...]:
     try:
         text = workflow_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -140,11 +144,10 @@ def parse_auth_manifest(workflow_path: Path) -> frozenset[str]:
         msg = f"{workflow_path} must be a mapping at the top level"
         raise WorkflowAuthManifestError(msg)
 
-    wired: set[str] = set()
+    env_maps: list[dict[str, Any]] = []
     jobs = parsed.get("jobs")
     if not isinstance(jobs, dict):
-        return frozenset()
-
+        return ()
     for job_def in jobs.values():
         if not isinstance(job_def, dict):
             continue
@@ -159,14 +162,36 @@ def parse_auth_manifest(workflow_path: Path) -> frozenset[str]:
                 continue
             env_map = step.get("env")
             if isinstance(env_map, dict):
-                wired.update(_labels_from_env_map(env_map))
+                env_maps.append(env_map)
+    return tuple(env_maps)
+
+
+def workflow_secret_bindings(workflow_path: Path) -> tuple[tuple[str, str], ...]:
+    """Return ``(env_key, secret_name)`` pairs wired on mergeCraft review steps."""
+    bindings: list[tuple[str, str]] = []
+    for env_map in _iter_mergecraft_env_maps(workflow_path):
+        for key, value in env_map.items():
+            if not isinstance(key, str):
+                continue
+            for secret_name in _secret_names_from_env_value(value):
+                bindings.append((key, secret_name))
+    return tuple(bindings)
+
+
+def parse_auth_manifest(workflow_path: Path) -> frozenset[str]:
+    """Return provider labels CI can authenticate from mergeCraft review steps."""
+    wired: set[str] = set()
+    for env_map in _iter_mergecraft_env_maps(workflow_path):
+        wired.update(_labels_from_env_map(env_map))
     return frozenset(wired)
 
 
 __all__ = [
     "DEFAULT_WORKFLOW_RELATIVE_PATH",
     "WorkflowAuthManifestError",
+    "flat_credential_env_keys",
     "is_mergecraft_action_uses",
     "parse_auth_manifest",
     "secret_name_to_provider_label",
+    "workflow_secret_bindings",
 ]

@@ -22,29 +22,24 @@ from mergecraft.cli.agents_cmd import (
     validate_agent_binding_override,
     validate_registered_model_slug,
 )
-from mergecraft.cli.config_precedence import (
-    committed_config_path,
-    load_layered_config_dict,
-    local_config_path,
-    merge_config_dicts,
-)
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.init_cmd import _ensure_gitignore_line
-from mergecraft.cli.provider_cmd import (
-    _write_config_dict,
-)
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.agent_roster import (
     AgentRosterError,
-    RosterEntry,
     add_model,
     assign_slot,
     load_roster,
     parse_slot,
     remove_slot,
 )
-from mergecraft.config.io import config_path_for_root, load_config_dict
+from mergecraft.config.io import config_path_for_root, load_config_dict, write_config_dict
+from mergecraft.config.layered import (
+    load_layered_config_dict,
+    local_config_path,
+    merge_config_dicts,
+)
 from mergecraft.config.roster_graph import AfterEdge, dispatch_levels
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.models import parse_model
@@ -245,7 +240,7 @@ def _persist_entry(
         load_roster(validation_raw)
     except AgentRosterError as exc:
         cli_bail(str(exc))
-    _write_config_dict(config_path, raw)
+    write_config_dict(config_path, raw)
 
 
 def _remove_entry(
@@ -264,7 +259,7 @@ def _remove_entry(
         load_roster(validation_raw)
     except AgentRosterError as exc:
         cli_bail(str(exc))
-    _write_config_dict(config_path, raw)
+    write_config_dict(config_path, raw)
 
 
 def _count_role_bindings(agents: dict[str, Any], role: str) -> int:
@@ -287,12 +282,6 @@ def _wired_providers_from_workflow(workflow_path: Path) -> frozenset[str]:
     except WorkflowAuthManifestError as exc:
         cli_bail(str(exc))
     return frozenset()  # unreachable — cli_bail exits
-
-
-def _dispatch_levels(entries: tuple[RosterEntry, ...]) -> dict[str, int]:
-    return dispatch_levels(
-        tuple(AfterEdge(name=entry.name, after=entry.after) for entry in entries)
-    )
 
 
 def _local_override_slot_indices(
@@ -375,8 +364,10 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         _ensure_committed_config(target_dir)
         merged_raw = load_layered_config_dict(root=target_dir)
         roster = load_roster(merged_raw)
-        levels = _dispatch_levels(roster.entries)
-        committed_raw = load_config_dict(committed_config_path(target_dir))
+        levels = dispatch_levels(
+            tuple(AfterEdge(name=entry.name, after=entry.after) for entry in roster.entries)
+        )
+        committed_raw = load_config_dict(config_path_for_root(target_dir))
         local_raw = load_config_dict(local_config_path(target_dir))
 
         table = Table(title="Agent roster")

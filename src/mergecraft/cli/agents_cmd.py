@@ -27,9 +27,9 @@ from mergecraft.cli.provider_cmd import (
     _config_path,
     _load_config_dict,
     _provider_entries,
-    _write_config_dict,
 )
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.config.io import write_config_dict
 from mergecraft.config.model_registry import normalize_model_id
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
 from mergecraft.mcp.context import (
@@ -317,7 +317,7 @@ def set_cmd(
         _replace_primary_in_entry(entry, model)
 
     validate_agent_binding_override(entry)
-    _write_config_dict(config_path, raw)
+    write_config_dict(config_path, raw)
     console.print(f"[green]updated agents.{role_key} in {config_path}[/green]")
 
 
@@ -353,7 +353,7 @@ def setmodel_cmd(
             entry = _agent_entry(agents, role_key)
             _replace_primary_in_entry(entry, slug)
             validate_agent_binding_override(entry)
-        _write_config_dict(config_path, raw)
+        write_config_dict(config_path, raw)
         console.print(f"[green]updated primary model for {len(role_keys)} agent role(s)[/green]")
         return
 
@@ -362,7 +362,7 @@ def setmodel_cmd(
     entry = _agent_entry(agents, role_key)
     _replace_primary_in_entry(entry, slug)
     validate_agent_binding_override(entry)
-    _write_config_dict(config_path, raw)
+    write_config_dict(config_path, raw)
     console.print(f"[green]updated primary model for agents.{role_key}[/green]")
 
 
@@ -386,7 +386,7 @@ def addbackupmodel_cmd(
     entry = _agent_entry(agents, role_key)
     _append_backup_to_entry(entry, slug)
     validate_agent_binding_override(entry)
-    _write_config_dict(config_path, raw)
+    write_config_dict(config_path, raw)
     console.print(f"[green]appended backup model to agents.{role_key}[/green]")
 
 

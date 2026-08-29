@@ -66,7 +66,7 @@ def dispatch_levels(nodes: Sequence[AfterEdge]) -> dict[str, int]:
     by_name = {node.name: node for node in nodes}
     levels: dict[str, int] = {}
 
-    def level_for(name: str, visiting: set[str]) -> int:
+    def level_for(name: str) -> int:
         cached = levels.get(name)
         if cached is not None:
             return cached
@@ -77,19 +77,12 @@ def dispatch_levels(nodes: Sequence[AfterEdge]) -> dict[str, int]:
         if node.after is None:
             levels[name] = 0
             return 0
-        if name in visiting:
-            cycle = " -> ".join([*visiting, name])
-            msg = f"after: cycle detected: {cycle}"
-            raise RosterGraphError(msg)
-        visiting.add(name)
-        dep_level = level_for(node.after, visiting)
-        result = dep_level + 1
+        result = level_for(node.after) + 1
         levels[name] = result
-        visiting.remove(name)
         return result
 
     for node in nodes:
-        level_for(node.name, set())
+        level_for(node.name)
     return levels
 
 

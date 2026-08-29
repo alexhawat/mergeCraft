@@ -19,7 +19,6 @@ from mergecraft.cli.provider_cmd import (
     _config_path,
     _load_config_dict,
     _provider_entries,
-    _write_config_dict,
     _write_env_label,
     indexed_credential_keys,
     load_provider_registry,
@@ -35,12 +34,13 @@ from mergecraft.cli.workflow_wf_yaml import (
     render_workflow_diff,
 )
 from mergecraft.config.agent_roster import load_roster
+from mergecraft.config.io import write_config_dict
 from mergecraft.config.provider_registry import (
     allocate_env_index,
     list_supported_harnesses,
     validate_http_url,
 )
-from mergecraft.config.roster_unwired import collect_unwired_roster_models
+from mergecraft.config.roster_unwired import collect_unwired_roster_models, reviewer_p0_slug
 from mergecraft.workflow.auth_manifest import (
     WorkflowAuthManifestError,
     is_mergecraft_action_uses,
@@ -198,7 +198,7 @@ def _plan_provider_for_workflow(
 
             def _commit_url_change() -> None:
                 data["providers"] = entries
-                _write_config_dict(config_path, data)
+                write_config_dict(config_path, data)
 
             return entry, env_index, _commit_url_change
 
@@ -229,7 +229,7 @@ def _plan_provider_for_workflow(
     def _commit_new_provider() -> None:
         entries.append(entry)
         data["providers"] = entries
-        _write_config_dict(config_path, data)
+        write_config_dict(config_path, data)
         _write_env_label(env_index, normalised_label, repo_root)
 
     return entry, env_index, _commit_new_provider
@@ -270,18 +270,6 @@ def parse_auth_manifest(workflow_path: Path) -> frozenset[str]:
     except WorkflowAuthManifestError as exc:
         cli_bail(str(exc))
     return frozenset()
-
-
-def _reviewer_p0_slug(repo_root: Path) -> str | None:
-    raw = _load_config_dict(_config_path(repo_root))
-    roster = load_roster(raw)
-    for entry in roster.entries:
-        if (entry.name == "reviewer" or entry.role == "reviewer") and entry.model_chain:
-            return entry.model_chain[0]
-    for entry in roster.entries:
-        if entry.model_chain:
-            return entry.model_chain[0]
-    return None
 
 
 def _collect_unwired_roster_models(
@@ -337,7 +325,7 @@ def _apply_workflow_sync(repo_root: Path, workflow_path: Path) -> WorkflowChange
                 affected.extend(provider_change.affected_steps)
             wired_labels.add(provider_label)
 
-        p0_slug = _reviewer_p0_slug(repo_root)
+        p0_slug = reviewer_p0_slug(_load_config_dict(_config_path(repo_root)))
         if p0_slug is not None:
             model_change = apply_model_wiring(
                 workflow_path=scratch,

@@ -323,6 +323,13 @@ class Registry:
         role: AgentRole,
         entries: list[tuple[str, AgentBinding]],
     ) -> list[tuple[str, AgentBinding]]:
+        """Pick the canonical binding when multiple agents share a role.
+
+        When the role-named key (for example ``reviewer``) is present in the
+        committed config, that binding is primary. Otherwise the first custom
+        agent id declared in config order wins so ``reviewer2`` does not sort
+        ahead of ``reviewer10``.
+        """
         role_key = role.value
         role_named = [entry for entry in entries if entry[0] == role_key]
         if role_key in self._configured_keys:
@@ -505,20 +512,13 @@ def load_registry(
         msg = f"cannot load multiple orchestrator bindings (D7): {joined}"
         raise RegistryValidationError(msg)
 
-    after_nodes = tuple(
-        AfterEdge(name=agent_key, after=binding.after)
-        for agent_key, binding in bindings.items()
-        if binding.after is not None
+    all_nodes = tuple(
+        AfterEdge(name=agent_key, after=binding.after) for agent_key, binding in bindings.items()
     )
-    if after_nodes:
-        all_nodes = tuple(
-            AfterEdge(name=agent_key, after=binding.after)
-            for agent_key, binding in bindings.items()
-        )
-        try:
-            validate_after_graph(all_nodes)
-        except RosterGraphError as exc:
-            raise RegistryValidationError(str(exc)) from exc
+    try:
+        validate_after_graph(all_nodes)
+    except RosterGraphError as exc:
+        raise RegistryValidationError(str(exc)) from exc
 
     return Registry(bindings, configured_keys=frozenset(settings.agents.keys()))
 

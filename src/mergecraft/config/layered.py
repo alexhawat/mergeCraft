@@ -10,7 +10,7 @@ import yaml
 from loguru import logger
 
 from mergecraft.config.compat import migrate_config
-from mergecraft.config.io import committed_config_path
+from mergecraft.config.io import config_path_for_root
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -75,7 +75,7 @@ def load_layered_config_dict(
         if candidate.is_file():
             return migrate_config(_read_yaml_mapping(candidate))
 
-    committed = migrate_config(_read_yaml_mapping(committed_config_path(root)))
+    committed = migrate_config(_read_yaml_mapping(config_path_for_root(root)))
     use_local = include_local if include_local is not None else not running_in_github_actions()
     if not use_local:
         return committed

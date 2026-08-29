@@ -754,7 +754,10 @@ def _run_claude_once(
     mcp_config: str,
     continue_session: bool = False,
 ) -> AgentResult:
-    from mergecraft.agents.harness_render import render_for_run
+    from mergecraft.agents.harness_render import (
+        append_reviewer_dispatch_instructions,
+        render_for_run,
+    )
 
     harness_render = render_for_run(ctx, "claude")
     model = None
@@ -792,7 +795,10 @@ def _run_claude_once(
     if skip_permissions:
         cmd.append("--dangerously-skip-permissions")
 
-    system = ctx.instructions.system
+    system = append_reviewer_dispatch_instructions(
+        ctx.instructions.system,
+        harness_render.metadata,
+    )
     user_prompt = prompt or ctx.instructions.user
     if system:
         cmd.extend(["--system-prompt", system])

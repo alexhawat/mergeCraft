@@ -85,6 +85,19 @@ def run_manifest_metadata(result: HarnessRenderResult) -> dict[str, Any]:
     return dict(result.metadata)
 
 
+def append_reviewer_dispatch_instructions(
+    system: str,
+    metadata: dict[str, Any],
+) -> str:
+    """Append level-by-level reviewer dispatch rules to a harness system prompt."""
+    block = metadata.get("reviewer_dispatch_instructions")
+    if not isinstance(block, str) or not block.strip():
+        return system
+    if not system.strip():
+        return block
+    return f"{system.rstrip()}\n\n{block}"
+
+
 def _repo_root_from_ctx(ctx: AgentRunContext | ToolContext) -> Path | None:
     tool_state = getattr(ctx, "tool_state", None)
     if tool_state is not None:
@@ -310,10 +323,16 @@ def _render_opencode(
     )
 
 
-def _prose_subagent_instructions(bindings: Sequence[AgentBinding]) -> str:
+def _prose_subagent_instructions(
+    bindings: Sequence[AgentBinding],
+    *,
+    dispatch_instructions: str = "",
+) -> str:
     parts = [
         "Registered read-only subagents (spawn via subagent tooling when needed):",
     ]
+    if dispatch_instructions:
+        parts.extend(["", dispatch_instructions, ""])
     for binding in bindings:
         parts.append(f"## {binding.agent_id}")
         parts.append(
@@ -343,11 +362,16 @@ def _degradation_row(
 def _render_prose_only(
     harness: HarnessName,
     bindings: Sequence[AgentBinding],
+    *,
+    dispatch_instructions: str = "",
 ) -> HarnessRenderResult:
     from mergecraft.agents.codex import CODEX_SUBAGENT_DEGRADATION
 
     selected_ids = tuple(binding.agent_id for binding in bindings)
-    instructions = _prose_subagent_instructions(bindings)
+    instructions = _prose_subagent_instructions(
+        bindings,
+        dispatch_instructions=dispatch_instructions,
+    )
     degradation = _degradation_row(
         harness,
         kind=CODEX_SUBAGENT_DEGRADATION.kind,
@@ -368,6 +392,7 @@ def render_agents(
     selected: Sequence[str],
     harness: HarnessName | str,
     ctx: AgentRunContext | ToolContext,
+    dispatch_instructions: str = "",
 ) -> HarnessRenderResult:
     """Project ``selected`` registry bindings into ``harness`` config (D2)."""
     harness_name: HarnessName = harness  # type: ignore[assignment]  # — harness is HarnessName | str; callers pass a valid HarnessName literal
@@ -385,7 +410,11 @@ def render_agents(
     if harness_name == "opencode":
         return _render_opencode(bindings, ctx=ctx, settings=settings)
     if harness_name in _PROSE_ONLY_HARNESSES:
-        return _render_prose_only(harness_name, bindings)
+        return _render_prose_only(
+            harness_name,
+            bindings,
+            dispatch_instructions=dispatch_instructions,
+        )
 
     msg = f"unknown harness {harness!r}"
     raise ValueError(msg)
@@ -395,12 +424,18 @@ def default_subagent_selection(
     registry: Registry,
     *,
     recall_pass: bool = False,
+    reviewer_batches: tuple[tuple[str, ...], ...] | None = None,
 ) -> tuple[str, ...]:
     """Default routed roster before AP4 lens routing — every reviewer + verifier (+ recall)."""
-    from mergecraft.agents.reviewer_merge import reviewer_dispatch_batches
+    from mergecraft.review.roster_dispatch import (
+        flatten_dispatch_batches,
+        reviewer_dispatch_batches,
+    )
 
-    batches = reviewer_dispatch_batches(registry)
-    roster: list[str] = [agent_id for batch in batches for agent_id in batch]
+    batches = (
+        reviewer_batches if reviewer_batches is not None else reviewer_dispatch_batches(registry)
+    )
+    roster: list[str] = list(flatten_dispatch_batches(batches))
     verifier = registry.resolve_role(AgentRole.verifier)
     roster.append(verifier.agent_id)
     if recall_pass:
@@ -435,25 +470,40 @@ def render_for_run(
 ) -> HarnessRenderResult:
     """Load the repo registry and render the routed roster for one agent run."""
     from mergecraft.agents.registry import load_registry
+    from mergecraft.review.roster_dispatch import (
+        format_reviewer_dispatch_instructions,
+        reviewer_dispatch_batches,
+    )
 
     root = _repo_root_from_ctx(ctx) or Path(ctx.tmpdir)
     settings = load_repo_settings(root=root)
     registry = load_registry(
         settings=settings, repo_root=root, model_head=_requested_model_head(ctx)
     )
+    batches = reviewer_dispatch_batches(registry)
+    dispatch_instructions = format_reviewer_dispatch_instructions(batches)
     roster = (
         tuple(selected)
         if selected is not None
-        else default_subagent_selection(registry, recall_pass=settings.review.recall_pass)
+        else default_subagent_selection(
+            registry,
+            recall_pass=settings.review.recall_pass,
+            reviewer_batches=batches,
+        )
     )
-    result = render_agents(registry, selected=roster, harness=harness, ctx=ctx)
-    from mergecraft.agents.reviewer_merge import reviewer_dispatch_batches
-
-    batches = reviewer_dispatch_batches(registry)
+    result = render_agents(
+        registry,
+        selected=roster,
+        harness=harness,
+        ctx=ctx,
+        dispatch_instructions=dispatch_instructions,
+    )
     if not batches:
         return result
     meta = dict(result.metadata)
     meta["reviewer_dispatch_batches"] = [list(batch) for batch in batches]
+    if dispatch_instructions:
+        meta["reviewer_dispatch_instructions"] = dispatch_instructions
     return HarnessRenderResult(
         harness=result.harness,
         payload=result.payload,
@@ -480,6 +530,7 @@ def merge_manifest_metadata(
 __all__ = [
     "HarnessRenderResult",
     "UnrenderableBindingError",
+    "append_reviewer_dispatch_instructions",
     "default_subagent_selection",
     "merge_manifest_metadata",
     "render_agents",

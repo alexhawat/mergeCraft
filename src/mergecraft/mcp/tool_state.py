@@ -323,6 +323,7 @@ class ToolState:
     pending_review_publication: dict[str, Any] | None = None
     terminal_submission: TerminalSubmission | None = None
     terminal_submission_conflict: bool = False
+    reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
