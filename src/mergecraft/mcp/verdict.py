@@ -162,6 +162,32 @@ def scope_blocks_terminal(tool_state: ToolState) -> bool:
     return not (mode == "IncrementalReview" and primary.incremental_changed_paths)
 
 
+def _has_unsubmitted_review(tool_state: ToolState) -> bool:
+    """Return whether a Review-mode run still lacks a terminal submission."""
+    mode = tool_state.selected_mode
+    if mode == "Review":
+        return tool_state.terminal_submission is None
+    if mode == "IncrementalReview":
+        return tool_state.terminal_submission is None and not tool_state.final_summary_written
+    return False
+
+
+def record_scope_rejection_if_blocked(tool_state: ToolState) -> None:
+    """Record a scope-guard refusal when post-run classification needs one (W5)."""
+    if tool_state.last_terminal_rejection is not None:
+        return
+    if not scope_blocks_terminal(tool_state):
+        return
+    if terminal_tool_was_attempted(tool_state):
+        record_terminal_rejection(tool_state, REJECTION_SCOPE_UNAVAILABLE)
+        return
+    if tool_state.selected_mode not in _REVIEW_MODES:
+        return
+    if not _has_unsubmitted_review(tool_state):
+        return
+    record_terminal_rejection(tool_state, REJECTION_SCOPE_UNAVAILABLE)
+
+
 def _scope_refusal_detail(tool_state: ToolState) -> str:
     primary = primary_repo_state(tool_state)
     if primary.diff_path:
@@ -909,6 +935,7 @@ __all__ = [
     "build_validation_state",
     "establish_offline_review_scope",
     "establish_review_scope_tool",
+    "record_scope_rejection_if_blocked",
     "record_terminal_rejection",
     "record_validated_terminal_submission",
     "recorded_submission_payload",

@@ -27,33 +27,6 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 
-def _record_scope_refusal_if_needed(tool_state: ToolState) -> None:
-    """Record or prime a scope-guard refusal for post-run classification (W5)."""
-    from mergecraft.mcp.verdict import (
-        REJECTION_SCOPE_UNAVAILABLE,
-        ensure_review_scope_for_terminal,
-        record_terminal_rejection,
-        scope_blocks_terminal,
-        terminal_tool_was_attempted,
-    )
-
-    if tool_state.last_terminal_rejection is not None:
-        return
-    if not scope_blocks_terminal(tool_state):
-        return
-    if terminal_tool_was_attempted(tool_state):
-        record_terminal_rejection(tool_state, REJECTION_SCOPE_UNAVAILABLE)
-        return
-    if tool_state.selected_mode not in ("Review", "IncrementalReview"):
-        return
-    if get_unsubmitted_review(tool_state) is None:
-        return
-    try:
-        ensure_review_scope_for_terminal(tool_state, "submit_review_verdict")
-    except ValueError:
-        pass
-
-
 def _post_run_issues_retryable(issues: PostRunIssues, tool_state: ToolState) -> bool:
     """Classify whether a post-run resume can change the outcome (D5)."""
     from mergecraft.mcp.verdict import REJECTION_SCOPE_UNAVAILABLE
@@ -173,7 +146,9 @@ async def collect_post_run_issues(
     skip_summary_stale: bool = False,
 ) -> PostRunIssues:
     issues = PostRunIssues()
-    _record_scope_refusal_if_needed(ctx.tool_state)
+    from mergecraft.mcp.verdict import record_scope_rejection_if_blocked
+
+    record_scope_rejection_if_blocked(ctx.tool_state)
     status = get_git_status()
     mode = ctx.tool_state.selected_mode
     if status:
@@ -332,7 +307,9 @@ async def run_post_run_retry_loop(
     usage = result.usage
     skip_summary = False
     previous_signature: tuple[Any, ...] | None = None
-    _record_scope_refusal_if_needed(ctx.tool_state)
+    from mergecraft.mcp.verdict import record_scope_rejection_if_blocked
+
+    record_scope_rejection_if_blocked(ctx.tool_state)
     for attempt in range(MAX_POST_RUN_RETRIES):
         issues = await collect_post_run_issues(ctx, skip_summary_stale=skip_summary)
         if not has_post_run_issues(issues):

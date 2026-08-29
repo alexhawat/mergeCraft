@@ -218,6 +218,22 @@ def _safe_iter_lines(stream: Iterable[str]) -> Iterator[str]:
         yield text
 
 
+def _safe_invoke_handler(
+    handler: EventHandler,
+    accumulator: StreamSpanAccumulator,
+    event: dict[str, Any],
+) -> None:
+    """Invoke ``handler`` and log handler failures without aborting the stream."""
+    try:
+        handler(accumulator, event)
+    except Exception as exc:
+        logger.warning(
+            "stream consumer handler failed on event type={!r}: {}",
+            event.get("type"),
+            exc,
+        )
+
+
 def _resolve_active_span_for_otel_bridge() -> Span | None:
     """Return the currently active mergeCraft ``Span`` for the OTel bridge.
 
@@ -301,24 +317,10 @@ def consume_stream(
             except ImportError:
                 attach_trace_context = None  # type: ignore[assignment]
             if attach_trace_context is not None:
-                try:
-                    with attach_trace_context(active_span):
-                        handler(accumulator, event)
-                except Exception as exc:
-                    logger.warning(
-                        "stream consumer handler failed on event type={!r}: {}",
-                        event.get("type"),
-                        exc,
-                    )
+                with attach_trace_context(active_span):
+                    _safe_invoke_handler(handler, accumulator, event)
                 continue
-        try:
-            handler(accumulator, event)
-        except Exception as exc:
-            logger.warning(
-                "stream consumer handler failed on event type={!r}: {}",
-                event.get("type"),
-                exc,
-            )
+        _safe_invoke_handler(handler, accumulator, event)
 
 
 __all__ = [

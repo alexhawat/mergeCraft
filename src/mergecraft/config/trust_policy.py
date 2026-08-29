@@ -103,11 +103,9 @@ def resolve_trust_policy(
     if _is_fork_pull_request(event):
         execution = "untrusted"
         authority = "untrusted"
-    elif _same_repo_pull_request_target(event_name, event):
-        if level == "analyzers":
-            execution = "trusted"
-        elif level == "full":
-            execution = "trusted"
+    elif _same_repo_pull_request_target(event_name, event) and level in ("analyzers", "full"):
+        execution = "trusted"
+        if level == "full":
             authority = "trusted"
 
     return TrustPolicy(
