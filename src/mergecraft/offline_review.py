@@ -95,7 +95,17 @@ def merge_analyzer_findings_into_result(
     """Fold analyzer findings into structured output used for CLI exit codes."""
     if not extra:
         return result
-    existing = parse_offline_review_findings(result)
+    if not result.structured_output:
+        existing: list[Finding] = []
+    else:
+        try:
+            existing = [
+                Finding.model_validate(row)
+                for row in parse_findings_payload(result.structured_output)
+            ]
+        except ValueError:
+            # Preserve invalid agent output so finalize fails closed.
+            return result
     seen = {row.fingerprint for row in existing}
     merged = list(existing)
     for finding in extra:

@@ -42,7 +42,7 @@ class TrustPolicy:
 def _is_fork_pull_request(event: dict[str, Any]) -> bool:
     pull_request = event.get("pull_request")
     if not isinstance(pull_request, dict):
-        return True
+        return False
     head = pull_request.get("head")
     if not isinstance(head, dict):
         return True
