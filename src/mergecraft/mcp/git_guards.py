@@ -445,7 +445,7 @@ def _is_denied_config_key(key: str) -> bool:
     """Whether a ``git config --get`` key may expose credential material."""
     if key.startswith(("credential.", "url.")):
         return True
-    return ".extraHeader" in key
+    return ".extraheader" in key.lower()
 
 
 def _config_key_from_get_arg(arg: str, args: list[str], idx: int) -> tuple[str, int]:
