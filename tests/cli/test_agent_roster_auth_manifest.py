@@ -1,4 +1,4 @@
-"""W1.7 — auth manifest & fail-closed wiring (wave plan 11, green after W7)."""
+"""W1.7 — auth manifest & fail-closed wiring (wave plan 11)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.cli.support_agent_roster import (
-    W7_XFAIL,
     WORKFLOW_GATED_STEP,
     WORKFLOW_INDEXED_STEP,
     bootstrap_review_repo,
@@ -42,7 +41,6 @@ def _invoke(*argv: str, env: dict[str, str] | None = None) -> object:
     return runner.invoke(app, list(argv), env=merged)
 
 
-@W7_XFAIL
 def test_parse_auth_manifest_reads_indexed_llm_provider_env(tmp_path: Path) -> None:
     workflow_path = scaffold_workflow_file(tmp_path, WORKFLOW_INDEXED_STEP)
     parse_auth_manifest = require_parse_auth_manifest()
@@ -50,7 +48,6 @@ def test_parse_auth_manifest_reads_indexed_llm_provider_env(tmp_path: Path) -> N
     assert "nous" in labels
 
 
-@W7_XFAIL
 def test_parse_auth_manifest_counts_secret_gated_step(tmp_path: Path) -> None:
     workflow_path = scaffold_workflow_file(tmp_path, WORKFLOW_GATED_STEP)
     parse_auth_manifest = require_parse_auth_manifest()
@@ -58,7 +55,6 @@ def test_parse_auth_manifest_counts_secret_gated_step(tmp_path: Path) -> None:
     assert "openai" in labels
 
 
-@W7_XFAIL
 def test_agent_assign_model_bails_on_unwired_provider(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -71,7 +67,6 @@ def test_agent_assign_model_bails_on_unwired_provider(
     assert "workflow" in output or "mergecraft.yml" in output or "provider" in output
 
 
-@W7_XFAIL
 def test_agent_assign_model_allow_unwired_permits_with_warning(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -83,7 +78,6 @@ def test_agent_assign_model_allow_unwired_permits_with_warning(
     assert "warn" in output or "unwired" in output
 
 
-@W7_XFAIL
 def test_agent_local_accepts_unwired_provider(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     bootstrap_review_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
     slug = register_nous_model(tmp_path, _invoke)
@@ -91,7 +85,6 @@ def test_agent_local_accepts_unwired_provider(tmp_path: Path, monkeypatch: Monke
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
 
 
-@W7_XFAIL
 def test_run_start_validation_fails_closed_on_unwired_provider(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -104,7 +97,6 @@ def test_run_start_validation_fails_closed_on_unwired_provider(
         validate(repo_root=tmp_path, workflow_path=tmp_path / ".github/workflows/mergecraft.yml")
 
 
-@W7_XFAIL
 def test_unwired_provider_and_empty_secret_messages_differ(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -136,7 +128,6 @@ def test_unwired_provider_and_empty_secret_messages_differ(
     assert "empty" in str(empty_exc).lower() or "secret" in str(empty_exc).lower()
 
 
-@W7_XFAIL
 def test_workflow_sync_check_exits_nonzero_and_writes_nothing(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -150,7 +141,6 @@ def test_workflow_sync_check_exits_nonzero_and_writes_nothing(
     assert workflow_text(tmp_path) == before
 
 
-@W7_XFAIL
 def test_workflow_sync_apply_adds_missing_step_with_owned_keys_only(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
