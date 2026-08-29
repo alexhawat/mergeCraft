@@ -16,6 +16,7 @@ from mergecraft.workflow.auth_manifest import (
     is_mergecraft_action_uses,
     parse_auth_manifest,
     secret_name_to_provider_label,
+    workflow_secret_bindings,
 )
 
 
@@ -45,3 +46,10 @@ def test_parse_auth_manifest_missing_file_raises() -> None:
 def test_secret_name_to_provider_label_maps_known_keys() -> None:
     assert secret_name_to_provider_label("ANTHROPIC_API_KEY") == "anthropic"
     assert secret_name_to_provider_label("CURSOR_API_KEY") == "cursor"
+
+
+def test_workflow_secret_bindings_reads_secret_refs(tmp_path: Path) -> None:
+    workflow_path = scaffold_workflow_file(tmp_path, WORKFLOW_INDEXED_STEP)
+    bindings = workflow_secret_bindings(workflow_path)
+    assert ("LLM_PROVIDER_1_API_KEY", "NOUS_API_KEY") in bindings
+    assert ("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY") in bindings

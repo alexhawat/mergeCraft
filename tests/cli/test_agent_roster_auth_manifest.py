@@ -24,6 +24,8 @@ from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
+from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
+from mergecraft.review.roster_auth import RosterSecretEmptyError, validate_roster_at_run_start
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -126,6 +128,19 @@ def test_unwired_provider_and_empty_secret_messages_differ(
     assert str(unwired_exc).lower() != str(empty_exc).lower()
     assert "credential step" in str(unwired_exc).lower() or "unwired" in str(unwired_exc).lower()
     assert "empty" in str(empty_exc).lower() or "secret" in str(empty_exc).lower()
+
+
+def test_validate_roster_at_run_start_auto_detects_empty_secrets(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    bootstrap_review_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_INDEXED_STEP)
+    slug = register_nous_model(tmp_path, _invoke)
+    assign = _invoke("agent", "assign-model", "reviewer", "p0", slug)
+    assert assign.exit_code == CLI_SUCCESS_EXIT_CODE, assign.stdout + assign.stderr
+    monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
+    snapshot = capture_repo_settings_snapshot(root=tmp_path)
+    with pytest.raises(RosterSecretEmptyError, match="NOUS_API_KEY"):
+        validate_roster_at_run_start(snapshot=snapshot)
 
 
 def test_workflow_sync_check_exits_nonzero_and_writes_nothing(

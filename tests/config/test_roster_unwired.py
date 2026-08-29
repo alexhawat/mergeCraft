@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mergecraft.config.agent_roster import Roster, RosterEntry, load_roster
 from mergecraft.config.roster_unwired import collect_unwired_roster_models, iter_roster_model_slots
 
@@ -47,3 +49,17 @@ def test_collect_unwired_roster_models_ignores_wired_provider() -> None:
     )
     unwired = collect_unwired_roster_models(roster=roster, wired_providers=frozenset({"anthropic"}))
     assert unwired == []
+
+
+def test_collect_unwired_roster_models_raises_on_invalid_slug() -> None:
+    roster = load_roster(
+        {
+            "agents": {
+                "reviewer": {
+                    "modelChain": ["not-a-valid-model-slug"],
+                },
+            },
+        }
+    )
+    with pytest.raises(ValueError, match=r"not-a-valid-model-slug|invalid|model"):
+        collect_unwired_roster_models(roster=roster, wired_providers=frozenset({"anthropic"}))
