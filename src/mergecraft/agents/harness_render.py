@@ -396,10 +396,11 @@ def default_subagent_selection(
     *,
     recall_pass: bool = False,
 ) -> tuple[str, ...]:
-    """Default routed roster before AP4 lens routing — reviewer + verifier (+ recall)."""
-    reviewer = registry.resolve_role(AgentRole.reviewer)
+    """Default routed roster before AP4 lens routing — every reviewer + verifier (+ recall)."""
+    reviewers = registry.resolve_roles(AgentRole.reviewer)
     verifier = registry.resolve_role(AgentRole.verifier)
-    roster: list[str] = [reviewer.agent_id, verifier.agent_id]
+    roster: list[str] = [binding.agent_id for binding in reviewers]
+    roster.append(verifier.agent_id)
     if recall_pass:
         recall = registry.resolve_role(AgentRole.recall)
         roster.append(recall.agent_id)
