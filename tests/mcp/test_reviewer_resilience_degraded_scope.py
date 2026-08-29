@@ -70,9 +70,6 @@ def _ctx(tmp_path: Path, github: GitHubClient) -> ToolContext:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after W4: auth-class head fetch degrades to api-only", strict=False
-)
 @pytest.mark.asyncio
 async def test_auth_head_fetch_yields_api_only_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -88,17 +85,18 @@ async def test_auth_head_fetch_yields_api_only_scope(
     monkeypatch.setattr("mergecraft.mcp.checkout._run_git", _auth_fail)
     monkeypatch.setattr("mergecraft.mcp.checkout.get_git_status", lambda cwd: "")
 
-    result = await checkout_pr_tool(_ctx(tmp_path, github)).execute({"pull_number": 546})
+    ctx = _ctx(tmp_path, github)
+    result = await checkout_pr_tool(ctx).execute({"pull_number": 546})
     assert result.is_error is False, result.content[0]["text"]
     payload = json.loads(result.content[0]["text"])
     assert payload["scope"] == "api-only"
     assert payload.get("diffPath")
     diff_path = payload["diffPath"]
     assert diff_path.endswith(".diff") or diff_path
-    assert _ctx(tmp_path, github).tool_state.review_phase == ReviewPhase.ESTABLISH_SCOPE.value
+    assert payload["reviewPhase"] == ReviewPhase.ESTABLISH_SCOPE.value
+    assert ctx.tool_state.review_phase == ReviewPhase.ESTABLISH_SCOPE.value
 
 
-@pytest.mark.xfail(reason="green after W4: checkout_sha from API head.sha", strict=False)
 @pytest.mark.asyncio
 async def test_checkout_sha_from_api_when_local_ref_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -120,7 +118,6 @@ async def test_checkout_sha_from_api_when_local_ref_missing(
     assert primary_repo_state(ctx.tool_state).checkout_sha == head_sha
 
 
-@pytest.mark.xfail(reason="green after W4: degraded run may approve (D2)", strict=False)
 @pytest.mark.asyncio
 async def test_degraded_scope_allows_terminal_approve(tmp_path: Path) -> None:
     from mergecraft.mcp.verdict import submit_review_verdict_tool
@@ -145,7 +142,6 @@ async def test_degraded_scope_allows_terminal_approve(tmp_path: Path) -> None:
     assert result.is_error is False, result.content[0]["text"]
 
 
-@pytest.mark.xfail(reason="green after W4: name degradation in checkout payload", strict=False)
 @pytest.mark.asyncio
 async def test_degraded_payload_names_limitation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -168,7 +164,6 @@ async def test_degraded_payload_names_limitation(
     assert "api" in str(degraded).lower() or "head" in str(degraded).lower()
 
 
-@pytest.mark.xfail(reason="green after W4: transient fetch retries once (D3)", strict=False)
 @pytest.mark.asyncio
 async def test_transient_fetch_retries_once_before_degrade(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -190,7 +185,6 @@ async def test_transient_fetch_retries_once_before_degrade(
     assert calls["n"] == 2
 
 
-@pytest.mark.xfail(reason="green after W4: auth-class fetch never retries (D3)", strict=False)
 @pytest.mark.asyncio
 async def test_auth_class_fetch_does_not_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -219,7 +213,6 @@ def _establish_review_scope_tool(ctx: ToolContext):
     return factory(ctx)
 
 
-@pytest.mark.xfail(reason="green after W4: establish_review_scope accepts real diff", strict=False)
 @pytest.mark.asyncio
 async def test_establish_review_scope_accepts_valid_diff(tmp_path: Path) -> None:
     head_sha = "1" * 40
@@ -238,9 +231,6 @@ async def test_establish_review_scope_accepts_valid_diff(tmp_path: Path) -> None
 @pytest.mark.parametrize(
     "diff_text",
     ["", "not-a-diff"],
-)
-@pytest.mark.xfail(
-    reason="green after W4: establish_review_scope refuses bad diff (D4)", strict=False
 )
 @pytest.mark.asyncio
 async def test_establish_review_scope_refuses_invalid_diff(tmp_path: Path, diff_text: str) -> None:
@@ -261,9 +251,6 @@ async def test_establish_review_scope_refuses_invalid_diff(tmp_path: Path, diff_
     assert result.is_error is True
 
 
-@pytest.mark.xfail(
-    reason="green after W4: establish_review_scope refuses wrong head (D4)", strict=False
-)
 @pytest.mark.asyncio
 async def test_establish_review_scope_refuses_wrong_head_sha(tmp_path: Path) -> None:
     diff_path = tmp_path / "real.diff"
@@ -277,9 +264,6 @@ async def test_establish_review_scope_refuses_wrong_head_sha(tmp_path: Path) -> 
     assert result.is_error is True
 
 
-@pytest.mark.xfail(
-    reason="green after W4: get_commit_info registers scope at PR head", strict=False
-)
 @pytest.mark.asyncio
 async def test_get_commit_info_registers_scope_for_pr_head(tmp_path: Path) -> None:
     head_sha = "5" * 40
@@ -294,7 +278,6 @@ async def test_get_commit_info_registers_scope_for_pr_head(tmp_path: Path) -> No
     assert primary.diff_path
 
 
-@pytest.mark.xfail(reason="green after W4: get_commit_info ignores non-head sha", strict=False)
 @pytest.mark.asyncio
 async def test_get_commit_info_does_not_register_scope_for_other_sha(tmp_path: Path) -> None:
     head_sha = "6" * 40
@@ -306,10 +289,9 @@ async def test_get_commit_info_does_not_register_scope_for_other_sha(tmp_path: P
 
     await get_commit_info_tool(ctx).execute({"sha": "7" * 40})
     assert ctx.tool_state.review_phase == "INIT"
-    assert primary.diff_path == ""
+    assert primary.diff_path is None
 
 
-@pytest.mark.xfail(reason="green after W4: memoize git show rev:path reads", strict=False)
 @pytest.mark.asyncio
 async def test_git_show_immutable_read_returns_cached_on_repeat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

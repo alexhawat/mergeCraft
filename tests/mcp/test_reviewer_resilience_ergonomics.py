@@ -24,7 +24,6 @@ class _RunGitRecorder:
 
 
 @pytest.mark.parametrize("subcommand", ["show-ref", "for-each-ref", "ls-remote"])
-@pytest.mark.xfail(reason="green after W3: allow missing read-only verbs", strict=False)
 @pytest.mark.asyncio
 async def test_readonly_discovery_verbs_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
@@ -38,7 +37,6 @@ async def test_readonly_discovery_verbs_allowed(
     assert recorder.calls == [[subcommand]]
 
 
-@pytest.mark.xfail(reason="green after W3: config --get remote.origin.url", strict=False)
 @pytest.mark.asyncio
 async def test_config_get_remote_origin_url_allowed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -62,7 +60,6 @@ async def test_config_get_remote_origin_url_allowed(
         "url.https://github.com/.insteadOf",
     ],
 )
-@pytest.mark.xfail(reason="green after W3: refuse credential config keys", strict=False)
 @pytest.mark.asyncio
 async def test_config_get_credential_keys_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, key: str
@@ -85,7 +82,6 @@ async def test_config_get_credential_keys_refused(
         ["user.email", "evil@example.com"],
     ],
 )
-@pytest.mark.xfail(reason="green after W3: config writes remain refused", strict=False)
 @pytest.mark.asyncio
 async def test_config_write_forms_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]

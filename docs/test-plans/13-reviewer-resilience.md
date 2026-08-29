@@ -5,6 +5,22 @@ Worktree: `../mergecraft-resilience` on `wave/reviewer-resilience`
 Authoring wave: **W1** (`test-creator`). Implementation: **W2–W9**.
 xfail-reconciliation: per impl wave (`strict=False` until green).
 
+## W3 reconciliation (post-`d625ff4a`)
+
+| Fix | Rationale |
+| --- | --- |
+| Removed `@pytest.mark.xfail` from 9 ergonomics tests | W3 git verb/config allowlist landed; tests pass without xfail |
+| `test_checkout_pr_parameter_aliases_resolve_to_pull_number` | Already green; no xfail was present |
+
+## W4 reconciliation (post-`d625ff4a`)
+
+| Fix | Rationale |
+| --- | --- |
+| Removed `@pytest.mark.xfail` from 12 degraded-scope tests | W4 degraded checkout, `establish_review_scope`, and scope registration landed |
+| `test_auth_head_fetch_yields_api_only_scope` | Assert `reviewPhase` on checkout payload and `ctx.tool_state` (was reading a fresh `_ctx`) |
+| `test_get_commit_info_does_not_register_scope_for_other_sha` | `RepoToolState.diff_path` defaults to `None`, not `""` |
+| `test_read_only_roles_exclude_mutating_tools_except_checkout_pr` | Admit `establish_review_scope` on primary reviewer (`PRIMARY_MUTATING_ALLOWLIST`) |
+
 ## W0 reconciliation
 
 | Fix | Rationale |
