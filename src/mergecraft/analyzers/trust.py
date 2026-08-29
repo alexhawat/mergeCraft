@@ -169,21 +169,30 @@ def derive_trust_tier(
     *,
     shell: str = "restricted",
     offline: bool = False,
+    event_name: str | None = None,
 ) -> TrustTier:
-    """Derive trust tier from the native GitHub event shape (W0.4 probe)."""
+    """Derive trust tier from the native GitHub event shape (W0.4 probe).
+
+    ``event_name`` overrides the ambient ``GITHUB_EVENT_NAME``. A caller that
+    already knows which event it is reasoning about must pass it, so the tier
+    and any event-name-dependent decision beside it cannot disagree: resolving
+    one from an argument and the other from the environment produced a
+    ``trusted`` posture for a ``pull_request_target`` run whenever the two
+    differed. ``None`` keeps the ambient lookup for callers inside a real run.
+    """
     _ = shell
     if offline:
         return "trusted"
     if not event:
         return "untrusted"
 
-    event_name = _event_name()
-    if event_name == "workflow_dispatch":
+    resolved_event_name = _event_name() if event_name is None else event_name
+    if resolved_event_name == "workflow_dispatch":
         return "trusted"
-    if event_name == "pull_request_target":
+    if resolved_event_name == "pull_request_target":
         return "untrusted"
 
-    if event_name == "pull_request":
+    if resolved_event_name == "pull_request":
         pull_request = event.get("pull_request")
         if isinstance(pull_request, dict):
             head = pull_request.get("head")
@@ -193,7 +202,7 @@ def derive_trust_tier(
                     return "trusted"
         return "untrusted"
 
-    if event_name == "issue_comment":
+    if resolved_event_name == "issue_comment":
         # ``resolve_native_event`` already authorises comment-driven runs by
         # author association (OWNER / MEMBER / COLLABORATOR).  Mirror that
         # gate here so a maintainer's ``issue_comment`` earns the trusted tier

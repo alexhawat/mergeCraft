@@ -48,8 +48,29 @@ def test_default_resolved_trust_policy_is_off(tmp_path: Path) -> None:
 
 
 def test_derive_trust_tier_unchanged_for_pull_request_target() -> None:
-    tier = derive_trust_tier(event=SAME_REPO_EVENT, shell="restricted")
+    # Pass the event name rather than relying on an unset ``GITHUB_EVENT_NAME``:
+    # under CI the ambient value is ``pull_request``, which combined with a
+    # same-repo head returned ``trusted`` and made this assertion pass locally
+    # for the wrong reason.
+    tier = derive_trust_tier(
+        event=SAME_REPO_EVENT, shell="restricted", event_name="pull_request_target"
+    )
     assert tier == "untrusted"
+
+
+def test_derive_trust_tier_argument_beats_ambient_event_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit event name must win over ``GITHUB_EVENT_NAME``.
+
+    ``mergecraft trust show`` asks about ``pull_request_target`` from inside a
+    job whose own event is something else; if the ambient value won, the command
+    would report a permissive posture that does not apply to the run it names.
+    """
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    assert derive_trust_tier(event=SAME_REPO_EVENT, event_name="pull_request_target") == "untrusted"
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    assert derive_trust_tier(event=SAME_REPO_EVENT, event_name="pull_request") == "trusted"
 
 
 @pytest.mark.parametrize(

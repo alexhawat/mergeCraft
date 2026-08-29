@@ -96,7 +96,12 @@ def resolve_trust_policy(
         resolved_from = "live_load"
 
     level = _read_self_review_level(settings)
-    base_tier = derive_trust_tier(event=event, shell=shell, offline=offline)
+    # One source of truth for the event name. Deriving the base tier from the
+    # ambient ``GITHUB_EVENT_NAME`` while judging ``_same_repo_pull_request_target``
+    # from the argument let the two disagree — a ``pull_request_target`` run
+    # resolved ``trusted`` at ``selfReview: off`` whenever the ambient value said
+    # ``pull_request``, and ``mergecraft trust show`` reported that posture.
+    base_tier = derive_trust_tier(event=event, shell=shell, offline=offline, event_name=event_name)
     execution: ExecutionTrust = base_tier
     authority: AuthorityTrust = base_tier
 

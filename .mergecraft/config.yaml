@@ -39,5 +39,13 @@ ciEvidence:
 #               --i-understand-this-grants-approval-authority (exceptional opt-out)
 # Real PAT-backed APPROVE for self-review still flows through mergecraft-approve.yml
 # when the structural mergecraft-approval check passes — see docs/trust-policy.md.
-trust:
-  selfReview: "off"
+#
+# The `trust:` block is deliberately absent while `selfReview` is `off`, which is
+# already the model default. The integration coverage gate runs the *base* tree's
+# tests from a worktree inside this checkout, so a key introduced in the same PR
+# that adds its schema field is parsed by base code that does not know it yet and
+# fails `extra="forbid"`. Add the block in a follow-up, or when setting a non-off
+# level:
+#
+#   trust:
+#     selfReview: "off"
