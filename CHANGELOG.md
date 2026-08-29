@@ -7,7 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every review run that resolves a pull request number posts a deterministic run
+  record — a sticky progress comment and a mandatory review-body preamble rendered
+  from the same function, so a green review that says nothing is no longer
+  indistinguishable from a review that never ran (#546 post-mortem)
+- The merge-evidence packet gains a `run_health` section (schema `1.11.0`) for
+  run-scoped findings partitioned out of the top-level `findings` list; change
+  findings and run observations now have separate audiences and surfaces
+- `Finding.scope` (`change` | `run`, default `change`) and `FindingSource`
+  `"trajectory"` so trajectory auditor rows are attributed as process evidence,
+  not PR defects
+- Job step summary (`GITHUB_STEP_SUMMARY`) written from `_publish` with outcome,
+  pre-merge rows, and findings — capped at GitHub's 1 MiB with the header intact
+- Evidence packet persisted to a workflow artifact on every review rung
+  (`if: always()`, 30-day retention) so the packet survives runner teardown
+- `MERGECRAFT_ACTION_SHA` workflow variable — one pin definition shared by all
+  three review rungs, with `make action-pin-check` enforcing staleness and
+  rung parity (#532)
+- Action image digest pin gate (`action-image-digest-check`) and halved
+  `wait-for-ci` poll cadence (20s → 10s, #528)
+
 ### Fixed
+
+- Trajectory findings no longer block merge: `blocking_findings()` is the single
+  predicate shared by the terminal-verdict gate, packet gate, and approval check;
+  run-scoped rows are dropped before severity grading (D2/D3)
+- A review whose inline anchors are all invalid still lands its body and verdict
+  — anchors are pre-validated against the diff, 422 on non-APPROVE reviews is
+  recovered server-side, and a total anchor failure posts zero inline comments
+  instead of losing the review (#530)
+- Trajectory auditor classifies tool failures before counting them, so
+  self-corrected schema slips, policy refusals, and environment faults no
+  longer masquerade as ignored errors that block the PR
+- Status-check summaries are derived from the evidence packet they report — no
+  hardcoded prose that the packet can contradict; failed check posts log at
+  WARNING with a matching `::warning::` annotation (#546 post-mortem)
+- Codex fallback routing reads `decision.verdict` from the in-process evidence
+  packet instead of racing the check-runs API
+
+### Changed
 
 - Enforcement modes and the approval gate now agree on what blocks. The
   gate-facing severity is the single authority, so ``contributes_blocker`` is
