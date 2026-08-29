@@ -12,6 +12,8 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | `git config --list` refused or omits `credential.*`, `url.*`, and `*.extraHeader` keys | `test_config_list_refused_or_omits_credential_keys` |
 | `git config --get-all http.https://github.com/.extraHeader` refused | `test_config_get_all_extra_header_refused` |
 | `git config --get-all credential.helper` refused | `test_config_get_all_credential_helper_refused` |
+| `git config --get http.https://github.com/.extraheader` refused (case-insensitive) | `test_config_get_lowercase_extraheader_refused` |
+| `git config --get-all http.https://github.com/.extraheader` refused (case-insensitive) | `test_config_get_all_lowercase_extraheader_refused` |
 
 ## Thermos regression — review scope evidence (post-`a6b96018`)
 
@@ -103,6 +105,8 @@ blocks or filters `--list` output.
 | Thermos HIGH #1 — `config --list` refused or omits credential keys | post-W10 | `tests/mcp/test_reviewer_resilience_ergonomics.py::test_config_list_refused_or_omits_credential_keys` |
 | Thermos HIGH #1 — `config --get-all` on `http.*.extraHeader` refused | post-W10 | `tests/mcp/test_reviewer_resilience_ergonomics.py::test_config_get_all_extra_header_refused` |
 | Thermos HIGH #1 — `config --get-all` on `credential.*` refused | post-W10 | `tests/mcp/test_reviewer_resilience_ergonomics.py::test_config_get_all_credential_helper_refused` |
+| Thermos turn 3 — lowercase `.extraheader` on `config --get` refused | post-W10 | `tests/mcp/test_reviewer_resilience_ergonomics.py::test_config_get_lowercase_extraheader_refused` |
+| Thermos turn 3 — lowercase `.extraheader` on `config --get-all` refused | post-W10 | `tests/mcp/test_reviewer_resilience_ergonomics.py::test_config_get_all_lowercase_extraheader_refused` |
 | Refuse `config --unset` / set forms | W3 | `tests/mcp/test_reviewer_resilience_ergonomics.py` |
 | `checkout_pr` aliases `pr_number` / `issue_number` | W3 | `tests/mcp/test_reviewer_resilience_ergonomics.py` |
 | Unknown alias → schema error (green today) | W3 | `tests/mcp/test_reviewer_resilience_ergonomics.py` |

@@ -131,6 +131,25 @@ async def test_config_list_refused_or_omits_credential_keys(
         assert "Authorization: Basic deadbeef" not in value
 
 
+_LOWERCASE_EXTRAHEADER_KEY = "http.https://github.com/.extraheader"
+
+
+@pytest.mark.asyncio
+async def test_config_get_lowercase_extraheader_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos turn 3 — lowercase ``.extraheader`` on ``config --get`` is refused."""
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {"command": "config", "args": ["--get", _LOWERCASE_EXTRAHEADER_KEY]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
 @pytest.mark.asyncio
 async def test_config_get_all_extra_header_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -145,6 +164,22 @@ async def test_config_get_all_extra_header_refused(
             "command": "config",
             "args": ["--get-all", "http.https://github.com/.extraHeader"],
         }
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.asyncio
+async def test_config_get_all_lowercase_extraheader_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos turn 3 — lowercase ``.extraheader`` on ``config --get-all`` is refused."""
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {"command": "config", "args": ["--get-all", _LOWERCASE_EXTRAHEADER_KEY]}
     )
     assert result.is_error is True, result.content[0]["text"]
     assert recorder.calls == []
