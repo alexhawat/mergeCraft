@@ -258,11 +258,7 @@ def _persist_credential(
         return
 
     console.print(f"saving [cyan]{name}[/cyan] via gh secret set...")
-    wrote_github = _set_gh_secret(
-        name=name,
-        value=_single_line_credential(name=name, value=value),
-        repo_slug=target.github.repo_slug,
-    )
+    wrote_github = _set_gh_secret(name=name, value=value, repo_slug=target.github.repo_slug)
     secrets_url = f"https://github.com/{target.github.repo_slug}/settings/secrets/actions"
     if wrote_github:
         console.print(f"[green]saved {name}[/green] to GitHub Actions secrets")
