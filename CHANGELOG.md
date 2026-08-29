@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Claude driver: pass ``--verbose`` alongside ``--print
+  --output-format=stream-json``. The CLI refuses that pair without it and exits
+  1 before emitting a single event, so the Claude backstop failed on every run
+  it was ever asked to handle; the failure only became legible once zero-event
+  runs began reporting their stderr (#557)
 - Trajectory findings no longer block merge: `blocking_findings()` is the single
   predicate shared by the terminal-verdict gate, packet gate, and approval check;
   run-scoped rows are dropped before severity grading (D2/D3)
