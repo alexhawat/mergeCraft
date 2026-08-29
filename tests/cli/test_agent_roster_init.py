@@ -1,4 +1,4 @@
-"""W1.8 — init seeds working reviewer pipeline (wave plan 11, green after W8)."""
+"""W1.8 — init seeds working reviewer pipeline (wave plan 11)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.cli.support_agent_roster import (
-    W8_XFAIL,
     agents_entry,
     init_git_repo,
     plain_cli_output,
@@ -46,7 +45,6 @@ def _preferred_slug(provider: str) -> str:
     pytest.fail(f"no preferred model for provider {provider!r}")
 
 
-@W8_XFAIL
 def test_init_plus_auth_seeds_single_model_chain_entry(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -64,7 +62,6 @@ def test_init_plus_auth_seeds_single_model_chain_entry(
     assert len(chain) == 1
 
 
-@W8_XFAIL
 def test_seeded_entry_uses_authenticated_provider_preferred_model(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -80,7 +77,6 @@ def test_seeded_entry_uses_authenticated_provider_preferred_model(
     assert chain == [expected]
 
 
-@W8_XFAIL
 def test_init_on_existing_roster_does_not_overwrite(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -104,7 +100,6 @@ agents:
     assert chain == ["anthropic/claude-sonnet"]
 
 
-@W8_XFAIL
 def test_review_runs_after_init_and_auth_without_third_command(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

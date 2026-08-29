@@ -41,7 +41,6 @@ W2_XFAIL = pytest.mark.xfail(reason="green after W2: slot primitives", strict=Fa
 W4_XFAIL = pytest.mark.xfail(reason="green after W4: agent-local scope", strict=False)
 W5_XFAIL = pytest.mark.xfail(reason="green after W5: registry multiplicity", strict=False)
 W7_XFAIL = pytest.mark.xfail(reason="green after W7: auth manifest fail-closed", strict=False)
-W8_XFAIL = pytest.mark.xfail(reason="green after W8: init seeds p0", strict=False)
 
 WORKFLOW_INDEXED_STEP = """\
 name: mergecraft
@@ -248,7 +247,6 @@ __all__ = [
     "W4_XFAIL",
     "W5_XFAIL",
     "W7_XFAIL",
-    "W8_XFAIL",
     "WORKFLOW_GATED_STEP",
     "WORKFLOW_INDEXED_STEP",
     "agents_entry",
