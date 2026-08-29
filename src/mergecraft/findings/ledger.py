@@ -34,10 +34,20 @@ _VIA_MERGECRAFT_MARKER = "*via mergecraft*"
 
 _LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+)(?::([^>]*?))? -->")
 _LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-]+):([^>]+) -->")
+# Agent prose: the block must end at a real terminator. Falling back to ``\Z``
+# here meant a marker the agent merely quoted — plausible in a repo that reviews
+# its own reviewer — swallowed every finding after it. A bare marker with no
+# terminator is removed on its own by the ``replace`` in the stripper below.
 _DETERMINISTIC_RECORD_BLOCK_RE = re.compile(
+    rf"{re.escape(DETERMINISTIC_RECORD_MARKER)}[\s\S]*?"
+    r"(?=\n<!-- mergecraft-ledger:|\n\*via mergecraft\*)",
+)
+# Our own progress comment, where the record legitimately ends the body.
+_DETERMINISTIC_RECORD_BLOCK_EOF_RE = re.compile(
     rf"{re.escape(DETERMINISTIC_RECORD_MARKER)}[\s\S]*?"
     r"(?=\n<!-- mergecraft-ledger:|\n\*via mergecraft\*|\Z)",
 )
+_RECORD_SLOT = "\x00mergecraft-deterministic-record\x00"
 
 _ISSUE_COMMENT_PAGE_SIZE = 100
 # GitHub issue comments are paginated at 100/page; cap total scanned comments
@@ -566,16 +576,29 @@ def _strip_deterministic_record_markers(body: str) -> str:
 
 
 def merge_deterministic_record_into_comment(body: str, *, record_block: str) -> str:
-    """Insert or replace the deterministic record block in a progress comment."""
-    cleaned = _DETERMINISTIC_RECORD_BLOCK_RE.sub("", body).replace(DETERMINISTIC_RECORD_MARKER, "")
-    cleaned = cleaned.strip()
+    """Insert or replace the deterministic record block in a progress comment.
+
+    When the comment already carries a record, the new one replaces it **in
+    place** so any surrounding prose keeps its position. The replacement is
+    staged through a sentinel because the rendered block itself opens with
+    ``DETERMINISTIC_RECORD_MARKER``; substituting it directly would leave the
+    freshly-inserted block matching the same pattern as the stale ones being
+    cleared.
+    """
     block = record_block.strip()
+    if DETERMINISTIC_RECORD_MARKER in body:
+        staged = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub(_RECORD_SLOT, body, count=1)
+        staged = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub("", staged)
+        staged = staged.replace(DETERMINISTIC_RECORD_MARKER, "")
+        if _PROGRESS_HEADING not in staged:
+            staged = f"{_PROGRESS_HEADING}\n\n{staged.lstrip()}"
+        return f"{staged.replace(_RECORD_SLOT, block).strip()}\n"
+    cleaned = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub("", body)
+    cleaned = cleaned.replace(DETERMINISTIC_RECORD_MARKER, "").strip()
     if not cleaned:
         return f"{_PROGRESS_HEADING}\n\n{block}\n"
     if _PROGRESS_HEADING not in cleaned:
         cleaned = f"{_PROGRESS_HEADING}\n\n{cleaned}"
-    if DETERMINISTIC_RECORD_MARKER in cleaned:
-        return f"{_DETERMINISTIC_RECORD_BLOCK_RE.sub(block, cleaned, count=1).rstrip()}\n"
     parts = cleaned.split("\n", 1)
     if parts[0].strip() == _PROGRESS_HEADING:
         tail = parts[1].strip() if len(parts) > 1 else ""
