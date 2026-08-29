@@ -13,7 +13,6 @@ from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_st
 from mergecraft.utils.log import configure_logging
 
 
-@pytest.mark.xfail(reason="green after W6: loguru enqueue=True", strict=False)
 def test_loguru_sinks_use_enqueue_true(monkeypatch: pytest.MonkeyPatch) -> None:
     from loguru import logger as loguru_logger
 
@@ -30,7 +29,6 @@ def test_loguru_sinks_use_enqueue_true(monkeypatch: pytest.MonkeyPatch) -> None:
     assert all(entry.get("enqueue") is True for entry in added)
 
 
-@pytest.mark.xfail(reason="green after W6: register log queue drain at exit", strict=False)
 def test_log_queue_drain_registered_on_atexit() -> None:
     from mergecraft.utils import git_setup
     from mergecraft.utils import log as log_mod
@@ -39,7 +37,6 @@ def test_log_queue_drain_registered_on_atexit() -> None:
     assert hasattr(git_setup, "_register_log_drain")
 
 
-@pytest.mark.xfail(reason="green after W6: concurrent log lines stay whole", strict=False)
 def test_concurrent_logger_and_stream_writes_do_not_interleave(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -100,7 +97,6 @@ def test_consume_stream_marks_activity_per_event(monkeypatch: pytest.MonkeyPatch
     assert len(marks) == 2
 
 
-@pytest.mark.xfail(reason="green after W7: remove stdout echo from consume_stream", strict=False)
 def test_consume_stream_does_not_echo_raw_lines(monkeypatch: pytest.MonkeyPatch) -> None:
     writes: list[str] = []
     monkeypatch.setattr("sys.stdout.write", lambda s: writes.append(s))

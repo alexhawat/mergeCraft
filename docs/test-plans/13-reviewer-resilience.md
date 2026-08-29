@@ -12,6 +12,13 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | Removed `@pytest.mark.xfail` from 9 ergonomics tests | W3 git verb/config allowlist landed; tests pass without xfail |
 | `test_checkout_pr_parameter_aliases_resolve_to_pull_number` | Already green; no xfail was present |
 
+## W6 reconciliation (post-`8c18875e`)
+
+| Fix | Rationale |
+| --- | --- |
+| Removed `@pytest.mark.xfail` from 3 logging tests | W6 `enqueue=True`, `drain_loguru_queue` atexit, and concurrent line-integrity landed |
+| `test_consume_stream_does_not_echo_raw_lines` | W6 routes NDJSON through the loguru queue (`_echo_line_to_log`); stdout echo contract satisfied incidentally before W7 removes the echo path |
+
 ## W5 reconciliation (post-`6f97c882`)
 
 | Fix | Rationale |
@@ -65,7 +72,7 @@ xfail-reconciliation: per impl wave (`strict=False` until green).
 | `verdict_diagnostic=scope_unavailable` + deterministic publish stub | W5 | `tests/agents/test_reviewer_resilience_retry.py` |
 | Loguru `enqueue=True` + drain | W6 | `tests/agents/test_reviewer_resilience_stream_logging.py` |
 | Concurrent writes — line integrity | W6 | `tests/agents/test_reviewer_resilience_stream_logging.py` |
-| `consume_stream` → `mark_activity()`; echo removed | W7 | `tests/agents/test_reviewer_resilience_stream_logging.py` |
+| `consume_stream` → `mark_activity()`; echo removed | W7 | `tests/agents/test_reviewer_resilience_stream_logging.py` (`echo removed` incidentally green at W6 via loguru queue) |
 | Rendered tool call/result/failure lines | W7 | `tests/agents/test_reviewer_resilience_stream_logging.py` |
 | `ACTIONS_STEP_DEBUG` retains raw NDJSON pre-D8 | W7 | `tests/agents/test_reviewer_resilience_stream_logging.py` |
 | `mcp/shared.py::execute` single error line | W7 | `tests/agents/test_reviewer_resilience_stream_logging.py` |
