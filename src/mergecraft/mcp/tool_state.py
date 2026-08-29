@@ -317,8 +317,9 @@ class ToolState:
     modes: list[Mode] = field(default_factory=list)
     review: ReviewRecord | None = None
     # D10 / VP4 — closed ``ReviewPhase`` vocabulary; advanced by checkout and
-    # verdict tools (``mcp/verdict.py``).
-    review_phase: str = "INIT"
+    # verdict tools (``mcp/verdict.py``). Empty default means the run has not
+    # yet pinned INIT after a scope-guard refusal (plan 13 W5).
+    review_phase: str = ""
     # Stashed ``create_pull_request_review`` params for ``publish_pull_request_review``.
     pending_review_publication: dict[str, Any] | None = None
     terminal_submission: TerminalSubmission | None = None
@@ -440,6 +441,9 @@ class ToolState:
     # appended) on each call. Read by ``validation_state_from_tool_context`` so
     # ``approve`` is rejected when a required gate recorded ``status: failed``.
     static_checks: list[dict[str, Any]] = field(default_factory=list)
+    # Plan 13 W5 — typed refusal from the last terminal tool attempt
+    # (``submit_review_verdict`` / ``create_pull_request_review``).
+    last_terminal_rejection: str | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

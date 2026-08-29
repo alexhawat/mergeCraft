@@ -50,6 +50,9 @@ REJECTION_REQUEST_CHANGES_NO_FINDINGS = "request_changes_without_findings"
 REJECTION_APPROVE_CONFIRMED_BLOCKER = "approve_with_confirmed_blocker"
 REJECTION_APPROVE_FAILED_GATE = "approve_with_failed_required_gate"
 REJECTION_CONFLICTING_SUBMISSION = "conflicting_submission"
+REJECTION_SCOPE_UNAVAILABLE = "scope_unavailable"
+
+_TERMINAL_TOOL_NAMES = frozenset({"submit_review_verdict", "create_pull_request_review"})
 
 
 class ReviewPhase(StrEnum):
@@ -119,7 +122,10 @@ def stamp_review_phase_on_active_span(phase: ReviewPhase) -> None:
 
 
 def _current_review_phase(tool_state: ToolState) -> ReviewPhase:
-    return ReviewPhase(tool_state.review_phase)
+    raw = tool_state.review_phase
+    if not raw:
+        return ReviewPhase.INIT
+    return ReviewPhase(raw)
 
 
 def _looks_like_unified_diff(text: str) -> bool:
@@ -127,6 +133,33 @@ def _looks_like_unified_diff(text: str) -> bool:
     if not stripped:
         return False
     return any(marker in stripped for marker in _UNIFIED_DIFF_MARKERS)
+
+
+def record_terminal_rejection(tool_state: ToolState, rejection_reason: str) -> None:
+    """Remember why the most recent terminal tool attempt was refused (W5)."""
+    tool_state.last_terminal_rejection = rejection_reason
+
+
+def terminal_tool_was_attempted(tool_state: ToolState) -> bool:
+    """Return whether a terminal review tool was invoked this run."""
+    for call in tool_state.tool_calls:
+        tool_name = getattr(call, "tool", None)
+        if tool_name in _TERMINAL_TOOL_NAMES:
+            return True
+    return False
+
+
+def scope_blocks_terminal(tool_state: ToolState) -> bool:
+    """Return whether review scope is missing for a terminal tool in Review modes."""
+    mode = tool_state.selected_mode
+    if mode not in _REVIEW_MODES:
+        return False
+    if tool_state.review_phase != ReviewPhase.INIT.value:
+        return False
+    primary = primary_repo_state(tool_state)
+    if primary.diff_path:
+        return False
+    return not (mode == "IncrementalReview" and primary.incremental_changed_paths)
 
 
 def _scope_refusal_detail(tool_state: ToolState) -> str:
@@ -224,6 +257,7 @@ def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> N
         if primary.incremental_changed_paths:
             return
     detail = _scope_refusal_detail(tool_state)
+    record_terminal_rejection(tool_state, REJECTION_SCOPE_UNAVAILABLE)
     routes = (
         "checkout_pr (fetch the PR branch or degrade to api-only with diffPath)",
         "establish_review_scope (diff_path + base_sha + head_sha matching the PR head)",
@@ -257,6 +291,7 @@ def record_validated_terminal_submission(
                 state=validation_state_from_tool_context(ctx),
             )
             if not validation.accepted:
+                record_terminal_rejection(ctx.tool_state, validation.rejection_reason or "")
                 msg = f"terminal submission rejected: {validation.rejection_reason}"
                 raise ValueError(msg)
             return existing
@@ -272,6 +307,7 @@ def record_validated_terminal_submission(
         state=validation_state_from_tool_context(ctx),
     )
     if not validation.accepted:
+        record_terminal_rejection(ctx.tool_state, validation.rejection_reason or "")
         msg = f"terminal submission rejected: {validation.rejection_reason}"
         raise ValueError(msg)
 
@@ -862,6 +898,7 @@ __all__ = [
     "REJECTION_INVALID_VERDICT",
     "REJECTION_MISSING_REQUIRED_FIELDS",
     "REJECTION_REQUEST_CHANGES_NO_FINDINGS",
+    "REJECTION_SCOPE_UNAVAILABLE",
     "REJECTION_UNKNOWN_FIELDS",
     "ReviewPhase",
     "SubmissionValidation",
@@ -870,16 +907,18 @@ __all__ = [
     "VerdictDiagnostic",
     "after_terminal_submission_recorded",
     "build_validation_state",
-    "ensure_review_scope_for_terminal",
     "establish_offline_review_scope",
     "establish_review_scope_tool",
+    "record_terminal_rejection",
     "record_validated_terminal_submission",
     "recorded_submission_payload",
     "register_review_scope",
     "revalidate_recorded_submission",
+    "scope_blocks_terminal",
     "span_attrs_for_verdict_diagnostic",
     "stamp_review_phase_on_active_span",
     "submit_review_verdict_tool",
+    "terminal_tool_was_attempted",
     "validate_submission",
     "validation_state_from_tool_context",
     "validation_state_from_tool_state",
