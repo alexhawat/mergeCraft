@@ -14,11 +14,11 @@ from pathlib import Path
 from typing import Any
 
 import typer
-import yaml
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.config.io import load_config_dict as _load_config_dict_raw
 from mergecraft.config.io import write_config_dict as _write_config_dict
 from mergecraft.config.provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,
@@ -142,14 +142,10 @@ def _env_path(cwd: Path | None = None) -> Path:
 
 
 def _load_config_dict(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {}
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if loaded is None:
-        return {}
-    if not isinstance(loaded, dict):
-        cli_bail(f"config must be a mapping: {path}")
-    return loaded
+    try:
+        return _load_config_dict_raw(path)
+    except ValueError as exc:
+        cli_bail(str(exc))
 
 
 def _provider_entries(data: dict[str, Any]) -> list[dict[str, Any]]:

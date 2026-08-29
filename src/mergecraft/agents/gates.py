@@ -23,6 +23,7 @@ from mergecraft.evidence.gate_policy import (
 from mergecraft.evidence.gate_policy import GateActionPolicy as GateActionPolicy
 from mergecraft.evidence.packet import Decision as PacketDecision
 from mergecraft.evidence.packet import MergeEvidencePacket
+from mergecraft.findings.severity import BLOCKING_SEVERITIES
 from mergecraft.mcp.server import build_orchestrator_tools
 from mergecraft.mcp.shared import (
     REVIEWER_ALLOWED_TOOL_CLASSES,
@@ -62,12 +63,6 @@ GIT_NATIVE_WRITE_DENY_CLAUDE: list[str] = [
 
 GIT_NATIVE_READ_DENY_CLAUDE: list[str] = [f"{tool}(.git/config)" for tool in CLAUDE_READ_TOOLS]
 
-
-# Severities that block the approval gate. Anything below (Minor, Trivial) is
-# advisory only — the gate treats the run as approved. Centralized here so the
-# merge-evidence plan's W2 (D12) and the analyzer plan's blocker taxonomy share
-# one source of truth.
-BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
 
 # Only rows attributed to the structural approval gate may be honoured when a
 # packet already carries an explicit ``decision`` (D9 / LR-1).

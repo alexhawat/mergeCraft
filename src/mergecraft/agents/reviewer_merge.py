@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mergecraft.review.roster_dispatch import reviewer_dispatch_batches
 from mergecraft.review.terminal_submission import (
+    TERMINAL_SUBMISSION_COUNT,
     ReviewerRun,
     append_degradation_to_summary,
     format_reviewer_degradation_summary,
@@ -14,6 +15,7 @@ from mergecraft.review.terminal_submission import (
 )
 
 __all__ = [
+    "TERMINAL_SUBMISSION_COUNT",
     "ReviewerRun",
     "append_degradation_to_summary",
     "format_reviewer_degradation_summary",

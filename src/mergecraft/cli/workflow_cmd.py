@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import typer
-import yaml
 
 from mergecraft.cli.agents_cmd import validate_registered_model_slug
 from mergecraft.cli.consoles import err_console as console
@@ -43,7 +42,7 @@ from mergecraft.config.provider_registry import (
 from mergecraft.config.roster_unwired import collect_unwired_roster_models, reviewer_p0_slug
 from mergecraft.workflow.auth_manifest import (
     WorkflowAuthManifestError,
-    is_mergecraft_action_uses,
+    iter_mergecraft_action_steps,
     secret_name_to_provider_label,
 )
 from mergecraft.workflow.auth_manifest import (
@@ -397,43 +396,9 @@ def sync_cmd(
 
 def _iter_mergecraft_steps(workflow_path: Path) -> list[dict[str, Any]]:
     try:
-        text = workflow_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        cli_bail(f"could not read {workflow_path}: {exc}")
-    try:
-        parsed = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        cli_bail(f"could not parse {workflow_path}: {exc}")
-    if not isinstance(parsed, dict):
-        cli_bail(f"{workflow_path} must be a mapping at the top level")
-    jobs = parsed.get("jobs")
-    if not isinstance(jobs, dict):
-        return []
-    rows: list[dict[str, Any]] = []
-    for job_name, job_def in jobs.items():
-        if not isinstance(job_def, dict):
-            continue
-        steps = job_def.get("steps")
-        if not isinstance(steps, list):
-            continue
-        for i, step in enumerate(steps):
-            if not isinstance(step, dict):
-                continue
-            uses = step.get("uses")
-            if not isinstance(uses, str) or not is_mergecraft_action_uses(uses):
-                continue
-            rows.append(
-                {
-                    "job": job_name,
-                    "index": i,
-                    "id": step.get("id") or step.get("name") or f"job:{job_name}/step:{i}",
-                    "model": (step.get("with") or {}).get("model")
-                    if isinstance(step.get("with"), dict)
-                    else None,
-                    "env": step.get("env") if isinstance(step.get("env"), dict) else {},
-                }
-            )
-    return rows
+        return list(iter_mergecraft_action_steps(workflow_path))
+    except WorkflowAuthManifestError as exc:
+        cli_bail(str(exc))
 
 
 @app.command("list")

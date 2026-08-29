@@ -519,8 +519,24 @@ def load_registry(
         validate_after_graph(all_nodes)
     except RosterGraphError as exc:
         raise RegistryValidationError(str(exc)) from exc
+    _validate_after_same_role(bindings)
 
     return Registry(bindings, configured_keys=frozenset(settings.agents.keys()))
+
+
+def _validate_after_same_role(bindings: dict[str, AgentBinding]) -> None:
+    for agent_key, binding in bindings.items():
+        if binding.after is None:
+            continue
+        target = bindings.get(binding.after)
+        if target is None:
+            continue
+        if binding.role != target.role:
+            msg = (
+                f"after: {binding.after!r} on {agent_key!r} must reference an agent "
+                f"with the same role ({binding.role.value} != {target.role.value})"
+            )
+            raise RegistryValidationError(msg)
 
 
 def resolve_agent_model(

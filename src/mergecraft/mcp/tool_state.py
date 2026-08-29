@@ -463,6 +463,20 @@ def record_lens_execution(
     tool_state.dispatched_lens_ids = tuple(dispatched_lens_ids)
 
 
+def record_reviewer_dispatch_error(
+    tool_state: ToolState,
+    *,
+    agent_id: str,
+    reason: str,
+) -> None:
+    """Record one reviewer subagent that produced no findings (D15)."""
+    key = agent_id.strip()
+    text = reason.strip()
+    if not key or not text:
+        return
+    tool_state.reviewer_dispatch_errors[key] = text
+
+
 def append_dispatched_lens(tool_state: ToolState, agent_id: str) -> None:
     """Append one lens id when a lens subagent completes (RC7)."""
     from mergecraft.review.lens_routing import lens_id_from_agent_id

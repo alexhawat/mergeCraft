@@ -9,7 +9,6 @@ from typing import Any
 
 import yaml
 
-from mergecraft.config.compat import migrate_config
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 
 
@@ -29,11 +28,6 @@ def load_config_dict(path: Path) -> dict[str, Any]:
         msg = f"config must be a mapping: {path}"
         raise ValueError(msg)
     return loaded
-
-
-def load_migrated_config_dict(path: Path) -> dict[str, Any]:
-    """Load and migrate a config mapping from *path*."""
-    return migrate_config(load_config_dict(path))
 
 
 def write_config_dict(path: Path, data: dict[str, Any]) -> None:
@@ -67,6 +61,5 @@ def write_config_dict(path: Path, data: dict[str, Any]) -> None:
 __all__ = [
     "config_path_for_root",
     "load_config_dict",
-    "load_migrated_config_dict",
     "write_config_dict",
 ]

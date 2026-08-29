@@ -31,8 +31,10 @@ from mergecraft.config.agent_roster import (
     add_model,
     assign_slot,
     load_roster,
+    model_chain_from_entry,
     parse_slot,
     remove_slot,
+    write_roster,
 )
 from mergecraft.config.io import config_path_for_root, load_config_dict, write_config_dict
 from mergecraft.config.layered import (
@@ -160,15 +162,6 @@ def _agent_entry(
     return {}  # unreachable — cli_bail exits
 
 
-def _model_chain_from_entry(entry: dict[str, Any]) -> list[str]:
-    chain = entry.get("modelChain")
-    if chain is None:
-        return []
-    if not isinstance(chain, list):
-        cli_bail("modelChain must be a list")
-    return [str(item) for item in chain]
-
-
 def _validate_slug(
     target_dir: Path,
     target: AgentRosterTarget,
@@ -237,9 +230,10 @@ def _persist_entry(
         _merged_raw_for_validation(target_dir, raw) if target == AgentRosterTarget.LOCAL else raw
     )
     try:
-        load_roster(validation_raw)
+        roster = load_roster(validation_raw)
     except AgentRosterError as exc:
         cli_bail(str(exc))
+    write_roster(raw, roster)
     write_config_dict(config_path, raw)
 
 
@@ -256,9 +250,10 @@ def _remove_entry(
         _merged_raw_for_validation(target_dir, raw) if target == AgentRosterTarget.LOCAL else raw
     )
     try:
-        load_roster(validation_raw)
+        roster = load_roster(validation_raw)
     except AgentRosterError as exc:
         cli_bail(str(exc))
+    write_roster(raw, roster)
     write_config_dict(config_path, raw)
 
 
@@ -307,7 +302,7 @@ def _local_override_slot_indices(
     committed_entry = committed_agents.get(agent_name)
     committed_chain: list[str] = []
     if isinstance(committed_entry, dict):
-        committed_chain = _model_chain_from_entry(committed_entry)
+        committed_chain = model_chain_from_entry(committed_entry)
     indices: set[int] = set()
     for index, slug in enumerate(merged_chain):
         if index >= len(committed_chain) or committed_chain[index] != slug:
@@ -521,7 +516,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
 
         try:
             index = parse_slot(slot)
-            chain, message = assign_slot(_model_chain_from_entry(entry), index, validated_slug)
+            chain, message = assign_slot(model_chain_from_entry(entry), index, validated_slug)
         except AgentRosterError as exc:
             cli_bail(str(exc))
 
@@ -557,7 +552,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
             validated_slug,
             allow_unwired=allow_unwired,
         )
-        chain, was_duplicate = add_model(_model_chain_from_entry(entry), validated_slug)
+        chain, was_duplicate = add_model(model_chain_from_entry(entry), validated_slug)
         if was_duplicate:
             console.print(
                 f"model {validated_slug!r} is already in the chain for agents.{agent_name}"
@@ -579,7 +574,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)
         entry = _agent_entry(agents, agent_name, target=target)
-        chain = _model_chain_from_entry(entry)
+        chain = model_chain_from_entry(entry)
         try:
             index = _resolve_remove_index(chain, token)
             updated = remove_slot(chain, index)
@@ -595,7 +590,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         name: str = typer.Argument(..., help="Agent name."),
         after: str = typer.Argument(
             ...,
-            help="Agent to run after, or --none to clear sequencing.",
+            help="Agent to run after, or --clear to clear sequencing.",
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
@@ -608,7 +603,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         if not isinstance(merged_agents, dict):
             merged_agents = agents
 
-        if after == "--none":
+        if after in {"--none", "--clear"}:
             entry.pop("after", None)
         else:
             after_name = _validate_agent_name(after)
@@ -617,7 +612,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
             entry["after"] = after_name
 
         _persist_entry(target_dir, target, config_path, raw, agents, agent_name, entry)
-        if after == "--none":
+        if after in {"--none", "--clear"}:
             console.print(f"[green]cleared after: on agents.{agent_name}[/green]")
         else:
             console.print(f"[green]set agents.{agent_name}.after to {after!r}[/green]")

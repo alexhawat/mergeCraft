@@ -677,9 +677,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
             ctx.tool_state.reviewer_dispatch_errors or None,
         )
         merged_findings = [
-            AgentFinding.model_validate(
-                {key: value for key, value in row.items() if key != "raised_by"}
-            )
+            AgentFinding.model_validate(row if isinstance(row, dict) else dict(row))
             for row in merged_raw
         ]
         validated = validated.model_copy(

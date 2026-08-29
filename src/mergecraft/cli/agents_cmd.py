@@ -29,6 +29,7 @@ from mergecraft.cli.provider_cmd import (
     _provider_entries,
 )
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.config.agent_roster import model_chain_from_entry
 from mergecraft.config.io import write_config_dict
 from mergecraft.config.model_registry import normalize_model_id
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
@@ -95,17 +96,8 @@ def _validate_role_key(role: str) -> str:
     return role_key
 
 
-def _model_chain_from_entry(entry: dict[str, Any]) -> list[str]:
-    chain = entry.get("modelChain")
-    if chain is None:
-        return []
-    if not isinstance(chain, list):
-        cli_bail("modelChain must be a list")
-    return [str(item) for item in chain]
-
-
 def _replace_primary_in_entry(entry: dict[str, Any], new_primary: str) -> None:
-    chain = _model_chain_from_entry(entry)
+    chain = model_chain_from_entry(entry)
     if chain:
         entry["modelChain"] = [new_primary, *chain[1:]]
     else:
@@ -113,7 +105,7 @@ def _replace_primary_in_entry(entry: dict[str, Any], new_primary: str) -> None:
 
 
 def _append_backup_to_entry(entry: dict[str, Any], backup_slug: str) -> None:
-    chain = _model_chain_from_entry(entry)
+    chain = model_chain_from_entry(entry)
     if backup_slug in chain:
         cli_bail(f"duplicate model {backup_slug!r} already in chain")
     if not chain:

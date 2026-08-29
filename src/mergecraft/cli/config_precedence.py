@@ -16,13 +16,6 @@ from typing import Any
 import yaml
 
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
-from mergecraft.config.io import config_path_for_root
-from mergecraft.config.layered import (
-    load_layered_config_dict,
-    local_config_path,
-    merge_config_dicts,
-    running_in_github_actions,
-)
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, default_settings, load_repo_settings
 from mergecraft.utils.agent_resolve import configured_model_slugs, resolve_effective_model_slug
 
@@ -207,11 +200,6 @@ def explain_setting(
 
 __all__ = [
     "ConfigLayer",
-    "config_path_for_root",
     "explain_setting",
-    "load_layered_config_dict",
-    "local_config_path",
-    "merge_config_dicts",
     "resolve_setting",
-    "running_in_github_actions",
 ]

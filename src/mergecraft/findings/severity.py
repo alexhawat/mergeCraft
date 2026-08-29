@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from mergecraft.agents.gates import BLOCKING_SEVERITIES
+from typing import Final
+
+# Severities that block approval — shared taxonomy for gates, merge, and policy.
+BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
 
 SEVERITY_ORDER: dict[str, int] = {
     "Trivial": 0,
@@ -43,6 +46,7 @@ def normalized_severity_rank(value: object) -> int:
 
 
 __all__ = [
+    "BLOCKING_SEVERITIES",
     "SEVERITY_ORDER",
     "normalize_severity",
     "normalized_severity_rank",

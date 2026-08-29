@@ -798,7 +798,16 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 )
 
         model_obj = _parse_model(model)
-        system = ctx.instructions.system
+        from mergecraft.agents.harness_render import (
+            append_reviewer_dispatch_instructions,
+            render_for_run,
+        )
+
+        harness_meta = render_for_run(ctx, "opencode").metadata
+        system = append_reviewer_dispatch_instructions(
+            ctx.instructions.system or "",
+            harness_meta,
+        )
         user = ctx.instructions.user
         prompt = f"{system}\n\n{user}".strip() if system else user
 
@@ -859,9 +868,19 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
 
 async def _run_cli_fallback(*, cli: str, ctx: AgentRunContext, env: dict[str, str]) -> AgentResult:
+    from mergecraft.agents.harness_render import (
+        append_reviewer_dispatch_instructions,
+        render_for_run,
+    )
+
+    harness_meta = render_for_run(ctx, "opencode").metadata
+    system = append_reviewer_dispatch_instructions(
+        ctx.instructions.system or "",
+        harness_meta,
+    )
     prompt = ctx.instructions.user
-    if ctx.instructions.system:
-        prompt = f"{ctx.instructions.system}\n\n{prompt}"
+    if system:
+        prompt = f"{system}\n\n{prompt}"
     cmd = [cli, "run", "--format", "json", prompt]
     if ctx.resolved_model:
         cmd.extend(["--model", ctx.resolved_model])

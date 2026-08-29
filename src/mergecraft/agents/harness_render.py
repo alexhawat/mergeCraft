@@ -305,16 +305,21 @@ def _render_opencode(
     *,
     ctx: AgentRunContext | ToolContext,
     settings: Any,
+    dispatch_instructions: str = "",
 ) -> HarnessRenderResult:
     agents: dict[str, Any] = {}
     selected_ids: list[str] = []
     for binding in bindings:
         denied = _denied_tool_names(ctx, binding)
-        agents[binding.agent_id] = _opencode_agent_entry(
+        entry = _opencode_agent_entry(
             binding,
             settings=settings,
             denied_tools=denied,
         )
+        if dispatch_instructions and binding.role is AgentRole.reviewer:
+            prompt = str(entry.get("prompt", ""))
+            entry["prompt"] = f"{dispatch_instructions}\n\n{prompt}".strip()
+        agents[binding.agent_id] = entry
         selected_ids.append(binding.agent_id)
     return HarnessRenderResult(
         harness="opencode",
@@ -408,7 +413,12 @@ def render_agents(
     if harness_name == "claude":
         return _render_claude(bindings, ctx=ctx, settings=settings)
     if harness_name == "opencode":
-        return _render_opencode(bindings, ctx=ctx, settings=settings)
+        return _render_opencode(
+            bindings,
+            ctx=ctx,
+            settings=settings,
+            dispatch_instructions=dispatch_instructions,
+        )
     if harness_name in _PROSE_ONLY_HARNESSES:
         return _render_prose_only(
             harness_name,

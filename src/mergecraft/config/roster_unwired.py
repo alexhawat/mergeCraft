@@ -44,9 +44,6 @@ def reviewer_p0_slug(raw: Mapping[str, object]) -> str | None:
     for entry in roster.entries:
         if (entry.name == "reviewer" or entry.role == "reviewer") and entry.model_chain:
             return entry.model_chain[0]
-    for entry in roster.entries:
-        if entry.model_chain:
-            return entry.model_chain[0]
     return None
 
 

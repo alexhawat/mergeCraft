@@ -96,6 +96,11 @@ class Roster:
         return {entry.name: entry for entry in self.entries}
 
 
+def model_chain_from_entry(entry: Mapping[str, Any]) -> list[str]:
+    """Return ``modelChain`` from one ``agents:`` entry as a mutable list."""
+    return list(_model_chain_from_entry(entry))
+
+
 def _model_chain_from_entry(entry: Mapping[str, Any]) -> tuple[str, ...]:
     chain = entry.get(_MODEL_CHAIN_KEY)
     if chain is None:
@@ -113,6 +118,36 @@ def _after_from_entry(entry: Mapping[str, Any]) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _effective_roster_role(name: str, role: str | None) -> str:
+    if role is not None:
+        return role
+    from mergecraft.agents.registry import AgentRole
+
+    try:
+        return AgentRole(name).value
+    except ValueError:
+        msg = f"agents.{name} missing role: and name is not a known AgentRole"
+        raise AgentRosterError(msg) from None
+
+
+def _validate_after_same_role(entries: tuple[RosterEntry, ...]) -> None:
+    by_name = {entry.name: entry for entry in entries}
+    for entry in entries:
+        if entry.after is None:
+            continue
+        target = by_name.get(entry.after)
+        if target is None:
+            continue
+        entry_role = _effective_roster_role(entry.name, entry.role)
+        target_role = _effective_roster_role(target.name, target.role)
+        if entry_role != target_role:
+            msg = (
+                f"after: {entry.after!r} on {entry.name!r} must reference an agent "
+                f"with the same role ({entry_role!r} != {target_role!r})"
+            )
+            raise AgentRosterError(msg)
 
 
 def load_roster(config: Mapping[str, Any]) -> Roster:
@@ -148,6 +183,7 @@ def load_roster(config: Mapping[str, Any]) -> Roster:
         )
     except RosterGraphError as exc:
         raise AgentRosterError(str(exc)) from exc
+    _validate_after_same_role(roster.entries)
     return roster
 
 
@@ -248,6 +284,7 @@ __all__ = [
     "add_model",
     "assign_slot",
     "load_roster",
+    "model_chain_from_entry",
     "parse_slot",
     "preferred_model_slug",
     "remove_slot",

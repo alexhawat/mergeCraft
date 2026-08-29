@@ -14,6 +14,9 @@ from mergecraft.findings.severity import normalized_severity_rank
 if TYPE_CHECKING:
     from mergecraft.agents.registry import Registry
 
+# One orchestrator ``submit_review_verdict`` per run regardless of reviewer count (D7).
+TERMINAL_SUBMISSION_COUNT = 1
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewerRun:
@@ -78,19 +81,19 @@ def merge_reviewer_findings(
 
 
 def verdict_from_merged_findings(findings: list[dict[str, Any]]) -> str:
-    """Map merged findings to one terminal verdict — strictest severity wins (D7)."""
+    """Map merged findings to one MCP terminal verdict — strictest severity wins (D7)."""
     if not findings:
         return "approve"
     max_rank = max(normalized_severity_rank(row.get("severity")) for row in findings)
     if max_rank >= normalized_severity_rank("Major"):
         return "request_changes"
-    return "comment"
+    return "approve"
 
 
 def terminal_submission_count_from_review_runs(runs: list[ReviewerRun]) -> int:
     """Terminal verdict cardinality stays one regardless of reviewer count (D7)."""
     _ = runs
-    return 1
+    return TERMINAL_SUBMISSION_COUNT
 
 
 def format_reviewer_degradation_summary(
@@ -137,9 +140,21 @@ def prepare_terminal_submission(
     else:
         groups = _group_findings_by_reviewer(findings, reviewers)
     merged = merge_reviewer_findings(groups, errors=errors, apply_placement=False)
+    if _every_reviewer_degraded(reviewers, errors) and not merged:
+        return merged, "request_changes"
     merged_verdict = verdict_from_merged_findings(merged)
     enforced = _strictest_terminal_verdict(verdict, merged_verdict)
     return merged, enforced
+
+
+def _every_reviewer_degraded(
+    reviewers: tuple[Any, ...],
+    errors: dict[str, str] | None,
+) -> bool:
+    if not reviewers or not errors:
+        return False
+    reviewer_ids = {binding.agent_id for binding in reviewers}
+    return reviewer_ids <= set(errors)
 
 
 def _group_findings_by_reviewer(
@@ -175,14 +190,13 @@ def _strictest_terminal_verdict(requested: str, from_findings: str) -> str:
     """Pick the strictest terminal verdict allowed by the MCP schema."""
     if from_findings == "request_changes":
         return "request_changes"
-    if requested == "approve":
-        return "approve"
-    if from_findings == "comment":
-        return requested
-    return requested
+    if requested == "request_changes":
+        return "request_changes"
+    return "approve"
 
 
 __all__ = [
+    "TERMINAL_SUBMISSION_COUNT",
     "ReviewerRun",
     "append_degradation_to_summary",
     "format_reviewer_degradation_summary",

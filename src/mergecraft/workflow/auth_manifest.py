@@ -178,6 +178,51 @@ def workflow_secret_bindings(workflow_path: Path) -> tuple[tuple[str, str], ...]
     return tuple(bindings)
 
 
+def iter_mergecraft_action_steps(workflow_path: Path) -> tuple[dict[str, Any], ...]:
+    """Return mergeCraft action steps with job metadata from a workflow file."""
+    try:
+        text = workflow_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = f"could not read {workflow_path}: {exc}"
+        raise WorkflowAuthManifestError(msg) from exc
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        msg = f"could not parse {workflow_path}: {exc}"
+        raise WorkflowAuthManifestError(msg) from exc
+    if not isinstance(parsed, dict):
+        msg = f"{workflow_path} must be a mapping at the top level"
+        raise WorkflowAuthManifestError(msg)
+
+    rows: list[dict[str, Any]] = []
+    jobs = parsed.get("jobs")
+    if not isinstance(jobs, dict):
+        return ()
+    for job_name, job_def in jobs.items():
+        if not isinstance(job_def, dict):
+            continue
+        steps = job_def.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for index, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str) or not is_mergecraft_action_uses(uses):
+                continue
+            with_block = step.get("with")
+            rows.append(
+                {
+                    "job": job_name,
+                    "index": index,
+                    "id": step.get("id") or step.get("name") or f"job:{job_name}/step:{index}",
+                    "model": with_block.get("model") if isinstance(with_block, dict) else None,
+                    "env": step.get("env") if isinstance(step.get("env"), dict) else {},
+                }
+            )
+    return tuple(rows)
+
+
 def parse_auth_manifest(workflow_path: Path) -> frozenset[str]:
     """Return provider labels CI can authenticate from mergeCraft review steps."""
     wired: set[str] = set()
@@ -191,6 +236,7 @@ __all__ = [
     "WorkflowAuthManifestError",
     "flat_credential_env_keys",
     "is_mergecraft_action_uses",
+    "iter_mergecraft_action_steps",
     "parse_auth_manifest",
     "secret_name_to_provider_label",
     "workflow_secret_bindings",
