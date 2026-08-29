@@ -485,6 +485,7 @@ def _persist_indexed_credentials(
         _single_line_credential,
         _write_env_value,
     )
+    from mergecraft.config.agent_roster import AgentRosterError, seed_reviewer_p0_if_empty
 
     env_index = int(entry["envIndex"])
     label = str(entry["label"])
@@ -493,6 +494,22 @@ def _persist_indexed_credentials(
     env_path = _env_path(cwd)
     label_key = _indexed_label_key(env_index)
     any_local_written = False
+
+    def _seed_reviewer_roster() -> None:
+        repo_root = (cwd or Path.cwd()).resolve()
+        config_path = _config_path(repo_root)
+        data = _load_config_dict(config_path)
+        try:
+            slug = seed_reviewer_p0_if_empty(data, label)
+        except AgentRosterError as exc:
+            cli_bail(str(exc))
+        if slug is None:
+            return
+        _write_config_dict(config_path, data)
+        console.print(
+            f"[green]seeded[/green] agents.reviewer p0 with [cyan]{slug}[/cyan] "
+            f"in {config_path.relative_to(repo_root)}"
+        )
 
     if target.local:
         if not _write_env_value(env_path, label_key, label):
@@ -505,6 +522,7 @@ def _persist_indexed_credentials(
         landed = ", ".join([label_key, *credential_map.keys()])
         console.print(f"[green]wrote {landed}[/green] to {env_path}")
         any_local_written = True
+        _seed_reviewer_roster()
 
     if target.github is not None:
         wrote_any_github = False
@@ -532,6 +550,8 @@ def _persist_indexed_credentials(
                 "nothing was written — both local and github scopes failed. "
                 "retry with --scope local or --scope github to isolate the failure."
             )
+        if wrote_any_github:
+            _seed_reviewer_roster()
         return
 
     if not any_local_written:
@@ -743,10 +763,27 @@ def run_provider_auth(
     *,
     credential_map: Mapping[str, str] | None = None,
     cwd: Path | None = None,
+    api_key: str | None = None,
 ) -> None:
     """Execute unified provider auth for one registry row (#478)."""
     if credential_map is not None:
         _persist_indexed_credentials(entry, scope, credential_map, cwd=cwd)
+        return
+    if api_key is not None:
+        auth_kind = _entry_auth_kind(entry)
+        if auth_kind != AUTH_KIND_API_KEY:
+            label = str(entry.get("label", "?"))
+            cli_bail(
+                f"provider {label!r} does not accept --api-key "
+                f"(auth kind {auth_kind!r}); use the interactive auth flow instead."
+            )
+        label = str(entry["label"])
+        url = entry.get("url")
+        url_str = str(url) if url is not None else None
+        if not _validate_api_key_for_label(label, api_key, url_str):
+            cli_bail(f"{label} API key validation failed (401/403). Check the key and retry.")
+        suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_API_KEY]
+        _persist_indexed_credentials(entry, scope, {suffix: api_key}, cwd=cwd)
         return
     auth_kind = _entry_auth_kind(entry)
     strategy = resolve_auth_strategy(auth_kind)
@@ -1216,6 +1253,11 @@ def provider_auth_cmd(
         help="Provider label (interactive picker when omitted).",
     ),
     scope: str = _PROVIDER_AUTH_SCOPE_OPTION,
+    api_key: str | None = typer.Option(
+        None,
+        "--api-key",
+        help="API key for api_key providers (non-interactive; skips the prompt).",
+    ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
     """Authenticate one registered provider into indexed ``LLM_PROVIDER_*`` secrets."""
@@ -1236,8 +1278,12 @@ def provider_auth_cmd(
         if entry is None:
             cli_bail(f"unknown provider label {normalised!r}")
         console.print(f"authenticating provider [cyan]{entry.get('label', normalised)}[/cyan]")
-        run_provider_auth(entry, scope, cwd=repo_root)
+        auth_scope = "local" if api_key is not None else scope
+        run_provider_auth(entry, auth_scope, cwd=repo_root, api_key=api_key)
         return
+
+    if api_key is not None:
+        cli_bail("--api-key requires an explicit provider label", code=CLI_USAGE_EXIT_CODE)
 
     picked = _interactive_provider_picker(registry)
     console.print(f"authenticating provider [cyan]{picked.get('label')}[/cyan]")

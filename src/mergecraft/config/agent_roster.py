@@ -18,6 +18,7 @@ from mergecraft.config.settings_snapshot import (
     capture_repo_settings_snapshot,
     config_yaml_hash,
 )
+from mergecraft.models import PROVIDERS
 
 _SLOT_RE = re.compile(r"^p(\d+)$")
 
@@ -188,6 +189,60 @@ def load_roster(config: Mapping[str, Any]) -> Roster:
     return roster
 
 
+def preferred_model_slug(provider_label: str) -> str:
+    """Return ``provider/model-id`` for the catalog's first ``preferred=True`` model."""
+    normalized = provider_label.strip().lower()
+    provider = PROVIDERS.get(normalized)
+    if provider is None:
+        msg = f"unknown provider {provider_label!r}"
+        raise AgentRosterError(msg)
+    for model_id, model in provider.models.items():
+        if model.preferred:
+            return f"{normalized}/{model_id}"
+    msg = f"provider {provider_label!r} has no preferred model in the catalog"
+    raise AgentRosterError(msg)
+
+
+def reviewer_model_chain_is_empty(config: Mapping[str, Any]) -> bool:
+    """Return whether ``agents.reviewer.modelChain`` is absent or empty."""
+    agents = config.get(_AGENTS_KEY)
+    if not isinstance(agents, Mapping):
+        return True
+    reviewer = agents.get("reviewer")
+    if not isinstance(reviewer, Mapping):
+        return True
+    chain = reviewer.get(_MODEL_CHAIN_KEY)
+    if chain is None:
+        return True
+    if isinstance(chain, list):
+        return len(chain) == 0
+    return False
+
+
+def seed_reviewer_p0_if_empty(
+    config: MutableMapping[str, Any],
+    provider_label: str,
+) -> str | None:
+    """Seed ``agents.reviewer`` p0 when the chain is empty; return slug or ``None``."""
+    if not reviewer_model_chain_is_empty(config):
+        return None
+    slug = preferred_model_slug(provider_label)
+    agents = config.get(_AGENTS_KEY)
+    if not isinstance(agents, MutableMapping):
+        agents = {}
+        config[_AGENTS_KEY] = agents
+    reviewer = agents.get("reviewer")
+    if not isinstance(reviewer, MutableMapping):
+        reviewer = {}
+        agents["reviewer"] = reviewer
+    reviewer[_ROLE_KEY] = "reviewer"
+    reviewer[_MODEL_CHAIN_KEY] = [slug]
+    models = config.get("models")
+    if isinstance(models, list) and slug not in [str(item) for item in models]:
+        models.insert(0, slug)
+    return slug
+
+
 def write_roster(config: MutableMapping[str, Any], roster: Roster) -> None:
     """Write *roster* into *config*'s ``agents:`` block in place.
 
@@ -233,6 +288,9 @@ __all__ = [
     "config_yaml_hash",
     "load_roster",
     "parse_slot",
+    "preferred_model_slug",
     "remove_slot",
+    "reviewer_model_chain_is_empty",
+    "seed_reviewer_p0_if_empty",
     "write_roster",
 ]
