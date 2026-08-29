@@ -28,7 +28,6 @@ def _reviewer_bindings(registry: object) -> list[object]:
     return list(resolve_roles(AgentRole.reviewer))
 
 
-@W5_XFAIL
 def test_two_lensless_reviewer_bindings_survive_load_registry(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -41,7 +40,6 @@ def test_two_lensless_reviewer_bindings_survive_load_registry(
     assert any("reviewer2" in binding.agent_id for binding in reviewers)
 
 
-@W5_XFAIL
 def test_resolve_role_returns_binding_keyed_reviewer_not_last_wins(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -53,7 +51,6 @@ def test_resolve_role_returns_binding_keyed_reviewer_not_last_wins(
     assert "reviewer2" not in primary.agent_id
 
 
-@W5_XFAIL
 def test_resolve_roles_returns_both_reviewers_in_stable_order(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

@@ -102,6 +102,7 @@ class AgentBinding(BaseModel):
     agent_id: str
     role: AgentRole
     lens: str | None = None
+    after: str | None = None
     model_chain: tuple[str, ...]
     prompt_id: str
     prompt_version: str
@@ -272,6 +273,7 @@ def _apply_override(
         agent_id=agent_key if agent_key not in {r.value for r in AgentRole} else base.agent_id,
         role=role,
         lens=override.lens if override.lens is not None else base.lens,
+        after=override.after if override.after is not None else base.after,
         model_chain=model_chain,
         prompt_id=override.prompt_id or base.prompt_id,
         prompt_version=override.prompt_version or base.prompt_version,
@@ -285,22 +287,89 @@ def _apply_override(
 
 
 class Registry:
-    """Resolved agent roster for one repo configuration."""
+    """Resolved agent roster for one repo configuration.
 
-    def __init__(self, bindings: dict[str, AgentBinding]) -> None:
+    Multiple lens-less bindings may share a role (for example two ``reviewer``
+    entries). :meth:`resolve_role` returns the binding whose config key equals
+    the role name when present, otherwise the first binding in stable order.
+    :meth:`resolve_roles` returns every binding for a role in that same order:
+    the role-named key first, then every other key in config declaration order
+    (not alphabetical — ``reviewer10`` does not sort before ``reviewer2``).
+    :meth:`resolve_role_levels` groups those bindings into dispatch levels from
+    each binding's ``after:`` dependency (D15).
+    """
+
+    def __init__(
+        self,
+        bindings: dict[str, AgentBinding],
+        *,
+        configured_keys: frozenset[str] = frozenset(),
+    ) -> None:
         self._bindings = bindings
-        self._by_role: dict[AgentRole, AgentBinding] = {}
-        for binding in bindings.values():
+        self._configured_keys = configured_keys
+        self._by_role: dict[AgentRole, list[tuple[str, AgentBinding]]] = {}
+        for key, binding in bindings.items():
             if binding.lens is None:
-                self._by_role[binding.role] = binding
+                self._by_role.setdefault(binding.role, []).append((key, binding))
+
+    def _primary_role_entries(
+        self,
+        role: AgentRole,
+        entries: list[tuple[str, AgentBinding]],
+    ) -> list[tuple[str, AgentBinding]]:
+        role_key = role.value
+        role_named = [entry for entry in entries if entry[0] == role_key]
+        if role_key in self._configured_keys:
+            return role_named
+        configured_custom = [entry for entry in entries if entry[0] in self._configured_keys]
+        if configured_custom:
+            return configured_custom[:1]
+        return role_named
+
+    def _ordered_role_entries(self, role: AgentRole) -> list[tuple[str, AgentBinding]]:
+        entries = self._by_role.get(role, [])
+        if not entries:
+            return []
+        primary = self._primary_role_entries(role, entries)
+        primary_keys = {key for key, _ in primary}
+        others = [entry for entry in entries if entry[0] not in primary_keys]
+        return primary + others
+
+    def _ordered_role_bindings(self, role: AgentRole) -> tuple[AgentBinding, ...]:
+        return tuple(binding for _, binding in self._ordered_role_entries(role))
+
+    def _dependency_level(self, agent_key: str, *, visiting: frozenset[str]) -> int:
+        binding = self._bindings[agent_key]
+        if binding.after is None:
+            return 0
+        dep = binding.after
+        if dep not in self._bindings or dep in visiting:
+            return 0
+        return self._dependency_level(dep, visiting=visiting | {agent_key}) + 1
 
     def resolve_role(self, role: AgentRole | str) -> AgentBinding:
         key = AgentRole(role) if isinstance(role, str) else role
-        try:
-            return self._by_role[key]
-        except KeyError as exc:
+        ordered = self._ordered_role_bindings(key)
+        if not ordered:
             msg = f"no binding for role {key!r}"
-            raise KeyError(msg) from exc
+            raise KeyError(msg)
+        return ordered[0]
+
+    def resolve_roles(self, role: AgentRole | str) -> tuple[AgentBinding, ...]:
+        key = AgentRole(role) if isinstance(role, str) else role
+        return self._ordered_role_bindings(key)
+
+    def resolve_role_levels(self, role: AgentRole | str) -> tuple[tuple[AgentBinding, ...], ...]:
+        """Return dispatch levels for *role* derived from ``after:`` edges (D15)."""
+        key = AgentRole(role) if isinstance(role, str) else role
+        entries = self._ordered_role_entries(key)
+        if not entries:
+            return ()
+        levels: dict[int, list[AgentBinding]] = {}
+        for agent_key, binding in entries:
+            level = self._dependency_level(agent_key, visiting=frozenset())
+            levels.setdefault(level, []).append(binding)
+        return tuple(tuple(levels[level_index]) for level_index in range(max(levels) + 1))
 
     def resolve_agent_ref(self, ref: str) -> AgentBinding:
         """Resolve a pipeline agent reference (role name or custom agent id)."""
@@ -427,7 +496,17 @@ def load_registry(
             lens_keys[merged.lens] = agent_key
         bindings[agent_key] = merged
 
-    return Registry(bindings)
+    orchestrator_keys = [
+        key
+        for key, binding in bindings.items()
+        if binding.role is AgentRole.orchestrator and binding.lens is None
+    ]
+    if len(orchestrator_keys) > 1:
+        joined = ", ".join(orchestrator_keys)
+        msg = f"cannot load multiple orchestrator bindings (D7): {joined}"
+        raise RegistryValidationError(msg)
+
+    return Registry(bindings, configured_keys=frozenset(settings.agents.keys()))
 
 
 def resolve_agent_model(
