@@ -1,4 +1,4 @@
-# Review record integrity — test plan (W1 RED suite)
+# Review record integrity — test plan
 
 Wave plan: `.ignorelocal/waves/12-review-record-integrity-wave-plan.md`
 Worktree: `mergecraft-review-record` @ `wave/review-record`
@@ -55,6 +55,7 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 | **W8 / #535** digest pin in `action.yml` | W8 | `test_action_image_digest_sync.py`, `test_action_yml_contract.py::test_docker_action_pulls_digest_pinned_slim_image` |
 | **W8 / #535** `action-image-digest-check` in `make lint` | W8 | `test_action_image_digest_sync.py::test_action_image_digest_check_runs_via_make_lint` |
 | **W2** `Finding.scope` on CI evidence path | W2 | `test_evidence.py::test_no_new_finding_fields_introduced` |
+| **cd6ff87c** cached packet re-finalizes on outcome | — | `test_run_packet.py::test_resolve_prepared_run_packet_refinalizes_on_outcome_change` |
 
 ## Deliverable symbols
 
@@ -70,6 +71,7 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 | `publish_deterministic_record` | `main.py` | `test_w15_deterministic_record.py` |
 | anchor pre-validation | `mcp/review.py` / `convergence_runtime.py` | `test_w16_anchor_422_recovery.py` |
 | `run_health` | `evidence/packet.py` | `test_w17_packet_artifact_summary.py` |
+| `resolve_prepared_run_packet` | `evidence/run_packet.py` | `test_run_packet.py::test_resolve_prepared_run_packet_refinalizes_on_outcome_change` |
 | `render_step_summary` / `append_step_summary` | `utils/step_summary.py` | `test_w17_packet_artifact_summary.py` |
 | workflow packet `env:` artifact steps | `.github/workflows/mergecraft.yml` | `test_w17_packet_artifact_summary.py` |
 | `action-pin-check` in `ci-static` / `CI_STEPS` | `Makefile` | `test_w18_action_pin_gate.py` |
@@ -86,8 +88,6 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 ```bash
 export UV_PROJECT_ENVIRONMENT="$PWD/.venv-dev"
 make lint && make typecheck
-uv run pytest --collect-only -q tests/review_record
-uv run pytest tests/review_record -q
+uv run pytest --collect-only -q tests/review_record tests/evidence/test_run_packet.py
+uv run pytest tests/review_record tests/evidence/test_run_packet.py::test_resolve_prepared_run_packet_refinalizes_on_outcome_change -q
 ```
-
-Expect RED: failures/errors dominate; W3-marked cases xfail; `test_approve_comment_422_fallback_still_works` passes today (regression pin).
