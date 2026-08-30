@@ -15,12 +15,19 @@
 # enable review.recallPass until the schema lands on base.
 prApproveEnabled: true
 
+# Per-run token band (D9): tokenBudget is the soft *target*; tokenBudgetTolerance
+# (default 0.10 in schema, omitted here) defines the hard *ceiling* as
+# target × (1 + tolerance). Crossing the target warns once and the run may
+# continue; crossing the ceiling raises BudgetExhausted. Set tolerance 0 to
+# restore the pre-band cliff (fail exactly at target).
+#
 # Dogfood self-review on this sweep PR exhausted the 2M default
 # (Codex: 2_196_957 tokens). Raised again after lane-A integration reviews
 # reported ~4.25M input tokens on large PRs while the 3M cap still failed
 # closed after a completed terminal verdict.
 runBounds:
   tokenBudget: 5000000
+  # tokenBudgetTolerance: 0.10
 
 # First-wave CI SARIF as review evidence (#464 / D8). Artifact names must match
 # the uploads in .github/workflows/ci.yml — not mergecraft.yml.

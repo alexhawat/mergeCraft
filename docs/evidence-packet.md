@@ -177,6 +177,14 @@ packet's `findings` field inlines that schema entirely into its emitted
 JSON Schema, so a packet consumer never has to look at `$defs` to validate
 a `findings` item.
 
+**`raised_by` is not a packet field.** Multi-reviewer provenance is stamped
+server-side on terminal-submission finding rows and rendered in the published
+review body / deterministic run record (`REVIEW-CHECKS.md` §8 and §11). It is
+deliberately absent from the agent-facing `submit_review_verdict` schema and
+from the typed `Finding` model here — an agent-supplied provenance field would
+be forgeable. Packet consumers that need reviewer attribution should read the
+published review or the run-record preamble, not `findings[]`.
+
 ### `run_health` — `RunHealth | None` (added in plan 12 W7)
 
 Run-scoped findings and their advisory conclusion. Trajectory auditor rows

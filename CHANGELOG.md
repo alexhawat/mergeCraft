@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Lane A — publication & attribution integrity
+
+#### Fixed
+
+- Anchor-422 recovery no longer spins on an out-of-range comment index — it
+  demotes all inline comments and posts once (#570)
+- The published GitHub review body always matches the terminal submission;
+  probe strings and split publication races no longer land a placeholder review
+  (#572)
+- Multi-reviewer findings carry server-stamped `raised_by` attribution on the
+  published review; agents cannot supply the field via `submit_review_verdict`
+  (#574)
+- Token spend slightly over `runBounds.tokenBudget` warns and completes instead
+  of failing at the cliff; crossing the hard ceiling still ends the run (#571)
+
+#### Changed
+
+- `runBounds.tokenBudget` is the soft target; `tokenBudgetTolerance` (default
+  `0.10`) sets the hard ceiling — set tolerance `0` to restore strict enforcement
+- Run record and job step summary token lines name target, ceiling, over-target
+  status, and per-phase attribution when phases are recorded
+
 ### Lane C — CI gate correctness & operator surface
 
 #### Added
