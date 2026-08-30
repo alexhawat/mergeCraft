@@ -138,6 +138,8 @@ class BudgetTracker:
         charge = count
         if charge > remaining:
             if prior_used < target:
+                # Cap one increment to remaining slack when still under target so a
+                # single call cannot vault past the ceiling without raising.
                 charge = remaining
             else:
                 msg = (

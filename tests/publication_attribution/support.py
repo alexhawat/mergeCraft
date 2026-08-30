@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import httpx
-import pytest
 
 from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
@@ -20,26 +19,6 @@ if TYPE_CHECKING:
 # W0 #572 probe string (PR #567 round 1).
 PROBE_BODY = "test-probe: body only, no inline comments"
 PROBE_INLINE_BODY = "test-probe: single comment"
-
-# D2 default retry ceiling (implementation W2).
-ANCHOR_RECOVERY_RETRY_CEILING = 8
-
-W2_XFAIL = pytest.mark.xfail(
-    reason="green after W2: bounded monotonic 422 recovery",
-    strict=False,
-)
-W3_XFAIL = pytest.mark.xfail(
-    reason="green after W3: published body is terminal body",
-    strict=False,
-)
-W4_XFAIL = pytest.mark.xfail(
-    reason="green after W4: server-stamped raised_by",
-    strict=False,
-)
-W5_XFAIL = pytest.mark.xfail(
-    reason="green after W5: soft target / hard ceiling",
-    strict=False,
-)
 
 
 def anchor_422_error(*, index: int | None) -> httpx.HTTPStatusError:

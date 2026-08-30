@@ -40,7 +40,6 @@ from mergecraft.mcp.verdict import (
     REJECTION_REQUEST_CHANGES_NO_FINDINGS,
     ReviewPhase,
     after_terminal_submission_recorded,
-    ensure_review_scope_for_terminal,
     record_validated_terminal_submission,
     recorded_submission_payload,
     revalidate_recorded_submission,
@@ -703,7 +702,7 @@ async def _create_github_review_with_anchor_recovery(
                 if _payload_signature(current) == prior_sig:
                     logger.error(
                         "anchor recovery on PR #{} made no progress after attempt {} "
-                        "(signature unchanged: event/body_len/comments_len={})",
+                        "(signature unchanged: event/body_len/comments_len/comment_body_len={})",
                         pull_number,
                         attempt,
                         prior_sig,
@@ -724,7 +723,7 @@ async def _create_github_review_with_anchor_recovery(
                 if _payload_signature(current) == prior_sig:
                     logger.error(
                         "anchor recovery on PR #{} made no progress after attempt {} "
-                        "(signature unchanged: event/body_len/comments_len={})",
+                        "(signature unchanged: event/body_len/comments_len/comment_body_len={})",
                         pull_number,
                         attempt,
                         prior_sig,
@@ -1030,6 +1029,7 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
         commit_id=commit_id,
     )
     if existing is not None:
+        ctx.tool_state.review_publication_entrypoint = "publish_pull_request_review"
         return existing
 
     pending = ctx.tool_state.pending_review_publication
@@ -1111,9 +1111,8 @@ def create_pull_request_review_tool(ctx: ToolContext):
             commit_id=commit_id,
         )
         if existing is not None:
+            ctx.tool_state.review_publication_entrypoint = "create_pull_request_review"
             return existing
-
-        ensure_review_scope_for_terminal(ctx.tool_state, "create_pull_request_review")
 
         if ctx.tool_state.terminal_submission is None:
             submission_payload = _legacy_params_to_submission(params)

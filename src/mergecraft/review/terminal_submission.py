@@ -253,8 +253,7 @@ def _group_findings_by_reviewer(
     if unknown_group:
         groups.append((UNKNOWN_RAISED_BY, unknown_group))
     if unassigned:
-        primary = reviewers[0].agent_id
-        groups.append((primary, unassigned))
+        groups.append((UNKNOWN_RAISED_BY, unassigned))
     if not groups:
         groups = [(reviewers[0].agent_id, list(findings))]
     return groups
