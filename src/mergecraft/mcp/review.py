@@ -828,6 +828,16 @@ async def _publish_github_review(
             incremental_diff_text = Path(incremental_path).read_text(encoding="utf-8")
 
     collateral_map = collateral_by_fingerprint(ctx)
+    finding_rows = [row for row in ctx.tool_state.iter_finding_rows() if isinstance(row, dict)]
+    from mergecraft.review.terminal_submission import should_render_finding_provenance
+
+    show_provenance = should_render_finding_provenance(finding_rows)
+    raised_by_map: dict[str, str | list[str]] = {}
+    for row in finding_rows:
+        fingerprint = str(row.get("fingerprint") or "").strip()
+        raised = row.get("raised_by")
+        if fingerprint and raised is not None:
+            raised_by_map[fingerprint] = raised
     anchor_index = _load_inline_anchor_index(primary)
     demoted_bodies: list[str] = []
 
@@ -853,6 +863,8 @@ async def _publish_github_review(
             fingerprint=raw_fingerprint,
             collateral_map=collateral_map,
             incremental_diff_text=incremental_diff_text,
+            raised_by=raised_by_map.get(raw_fingerprint),
+            show_provenance=show_provenance,
         )
         item: dict[str, Any] = {
             "path": path,

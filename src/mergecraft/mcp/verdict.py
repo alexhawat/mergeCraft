@@ -769,6 +769,12 @@ class SubmitReviewVerdictParams(BaseModel):
             raise ValueError(msg)
         coerced: list[Any] = []
         for item in value:
+            if isinstance(item, dict) and item.get("raised_by") is not None:
+                msg = (
+                    "raised_by is server-stamped at collection time and must not "
+                    "be supplied by agents"
+                )
+                raise ValueError(msg)
             finding = coerce_agent_finding(item)
             if finding.severity not in FINDING_SEVERITIES:
                 msg = f"severity must be one of {FINDING_SEVERITIES!r}, got {finding.severity!r}"

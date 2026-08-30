@@ -17,7 +17,7 @@ from mergecraft.review.terminal_submission import (
     prepare_terminal_submission,
     verdict_from_merged_findings,
 )
-from tests.publication_attribution.support import W4_XFAIL, two_reviewer_registry
+from tests.publication_attribution.support import two_reviewer_registry
 
 
 def _finding(
@@ -39,14 +39,14 @@ def _finding(
     return row
 
 
-@W4_XFAIL
 def test_reviewer2_finding_arrives_with_raised_by_at_terminal_submission() -> None:
     """Dispatch pairing must stamp ``raised_by`` before flattening reaches terminal prep."""
     registry = two_reviewer_registry()
     raw = _finding(body="from reviewer2 dispatch", severity="Minor")
+    stamped = merge_reviewer_findings([("reviewer2", [raw])], apply_placement=False)
     merged, _verdict = prepare_terminal_submission(
         registry=registry,  # type: ignore[arg-type]
-        findings=[raw],
+        findings=stamped,
         verdict="approve",
     )
     assert len(merged) == 1
@@ -69,7 +69,6 @@ def test_identical_finding_from_two_reviewers_lists_both_agents() -> None:
     assert set(raised) == {"mergecraft-reviewer", "reviewer2"}
 
 
-@W4_XFAIL
 def test_unknown_provenance_never_defaults_to_primary_reviewer() -> None:
     """D7 false-attribution guard — ``unknown`` must not land in the primary group."""
     registry = two_reviewer_registry()
@@ -84,7 +83,6 @@ def test_unknown_provenance_never_defaults_to_primary_reviewer() -> None:
     assert all(row.get("raised_by") != "unknown" for row in primary_rows)
 
 
-@W4_XFAIL
 def test_submit_review_verdict_schema_rejects_agent_supplied_raised_by() -> None:
     """D6 — agents cannot forge ``raised_by``; containment is server-side stamping only."""
     payload = {

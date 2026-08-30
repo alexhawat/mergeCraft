@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 # One orchestrator ``submit_review_verdict`` per run regardless of reviewer count (D7).
 TERMINAL_SUBMISSION_COUNT = 1
 
+# Server-stamped provenance for findings whose reviewer cannot be determined (D7).
+UNKNOWN_RAISED_BY = "unknown"
+
 
 @dataclass(frozen=True, slots=True)
 class ReviewerRun:
@@ -44,6 +47,8 @@ def merge_reviewer_findings(
     for agent_name, findings in groups:
         for row in findings:
             item = dict(row)
+            if item.get("raised_by") is None:
+                item["raised_by"] = agent_name
             key = finding_key(item)
             provenance.setdefault(key, []).append(agent_name)
             if key not in merged:
@@ -109,6 +114,68 @@ def format_reviewer_degradation_summary(
     return "\n".join(lines)
 
 
+def stamp_findings_with_reviewer(
+    reviewer_id: str,
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Stamp ``raised_by`` from dispatch pairing before flattening (D6/D7)."""
+    stamped: list[dict[str, Any]] = []
+    for row in findings:
+        item = dict(row)
+        if item.get("raised_by") is None:
+            item["raised_by"] = reviewer_id
+        stamped.append(item)
+    return stamped
+
+
+def reviewer_groups_from_runs(
+    runs: list[ReviewerRun],
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Build ``(reviewer_id, findings)`` groups from dispatch runs (D7)."""
+    return [
+        (run.agent_id, stamp_findings_with_reviewer(run.agent_id, run.findings)) for run in runs
+    ]
+
+
+def should_render_finding_provenance(findings: list[dict[str, Any]]) -> bool:
+    """Return whether multi-reviewer provenance lines belong in the review body (D8)."""
+    agents: set[str] = set()
+    for row in findings:
+        raised = row.get("raised_by")
+        if isinstance(raised, str):
+            agents.add(raised)
+        elif isinstance(raised, list):
+            agents.update(str(agent) for agent in raised)
+    return len(agents) > 1
+
+
+def format_finding_provenance_line(raised_by: str | list[str] | None) -> str | None:
+    """Format one finding's ``raised_by`` for display in the review body (D8)."""
+    if not raised_by:
+        return None
+    if isinstance(raised_by, list):
+        agents = ", ".join(f"`{agent}`" for agent in raised_by)
+        return f"_Raised by: {agents}_"
+    return f"_Raised by: `{raised_by}`_"
+
+
+def enrich_finding_body_with_provenance(
+    body: str,
+    raised_by: str | list[str] | None,
+    *,
+    show_provenance: bool,
+) -> str:
+    """Append a provenance line to a finding body when multi-reviewer display is active (D8)."""
+    if not show_provenance:
+        return body
+    line = format_finding_provenance_line(raised_by)
+    if not line or line in body:
+        return body
+    if not body.strip():
+        return line
+    return f"{body.rstrip()}\n\n{line}"
+
+
 def append_degradation_to_summary(
     summary: str,
     errors: dict[str, str] | None = None,
@@ -164,6 +231,7 @@ def _group_findings_by_reviewer(
     reviewer_ids = {binding.agent_id for binding in reviewers}
     by_agent: dict[str, list[dict[str, Any]]] = {agent_id: [] for agent_id in reviewer_ids}
     unassigned: list[dict[str, Any]] = []
+    unknown_group: list[dict[str, Any]] = []
     for row in findings:
         if not isinstance(row, dict):
             continue
@@ -173,11 +241,17 @@ def _group_findings_by_reviewer(
             agent = raised
         elif isinstance(raised, list) and raised:
             agent = str(raised[0])
-        if agent is not None and agent in by_agent:
+        if agent == UNKNOWN_RAISED_BY:
+            unknown_group.append(row)
+        elif agent is not None and agent in by_agent:
             by_agent[agent].append(row)
+        elif agent is not None:
+            unknown_group.append(dict(row, raised_by=UNKNOWN_RAISED_BY))
         else:
             unassigned.append(row)
     groups = [(agent_id, by_agent[agent_id]) for agent_id in sorted(by_agent) if by_agent[agent_id]]
+    if unknown_group:
+        groups.append((UNKNOWN_RAISED_BY, unknown_group))
     if unassigned:
         primary = reviewers[0].agent_id
         groups.append((primary, unassigned))
@@ -197,11 +271,17 @@ def _strictest_terminal_verdict(requested: str, from_findings: str) -> str:
 
 __all__ = [
     "TERMINAL_SUBMISSION_COUNT",
+    "UNKNOWN_RAISED_BY",
     "ReviewerRun",
     "append_degradation_to_summary",
+    "enrich_finding_body_with_provenance",
+    "format_finding_provenance_line",
     "format_reviewer_degradation_summary",
     "merge_reviewer_findings",
     "prepare_terminal_submission",
+    "reviewer_groups_from_runs",
+    "should_render_finding_provenance",
+    "stamp_findings_with_reviewer",
     "terminal_submission_count_from_review_runs",
     "verdict_from_merged_findings",
 ]
