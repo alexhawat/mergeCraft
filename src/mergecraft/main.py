@@ -931,12 +931,22 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     )
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
-    capture_run_scope_snapshot(
+    snapshot = capture_run_scope_snapshot(
         ctx.tool_context,
         root=Path(primary_repo_state(tool_state).dir),
         settings=settings,
         load_learnings_files=False,
     )
+    from mergecraft.review.roster_auth import (
+        RosterAuthError,
+        RosterSecretEmptyError,
+        validate_roster_at_run_start,
+    )
+
+    try:
+        validate_roster_at_run_start(snapshot=snapshot)
+    except (RosterAuthError, RosterSecretEmptyError) as exc:
+        raise _ConfigurationError(str(exc)) from exc
 
 
 async def _apply_overrides_and_setup_git(ctx: RunContext) -> None:

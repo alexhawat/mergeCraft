@@ -828,6 +828,37 @@ def submit_review_verdict_tool(ctx: ToolContext):
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
         validated = SubmitReviewVerdictParams.model_validate(params)
         repo_root = Path(primary_repo_state(ctx.tool_state).dir)
+        from mergecraft.agents.registry import load_registry
+        from mergecraft.agents.verifier import AgentFinding
+        from mergecraft.config.settings_snapshot import repo_settings_from_context
+        from mergecraft.review.terminal_submission import (
+            append_degradation_to_summary,
+            prepare_terminal_submission,
+        )
+
+        raw_findings = [
+            item.model_dump() if hasattr(item, "model_dump") else dict(item)
+            for item in validated.findings
+        ]
+        settings = repo_settings_from_context(ctx)
+        registry = load_registry(settings=settings, repo_root=repo_root)
+        merged_raw, enforced_verdict = prepare_terminal_submission(
+            registry=registry,
+            findings=raw_findings,
+            verdict=validated.verdict,
+            errors=ctx.tool_state.reviewer_dispatch_errors or None,
+        )
+        summary = append_degradation_to_summary(
+            validated.summary,
+            ctx.tool_state.reviewer_dispatch_errors or None,
+        )
+        merged_findings = [
+            AgentFinding.model_validate(row if isinstance(row, dict) else dict(row))
+            for row in merged_raw
+        ]
+        validated = validated.model_copy(
+            update={"verdict": enforced_verdict, "findings": merged_findings, "summary": summary}
+        )
         trust = (
             ctx.tool_state.trust_tier
             if ctx.tool_state.trust_tier in {"trusted", "untrusted"}

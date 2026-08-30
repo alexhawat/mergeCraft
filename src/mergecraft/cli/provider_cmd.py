@@ -14,11 +14,12 @@ from pathlib import Path
 from typing import Any
 
 import typer
-import yaml
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.config.io import load_config_dict as _load_config_dict_raw
+from mergecraft.config.io import write_config_dict as _write_config_dict
 from mergecraft.config.provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,
     allocate_env_index,
@@ -87,8 +88,8 @@ CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
 
 _LEGACY_CREDENTIAL_WARNED_KEYS: set[str] = set()
 
-_PROVIDER_AUTH_SCOPE_OPTION: str = typer.Option(
-    "github",
+_PROVIDER_AUTH_SCOPE_OPTION: str | None = typer.Option(
+    None,
     "--scope",
     "-s",
     help=(
@@ -141,42 +142,10 @@ def _env_path(cwd: Path | None = None) -> Path:
 
 
 def _load_config_dict(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {}
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if loaded is None:
-        return {}
-    if not isinstance(loaded, dict):
-        cli_bail(f"config must be a mapping: {path}")
-    return loaded
-
-
-def _write_config_dict(path: Path, data: dict[str, Any]) -> None:
-    """Replace the config file atomically.
-
-    Writing in place truncates first, so a failure partway through would leave
-    the operator with a half-written ``config.yaml``. Serialise into a sibling
-    temporary file and rename over the target instead: the rename is atomic, so
-    the file is either the old content or the new one.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
-    mode = path.stat().st_mode & 0o777 if path.is_file() else None
-    tmp_fd, tmp_name = tempfile.mkstemp(
-        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
-    )
-    tmp_path = Path(tmp_name)
     try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if mode is not None:
-            tmp_path.chmod(mode)
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+        return _load_config_dict_raw(path)
+    except ValueError as exc:
+        cli_bail(str(exc))
 
 
 def _provider_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -485,6 +454,7 @@ def _persist_indexed_credentials(
         _single_line_credential,
         _write_env_value,
     )
+    from mergecraft.cli.roster_seed import seed_reviewer_p0_after_auth
 
     env_index = int(entry["envIndex"])
     label = str(entry["label"])
@@ -505,6 +475,7 @@ def _persist_indexed_credentials(
         landed = ", ".join([label_key, *credential_map.keys()])
         console.print(f"[green]wrote {landed}[/green] to {env_path}")
         any_local_written = True
+        seed_reviewer_p0_after_auth(cwd=cwd or Path.cwd(), provider_label=label)
 
     if target.github is not None:
         wrote_any_github = False
@@ -533,6 +504,8 @@ def _persist_indexed_credentials(
                 "nothing was written — both local and github scopes failed. "
                 "retry with --scope local or --scope github to isolate the failure."
             )
+        if wrote_any_github:
+            seed_reviewer_p0_after_auth(cwd=cwd or Path.cwd(), provider_label=label)
         return
 
     if not any_local_written:
@@ -744,10 +717,27 @@ def run_provider_auth(
     *,
     credential_map: Mapping[str, str] | None = None,
     cwd: Path | None = None,
+    api_key: str | None = None,
 ) -> None:
     """Execute unified provider auth for one registry row (#478)."""
     if credential_map is not None:
         _persist_indexed_credentials(entry, scope, credential_map, cwd=cwd)
+        return
+    if api_key is not None:
+        auth_kind = _entry_auth_kind(entry)
+        if auth_kind != AUTH_KIND_API_KEY:
+            label = str(entry.get("label", "?"))
+            cli_bail(
+                f"provider {label!r} does not accept --api-key "
+                f"(auth kind {auth_kind!r}); use the interactive auth flow instead."
+            )
+        label = str(entry["label"])
+        url = entry.get("url")
+        url_str = str(url) if url is not None else None
+        if not _validate_api_key_for_label(label, api_key, url_str):
+            cli_bail(f"{label} API key validation failed (401/403). Check the key and retry.")
+        suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_API_KEY]
+        _persist_indexed_credentials(entry, scope, {suffix: api_key}, cwd=cwd)
         return
     auth_kind = _entry_auth_kind(entry)
     strategy = resolve_auth_strategy(auth_kind)
@@ -1216,7 +1206,12 @@ def provider_auth_cmd(
         None,
         help="Provider label (interactive picker when omitted).",
     ),
-    scope: str = _PROVIDER_AUTH_SCOPE_OPTION,
+    scope: str | None = _PROVIDER_AUTH_SCOPE_OPTION,
+    api_key: str | None = typer.Option(
+        None,
+        "--api-key",
+        help="API key for api_key providers (non-interactive; skips the prompt).",
+    ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
     """Authenticate one registered provider into indexed ``LLM_PROVIDER_*`` secrets."""
@@ -1237,12 +1232,23 @@ def provider_auth_cmd(
         if entry is None:
             cli_bail(f"unknown provider label {normalised!r}")
         console.print(f"authenticating provider [cyan]{entry.get('label', normalised)}[/cyan]")
-        run_provider_auth(entry, scope, cwd=repo_root)
+        resolved_scope = (scope or "github").strip().lower()
+        if api_key is not None and scope is not None and resolved_scope == "github":
+            cli_bail(
+                "--api-key writes credentials to the local .env only — "
+                "use --scope local (or omit --scope) with --api-key, "
+                "or omit --api-key to store GitHub Actions secrets interactively"
+            )
+        auth_scope = "local" if api_key is not None else resolved_scope
+        run_provider_auth(entry, auth_scope, cwd=repo_root, api_key=api_key)
         return
+
+    if api_key is not None:
+        cli_bail("--api-key requires an explicit provider label", code=CLI_USAGE_EXIT_CODE)
 
     picked = _interactive_provider_picker(registry)
     console.print(f"authenticating provider [cyan]{picked.get('label')}[/cyan]")
-    run_provider_auth(picked, scope, cwd=repo_root)
+    run_provider_auth(picked, (scope or "github"), cwd=repo_root)
 
 
 # ``provider enable|disable`` (#520) live in their own module to keep this one

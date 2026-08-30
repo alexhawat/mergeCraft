@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft agent` and `mergecraft agent-local` author the agent roster —
+  positional `pN` slots, named agents, `after:` dispatch levels, and dense
+  `modelChain` editing; local overrides write `.mergecraft/config.local.yaml`
+  and are invisible to CI
+- Multiple reviewer-role bindings run on one PR; findings merge by path/body/line
+  and produce exactly one verdict with strictest severity winning
+- `mergecraft workflow sync` keeps `.github/workflows/mergecraft.yml` auth wiring
+  aligned with roster models; unwired providers fail at CLI write time and at run
+  start
+- First `mergecraft provider auth` after `init` seeds `agents.reviewer` p0 so
+  review works with no third command
+- `docs/agent-roster.md` — operator guide for slots, named agents, local scope,
+  multi-reviewer verdict rules, and the run-start trust snapshot
 - Operator trust knob (`trust.selfReview`: `off` / `analyzers` / `full`) with
   two-axis resolution — execution trust for analyzers vs authority trust for
   approval semantics — resolved from the base config snapshot so a PR cannot

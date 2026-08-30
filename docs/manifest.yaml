@@ -175,6 +175,12 @@ pages:
     generator: null
     purpose: Provider auth, custom OpenAI-compatible gateways, and model fallback chains.
 
+  - path: docs/agent-roster.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot (D9).
+
   - path: docs/workflows.md
     audience: consumer
     template: consumer

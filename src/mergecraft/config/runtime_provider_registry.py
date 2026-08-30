@@ -125,6 +125,21 @@ def _credential_suffixes_for_entry(entry: ProviderRegistryEntry) -> tuple[str, .
     return (suffix,)
 
 
+def credential_env_keys_for_entry(entry: ProviderRegistryEntry) -> tuple[str, ...]:
+    """Return the indexed env keys that can satisfy *entry*, in preference order.
+
+    The keys are **alternatives**, not requirements: an ``oauth`` entry is
+    satisfied by ``LLM_PROVIDER_<N>_CLAUDE_CODE_OAUTH_TOKEN`` and a
+    ``device_code`` entry by ``LLM_PROVIDER_<N>_CODEX_AUTH_JSON``, neither of
+    which is an API key. Callers that check for a *missing* credential must
+    treat the whole tuple as one OR, the way ``indexed_credential_for_entry``
+    does when it reads them.
+    """
+    return tuple(
+        indexed_env_key(entry.env_index, suffix) for suffix in _credential_suffixes_for_entry(entry)
+    )
+
+
 def indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
     """Return the first indexed credential value present for *entry*."""
     for suffix in _credential_suffixes_for_entry(entry):
@@ -344,6 +359,7 @@ def infer_harness_for_slug(
 
 __all__ = [
     "SEED_PROVIDER_URLS",
+    "credential_env_keys_for_entry",
     "harness_env_for_active_provider",
     "has_registry_credentials",
     "indexed_api_key_for_entry",

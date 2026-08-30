@@ -171,7 +171,7 @@ def run_ensemble_dispatch(
     return EnsembleRun(agent_id=binding.agent_id, model_runs=tuple(model_runs))
 
 
-def _finding_key(row: dict[str, object]) -> tuple[str, str, str]:
+def finding_key(row: dict[str, object]) -> tuple[str, str, str]:
     """Identify a finding by its anchor and body.
 
     ``line`` is part of the identity: the same defect reported at two call
@@ -183,6 +183,9 @@ def _finding_key(row: dict[str, object]) -> tuple[str, str, str]:
     return str(row.get("path", "")), str(row.get("body", "")), "" if line is None else str(line)
 
 
+_finding_key = finding_key
+
+
 def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
     """Merge ensemble runs — agreement boosts confidence; disagreement → judge."""
     if len(run.model_runs) < 2:
@@ -190,8 +193,8 @@ def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
         return EnsembleReconciliation(agreement=True, merged_findings=merged)
 
     left, right = run.model_runs[0], run.model_runs[1]
-    left_keys = {_finding_key(row) for row in left.findings}
-    right_keys = {_finding_key(row) for row in right.findings}
+    left_keys = {finding_key(row) for row in left.findings}
+    right_keys = {finding_key(row) for row in right.findings}
     if left_keys == right_keys:
         # Empty-vs-empty is agreement (both found nothing) but not a
         # confidence boost — there is no corroborated finding set.
@@ -223,7 +226,7 @@ def reconcile_ensemble(run: EnsembleRun) -> EnsembleReconciliation:
     # finding keeps its severity and evidence.
     unioned: dict[tuple[str, str, str], dict[str, object]] = {}
     for row in (*left.findings, *right.findings):
-        unioned.setdefault(_finding_key(row), row)
+        unioned.setdefault(finding_key(row), row)
 
     return EnsembleReconciliation(
         agreement=False,
@@ -298,6 +301,7 @@ __all__ = [
     "JudgeDispatch",
     "ModelRun",
     "ShadowDispatchResult",
+    "finding_key",
     "plan_ensemble_models",
     "reconcile_ensemble",
     "run_ensemble_dispatch",

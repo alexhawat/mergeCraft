@@ -9,7 +9,8 @@ import typer
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
-from mergecraft.cli.provider_cmd import _config_path, _load_config_dict, _write_config_dict
+from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
+from mergecraft.config.io import write_config_dict
 from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
 from mergecraft.config.trust_policy import resolve_trust_policy
 
@@ -85,7 +86,7 @@ def set_self_review_cmd(
         trust_block = {}
     trust_block["selfReview"] = normalized
     data["trust"] = trust_block
-    _write_config_dict(config_path, data)
+    write_config_dict(config_path, data)
     console.print(f"updated {config_path}: trust.selfReview={normalized}")
 
 

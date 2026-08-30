@@ -44,20 +44,36 @@ def test_flagged_value_is_not_doubled() -> None:
     assert redacted.count("<redacted>") == 1
 
 
-_FLAG_NAMES = st.sampled_from(
-    [
-        "--api-key",
-        "--token",
-        "--secret",
-        "GH_TOKEN",
-        "ANTHROPIC_API_KEY",
-    ]
-)
+_FLAG_NAME_LIST = [
+    "--api-key",
+    "--token",
+    "--secret",
+    "GH_TOKEN",
+    "ANTHROPIC_API_KEY",
+]
+_FLAG_NAMES = st.sampled_from(_FLAG_NAME_LIST)
+
+
+def _is_usable_secret(value: str) -> bool:
+    """Reject generated values that a flag *name* would legitimately echo.
+
+    The flag name stays in the redacted string — it is not secret. So a
+    generated value that is a substring of some flag name (``GH_TOKEN`` itself,
+    or ``ANTHROPIC`` inside ``ANTHROPIC_API_KEY``) makes ``secret not in
+    redacted`` fail on the surviving flag rather than on a leaked value. That is
+    a collision in the generator, not a redaction defect, and it made this
+    property intermittently red.
+    """
+    if not value.strip() or " " in value:
+        return False
+    return not any(value in flag for flag in _FLAG_NAME_LIST)
+
+
 _SECRET_VALUES = st.text(
     alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters=" \t\n\r"),
     min_size=8,
     max_size=48,
-).filter(lambda value: value.strip() and " " not in value)
+).filter(_is_usable_secret)
 
 
 @settings(max_examples=80, deadline=None)

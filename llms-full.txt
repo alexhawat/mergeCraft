@@ -2476,6 +2476,31 @@ You do not need `uv tool install` on your laptop unless you want local
 
 # Authentication
 
+## Quick start — init → auth → review (D10)
+
+A new consumer repo can review immediately after two commands — no manual roster
+editing:
+
+```bash
+mergecraft init
+mergecraft provider auth claude    # or codex, gemini, nous, …
+mergecraft review                  # local review works now
+```
+
+`mergecraft init` scaffolds `.mergecraft/config.yaml` and the workflow. The first
+successful `provider auth` seeds `agents.reviewer` p0 with that provider's
+preferred catalog model and inserts the slug into `models:` when needed. Inspect
+the result with `mergecraft agent list`.
+
+To override models for local runs only — without changing what CI sees — use
+`mergecraft agent-local` (see [`docs/agent-roster.md`](agent-roster.md)).
+
+Commit `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml` after
+auth. Run `mergecraft workflow sync --check` before pushing if you assign roster
+models whose providers are not yet wired in the workflow.
+
+## Provider reference
+
 | Provider | Subscription (recommended) | API key | Recommended model | Inferred harness |
 |----------|-----------------------------|---------|-------------------|------------------|
 | Anthropic Claude | `mergecraft auth claude` → `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` | `claude` |

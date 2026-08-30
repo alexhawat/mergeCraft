@@ -324,6 +324,7 @@ class ToolState:
     pending_review_publication: dict[str, Any] | None = None
     terminal_submission: TerminalSubmission | None = None
     terminal_submission_conflict: bool = False
+    reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
@@ -481,6 +482,20 @@ def record_lens_execution(
     """Persist the routing decision and the lenses that actually ran (RC7)."""
     record_lens_routing_decision(tool_state, routing_decision)
     tool_state.dispatched_lens_ids = tuple(dispatched_lens_ids)
+
+
+def record_reviewer_dispatch_error(
+    tool_state: ToolState,
+    *,
+    agent_id: str,
+    reason: str,
+) -> None:
+    """Record one reviewer subagent that produced no findings (D15)."""
+    key = agent_id.strip()
+    text = reason.strip()
+    if not key or not text:
+        return
+    tool_state.reviewer_dispatch_errors[key] = text
 
 
 def append_dispatched_lens(tool_state: ToolState, agent_id: str) -> None:

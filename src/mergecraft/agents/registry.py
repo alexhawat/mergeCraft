@@ -17,6 +17,12 @@ from mergecraft.agents.recall import RECALL_SYSTEM_PROMPT
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.structured_handoff import agent_finding_output_schema_id
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
+from mergecraft.config.roster_graph import (
+    AfterEdge,
+    RosterGraphError,
+    ordered_level_groups,
+    validate_after_graph,
+)
 from mergecraft.config.settings import (  # noqa: TC001
     AgentBindingOverride,
     DispatchMode,
@@ -102,6 +108,7 @@ class AgentBinding(BaseModel):
     agent_id: str
     role: AgentRole
     lens: str | None = None
+    after: str | None = None
     model_chain: tuple[str, ...]
     prompt_id: str
     prompt_version: str
@@ -272,6 +279,7 @@ def _apply_override(
         agent_id=agent_key if agent_key not in {r.value for r in AgentRole} else base.agent_id,
         role=role,
         lens=override.lens if override.lens is not None else base.lens,
+        after=override.after if override.after is not None else base.after,
         model_chain=model_chain,
         prompt_id=override.prompt_id or base.prompt_id,
         prompt_version=override.prompt_version or base.prompt_version,
@@ -285,22 +293,89 @@ def _apply_override(
 
 
 class Registry:
-    """Resolved agent roster for one repo configuration."""
+    """Resolved agent roster for one repo configuration.
 
-    def __init__(self, bindings: dict[str, AgentBinding]) -> None:
+    Multiple lens-less bindings may share a role (for example two ``reviewer``
+    entries). :meth:`resolve_role` returns the binding whose config key equals
+    the role name when present, otherwise the first binding in stable order.
+    :meth:`resolve_roles` returns every binding for a role in that same order:
+    the role-named key first, then every other key in config declaration order
+    (not alphabetical — ``reviewer10`` does not sort before ``reviewer2``).
+    :meth:`resolve_role_levels` groups those bindings into dispatch levels from
+    each binding's ``after:`` dependency (D15).
+    """
+
+    def __init__(
+        self,
+        bindings: dict[str, AgentBinding],
+        *,
+        configured_keys: frozenset[str] = frozenset(),
+    ) -> None:
         self._bindings = bindings
-        self._by_role: dict[AgentRole, AgentBinding] = {}
-        for binding in bindings.values():
+        self._configured_keys = configured_keys
+        self._by_role: dict[AgentRole, list[tuple[str, AgentBinding]]] = {}
+        for key, binding in bindings.items():
             if binding.lens is None:
-                self._by_role[binding.role] = binding
+                self._by_role.setdefault(binding.role, []).append((key, binding))
+
+    def _primary_role_entries(
+        self,
+        role: AgentRole,
+        entries: list[tuple[str, AgentBinding]],
+    ) -> list[tuple[str, AgentBinding]]:
+        """Pick the canonical binding when multiple agents share a role.
+
+        When the role-named key (for example ``reviewer``) is present in the
+        committed config, that binding is primary. Otherwise the first custom
+        agent id declared in config order wins so ``reviewer2`` does not sort
+        ahead of ``reviewer10``.
+        """
+        role_key = role.value
+        role_named = [entry for entry in entries if entry[0] == role_key]
+        if role_key in self._configured_keys:
+            return role_named
+        configured_custom = [entry for entry in entries if entry[0] in self._configured_keys]
+        if configured_custom:
+            return configured_custom[:1]
+        return role_named
+
+    def _ordered_role_entries(self, role: AgentRole) -> list[tuple[str, AgentBinding]]:
+        entries = self._by_role.get(role, [])
+        if not entries:
+            return []
+        primary = self._primary_role_entries(role, entries)
+        primary_keys = {key for key, _ in primary}
+        others = [entry for entry in entries if entry[0] not in primary_keys]
+        return primary + others
+
+    def _ordered_role_bindings(self, role: AgentRole) -> tuple[AgentBinding, ...]:
+        return tuple(binding for _, binding in self._ordered_role_entries(role))
 
     def resolve_role(self, role: AgentRole | str) -> AgentBinding:
         key = AgentRole(role) if isinstance(role, str) else role
-        try:
-            return self._by_role[key]
-        except KeyError as exc:
+        ordered = self._ordered_role_bindings(key)
+        if not ordered:
             msg = f"no binding for role {key!r}"
-            raise KeyError(msg) from exc
+            raise KeyError(msg)
+        return ordered[0]
+
+    def resolve_roles(self, role: AgentRole | str) -> tuple[AgentBinding, ...]:
+        key = AgentRole(role) if isinstance(role, str) else role
+        return self._ordered_role_bindings(key)
+
+    def resolve_role_levels(self, role: AgentRole | str) -> tuple[tuple[AgentBinding, ...], ...]:
+        """Return dispatch levels for *role* derived from ``after:`` edges (D15)."""
+        key = AgentRole(role) if isinstance(role, str) else role
+        entries = self._ordered_role_entries(key)
+        if not entries:
+            return ()
+        nodes = tuple(
+            AfterEdge(name=agent_key, after=binding.after) for agent_key, binding in entries
+        )
+        ordered_keys = tuple(agent_key for agent_key, _binding in entries)
+        level_groups = ordered_level_groups(nodes, names_in_order=ordered_keys)
+        by_key = {agent_key: binding for agent_key, binding in entries}
+        return tuple(tuple(by_key[agent_key] for agent_key in group) for group in level_groups)
 
     def resolve_agent_ref(self, ref: str) -> AgentBinding:
         """Resolve a pipeline agent reference (role name or custom agent id)."""
@@ -427,7 +502,41 @@ def load_registry(
             lens_keys[merged.lens] = agent_key
         bindings[agent_key] = merged
 
-    return Registry(bindings)
+    orchestrator_keys = [
+        key
+        for key, binding in bindings.items()
+        if binding.role is AgentRole.orchestrator and binding.lens is None
+    ]
+    if len(orchestrator_keys) > 1:
+        joined = ", ".join(orchestrator_keys)
+        msg = f"cannot load multiple orchestrator bindings (D7): {joined}"
+        raise RegistryValidationError(msg)
+
+    all_nodes = tuple(
+        AfterEdge(name=agent_key, after=binding.after) for agent_key, binding in bindings.items()
+    )
+    try:
+        validate_after_graph(all_nodes)
+    except RosterGraphError as exc:
+        raise RegistryValidationError(str(exc)) from exc
+    _validate_after_same_role(bindings)
+
+    return Registry(bindings, configured_keys=frozenset(settings.agents.keys()))
+
+
+def _validate_after_same_role(bindings: dict[str, AgentBinding]) -> None:
+    for agent_key, binding in bindings.items():
+        if binding.after is None:
+            continue
+        target = bindings.get(binding.after)
+        if target is None:
+            continue
+        if binding.role != target.role:
+            msg = (
+                f"after: {binding.after!r} on {agent_key!r} must reference an agent "
+                f"with the same role ({binding.role.value} != {target.role.value})"
+            )
+            raise RegistryValidationError(msg)
 
 
 def resolve_agent_model(

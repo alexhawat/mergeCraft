@@ -93,6 +93,16 @@ def merge_analyzer_findings_into_result(
     extra: list[Finding],
 ) -> OfflineReviewResult:
     """Fold analyzer findings into structured output used for CLI exit codes."""
+    if result.structured_output:
+        try:
+            parse_findings_payload(result.structured_output)
+        except ValueError as exc:
+            return _offline_failure(
+                error=str(exc),
+                outcome=RunOutcome.configuration_error,
+                diff_path=result.diff_path,
+                evidence_packet_path=result.evidence_packet_path,
+            )
     if not extra:
         return result
     if result.structured_output:
