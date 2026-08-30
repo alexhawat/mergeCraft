@@ -13,6 +13,8 @@ mergecraft agent create       reviewer2 --role reviewer          # a second revi
 mergecraft agent create       reviewer3 --role reviewer --after reviewer2
 mergecraft agent-local assign-model reviewer p0 openai/gpt-codex  # local-only override
 mergecraft workflow sync --check   # fail when roster models lack CI credentials
+mergecraft provider status         # what CI will run — roster, credentials, wiring
+mergecraft provider status --github   # also check repo secret presence
 ```
 
 Full command reference: [`docs/cli.md`](cli.md).
@@ -118,6 +120,33 @@ model reviews that PR.
 Implementation: `src/mergecraft/config/settings_snapshot.py` (AG2 / MCB-19).
 Roster helpers in `src/mergecraft/config/agent_roster.py` import the snapshot
 primitives — do not duplicate snapshot logic elsewhere.
+
+## Inspecting what CI will run
+
+`mergecraft provider status` is the read-only inspection command for the
+question *"what will CI actually run?"* It projects the committed roster onto
+credential presence, workflow auth wiring, dispatch levels, and per-slot skip
+reasons — without calling a model or mutating config.
+
+```bash
+mergecraft provider status              # offline view from config + workflow
+mergecraft provider status --github     # also query repo secret presence
+mergecraft provider status --json       # machine-readable output (schema v1)
+```
+
+| State | Meaning | Typical remedy |
+|-------|---------|----------------|
+| credential missing | env var absent locally (or secret absent with `--github`) | `mergecraft provider auth <label>` |
+| not wired | provider absent from `mergecraft.yml` auth manifest | `mergecraft workflow sync --apply` |
+| disabled | credentials cleared via `provider disable` | `mergecraft provider enable <label>` |
+
+``--github`` needs a token with ``repo`` scope (``gh auth token`` or
+``GITHUB_TOKEN``). Without one every remote field is ``unknown`` and the command
+still exits 0. Secrets are reported as present/absent only — values are never
+printed (#520 / D11).
+
+``--cwd`` selects every target — config path, git resolution, workflow file,
+and registry — the same rule as `provider disable` (#521).
 
 ## Workflow sync
 
