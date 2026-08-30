@@ -7,14 +7,14 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from tests.publication_attribution.support import (
-    ANCHOR_RECOVERY_RETRY_CEILING,
-    RecordingGitHub,
-)
+from tests.publication_attribution.support import RecordingGitHub
 from tests.support.tool_context import bind_github_client
 
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
-from mergecraft.mcp.review import _create_github_review_with_anchor_recovery
+from mergecraft.mcp.review import (
+    ANCHOR_RECOVERY_RETRY_CEILING,
+    _create_github_review_with_anchor_recovery,
+)
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 
