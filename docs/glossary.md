@@ -15,7 +15,8 @@ A **trust tier** is how much mergeCraft trusts the code it is reading: a pull re
 from your own repository is trusted and gets secrets; a pull request from a fork is not,
 and runs with no secrets and read-only tools.
 
-Read more: [Security model](workflows.md#security-model) in `docs/workflows.md`.
+Read more: [Security model](workflows.md#security-model) in `docs/workflows.md`,
+[Operator trust policy](trust-policy.md) for the `trust.selfReview` knob.
 
 ### Typed finding {#typed-finding}
 

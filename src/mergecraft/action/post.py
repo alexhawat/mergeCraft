@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path
 
 from loguru import logger
+
+from mergecraft.cli.auth_cmd import _set_gh_secret, _single_line_credential
 
 
 def _get_state(name: str) -> str:
@@ -37,22 +38,16 @@ def detect_codex_refresh(*, auth_file_content: str, original_refresh: str) -> st
     if not refresh or refresh == original_refresh:
         return None
 
-    # Prefer returning Codex CLI shape if we can.
+    # Prefer returning Codex CLI shape if we can — compact JSON so writeback
+    # does not reintroduce multi-line masking (ledger B2).
     if isinstance(data, dict) and "tokens" in data:
-        return json.dumps(data, indent=2)
+        return json.dumps(data)
     return auth_file_content
 
 
 def _writeback_gh_secret(value: str, repo: str | None = None) -> bool:
-    cmd = ["gh", "secret", "set", "CODEX_AUTH_JSON"]
-    if repo:
-        cmd.extend(["--repo", repo])
-    try:
-        subprocess.run(cmd, input=value, text=True, check=True, capture_output=True)
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError) as exc:
-        logger.warning("codex post-hook: gh secret set failed — {}", exc)
-        return False
+    secret_value = _single_line_credential(name="CODEX_AUTH_JSON", value=value)
+    return _set_gh_secret(name="CODEX_AUTH_JSON", value=secret_value, repo_slug=repo)
 
 
 def main() -> None:

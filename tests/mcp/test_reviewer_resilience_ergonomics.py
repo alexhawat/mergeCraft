@@ -1,0 +1,262 @@
+"""Plan 13 W1.2 — git tool ergonomics RED contracts (green after W3)."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+from tests.mcp.reviewer_resilience_support import git_ctx, init_git_repo, tool_error_text
+
+from mergecraft.mcp.checkout import checkout_pr_tool
+from mergecraft.mcp.git import git_tool
+from mergecraft.mcp.git_guards import _is_denied_config_key
+from mergecraft.utils.github import GitHubClient
+
+
+class _RunGitRecorder:
+    def __init__(self, output: str = "ok\n") -> None:
+        self.calls: list[list[str]] = []
+        self.output = output
+
+    def __call__(self, args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
+        self.calls.append([str(a) for a in args])
+        return self.output
+
+
+@pytest.mark.parametrize("subcommand", ["show-ref", "for-each-ref", "ls-remote"])
+@pytest.mark.asyncio
+async def test_readonly_discovery_verbs_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute({"command": subcommand})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [[subcommand]]
+
+
+@pytest.mark.asyncio
+async def test_config_get_remote_origin_url_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder(output="https://github.com/acme/demo.git\n")
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {"command": "config", "args": ["--get", "remote.origin.url"]}
+    )
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["config", "--get", "remote.origin.url"]]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "http.https://github.com/.extraHeader",
+        "credential.helper",
+        "url.https://github.com/.insteadOf",
+    ],
+)
+@pytest.mark.asyncio
+async def test_config_get_credential_keys_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {"command": "config", "args": ["--get", key]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+def _seed_repo_credential_config(root: Path) -> None:
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "http.https://github.com/.extraHeader",
+            "Authorization: Basic deadbeef",
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "credential.helper", "store"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_config_list_refused_or_omits_credential_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos HIGH #1 — ``git config --list`` must not dump credential keys."""
+    init_git_repo(tmp_path)
+    _seed_repo_credential_config(tmp_path)
+
+    recorder = _RunGitRecorder(
+        output=(
+            "user.name=Test\n"
+            "http.https://github.com/.extraHeader=Authorization: Basic deadbeef\n"
+            "credential.helper=store\n"
+        )
+    )
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute({"command": "config", "args": ["--list"]})
+
+    if result.is_error:
+        assert recorder.calls == []
+        return
+
+    output = json.loads(result.content[0]["text"])["output"]
+    for line in output.splitlines():
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        assert not _is_denied_config_key(key), f"credential key leaked in --list: {key}={value}"
+        assert "Authorization: Basic deadbeef" not in value
+
+
+_LOWERCASE_EXTRAHEADER_KEY = "http.https://github.com/.extraheader"
+
+
+@pytest.mark.asyncio
+async def test_config_get_lowercase_extraheader_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos turn 3 — lowercase ``.extraheader`` on ``config --get`` is refused."""
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {"command": "config", "args": ["--get", _LOWERCASE_EXTRAHEADER_KEY]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.asyncio
+async def test_config_get_all_extra_header_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos HIGH #1 — ``config --get-all`` on extraHeader keys is refused."""
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {
+            "command": "config",
+            "args": ["--get-all", "http.https://github.com/.extraHeader"],
+        }
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.asyncio
+async def test_config_get_all_lowercase_extraheader_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos turn 3 — lowercase ``.extraheader`` on ``config --get-all`` is refused."""
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {"command": "config", "args": ["--get-all", _LOWERCASE_EXTRAHEADER_KEY]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.asyncio
+async def test_config_get_all_credential_helper_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thermos HIGH #1 — ``config --get-all`` on credential.* keys is refused."""
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute(
+        {"command": "config", "args": ["--get-all", "credential.helper"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--unset", "user.email"],
+        ["user.email", "evil@example.com"],
+    ],
+)
+@pytest.mark.asyncio
+async def test_config_write_forms_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    init_git_repo(tmp_path)
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(git_ctx(tmp_path)).execute({"command": "config", "args": args})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+class _AliasCheckoutStub(GitHubClient):
+    """Records alias-normalized pull_number via ctx.scm → GitHubScmAdapter."""
+
+    async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, object]:
+        assert pull_number == 546
+        return {
+            "head": {"ref": "feature", "sha": "a" * 40, "repo": {"full_name": "acme/demo"}},
+            "base": {"ref": "main", "repo": {"full_name": "acme/demo"}},
+            "title": "t",
+            "html_url": "https://x/1",
+        }
+
+
+@pytest.mark.parametrize("alias_key", ["pr_number", "issue_number"])
+@pytest.mark.asyncio
+async def test_checkout_pr_parameter_aliases_resolve_to_pull_number(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, alias_key: str
+) -> None:
+    monkeypatch.setattr("mergecraft.mcp.checkout.get_git_status", lambda cwd: "")
+    monkeypatch.setattr(
+        "mergecraft.mcp.checkout._run_git",
+        lambda *args, **kwargs: "deadbeef\n" if args[0] == ["rev-parse", "HEAD"] else "ok\n",
+    )
+
+    result = await checkout_pr_tool(
+        git_ctx(tmp_path, github=_AliasCheckoutStub(token="test-token"))
+    ).execute({alias_key: 546})
+    assert result.is_error is False, result.content[0]["text"]
+    payload = json.loads(result.content[0]["text"])
+    assert payload.get("pullNumber") == 546 or payload.get("pull_number") == 546
+
+
+@pytest.mark.asyncio
+async def test_unknown_checkout_alias_produces_schema_error(tmp_path: Path) -> None:
+    spec = checkout_pr_tool(git_ctx(tmp_path))
+    result = await spec.execute({"pullNumber": 1})
+    assert result.is_error is True
+    text = tool_error_text(result)
+    assert "additionalProperties" in text or "pull_number" in text

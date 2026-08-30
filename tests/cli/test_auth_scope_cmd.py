@@ -547,26 +547,28 @@ def test_multiline_non_json_credential_bails_instead_of_writing(
 def test_gh_secret_receives_the_uncompacted_payload(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    """Only the local write is compacted; ``gh secret set`` gets the payload verbatim.
+    """W0 landing strip — both local and ``gh secret set`` paths are compacted.
 
-    The asymmetry is deliberate and easy to "simplify" away by hoisting the
-    ``_single_line_credential`` call above the branch: an Actions secret has no
-    one-line constraint, and rewriting the credential before shipping it to
-    GitHub would change what the runtime receives for no reason.
+    Plan 13 W0 applies ``_single_line_credential()`` to the Actions secret write
+    so multi-line JSON does not mask every ``{`` in job logs. The local ``.env``
+    write and the GitHub secret must both receive the single-line JSON form.
     """
     module = _load_auth_cmd()
     _arrange_pretty_codex(module, monkeypatch)
     gh = GhRecorder()
     gh.install(module, monkeypatch)
     env_path = _pin_env_path(tmp_path, monkeypatch, precreate=False)
+    compact = json.dumps(json.loads(PRETTY_CODEX_PAYLOAD))
 
     result = runner.invoke(app, ["auth", "codex", "--scope", "both"])
 
     assert result.exit_code == 0, _flat(result)
     assert [record["name"] for record in gh.secrets] == ["CODEX_AUTH_JSON"]
-    assert gh.secrets[0]["value"] == PRETTY_CODEX_PAYLOAD
+    assert gh.secrets[0]["value"] == compact
+    assert "\n" not in gh.secrets[0]["value"]
     stored = _read_back(env_path, "CODEX_AUTH_JSON")
     assert stored is not None
+    assert stored == compact
     assert "\n" not in stored
 
 

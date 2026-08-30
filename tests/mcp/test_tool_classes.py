@@ -364,17 +364,19 @@ def test_record_finding_verdict_is_absent_from_verifier_surface(tool_ctx: ToolCo
 def test_read_only_roles_exclude_mutating_tools_except_checkout_pr(tool_ctx: ToolContext) -> None:
     """Class membership is not enough: mutates=True tools stay off read-only surfaces.
 
-    ``checkout_pr`` is the HA4.2 / D14 exception on the reviewer. D9 also admits
-    ``create_pull_request_review`` on the primary reviewer only. The session tools
-    ``set_output``, ``select_mode``, and ``report_progress`` are admitted on the
-    primary reviewer via ``PRIMARY_MUTATING_ALLOWLIST``; subagents still deny them.
-    Verifier gets no mutating tool.
+    ``checkout_pr`` and ``establish_review_scope`` are the HA4.2 / D14 / W4
+    exceptions on the reviewer. D9 also admits ``create_pull_request_review`` on
+    the primary reviewer only. The session tools ``set_output``, ``select_mode``,
+    and ``report_progress`` are admitted on the primary reviewer via
+    ``PRIMARY_MUTATING_ALLOWLIST``; subagents still deny them. Verifier gets no
+    mutating tool.
     """
     reviewer, verifier = _read_only_toolsets(tool_ctx)
     reviewer_mutating = [spec.name for spec in reviewer if spec.mutates]
     assert "checkout_pr" in reviewer_mutating
     assert set(reviewer_mutating) <= {
         "checkout_pr",
+        "establish_review_scope",
         "create_pull_request_review",
         "set_output",
         "select_mode",

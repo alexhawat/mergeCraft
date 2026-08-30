@@ -11,9 +11,9 @@ a sequence of NDJSON events (Claude ``stream-json``, ``codex exec --json``,
 pathway, so the existing ``MemorySink`` / ``JSONLFileSink`` surface sees it.
 
 The consumer is intentionally **driver-agnostic**: it knows how to read lines
-from a stream, parse them as JSON, skip malformed lines (W6.5), echo lines
-to stdout so the activity monitor stays armed (D13), and surface a classifier
-callback for driver-specific span emission.
+from a stream, parse them as JSON, skip malformed lines (W6.5), render
+operator-facing lines through ``stream_render`` (plan 13 W7), and surface a
+classifier callback for driver-specific span emission.
 
 Per-harness payload coverage (OB3 — recorded, not faked; plan §OB3.1 note):
     - **OpenCode HTTP path** (``opencode.py::_prompt_session``): full
@@ -51,14 +51,15 @@ Exports:
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from mergecraft.agents.shared import resolve_cache_read
+from mergecraft.agents.stream_render import emit_rendered_stream_line
+from mergecraft.utils import activity
 
 if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentUsage
@@ -99,6 +100,9 @@ class StreamSpanAccumulator:
     # them the run's only failure signal is whatever unrelated text the CLI
     # happened to leave on stderr (#445).
     stream_error: str | None = None
+    # Bubblewrap namespace failures on command_execution items (plan 13 W8 / #553).
+    user_namespace_failure_reported: bool = False
+    run_health_notes: list[str] = field(default_factory=list)
 
     def set_stream_error(self, message: str | None) -> None:
         """Record the first provider-reported fatal error on this stream."""
@@ -213,6 +217,22 @@ def _safe_iter_lines(stream: Iterable[str]) -> Iterator[str]:
         yield text
 
 
+def _safe_invoke_handler(
+    handler: EventHandler,
+    accumulator: StreamSpanAccumulator,
+    event: dict[str, Any],
+) -> None:
+    """Invoke ``handler`` and log handler failures without aborting the stream."""
+    try:
+        handler(accumulator, event)
+    except Exception as exc:
+        logger.warning(
+            "stream consumer handler failed on event type={!r}: {}",
+            event.get("type"),
+            exc,
+        )
+
+
 def _resolve_active_span_for_otel_bridge() -> Span | None:
     """Return the currently active mergeCraft ``Span`` for the OTel bridge.
 
@@ -232,23 +252,6 @@ def _resolve_active_span_for_otel_bridge() -> Span | None:
     if isinstance(active, _Span):
         return active
     return None
-
-
-def _echo_line_to_stdout(line: str) -> None:
-    """Echo a streamed line to ``sys.stdout`` so the activity monitor stays armed.
-
-    The activity monitor (``utils/activity.py``) patches ``sys.stdout.write``
-    to call ``mark_activity`` on every non-noise chunk. Without this echo,
-    the W6 streaming read loop bypasses stdout entirely and the activity
-    monitor can time out on a long, quiet run (D13). A newline is appended
-    so a partial chunk still triggers the patched write.
-    """
-    try:
-        sys.stdout.write(line)
-        if not line.endswith("\n"):
-            sys.stdout.write("\n")
-    except Exception as exc:
-        logger.debug("stream consumer stdout echo failed: {}", exc)
 
 
 def consume_stream(
@@ -292,10 +295,8 @@ def consume_stream(
 
         accumulator.parsed_event_count += 1
 
-        # The activity monitor is patched onto ``sys.stdout.write``. Echo
-        # every well-formed line so a streaming run keeps the monitor armed
-        # (D13). Malformed lines do not echo — they're noise by definition.
-        _echo_line_to_stdout(stripped)
+        activity.mark_activity()
+        emit_rendered_stream_line(event)
 
         # T3.2 — when a mergeCraft span is active, wrap the handler call in
         # ``attach_trace_context`` so any nested OTel auto-instrumented
@@ -312,24 +313,10 @@ def consume_stream(
             except ImportError:
                 attach_trace_context = None  # type: ignore[assignment]
             if attach_trace_context is not None:
-                try:
-                    with attach_trace_context(active_span):
-                        handler(accumulator, event)
-                except Exception as exc:
-                    logger.warning(
-                        "stream consumer handler failed on event type={!r}: {}",
-                        event.get("type"),
-                        exc,
-                    )
+                with attach_trace_context(active_span):
+                    _safe_invoke_handler(handler, accumulator, event)
                 continue
-        try:
-            handler(accumulator, event)
-        except Exception as exc:
-            logger.warning(
-                "stream consumer handler failed on event type={!r}: {}",
-                event.get("type"),
-                exc,
-            )
+        _safe_invoke_handler(handler, accumulator, event)
 
 
 __all__ = [

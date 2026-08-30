@@ -29,3 +29,23 @@ ciEvidence:
     - ruff-sarif
     - mypy-sarif
     - bandit-sarif
+
+# Operator trust knob for same-repo pull_request_target (plan 13 D14–D16).
+# Resolved from the BASE snapshot at run start — a PR-head edit cannot raise
+# its own tier. Default when absent: off (today's untrusted posture).
+#   off       — no change from pre-knob behaviour
+#   analyzers — trusted-tier analyzers on same-repo PRs; agent still cannot APPROVE
+#   full      — authority trust too; requires mergecraft trust set-self-review full
+#               --i-understand-this-grants-approval-authority (exceptional opt-out)
+# Real PAT-backed APPROVE for self-review still flows through mergecraft-approve.yml
+# when the structural mergecraft-approval check passes — see docs/trust-policy.md.
+#
+# The `trust:` block is deliberately absent while `selfReview` is `off`, which is
+# already the model default. The integration coverage gate runs the *base* tree's
+# tests from a worktree inside this checkout, so a key introduced in the same PR
+# that adds its schema field is parsed by base code that does not know it yet and
+# fails `extra="forbid"`. Add the block in a follow-up, or when setting a non-off
+# level:
+#
+#   trust:
+#     selfReview: "off"

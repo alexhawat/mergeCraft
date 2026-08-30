@@ -20,12 +20,44 @@ from mergecraft.agents.shared import (
     has_post_run_issues,
     merge_agent_usage,
 )
+from mergecraft.mcp.tool_state import ToolState  # noqa: TC001 — runtime helpers below
 from mergecraft.modes import NON_COMMITTING_MODES
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from mergecraft.mcp.tool_state import ToolState
+
+def _post_run_issues_retryable(issues: PostRunIssues, tool_state: ToolState) -> bool:
+    """Classify whether a post-run resume can change the outcome (D5)."""
+    from mergecraft.mcp.verdict import REJECTION_SCOPE_UNAVAILABLE
+
+    if issues.stop_hook is not None or issues.dirty_tree is not None:
+        return True
+    if issues.unsubmitted_review is not None:
+        return tool_state.last_terminal_rejection is None
+    return tool_state.last_terminal_rejection != REJECTION_SCOPE_UNAVAILABLE
+
+
+def _apply_non_retryable_scope_outcome(
+    ctx: AgentRunContext,
+    result: AgentResult,
+    *,
+    rejection: str,
+) -> AgentResult:
+    """Skip the resume for a deterministic refusal (D5).
+
+    Publication is **not** performed here. ``tool_state.last_terminal_rejection``
+    already carries the refusal, and ``main._publish`` renders exactly one
+    deterministic record per resolved PR from it — an upsert onto the sticky
+    comment that runs after this loop returns. Publishing a second record here
+    would be overwritten moments later.
+    """
+    _ = ctx
+    logger.info(
+        "post-run resume skipped — terminal refusal is not retryable ({})",
+        rejection,
+    )
+    return result
 
 
 def get_unsubmitted_review(tool_state: ToolState) -> str | None:
@@ -117,6 +149,9 @@ async def collect_post_run_issues(
     skip_summary_stale: bool = False,
 ) -> PostRunIssues:
     issues = PostRunIssues()
+    from mergecraft.mcp.verdict import record_scope_rejection_if_blocked
+
+    record_scope_rejection_if_blocked(ctx.tool_state)
     status = get_git_status()
     mode = ctx.tool_state.selected_mode
     if status:
@@ -132,6 +167,7 @@ async def collect_post_run_issues(
     unsubmitted = get_unsubmitted_review(ctx.tool_state)
     if unsubmitted:
         issues.unsubmitted_review = unsubmitted
+    issues.retryable = _post_run_issues_retryable(issues, ctx.tool_state)
     return issues
 
 
@@ -227,7 +263,8 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
 
 async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> AgentResult:
     """Terminal hard-fail if stopHook / unsubmittedReview still open."""
-    received, submission_id, diagnostics = _terminal_submission_fields(ctx)
+    received, submission_id, terminal_diagnostics = _terminal_submission_fields(ctx)
+    diagnostics = {**result.diagnostics, **terminal_diagnostics}
     if not result.success:
         return replace(
             result,
@@ -273,10 +310,18 @@ async def run_post_run_retry_loop(
     usage = result.usage
     skip_summary = False
     previous_signature: tuple[Any, ...] | None = None
+    from mergecraft.mcp.verdict import record_scope_rejection_if_blocked
+
+    record_scope_rejection_if_blocked(ctx.tool_state)
     for attempt in range(MAX_POST_RUN_RETRIES):
         issues = await collect_post_run_issues(ctx, skip_summary_stale=skip_summary)
         if not has_post_run_issues(issues):
             break
+        if not issues.retryable:
+            rejection = ctx.tool_state.last_terminal_rejection or "scope_unavailable"
+            result.usage = usage
+            result = _apply_non_retryable_scope_outcome(ctx, result, rejection=rejection)
+            return await finalize_agent_result(ctx, result)
         signature = _post_run_issue_signature(issues)
         if signature == previous_signature:
             logger.warning(

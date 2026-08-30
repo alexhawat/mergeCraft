@@ -26,3 +26,5 @@ severity_map:
 provenance: {}
 network_allowlist: []
 exclusive_group: null
+declared_unavailable: manifest-only — yamllint binary not bundled for linux-amd64
+  (provisioning gap; use repo-native install or wait for pinned provenance)

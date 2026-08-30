@@ -177,7 +177,10 @@ issues-showcase-readiness wave plan (PR G5 / D7). -->
 - **The approval check is structural** — `success` requires a completed trusted
   run with no Critical/Major findings; `failure` on any blocker; `neutral` for
   crashes, timeouts, and untrusted tiers. The agent's narrative approval is
-  advisory only.
+  advisory only. Real PAT-backed APPROVE on self-review flows through
+  [`mergecraft-approve.yml`](../../.github/workflows/mergecraft-approve.yml)
+  when the `mergecraft-approval` check passes — see
+  [trust policy](trust-policy.md).
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
 - **Agent subprocess env is an explicit allowlist** — agent CLIs never

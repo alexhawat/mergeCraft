@@ -91,6 +91,7 @@ class ToolContext:
     ci_sarif_artifacts: list[str] = field(default_factory=list)
     analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto"
     trust_tier: Literal["trusted", "untrusted"] = "trusted"
+    authority_trust: Literal["trusted", "untrusted"] = "trusted"
     analyzers_settings_enabled: bool = True
     sarif_upload_enabled: bool = False
     run_id: int | None = None
@@ -133,6 +134,7 @@ class ToolContext:
         ci_sarif_artifacts: list[str] | None = None,
         analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto",
         trust_tier: Literal["trusted", "untrusted"] = "trusted",
+        authority_trust: Literal["trusted", "untrusted"] | None = None,
         analyzers_settings_enabled: bool = True,
         sarif_upload_enabled: bool = False,
         run_id: int | None = None,
@@ -184,6 +186,7 @@ class ToolContext:
         self.ci_sarif_artifacts = list(ci_sarif_artifacts or [])
         self.analyzers_mode = analyzers_mode
         self.trust_tier = trust_tier
+        self.authority_trust = authority_trust if authority_trust is not None else trust_tier
         self.analyzers_settings_enabled = analyzers_settings_enabled
         self.sarif_upload_enabled = sarif_upload_enabled
         self.run_id = run_id

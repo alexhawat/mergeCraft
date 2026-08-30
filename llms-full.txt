@@ -1061,7 +1061,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `cargo-audit` | vuln | rust | auto | repo-native | trusted | — | — |
 | `cargo-deny` | license | rust | auto | repo-native | trusted | — | — |
 | `checkmake` | lint | make | auto | managed | trusted | — | — |
-| `checkov` | security | terraform, cloudformation | auto | managed | untrusted | — | — |
+| `checkov` | security | terraform, cloudformation | auto | managed | untrusted | — | manifest-only — checkov binary not bundled for linux-amd64 (provisioning gap; use repo-native install or wait for pinned provenance) |
 | `circleci` | lint | yaml | disabled | managed | untrusted | — | — |
 | `clang-tidy` | lint | c, cpp | disabled | container | trusted | — | requires compile_commands.json — mergeCraft never guesses compiler flags (C4) |
 | `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
@@ -1113,7 +1113,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `tsc` | lint | typescript | auto | repo-native | trusted | — | — |
 | `typos` | lint | python, javascript, typescript, rust, go, markdown | auto | repo-native | trusted | — | — |
 | `vulture` | quality | python | auto | repo-native | trusted | — | — |
-| `yamllint` | lint | yaml | auto | managed | untrusted | — | — |
+| `yamllint` | lint | yaml | auto | managed | untrusted | — | manifest-only — yamllint binary not bundled for linux-amd64 (provisioning gap; use repo-native install or wait for pinned provenance) |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
 ## Runtime x shell x trust x mode
@@ -2392,9 +2392,35 @@ When JSON is on, each record includes bound context when available:
 | `phase` | coarse run phase (`setup`, …) |
 
 Bind or refresh fields from code with
-`mergecraft.utils.log.bind_run_context(...)`. Use tracing (`docs/TRACING.md`
-above) when you need model/tool span trees; use JSON logs when you need a
-grep-friendly stream of the same run on the runner console or log drain.
+`mergecraft.utils.log.bind_run_context(...)`. Use tracing (above) when you
+need model/tool span trees; use JSON logs when you need a grep-friendly stream
+of the same run on the runner console or log drain.
+
+## Agent stream log surface (plan 13 W6–W7)
+
+This section is **not** tracing spans — it is what operators see on the Actions
+console while the reviewing agent runs.
+
+| Before (plan 13) | After |
+|------------------|-------|
+| Loguru → stderr, stream echo → stdout — unsynchronised writers, interleaved mid-line | One writer: Loguru with `enqueue=True`; stream renderer emits through the same sink |
+| Full provider NDJSON dumped to stdout on every stream event | Human-readable lines from `agents/stream_render.py` (`emit_rendered_stream_line`) |
+| Forensic detail only in a masked, interleaved dump | Evidence packet `trajectory` built from MCP tool state (see [`evidence-packet.md`](evidence-packet.md)) |
+
+**Raw NDJSON is not the default log surface.** `consume_stream` still parses each
+line for spans and trajectory, but operator-facing output is rendered. The raw
+line is logged at `DEBUG` only when `is_debug_enabled()` is true:
+
+- `LOG_LEVEL=debug`, or
+- `ACTIONS_STEP_DEBUG=true` (GitHub Actions step debug)
+
+Until plan 12's artifact upload lands, raw NDJSON is not uploaded as a separate
+artifact — enable debug on the step when you need line-level provider JSON in
+the job log. The trajectory record in the evidence packet is the durable
+forensic surface for tool identity, outcomes, paths, and failure class.
+
+Loguru queue drain is registered beside the existing temp-dir `atexit` hook so
+Docker action tails are not lost when the container exits.
 
 ===== FILE: docs/install.md =====
 

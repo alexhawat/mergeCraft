@@ -24,6 +24,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.trust import derive_trust_tier
 
@@ -321,9 +323,11 @@ async def test_fork_pr_cannot_self_approve_at_tool_layer(
     )
 
     spec = create_pull_request_review_tool(ctx)
-    await spec.execute(
+    result = await spec.execute(
         {"pull_number": 7, "body": "Looks good.", "approved": True},
     )
+    assert result.is_error is True
+    assert any("authority trust" in block.get("text", "") for block in result.content)
 
     sent_events = [p.get("event") for p in github.review_payloads]
     assert "APPROVE" not in sent_events, (
@@ -331,10 +335,7 @@ async def test_fork_pr_cannot_self_approve_at_tool_layer(
         "untrusted runs, even with pr_approve_enabled=True and "
         "approved=True — D14 enforces one config knob, one inert path"
     )
-
-    # The advisory input is still recorded (W8.3).
-    assert ctx.tool_state.approval is not None
-    assert ctx.tool_state.approval.would_approve is True
+    assert ctx.tool_state.approval is None
 
     _ = httpx.__name__
 

@@ -164,6 +164,8 @@ class RunContext:
 
     # -- populated by ``_resolve_credentials`` (security boundary) ----------
     trust_tier: TrustTier = "untrusted"
+    authority_trust: TrustTier = "untrusted"
+    trust_self_review_level: str = "off"
     token_ref: TokenRef | None = None
 
     # -- populated by ``_execute_agent`` -------------------------------------
@@ -445,9 +447,15 @@ async def _publish(
         pull_number = tool_context.tool_state.pr_number
         if pull_number is None and tool_context.payload.event.issue_number is not None:
             pull_number = int(tool_context.payload.event.issue_number)
-        rejection_reason = (
-            failure_reason if prepared is not None and prepared.decision is None else None
-        )
+        # A refused terminal verdict (scope, schema, semantic or policy) is
+        # recorded on ``tool_state``; it names the actual cause, so it wins over
+        # the generic run failure reason. This is deliberately not gated on
+        # ``prepared.decision is None``: ``decide_approval`` always returns a
+        # ``PacketDecision``, so that condition never holds and the reason never
+        # reached the record — a refused run read as a clean one (plan 13 D5).
+        rejection_reason = tool_context.tool_state.last_terminal_rejection
+        if rejection_reason is None and prepared is not None and prepared.decision is None:
+            rejection_reason = failure_reason
         if pull_number is not None and prepared is not None:
             await publish_deterministic_record(
                 pull_number=int(pull_number),
@@ -670,9 +678,35 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     assert ctx.tool_state is not None
     assert ctx.scm is not None
 
-    trust_tier = derive_trust_tier(event=ctx.gh_event)
+    from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
+    from mergecraft.config.trust_policy import (
+        log_trust_policy_at_run_start,
+        resolve_trust_policy,
+        trust_policy_manifest_fields,
+    )
+
+    repo_root = Path.cwd()
+    snapshot = capture_repo_settings_snapshot(root=repo_root, settings=ctx.settings)
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    shell = str(ctx.payload.get("shell") or "restricted")
+    policy = resolve_trust_policy(
+        event=ctx.gh_event or {},
+        config_root=repo_root,
+        event_name=event_name,
+        settings_snapshot=snapshot,
+        shell=shell,
+    )
+    log_trust_policy_at_run_start(policy)
+
+    trust_tier = policy.execution_trust
+    authority_trust = policy.authority_trust
     ctx.trust_tier = trust_tier
+    ctx.authority_trust = authority_trust
+    ctx.trust_self_review_level = policy.level
     ctx.tool_state.trust_tier = trust_tier
+    ctx.tool_state.authority_trust = authority_trust
+    ctx.tool_state.trust_self_review_level = policy.level
+    ctx.tool_state.run_manifest_trust = trust_policy_manifest_fields(policy)
 
     assert ctx.settings is not None
     from mergecraft.config.settings import (
@@ -884,6 +918,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
         analyzers_mode=analyzers_mode,
         trust_tier=ctx.trust_tier,
+        authority_trust=ctx.authority_trust,
         analyzers_settings_enabled=settings.analyzers.enabled,
         sarif_upload_enabled=sarif_upload_enabled,
         run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
@@ -1576,7 +1611,6 @@ def _action_review_context() -> ReviewContext:
     # (`derive_trust_tier`, fail-closed `untrusted`) — never the
     # `MERGECRAFT_TRUST_TIER` env var, which only the CLI path sets; reading it
     # here would omit the tier on Action runs.
-    from mergecraft.analyzers.trust import derive_trust_tier
     from mergecraft.utils.payload import read_github_event
 
     try:

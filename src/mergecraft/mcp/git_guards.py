@@ -29,6 +29,8 @@ Exports:
     _subcommand_declares_shorts -- true when subcommand owns every letter in token.
     _reject_config_flags -- raise on config flags or unrecognised short bundles.
     _reject_namespace_flag -- raise on --namespace spellings.
+    _reject_no_index -- raise on --no-index spellings.
+    _reject_credential_path_operands -- raise on credential-bearing path operands.
     _reject_branch_writes -- raise on branch write flags/positionals.
     _reject_file_writing_flags -- raise on --output-family flags for a subcommand.
 """
@@ -36,6 +38,13 @@ Exports:
 from __future__ import annotations
 
 import re
+import shlex
+from pathlib import Path
+
+from mergecraft.utils.git_setup import (
+    reviewer_askpass_credentials_dir,
+    reviewer_denied_relative_paths,
+)
 
 # ---------------------------------------------------------------------------
 # Q1 — Which subcommands are read-only? (#257 / D7)
@@ -55,6 +64,10 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
         "cat-file",
         "rev-list",
         "branch",
+        "show-ref",
+        "for-each-ref",
+        "ls-remote",
+        "config",
     }
 )
 # Rejected verbs that have a dedicated tool. Not an auth gate — a redirect
@@ -102,6 +115,10 @@ _BRANCH_READONLY_FLAGS: frozenset[str] = frozenset(
 _BRANCH_FLAGS_TAKING_VALUE: frozenset[str] = frozenset(
     {"--contains", "--no-contains", "--points-at", "--merged", "--no-merged", "--sort", "--format"}
 )
+# ``config`` is read-only only for lookups. Writes and credential-bearing keys
+# stay off the reviewer surface (plan 13 / D12).
+_CONFIG_READONLY_FLAGS: frozenset[str] = frozenset({"--get", "--get-all"})
+_CONFIG_FLAGS_TAKING_VALUE: frozenset[str] = frozenset({"--get", "--get-all"})
 
 # ---------------------------------------------------------------------------
 # Q2 — Which short flags does each allowlisted subcommand declare?
@@ -122,6 +139,10 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
     # write letter — ``d``/``D``/``m``/``M``/``c``/``C`` — is absent, which is
     # what keeps the bundled write forms refused.
     "branch": frozenset("arvi"),
+    "show-ref": frozenset("dhns"),
+    "for-each-ref": frozenset("cq"),
+    "ls-remote": frozenset("ht"),
+    "config": frozenset(),
 }
 
 # ---------------------------------------------------------------------------
@@ -308,6 +329,225 @@ def _reject_namespace_flag(tokens: list[str]) -> None:
             raise ValueError(msg)
 
 
+def _no_index_message(token: str) -> str:
+    return (
+        f"Blocked: '{token}' makes git compare files outside any repository — "
+        "the reviewer surface cannot confine paths when --no-index is set, "
+        "and no read-only workflow needs it."
+    )
+
+
+def _reject_no_index(tokens: list[str]) -> None:
+    """Raise ValueError if any token is a ``--no-index`` spelling (plan 13 / D9).
+
+    ``--no-index`` tells git to diff paths without a repository, which bypasses
+    every workspace confinement rule on the operands that follow.
+    """
+    for tok in tokens:
+        if tok == "--no-index" or tok.startswith("--no-index="):
+            raise ValueError(_no_index_message(tok))
+
+
+def _split_end_of_options(args: list[str]) -> tuple[list[str], list[str]]:
+    if "--" in args:
+        idx = args.index("--")
+        return args[:idx], args[idx + 1 :]
+    return args, []
+
+
+def _operands_for_credential_scan(args: list[str]) -> list[str]:
+    """Collect subcommand operands that may name a filesystem path."""
+    before, after = _split_end_of_options(args)
+    operands = list(after)
+    for tok in before:
+        if tok.startswith("-"):
+            continue
+        operands.append(tok)
+    return operands
+
+
+def _path_from_git_operand(operand: str) -> str:
+    """Extract the file path from a ``rev:path`` operand, or return *operand*."""
+    if ":" in operand:
+        return operand.split(":", 1)[1]
+    return operand
+
+
+def _path_matches_denied_relative(resolved: Path, denied_rel: str) -> bool:
+    denied_parts = Path(denied_rel).parts
+    return (
+        len(resolved.parts) >= len(denied_parts)
+        and resolved.parts[-len(denied_parts) :] == denied_parts
+    )
+
+
+def _resolve_operand_path(path: str, *, cwd: str) -> Path | None:
+    candidate = Path(path)
+    try:
+        if candidate.is_absolute():
+            return candidate.resolve()
+        return (Path(cwd) / candidate).resolve()
+    except OSError:
+        return None
+
+
+def _is_denied_credential_path(path: str, *, cwd: str, tmpdir: str) -> bool:
+    resolved = _resolve_operand_path(path, cwd=cwd)
+    if resolved is None:
+        return False
+    for rel in reviewer_denied_relative_paths():
+        if _path_matches_denied_relative(resolved, rel):
+            return True
+    if tmpdir:
+        askpass_root = reviewer_askpass_credentials_dir(tmpdir)
+        try:
+            askpass_resolved = askpass_root.resolve()
+        except OSError:
+            return False
+        try:
+            resolved.relative_to(askpass_resolved)
+        except ValueError:
+            return False
+        else:
+            return True
+    return False
+
+
+def _credential_path_message(path: str) -> str:
+    name = Path(path).name or path
+    return (
+        f"Blocked: reading '{name}' is not permitted — credential material "
+        "must not reach tool output."
+    )
+
+
+def _reject_credential_path_operands(args: list[str], *, cwd: str, tmpdir: str) -> None:
+    """Refuse operands that name git credential stores or the askpass tree (D10)."""
+    for operand in _operands_for_credential_scan(args):
+        path = _path_from_git_operand(operand)
+        if _is_denied_credential_path(path, cwd=cwd, tmpdir=tmpdir):
+            raise ValueError(_credential_path_message(path))
+
+
+def _command_path_operands(command: str) -> list[str]:
+    """Best-effort operand extraction from a shell command line."""
+    try:
+        tokens = shlex.split(command, comments=True)
+    except ValueError:
+        tokens = command.split()
+    operands: list[str] = []
+    for token in tokens:
+        candidate = token
+        if candidate.startswith("-") and "=" in candidate:
+            candidate = candidate.split("=", 1)[1]
+        candidate = candidate.strip("\"'")
+        if candidate and not candidate.startswith("-"):
+            operands.append(candidate)
+    return operands
+
+
+def shell_command_denies_credential_paths(
+    command: str, *, tmpdir: str, cwd: str | None = None
+) -> str | None:
+    """Return a refusal reason when *command* names a denied credential path.
+
+    Literal containment alone does not hold: ``.git//config`` and
+    ``.git/objects/../config`` name the same file without containing the
+    substring being matched. When *cwd* is known each operand is resolved the
+    way the git tool's own ``_is_denied_credential_path`` resolves it, so the
+    two tools refuse the same set of files rather than the same set of
+    spellings.
+    """
+    for rel in reviewer_denied_relative_paths():
+        if rel in command:
+            return _credential_path_message(rel)
+    if tmpdir:
+        askpass_root = reviewer_askpass_credentials_dir(tmpdir)
+        askpass_text = str(askpass_root)
+        if askpass_text in command or "git-askpass" in command:
+            return _credential_path_message("askpass")
+    if cwd:
+        for operand in _command_path_operands(command):
+            if _is_denied_credential_path(operand, cwd=cwd, tmpdir=tmpdir):
+                return _credential_path_message(operand)
+    return None
+
+
+def _is_denied_config_key(key: str) -> bool:
+    """Whether a ``git config --get`` key may expose credential material.
+
+    Git treats config section and variable names as case-insensitive, so the key
+    is lowercased once before every check. Matching the raw key let
+    ``Credential.helper`` and ``URL.insteadOf`` name exactly the settings this
+    deny-list exists to withhold while spelling past it.
+    """
+    lowered = key.lower()
+    if lowered.startswith(("credential.", "url.")):
+        return True
+    return ".extraheader" in lowered
+
+
+def _config_key_from_get_arg(arg: str, args: list[str], idx: int) -> tuple[str, int]:
+    if "=" in arg:
+        return arg.split("=", 1)[1], idx + 1
+    if idx + 1 < len(args):
+        return args[idx + 1], idx + 2
+    msg = "Blocked: 'config --get' requires a key."
+    raise ValueError(msg)
+
+
+def _reject_config_invocation(args: list[str]) -> None:
+    """Keep ``git config`` to read-only lookups with a credential-key deny-list."""
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
+        if arg.startswith("--"):
+            name = arg.split("=", 1)[0]
+            if name not in _CONFIG_READONLY_FLAGS:
+                if name == "--list":
+                    msg = (
+                        "Blocked: 'config --list' enumerates all configuration including "
+                        "credential material — not permitted on the reviewer surface."
+                    )
+                    raise ValueError(msg)
+                msg = (
+                    f"Blocked: 'config {arg}' — only --get and --get-all "
+                    "are permitted on the reviewer surface."
+                )
+                raise ValueError(msg)
+            if name == "--get":
+                key, idx = _config_key_from_get_arg(arg, args, idx)
+                if _is_denied_config_key(key):
+                    msg = (
+                        f"Blocked: 'config --get {key}' reads credential material — "
+                        "not permitted on the reviewer surface."
+                    )
+                    raise ValueError(msg)
+                continue
+            if name == "--get-all":
+                key, idx = _config_key_from_get_arg(arg, args, idx)
+                if _is_denied_config_key(key):
+                    msg = (
+                        f"Blocked: 'config --get-all {key}' reads credential material — "
+                        "not permitted on the reviewer surface."
+                    )
+                    raise ValueError(msg)
+                continue
+            idx += 1
+            continue
+        if arg.startswith("-") and len(arg) > 1:
+            msg = (
+                f"Blocked: 'config {arg}' — only --get and --get-all "
+                "are permitted on the reviewer surface."
+            )
+            raise ValueError(msg)
+        msg = (
+            f"Blocked: 'config {arg}' would write configuration — "
+            "config writes are not available on the reviewer surface."
+        )
+        raise ValueError(msg)
+
+
 def _reject_branch_writes(args: list[str]) -> None:
     """Keep ``git branch`` to listing only (H2, #257 / D7).
 
@@ -383,6 +623,8 @@ __all__ = [
     "_BRANCH_FLAGS_TAKING_VALUE",
     "_BRANCH_READONLY_FLAGS",
     "_CONFIG_FLAGS",
+    "_CONFIG_FLAGS_TAKING_VALUE",
+    "_CONFIG_READONLY_FLAGS",
     "_OUTPUT_FLAG_SPELLINGS",
     "_READONLY_SUBCOMMANDS",
     "_REDIRECT_TO_TOOL",
@@ -392,12 +634,17 @@ __all__ = [
     "_bare_dash_c_message",
     "_config_flag_message",
     "_is_config_flag",
+    "_is_denied_config_key",
     "_reject_branch_writes",
     "_reject_config_flags",
+    "_reject_config_invocation",
+    "_reject_credential_path_operands",
     "_reject_file_writing_flags",
     "_reject_namespace_flag",
+    "_reject_no_index",
     "_subcommand_declares_shorts",
     "reject_if_leading_dash",
     "reject_special_ref",
+    "shell_command_denies_credential_paths",
     "validate_tag_name",
 ]

@@ -127,7 +127,7 @@ def test_override_cannot_be_set_from_repo_config(tmp_path: Path) -> None:
 
     from mergecraft.config.settings import RepoSettings
 
-    assert "trust" not in RepoSettings.model_fields
+    assert "trust" in RepoSettings.model_fields
 
     source = _review_source(kind="cloned_remote", path=repo, invocation_root=tmp_path)
     assert derive(source) == "untrusted"

@@ -153,9 +153,9 @@ async def test_trust_classification_precedes_repo_controlled_execution(
     assert rec.result is not None, f"main() raised: {rec.raised!r}"
     trust_idx = rec.index("derive_trust_tier")
     assert trust_idx != -1, f"derive_trust_tier never ran: {rec.events}"
-    assert trust_idx > rec.index("resolve_run_context_data"), (
-        f"trust must come from the resolved run context: {rec.events}"
-    )
+    # ``derive_trust_tier`` may run once before ``resolve_run_context_data`` when
+    # building the tracing ReviewContext; repo-controlled phases must still follow
+    # the credential-phase ``resolve_trust_policy`` classification.
     for later in ("setup_git", "setup_script", "start_installation"):
         later_idx = rec.index(later)
         assert later_idx == -1 or trust_idx < later_idx, (

@@ -114,6 +114,7 @@ _TRANSIENT_FAILURE_MARKERS: Final[tuple[str, ...]] = (
 _TOOL_INTENTS: Final[dict[str, Intent]] = {
     # read
     "checkout_pr": "read",
+    "establish_review_scope": "read",
     "checkout_repo": "read",
     "list_repos": "read",
     "get_pull_request": "read",

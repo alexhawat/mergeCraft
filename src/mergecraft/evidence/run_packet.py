@@ -231,7 +231,7 @@ def _finalize_packet_with_gate(
 
     gate_mode = _resolve_gate_mode(ctx, pinned=pinned)
     gate_policy = _resolve_gate_policy(ctx, pinned=pinned)
-    decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.trust_tier)
+    decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.authority_trust)
     packet_with_decision = packet.model_copy(update={"decision": decision})
     action = decide_action(packet_with_decision, mode=gate_mode, policy=gate_policy)
     reason = decision.reason
