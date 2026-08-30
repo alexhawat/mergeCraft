@@ -306,3 +306,37 @@ def test_declared_degradation_reaches_the_run_manifest(tmp_path: Path) -> None:
     assert asdict(CODEX_SUBAGENT_DEGRADATION)["kind"] in {
         row.get("kind") for row in merged["harness_degradations"]
     }
+
+
+def test_append_reviewer_dispatch_instructions() -> None:
+    from mergecraft.agents.harness_render import append_reviewer_dispatch_instructions
+
+    block = "Dispatch reviewers level by level."
+    assert (
+        append_reviewer_dispatch_instructions(
+            "System prompt", {"reviewer_dispatch_instructions": block}
+        )
+        == "System prompt\n\nDispatch reviewers level by level."
+    )
+    assert (
+        append_reviewer_dispatch_instructions("", {"reviewer_dispatch_instructions": block})
+        == block
+    )
+    assert append_reviewer_dispatch_instructions("System prompt", {}) == "System prompt"
+
+
+def test_render_for_run_attaches_dispatch_metadata(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    from tests.agents.conftest import make_agent_run_context
+    from tests.cli.support_agent_roster import two_reviewer_config, write_config
+
+    from mergecraft.agents.harness_render import render_for_run
+
+    write_config(tmp_path, two_reviewer_config())
+    _stub_slug_runnability(monkeypatch)
+    ctx = make_agent_run_context(tmp_path, resolved_model=None)
+    result = render_for_run(ctx, harness="claude")
+    assert "reviewer_dispatch_batches" in result.metadata
+    instructions = result.metadata.get("reviewer_dispatch_instructions", "")
+    assert "Level 0 (parallel)" in instructions

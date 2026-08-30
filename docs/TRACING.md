@@ -715,6 +715,32 @@ When JSON is on, each record includes bound context when available:
 | `phase` | coarse run phase (`setup`, …) |
 
 Bind or refresh fields from code with
-`mergecraft.utils.log.bind_run_context(...)`. Use tracing (`docs/TRACING.md`
-above) when you need model/tool span trees; use JSON logs when you need a
-grep-friendly stream of the same run on the runner console or log drain.
+`mergecraft.utils.log.bind_run_context(...)`. Use tracing (above) when you
+need model/tool span trees; use JSON logs when you need a grep-friendly stream
+of the same run on the runner console or log drain.
+
+## Agent stream log surface (plan 13 W6–W7)
+
+This section is **not** tracing spans — it is what operators see on the Actions
+console while the reviewing agent runs.
+
+| Before (plan 13) | After |
+|------------------|-------|
+| Loguru → stderr, stream echo → stdout — unsynchronised writers, interleaved mid-line | One writer: Loguru with `enqueue=True`; stream renderer emits through the same sink |
+| Full provider NDJSON dumped to stdout on every stream event | Human-readable lines from `agents/stream_render.py` (`emit_rendered_stream_line`) |
+| Forensic detail only in a masked, interleaved dump | Evidence packet `trajectory` built from MCP tool state (see [`evidence-packet.md`](evidence-packet.md)) |
+
+**Raw NDJSON is not the default log surface.** `consume_stream` still parses each
+line for spans and trajectory, but operator-facing output is rendered. The raw
+line is logged at `DEBUG` only when `is_debug_enabled()` is true:
+
+- `LOG_LEVEL=debug`, or
+- `ACTIONS_STEP_DEBUG=true` (GitHub Actions step debug)
+
+Until plan 12's artifact upload lands, raw NDJSON is not uploaded as a separate
+artifact — enable debug on the step when you need line-level provider JSON in
+the job log. The trajectory record in the evidence packet is the durable
+forensic surface for tool identity, outcomes, paths, and failure class.
+
+Loguru queue drain is registered beside the existing temp-dir `atexit` hook so
+Docker action tails are not lost when the container exits.

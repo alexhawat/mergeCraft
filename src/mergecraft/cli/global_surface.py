@@ -16,7 +16,7 @@ from mergecraft.cli import consoles
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.review.snapshot import REVIEW_SCHEMA_VERSION as CLI_JSON_SCHEMA_VERSION
-from mergecraft.utils.log import configure_logging
+from mergecraft.utils.log import configure_logging, drain_loguru_queue
 
 OutputFormat = Literal["table", "json"]
 ColorMode = Literal["auto", "always", "never"]
@@ -214,6 +214,11 @@ def emit_cli_json(payload: dict[str, Any]) -> None:
     typer.echo(cli_json_dumps(payload))
 
 
+def drain_log_queue_after_command(*_args: object, **_kwargs: object) -> None:
+    """Flush enqueued Loguru records before Typer returns (D6)."""
+    drain_loguru_queue()
+
+
 __all__ = [
     "CLI_JSON_SCHEMA_VERSION",
     "CliGlobals",
@@ -223,6 +228,7 @@ __all__ = [
     "apply_typer_rich_help_color",
     "bootstrap_cli_surface_from_argv",
     "cli_json_dumps",
+    "drain_log_queue_after_command",
     "emit_cli_json",
     "get_cli_globals",
     "parse_color_flag_from_argv",

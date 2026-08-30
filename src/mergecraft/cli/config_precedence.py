@@ -81,9 +81,6 @@ def _resolve_model_layers(*, cwd: Path, cli_model: str | None = None) -> dict[Co
     if env_model:
         layers[ConfigLayer.ENV] = env_model.strip()
     settings = load_repo_settings(root=cwd, load_learnings_files=False)
-    # The YAML layer is what the config file says on its own —
-    # ``effective_model_slugs`` promotes ``MERGECRAFT_MODEL`` to the front,
-    # which would report the env value under the YAML layer.
     yaml_slugs = configured_model_slugs(settings)
     if yaml_slugs:
         layers[ConfigLayer.YAML] = yaml_slugs[0]
@@ -117,7 +114,6 @@ def _resolve_tracing_enabled_layers(
         if "--no-tracing" in cli_args:
             layers[ConfigLayer.CLI] = False
     layers[ConfigLayer.DEFAULT] = False
-    # The merged resolver already applied precedence; pin the winner explicitly.
     winner = ConfigLayer.DEFAULT
     for layer in (ConfigLayer.YAML, ConfigLayer.ENV, ConfigLayer.CLI):
         if layer in layers:
@@ -202,4 +198,8 @@ def explain_setting(
     }
 
 
-__all__ = ["ConfigLayer", "explain_setting", "resolve_setting"]
+__all__ = [
+    "ConfigLayer",
+    "explain_setting",
+    "resolve_setting",
+]

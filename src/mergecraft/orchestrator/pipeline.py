@@ -10,15 +10,9 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from mergecraft.findings.severity import SEVERITY_ORDER as _SEVERITY_ORDER
 from mergecraft.utils.path_globs import path_matches_glob
 from mergecraft.utils.risk_bands import RISK_BANDS, risk_at_or_above
-
-_SEVERITY_ORDER: dict[str, int] = {
-    "Trivial": 0,
-    "Minor": 1,
-    "Major": 2,
-    "Critical": 3,
-}
 
 _ALLOWED_PREDICATE_RE = re.compile(
     r"^(changed_paths matches '([^']*)'"

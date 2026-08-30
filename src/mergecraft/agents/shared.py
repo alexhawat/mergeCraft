@@ -125,6 +125,7 @@ class PostRunIssues:
     dirty_tree: str | None = None
     summary_stale: SummaryStale | None = None
     unsubmitted_review: str | None = None  # "Review" | "IncrementalReview"
+    retryable: bool = True
 
 
 def has_post_run_issues(issues: PostRunIssues) -> bool:

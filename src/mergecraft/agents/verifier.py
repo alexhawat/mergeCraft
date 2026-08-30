@@ -186,6 +186,7 @@ class AgentFinding(BaseModel):
     severity: str
     line: int | None = None
     fingerprint: str = ""
+    raised_by: str | list[str] | None = None
 
     def identity(self) -> str:
         """Return this finding's fingerprint, deriving one when absent.

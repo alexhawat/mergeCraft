@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
-import yaml
-
-from mergecraft.config.settings import _resolve_config_path
+from mergecraft.config.layered import load_layered_config_dict
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,21 +14,9 @@ TrustTier = Literal["trusted", "untrusted"]
 
 def raw_analyzers_block(repo_root: Path) -> dict[str, Any]:
     """Return the raw ``analyzers`` mapping from repo config, if any."""
-    path = _resolve_config_path(root=repo_root)
-    if path is None:
-        return {}
-    try:
-        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):  # fmt: skip
-        return {}
-    if not isinstance(loaded, dict):
-        return {}
+    loaded = load_layered_config_dict(root=repo_root)
     analyzers = loaded.get("analyzers")
     return analyzers if isinstance(analyzers, dict) else {}
-
-
-def _raw_analyzers(repo_root: Path) -> dict[str, Any]:
-    return raw_analyzers_block(repo_root)
 
 
 def trufflehog_verify_enabled(
@@ -48,7 +34,7 @@ def trufflehog_verify_enabled(
     _ = event
     if tier != "trusted":
         return False
-    trufflehog = _raw_analyzers(repo_root).get("trufflehog")
+    trufflehog = raw_analyzers_block(repo_root).get("trufflehog")
     if isinstance(trufflehog, dict):
         return bool(trufflehog.get("verify"))
     return False

@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.9.0`.
+The current version is `1.11.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -124,6 +124,8 @@ not move.
   (`success` / `failure` / `neutral`). Gate actions such as `block` live
   on `action`, not `verdict`. Persisted packets that stored `block` as
   `verdict` no longer validate.
+- `1.11.0` — plan 12 W7 adds `run_health`: run-scoped findings and an
+  advisory conclusion, partitioned out of the top-level `findings` list.
 
 ## Top-level fields
 
@@ -166,13 +168,26 @@ is the per-PR evidence record; this list is its scope.
 
 ### `findings` — required (`list[Finding]`)
 
-The re-typed analyzer findings. The packet **composes** the existing
-`Finding` model from `mergecraft.analyzers.finding`, not a parallel
-finding model (D3). The wire shape is governed by the
-[`Finding` schema](ANALYZERS.md); the packet's `findings` field
-inlines that schema entirely into its emitted JSON Schema, so a
-packet consumer never has to look at `$defs` to validate a
-`findings` item.
+Change-scoped findings only. Run-scoped trajectory and environment
+observations live under `run_health` instead (plan 12 W7). The packet
+**composes** the existing `Finding` model from
+`mergecraft.analyzers.finding`, not a parallel finding model (D3). The
+wire shape is governed by the [`Finding` schema](ANALYZERS.md); the
+packet's `findings` field inlines that schema entirely into its emitted
+JSON Schema, so a packet consumer never has to look at `$defs` to validate
+a `findings` item.
+
+### `run_health` — `RunHealth | None` (added in plan 12 W7)
+
+Run-scoped findings and their advisory conclusion. Trajectory auditor rows
+and other `scope="run"` observations are partitioned here at assembly
+time; they never block merge (D2). When no run-scoped findings exist the
+section is omitted (`null`).
+
+| Field | Type | Notes |
+|------|------|-------|
+| `findings` | `list[Finding]` | Run-scoped rows (`scope="run"`). |
+| `conclusion` | `str` | `clean` when empty; `advisory` when observations exist. |
 
 ### `deterministic_checks` — required (`list[DeterministicCheck]`)
 

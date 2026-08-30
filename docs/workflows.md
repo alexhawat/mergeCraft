@@ -177,7 +177,10 @@ issues-showcase-readiness wave plan (PR G5 / D7). -->
 - **The approval check is structural** — `success` requires a completed trusted
   run with no Critical/Major findings; `failure` on any blocker; `neutral` for
   crashes, timeouts, and untrusted tiers. The agent's narrative approval is
-  advisory only.
+  advisory only. Real PAT-backed APPROVE on self-review flows through
+  [`mergecraft-approve.yml`](../../.github/workflows/mergecraft-approve.yml)
+  when the `mergecraft-approval` check passes — see
+  [trust policy](trust-policy.md).
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
 - **Agent subprocess env is an explicit allowlist** — agent CLIs never
@@ -245,6 +248,45 @@ outlasts the conflict only when the conflict disappears *without* a push to the
 head branch — the base moved, say — because nothing then re-triggers the run.
 A conflicted PR is unmergeable on its own account anyway, so weigh this against
 running with secrets in scope rather than treating it as decisive.
+
+## Action pin and evidence artifacts
+
+The shipped `.github/workflows/mergecraft.yml` hoists the review Action SHA to a
+single workflow-level variable:
+
+```yaml
+env:
+  MERGECRAFT_ACTION_SHA: "<40-char-sha>"
+```
+
+All three review rungs (`uses: alexhawat/mergeCraft@…`) derive from that value,
+with a `# env.MERGECRAFT_ACTION_SHA` comment suffix on each line. A bump is one
+edit; `make action-pin-check` (wired into `make ci-static`) fails when the pin
+drifts from the default branch or when the three rungs disagree (#532).
+
+After each review rung, the workflow persists the `evidence_packet` action output
+to disk and uploads it as an artifact (`if: always()`):
+
+```yaml
+- name: Persist evidence packet
+  if: always()
+  env:
+    PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
+  run: printf '%s' "$PACKET" > packet-codex.json
+
+- uses: actions/upload-artifact@<full-sha>
+  if: always()
+  with:
+    name: mergecraft-evidence-codex
+    path: packet-codex.json
+    retention-days: 30
+    if-no-files-found: ignore
+```
+
+The `env:` indirection is mandatory — interpolating the packet directly into a
+`run:` body puts it in the process table and re-renders it into the log. The
+packet is also written to `$GITHUB_OUTPUT` by the Action and consumed in-process
+for fallback routing; the artifact is what survives after the runner is recycled.
 
 If you pin the action SHA in more than one place, gate the copies against each
 other in CI — and read the workflow side from the **default branch**

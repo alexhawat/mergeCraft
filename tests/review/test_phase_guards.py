@@ -188,7 +188,9 @@ async def test_create_pull_request_review_before_scope_is_rejected(tmp_path: Pat
     ctx = _ctx(tmp_path)
     bind_github_client(ctx, github)
     assert ctx.tool_state.selected_mode == "Review"
-    assert str(getattr(ctx.tool_state, "review_phase", "INIT")) == "INIT"
+    # W5: fresh ``init_tool_state`` leaves ``review_phase`` empty; scope gate
+    # still treats it as INIT via ``_current_review_phase``.
+    assert ctx.tool_state.review_phase == ""
 
     result = await create_pull_request_review_tool(ctx).execute(
         {"pull_number": 1, "body": "Looks good.", "approved": True},
@@ -275,7 +277,7 @@ def test_scope_gate_accepts_a_materialized_diff_without_a_phase_transition(
     from mergecraft.mcp.verdict import ensure_review_scope_for_terminal
 
     ctx = _ctx(tmp_path)
-    assert ctx.tool_state.review_phase == "INIT"
+    assert ctx.tool_state.review_phase == ""
     with pytest.raises(ValueError, match="review scope"):
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
 

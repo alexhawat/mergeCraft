@@ -12,14 +12,20 @@ from loguru import logger
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.settings import load_repo_settings
-from mergecraft.mcp.git import _git_env, _run_git
-from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
+from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
+from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
+from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
+from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
+from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+
+__all__ = ["GitHubClient", "checkout_pr_tool", "ensure_local_base_branch_alias", "get_git_status"]
 
 # A review authored by mergeCraft carries the run footer, or (for a review whose
 # body was suppressed) at least one finding marker. Reviews from humans and other
@@ -29,6 +35,12 @@ _MERGECRAFT_REVIEW_MARKERS = ("*via mergecraft*", "mergecraft-finding:v1:")
 
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
+_CHECKOUT_PR_INPUT_SCHEMA: JsonSchema = {
+    "type": "object",
+    "properties": {"pull_number": {"type": "number"}},
+    "required": ["pull_number"],
+    "additionalProperties": False,
+}
 
 
 def ensure_local_base_branch_alias(*, cwd: str, base_ref: str) -> None:
@@ -119,6 +131,126 @@ async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head
     return last_reviewed_sha(reviews, head_sha=head_sha) or ""
 
 
+def _remote_url_for_cwd(cwd: str) -> str:
+    try:
+        return read_remote_origin_url(cwd)
+    except RuntimeError:
+        return ""
+
+
+def _git_env_for_cwd(cwd: str, token: str) -> tuple[dict[str, str], str]:
+    remote_url = _remote_url_for_cwd(cwd)
+    return _git_env(token, remote_url=remote_url), remote_url
+
+
+# GitHub caps ``pulls/{n}/files`` at 100 per page and defaults to 30. This diff
+# is the degraded ``api-only`` scope's only view of the change, and a run may
+# still reach an approvable verdict from it, so a silently short page would
+# approve a PR whose later files were never seen.
+_PULL_FILES_PAGE_SIZE = 100
+# A PR larger than this is beyond what a review can meaningfully cover; stop
+# paging rather than loop unbounded against a paginating API.
+_PULL_FILES_MAX_PAGES = 30
+
+
+async def pull_request_path_expectations(
+    ctx: ToolContext, *, pull_number: int
+) -> tuple[set[str], set[str]]:
+    """Return ``(required, allowed)`` paths for the PR as GitHub reports them.
+
+    The authority a caller-supplied diff is checked against before it may
+    establish review scope. ``required`` is the post-image name of every changed
+    file — a diff omitting one does not describe this PR. ``allowed`` adds
+    rename pre-image names, because ``git diff`` writes a rename as
+    ``a/<old> b/<new>`` and only ``<new>`` is the post-image path; counting
+    ``<old>`` as required would reject an honest rename.
+    """
+    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
+    required: set[str] = set()
+    allowed: set[str] = set()
+    for page in range(1, _PULL_FILES_MAX_PAGES + 1):
+        files = await ctx.scm.get(
+            endpoint, params={"per_page": _PULL_FILES_PAGE_SIZE, "page": page}
+        )
+        batch = list(files or [])
+        for f in batch:
+            filename = str(f.get("filename") or "").strip()
+            if filename:
+                required.add(filename)
+                allowed.add(filename)
+            previous = str(f.get("previous_filename") or "").strip()
+            if previous:
+                allowed.add(previous)
+        if len(batch) < _PULL_FILES_PAGE_SIZE:
+            break
+    return required, allowed
+
+
+async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> str:
+    """Build a unified diff from the PR files API, following pagination."""
+    parts: list[str] = []
+    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
+    for page in range(1, _PULL_FILES_MAX_PAGES + 1):
+        files = await ctx.scm.get(
+            endpoint, params={"per_page": _PULL_FILES_PAGE_SIZE, "page": page}
+        )
+        batch = list(files or [])
+        for f in batch:
+            parts.append(f"diff --git a/{f.get('filename')} b/{f.get('filename')}\n")
+            if f.get("patch"):
+                parts.append(f.get("patch") + "\n")
+        if len(batch) < _PULL_FILES_PAGE_SIZE:
+            break
+    else:
+        logger.warning(
+            "api-only diff: stopped after {} pages of pull files for #{}; "
+            "the diff may be incomplete",
+            _PULL_FILES_MAX_PAGES,
+            pull_number,
+        )
+    return "".join(parts)
+
+
+def _fetch_head_with_retry(
+    *,
+    cwd: str,
+    pull_number: int,
+    local_branch: str,
+    git_token: str,
+) -> tuple[bool, str | None]:
+    """Fetch PR head; retry once on transient failure, never on auth-class (D3)."""
+    env, remote_url = _git_env_for_cwd(cwd, git_token)
+    refspec = f"pull/{pull_number}/head:{local_branch}"
+    last_err: str | None = None
+    detached = False
+    for attempt in range(2):
+        try:
+            _run_git(
+                ["fetch", "--no-tags", "origin", refspec],
+                cwd=cwd,
+                env=env,
+                remote_url=remote_url or None,
+            )
+            return True, None
+        except RuntimeError as err:
+            last_err = str(err)
+            if _is_auth_failure(last_err):
+                break
+            lowered = last_err.lower()
+            if not detached and "refusing to fetch into branch" in lowered:
+                # A prior checkout_pr may have left HEAD on local_branch; detach
+                # before retrying so the fetch target is not the current HEAD.
+                detached = True
+                try:
+                    _run_git(["checkout", "--detach", "HEAD"], cwd=cwd)
+                except RuntimeError as detach_err:
+                    last_err = str(detach_err)
+                continue
+            if attempt == 1:
+                break
+    return False, last_err
+
+
 def _write_incremental_diff(
     *, cwd: str, temp: str, pull_number: int, prior_sha: str, git_token: str
 ) -> tuple[str, list[str]] | None:
@@ -131,11 +263,13 @@ def _write_incremental_diff(
     try:
         _run_git(["cat-file", "-e", f"{prior_sha}^{{commit}}"], cwd=cwd)
     except RuntimeError:
+        env, remote_url = _git_env_for_cwd(cwd, git_token)
         try:
             _run_git(
                 ["fetch", "--no-tags", "--depth=1000", "origin", prior_sha],
                 cwd=cwd,
-                env=_git_env(git_token),
+                env=env,
+                remote_url=remote_url or None,
             )
             _run_git(["cat-file", "-e", f"{prior_sha}^{{commit}}"], cwd=cwd)
         except RuntimeError as err:
@@ -154,14 +288,20 @@ def _write_incremental_diff(
     return path, changed_paths_in_diff(diff)
 
 
+def get_git_status(cwd: str) -> str:
+    """Return porcelain status for *cwd* (monkeypatch hook for tests and callers)."""
+    return _run_git(["status", "--porcelain"], cwd=cwd).strip()
+
+
 def checkout_pr_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
+        params = normalize_pull_number_aliases(params, _CHECKOUT_PR_INPUT_SCHEMA)
         pull_number = int(params["pull_number"])
         state = primary_repo_state(ctx.tool_state)
         cwd = state.dir
         prior_reviews: list[dict[str, Any]] = []
 
-        dirty = _run_git(["status", "--porcelain"], cwd=cwd).strip()
+        dirty = get_git_status(cwd)
         if dirty:
             msg = (
                 f"cannot checkout PR #{pull_number} while the working tree has "
@@ -180,26 +320,73 @@ def checkout_pr_tool(ctx: ToolContext):
         )
         local_branch = f"pr-{pull_number}"
 
-        # Detach HEAD before fetching into local_branch. checkout_pr can run
-        # more than once against the same shared workspace within a single
-        # job (e.g. a Nous review, then a Codex fallback both calling
-        # checkout_pr against /github/workspace) — if a prior call already
-        # left HEAD on local_branch, `git fetch ... :local_branch` fails with
-        # "refusing to fetch into branch ... checked out" and the second
-        # review never completes. Detaching first — safe, since the dirty
-        # check above already guarantees no uncommitted work to lose — means
-        # the fetch target is never the current HEAD, regardless of what an
-        # earlier checkout_pr call left behind.
-        _run_git(["checkout", "--detach", "HEAD"], cwd=cwd)
-
-        # Fetch PR head via GitHub's pull/<n>/head ref
-        _run_git(
-            ["fetch", "--no-tags", "origin", f"pull/{pull_number}/head:{local_branch}"],
+        # Fetch PR head into local_branch. checkout_pr can run more than once
+        # against the same shared workspace within a single job (e.g. a Nous
+        # review, then a Codex fallback both calling checkout_pr against
+        # /github/workspace). When a prior call left HEAD on local_branch,
+        # ``_fetch_head_with_retry`` detaches before retrying on the
+        # "refusing to fetch into branch" error — safe because the dirty check
+        # above already guarantees no uncommitted work to lose.
+        fetched, fetch_err = _fetch_head_with_retry(
             cwd=cwd,
-            env=_git_env(ctx.git_token),
+            pull_number=pull_number,
+            local_branch=local_branch,
+            git_token=ctx.git_token,
         )
+        temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
+        diff_path = str(Path(temp) / f"pr-{pull_number}.diff")
+
+        if not fetched:
+            degraded_reason = degraded_checkout_reason(
+                detail=(fetch_err or "git fetch failed").splitlines()[0]
+            )
+            warning(degraded_reason)
+            diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            Path(diff_path).write_text(diff, encoding="utf-8")
+            state.issue_number = pull_number
+            state.checkout_sha = head_sha
+            from mergecraft.mcp.review_context import hydrate_review_context
+            from mergecraft.mcp.verdict import ReviewPhase, register_review_scope
+
+            register_review_scope(
+                ctx.tool_state,
+                diff_path=diff_path,
+                provenance="api",
+                review_scope=API_ONLY_SCOPE,
+            )
+            prior_reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
+            round_index = review_round_index(prior_reviews)
+            ctx.tool_state.review_round_index = round_index
+            result: dict[str, Any] = {
+                "pullNumber": pull_number,
+                "remoteBranch": head_ref,
+                "base": base_ref,
+                "headSha": head_sha,
+                "checkoutSha": head_sha,
+                "isFork": is_fork,
+                "diffPath": diff_path,
+                "title": pr.get("title"),
+                "url": pr.get("html_url"),
+                "scope": API_ONLY_SCOPE,
+                "degraded": degraded_reason,
+                "reviewPhase": ReviewPhase.ESTABLISH_SCOPE.value,
+            }
+
+            await hydrate_review_context(
+                ctx,
+                round_index=round_index,
+                incremental_changed_paths=None,
+            )
+            logger.warning(
+                "checked out PR #{} in {} scope (head fetch failed)",
+                pull_number,
+                API_ONLY_SCOPE,
+            )
+            return result
+
         _run_git(["checkout", local_branch], cwd=cwd)
         # Ensure base is available for merge-base diffs
+        base_env, base_remote_url = _git_env_for_cwd(cwd, ctx.git_token)
         try:
             _run_git(
                 [
@@ -210,7 +397,8 @@ def checkout_pr_tool(ctx: ToolContext):
                     f"{base_ref}:refs/remotes/origin/{base_ref}",
                 ],
                 cwd=cwd,
-                env=_git_env(ctx.git_token),
+                env=base_env,
+                remote_url=base_remote_url or None,
             )
         except Exception as err:
             logger.info("base fetch soft-failed: {}", err)
@@ -237,27 +425,19 @@ def checkout_pr_tool(ctx: ToolContext):
                 state.push_url = f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}"
 
         # Write a basic diff file for reviewers
-        temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
-        diff_path = str(Path(temp) / f"pr-{pull_number}.diff")
         try:
             diff = _run_git(
                 ["diff", "--merge-base", f"origin/{base_ref}", "HEAD"],
                 cwd=cwd,
             )
         except Exception:
-            files = await ctx.scm.get(
-                f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
-            )
-            parts: list[str] = []
-            for f in files or []:
-                parts.append(f"diff --git a/{f.get('filename')} b/{f.get('filename')}\n")
-                if f.get("patch"):
-                    parts.append(f.get("patch") + "\n")
-            diff = "".join(parts)
+            diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
         Path(diff_path).write_text(diff, encoding="utf-8")
-        state.diff_path = diff_path
+        from mergecraft.mcp.verdict import register_review_scope
 
-        result: dict[str, Any] = {
+        register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
+
+        result = {
             "pullNumber": pull_number,
             "localBranch": local_branch,
             "remoteBranch": head_ref,
@@ -363,16 +543,13 @@ def checkout_pr_tool(ctx: ToolContext):
             logger.info("linked-repo review soft-failed: {}", xrepo_err)
 
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
-        ctx.tool_state.review_phase = "ESTABLISH_SCOPE"
         from mergecraft.mcp.review_context import hydrate_review_context
-        from mergecraft.mcp.verdict import ReviewPhase, stamp_review_phase_on_active_span
 
         await hydrate_review_context(
             ctx,
             round_index=round_index,
             incremental_changed_paths=state.incremental_changed_paths,
         )
-        stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
         return result
 
     return tool(
@@ -388,11 +565,6 @@ def checkout_pr_tool(ctx: ToolContext):
             "analyzers.impact, also returns impactPath pointing to a JSON file listing "
             "declaration-level reference leads for the changed files."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {"pull_number": {"type": "number"}},
-            "required": ["pull_number"],
-            "additionalProperties": False,
-        },
+        input_schema=_CHECKOUT_PR_INPUT_SCHEMA,
         execute=execute(_run, "checkout_pr"),
     )

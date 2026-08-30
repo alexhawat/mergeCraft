@@ -158,6 +158,30 @@ async def run_offline_agent_review(
 
             _store_run_state(tool_context, analyzer_run)
 
+        from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
+        from mergecraft.review.roster_auth import (
+            RosterAuthError,
+            RosterSecretEmptyError,
+            validate_roster_at_run_start,
+        )
+        from mergecraft.workflow.auth_manifest import DEFAULT_WORKFLOW_RELATIVE_PATH
+
+        workflow_path = cwd / DEFAULT_WORKFLOW_RELATIVE_PATH
+        if workflow_path.is_file():
+            snapshot = capture_run_scope_snapshot(
+                tool_context,
+                root=cwd,
+                settings=settings,
+                load_learnings_files=False,
+            )
+            try:
+                validate_roster_at_run_start(snapshot=snapshot, workflow_path=workflow_path)
+            except (RosterAuthError, RosterSecretEmptyError) as exc:
+                return _offline_failure(
+                    error=str(exc),
+                    outcome=RunOutcome.configuration_error,
+                )
+
         mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=output_schema)
         tool_context.mcp_server_url = mcp_url
         reviewer_mcp_url = mcp_role_url(mcp_url, None)

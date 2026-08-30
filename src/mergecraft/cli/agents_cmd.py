@@ -27,9 +27,10 @@ from mergecraft.cli.provider_cmd import (
     _config_path,
     _load_config_dict,
     _provider_entries,
-    _write_config_dict,
 )
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.config.agent_roster import model_chain_from_entry
+from mergecraft.config.io import write_config_dict
 from mergecraft.config.model_registry import normalize_model_id
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
 from mergecraft.mcp.context import (
@@ -48,6 +49,14 @@ app = typer.Typer(
     help="Inspect and override the mergeCraft agent registry.",
     no_args_is_help=True,
 )
+
+
+def _warn_agents_model_deprecation(verb: str, replacement: str) -> None:
+    """Point operators at ``mergecraft agent`` model verbs (wave plan 11 / W3)."""
+    message = (
+        f"mergecraft agents {verb} is deprecated — use mergecraft agent {replacement} instead."
+    )
+    console.print(f"[yellow]warning:[/yellow] {message}")
 
 
 def _tool_ctx(target_dir: Path) -> ToolContext:
@@ -87,17 +96,8 @@ def _validate_role_key(role: str) -> str:
     return role_key
 
 
-def _model_chain_from_entry(entry: dict[str, Any]) -> list[str]:
-    chain = entry.get("modelChain")
-    if chain is None:
-        return []
-    if not isinstance(chain, list):
-        cli_bail("modelChain must be a list")
-    return [str(item) for item in chain]
-
-
 def _replace_primary_in_entry(entry: dict[str, Any], new_primary: str) -> None:
-    chain = _model_chain_from_entry(entry)
+    chain = model_chain_from_entry(entry)
     if chain:
         entry["modelChain"] = [new_primary, *chain[1:]]
     else:
@@ -105,7 +105,7 @@ def _replace_primary_in_entry(entry: dict[str, Any], new_primary: str) -> None:
 
 
 def _append_backup_to_entry(entry: dict[str, Any], backup_slug: str) -> None:
-    chain = _model_chain_from_entry(entry)
+    chain = model_chain_from_entry(entry)
     if backup_slug in chain:
         cli_bail(f"duplicate model {backup_slug!r} already in chain")
     if not chain:
@@ -309,7 +309,7 @@ def set_cmd(
         _replace_primary_in_entry(entry, model)
 
     validate_agent_binding_override(entry)
-    _write_config_dict(config_path, raw)
+    write_config_dict(config_path, raw)
     console.print(f"[green]updated agents.{role_key} in {config_path}[/green]")
 
 
@@ -326,6 +326,7 @@ def setmodel_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Replace the primary model for an agent role; backups are preserved (D8)."""
+    _warn_agents_model_deprecation("setmodel", "assign-model <name> p0 <slug>")
     if all_agents and agent is not None:
         cli_bail("pass either --agent or --all, not both")
 
@@ -344,7 +345,7 @@ def setmodel_cmd(
             entry = _agent_entry(agents, role_key)
             _replace_primary_in_entry(entry, slug)
             validate_agent_binding_override(entry)
-        _write_config_dict(config_path, raw)
+        write_config_dict(config_path, raw)
         console.print(f"[green]updated primary model for {len(role_keys)} agent role(s)[/green]")
         return
 
@@ -353,7 +354,7 @@ def setmodel_cmd(
     entry = _agent_entry(agents, role_key)
     _replace_primary_in_entry(entry, slug)
     validate_agent_binding_override(entry)
-    _write_config_dict(config_path, raw)
+    write_config_dict(config_path, raw)
     console.print(f"[green]updated primary model for agents.{role_key}[/green]")
 
 
@@ -365,6 +366,7 @@ def addbackupmodel_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
     """Append a registered model to an agent's backup chain."""
+    _warn_agents_model_deprecation("addbackupmodel", "add-model <name> <slug>")
     target_dir = resolve_target_dir(cwd)
     config_path = _config_path(target_dir)
     raw, agents = _load_agents_block(config_path)
@@ -376,7 +378,7 @@ def addbackupmodel_cmd(
     entry = _agent_entry(agents, role_key)
     _append_backup_to_entry(entry, slug)
     validate_agent_binding_override(entry)
-    _write_config_dict(config_path, raw)
+    write_config_dict(config_path, raw)
     console.print(f"[green]appended backup model to agents.{role_key}[/green]")
 
 

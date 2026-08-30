@@ -387,7 +387,7 @@ def test_check_run_finding_evidence_is_redacted() -> None:
 
 
 def test_no_new_finding_fields_introduced(tmp_path: Path) -> None:
-    """CI evidence uses ``evidence`` and ``source``; it adds no field to ``Finding``."""
+    """CI evidence producers must emit only canonical ``Finding`` fields (incl. ``scope``)."""
     expected = {
         "tool",
         "rule_id",
@@ -404,6 +404,7 @@ def test_no_new_finding_fields_introduced(tmp_path: Path) -> None:
         "autofix",
         "introduced_by_pr",
         "source",
+        "scope",
         "cluster_id",
         "lens",
         "collateral",

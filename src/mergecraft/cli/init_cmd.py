@@ -11,6 +11,7 @@ from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.provider_cmd import seed_builtin_providers
+from mergecraft.config.io import load_config_dict
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.pins import action_pin_minimal
 from mergecraft.review.completed import COMPLETED_REVIEWS_GITIGNORE_LINE
@@ -150,8 +151,14 @@ def run(
             "[yellow].mergecraft/config.yaml already exists[/yellow] — pass --force to overwrite"
         )
     else:
+        config_to_write: dict[str, object] = dict(DEFAULT_CONFIG)
+        if config_path.is_file():
+            existing = load_config_dict(config_path)
+            existing_agents = existing.get("agents")
+            if existing_agents is not None:
+                config_to_write["agents"] = existing_agents
         config_path.write_text(
-            yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False, default_flow_style=False),
+            yaml.safe_dump(config_to_write, sort_keys=False, default_flow_style=False),
             encoding="utf-8",
         )
         console.print(f"wrote [green]{config_path.relative_to(root)}[/green]")
@@ -179,8 +186,10 @@ def run(
 
     console.print("\n[bold]next steps[/bold]")
     console.print(
-        "  1. set provider secrets: [cyan]mergecraft auth claude[/cyan] or [cyan]mergecraft auth codex[/cyan]"
+        "  1. authenticate a provider: [cyan]mergecraft provider auth <label>[/cyan] "
+        "(seeds reviewer p0 automatically)"
     )
-    console.print("  2. commit and push the workflow + config")
-    console.print("  3. open a PR or run workflow_dispatch")
+    console.print("  2. inspect the roster: [cyan]mergecraft agent list[/cyan]")
+    console.print("  3. commit and push the workflow + config")
+    console.print("  4. open a PR or run workflow_dispatch")
     logger.debug("init complete at {}", root)

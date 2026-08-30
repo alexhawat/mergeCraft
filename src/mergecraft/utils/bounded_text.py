@@ -7,6 +7,14 @@ from pathlib import Path  # noqa: TC003 — used at runtime for path containment
 
 MAX_INDEX_TEXT_BYTES = 256_000
 MAX_CONSUMER_HAYSTACK_BYTES = 2_048_000
+MAX_RENDER_TEXT_CHARS = 200
+
+
+def truncate_text(text: str, max_chars: int = MAX_RENDER_TEXT_CHARS) -> str:
+    """Truncate ``text`` for log rendering without splitting multibyte codepoints."""
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}…"
 
 
 def read_bounded_text(path: Path, *, max_bytes: int = MAX_INDEX_TEXT_BYTES) -> str | None:
@@ -54,7 +62,9 @@ def iter_indexable_files(root: Path) -> Iterator[Path]:
 __all__ = [
     "MAX_CONSUMER_HAYSTACK_BYTES",
     "MAX_INDEX_TEXT_BYTES",
+    "MAX_RENDER_TEXT_CHARS",
     "iter_indexable_files",
     "read_bounded_text",
     "resolve_path_under_root",
+    "truncate_text",
 ]

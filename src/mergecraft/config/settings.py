@@ -241,6 +241,7 @@ class AgentBindingOverride(BaseModel):
 
     role: str | None = None
     lens: str | None = None
+    after: str | None = None
     model: str | None = None
     model_chain: list[str] | None = Field(default=None, alias="modelChain")
     prompt_id: str | None = Field(default=None, alias="promptId")
@@ -429,6 +430,24 @@ class TracingSettings(BaseModel):
         raise ValueError(msg)
 
 
+SelfReviewLevel = Literal["off", "analyzers", "full"]
+
+
+class TrustSettings(BaseModel):
+    """Operator trust knob for same-repo ``pull_request_target`` (plan 13 D14)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    self_review: SelfReviewLevel = Field(
+        default="off",
+        alias="selfReview",
+        description=(
+            "off — default untrusted posture; analyzers — trusted-tier analyzers only; "
+            "full — authority trust too (requires explicit CLI confirmation at write time)"
+        ),
+    )
+
+
 class RunBoundsSettings(BaseModel):
     """Per-run budget and degradation ceilings (CC3 / N-05, R-08)."""
 
@@ -532,6 +551,7 @@ class RepoSettings(BaseModel):
     # to ``shadow`` (D12). The override is layered on top of the default
     # policy at the gate; a mis-spelled value is rejected there.
     gates: GatesSettings = Field(default_factory=GatesSettings, alias="gates")
+    trust: TrustSettings = Field(default_factory=TrustSettings)
     env_allowlist: str | None = Field(default=None, alias="envAllowlist")
     # Extra GitHub logins (comma-separated) permitted to invoke mergeCraft by
     # comment even when ``comment.author_association`` is outside the trusted
@@ -829,21 +849,28 @@ def load_repo_settings(
     When no config file exists, returns ``default_settings()``. Optionally merges
     learnings bodies + headings from ``.mergecraft/learnings.md`` (and xrepo files).
     """
-    config_path = _resolve_config_path(path, root=root)
     raw: dict[str, Any] | None = None
-    if config_path is not None:
-        try:
-            loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError) as exc:
-            logger.warning("failed to parse config {}: {}", config_path, exc)
-            loaded = None
-        if loaded is None:
-            raw = {}
-        elif not isinstance(loaded, dict):
-            msg = f"config must be a mapping, got {type(loaded).__name__}: {config_path}"
-            raise ValueError(msg)
-        else:
-            raw = migrate_config(loaded)
+    if path is not None:
+        candidate = Path(path)
+        if candidate.is_file():
+            try:
+                loaded = yaml.safe_load(candidate.read_text(encoding="utf-8"))
+            except (OSError, yaml.YAMLError) as exc:
+                logger.warning("failed to parse config {}: {}", candidate, exc)
+                loaded = None
+            if loaded is None:
+                raw = {}
+            elif not isinstance(loaded, dict):
+                msg = f"config must be a mapping, got {type(loaded).__name__}: {candidate}"
+                raise ValueError(msg)
+            else:
+                raw = migrate_config(loaded)
+    else:
+        from mergecraft.config.layered import load_layered_config_dict
+
+        base = _workspace_root(root)
+        layered = load_layered_config_dict(root=base)
+        raw = layered if layered else None
 
     settings = _merge_settings(raw)
 

@@ -74,6 +74,7 @@ from mergecraft.mcp.review_comments import (
     list_pull_request_reviews_tool,
     resolve_review_thread_tool,
 )
+from mergecraft.mcp.reviewer_dispatch import record_reviewer_dispatch_error_tool
 from mergecraft.mcp.rpc import dispatch_mcp_rpc, package_version
 from mergecraft.mcp.rpc_types import json_rpc_parse_error
 from mergecraft.mcp.select_mode import select_mode_tool
@@ -95,7 +96,7 @@ from mergecraft.mcp.shell import (
 )
 from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.upload import upload_file_tool
-from mergecraft.mcp.verdict import submit_review_verdict_tool
+from mergecraft.mcp.verdict import establish_review_scope_tool, submit_review_verdict_tool
 from mergecraft.mcp.verification import (
     record_finding_verdict_tool,
     verify_agent_findings_tool,
@@ -142,6 +143,7 @@ def build_common_tools(ctx: ToolContext, output_schema: JsonSchema | None = None
         get_pull_request_tool(ctx),
         get_commit_info_tool(ctx),
         checkout_pr_tool(ctx),
+        establish_review_scope_tool(ctx),
         get_review_comments_tool(ctx),
         list_pull_request_reviews_tool(ctx),
         resolve_review_thread_tool(ctx),
@@ -231,6 +233,7 @@ def build_orchestrator_tools(
         *build_common_tools(ctx, output_schema),
         report_progress_tool(ctx),
         select_mode_tool(ctx),
+        record_reviewer_dispatch_error_tool(ctx),
         submit_review_verdict_tool(ctx),
         push_branch_tool(ctx),
         push_tags_tool(ctx),

@@ -20,6 +20,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [TRACING](TRACING.md) | contributor | Tracing sinks, retention, and Logfire/OTLP wiring for operators. |
 | [action-reference](action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
 | [agent-loop](agent-loop.md) | consumer | Reference workflow for an external coding agent looping with mergecraft review --agent. |
+| [agent-roster](agent-roster.md) | consumer | Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot (D9). |
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
@@ -41,6 +42,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [support-matrix](support-matrix.md) | consumer | Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models. |
+| [trust-policy](trust-policy.md) | consumer | Two-axis trust policy — execution vs authority, selfReview levels, mergecraft-approve.yml, base snapshot rule. |
 | [workflows](workflows.md) | consumer | Workflow examples 2–6, trust tiers, [security model](workflows.md#security-model), and pull_request_target placement gotchas. |
 | [evals README](../evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
 | [llms-full.txt](../llms-full.txt) | consumer | Concatenated LLM bundle of core consumer and contributor docs (generated). |

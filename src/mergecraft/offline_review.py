@@ -93,9 +93,30 @@ def merge_analyzer_findings_into_result(
     extra: list[Finding],
 ) -> OfflineReviewResult:
     """Fold analyzer findings into structured output used for CLI exit codes."""
+    if result.structured_output:
+        try:
+            parse_findings_payload(result.structured_output)
+        except ValueError as exc:
+            return _offline_failure(
+                error=str(exc),
+                outcome=RunOutcome.configuration_error,
+                diff_path=result.diff_path,
+                evidence_packet_path=result.evidence_packet_path,
+            )
     if not extra:
         return result
-    existing = parse_offline_review_findings(result)
+    if result.structured_output:
+        try:
+            existing = [
+                Finding.model_validate(row)
+                for row in parse_findings_payload(result.structured_output)
+            ]
+        except ValueError:
+            # Invalid agent output must fail in finalize — do not mask it with
+            # analyzer rows (tests/cli/test_diff_review_json.py invalid_finding).
+            return result
+    else:
+        existing = []
     seen = {row.fingerprint for row in existing}
     merged = list(existing)
     for finding in extra:

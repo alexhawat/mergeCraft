@@ -4,8 +4,8 @@ WC-T of the merge-evidence wave plan. Every case here is written against the
 contract W7/W8 must satisfy, not against an implementation:
 
 * **WC-T.1** — one case per named check, each firing on a crafted record.
-* **WC-T.2** — a high-severity trajectory finding blocks auto-merge *through
-  the packet decision* (#43's acceptance criterion), not through a stub.
+* **WC-T.2** — a high-severity trajectory finding reaches the packet but stays
+  advisory (plan 12 D2): run-scoped findings never block auto-merge.
 * **WC-T.3** — the record builds from MCP tool-call state alone (D8): no
   external trace, no tracing sink, no #56.
 * **WC-T.4** — an attached external trace is enrichment; the same record
@@ -190,34 +190,33 @@ def test_no_post_edit_verification_fires() -> None:
 
 
 def test_repeated_tool_loop_fires() -> None:
-    """The same call, with the same arguments, three times over."""
+    """Three adjacent identical verify calls with the same signature."""
     findings = _audit(
         _record(
             tool_calls=[
-                _call(index, "shell", intent="read", command="ls", signature="shell:ls")
-                for index in range(1, 4)
-            ]
-            + [_call(4, "create_pull_request_review", intent="complete")],
+                _call(1, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(2, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(3, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(4, "create_pull_request_review", intent="complete"),
+            ],
             files_read=[],
             files_modified=[],
-            retries=2,
         )
     )
     assert "repeated-tool-loop" in _rule_ids(findings)
 
 
 def test_repeated_tool_loop_does_not_fire_below_the_threshold() -> None:
-    """Two identical calls is a retry; the check is about a *loop*."""
+    """Two adjacent identical verify calls is a retry; the check is about a *loop*."""
     findings = _audit(
         _record(
             tool_calls=[
-                _call(index, "shell", intent="read", command="ls", signature="shell:ls")
-                for index in range(1, 3)
-            ]
-            + [_call(3, "create_pull_request_review", intent="complete")],
+                _call(1, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(2, "run_static_checks", intent="verify", signature="run_static_checks:loop"),
+                _call(3, "create_pull_request_review", intent="complete"),
+            ],
             files_read=[],
             files_modified=[],
-            retries=1,
         )
     )
     assert "repeated-tool-loop" not in _rule_ids(findings)
@@ -369,21 +368,24 @@ def test_every_named_check_has_a_severity_and_a_recommended_action() -> None:
         assert check.recommended_action, f"{check.rule_id} has no recommended action"
 
 
-# ── WC-T.2 — a high-severity finding blocks auto-merge via the packet ─────────
+# ── WC-T.2 — high-severity trajectory findings stay advisory (plan 12 D2) ─────
 
 
-def test_high_severity_trajectory_finding_blocks_auto_merge() -> None:
-    """#43's acceptance criterion, driven through the real decision path.
+def test_high_severity_trajectory_finding_does_not_block_auto_merge() -> None:
+    """Run-scoped trajectory findings reach the packet but never block approval.
 
-    The trajectory finding is not handed to a bespoke gate: it goes into the
-    packet's finding list, and `decide_approval` — the one gate — reads it.
+    Plan 12 D2: even Critical run-health observations are advisory. The
+    trajectory finding rides in the packet's finding list and `decide_approval`
+    — the one gate — must still return success when they are the only findings.
     """
-    from mergecraft.agents.gates import BLOCKING_SEVERITIES, decide_approval
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES, blocking_findings, decide_approval
     from mergecraft.evidence.build import build_packet
 
     findings = _audit(_record(completion_claims=[], tool_calls=_record().tool_calls[:1]))
-    blockers = [f for f in findings if f.severity in BLOCKING_SEVERITIES]
-    assert blockers, "no trajectory check produces a blocking severity"
+    high_severity = [f for f in findings if f.severity in BLOCKING_SEVERITIES]
+    assert high_severity, "no trajectory check produces a blocking severity"
+    assert all(finding.scope == "run" for finding in high_severity)
+    assert blocking_findings(high_severity) == []
 
     packet = build_packet(
         change_id="acme/demo#1",
@@ -391,13 +393,13 @@ def test_high_severity_trajectory_finding_blocks_auto_merge() -> None:
         agent_version="0.0.1",
         model="claude-sonnet-4-5",
         files_changed=["src/app.py"],
-        findings=blockers,
+        findings=high_severity,
         deterministic_checks=[],
         self_assessment={"would_approve": True, "sha": "cafe"},
     )
     decision = decide_approval(packet, run_succeeded=True, tier="trusted")
-    assert decision.verdict == "failure", (
-        "a blocking trajectory finding must reach the packet verdict, not a side channel"
+    assert decision.verdict == "success", (
+        "run-scoped trajectory findings are advisory and must not block approval"
     )
 
 

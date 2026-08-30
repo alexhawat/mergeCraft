@@ -24,7 +24,7 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
-from mergecraft.evidence.run_packet import emit_run_packet, prepare_run_packet
+from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.main_outcome import (
     _classify_outcome,
     _publish_span_attrs,
@@ -164,6 +164,8 @@ class RunContext:
 
     # -- populated by ``_resolve_credentials`` (security boundary) ----------
     trust_tier: TrustTier = "untrusted"
+    authority_trust: TrustTier = "untrusted"
+    trust_self_review_level: str = "off"
     token_ref: TokenRef | None = None
 
     # -- populated by ``_execute_agent`` -------------------------------------
@@ -333,6 +335,82 @@ def _short_circuit_setup_failure(
     return ("continue", None)
 
 
+async def publish_deterministic_record(
+    *,
+    pull_number: int,
+    packet: Any,
+    rejection_reason: str | None = None,
+    tmpdir: str | None = None,
+    ctx: ToolContext | None = None,
+    run_outcome: RunOutcome | None = None,
+    verdict_diagnostic: Any | None = None,
+) -> None:
+    """Publish the deterministic sticky record for a resolved PR (D6, plan 13 A4).
+
+    Plan 13 ``run_post_run_retry_loop`` routes non-retryable rejections here.
+    Stable signature for cross-plan callers::
+
+        publish_deterministic_record(
+            *,
+            pull_number: int,
+            packet: MergeEvidencePacket,
+            rejection_reason: str | None = None,
+            tmpdir: str | None = None,
+            ctx: ToolContext | None = None,
+            run_outcome: RunOutcome | None = None,
+            verdict_diagnostic: VerdictDiagnostic | None = None,
+        ) -> None
+    """
+    from mergecraft.findings.ledger import (
+        render_deterministic_review_block,
+        upsert_sticky_progress_comment,
+    )
+    from mergecraft.scm.github import create_github_scm
+    from mergecraft.utils.status_checks import _run_url
+
+    resolved_ctx = ctx
+    if resolved_ctx is None:
+        tool_state = init_tool_state(owner="local", name="local", dir=tmpdir or ".")
+        tool_state.pr_number = pull_number
+        resolved_ctx = ToolContext(
+            agent_id="claude",
+            repo=RepoIdentity(owner="local", name="local"),
+            payload=ResolvedPayload(
+                event=PayloadEvent(trigger="pull_request", issue_number=pull_number, is_pr=True),
+            ),
+            scm=create_github_scm(""),
+            modes=compute_modes("claude"),
+            tool_state=tool_state,
+            tmpdir=tmpdir or ".",
+        )
+
+    tool_state = resolved_ctx.tool_state
+    submission = tool_state.terminal_submission
+    analyzer_run = tool_state.analyzer_run
+    block = render_deterministic_review_block(
+        packet=packet,
+        rejection_reason=rejection_reason,
+        run_url=_run_url(resolved_ctx),
+        run_outcome=run_outcome,
+        verdict_diagnostic=verdict_diagnostic,
+        analyzer_summary=analyzer_run.pre_merge_summary if analyzer_run is not None else None,
+        agent_summary=submission.summary if submission is not None else None,
+        trust_tier=resolved_ctx.trust_tier,
+        attempt_count=len(tool_state.usage_entries) if tool_state.usage_entries else None,
+        token_summary=_token_summary(tool_state.usage_entries),
+    )
+    await upsert_sticky_progress_comment(resolved_ctx, block)
+
+
+def _token_summary(usage_entries: list[Any]) -> str | None:
+    totals = [
+        str(row.total_tokens)
+        for row in usage_entries
+        if getattr(row, "total_tokens", None) is not None
+    ]
+    return ", ".join(totals) if totals else None
+
+
 async def _publish(
     ctx: RunContext,
     *,
@@ -341,6 +419,7 @@ async def _publish(
     attrs_source: Callable[[], dict[str, Any]] | None = None,
     verdict_prediction: VerdictProtocolPrediction | None = None,
     actual_outcome: str | None = None,
+    verdict_diagnostic: Any | None = None,
     emit: bool = True,
 ) -> str | None:
     """Prepare packet + persist learnings + status checks, then optionally emit.
@@ -354,7 +433,7 @@ async def _publish(
     if tool_context is None:
         return None
     run_ok = run_succeeded_for_outcome(outcome)
-    prepared = prepare_run_packet(tool_context, run_succeeded=run_ok)
+    prepared = resolve_prepared_run_packet(tool_context, run_succeeded=run_ok)
 
     async def _learnings_and_status() -> None:
         await persist_learnings(tool_context)
@@ -365,6 +444,51 @@ async def _publish(
             conclusion=RUN_OUTCOME_CONCLUSION[outcome],
             packet=prepared,
         )
+        pull_number = tool_context.tool_state.pr_number
+        if pull_number is None and tool_context.payload.event.issue_number is not None:
+            pull_number = int(tool_context.payload.event.issue_number)
+        # A refused terminal verdict (scope, schema, semantic or policy) is
+        # recorded on ``tool_state``; it names the actual cause, so it wins over
+        # the generic run failure reason. This is deliberately not gated on
+        # ``prepared.decision is None``: ``decide_approval`` always returns a
+        # ``PacketDecision``, so that condition never holds and the reason never
+        # reached the record — a refused run read as a clean one (plan 13 D5).
+        rejection_reason = tool_context.tool_state.last_terminal_rejection
+        if rejection_reason is None and prepared is not None and prepared.decision is None:
+            rejection_reason = failure_reason
+        if pull_number is not None and prepared is not None:
+            await publish_deterministic_record(
+                pull_number=int(pull_number),
+                packet=prepared,
+                rejection_reason=rejection_reason,
+                tmpdir=tool_context.tmpdir,
+                ctx=tool_context,
+                run_outcome=outcome,
+                verdict_diagnostic=verdict_diagnostic,
+            )
+        if prepared is not None:
+            from mergecraft.utils.status_checks import _run_url
+            from mergecraft.utils.step_summary import append_step_summary, render_step_summary
+
+            submission = tool_context.tool_state.terminal_submission
+            analyzer_run = tool_context.tool_state.analyzer_run
+            outcome_label = (
+                "no_verdict" if prepared.decision is None else ("success" if run_ok else "failure")
+            )
+            summary_body = render_step_summary(
+                packet=prepared,
+                outcome_label=outcome_label,
+                rejection_reason=rejection_reason,
+                run_url=_run_url(tool_context),
+                run_outcome=outcome,
+                verdict_diagnostic=verdict_diagnostic,
+                analyzer_summary=analyzer_run.pre_merge_summary
+                if analyzer_run is not None
+                else None,
+                agent_summary=submission.summary if submission is not None else None,
+                trust_tier=tool_context.trust_tier,
+            )
+            append_step_summary(summary_body)
 
     if not emit:
         await _learnings_and_status()
@@ -554,9 +678,35 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     assert ctx.tool_state is not None
     assert ctx.scm is not None
 
-    trust_tier = derive_trust_tier(event=ctx.gh_event)
+    from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
+    from mergecraft.config.trust_policy import (
+        log_trust_policy_at_run_start,
+        resolve_trust_policy,
+        trust_policy_manifest_fields,
+    )
+
+    repo_root = Path.cwd()
+    snapshot = capture_repo_settings_snapshot(root=repo_root, settings=ctx.settings)
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    shell = str(ctx.payload.get("shell") or "restricted")
+    policy = resolve_trust_policy(
+        event=ctx.gh_event or {},
+        config_root=repo_root,
+        event_name=event_name,
+        settings_snapshot=snapshot,
+        shell=shell,
+    )
+    log_trust_policy_at_run_start(policy)
+
+    trust_tier = policy.execution_trust
+    authority_trust = policy.authority_trust
     ctx.trust_tier = trust_tier
+    ctx.authority_trust = authority_trust
+    ctx.trust_self_review_level = policy.level
     ctx.tool_state.trust_tier = trust_tier
+    ctx.tool_state.authority_trust = authority_trust
+    ctx.tool_state.trust_self_review_level = policy.level
+    ctx.tool_state.run_manifest_trust = trust_policy_manifest_fields(policy)
 
     assert ctx.settings is not None
     from mergecraft.config.settings import (
@@ -768,6 +918,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
         analyzers_mode=analyzers_mode,
         trust_tier=ctx.trust_tier,
+        authority_trust=ctx.authority_trust,
         analyzers_settings_enabled=settings.analyzers.enabled,
         sarif_upload_enabled=sarif_upload_enabled,
         run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
@@ -780,12 +931,22 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     )
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
-    capture_run_scope_snapshot(
+    snapshot = capture_run_scope_snapshot(
         ctx.tool_context,
         root=Path(primary_repo_state(tool_state).dir),
         settings=settings,
         load_learnings_files=False,
     )
+    from mergecraft.review.roster_auth import (
+        RosterAuthError,
+        RosterSecretEmptyError,
+        validate_roster_at_run_start,
+    )
+
+    try:
+        validate_roster_at_run_start(snapshot=snapshot)
+    except (RosterAuthError, RosterSecretEmptyError) as exc:
+        raise _ConfigurationError(str(exc)) from exc
 
 
 async def _apply_overrides_and_setup_git(ctx: RunContext) -> None:
@@ -1388,6 +1549,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         attrs_source=lambda: _publish_span_attrs(outcome, selected_mode_obj) | diagnostic_attrs,
         verdict_prediction=verdict_prediction,
         actual_outcome=str(outcome) if verdict_prediction is not None else None,
+        verdict_diagnostic=verdict_diagnostic_code,
     )
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted
@@ -1459,7 +1621,6 @@ def _action_review_context() -> ReviewContext:
     # (`derive_trust_tier`, fail-closed `untrusted`) — never the
     # `MERGECRAFT_TRUST_TIER` env var, which only the CLI path sets; reading it
     # here would omit the tier on Action runs.
-    from mergecraft.analyzers.trust import derive_trust_tier
     from mergecraft.utils.payload import read_github_event
 
     try:
@@ -1568,4 +1729,4 @@ async def main() -> MainResult:
             reset_gateway_settings_cache()
 
 
-__all__ = ["MainResult", "RunOutcome", "main"]
+__all__ = ["MainResult", "RunOutcome", "main", "publish_deterministic_record"]

@@ -11,6 +11,8 @@ from typing import Any, Final, Literal
 
 from loguru import logger
 
+from mergecraft.agents.stream_render import emit_tool_failure_line
+
 JsonSchema = dict[str, Any]
 # Tool bodies vary across modules; wrap loosely then normalize in ``execute``.
 ToolBody = Callable[..., Awaitable[Any]]
@@ -69,7 +71,9 @@ VERIFIER_ALLOWED_TOOL_CLASSES: Final[frozenset[ToolClass]] = frozenset(
 # ``checkout_pr`` is SCOPE + mutates=True but must stay on the reviewer surface
 # (HA4.2 / D14). Every other mutating tool is orchestrator-only even when its
 # class is otherwise allowed on a read-only role.
-READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset({"checkout_pr"})
+READONLY_MUTATING_ALLOWLIST: Final[frozenset[str]] = frozenset(
+    {"checkout_pr", "establish_review_scope"}
+)
 # Primary reviewer additionally allows review publication (D9) and the three
 # session tools the primary must be able to call:
 #   - ``set_output``      (ANALYSIS, mutates=True) — Action output_schema + offline --json
@@ -285,8 +289,10 @@ def execute(fn: ToolBody, tool_name: str | None = None) -> ToolHandler:
             return handle_tool_success({"result": result})
         except Exception as error:
             prefix = f"[{tool_name}]" if tool_name else "tool"
-            logger.info("{} error: {}", prefix, error)
+            message = str(error)
+            logger.debug("{} error: {}", prefix, message)
             logger.debug("{} params: {}", prefix, params)
+            emit_tool_failure_line(tool_name or "tool", message)
             return handle_tool_error(error)
 
     return _fn

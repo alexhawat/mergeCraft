@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from mergecraft.agents.shared import AgentUsage, log_token_table
 from mergecraft.agents.stream_bookkeeping import sync_open_pair_bookkeeping
 from mergecraft.tracing._tool_attrs import (
@@ -23,6 +25,7 @@ from mergecraft.tracing.tracer import (
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
+from mergecraft.utils import gha_log
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -233,6 +236,31 @@ def codex_stream_event_handler(
                     )
                 return
             if item_type == "tool_result":
+                return
+            if item_type == "command_execution":
+                from mergecraft.agents.codex import (
+                    is_user_namespace_failure,
+                    user_namespace_failure_hint,
+                )
+
+                output_text = str(item.get("aggregated_output") or "")
+                if (
+                    is_user_namespace_failure(output_text)
+                    and not accumulator.user_namespace_failure_reported
+                ):
+                    accumulator.user_namespace_failure_reported = True
+                    hint = user_namespace_failure_hint()
+                    logger.warning("{}", hint)
+                    gha_log.warning(
+                        "Codex platform sandbox unavailable: bubblewrap cannot create a user "
+                        "namespace inside this container. See logs for remedies."
+                    )
+                    run_health_line = (
+                        "Codex shell calls failed: bubblewrap cannot create a user namespace "
+                        "in this container (environmental; review may be degraded)."
+                    )
+                    accumulator.run_health_notes.append(run_health_line)
+                    logger.info("run_health: {}", run_health_line)
                 return
             if item_type == "reasoning":
                 if capture_policy is not None:

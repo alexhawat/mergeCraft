@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -30,6 +31,8 @@ if TYPE_CHECKING:
 TrustTier = Literal["trusted", "untrusted"]
 
 _NO_LINT_TARGETS_REASON = "no source files to lint after dropping enablement markers"
+_PROVISION_MAX_ATTEMPTS = 3
+_PROVISION_RETRY_DELAY_S = 1.0
 
 
 def marker_only_lint_skip_reason(manifest: AnalyzerManifest) -> str:
@@ -145,15 +148,33 @@ def provision_managed_argv(
     platform_key = provision_platform_key()
     cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
     lock_path = repo_root / ".mergecraft" / "analyzers.lock"
-    try:
-        result = resolve_with_lock(
-            manifest=manifest,
-            lock_path=lock_path,
-            cache_dir=cache_dir,
-            platform=platform_key,
-        )
-    except ProvisionError as exc:
-        logger.info("{}", exc)
+    last_error: ProvisionError | None = None
+    for attempt in range(1, _PROVISION_MAX_ATTEMPTS + 1):
+        try:
+            result = resolve_with_lock(
+                manifest=manifest,
+                lock_path=lock_path,
+                cache_dir=cache_dir,
+                platform=platform_key,
+            )
+            break
+        except ProvisionError as exc:
+            last_error = exc
+            logger.warning(
+                "{}: provisioning failed on attempt {}/{}: {}",
+                manifest.id,
+                attempt,
+                _PROVISION_MAX_ATTEMPTS,
+                exc,
+            )
+            if attempt < _PROVISION_MAX_ATTEMPTS:
+                time.sleep(_PROVISION_RETRY_DELAY_S)
+                continue
+            logger.info("{}", exc)
+            return None
+    else:
+        assert last_error is not None
+        logger.info("{}", last_error)
         return None
 
     argv = list(plan.argv)

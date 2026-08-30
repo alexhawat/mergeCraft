@@ -50,6 +50,10 @@ WORKFLOW_DIR = REPO / ".github" / "workflows"
 
 # The action pins itself here; a consumer's own pin is their business.
 _PIN_RE = re.compile(r"uses:\s*alexhawat/mergeCraft@(?P<sha>[0-9a-f]{40})")
+_ENV_SHA_RE = re.compile(
+    r"^\s*MERGECRAFT_ACTION_SHA:\s*[\"']?(?P<sha>[0-9a-f]{40})[\"']?\s*$",
+    re.MULTILINE,
+)
 
 DEFAULT_BRANCH = os.environ.get("MERGECRAFT_DEFAULT_BRANCH", "main")
 
@@ -116,6 +120,23 @@ def _check_self_consistency(rel_path: str, pins: list[tuple[int, str]]) -> list[
         f"{rel_path}: {len(distinct)} different Action pins in one file "
         f"({locations}). A one-sided bump leaves the review and fallback steps "
         f"on different code."
+    ]
+
+
+def _check_env_parity(rel_path: str, text: str, pins: list[tuple[int, str]]) -> list[str]:
+    """Every rung pin must match the hoisted ``env.MERGECRAFT_ACTION_SHA``."""
+    env_match = _ENV_SHA_RE.search(text)
+    if env_match is None:
+        return []
+    env_sha = env_match.group("sha")
+    mismatched = [(line, sha) for line, sha in pins if sha != env_sha]
+    if not mismatched:
+        return []
+    locations = ", ".join(f"line {line}: {sha[:12]}" for line, sha in mismatched)
+    return [
+        f"{rel_path}: uses: pin(s) disagree with env.MERGECRAFT_ACTION_SHA "
+        f"({env_sha[:12]}): {locations}. Bump env.MERGECRAFT_ACTION_SHA only "
+        f"and mirror to every rung."
     ]
 
 
@@ -200,6 +221,7 @@ def main() -> int:
         checked += 1
         rel_path = path.relative_to(REPO).as_posix()
         failures.extend(_check_self_consistency(rel_path, pins))
+        failures.extend(_check_env_parity(rel_path, text, pins))
         failures.extend(_check_freshness(rel_path, pins[0][1]))
         failures.extend(_check_staleness(rel_path, pins[0][1]))
 

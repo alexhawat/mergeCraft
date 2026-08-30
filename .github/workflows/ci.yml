@@ -94,8 +94,70 @@ jobs:
           GITHUB_BASE_REF: ${{ github.base_ref }}
         run: make coverage-gate
 
+  action-slim-bootstrap:
+    name: Bootstrap slim GHCR image for Action SHA pin
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.base.ref == 'pre-0.0.1' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve self-review Action SHA pin
+        id: pin
+        run: |
+          set -euo pipefail
+          SHA=$(grep -E '^\s*MERGECRAFT_ACTION_SHA:\s*"' .github/workflows/mergecraft.yml | head -1 | sed -E 's/.*"([0-9a-f]{40})".*/\1/')
+          test -n "${SHA}"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check whether slim image tag already exists on GHCR
+        id: tag
+        env:
+          SHA: ${{ steps.pin.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if docker manifest inspect "ghcr.io/alexhawat/mergecraft:${SHA}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Slim image tag already published — skipping bootstrap rebuild"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Slim image tag missing — will build and push"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.tag.outputs.exists != 'true'
+        with:
+          ref: ${{ steps.pin.outputs.sha }}
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        if: steps.tag.outputs.exists != 'true'
+      - name: Build and push slim image for pinned Action SHA
+        if: steps.tag.outputs.exists != 'true'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ghcr.io/alexhawat/mergecraft:${{ steps.pin.outputs.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.pin.outputs.sha }}
+          cache-from: type=gha,scope=mergeCraft-slim-bootstrap
+          cache-to: type=gha,mode=max,scope=mergeCraft-slim-bootstrap
+
   static:
     name: Verify (static + build py${{ matrix.python }})
+    needs: action-slim-bootstrap
+    if: >-
+      always() &&
+      (needs.action-slim-bootstrap.result == 'success' ||
+       needs.action-slim-bootstrap.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -115,12 +177,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Static, typecheck, build tier
         run: make ci-static
-      # Reports self-review Action-pin drift (#450). Advisory on purpose: the
-      # stale pin lives on the default branch, so it is not a defect in the PR
-      # being checked, and failing here would block every unrelated change
-      # until someone bumps main. The annotation is what makes the skew
-      # visible instead of silent -- which is how it reached 687 commits.
-      - name: Action pin freshness (advisory)
+      - name: Action pin freshness
         if: matrix.python == '3.14'
         run: |
           # No --depth here. A depth-limited fetch marks origin/main as a
@@ -130,13 +187,7 @@ jobs:
           # runs it. The checkout above is fetch-depth: 0, so the objects are
           # already local and a full fetch is near-free.
           git fetch --no-tags origin main:refs/remotes/origin/main || true
-          if out="$(make action-pin-check 2>&1)"; then
-            echo "$out"
-          else
-            echo "$out"
-            detail="$(printf '%s' "$out" | grep -m1 -- '  - ' | sed 's/^  - //')"
-            echo "::warning title=mergecraft action pin drift::${detail:-see log}"
-          fi
+          make action-pin-check
       # First-wave CI SARIF for mergeCraft ingest (#464 / D8). Upload even when
       # the static tier failed so the review still sees the tool's findings.
       - name: Emit ruff and mypy SARIF

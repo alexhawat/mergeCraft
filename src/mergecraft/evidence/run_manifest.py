@@ -51,6 +51,7 @@ def build_run_manifest(
     config_path: Path | None = None,
     policy_text: str | None = None,
     instruction_hashes: Mapping[str, str] | None = None,
+    trust_policy: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Return manifest metadata merged into evidence packets and run records."""
     resolved_config = config_path
@@ -89,6 +90,8 @@ def build_run_manifest(
     }
     if injected:
         manifest["instruction_hashes"] = injected
+    if trust_policy:
+        manifest.update(dict(trust_policy))
     return manifest
 
 

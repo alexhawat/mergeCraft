@@ -169,21 +169,30 @@ def derive_trust_tier(
     *,
     shell: str = "restricted",
     offline: bool = False,
+    event_name: str | None = None,
 ) -> TrustTier:
-    """Derive trust tier from the native GitHub event shape (W0.4 probe)."""
+    """Derive trust tier from the native GitHub event shape (W0.4 probe).
+
+    ``event_name`` overrides the ambient ``GITHUB_EVENT_NAME``. A caller that
+    already knows which event it is reasoning about must pass it, so the tier
+    and any event-name-dependent decision beside it cannot disagree: resolving
+    one from an argument and the other from the environment produced a
+    ``trusted`` posture for a ``pull_request_target`` run whenever the two
+    differed. ``None`` keeps the ambient lookup for callers inside a real run.
+    """
     _ = shell
     if offline:
         return "trusted"
     if not event:
         return "untrusted"
 
-    event_name = _event_name()
-    if event_name == "workflow_dispatch":
+    resolved_event_name = _event_name() if event_name is None else event_name
+    if resolved_event_name == "workflow_dispatch":
         return "trusted"
-    if event_name == "pull_request_target":
+    if resolved_event_name == "pull_request_target":
         return "untrusted"
 
-    if event_name == "pull_request":
+    if resolved_event_name == "pull_request":
         pull_request = event.get("pull_request")
         if isinstance(pull_request, dict):
             head = pull_request.get("head")
@@ -193,7 +202,7 @@ def derive_trust_tier(
                     return "trusted"
         return "untrusted"
 
-    if event_name == "issue_comment":
+    if resolved_event_name == "issue_comment":
         # ``resolve_native_event`` already authorises comment-driven runs by
         # author association (OWNER / MEMBER / COLLABORATOR).  Mirror that
         # gate here so a maintainer's ``issue_comment`` earns the trusted tier
@@ -241,9 +250,10 @@ def build_analyzer_env(
 
 
 def evaluate_manifest_for_tier(
-    *,
     manifest: AnalyzerManifest,
-    tier: TrustTier,
+    tier_or_ctx: TrustTier | ToolContext | None = None,
+    *,
+    tier: TrustTier | None = None,
     cause: str = "fork PR / pull_request_target",
 ) -> ManifestTierDecision:
     """Skip trusted-only manifests on untrusted runs (D7).
@@ -252,8 +262,24 @@ def evaluate_manifest_for_tier(
     string stays true when the tier was chosen by the operator rather than
     derived from the event — ``analyzers: untrusted-only`` on a same-repo PR
     is a real untrusted selection, but it is not a fork (D9, #38).
+
+    The second positional argument may be a :class:`~mergecraft.mcp.context.ToolContext`
+    — execution trust is read from ``ctx.trust_tier``.
     """
-    if tier == "untrusted" and manifest.trust == "trusted":
+    from mergecraft.mcp.context import ToolContext
+
+    resolved_tier: TrustTier
+    if isinstance(tier_or_ctx, ToolContext):
+        resolved_tier = tier_or_ctx.trust_tier
+    elif tier_or_ctx is not None:
+        resolved_tier = tier_or_ctx
+    elif tier is not None:
+        resolved_tier = tier
+    else:
+        msg = "evaluate_manifest_for_tier requires tier or ToolContext"
+        raise TypeError(msg)
+
+    if resolved_tier == "untrusted" and manifest.trust == "trusted":
         reason = f"skipped {manifest.id}: requires trusted tier ({cause})"
         logger.info("{}", reason)
         return ManifestTierDecision(skipped=True, reason=reason)

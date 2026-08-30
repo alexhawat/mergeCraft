@@ -23,6 +23,8 @@ A quick orientation before the lists:
 7. [Memory across runs](#7-memory-across-runs)
 8. [Output shape](#8-output-shape)
 9. [Address-reviews checks](#9-address-reviews-checks)
+10. [Trajectory checks](#10-trajectory-checks-43-49)
+11. [Deterministic run record](#11-deterministic-run-record-plan-12)
 
 ---
 
@@ -37,8 +39,10 @@ verdict; everything else is advisory. Concretely:
   `mergecraft.analyzers.finding`, `extra="forbid"`). Each finding carries
   `tool`, `rule_id`, `category`, `severity`, `confidence`, `path`,
   `start_line`/`end_line`, `fingerprint`, `evidence: list[str]`,
-  `introduced_by_pr`, `source`, `cluster_id`. Findings are the
-  authoritative structural input to `decide_approval()`.
+  `introduced_by_pr`, `source`, `scope`, `cluster_id`. Findings are the
+  authoritative structural input to `decide_approval()`. Only `scope="change"`
+  findings can block; `scope="run"` rows are advisory and partition into the
+  packet's `run_health` section at assembly time (plan 12).
 - **`DeterministicCheck` rows** — one per declared `staticChecks` or
   discovered Makefile target. Status is one of five: `passed`, `failed`,
   `timed_out`, `unavailable`, `declared-but-cannot-run`. **Only
@@ -407,13 +411,48 @@ gated on the record carrying that signal at all: `changed-unread-file` needs
 `read_coverage`, `missing-completion-signal` needs at least one recorded call. A
 check that fires on every run is noise, not a gate.
 
-**No second gate.** These are ordinary findings in the packet's finding list, so
-`decide_approval()` weighs them exactly like any other evidence — a `Critical`
-`unresolved-failure` blocks for the same reason a `Critical` analyzer finding
-does. There is no separate trajectory verdict.
+**Run-scoped, never blocking (D2).** Trajectory checks stamp `scope="run"`,
+`source="trajectory"`, and `introduced_by_pr="false"`. They partition into the
+packet's `run_health` section and render under a separate collapsed heading in
+the deterministic run record. `blocking_findings()` drops them before severity
+grading — no severity, and no future check, makes a run-scoped finding fail a
+PR. There is no separate trajectory verdict and no second required check-run
+(D14).
 
 **They never crowd out code findings.** Inline slots go to code findings first;
-trajectory findings take only what is left and otherwise report in the body.
+trajectory findings take only what is left and otherwise report in the body or
+the run-health section.
+
+## 11. Deterministic run record (plan 12)
+
+Every run that resolves a PR number leaves exactly one authoritative sticky
+progress comment, whether the agent published a review, posted no verdict, or
+failed mid-run (D6). Re-runs edit the same comment in place via the existing
+sticky marker — they do not append a second one.
+
+The comment and the published review body both render from
+`render_deterministic_review_block()` in `findings/ledger.py` (D7), so the two
+surfaces cannot drift. The agent cannot suppress the block by supplying its own
+copy of the markers — dedupe keeps the server's version.
+
+The block always contains, in order:
+
+1. **Run header** — outcome, verdict diagnostic, decision verdict and reason,
+   model actually used, attempt count, token summary, run URL, reviewed SHA.
+2. **Pre-merge checks** — analyzers (dispatched lenses or packet summary),
+   static checks from `deterministic_checks`, CI intelligence pointer, trust
+   tier.
+3. **Change-scoped findings** — typed packet rows (`scope="change"`); `_No
+   change-scoped findings recorded._` when empty.
+4. **Run health** — collapsed `<details>` with `scope="run"` findings when
+   present; omitted when none.
+5. **Agent summary or rejection** — when a verdict exists, the agent's summary
+   quoted beneath the deterministic rows; when it does not, an explicit
+   `No verdict recorded — reason: <typed rejection>` line.
+
+The same block is merged into the review body as a mandatory preamble through
+`merge_deterministic_preamble_into_review_body` in `mcp/review.py`, applied
+last so nothing can be appended above it.
 
 ## 9. Address-reviews checks
 
