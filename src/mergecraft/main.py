@@ -397,12 +397,25 @@ async def publish_deterministic_record(
         agent_summary=submission.summary if submission is not None else None,
         trust_tier=resolved_ctx.trust_tier,
         attempt_count=len(tool_state.usage_entries) if tool_state.usage_entries else None,
-        token_summary=_token_summary(tool_state.usage_entries),
+        token_summary=_token_summary(
+            tool_state.usage_entries,
+            budget_tracker=resolved_ctx.budget_tracker,
+        ),
     )
     await upsert_sticky_progress_comment(resolved_ctx, block)
 
 
-def _token_summary(usage_entries: list[Any]) -> str | None:
+def _token_summary(
+    usage_entries: list[Any],
+    *,
+    budget_tracker: Any | None = None,
+) -> str | None:
+    from mergecraft.utils.run_bounds import BudgetTracker, format_token_budget_summary
+
+    if isinstance(budget_tracker, BudgetTracker) and (
+        budget_tracker.tokens_used > 0 or budget_tracker.over_target
+    ):
+        return format_token_budget_summary(budget_tracker)
     totals = [
         str(row.total_tokens)
         for row in usage_entries
@@ -487,6 +500,10 @@ async def _publish(
                 else None,
                 agent_summary=submission.summary if submission is not None else None,
                 trust_tier=tool_context.trust_tier,
+                token_summary=_token_summary(
+                    tool_context.tool_state.usage_entries,
+                    budget_tracker=tool_context.budget_tracker,
+                ),
             )
             append_step_summary(summary_body)
 
@@ -1227,7 +1244,7 @@ def _promote_and_finalize_agent_result(
         from mergecraft.utils.run_bounds import BudgetExhausted, record_agent_usage
 
         try:
-            record_agent_usage(ctx.budget_tracker, result.usage)
+            record_agent_usage(ctx.budget_tracker, result.usage, phase="reviewer_dispatch")
         except BudgetExhausted as exc:
             ctx.budget_exhaustion = exc
 

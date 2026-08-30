@@ -95,6 +95,7 @@ def _deterministic_review_block(
     verdict_diagnostic: VerdictDiagnostic | str | None = None,
 ) -> str:
     from mergecraft.findings.ledger import render_deterministic_review_block
+    from mergecraft.utils.run_bounds import BudgetTracker, format_token_budget_summary
     from mergecraft.utils.status_checks import _run_url
 
     tool_state = ctx.tool_state
@@ -103,12 +104,18 @@ def _deterministic_review_block(
     submission = tool_state.terminal_submission
     agent_summary = submission.summary if submission is not None else None
     attempt_count = len(tool_state.usage_entries) if tool_state.usage_entries else None
-    token_bits: list[str] = []
-    for usage in tool_state.usage_entries or []:
-        total = getattr(usage, "total_tokens", None)
-        if total:
-            token_bits.append(str(total))
-    token_summary = ", ".join(token_bits) if token_bits else None
+    token_summary: str | None = None
+    if isinstance(ctx.budget_tracker, BudgetTracker) and (
+        ctx.budget_tracker.tokens_used > 0 or ctx.budget_tracker.over_target
+    ):
+        token_summary = format_token_budget_summary(ctx.budget_tracker)
+    if token_summary is None:
+        token_bits: list[str] = []
+        for usage in tool_state.usage_entries or []:
+            total = getattr(usage, "total_tokens", None)
+            if total:
+                token_bits.append(str(total))
+        token_summary = ", ".join(token_bits) if token_bits else None
     return render_deterministic_review_block(
         packet=packet,
         rejection_reason=rejection_reason,

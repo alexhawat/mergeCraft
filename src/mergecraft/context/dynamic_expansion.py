@@ -108,7 +108,7 @@ def _remaining_token_budget(
     remaining = token_budget - total_tokens
     if budget_tracker is None:
         return remaining
-    tracker_remaining = budget_tracker.bounds.token_budget - budget_tracker.tokens_used
+    tracker_remaining = budget_tracker.bounds.token_ceiling - budget_tracker.tokens_used
     return min(remaining, tracker_remaining)
 
 
@@ -119,10 +119,10 @@ def _record_tokens_without_raise(
     """Record token usage without raising when a shared tracker is exhausted."""
     if budget_tracker is None or count <= 0:
         return True
-    if budget_tracker.tokens_used + count > budget_tracker.bounds.token_budget:
+    if budget_tracker.tokens_used + count > budget_tracker.bounds.token_ceiling:
         return False
     try:
-        budget_tracker.record_tokens(count)
+        budget_tracker.record_tokens(count, phase="context_expansion")
     except BudgetExhausted:
         return False
     return True

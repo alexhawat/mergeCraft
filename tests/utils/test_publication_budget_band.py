@@ -9,7 +9,6 @@ import pytest
 from loguru import logger
 
 from mergecraft.utils.run_bounds import BudgetExhausted, BudgetTracker, RunBounds
-from tests.publication_attribution.support import W5_XFAIL
 
 
 def _base_bounds(**overrides: Any) -> RunBounds:
@@ -37,7 +36,6 @@ def _token_ceiling(bounds: RunBounds) -> int:
     return int(bounds.token_budget * (1.0 + tolerance))
 
 
-@W5_XFAIL
 def test_crossing_target_under_ceiling_warns_once_without_raise() -> None:
     """D9 — 7% over target warns once and continues; no ``BudgetExhausted``."""
     bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
@@ -56,7 +54,6 @@ def test_crossing_target_under_ceiling_warns_once_without_raise() -> None:
     assert len(over_target) == 1
 
 
-@W5_XFAIL
 def test_over_target_warning_emitted_only_once() -> None:
     """D9 — subsequent increments must not spam warnings."""
     bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
@@ -73,7 +70,6 @@ def test_over_target_warning_emitted_only_once() -> None:
     assert len(over_target) == 1
 
 
-@W5_XFAIL
 def test_crossing_ceiling_raises_with_target_ceiling_and_tolerance() -> None:
     """D9 — ceiling breach names used / target / ceiling / tolerance."""
     bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
@@ -87,7 +83,6 @@ def test_crossing_ceiling_raises_with_target_ceiling_and_tolerance() -> None:
     assert "0.1" in message or "10%" in message or "tolerance" in message.lower()
 
 
-@W5_XFAIL
 def test_zero_tolerance_restores_strict_greater_than_target() -> None:
     """Regression — tolerance ``0`` reproduces today's strict ``>`` cliff."""
     bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.0)
@@ -100,7 +95,6 @@ def test_zero_tolerance_restores_strict_greater_than_target() -> None:
     assert "101" in str(exc_info.value)
 
 
-@W5_XFAIL
 def test_single_increment_over_ceiling_has_distinct_message_from_steady_drift() -> None:
     """D10 — one pathological increment must not share the steady-drift message."""
     bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
@@ -115,7 +109,6 @@ def test_single_increment_over_ceiling_has_distinct_message_from_steady_drift() 
     assert str(drift_exc.value) != str(vault_exc.value)
 
 
-@W5_XFAIL
 def test_record_tokens_without_phase_attributes_to_unattributed() -> None:
     """D11 — unannotated ``record_tokens`` calls attribute to ``unattributed``."""
     sig = inspect.signature(BudgetTracker.record_tokens)
@@ -127,7 +120,6 @@ def test_record_tokens_without_phase_attributes_to_unattributed() -> None:
     assert totals.get("unattributed") == 25
 
 
-@W5_XFAIL
 def test_per_phase_totals_sum_to_tokens_used() -> None:
     """D11 — phase buckets reconcile to ``tokens_used``."""
     tracker = BudgetTracker(_base_bounds())

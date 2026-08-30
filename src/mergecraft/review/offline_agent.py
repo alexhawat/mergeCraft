@@ -227,7 +227,7 @@ async def run_offline_agent_review(
         ):
             result = await agent.run(run_ctx)
         try:
-            record_agent_usage(budget_tracker, result.usage)
+            record_agent_usage(budget_tracker, result.usage, phase="reviewer_dispatch")
         except BudgetExhausted as exc:
             return OfflineReviewResult(
                 success=False,
