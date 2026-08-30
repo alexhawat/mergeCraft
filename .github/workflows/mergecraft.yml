@@ -627,14 +627,24 @@ jobs:
         if: always()
         env:
           PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
-        run: printf '%s' "$PACKET" > packet-nous.json
+        run: |
+          # $GITHUB_WORKSPACE is created by the Action container's volume
+          # mount and owned by root — this job never checks out, so no
+          # runner-owned directory exists there. Writing the packet into
+          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
+          # always writable by the runner user.
+          if [ -z "${PACKET:-}" ]; then
+            echo "no evidence packet emitted by this rung; nothing to persist"
+            exit 0
+          fi
+          printf '%s' "$PACKET" > "$RUNNER_TEMP/packet-nous.json"
 
       - name: Upload packet artifact (Nous)
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-nous
-          path: packet-nous.json
+          path: ${{ runner.temp }}/packet-nous.json
           retention-days: 30
           if-no-files-found: ignore
 
@@ -784,14 +794,24 @@ jobs:
         if: always()
         env:
           PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
-        run: printf '%s' "$PACKET" > packet-codex.json
+        run: |
+          # $GITHUB_WORKSPACE is created by the Action container's volume
+          # mount and owned by root — this job never checks out, so no
+          # runner-owned directory exists there. Writing the packet into
+          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
+          # always writable by the runner user.
+          if [ -z "${PACKET:-}" ]; then
+            echo "no evidence packet emitted by this rung; nothing to persist"
+            exit 0
+          fi
+          printf '%s' "$PACKET" > "$RUNNER_TEMP/packet-codex.json"
 
       - name: Upload packet artifact (Codex)
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-codex
-          path: packet-codex.json
+          path: ${{ runner.temp }}/packet-codex.json
           retention-days: 30
           if-no-files-found: ignore
 
@@ -917,14 +937,24 @@ jobs:
         if: always()
         env:
           PACKET: ${{ steps.mergecraft_claude.outputs.evidence_packet }}
-        run: printf '%s' "$PACKET" > packet-claude.json
+        run: |
+          # $GITHUB_WORKSPACE is created by the Action container's volume
+          # mount and owned by root — this job never checks out, so no
+          # runner-owned directory exists there. Writing the packet into
+          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
+          # always writable by the runner user.
+          if [ -z "${PACKET:-}" ]; then
+            echo "no evidence packet emitted by this rung; nothing to persist"
+            exit 0
+          fi
+          printf '%s' "$PACKET" > "$RUNNER_TEMP/packet-claude.json"
 
       - name: Upload packet artifact (Claude)
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-claude
-          path: packet-claude.json
+          path: ${{ runner.temp }}/packet-claude.json
           retention-days: 30
           if-no-files-found: ignore
 
