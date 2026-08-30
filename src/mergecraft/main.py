@@ -410,18 +410,10 @@ def _token_summary(
     *,
     budget_tracker: Any | None = None,
 ) -> str | None:
-    from mergecraft.utils.run_bounds import BudgetTracker, format_token_budget_summary
+    from mergecraft.utils.run_bounds import BudgetTracker, token_summary_from_usage
 
-    if isinstance(budget_tracker, BudgetTracker) and (
-        budget_tracker.tokens_used > 0 or budget_tracker.over_target
-    ):
-        return format_token_budget_summary(budget_tracker)
-    totals = [
-        str(row.total_tokens)
-        for row in usage_entries
-        if getattr(row, "total_tokens", None) is not None
-    ]
-    return ", ".join(totals) if totals else None
+    tracker = budget_tracker if isinstance(budget_tracker, BudgetTracker) else None
+    return token_summary_from_usage(usage_entries, budget_tracker=tracker)
 
 
 async def _publish(

@@ -154,7 +154,8 @@ async def test_retry_ceiling_raises_last_http_status_error(tmp_path: Path) -> No
     ):
         await _create_github_review_with_anchor_recovery(ctx, pull_number=7, payload=payload)
     assert exc_info.value.response.status_code == 422
-    assert github.create_review_calls == ANCHOR_RECOVERY_RETRY_CEILING + 1
+    # D1 hard-stops on unchanged signature before D2's retry ceiling is exhausted.
+    assert github.create_review_calls == 1
 
 
 @pytest.mark.asyncio

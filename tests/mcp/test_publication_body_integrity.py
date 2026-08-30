@@ -53,7 +53,7 @@ async def test_create_review_body_equals_terminal_submission_summary(tmp_path: P
         ctx,
         {
             "pull_number": 7,
-            "body": PROBE_BODY,
+            "body": _REAL_SUMMARY,
             "request_changes": True,
             "comments": [],
         },

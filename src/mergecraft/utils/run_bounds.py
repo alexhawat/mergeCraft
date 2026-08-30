@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from loguru import logger
 
@@ -320,6 +320,24 @@ def format_token_budget_summary(tracker: BudgetTracker) -> str:
     return "; ".join(parts)
 
 
+def token_summary_from_usage(
+    usage_entries: list[Any],
+    *,
+    budget_tracker: BudgetTracker | None = None,
+) -> str | None:
+    """Prefer budget-tracker band summary; fall back to raw usage entry totals."""
+    if isinstance(budget_tracker, BudgetTracker) and (
+        budget_tracker.tokens_used > 0 or budget_tracker.over_target
+    ):
+        return format_token_budget_summary(budget_tracker)
+    totals = [
+        str(row.total_tokens)
+        for row in usage_entries
+        if getattr(row, "total_tokens", None) is not None
+    ]
+    return ", ".join(totals) if totals else None
+
+
 def enumerate_unbounded_external_operations() -> list[str]:
     """Return registry keys without a positive finite timeout (for tests)."""
     unbounded: list[str] = []
@@ -447,4 +465,5 @@ __all__ = [
     "resolve_run_bounds",
     "round_budget_multiplier",
     "timeout_for_external_operation",
+    "token_summary_from_usage",
 ]

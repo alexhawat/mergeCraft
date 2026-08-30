@@ -95,7 +95,7 @@ def _deterministic_review_block(
     verdict_diagnostic: VerdictDiagnostic | str | None = None,
 ) -> str:
     from mergecraft.findings.ledger import render_deterministic_review_block
-    from mergecraft.utils.run_bounds import BudgetTracker, format_token_budget_summary
+    from mergecraft.utils.run_bounds import token_summary_from_usage
     from mergecraft.utils.status_checks import _run_url
 
     tool_state = ctx.tool_state
@@ -104,18 +104,10 @@ def _deterministic_review_block(
     submission = tool_state.terminal_submission
     agent_summary = submission.summary if submission is not None else None
     attempt_count = len(tool_state.usage_entries) if tool_state.usage_entries else None
-    token_summary: str | None = None
-    if isinstance(ctx.budget_tracker, BudgetTracker) and (
-        ctx.budget_tracker.tokens_used > 0 or ctx.budget_tracker.over_target
-    ):
-        token_summary = format_token_budget_summary(ctx.budget_tracker)
-    if token_summary is None:
-        token_bits: list[str] = []
-        for usage in tool_state.usage_entries or []:
-            total = getattr(usage, "total_tokens", None)
-            if total:
-                token_bits.append(str(total))
-        token_summary = ", ".join(token_bits) if token_bits else None
+    token_summary = token_summary_from_usage(
+        tool_state.usage_entries or [],
+        budget_tracker=ctx.budget_tracker,
+    )
     return render_deterministic_review_block(
         packet=packet,
         rejection_reason=rejection_reason,
@@ -458,7 +450,7 @@ def _terminal_publication_body(submission: Any, params: dict[str, Any]) -> str:
     """Return the terminal submission body; refuse bare agent body overrides (D4)."""
     expected = str(submission.summary)
     supplied = params.get("body")
-    if supplied is not None and str(supplied) != expected and "comments" not in params:
+    if supplied is not None and str(supplied) != expected:
         msg = (
             "refusing publication: create_pull_request_review body parameter "
             "does not match terminal submission summary"
@@ -495,6 +487,9 @@ def _maybe_revalidate_before_publish(ctx: ToolContext) -> None:
             recorded_submission_payload(submission),
             state=validation_state_from_tool_context(ctx),
         )
+        # ``request_changes_without_findings`` is rejected at record time; this
+        # branch is a legacy escape hatch when phase is still SUBMIT and the
+        # stored payload would fail re-validation for that reason only.
         if (
             not validation.accepted
             and validation.rejection_reason == REJECTION_REQUEST_CHANGES_NO_FINDINGS
@@ -599,13 +594,16 @@ def _inline_anchor_index_for_diff(diff_text: str) -> InlineAnchorIndex | None:
 ANCHOR_RECOVERY_RETRY_CEILING = 8
 
 
-def _payload_signature(payload: dict[str, Any]) -> tuple[str, int, int]:
+def _payload_signature(payload: dict[str, Any]) -> tuple[str, int, int, int]:
     """Cheap structural signature for anchor-recovery progress checks (D1)."""
     comments = payload.get("comments") or []
+    body = str(payload.get("body") or "")
+    comment_body_len = sum(len(str(comment.get("body") or "")) for comment in comments)
     return (
         str(payload.get("event") or ""),
-        len(str(payload.get("body") or "")),
+        len(body),
         len(comments),
+        comment_body_len,
     )
 
 
@@ -710,6 +708,7 @@ async def _create_github_review_with_anchor_recovery(
                         attempt,
                         prior_sig,
                     )
+                    raise exc
                 continue
 
             event = str(current.get("event") or "COMMENT")
@@ -730,9 +729,52 @@ async def _create_github_review_with_anchor_recovery(
                         attempt,
                         prior_sig,
                     )
+                    raise exc
                 continue
 
             raise
+
+
+def _finding_rows_for_provenance(ctx: ToolContext) -> list[dict[str, Any]]:
+    """Collect finding rows for provenance display, including terminal submission."""
+    rows = [row for row in ctx.tool_state.iter_finding_rows() if isinstance(row, dict)]
+    submission = ctx.tool_state.terminal_submission
+    if submission is None:
+        return rows
+    seen_fingerprints = {
+        str(row.get("fingerprint") or "").strip()
+        for row in rows
+        if str(row.get("fingerprint") or "").strip()
+    }
+    for item in submission.findings:
+        if hasattr(item, "model_dump"):
+            row = item.model_dump()
+        elif isinstance(item, dict):
+            row = item
+        else:
+            continue
+        if not isinstance(row, dict):
+            continue
+        fingerprint = str(row.get("fingerprint") or "").strip()
+        if fingerprint and fingerprint in seen_fingerprints:
+            continue
+        rows.append(row)
+        if fingerprint:
+            seen_fingerprints.add(fingerprint)
+    return rows
+
+
+def _raised_by_lookup_key(row: dict[str, Any]) -> str | None:
+    """Map a finding row to the key used for inline-comment provenance lookup."""
+    fingerprint = str(row.get("fingerprint") or "").strip()
+    if fingerprint:
+        return fingerprint
+    from mergecraft.agents.ensemble import finding_key
+
+    path, body, line = finding_key(row)
+    if not path and not body:
+        return None
+    return f"{path}:{line}:{body}"
 
 
 async def _publish_github_review(
@@ -753,6 +795,7 @@ async def _publish_github_review(
         commit_id=commit_id,
     )
     if existing is not None:
+        ctx.tool_state.review_publication_entrypoint = entrypoint
         return existing
 
     ctx.tool_state.review_publication_entrypoint = entrypoint
@@ -835,16 +878,16 @@ async def _publish_github_review(
             incremental_diff_text = Path(incremental_path).read_text(encoding="utf-8")
 
     collateral_map = collateral_by_fingerprint(ctx)
-    finding_rows = [row for row in ctx.tool_state.iter_finding_rows() if isinstance(row, dict)]
+    finding_rows = _finding_rows_for_provenance(ctx)
     from mergecraft.review.terminal_submission import should_render_finding_provenance
 
     show_provenance = should_render_finding_provenance(finding_rows)
     raised_by_map: dict[str, str | list[str]] = {}
     for row in finding_rows:
-        fingerprint = str(row.get("fingerprint") or "").strip()
+        lookup_key = _raised_by_lookup_key(row)
         raised = row.get("raised_by")
-        if fingerprint and raised is not None:
-            raised_by_map[fingerprint] = raised
+        if lookup_key and raised is not None:
+            raised_by_map[lookup_key] = raised
     anchor_index = _load_inline_anchor_index(primary)
     demoted_bodies: list[str] = []
 
@@ -860,6 +903,9 @@ async def _publish_github_review(
         )
         comment_body = str(c.get("body") or "")
         raw_fingerprint = _comment_fingerprint(c)
+        lookup_key = raw_fingerprint or _raised_by_lookup_key(
+            {"path": path, "body": comment_body, "line": line or 0}
+        )
         short_id = publish_short_ids.get(raw_fingerprint)
         prepared_body = prepare_inline_comment_for_publish(
             ctx,
@@ -870,7 +916,7 @@ async def _publish_github_review(
             fingerprint=raw_fingerprint,
             collateral_map=collateral_map,
             incremental_diff_text=incremental_diff_text,
-            raised_by=raised_by_map.get(raw_fingerprint),
+            raised_by=raised_by_map.get(lookup_key or "") if lookup_key else None,
             show_provenance=show_provenance,
         )
         item: dict[str, Any] = {
