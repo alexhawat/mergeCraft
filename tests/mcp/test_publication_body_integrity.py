@@ -8,7 +8,6 @@ import pytest
 from tests.publication_attribution.support import (
     PROBE_BODY,
     PROBE_INLINE_BODY,
-    W3_XFAIL,
     RaceGitHub,
     RecordingGitHub,
     bind_terminal_submission,
@@ -38,7 +37,6 @@ _REAL_SUMMARY = (
 
 
 @pytest.mark.asyncio
-@W3_XFAIL
 async def test_create_review_body_equals_terminal_submission_summary(tmp_path: Path) -> None:
     """D4 — SCM ``create_review`` kwargs must carry the terminal submission body."""
     github = RecordingGitHub()
@@ -66,7 +64,6 @@ async def test_create_review_body_equals_terminal_submission_summary(tmp_path: P
 
 
 @pytest.mark.asyncio
-@W3_XFAIL
 async def test_probe_body_with_bound_terminal_submission_is_hard_failure(
     tmp_path: Path,
 ) -> None:
@@ -94,7 +91,6 @@ async def test_probe_body_with_bound_terminal_submission_is_hard_failure(
 
 
 @pytest.mark.asyncio
-@W3_XFAIL
 async def test_572_race_replay_produces_one_review_with_real_findings(tmp_path: Path) -> None:
     """D5 — inline 422 racing a body-only probe must leave one review carrying findings."""
     github = RaceGitHub()
@@ -139,7 +135,6 @@ async def test_572_race_replay_produces_one_review_with_real_findings(tmp_path: 
 
 
 @pytest.mark.asyncio
-@W3_XFAIL
 async def test_second_publish_same_commit_posts_nothing_and_reports_existing_review(
     tmp_path: Path,
 ) -> None:

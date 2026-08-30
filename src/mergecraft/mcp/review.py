@@ -37,12 +37,16 @@ from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
 from mergecraft.mcp.verdict import (
+    REJECTION_REQUEST_CHANGES_NO_FINDINGS,
     ReviewPhase,
     after_terminal_submission_recorded,
     ensure_review_scope_for_terminal,
     record_validated_terminal_submission,
+    recorded_submission_payload,
     revalidate_recorded_submission,
     stamp_review_phase_on_active_span,
+    validate_submission,
+    validation_state_from_tool_context,
 )
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import (
@@ -116,6 +120,8 @@ def _deterministic_review_block(
         trust_tier=ctx.trust_tier,
         attempt_count=attempt_count,
         token_summary=token_summary,
+        publication_entrypoint=tool_state.review_publication_entrypoint,
+        inline_comments_demoted=tool_state.review_inline_comments_demoted,
     )
 
 
@@ -441,6 +447,55 @@ def _reject_mismatched_publication(submission: Any, params: dict[str, Any]) -> N
     raise ValueError(msg)
 
 
+def _terminal_publication_body(submission: Any, params: dict[str, Any]) -> str:
+    """Return the terminal submission body; refuse bare agent body overrides (D4)."""
+    expected = str(submission.summary)
+    supplied = params.get("body")
+    if supplied is not None and str(supplied) != expected and "comments" not in params:
+        msg = (
+            "refusing publication: create_pull_request_review body parameter "
+            "does not match terminal submission summary"
+        )
+        raise ValueError(msg)
+    return expected
+
+
+def _existing_publication_response(
+    ctx: ToolContext,
+    *,
+    pull_number: int,
+    commit_id: str | None,
+) -> dict[str, Any] | None:
+    """Short-circuit when this run already published for ``(pull_number, commit_id)`` (D5)."""
+    review = ctx.tool_state.review
+    if review is None or not commit_id or review.reviewed_sha != commit_id:
+        return None
+    return {
+        "success": True,
+        "skipped": True,
+        "reason": (f"review {review.id} already submitted for sha {commit_id} this session"),
+        "reviewId": review.id,
+    }
+
+
+def _maybe_revalidate_before_publish(ctx: ToolContext) -> None:
+    """Re-run terminal validation before publish unless already graded at submit."""
+    submission = ctx.tool_state.terminal_submission
+    if submission is None:
+        return
+    if ctx.tool_state.review_phase == ReviewPhase.SUBMIT.value:
+        validation = validate_submission(
+            recorded_submission_payload(submission),
+            state=validation_state_from_tool_context(ctx),
+        )
+        if (
+            not validation.accepted
+            and validation.rejection_reason == REJECTION_REQUEST_CHANGES_NO_FINDINGS
+        ):
+            return
+    revalidate_recorded_submission(ctx)
+
+
 def _bound_pull_number(ctx: ToolContext) -> int | None:
     """Return the PR number this review run is bound to, if any.
 
@@ -617,6 +672,7 @@ async def _create_github_review_with_anchor_recovery(
                         pull_number,
                     )
                     current = _demote_all_inline_comments(current)
+                    ctx.tool_state.review_inline_comments_demoted = True
                 elif index < 0 or index >= len(comments):
                     logger.warning(
                         "review comment 422 on PR #{} at out-of-range index {} "
@@ -626,6 +682,7 @@ async def _create_github_review_with_anchor_recovery(
                         len(comments),
                     )
                     current = _demote_all_inline_comments(current)
+                    ctx.tool_state.review_inline_comments_demoted = True
                 else:
                     logger.warning(
                         "review comment 422 on PR #{} at index {}; demoting inline comment to body",
@@ -636,6 +693,7 @@ async def _create_github_review_with_anchor_recovery(
                     current = (
                         demoted if demoted is not None else _demote_all_inline_comments(current)
                     )
+                    ctx.tool_state.review_inline_comments_demoted = True
 
                 if _payload_signature(current) == prior_sig:
                     logger.error(
@@ -670,21 +728,39 @@ async def _create_github_review_with_anchor_recovery(
             raise
 
 
-async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> dict[str, Any]:
+async def _publish_github_review(
+    ctx: ToolContext,
+    params: dict[str, Any],
+    *,
+    entrypoint: str = "create_pull_request_review",
+) -> dict[str, Any]:
     """Post a GitHub review after a validated terminal submission exists (V6)."""
     primary = primary_repo_state(ctx.tool_state)
     pull_number = _resolve_bound_pull_number(ctx, params)
     commit_id = _resolve_bound_commit_id(ctx, params)
     _assert_publication_scope(ctx, pull_number=pull_number, commit_id=commit_id)
 
+    existing = _existing_publication_response(
+        ctx,
+        pull_number=pull_number,
+        commit_id=commit_id,
+    )
+    if existing is not None:
+        return existing
+
+    ctx.tool_state.review_publication_entrypoint = entrypoint
+
     approved = bool(params.get("approved"))
     request_changes = bool(params.get("request_changes"))
     submission = ctx.tool_state.terminal_submission
+    body: str | None
     if submission is not None:
         approved = submission.verdict == "approve"
         request_changes = submission.verdict == "request_changes"
+        body = _terminal_publication_body(submission, params)
+    else:
+        body = params.get("body")
 
-    body = params.get("body")
     comments = list(params.get("comments") or [])
 
     primary.issue_number = pull_number
@@ -816,6 +892,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     if review_settings.recall_pass:
         inline = strip_recall_inline_comments(ctx, inline, publish_sets=publish_sets)
     if demoted_bodies:
+        ctx.tool_state.review_inline_comments_demoted = True
         payload["body"] = add_footer(
             ctx,
             append_demoted_inline_comments(str(payload.get("body") or ""), demoted_bodies),
@@ -877,13 +954,22 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
         msg = "no validated terminal submission available for publication"
         raise ValueError(msg)
 
+    pull_number = _bound_pull_number(ctx)
+    if pull_number is None:
+        msg = "no pull number available for validated terminal submission publication"
+        raise ValueError(msg)
+    commit_id = _bound_commit_id(ctx)
+    existing = _existing_publication_response(
+        ctx,
+        pull_number=pull_number,
+        commit_id=commit_id,
+    )
+    if existing is not None:
+        return existing
+
     pending = ctx.tool_state.pending_review_publication
     if pending is None:
         submission = ctx.tool_state.terminal_submission
-        pull_number = _bound_pull_number(ctx)
-        if pull_number is None:
-            msg = "no pull number available for validated terminal submission publication"
-            raise ValueError(msg)
         pending = {
             "pull_number": pull_number,
             "body": submission.summary,
@@ -891,10 +977,17 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
             "approved": submission.verdict == "approve",
             "request_changes": submission.verdict == "request_changes",
         }
+    if commit_id:
+        pending = dict(pending)
+        pending["commit_id"] = commit_id
 
     ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
     stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
-    result = await _publish_github_review(ctx, pending)
+    result = await _publish_github_review(
+        ctx,
+        pending,
+        entrypoint="publish_pull_request_review",
+    )
     ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
     stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
     return result
@@ -947,17 +1040,13 @@ def create_pull_request_review_tool(ctx: ToolContext):
         primary = primary_repo_state(ctx.tool_state)
         primary.issue_number = pull_number
 
-        if ctx.tool_state.review and primary.checkout_sha:
-            if ctx.tool_state.review.reviewed_sha == primary.checkout_sha:
-                return {
-                    "success": True,
-                    "skipped": True,
-                    "reason": (
-                        f"review {ctx.tool_state.review.id} already submitted for "
-                        f"sha {primary.checkout_sha} this session"
-                    ),
-                    "reviewId": ctx.tool_state.review.id,
-                }
+        existing = _existing_publication_response(
+            ctx,
+            pull_number=pull_number,
+            commit_id=commit_id,
+        )
+        if existing is not None:
+            return existing
 
         ensure_review_scope_for_terminal(ctx.tool_state, "create_pull_request_review")
 
@@ -968,13 +1057,16 @@ def create_pull_request_review_tool(ctx: ToolContext):
                 after_terminal_submission_recorded(ctx, recorded, replayed=False)
         else:
             _reject_mismatched_publication(ctx.tool_state.terminal_submission, params)
-            revalidate_recorded_submission(ctx)
+            _maybe_revalidate_before_publish(ctx)
 
         publication_params = dict(params)
         publication_params["pull_number"] = pull_number
         bound_commit = _bound_commit_id(ctx)
         if bound_commit:
             publication_params["commit_id"] = bound_commit
+        submission = ctx.tool_state.terminal_submission
+        if submission is not None:
+            publication_params["body"] = submission.summary
         ctx.tool_state.pending_review_publication = publication_params
 
         ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
@@ -982,7 +1074,11 @@ def create_pull_request_review_tool(ctx: ToolContext):
         from mergecraft.mcp.verification import emit_published_findings
 
         emit_published_findings(ctx)
-        result = await _publish_github_review(ctx, publication_params)
+        result = await _publish_github_review(
+            ctx,
+            publication_params,
+            entrypoint="create_pull_request_review",
+        )
         ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
         stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
         return result

@@ -322,6 +322,9 @@ class ToolState:
     review_phase: str = ""
     # Stashed ``create_pull_request_review`` params for ``publish_pull_request_review``.
     pending_review_publication: dict[str, Any] | None = None
+    # Lane A W3 — which publication entrypoint won and whether 422 recovery demoted inline.
+    review_publication_entrypoint: str | None = None
+    review_inline_comments_demoted: bool = False
     terminal_submission: TerminalSubmission | None = None
     terminal_submission_conflict: bool = False
     reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)

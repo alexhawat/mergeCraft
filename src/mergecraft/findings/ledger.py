@@ -620,6 +620,8 @@ def render_deterministic_review_block(
     trust_tier: str | None = None,
     attempt_count: int | None = None,
     token_summary: str | None = None,
+    publication_entrypoint: str | None = None,
+    inline_comments_demoted: bool = False,
 ) -> str:
     """Render the authoritative deterministic review record (D6/D7).
 
@@ -681,6 +683,10 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Run:** {run_url}")
     if reviewed_sha:
         header_lines.append(f"- **Reviewed SHA:** `{reviewed_sha}`")
+    if publication_entrypoint:
+        header_lines.append(f"- **Publication path:** `{publication_entrypoint}`")
+    if inline_comments_demoted:
+        header_lines.append("- **Inline recovery:** demoted inline comments into the review body")
 
     pre_merge_lines = ["", "### Pre-merge checks", ""]
     if analyzer_summary:
