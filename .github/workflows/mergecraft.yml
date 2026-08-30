@@ -333,15 +333,23 @@ jobs:
       # `env` expression). Adding a provider here without updating that copy
       # fails the required gate OPEN — see the comment there.
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
-      # MERGECRAFT_REVIEWER_PAT is deliberately absent from this job. The
-      # default github.token cannot submit an "Approve" review — GitHub
-      # silently downgrades any attempt to a comment — and a PAT from a
-      # distinct account (sevn-one, a collaborator + CODEOWNERS entry) can.
-      # But a PAT also cannot create the check-run the approval gate reads, so
-      # handing it to the review steps disabled the gate and the approval both.
-      # The approve lane lives in mergecraft-approve.yml, which holds its own
-      # copy of the PAT and never re-reads PR content — see the review steps'
-      # `token:` comment and PR #200.
+      # #550 — the `secrets` context is not available in a step's `if:`
+      # (actionlint: "context secrets is not allowed here"; GitHub's own
+      # context-availability table omits `if:` for `secrets`), so the App-secret
+      # presence check has to be hoisted into job env, same as every HAS_* above,
+      # and the "Mint reviewer App installation token" step below reads
+      # `env.HAS_APP` instead of `secrets.*` directly.
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' }}
+      # No PAT is used anywhere in this job (#550 retired
+      # MERGECRAFT_REVIEWER_PAT repo-wide). The default github.token cannot
+      # submit an "Approve" review — GitHub silently downgrades any attempt to
+      # a comment — so this job never tries to; the actual approve lane lives
+      # in mergecraft-approve.yml, which mints its own App installation token
+      # and never re-reads PR content — see the review steps' `token:` comment
+      # and PR #200. This job's review steps prefer that same kind of App
+      # token (minted separately, above) purely for a distinct comment/check
+      # byline, falling back to github.token — see the `Mint reviewer App
+      # installation token` step.
       # Forward wait-for-ci outputs for action-side SARIF ingest (D9). Dual
       # MERGECRAFT_* / CI_* aliases support older consumer templates that only set CI_*.
       MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
@@ -506,6 +514,34 @@ jobs:
           echo "baseline mergecraft-approval check-run: ${id:-none}"
           echo "id=${id}" >> "${GITHUB_OUTPUT}"
 
+      # #550 — a distinct reviewer identity (not github-actions[bot]) requires a
+      # GitHub App installation token: GITHUB_TOKEN posts check-runs fine but
+      # carries no identity of its own, and a PAT carries an identity but
+      # 403s on POST /check-runs ("You must authenticate via a GitHub App") —
+      # no scope unlocks that for a PAT. An App token does both at once.
+      #
+      # Optional by design: skipped outright when MERGECRAFT_APP_ID /
+      # MERGECRAFT_APP_PRIVATE_KEY are unset (unconfigured consumers, and every
+      # fork PR — same IS_SAME_REPO guard the provider secrets use, so a fork
+      # never receives the reviewer App's installation token) and
+      # continue-on-error tolerant of a bad/expired key. Either way
+      # steps.app_token.outputs.token is then empty, and every review step's
+      # `token:` input below falls back to github.token — the identity
+      # degrades to github-actions[bot] again, but the review and its
+      # check-runs still post. See docs/authentication.md "GitHub App reviewer
+      # identity" for what to register and which secrets to set.
+      - name: Mint reviewer App installation token
+        id: app_token
+        if: >-
+          env.HAS_AUTH == 'true' &&
+          env.IS_SAME_REPO == 'true' &&
+          env.HAS_APP == 'true'
+        continue-on-error: true
+        uses: alexhawat/mergeCraft/get-installation-token@e5f9ed5f799d8d352fd850724ceaca333dedb1ce # env.MERGECRAFT_ACTION_SHA — kept in lockstep with the review rungs below; covered by make action-pin-check's self-consistency scan
+        env:
+          GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+
       - name: mergeCraft PR review (Nous Tencent HY3)
         if: env.HAS_NOUS == 'true'
         id: mergecraft_nous
@@ -611,12 +647,12 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # The workflow job token, NOT MERGECRAFT_REVIEWER_PAT. mergeCraft
-          # posts the `mergecraft` / `mergecraft-approval` check-runs from this
-          # input, and `POST /repos/{owner}/{repo}/check-runs` answers any
-          # classic or OAuth user token with `403 You must authenticate via a
-          # GitHub App` — no scope unlocks it. GITHUB_TOKEN *is* an App
-          # installation token, and this job already grants checks: write.
+          # Never MERGECRAFT_REVIEWER_PAT. mergeCraft posts the `mergecraft` /
+          # `mergecraft-approval` check-runs from this input, and
+          # `POST /repos/{owner}/{repo}/check-runs` answers any classic or
+          # OAuth user token with `403 You must authenticate via a GitHub App`
+          # — no scope unlocks it. Both github.token and a GitHub App
+          # installation token pass that check.
           #
           # Under the PAT neither check-run had EVER posted (verified across
           # #519, #524, #533, #534, #542, #545, #546, #548), so `mergecraft
@@ -624,10 +660,21 @@ jobs:
           # gates on reading that conclusion, could never submit its approval.
           # The PAT bought only the comment byline; it cost the whole gate.
           #
-          # MERGECRAFT_REVIEWER_PAT stays where it works: mergecraft-approve.yml
-          # holds its own copy and submits the sevn-one APPROVE from there.
-          # Restoring a distinct byline here needs a GitHub App, not a PAT.
-          token: ${{ github.token }}
+          # #550: prefer the App-minted token above (a distinct byline —
+          # github-actions[bot] otherwise) and fall back to github.token when
+          # the App is not configured (steps.app_token.outputs.token is then
+          # empty, which GitHub Actions treats as falsy). Both satisfy the
+          # check-run requirement; only the App token also carries an identity
+          # distinct from every other Actions bot comment in the repo. This
+          # fallback is load-bearing: forks and unconfigured consumers must
+          # keep working with no App registered at all.
+          #
+          # MERGECRAFT_REVIEWER_PAT is retired entirely (#550) — it no longer
+          # appears in this workflow or in mergecraft-approve.yml, which now
+          # mints its own App token the same way to submit the sevn-one
+          # APPROVE (github.token cannot: GitHub silently downgrades any
+          # approve attempt from the default token to a comment).
+          token: ${{ steps.app_token.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
@@ -752,8 +799,9 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # Job token, not the PAT — see the matching comment on the Nous step.
-          token: ${{ github.token }}
+          # App token preferred, github.token fallback — see the matching comment
+          # on the Nous step (#550).
+          token: ${{ steps.app_token.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
@@ -853,8 +901,9 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # Job token, not the PAT — see the matching comment on the Nous step.
-          token: ${{ github.token }}
+          # App token preferred, github.token fallback — see the matching comment
+          # on the Nous step (#550).
+          token: ${{ steps.app_token.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}

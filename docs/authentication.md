@@ -49,6 +49,105 @@ Subscription auth runs the official `claude` / `codex` / `gemini` CLIs as *you*
 — the same credential your local coding agent uses. Only set env vars for
 providers you actually use.
 
+### GitHub App reviewer identity (recommended)
+
+By default, mergeCraft's review comments and check-runs are authored by
+`github-actions[bot]` — indistinguishable from any other Actions bot comment
+in the repo. A **GitHub App installation token** is the recommended way to
+give the reviewer its own identity, and for a self-hosted workflow that also
+wants a same-repo privileged approval lane (like this repo's own
+`mergecraft-approve.yml`), it is the *only* credential that works at all.
+
+#### Why a personal access token cannot do this
+
+A classic or fine-grained PAT cannot create check-runs, full stop — no scope
+unlocks it:
+
+```console
+$ echo '{}' | gh api -X POST /repos/OWNER/REPO/check-runs --input -
+{"message":"You must authenticate via a GitHub App."}
+```
+
+So the reviewer credential has to satisfy two requirements a PAT cannot
+satisfy together:
+
+1. create the `mergecraft` / `mergecraft-approval` check-runs a merge gate reads
+2. carry an identity distinct from `github-actions[bot]`
+
+The default `GITHUB_TOKEN` (or `github.token`) satisfies (1) — it *is* an App
+installation token under the hood — but not (2): every run's comments and
+check-runs still read as `github-actions[bot]`. A PAT satisfies (2) but not
+(1). A **GitHub App installation token satisfies both at once**, and — unlike
+a PAT — it is short-lived and minted fresh per run rather than sitting in
+repository secrets indefinitely.
+
+#### What to register
+
+Register a new GitHub App (**Settings → Developer settings → GitHub Apps →
+New GitHub App**, or organization-level equivalent) with these permissions:
+
+| Permission | Access | Why |
+|------------|--------|-----|
+| Checks | Read and write | Post the `mergecraft` / `mergecraft-approval` check-runs |
+| Pull requests | Read and write | Post inline review comments and (for the privileged approve lane) submit an APPROVE |
+| Issues | Read and write | Post the summary comment |
+| Contents | Read | Read repository content for the review |
+
+Generate a private key for the App, then **install** it on the repositories
+that should get App-authored reviews. Store two repository (or organization)
+secrets:
+
+- `MERGECRAFT_APP_ID` — the App's numeric ID
+- `MERGECRAFT_APP_PRIVATE_KEY` — the private key PEM, verbatim (including the
+  `-----BEGIN/END PRIVATE KEY-----` lines)
+
+No other setup is required — this is entirely a human, out-of-band step
+(App registration and secret creation cannot be automated from inside a
+workflow run). The minting path itself already exists in mergeCraft:
+`src/mergecraft/utils/token.py`'s `acquire_installation_token`, wired as the
+`mergecraft gha token` CLI mode ([`docs/cli.md`](cli.md)) and packaged as the
+[`get-installation-token`](../get-installation-token) composite action for
+other workflows to call directly.
+
+#### How the shipped workflows use it
+
+`.github/workflows/mergecraft.yml`'s `review` job and
+`.github/workflows/mergecraft-approve.yml`'s `approve` job each mint an App
+token in a `Mint reviewer App installation token` step (via
+`alexhawat/mergeCraft/get-installation-token@<pinned-sha>`) and use it in
+preference to `github.token`:
+
+```yaml
+- name: Mint reviewer App installation token
+  id: app_token
+  if: secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != ''
+  continue-on-error: true
+  uses: alexhawat/mergeCraft/get-installation-token@<pinned-sha>
+  env:
+    GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
+    GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+
+# ... later, on the review step ...
+with:
+  token: ${{ steps.app_token.outputs.token || github.token }}
+```
+
+The fallback is load-bearing, not cosmetic: `steps.app_token.outputs.token`
+is empty whenever the mint step is skipped (App secrets unset — the common
+case for a fresh consumer, and every fork PR, which is additionally gated off
+by a same-repo check) or fails (`continue-on-error: true`, e.g. an expired
+key). GitHub Actions treats an empty string as falsy, so the expression
+degrades cleanly to `github.token` — **a repository with no App configured
+still gets a working review and a working gate**, just with the
+`github-actions[bot]` byline it always had. `mergecraft-approve.yml` has no
+such fallback for its own submit step: without the App, that workflow's
+`Submit privileged APPROVE` step reads an empty `GH_TOKEN` and no-ops, the
+same way it used to no-op without a PAT.
+
+`MERGECRAFT_REVIEWER_PAT` — the long-lived user PAT this replaced — is no
+longer referenced anywhere in the shipped workflows ([issue
+#550](https://github.com/alexhawat/mergeCraft/issues/550)).
+
 ### Turning a provider off
 
 `mergecraft provider disable <label>` is the inverse of `auth` / `provider auth`:
