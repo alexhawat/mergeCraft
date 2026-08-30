@@ -22,10 +22,6 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-W2_XFAIL = pytest.mark.xfail(
-    reason="green after W2: settings-root worktree resolution", strict=True
-)
-
 
 def test_load_repo_settings_root_reads_base_with_github_workspace_at_head(
     tmp_path: Path,
@@ -40,7 +36,6 @@ def test_load_repo_settings_root_reads_base_with_github_workspace_at_head(
     assert settings.model == BASE_MODEL
 
 
-@W2_XFAIL
 def test_cwd_worktree_wins_over_github_workspace(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """D2 — cwd in a sibling worktree must not inherit head's ``GITHUB_WORKSPACE``."""
     head, base = init_repo_with_worktrees(tmp_path)
@@ -108,7 +103,6 @@ def test_outside_git_repo_falls_back_to_cwd(tmp_path: Path, monkeypatch: MonkeyP
     assert settings.model == BASE_MODEL
 
 
-@W2_XFAIL
 def test_base_tree_validates_cleanly_when_head_config_has_unknown_key(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

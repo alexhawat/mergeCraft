@@ -25,9 +25,11 @@ git worktree prune 2>/dev/null || true
 
 git fetch origin "${GITHUB_BASE_REF}"
 git worktree add "$worktree" "$base_ref"
+orig_workspace="$GITHUB_WORKSPACE"
 # BASE_WORKTREE_MEASURE_BLOCK — parsed by tests/ci/test_coverage_delta_wrapper.py (D10).
 (
   cd "$worktree"
+  export GITHUB_WORKSPACE="$worktree"  # #573: base tree reads its own config, not head's
   # The base worktree gets its own fresh venv. `dev` is a
   # [project.optional-dependencies] extra, which `uv run` does not install, so
   # `make coverage-measure` died with "Failed to spawn: pytest" before measuring
@@ -56,7 +58,7 @@ git worktree add "$worktree" "$base_ref"
       --randomly-seed="${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}" \
       -rX
   fi
-  cp coverage.json "${GITHUB_WORKSPACE}/coverage-base.json"
+  cp coverage.json "${orig_workspace}/coverage-base.json"
 )
 make coverage-gate
 if [[ -f coverage-base.json ]]; then
