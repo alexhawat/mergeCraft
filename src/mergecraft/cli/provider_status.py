@@ -277,6 +277,15 @@ def _collect_github_secrets(
         }
 
     repo_slug = _resolve_repo_slug(cwd)
+    if repo_slug == "local/unknown":
+        return {
+            "status": "unknown",
+            "message": (
+                "GitHub secret presence unknown — could not resolve owner/repo from "
+                f"git origin at {cwd.resolve()}"
+            ),
+        }
+
     present_names = set(list_repo_secrets(repo_slug))
     provider_registry = load_provider_registry(_config_path(cwd))
     provider_entry_by_label = {
@@ -300,10 +309,7 @@ def _collect_github_secrets(
                     seen.add(name)
                     required.append(name)
 
-    secret_rows = [
-        {"name": name, "present": name in present_names or secret_is_present(repo_slug, name)}
-        for name in sorted(required)
-    ]
+    secret_rows = [{"name": name, "present": name in present_names} for name in sorted(required)]
     return {"status": "ok", "repo": repo_slug, "secrets": secret_rows}
 
 
@@ -326,11 +332,11 @@ def build_status_payload(
 
     reviewers_payload: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
+    provider_entry_by_label = {
+        str(row.get("label", "")).lower(): row for row in provider_registry.entries
+    }
 
     for binding in registry.resolve_roles(AgentRole.reviewer):
-        provider_entry_by_label = {
-            str(row.get("label", "")).lower(): row for row in provider_registry.entries
-        }
         slots_payload: list[dict[str, Any]] = []
         agent_enabled = True
 

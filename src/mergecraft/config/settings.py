@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -23,6 +22,7 @@ from mergecraft.classify import RuleSet
 from mergecraft.config.compat import CONFIG_SCHEMA_VERSION, migrate_config
 from mergecraft.enterprise.controls import EnterpriseSettings
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
+from mergecraft.utils.source_resolve import is_registered_git_worktree, resolve_git_common_dir
 
 AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
@@ -751,44 +751,6 @@ def parse_learnings_headings(body: str | None) -> list[LearningsHeading]:
     return result
 
 
-def _git_worktree_root(path: Path) -> Path | None:
-    """Return the git worktree root containing *path*, or ``None`` if not in a repo."""
-    try:
-        current = path.resolve()
-    except OSError:
-        return None
-    for candidate in (current, *current.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
-
-
-@lru_cache(maxsize=32)
-def _git_common_dir(worktree_root: str) -> str | None:
-    """Resolve the git common directory for *worktree_root* without subprocess (#573 / D2)."""
-    root = Path(worktree_root)
-    git_entry = root / ".git"
-    if not git_entry.exists():
-        return None
-    if git_entry.is_dir():
-        return str(git_entry.resolve())
-    if not git_entry.is_file():
-        return None
-    try:
-        first_line = git_entry.read_text(encoding="utf-8").splitlines()[0].strip()
-    except (OSError, IndexError):
-        return None
-    if not first_line.startswith("gitdir:"):
-        return None
-    gitdir = Path(first_line.removeprefix("gitdir:").strip())
-    gitdir = (root / gitdir).resolve() if not gitdir.is_absolute() else gitdir.resolve()
-    parts = gitdir.parts
-    if "worktrees" not in parts:
-        return None
-    common = Path(*parts[: parts.index("worktrees")])
-    return str(common) if common.is_dir() else None
-
-
 def _path_is_inside(child: Path, parent: Path) -> bool:
     try:
         child.resolve().relative_to(parent.resolve())
@@ -820,13 +782,15 @@ def _workspace_root(explicit: Path | None = None) -> Path:
         return workspace
     if _path_is_inside(cwd, workspace) or cwd_resolved == workspace_resolved:
         return workspace
-    cwd_root = _git_worktree_root(cwd)
-    ws_root = _git_worktree_root(workspace)
-    if cwd_root is not None and ws_root is not None and cwd_root.resolve() != ws_root.resolve():
-        cwd_common = _git_common_dir(str(cwd_root.resolve()))
-        ws_common = _git_common_dir(str(ws_root.resolve()))
-        if cwd_common is not None and cwd_common == ws_common:
-            return cwd_root
+    cwd_common = resolve_git_common_dir(cwd_resolved)
+    ws_common = resolve_git_common_dir(workspace_resolved)
+    if (
+        cwd_common is not None
+        and ws_common is not None
+        and cwd_common == ws_common
+        and is_registered_git_worktree(cwd_resolved)
+    ):
+        return cwd_resolved
     return workspace
 
 

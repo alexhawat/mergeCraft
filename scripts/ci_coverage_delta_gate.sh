@@ -2,6 +2,11 @@
 # Coverage ratchet for integration CI — base worktree + delta gate (#432 / D6).
 set -euo pipefail
 
+# Nested ``make coverage-measure`` / pytest must not inherit the parent CI
+# session's coverage subprocess hooks (wave-16 integration tests spawn this
+# script while pytest-cov is active on the outer gate).
+unset COVERAGE_PROCESS_START COVERAGE_PROCESS_CONFIG COVERAGE_FILE COVERAGE_RCFILE
+
 if [[ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]]; then
   make coverage-gate
   exit 0

@@ -168,21 +168,16 @@ def test_provider_status_github_with_token_reports_secret_presence(
     present: set[str] = set()
 
     def _list_secrets(repo_slug: str) -> list[str]:
-        assert repo_slug
+        assert repo_slug == "acme/demo"
         return sorted(present)
 
-    def _probe(repo_slug: str, name: str) -> bool:
-        assert repo_slug
-        return name in present
-
+    monkeypatch.setattr(
+        "mergecraft.cli.provider_status._resolve_repo_slug",
+        lambda _cwd: "acme/demo",
+    )
     monkeypatch.setattr(
         "mergecraft.cli.provider_status.list_repo_secrets",
         _list_secrets,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "mergecraft.cli.provider_status.secret_is_present",
-        _probe,
         raising=False,
     )
     present.update({"ANTHROPIC_API_KEY", "OPENAI_API_KEY"})
