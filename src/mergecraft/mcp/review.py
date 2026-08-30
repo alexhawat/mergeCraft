@@ -40,6 +40,7 @@ from mergecraft.mcp.verdict import (
     REJECTION_REQUEST_CHANGES_NO_FINDINGS,
     ReviewPhase,
     after_terminal_submission_recorded,
+    ensure_review_scope_for_terminal,
     record_validated_terminal_submission,
     recorded_submission_payload,
     revalidate_recorded_submission,
@@ -1113,6 +1114,8 @@ def create_pull_request_review_tool(ctx: ToolContext):
         if existing is not None:
             ctx.tool_state.review_publication_entrypoint = "create_pull_request_review"
             return existing
+
+        ensure_review_scope_for_terminal(ctx.tool_state, "create_pull_request_review")
 
         if ctx.tool_state.terminal_submission is None:
             submission_payload = _legacy_params_to_submission(params)
