@@ -2,17 +2,25 @@
 """Bump the self-review Action pin — one atomic edit, not a hand-run checklist.
 
 ``.github/workflows/mergecraft.yml`` pins the self-review Action to a full
-commit SHA in four places (the hoisted ``env.MERGECRAFT_ACTION_SHA`` plus
-three ``uses: alexhawat/mergeCraft@…`` review rungs), and ``action.yml`` pins
-the matching published image **digest** (``runs.image``). Bumping the SHA
-without also updating the image digest — or updating some rungs and not
-others — is exactly the footgun ``scripts/check_action_pin_freshness.py`` and
-``scripts/check_action_image_digest.py`` exist to catch, and PR #562 hit it
-directly: splitting the pin bump from the digest bump turned five checks red
-at once. This script does both edits in one pass, from one target SHA, and
-refuses to write anything unless every precondition holds first.
+commit SHA in five places (the hoisted ``env.MERGECRAFT_ACTION_SHA``, three
+``uses: alexhawat/mergeCraft@…`` review rungs, and one
+``uses: alexhawat/mergeCraft/get-installation-token@…`` companion-action
+reference, #550), ``.github/workflows/mergecraft-approve.yml`` pins the same
+companion action a second time, and ``action.yml`` pins the matching
+published image **digest** (``runs.image``). Bumping the SHA without also
+updating the image digest — or updating some sites and not others — is
+exactly the footgun ``scripts/check_action_pin_freshness.py`` and
+``scripts/check_action_image_digest.py`` exist to catch. PR #562 hit the
+workflow/digest split directly (splitting the pin bump from the digest bump
+turned five checks red at once); the very next merge after this script first
+shipped hit the companion-action split too — a merge that only advanced the
+bare ``mergeCraft@`` rungs left both ``get-installation-token@`` references
+behind, and (before ``check_action_pin_freshness.py``'s ``_PIN_RE`` was
+widened to see the subpath form) no gate caught it. This script now rewrites
+every one of those sites in one pass, from one target SHA, and refuses to
+write anything unless every precondition holds first.
 
-Preconditions, all checked before either file is touched:
+Preconditions, all checked before any file is touched:
 
 1. **Ancestry.** ``sha`` must be an ancestor of ``--ref`` (default ``HEAD``).
    A pin that is not part of this branch's history cannot be a legitimate
@@ -27,11 +35,18 @@ Preconditions, all checked before either file is touched:
 3. **Tracing extra.** The published image must have been built with
    ``uv sync --extra tracing`` (#531) — a slim image without it silently
    degrades Logfire/OTEL tracing to a ``NullSink``.
+4. **Every pin site already carries the current pin, literally.** If
+   ``mergecraft.yml`` or ``mergecraft-approve.yml`` has already drifted (a
+   site pins something other than the SHA ``env.MERGECRAFT_ACTION_SHA``
+   names), this script refuses rather than silently leaving that drift in
+   place — reconcile it by hand first, the same way the #550 follow-up split
+   had to be reconciled.
 
-Only once all three hold does the script rewrite ``.github/workflows/mergecraft.yml``
-(every literal occurrence of the current pin, in one string replace, so the
-hoisted var and all rungs move together by construction) and ``action.yml``'s
-``runs.image`` digest, then write both files.
+Only once all four hold does the script rewrite ``mergecraft.yml`` and
+``mergecraft-approve.yml`` (every literal occurrence of the current pin in
+each, in one string replace per file, so every rung and every companion-action
+reference moves together by construction) and ``action.yml``'s ``runs.image``
+digest, then write all three files.
 
 The GHCR lookup helpers (``ghcr_digest_for_tag``, ``fetch_oci_config_for_tag``,
 ``image_has_tracing_extra``) are imported from ``check_action_image_digest``
@@ -47,7 +62,8 @@ Depends: check_action_image_digest (this directory), argparse, re, subprocess,
 Exports:
     current_pin — read the self-review Action SHA out of mergecraft.yml.
     resolve_digest — look up + validate the GHCR digest for a target SHA.
-    bump — rewrite mergecraft.yml + action.yml for a validated target SHA.
+    bump — rewrite mergecraft.yml + mergecraft-approve.yml + action.yml for a
+        validated target SHA.
     main — CLI entry.
 """
 
@@ -74,6 +90,7 @@ from check_action_image_digest import (  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 WORKFLOW = REPO / ".github" / "workflows" / "mergecraft.yml"
+APPROVE_WORKFLOW = REPO / ".github" / "workflows" / "mergecraft-approve.yml"
 ACTION_YML = REPO / "action.yml"
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -174,12 +191,37 @@ def resolve_digest(sha: str) -> str:
     return lookup.digest
 
 
+def _rewrite_literal_pin(path: Path, old_sha: str, new_sha: str) -> str:
+    """Return ``path``'s text with every literal ``old_sha`` occurrence replaced.
+
+    Refuses (raises ``BumpError``, writes nothing) when ``old_sha`` does not
+    appear at all — a file that has already drifted off the shared pin must be
+    reconciled by hand before an automated bump can safely touch it, rather
+    than this script silently leaving that drift in place.
+    """
+    text = path.read_text(encoding="utf-8")
+    occurrences = text.count(old_sha)
+    if occurrences == 0:
+        msg = f"{path}: current pin {old_sha} not found as literal text — refusing"
+        raise BumpError(msg)
+    preexisting_new_sha = text.count(new_sha)
+    new_text = text.replace(old_sha, new_sha)
+    if new_text.count(new_sha) != occurrences + preexisting_new_sha:
+        # Should be unreachable (replace() is exact), but this is the one
+        # invariant that makes "atomic" true: every pin site in this file
+        # moves together.
+        msg = f"{path}: replacement count mismatch — refusing to write a partial bump"
+        raise BumpError(msg)
+    return new_text
+
+
 def bump(sha: str, *, ref: str = "HEAD") -> tuple[str, str]:
-    """Rewrite the pin to ``sha`` across mergecraft.yml + action.yml.
+    """Rewrite the pin to ``sha`` across mergecraft.yml, mergecraft-approve.yml,
+    and action.yml.
 
     Returns ``(old_sha, new_digest)``. Raises ``BumpError`` (without writing
-    anything) if any precondition fails — ancestry, GHCR publication, or the
-    tracing extra.
+    anything) if any precondition fails — ancestry, GHCR publication, the
+    tracing extra, or a pin site that has already drifted off the current SHA.
     """
     if not _SHA_RE.fullmatch(sha):
         msg = f"not a full 40-hex commit SHA: {sha!r}"
@@ -188,23 +230,13 @@ def bump(sha: str, *, ref: str = "HEAD") -> tuple[str, str]:
     assert_is_ancestor(sha, ref)
     digest = resolve_digest(sha)  # "sha256:<64-hex>"
 
-    workflow_text = WORKFLOW.read_text(encoding="utf-8")
-    old_sha = current_pin(workflow_text)
+    old_sha = current_pin()
     if old_sha == sha:
         msg = f"{WORKFLOW} already pins {sha} — nothing to bump"
         raise BumpError(msg)
 
-    occurrences = workflow_text.count(old_sha)
-    if occurrences == 0:
-        msg = f"{WORKFLOW}: current pin {old_sha} not found as literal text — refusing"
-        raise BumpError(msg)
-    preexisting_new_sha = workflow_text.count(sha)
-    new_workflow_text = workflow_text.replace(old_sha, sha)
-    if new_workflow_text.count(sha) != occurrences + preexisting_new_sha:
-        # Should be unreachable (replace() is exact), but this is the one
-        # invariant that makes "atomic" true: every rung moves together.
-        msg = f"{WORKFLOW}: replacement count mismatch — refusing to write a partial bump"
-        raise BumpError(msg)
+    new_workflow_text = _rewrite_literal_pin(WORKFLOW, old_sha, sha)
+    new_approve_text = _rewrite_literal_pin(APPROVE_WORKFLOW, old_sha, sha)
 
     action_text = ACTION_YML.read_text(encoding="utf-8")
     digest_match = _IMAGE_DIGEST_RE.search(action_text)
@@ -219,8 +251,9 @@ def bump(sha: str, *, ref: str = "HEAD") -> tuple[str, str]:
         + action_text[digest_match.end() :]
     )
 
-    # Both texts are fully computed and validated — write them only now.
+    # Every text is fully computed and validated — write them only now.
     WORKFLOW.write_text(new_workflow_text, encoding="utf-8")
+    APPROVE_WORKFLOW.write_text(new_approve_text, encoding="utf-8")
     ACTION_YML.write_text(new_action_text, encoding="utf-8")
     return old_sha, digest
 
@@ -242,7 +275,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"bump-action-pin OK: {old_sha[:12]} -> {args.sha[:12]} (image digest {digest[:19]}…)")
-    print(f"  {WORKFLOW}: env.MERGECRAFT_ACTION_SHA + 3 uses: rungs updated")
+    print(
+        f"  {WORKFLOW}: env.MERGECRAFT_ACTION_SHA + 3 uses: rungs + get-installation-token updated"
+    )
+    print(f"  {APPROVE_WORKFLOW}: get-installation-token pin updated")
     print(f"  {ACTION_YML}: runs.image digest updated")
     return 0
 

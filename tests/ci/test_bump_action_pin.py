@@ -1,10 +1,17 @@
-"""Unit tests for ``scripts/bump_action_pin.py`` (#450/#526/#532/#562 follow-up).
+"""Unit tests for ``scripts/bump_action_pin.py`` (#450/#526/#532/#562/#550 follow-up).
 
 PR #562 split the pin bump (``mergecraft.yml``) from the digest bump
-(``action.yml``) across two edits and turned five checks red at once. These
-tests pin the fix at the unit level: one call either rewrites both files
-consistently or writes neither, and every precondition (ancestry, GHCR
-publication, the tracing extra) is checked before any write happens.
+(``action.yml``) across two edits and turned five checks red at once. The
+very first merge onto this branch's own automation hit a second split: the
+bare ``uses: alexhawat/mergeCraft@…`` rungs advanced but the companion
+``alexhawat/mergeCraft/get-installation-token@…`` references (#550, one each
+in ``mergecraft.yml`` and ``mergecraft-approve.yml``) were left behind, and no
+gate caught it until ``check_action_pin_freshness.py``'s ``_PIN_RE`` was
+widened to see the subpath form. These tests pin both fixes at the unit
+level: one call either rewrites every file consistently or writes nothing,
+and every precondition (ancestry, GHCR publication, the tracing extra, and —
+now — that every pin site already carries the *current* pin literally) is
+checked before any write happens.
 
 GHCR is stubbed throughout — these tests never touch the network. Ancestry
 tests use this checkout's own real git history rather than a synthetic repo,
@@ -25,6 +32,7 @@ from tests.ci.workflow_support import REPO_ROOT
 
 _OLD_SHA = "a" * 40
 _NEW_SHA = "b" * 40
+_STALE_SHA = "d" * 40
 _DIGEST = "sha256:" + "c" * 64
 
 _WORKFLOW_FIXTURE = f"""\
@@ -36,9 +44,19 @@ env:
 jobs:
   review:
     steps:
+      - uses: alexhawat/mergeCraft/get-installation-token@{_OLD_SHA} # env.MERGECRAFT_ACTION_SHA
       - uses: alexhawat/mergeCraft@{_OLD_SHA} # env.MERGECRAFT_ACTION_SHA
       - uses: alexhawat/mergeCraft@{_OLD_SHA} # env.MERGECRAFT_ACTION_SHA
       - uses: alexhawat/mergeCraft@{_OLD_SHA} # env.MERGECRAFT_ACTION_SHA
+"""
+
+_APPROVE_WORKFLOW_FIXTURE = f"""\
+name: mergecraft-approve
+
+jobs:
+  approve:
+    steps:
+      - uses: alexhawat/mergeCraft/get-installation-token@{_OLD_SHA} # env.MERGECRAFT_ACTION_SHA (mergecraft.yml)
 """
 
 _ACTION_YML_FIXTURE = """\
@@ -59,12 +77,24 @@ def _load_module() -> Any:
     return module
 
 
-def _write_fixtures(tmp_path: Path) -> tuple[Path, Path]:
+def _write_fixtures(
+    tmp_path: Path, *, approve_text: str = _APPROVE_WORKFLOW_FIXTURE
+) -> tuple[Path, Path, Path]:
     workflow = tmp_path / "mergecraft.yml"
     workflow.write_text(_WORKFLOW_FIXTURE, encoding="utf-8")
+    approve = tmp_path / "mergecraft-approve.yml"
+    approve.write_text(approve_text, encoding="utf-8")
     action = tmp_path / "action.yml"
     action.write_text(_ACTION_YML_FIXTURE, encoding="utf-8")
-    return workflow, action
+    return workflow, approve, action
+
+
+def _install_fixtures(module: Any, tmp_path: Path, **kwargs: Any) -> tuple[Path, Path, Path]:
+    workflow, approve, action = _write_fixtures(tmp_path, **kwargs)
+    module.WORKFLOW = workflow
+    module.APPROVE_WORKFLOW = approve
+    module.ACTION_YML = action
+    return workflow, approve, action
 
 
 def _stub_healthy_ghcr(
@@ -90,12 +120,8 @@ class TestCurrentPin:
 
     def test_missing_env_var_raises(self) -> None:
         module = _load_module()
-        try:
+        with pytest.raises(module.BumpError):
             module.current_pin("jobs:\n  review:\n    steps: []\n")
-        except module.BumpError:
-            pass
-        else:
-            raise AssertionError("expected BumpError")
 
 
 class TestAncestry:
@@ -121,61 +147,40 @@ class TestAncestry:
             text=True,
             check=True,
         ).stdout.strip()
-        try:
+        with pytest.raises(module.BumpError, match="not an ancestor"):
             module.assert_is_ancestor(head, "HEAD~5")
-        except module.BumpError:
-            pass
-        else:
-            raise AssertionError("expected BumpError: HEAD is not an ancestor of HEAD~5")
 
     def test_an_unknown_commit_is_rejected(self) -> None:
         module = _load_module()
-        try:
+        with pytest.raises(module.BumpError):
             module.assert_is_ancestor("f" * 40, "HEAD")
-        except module.BumpError:
-            pass
-        else:
-            raise AssertionError("expected BumpError: unknown commit")
 
 
 class TestBumpValidation:
     def test_rejects_a_non_sha_argument(self, tmp_path: Path) -> None:
         module = _load_module()
-        workflow, action = _write_fixtures(tmp_path)
-        module.WORKFLOW = workflow
-        module.ACTION_YML = action
-        try:
+        workflow, approve, _action = _install_fixtures(module, tmp_path)
+        with pytest.raises(module.BumpError):
             module.bump("not-a-sha", ref="HEAD")
-        except module.BumpError:
-            pass
-        else:
-            raise AssertionError("expected BumpError")
         # Nothing written.
         assert workflow.read_text(encoding="utf-8") == _WORKFLOW_FIXTURE
+        assert approve.read_text(encoding="utf-8") == _APPROVE_WORKFLOW_FIXTURE
 
     def test_refuses_when_target_equals_current_pin(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = _load_module()
-        workflow, action = _write_fixtures(tmp_path)
-        module.WORKFLOW = workflow
-        module.ACTION_YML = action
+        _install_fixtures(module, tmp_path)
         monkeypatch.setattr(module, "assert_is_ancestor", lambda sha, ref: None)
         _stub_healthy_ghcr(module, monkeypatch)
-        try:
+        with pytest.raises(module.BumpError, match="already pins"):
             module.bump(_OLD_SHA, ref="HEAD")
-        except module.BumpError:
-            pass
-        else:
-            raise AssertionError("expected BumpError: same SHA")
 
     def test_refuses_when_image_not_published(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = _load_module()
-        workflow, action = _write_fixtures(tmp_path)
-        module.WORKFLOW = workflow
-        module.ACTION_YML = action
+        workflow, approve, action = _install_fixtures(module, tmp_path)
         monkeypatch.setattr(module, "assert_is_ancestor", lambda sha, ref: None)
         monkeypatch.setattr(
             module,
@@ -185,15 +190,14 @@ class TestBumpValidation:
         with pytest.raises(module.BumpError, match=r"build|publish"):
             module.bump(_NEW_SHA, ref="HEAD")
         assert workflow.read_text(encoding="utf-8") == _WORKFLOW_FIXTURE
+        assert approve.read_text(encoding="utf-8") == _APPROVE_WORKFLOW_FIXTURE
         assert action.read_text(encoding="utf-8") == _ACTION_YML_FIXTURE
 
     def test_refuses_when_tracing_extra_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = _load_module()
-        workflow, action = _write_fixtures(tmp_path)
-        module.WORKFLOW = workflow
-        module.ACTION_YML = action
+        workflow, approve, action = _install_fixtures(module, tmp_path)
         monkeypatch.setattr(module, "assert_is_ancestor", lambda sha, ref: None)
         monkeypatch.setattr(
             module,
@@ -206,6 +210,35 @@ class TestBumpValidation:
             module.bump(_NEW_SHA, ref="HEAD")
         # Nothing written — the tracing-extra check must run before any write.
         assert workflow.read_text(encoding="utf-8") == _WORKFLOW_FIXTURE
+        assert approve.read_text(encoding="utf-8") == _APPROVE_WORKFLOW_FIXTURE
+        assert action.read_text(encoding="utf-8") == _ACTION_YML_FIXTURE
+
+    def test_refuses_when_approve_workflow_has_already_drifted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression anchor: the exact split this branch's own first merge
+        produced — mergecraft.yml on the current pin, mergecraft-approve.yml
+        already on something else. The bump must refuse rather than silently
+        leaving mergecraft-approve.yml's drift in place.
+        """
+        module = _load_module()
+        workflow, approve, action = _install_fixtures(
+            module,
+            tmp_path,
+            approve_text=_APPROVE_WORKFLOW_FIXTURE.replace(_OLD_SHA, _STALE_SHA),
+        )
+        monkeypatch.setattr(module, "assert_is_ancestor", lambda sha, ref: None)
+        _stub_healthy_ghcr(module, monkeypatch)
+
+        with pytest.raises(module.BumpError, match="not found as literal text"):
+            module.bump(_NEW_SHA, ref="HEAD")
+
+        # Nothing written to ANY file — mergecraft.yml must not move ahead of
+        # the approve workflow even though its own precondition was satisfied.
+        assert workflow.read_text(encoding="utf-8") == _WORKFLOW_FIXTURE
+        assert approve.read_text(encoding="utf-8") == _APPROVE_WORKFLOW_FIXTURE.replace(
+            _OLD_SHA, _STALE_SHA
+        )
         assert action.read_text(encoding="utf-8") == _ACTION_YML_FIXTURE
 
 
@@ -214,9 +247,7 @@ class TestBumpWritesAtomically:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = _load_module()
-        workflow, action = _write_fixtures(tmp_path)
-        module.WORKFLOW = workflow
-        module.ACTION_YML = action
+        workflow, approve, action = _install_fixtures(module, tmp_path)
         monkeypatch.setattr(module, "assert_is_ancestor", lambda sha, ref: None)
         _stub_healthy_ghcr(module, monkeypatch)
 
@@ -225,9 +256,14 @@ class TestBumpWritesAtomically:
         assert old_sha == _OLD_SHA
         assert digest == _DIGEST
         new_workflow_text = workflow.read_text(encoding="utf-8")
-        # Hoisted var + all three rungs — four occurrences, all moved.
-        assert new_workflow_text.count(_NEW_SHA) == 4
+        # Hoisted var + the get-installation-token subpath ref + 3 bare rungs
+        # — five occurrences, all moved together.
+        assert new_workflow_text.count(_NEW_SHA) == 5
         assert _OLD_SHA not in new_workflow_text
+
+        new_approve_text = approve.read_text(encoding="utf-8")
+        assert new_approve_text.count(_NEW_SHA) == 1
+        assert _OLD_SHA not in new_approve_text
 
         new_action_text = action.read_text(encoding="utf-8")
         assert digest.removeprefix("sha256:") in new_action_text
@@ -238,9 +274,7 @@ class TestBumpWritesAtomically:
     ) -> None:
         """Ancestry is the cheapest, offline check — it must run first."""
         module = _load_module()
-        workflow, action = _write_fixtures(tmp_path)
-        module.WORKFLOW = workflow
-        module.ACTION_YML = action
+        _install_fixtures(module, tmp_path)
 
         calls: list[str] = []
 
@@ -250,13 +284,31 @@ class TestBumpWritesAtomically:
 
         monkeypatch.setattr(module, "ghcr_digest_for_tag", _boom)
 
-        try:
+        with pytest.raises(module.BumpError):
             module.bump("f" * 40, ref="HEAD")
-        except module.BumpError:
-            pass
-        else:
-            raise AssertionError("expected BumpError: unknown commit")
         assert calls == []
+
+    def test_a_stale_approve_workflow_pin_stops_the_workflow_file_from_moving_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Companion to test_refuses_when_approve_workflow_has_already_drifted:
+        confirms mergecraft.yml specifically is left untouched, not just
+        "some file". This is the file check_action_pin_freshness.py's
+        self-consistency scan reads first.
+        """
+        module = _load_module()
+        workflow, _approve, _action = _install_fixtures(
+            module,
+            tmp_path,
+            approve_text=_APPROVE_WORKFLOW_FIXTURE.replace(_OLD_SHA, _STALE_SHA),
+        )
+        monkeypatch.setattr(module, "assert_is_ancestor", lambda sha, ref: None)
+        _stub_healthy_ghcr(module, monkeypatch)
+
+        with pytest.raises(module.BumpError):
+            module.bump(_NEW_SHA, ref="HEAD")
+
+        assert workflow.read_text(encoding="utf-8") == _WORKFLOW_FIXTURE
 
 
 class TestMainCli:
@@ -264,25 +316,23 @@ class TestMainCli:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = _load_module()
-        workflow, action = _write_fixtures(tmp_path)
-        module.WORKFLOW = workflow
-        module.ACTION_YML = action
+        workflow, approve, _action = _install_fixtures(module, tmp_path)
         monkeypatch.setattr(module, "assert_is_ancestor", lambda sha, ref: None)
         _stub_healthy_ghcr(module, monkeypatch)
 
         assert module.main([_NEW_SHA]) == 0
         assert _NEW_SHA in workflow.read_text(encoding="utf-8")
+        assert _NEW_SHA in approve.read_text(encoding="utf-8")
 
     def test_main_returns_nonzero_on_a_failed_precondition(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = _load_module()
-        workflow, action = _write_fixtures(tmp_path)
-        module.WORKFLOW = workflow
-        module.ACTION_YML = action
+        workflow, approve, _action = _install_fixtures(module, tmp_path)
 
         assert module.main(["not-a-sha"]) != 0
         assert workflow.read_text(encoding="utf-8") == _WORKFLOW_FIXTURE
+        assert approve.read_text(encoding="utf-8") == _APPROVE_WORKFLOW_FIXTURE
 
 
 __all__ = [

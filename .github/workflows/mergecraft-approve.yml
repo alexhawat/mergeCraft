@@ -113,7 +113,7 @@ jobs:
         id: app_token
         if: steps.verdict.outputs.conclusion == 'success' && env.HAS_APP == 'true'
         continue-on-error: true
-        uses: alexhawat/mergeCraft/get-installation-token@e5f9ed5f799d8d352fd850724ceaca333dedb1ce # env.MERGECRAFT_ACTION_SHA (mergecraft.yml) — kept in lockstep; covered by make action-pin-check
+        uses: alexhawat/mergeCraft/get-installation-token@e5f9ed5f799d8d352fd850724ceaca333dedb1ce # env.MERGECRAFT_ACTION_SHA (mergecraft.yml) — covered by make action-pin-check's self-consistency scan
         env:
           GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
