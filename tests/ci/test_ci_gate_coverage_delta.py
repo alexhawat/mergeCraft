@@ -1,0 +1,136 @@
+"""W1.2 — coverage delta gate contracts (wave 16, green after W3)."""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import TYPE_CHECKING
+
+import pytest
+
+from tests.ci.support_ci_gate_coverage import (
+    base_measure_block,
+    break_coverage_measure,
+    clone_local_repo,
+    git,
+    install_bare_origin,
+    run_coverage_delta_gate,
+    script_text,
+    worktree_path,
+)
+from tests.ci.test_coverage_delta_wrapper import (
+    _BASE_MEASURE_MARKER,
+    _base_worktree_block,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+W3_XFAIL = pytest.mark.xfail(reason="green after W3: base measurement signal not gate", strict=True)
+_INTEGRATION_TIMEOUT = 180
+
+
+def _bootstrap_broken_base(scratch: Path, tmp_path: Path, base_ref: str = "broken-base") -> None:
+    install_bare_origin(scratch, tmp_path)
+    break_coverage_measure(scratch / "Makefile")
+    git(scratch, "checkout", "-b", base_ref)
+    git(scratch, "add", "Makefile")
+    git(scratch, "commit", "-m", "break base coverage-measure")
+    git(scratch, "push", "-u", "origin", base_ref)
+    git(scratch, "checkout", "-b", "feature-head")
+    git(scratch, "push", "-u", "origin", "feature-head")
+
+
+def test_base_measure_block_markers_remain_parseable() -> None:
+    """D7 — ``BASE_WORKTREE_MEASURE_BLOCK`` stays where the wrapper test expects."""
+    block = _base_worktree_block(script_text())
+    assert "make coverage-measure" in block or "coverage-gate:" in block
+    assert _BASE_MEASURE_MARKER in script_text()
+
+
+def test_base_measure_block_exports_uv_project_environment() -> None:
+    """Regression guard — ``UV_PROJECT_ENVIRONMENT`` export must survive W3 edits."""
+    block = base_measure_block()
+    assert "UV_PROJECT_ENVIRONMENT" in block
+    assert "export UV_PROJECT_ENVIRONMENT" in block
+
+
+def test_base_measure_block_keeps_pre_th_inline_fallback() -> None:
+    """Regression guard — pre-TH inline measure fallback must survive W3 edits."""
+    block = base_measure_block()
+    assert "grep -q '^coverage-measure:' Makefile" in block
+    assert "--cov-report=json:coverage.json" in block
+
+
+def test_head_coverage_gate_stays_unguarded_outside_subshell() -> None:
+    """D5 guard — head ``make coverage-gate`` must not be wrapped in a tolerant guard."""
+    text = script_text()
+    tail = text.split(")\n", 1)[-1]
+    assert re.search(r"^make coverage-gate\s*$", tail, re.MULTILINE), (
+        "head make coverage-gate must remain a hard gate after the subshell"
+    )
+    assert "make coverage-gate ||" not in tail
+
+
+def test_successful_base_measurement_still_runs_delta_comparison() -> None:
+    """Regression guard — a healthy base must still reach the delta comparison tail."""
+    text = script_text()
+    assert "if [[ -f coverage-base.json ]]; then" in text
+    assert "check_coverage_delta.py" in text
+
+
+def test_worktree_cleaned_up_when_base_measurement_fails(tmp_path: Path) -> None:
+    """The trap must remove the base worktree even when measurement fails."""
+    scratch = clone_local_repo(tmp_path)
+    _bootstrap_broken_base(scratch, tmp_path)
+    wt = worktree_path(scratch)
+
+    run_coverage_delta_gate(scratch, base_ref="broken-base", timeout=_INTEGRATION_TIMEOUT)
+
+    assert not wt.exists()
+
+
+@W3_XFAIL
+def test_broken_base_measurement_exits_zero_without_base_json(tmp_path: Path) -> None:
+    """D4 — a red base is a signal, not a script-killing pre-gate."""
+    scratch = clone_local_repo(tmp_path)
+    _bootstrap_broken_base(scratch, tmp_path)
+
+    result = run_coverage_delta_gate(scratch, base_ref="broken-base", timeout=_INTEGRATION_TIMEOUT)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (scratch / "coverage-base.json").is_file()
+
+
+@W3_XFAIL
+def test_skipped_delta_emits_warning_with_reason(tmp_path: Path) -> None:
+    """D6 — a skipped delta must be visible, not silent."""
+    scratch = clone_local_repo(tmp_path)
+    _bootstrap_broken_base(scratch, tmp_path)
+
+    result = run_coverage_delta_gate(scratch, base_ref="broken-base", timeout=_INTEGRATION_TIMEOUT)
+    combined = (result.stdout + result.stderr).lower()
+
+    assert result.returncode == 0, combined
+    assert "warn" in combined or "::warning" in combined
+    assert "base" in combined or "broken-base" in combined
+    assert "measure" in combined or "coverage" in combined
+
+
+@W3_XFAIL
+def test_head_coverage_regression_still_fails_when_base_skips(tmp_path: Path) -> None:
+    """D5 — relaxing only the base must not disable the head ratchet."""
+    scratch = clone_local_repo(tmp_path)
+    _bootstrap_broken_base(scratch, tmp_path)
+    bad = {
+        "totals": {"percent_covered": 0.0, "num_statements": 100, "covered_lines": 0},
+        "files": {},
+    }
+    (scratch / "coverage.json").write_text(json.dumps(bad), encoding="utf-8")
+
+    result = run_coverage_delta_gate(scratch, base_ref="broken-base", timeout=_INTEGRATION_TIMEOUT)
+    combined = (result.stdout + result.stderr).lower()
+
+    assert result.returncode != 0, "head coverage regression must still fail the gate"
+    assert not (scratch / "coverage-base.json").is_file()
+    assert "coverage-gate" in combined or "ratchet" in combined or "fail_under" in combined
