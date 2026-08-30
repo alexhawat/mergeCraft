@@ -13,7 +13,6 @@ from tests.cli.support_agent_roster import (
     init_git_repo,
     local_config_path,
     local_config_text,
-    plain_cli_output,
     read_config,
     register_nous_model,
 )
@@ -77,9 +76,20 @@ def test_agent_local_overrides_win_for_cli_runs(tmp_path: Path, monkeypatch: Mon
     assert committed.exit_code == CLI_SUCCESS_EXIT_CODE, committed.stdout + committed.stderr
     local = _invoke("agent-local", "assign-model", "reviewer", "p0", slug)
     assert local.exit_code == CLI_SUCCESS_EXIT_CODE, local.stdout + local.stderr
-    show = _invoke("agent", "show", "reviewer")
-    output = plain_cli_output(show.stdout + show.stderr)
-    assert slug in output
+
+    # Assert the resolved configuration, not CLI output. `agent show` reaches
+    # `pick_runnable_slug_from_chain`, which finds no credentials for the local
+    # slug in a test repo and reports it only through a Loguru warning. That
+    # made the slug appear in captured output as part of a message about
+    # *skipping* it — the assertion passed for the opposite of the reason it
+    # names, and stopped passing at all once the logger became asynchronous.
+    # `test_github_actions_ignores_local_file` checks the same seam this way.
+    from mergecraft.config.settings import load_repo_settings
+
+    resolved = load_repo_settings(root=tmp_path).agents.get("reviewer")
+    assert resolved is not None, local.stdout + local.stderr
+    assert resolved.model_chain, local.stdout + local.stderr
+    assert resolved.model_chain[0] == slug, "the local override must win for CLI runs"
     assert read_config(tmp_path)["agents"]["reviewer"]["modelChain"][0] == "anthropic/claude-sonnet"
 
 
