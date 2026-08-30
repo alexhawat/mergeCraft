@@ -225,7 +225,9 @@ def _establish_review_scope_tool(ctx: ToolContext):
 async def test_establish_review_scope_accepts_valid_diff(tmp_path: Path) -> None:
     head_sha = "1" * 40
     diff_path = tmp_path / "real.diff"
-    diff_path.write_text("diff --git a/x b/x\n", encoding="utf-8")
+    # Must name the files the stub PR actually changes: scope evidence is bound
+    # to GitHub's file list, not merely to something diff-shaped.
+    diff_path.write_text("diff --git a/src/a.py b/src/a.py\n", encoding="utf-8")
     ctx = _ctx(tmp_path, _StubGitHub(head_sha=head_sha))
     ctx.tool_state.pr_number = 1
 
@@ -421,3 +423,78 @@ async def test_api_only_diff_follows_pull_files_pagination() -> None:
     assert requested_pages == [1, 2], "must request the second page after a full first page"
     for i in (0, _PULL_FILES_PAGE_SIZE - 1, _PULL_FILES_PAGE_SIZE, total - 1):
         assert f"src/file_{i:03d}.py" in diff, f"file {i} missing from the api-only diff"
+
+
+# --- Review round 3 finding (PR #567) --------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_establish_review_scope_refuses_a_fabricated_diff(tmp_path: Path) -> None:
+    """A diff-shaped file naming files the PR never touched must not grant scope.
+
+    The caller supplies ``diff_path`` and can read the real ``head_sha`` from the
+    API, so shape plus a matching head SHA proved only that some file exists. An
+    agent holding a shell tool could write one and satisfy the fail-closed scope
+    gate without ever reading the change — the one thing that gate prevents.
+    """
+    head_sha = "1" * 40
+    diff_path = tmp_path / "fabricated.diff"
+    diff_path.write_text(
+        "diff --git a/totally/invented.py b/totally/invented.py\n"
+        "@@ -0,0 +1 @@\n+not the real change\n",
+        encoding="utf-8",
+    )
+    ctx = _ctx(tmp_path, _StubGitHub(head_sha=head_sha))
+    ctx.tool_state.pr_number = 1
+
+    result = await _establish_review_scope_tool(ctx).execute(
+        {"diff_path": str(diff_path), "base_sha": "0" * 40, "head_sha": head_sha}
+    )
+    assert result.is_error is True
+    assert primary_repo_state(ctx.tool_state).diff_path is None
+
+
+@pytest.mark.asyncio
+async def test_establish_review_scope_refuses_a_partial_diff(tmp_path: Path) -> None:
+    """Omitting a file the PR changes must not grant scope either."""
+    head_sha = "1" * 40
+    stub = _StubGitHub(
+        head_sha=head_sha,
+        files=[
+            {"filename": "src/a.py", "patch": "@@ -0,0 +1 @@\n+a\n"},
+            {"filename": "src/b.py", "patch": "@@ -0,0 +1 @@\n+b\n"},
+        ],
+    )
+    diff_path = tmp_path / "partial.diff"
+    diff_path.write_text("diff --git a/src/a.py b/src/a.py\n", encoding="utf-8")
+    ctx = _ctx(tmp_path, stub)
+    ctx.tool_state.pr_number = 1
+
+    result = await _establish_review_scope_tool(ctx).execute(
+        {"diff_path": str(diff_path), "base_sha": "0" * 40, "head_sha": head_sha}
+    )
+    assert result.is_error is True
+
+
+@pytest.mark.asyncio
+async def test_establish_review_scope_accepts_a_rename(tmp_path: Path) -> None:
+    """``git diff`` writes a rename as ``a/<old> b/<new>``; only ``<new>`` is a path.
+
+    Treating the pre-image name as required would refuse an honest rename.
+    """
+    head_sha = "1" * 40
+    stub = _StubGitHub(
+        head_sha=head_sha,
+        files=[{"filename": "src/new.py", "previous_filename": "src/old.py", "patch": ""}],
+    )
+    diff_path = tmp_path / "rename.diff"
+    diff_path.write_text(
+        "diff --git a/src/old.py b/src/new.py\nsimilarity index 100%\n", encoding="utf-8"
+    )
+    ctx = _ctx(tmp_path, stub)
+    ctx.tool_state.pr_number = 1
+
+    result = await _establish_review_scope_tool(ctx).execute(
+        {"diff_path": str(diff_path), "base_sha": "0" * 40, "head_sha": head_sha}
+    )
+    assert result.is_error is False, result.content[0]["text"]

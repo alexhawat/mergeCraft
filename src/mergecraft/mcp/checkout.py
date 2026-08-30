@@ -153,6 +153,39 @@ _PULL_FILES_PAGE_SIZE = 100
 _PULL_FILES_MAX_PAGES = 30
 
 
+async def pull_request_path_expectations(
+    ctx: ToolContext, *, pull_number: int
+) -> tuple[set[str], set[str]]:
+    """Return ``(required, allowed)`` paths for the PR as GitHub reports them.
+
+    The authority a caller-supplied diff is checked against before it may
+    establish review scope. ``required`` is the post-image name of every changed
+    file — a diff omitting one does not describe this PR. ``allowed`` adds
+    rename pre-image names, because ``git diff`` writes a rename as
+    ``a/<old> b/<new>`` and only ``<new>`` is the post-image path; counting
+    ``<old>`` as required would reject an honest rename.
+    """
+    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
+    required: set[str] = set()
+    allowed: set[str] = set()
+    for page in range(1, _PULL_FILES_MAX_PAGES + 1):
+        files = await ctx.scm.get(
+            endpoint, params={"per_page": _PULL_FILES_PAGE_SIZE, "page": page}
+        )
+        batch = list(files or [])
+        for f in batch:
+            filename = str(f.get("filename") or "").strip()
+            if filename:
+                required.add(filename)
+                allowed.add(filename)
+            previous = str(f.get("previous_filename") or "").strip()
+            if previous:
+                allowed.add(previous)
+        if len(batch) < _PULL_FILES_PAGE_SIZE:
+            break
+    return required, allowed
+
+
 async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> str:
     """Build a unified diff from the PR files API, following pagination."""
     parts: list[str] = []

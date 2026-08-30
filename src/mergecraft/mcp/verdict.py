@@ -266,6 +266,45 @@ async def validate_review_scope_evidence(
         raise ValueError(msg)
 
 
+async def reject_diff_that_does_not_match_the_pr(
+    ctx: ToolContext, *, diff_path: str, pull_number: int
+) -> None:
+    """Bind a caller-supplied diff to the PR GitHub actually reports (D4).
+
+    The caller supplies ``diff_path`` and can read the real ``head_sha`` from the
+    API, so shape plus a matching head SHA proved only that a file exists and
+    looks like a diff. A reviewing agent holding a shell tool could write any
+    file and satisfy the fail-closed scope gate without reading the change —
+    which is the one thing that gate exists to prevent.
+
+    The diff's paths must therefore cover every path GitHub reports for the PR,
+    and introduce none it does not report. This binds scope to the real change
+    set; it does not authenticate hunk contents, so a diff naming the right
+    files with altered bodies is still out of reach of this check.
+    """
+    from mergecraft.mcp.checkout import changed_paths_in_diff, pull_request_path_expectations
+
+    text = Path(diff_path).read_text(encoding="utf-8")
+    required, allowed = await pull_request_path_expectations(ctx, pull_number=pull_number)
+    if not required:
+        msg = "could not resolve the PR's changed files from the API"
+        raise ValueError(msg)
+    diff_paths = set(changed_paths_in_diff(text))
+    if not diff_paths:
+        msg = "diff_path names no files; it cannot describe the PR head"
+        raise ValueError(msg)
+    missing = sorted(required - diff_paths)
+    unexpected = sorted(diff_paths - allowed)
+    if missing or unexpected:
+        detail: list[str] = []
+        if missing:
+            detail.append(f"missing {len(missing)} file(s) the PR changes: {missing[:5]}")
+        if unexpected:
+            detail.append(f"names {len(unexpected)} file(s) the PR does not: {unexpected[:5]}")
+        msg = f"diff_path does not match the pull request — {'; '.join(detail)}"
+        raise ValueError(msg)
+
+
 def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> None:
     """Raise when a Review-mode terminal tool runs before review scope exists (D10).
 
@@ -881,6 +920,15 @@ def establish_review_scope_tool(ctx: ToolContext):
         diff_path = str(params["diff_path"])
         head_sha = str(params["head_sha"])
         await validate_review_scope_evidence(ctx, diff_path=diff_path, head_sha=head_sha)
+        # Only this route takes the diff from the caller. ``get_commit_info``
+        # builds its own from the commit API, so there is nothing to authenticate
+        # there — re-checking it would demand a single commit cover every file in
+        # the PR, which a commit diff legitimately does not.
+        pull_number = ctx.tool_state.pr_number or primary_repo_state(ctx.tool_state).issue_number
+        if pull_number is not None:
+            await reject_diff_that_does_not_match_the_pr(
+                ctx, diff_path=diff_path, pull_number=int(pull_number)
+            )
         register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="local-diff")
         return {
             "diffPath": diff_path,
