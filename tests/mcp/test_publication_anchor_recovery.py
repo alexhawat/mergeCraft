@@ -9,7 +9,6 @@ import httpx
 import pytest
 from tests.publication_attribution.support import (
     ANCHOR_RECOVERY_RETRY_CEILING,
-    W2_XFAIL,
     RecordingGitHub,
 )
 from tests.support.tool_context import bind_github_client
@@ -43,7 +42,6 @@ def _ctx(tmp_path: Path, github: RecordingGitHub) -> ToolContext:
 
 
 @pytest.mark.asyncio
-@W2_XFAIL
 async def test_out_of_range_422_index_terminates_with_bounded_call_count(
     tmp_path: Path,
 ) -> None:
@@ -60,14 +58,13 @@ async def test_out_of_range_422_index_terminates_with_bounded_call_count(
         pull_number=7,
         payload=payload,
     )
-    assert result["id"] == 1
+    assert result["id"] == github.create_review_calls
     assert github.create_review_calls <= ANCHOR_RECOVERY_RETRY_CEILING + 1
     final = github.review_payloads[-1]
     assert "comments" not in final
 
 
 @pytest.mark.asyncio
-@W2_XFAIL
 async def test_out_of_range_422_demotes_all_inline_comments(tmp_path: Path) -> None:
     """D3 — out-of-range index degrades to demote-all; payload has no ``comments`` key."""
     github = RecordingGitHub(comment_422_index=5, loop_guard=20)
@@ -107,7 +104,6 @@ async def test_unparseable_422_index_still_demotes_all_inline_comments(
 
 
 @pytest.mark.asyncio
-@W2_XFAIL
 async def test_unchanged_payload_between_attempts_raises_instead_of_looping(
     tmp_path: Path,
 ) -> None:
@@ -136,7 +132,6 @@ async def test_unchanged_payload_between_attempts_raises_instead_of_looping(
 
 
 @pytest.mark.asyncio
-@W2_XFAIL
 async def test_retry_ceiling_raises_last_http_status_error(tmp_path: Path) -> None:
     """D2 — exhausting the retry ceiling re-raises the last 422, not partial success."""
     github = RecordingGitHub(comment_422_index=0, loop_guard=20)

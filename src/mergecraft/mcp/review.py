@@ -534,11 +534,27 @@ def _inline_anchor_index_for_diff(diff_text: str) -> InlineAnchorIndex | None:
     return index
 
 
-def _demote_inline_comment_from_payload(payload: dict[str, Any], index: int) -> dict[str, Any]:
+ANCHOR_RECOVERY_RETRY_CEILING = 8
+
+
+def _payload_signature(payload: dict[str, Any]) -> tuple[str, int, int]:
+    """Cheap structural signature for anchor-recovery progress checks (D1)."""
+    comments = payload.get("comments") or []
+    return (
+        str(payload.get("event") or ""),
+        len(str(payload.get("body") or "")),
+        len(comments),
+    )
+
+
+def _demote_inline_comment_from_payload(
+    payload: dict[str, Any],
+    index: int,
+) -> dict[str, Any] | None:
     """Move one inline comment into the review body and remove it from the payload."""
     comments = list(payload.get("comments") or [])
     if index < 0 or index >= len(comments):
-        return payload
+        return None
     comment = comments.pop(index)
     demoted = format_demoted_inline_comment(comment)
     updated = dict(payload)
@@ -548,6 +564,17 @@ def _demote_inline_comment_from_payload(payload: dict[str, Any], index: int) -> 
     else:
         updated.pop("comments", None)
     return updated
+
+
+def _demote_all_inline_comments(payload: dict[str, Any]) -> dict[str, Any]:
+    """Demote every inline comment into the review body."""
+    current = dict(payload)
+    while current.get("comments"):
+        demoted = _demote_inline_comment_from_payload(current, 0)
+        if demoted is None:
+            break
+        current = demoted
+    return current
 
 
 async def _create_github_review_with_anchor_recovery(
@@ -560,6 +587,7 @@ async def _create_github_review_with_anchor_recovery(
     scm = ctx.scm
     current = dict(payload)
     approve_fallback = False
+    attempt = 0
 
     while True:
         try:
@@ -574,27 +602,54 @@ async def _create_github_review_with_anchor_recovery(
             if exc.response.status_code != 422:
                 raise
 
+            attempt += 1
+            if attempt > ANCHOR_RECOVERY_RETRY_CEILING:
+                raise
+
             if current.get("comments") and is_comments_anchor_422_response(exc.response):
                 index = parse_comment_422_index(exc.response)
+                prior_sig = _payload_signature(current)
+                comments = list(current.get("comments") or [])
+
                 if index is None:
                     logger.warning(
                         "review comment 422 on PR #{} without index; demoting all inline comments",
                         pull_number,
                     )
-                    while current.get("comments"):
-                        current = _demote_inline_comment_from_payload(current, 0)
-                    continue
+                    current = _demote_all_inline_comments(current)
+                elif index < 0 or index >= len(comments):
+                    logger.warning(
+                        "review comment 422 on PR #{} at out-of-range index {} "
+                        "(comment count {}); demoting all inline comments",
+                        pull_number,
+                        index,
+                        len(comments),
+                    )
+                    current = _demote_all_inline_comments(current)
+                else:
+                    logger.warning(
+                        "review comment 422 on PR #{} at index {}; demoting inline comment to body",
+                        pull_number,
+                        index,
+                    )
+                    demoted = _demote_inline_comment_from_payload(current, index)
+                    current = (
+                        demoted if demoted is not None else _demote_all_inline_comments(current)
+                    )
 
-                logger.warning(
-                    "review comment 422 on PR #{} at index {}; demoting inline comment to body",
-                    pull_number,
-                    index,
-                )
-                current = _demote_inline_comment_from_payload(current, index)
+                if _payload_signature(current) == prior_sig:
+                    logger.error(
+                        "anchor recovery on PR #{} made no progress after attempt {} "
+                        "(signature unchanged: event/body_len/comments_len={})",
+                        pull_number,
+                        attempt,
+                        prior_sig,
+                    )
                 continue
 
             event = str(current.get("event") or "COMMENT")
             if event == "APPROVE":
+                prior_sig = _payload_signature(current)
                 logger.info(
                     "APPROVE review rejected with 422 on PR #{}; falling back to COMMENT",
                     pull_number,
@@ -602,6 +657,14 @@ async def _create_github_review_with_anchor_recovery(
                 current = dict(current)
                 current["event"] = "COMMENT"
                 approve_fallback = True
+                if _payload_signature(current) == prior_sig:
+                    logger.error(
+                        "anchor recovery on PR #{} made no progress after attempt {} "
+                        "(signature unchanged: event/body_len/comments_len={})",
+                        pull_number,
+                        attempt,
+                        prior_sig,
+                    )
                 continue
 
             raise
