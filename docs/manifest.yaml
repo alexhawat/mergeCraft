@@ -187,6 +187,12 @@ pages:
     generator: null
     purpose: Workflow examples 2–6, trust tiers, [security model](workflows.md#security-model), and pull_request_target placement gotchas.
 
+  - path: docs/trust-policy.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Two-axis trust policy — execution vs authority, selfReview levels, mergecraft-approve.yml, base snapshot rule.
+
   - path: assets/diagrams/README.md
     audience: satellite
     template: satellite

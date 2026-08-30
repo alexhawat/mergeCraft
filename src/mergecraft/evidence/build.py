@@ -22,6 +22,7 @@ from mergecraft.evidence.packet import (
     DeterministicCheck,
     MergeEvidencePacket,
     ModePromptVersion,
+    RunHealth,
     SelfAssessment,
 )
 from mergecraft.evidence.trajectory import TrajectoryRecord
@@ -139,6 +140,14 @@ def _agent_metadata(
     )
 
 
+def _partition_findings(findings: list[Finding]) -> tuple[list[Finding], RunHealth | None]:
+    """Split change-scoped findings from run-health rows (plan 12 W7)."""
+    change_findings = [finding for finding in findings if finding.scope != "run"]
+    run_findings = [finding for finding in findings if finding.scope == "run"]
+    run_health = RunHealth(findings=run_findings, conclusion="advisory") if run_findings else None
+    return change_findings, run_health
+
+
 def build_packet(
     *,
     change_id: str,
@@ -194,6 +203,7 @@ def build_packet(
     extend their sections.
     """
     coerced_findings = _coerce_findings(findings)
+    change_findings, run_health = _partition_findings(coerced_findings)
     coerced_checks = _coerce_deterministic_checks(deterministic_checks)
     coerced_self_assessment = _coerce_self_assessment(self_assessment)
 
@@ -234,7 +244,8 @@ def build_packet(
             dispatched_lens_ids=dispatched_lens_ids,
         ),
         files_changed=list(files_changed),
-        findings=coerced_findings,
+        findings=change_findings,
+        run_health=run_health,
         deterministic_checks=coerced_checks,
         self_assessment=coerced_self_assessment,
         decision=decision,

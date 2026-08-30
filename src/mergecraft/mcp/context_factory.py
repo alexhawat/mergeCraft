@@ -28,6 +28,7 @@ def minimal_tool_context(
     """Build a workspace-scoped :class:`ToolContext` with safe defaults."""
     state = init_tool_state(owner=repo_owner, name=repo_name, dir=tmpdir)
     state.trust_tier = trust_tier
+    state.authority_trust = trust_tier
     payload = ResolvedPayload(
         event=PayloadEvent(
             trigger="unknown",
@@ -57,6 +58,7 @@ def minimal_tool_context(
         static_checks_enabled=static_checks_enabled,
         analyzers_mode="auto",
         trust_tier=trust_tier,
+        authority_trust=trust_tier,
         analyzers_settings_enabled=analyzers_settings_enabled,
         xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
     )

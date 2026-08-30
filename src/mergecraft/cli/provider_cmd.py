@@ -481,8 +481,9 @@ def _persist_indexed_credentials(
         wrote_any_github = False
         for suffix, raw_value in credential_map.items():
             key = f"LLM_PROVIDER_{env_index}_{suffix}"
+            value = _single_line_credential(name=key, value=raw_value)
             console.print(f"saving [cyan]{key}[/cyan] via gh secret set...")
-            if _set_gh_secret(name=key, value=raw_value, repo_slug=target.github.repo_slug):
+            if _set_gh_secret(name=key, value=value, repo_slug=target.github.repo_slug):
                 console.print(f"[green]saved {key}[/green] to GitHub Actions secrets")
                 wrote_any_github = True
             elif not target.local:

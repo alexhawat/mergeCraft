@@ -6,8 +6,9 @@
 # approved=true AND ctx.trust_tier == "trusted", which derive_trust_tier()
 # (src/mergecraft/analyzers/trust.py) only grants to a genuine non-fork
 # `pull_request` event or workflow_dispatch — never to pull_request_target,
-# regardless of fork status. See the mergecraft.yml trigger comment for how the
-# workflow now earns that "trusted" tier for same-repo PRs.
+# regardless of fork status. mergecraft.yml deliberately stays on
+# pull_request_target only (see PR #200); the PAT-backed APPROVE lane lives in
+# mergecraft-approve.yml.
 #
 # recallPass dogfood resumes after this PR merges to pre-0.0.1: pull_request_target
 # runs the workflow + action pin from the base branch, so self-review PRs cannot
@@ -28,3 +29,23 @@ ciEvidence:
     - ruff-sarif
     - mypy-sarif
     - bandit-sarif
+
+# Operator trust knob for same-repo pull_request_target (plan 13 D14–D16).
+# Resolved from the BASE snapshot at run start — a PR-head edit cannot raise
+# its own tier. Default when absent: off (today's untrusted posture).
+#   off       — no change from pre-knob behaviour
+#   analyzers — trusted-tier analyzers on same-repo PRs; agent still cannot APPROVE
+#   full      — authority trust too; requires mergecraft trust set-self-review full
+#               --i-understand-this-grants-approval-authority (exceptional opt-out)
+# Real PAT-backed APPROVE for self-review still flows through mergecraft-approve.yml
+# when the structural mergecraft-approval check passes — see docs/trust-policy.md.
+#
+# The `trust:` block is deliberately absent while `selfReview` is `off`, which is
+# already the model default. The integration coverage gate runs the *base* tree's
+# tests from a worktree inside this checkout, so a key introduced in the same PR
+# that adds its schema field is parsed by base code that does not know it yet and
+# fails `extra="forbid"`. Add the block in a follow-up, or when setting a non-off
+# level:
+#
+#   trust:
+#     selfReview: "off"

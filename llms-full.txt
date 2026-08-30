@@ -595,6 +595,8 @@ A quick orientation before the lists:
 7. [Memory across runs](#7-memory-across-runs)
 8. [Output shape](#8-output-shape)
 9. [Address-reviews checks](#9-address-reviews-checks)
+10. [Trajectory checks](#10-trajectory-checks-43-49)
+11. [Deterministic run record](#11-deterministic-run-record-plan-12)
 
 ---
 
@@ -609,8 +611,10 @@ verdict; everything else is advisory. Concretely:
   `mergecraft.analyzers.finding`, `extra="forbid"`). Each finding carries
   `tool`, `rule_id`, `category`, `severity`, `confidence`, `path`,
   `start_line`/`end_line`, `fingerprint`, `evidence: list[str]`,
-  `introduced_by_pr`, `source`, `cluster_id`. Findings are the
-  authoritative structural input to `decide_approval()`.
+  `introduced_by_pr`, `source`, `scope`, `cluster_id`. Findings are the
+  authoritative structural input to `decide_approval()`. Only `scope="change"`
+  findings can block; `scope="run"` rows are advisory and partition into the
+  packet's `run_health` section at assembly time (plan 12).
 - **`DeterministicCheck` rows** — one per declared `staticChecks` or
   discovered Makefile target. Status is one of five: `passed`, `failed`,
   `timed_out`, `unavailable`, `declared-but-cannot-run`. **Only
@@ -979,13 +983,48 @@ gated on the record carrying that signal at all: `changed-unread-file` needs
 `read_coverage`, `missing-completion-signal` needs at least one recorded call. A
 check that fires on every run is noise, not a gate.
 
-**No second gate.** These are ordinary findings in the packet's finding list, so
-`decide_approval()` weighs them exactly like any other evidence — a `Critical`
-`unresolved-failure` blocks for the same reason a `Critical` analyzer finding
-does. There is no separate trajectory verdict.
+**Run-scoped, never blocking (D2).** Trajectory checks stamp `scope="run"`,
+`source="trajectory"`, and `introduced_by_pr="false"`. They partition into the
+packet's `run_health` section and render under a separate collapsed heading in
+the deterministic run record. `blocking_findings()` drops them before severity
+grading — no severity, and no future check, makes a run-scoped finding fail a
+PR. There is no separate trajectory verdict and no second required check-run
+(D14).
 
 **They never crowd out code findings.** Inline slots go to code findings first;
-trajectory findings take only what is left and otherwise report in the body.
+trajectory findings take only what is left and otherwise report in the body or
+the run-health section.
+
+## 11. Deterministic run record (plan 12)
+
+Every run that resolves a PR number leaves exactly one authoritative sticky
+progress comment, whether the agent published a review, posted no verdict, or
+failed mid-run (D6). Re-runs edit the same comment in place via the existing
+sticky marker — they do not append a second one.
+
+The comment and the published review body both render from
+`render_deterministic_review_block()` in `findings/ledger.py` (D7), so the two
+surfaces cannot drift. The agent cannot suppress the block by supplying its own
+copy of the markers — dedupe keeps the server's version.
+
+The block always contains, in order:
+
+1. **Run header** — outcome, verdict diagnostic, decision verdict and reason,
+   model actually used, attempt count, token summary, run URL, reviewed SHA.
+2. **Pre-merge checks** — analyzers (dispatched lenses or packet summary),
+   static checks from `deterministic_checks`, CI intelligence pointer, trust
+   tier.
+3. **Change-scoped findings** — typed packet rows (`scope="change"`); `_No
+   change-scoped findings recorded._` when empty.
+4. **Run health** — collapsed `<details>` with `scope="run"` findings when
+   present; omitted when none.
+5. **Agent summary or rejection** — when a verdict exists, the agent's summary
+   quoted beneath the deterministic rows; when it does not, an explicit
+   `No verdict recorded — reason: <typed rejection>` line.
+
+The same block is merged into the review body as a mandatory preamble through
+`merge_deterministic_preamble_into_review_body` in `mcp/review.py`, applied
+last so nothing can be appended above it.
 
 ## 9. Address-reviews checks
 
@@ -1022,7 +1061,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `cargo-audit` | vuln | rust | auto | repo-native | trusted | — | — |
 | `cargo-deny` | license | rust | auto | repo-native | trusted | — | — |
 | `checkmake` | lint | make | auto | managed | trusted | — | — |
-| `checkov` | security | terraform, cloudformation | auto | managed | untrusted | — | — |
+| `checkov` | security | terraform, cloudformation | auto | managed | untrusted | — | manifest-only — checkov binary not bundled for linux-amd64 (provisioning gap; use repo-native install or wait for pinned provenance) |
 | `circleci` | lint | yaml | disabled | managed | untrusted | — | — |
 | `clang-tidy` | lint | c, cpp | disabled | container | trusted | — | requires compile_commands.json — mergeCraft never guesses compiler flags (C4) |
 | `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
@@ -1074,7 +1113,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `tsc` | lint | typescript | auto | repo-native | trusted | — | — |
 | `typos` | lint | python, javascript, typescript, rust, go, markdown | auto | repo-native | trusted | — | — |
 | `vulture` | quality | python | auto | repo-native | trusted | — | — |
-| `yamllint` | lint | yaml | auto | managed | untrusted | — | — |
+| `yamllint` | lint | yaml | auto | managed | untrusted | — | manifest-only — yamllint binary not bundled for linux-amd64 (provisioning gap; use repo-native install or wait for pinned provenance) |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
 ## Runtime x shell x trust x mode
@@ -1259,6 +1298,28 @@ Only a real non-zero exit from an executable gate is evidence. The Action image 
 `git`, `gh`, `jq`, `node`, and `npm` — not `make` — so every Makefile-discovered target
 lands as `unavailable` there unless the repo declares explicit `staticChecks` with binaries
 that exist in the image.
+
+## Finding scope: change vs run (plan 12, D1–D2)
+
+Every `Finding` carries a `scope` axis: `change` or `run`. The default is `change`, so
+existing producers keep their meaning without silent reclassification.
+
+- **`change`** — a claim about the diff under review. These are the findings that can
+  block merge after causality policy and severity grading.
+- **`run`** — a claim about how the review executed (trajectory auditor rows, environment
+  observations, and similar process evidence). These are **advisory only** and can never
+  block (D2). Run health is reported — in the evidence packet's `run_health` section, the
+  deterministic run record, the `mergecraft` completion check summary, and the job step
+  summary — never enforced as a second merge gate (D14).
+
+`blocking_findings()` in `agents/gates.py` is the single predicate: drop `scope == "run"`,
+apply `apply_causality_policy`, then test `BLOCKING_SEVERITIES`. `_has_blocker`,
+`_packet_has_blockers`, `decide_approval`, and `mcp/verdict.py::_blocks_approve` all route
+through it — two predicates that disagree is a defect class, not a style question (D3).
+
+Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by_pr="false"`
+(D4). All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
+`source` drives rendering.
 
 ## Makefile discovery, not tool inference
 
@@ -2331,9 +2392,35 @@ When JSON is on, each record includes bound context when available:
 | `phase` | coarse run phase (`setup`, …) |
 
 Bind or refresh fields from code with
-`mergecraft.utils.log.bind_run_context(...)`. Use tracing (`docs/TRACING.md`
-above) when you need model/tool span trees; use JSON logs when you need a
-grep-friendly stream of the same run on the runner console or log drain.
+`mergecraft.utils.log.bind_run_context(...)`. Use tracing (above) when you
+need model/tool span trees; use JSON logs when you need a grep-friendly stream
+of the same run on the runner console or log drain.
+
+## Agent stream log surface (plan 13 W6–W7)
+
+This section is **not** tracing spans — it is what operators see on the Actions
+console while the reviewing agent runs.
+
+| Before (plan 13) | After |
+|------------------|-------|
+| Loguru → stderr, stream echo → stdout — unsynchronised writers, interleaved mid-line | One writer: Loguru with `enqueue=True`; stream renderer emits through the same sink |
+| Full provider NDJSON dumped to stdout on every stream event | Human-readable lines from `agents/stream_render.py` (`emit_rendered_stream_line`) |
+| Forensic detail only in a masked, interleaved dump | Evidence packet `trajectory` built from MCP tool state (see [`evidence-packet.md`](evidence-packet.md)) |
+
+**Raw NDJSON is not the default log surface.** `consume_stream` still parses each
+line for spans and trajectory, but operator-facing output is rendered. The raw
+line is logged at `DEBUG` only when `is_debug_enabled()` is true:
+
+- `LOG_LEVEL=debug`, or
+- `ACTIONS_STEP_DEBUG=true` (GitHub Actions step debug)
+
+Until plan 12's artifact upload lands, raw NDJSON is not uploaded as a separate
+artifact — enable debug on the step when you need line-level provider JSON in
+the job log. The trajectory record in the evidence packet is the durable
+forensic surface for tool identity, outcomes, paths, and failure class.
+
+Loguru queue drain is registered beside the existing temp-dir `atexit` hook so
+Docker action tails are not lost when the container exits.
 
 ===== FILE: docs/install.md =====
 

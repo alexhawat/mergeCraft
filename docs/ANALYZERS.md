@@ -21,7 +21,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `cargo-audit` | vuln | rust | auto | repo-native | trusted | — | — |
 | `cargo-deny` | license | rust | auto | repo-native | trusted | — | — |
 | `checkmake` | lint | make | auto | managed | trusted | — | — |
-| `checkov` | security | terraform, cloudformation | auto | managed | untrusted | — | — |
+| `checkov` | security | terraform, cloudformation | auto | managed | untrusted | — | manifest-only — checkov binary not bundled for linux-amd64 (provisioning gap; use repo-native install or wait for pinned provenance) |
 | `circleci` | lint | yaml | disabled | managed | untrusted | — | — |
 | `clang-tidy` | lint | c, cpp | disabled | container | trusted | — | requires compile_commands.json — mergeCraft never guesses compiler flags (C4) |
 | `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
@@ -73,7 +73,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `tsc` | lint | typescript | auto | repo-native | trusted | — | — |
 | `typos` | lint | python, javascript, typescript, rust, go, markdown | auto | repo-native | trusted | — | — |
 | `vulture` | quality | python | auto | repo-native | trusted | — | — |
-| `yamllint` | lint | yaml | auto | managed | untrusted | — | — |
+| `yamllint` | lint | yaml | auto | managed | untrusted | — | manifest-only — yamllint binary not bundled for linux-amd64 (provisioning gap; use repo-native install or wait for pinned provenance) |
 | `zizmor` | ci | — | auto | managed | untrusted | — | — |
 
 ## Runtime x shell x trust x mode

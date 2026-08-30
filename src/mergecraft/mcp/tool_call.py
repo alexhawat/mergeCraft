@@ -74,6 +74,29 @@ def record_trajectory(
 
 _TRUE_STRINGS = frozenset({"true", "1"})
 _FALSE_STRINGS = frozenset({"false", "0"})
+_PULL_NUMBER_ALIASES: tuple[str, ...] = ("pr_number", "issue_number")
+
+
+def normalize_pull_number_aliases(arguments: dict[str, Any], schema: JsonSchema) -> dict[str, Any]:
+    """Map ``pr_number`` / ``issue_number`` to ``pull_number`` for PR-scoped tools."""
+    properties = schema.get("properties")
+    if not isinstance(properties, dict) or "pull_number" not in properties:
+        return arguments
+    if "pull_number" in arguments:
+        return arguments
+    for alias in _PULL_NUMBER_ALIASES:
+        if alias not in arguments:
+            continue
+        normalized = dict(arguments)
+        normalized["pull_number"] = arguments[alias]
+        del normalized[alias]
+        logger.debug(
+            "normalized pull_number from {}={} for PR-scoped tool",
+            alias,
+            arguments[alias],
+        )
+        return normalized
+    return arguments
 
 
 def _declared_types(schema: JsonSchema | None) -> frozenset[str]:
@@ -115,6 +138,7 @@ def _coerce_scalar(value: object, types: frozenset[str]) -> object:
 
 def coerce_arguments(arguments: dict[str, Any], schema: JsonSchema) -> dict[str, Any]:
     """Absorb loosely-typed scalars models routinely send at the MCP boundary."""
+    arguments = normalize_pull_number_aliases(arguments, schema)
     properties = schema.get("properties")
     if not isinstance(properties, dict):
         return arguments
@@ -156,6 +180,7 @@ __all__ = [
     "argument_schema_error",
     "charge_tool_call_budget",
     "coerce_arguments",
+    "normalize_pull_number_aliases",
     "record_trajectory",
     "span_tool_call_id",
     "tool_result_to_rpc",

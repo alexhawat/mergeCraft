@@ -50,6 +50,7 @@ from mergecraft.cli import (
     support_bundle_cmd,
     tracing_cmd,
     tracing_logfire_cmd,
+    trust_cmd,
     update_cmd,
     watch_cmd,
     workflow_cmd,
@@ -62,6 +63,7 @@ from mergecraft.cli.global_surface import (
     ColorMode,
     OutputFormat,
     apply_global_cli_options,
+    drain_log_queue_after_command,
     emit_cli_json,
     validate_log_level_option,
 )
@@ -107,6 +109,7 @@ app.add_typer(cache_cmd.app, name="cache")
 app.add_typer(context_cmd.app, name="context")
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(provider_cmd.app, name="provider")
+app.add_typer(trust_cmd.app, name="trust")
 app.add_typer(model_cmd.app, name="model")
 app.add_typer(workflow_cmd.app, name="workflow")
 app.add_typer(models_cmd.app, name="models")
@@ -147,7 +150,7 @@ app.add_typer(audit_cmd.app, name="audit")
 app.add_typer(support_bundle_cmd.app, name="support-bundle")
 
 
-@app.callback(invoke_without_command=True)
+@app.callback(invoke_without_command=True, result_callback=drain_log_queue_after_command)
 def _root(
     ctx: typer.Context,
     version: bool = typer.Option(

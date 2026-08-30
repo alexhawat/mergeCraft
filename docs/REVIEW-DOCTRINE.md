@@ -13,6 +13,28 @@ Only a real non-zero exit from an executable gate is evidence. The Action image 
 lands as `unavailable` there unless the repo declares explicit `staticChecks` with binaries
 that exist in the image.
 
+## Finding scope: change vs run (plan 12, D1–D2)
+
+Every `Finding` carries a `scope` axis: `change` or `run`. The default is `change`, so
+existing producers keep their meaning without silent reclassification.
+
+- **`change`** — a claim about the diff under review. These are the findings that can
+  block merge after causality policy and severity grading.
+- **`run`** — a claim about how the review executed (trajectory auditor rows, environment
+  observations, and similar process evidence). These are **advisory only** and can never
+  block (D2). Run health is reported — in the evidence packet's `run_health` section, the
+  deterministic run record, the `mergecraft` completion check summary, and the job step
+  summary — never enforced as a second merge gate (D14).
+
+`blocking_findings()` in `agents/gates.py` is the single predicate: drop `scope == "run"`,
+apply `apply_causality_policy`, then test `BLOCKING_SEVERITIES`. `_has_blocker`,
+`_packet_has_blockers`, `decide_approval`, and `mcp/verdict.py::_blocks_approve` all route
+through it — two predicates that disagree is a defect class, not a style question (D3).
+
+Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by_pr="false"`
+(D4). All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
+`source` drives rendering.
+
 ## Makefile discovery, not tool inference
 
 **`DISCOVERABLE_TARGETS` discovers Makefile targets, not tools.** The tuple

@@ -105,7 +105,18 @@ def merge_analyzer_findings_into_result(
             )
     if not extra:
         return result
-    existing = parse_offline_review_findings(result)
+    if result.structured_output:
+        try:
+            existing = [
+                Finding.model_validate(row)
+                for row in parse_findings_payload(result.structured_output)
+            ]
+        except ValueError:
+            # Invalid agent output must fail in finalize — do not mask it with
+            # analyzer rows (tests/cli/test_diff_review_json.py invalid_finding).
+            return result
+    else:
+        existing = []
     seen = {row.fingerprint for row in existing}
     merged = list(existing)
     for finding in extra:

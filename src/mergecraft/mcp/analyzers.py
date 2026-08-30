@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.config import load_repo_settings
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, analyzer_run_key, primary_repo_state
+from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, API_ONLY_SCOPE_GUIDANCE
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -45,6 +45,8 @@ def run_analyzers_tool(ctx: ToolContext):
         changed = [str(f) for f in (params.get("changed_files") or [])]
         diff_path = params.get("diff_path")
         diff_text = _load_diff_text(Path(diff_path)) if diff_path else ""
+
+        from mergecraft.config import load_repo_settings
 
         settings = load_repo_settings(root=repo_root, load_learnings_files=False).analyzers
         offline = ctx.payload.event.trigger == "unknown"
@@ -119,6 +121,8 @@ def run_analyzers_tool(ctx: ToolContext):
             payload["mechanicalSection"] = run_state.mechanical_section
         if run_state.deferred_section:
             payload["deferredSection"] = run_state.deferred_section
+        if ctx.tool_state.review_scope == API_ONLY_SCOPE:
+            payload["scopeNotice"] = API_ONLY_SCOPE_GUIDANCE
         logger.info(
             "analyzers: ran={} tools={} findings={} catalog={}",
             run_state.ran,

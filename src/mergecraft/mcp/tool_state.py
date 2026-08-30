@@ -317,8 +317,9 @@ class ToolState:
     modes: list[Mode] = field(default_factory=list)
     review: ReviewRecord | None = None
     # D10 / VP4 — closed ``ReviewPhase`` vocabulary; advanced by checkout and
-    # verdict tools (``mcp/verdict.py``).
-    review_phase: str = "INIT"
+    # verdict tools (``mcp/verdict.py``). Empty default means the run has not
+    # yet pinned INIT after a scope-guard refusal (plan 13 W5).
+    review_phase: str = ""
     # Stashed ``create_pull_request_review`` params for ``publish_pull_request_review``.
     pending_review_publication: dict[str, Any] | None = None
     terminal_submission: TerminalSubmission | None = None
@@ -356,8 +357,14 @@ class ToolState:
     author: str | None = None
     # GitHub ``author_association`` of the triggering comment / event.
     author_association: str | None = None
-    # ``derive_trust_tier()``'s return value for this run (trusted|untrusted).
+    # ``derive_trust_tier()``'s execution-trust value for this run (trusted|untrusted).
     trust_tier: str | None = None
+    # Authority axis — whether terminal approval semantics may apply (plan 13 D13).
+    authority_trust: str | None = None
+    # Resolved ``trust.selfReview`` level from the base snapshot (plan 13 W9).
+    trust_self_review_level: str | None = None
+    # Trust policy fields for evidence run manifest (plan 13 W9).
+    run_manifest_trust: dict[str, str] = field(default_factory=dict)
     # When ``setup_script`` is skipped on an untrusted tier (W1.2), the reason
     # string is recorded here for harness/tests and later RunOutcome mapping.
     setup_script_skip_reason: str | None = None
@@ -419,12 +426,23 @@ class ToolState:
     finding_ledger_loaded: bool = False
     # RC12 — 1-based review round, set by ``checkout_pr`` from prior PR reviews.
     review_round_index: int = 1
+    # Plan 13 W4 — ``api-only`` when the PR diff is authoritative but the head
+    # ref is not checked out locally; ``None`` means full local scope.
+    review_scope: str | None = None
+    # How review scope was established (``checkout_pr`` api fallback,
+    # ``establish_review_scope``, or ``get_commit_info`` at PR head).
+    scope_provenance: Literal["api", "checkout", "local-diff", "commit-info"] | None = None
+    # Memoized ``git show <rev>:<path>`` output paths keyed ``rev\\0path``.
+    git_show_cache: dict[str, str] = field(default_factory=dict)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     agent_findings: list[dict[str, Any]] = field(default_factory=list)
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
     # a CI source is actually read, so a run that consulted no CI records
     # nothing rather than an empty section.
     ci_evidence: CiEvidenceState | None = None
+    # D7 — single evidence-packet snapshot for the review preamble and sticky
+    # record; assembled once via ``resolve_prepared_run_packet`` and reused.
+    prepared_run_packet: Any | None = None
     # True once ``run_static_checks`` has been called this session. Read by the
     # verification tools (D14): an LLM judge may not evaluate a finding before
     # the deterministic checks it is meant to supplement have had their turn.
@@ -433,6 +451,9 @@ class ToolState:
     # appended) on each call. Read by ``validation_state_from_tool_context`` so
     # ``approve`` is rejected when a required gate recorded ``status: failed``.
     static_checks: list[dict[str, Any]] = field(default_factory=list)
+    # Plan 13 W5 — typed refusal from the last terminal tool attempt
+    # (``submit_review_verdict`` / ``create_pull_request_review``).
+    last_terminal_rejection: str | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

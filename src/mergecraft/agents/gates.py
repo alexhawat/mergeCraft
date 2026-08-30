@@ -130,14 +130,39 @@ def build_opencode_native_fs_permission() -> dict[str, object]:
     }
 
 
+def blocking_findings(findings: list[Finding]) -> list[Finding]:
+    """Return change-scoped findings that block after causality policy (D3)."""
+    from mergecraft.findings.causality import apply_causality_policy
+
+    blockers: list[Finding] = []
+    for finding in findings:
+        if finding.scope == "run":
+            continue
+        adjusted = apply_causality_policy(finding)
+        if adjusted.severity in BLOCKING_SEVERITIES:
+            blockers.append(adjusted)
+    return blockers
+
+
 def _has_blocker(findings: list[Finding]) -> bool:
     """True iff any finding carries a severity the gate treats as blocking."""
-    return any(f.severity in BLOCKING_SEVERITIES for f in findings)
+    return bool(blocking_findings(findings))
 
 
 def _packet_has_blockers(packet: MergeEvidencePacket) -> bool:
-    """True iff ``packet`` carries any blocking finding."""
+    """True iff ``packet.findings`` carries a change-scoped blocking row (D2).
+
+    ``run_health`` findings are advisory-only and are excluded here.
+    """
     return _has_blocker(packet.findings)
+
+
+def _packet_attested_findings(packet: MergeEvidencePacket) -> list[Finding]:
+    """Return all findings that attest the review ran, including run-health rows."""
+    attested = list(packet.findings)
+    if packet.run_health is not None:
+        attested.extend(packet.run_health.findings)
+    return attested
 
 
 def _trusted_positive_decision(packet: MergeEvidencePacket) -> bool:
@@ -221,8 +246,9 @@ def decide_approval(
       explicit ``Decision``, that row is honoured only when ``decided_by`` is
       the trusted decider and the verdict is consistent with typed findings
       (D9 / LR-1 — forged or permissive rows are refused). Otherwise the same
-      monotone blocker logic runs against ``packet.findings`` and the result is
-      wrapped in a :class:`Decision`.
+      monotone blocker logic runs against attested findings (change-scoped rows
+      from ``packet.findings`` plus run-health rows for attestation only) and
+      the result is wrapped in a :class:`Decision`.
 
     The decision is monotone in blockers:
 
@@ -293,7 +319,8 @@ def _decide_approval_from_packet(
     ``decided_by`` matches :data:`TRUSTED_PACKET_DECIDED_BY` and the verdict
     is consistent with typed findings; otherwise a :class:`ValueError` is
     raised. When the packet does not carry an explicit verdict, the legacy
-    blocker logic runs against ``packet.findings`` and the ``Conclusion``
+    blocker logic runs against :func:`_packet_attested_findings` (change-scoped
+    rows block; ``run_health`` rows attest only per D2) and the ``Conclusion``
     literal is wrapped in a ``Decision`` with a stable ``decided_by`` and a
     reason that names the signal the verdict came from.
 
@@ -317,7 +344,7 @@ def _decide_approval_from_packet(
         return packet.decision
 
     conclusion = _decide_approval_from_findings(
-        packet.findings, run_succeeded=run_succeeded, tier=tier
+        _packet_attested_findings(packet), run_succeeded=run_succeeded, tier=tier
     )
     return PacketDecision(
         verdict=conclusion,
@@ -345,7 +372,7 @@ def _packet_decision_reason(
             f"{conclusion}: structural evidence — agent's self_assessment.approved=true "
             "is advisory only and did not override the verdict"
         )
-    if not packet.findings:
+    if not _packet_attested_findings(packet):
         return f"{conclusion}: no typed findings to attest to the review"
     return f"{conclusion}: derived from typed findings and run state"
 
@@ -365,9 +392,13 @@ def approval_decision_inputs(
     ``decide_approval`` decision from the stored summary without re-running the
     analysis path.
     """
+    change_findings = [f for f in findings if f.scope != "run"]
+    run_findings = [f for f in findings if f.scope == "run"]
     severities = sorted({f.severity for f in findings})
     return {
         "findings_count": len(findings),
+        "change_findings_count": len(change_findings),
+        "run_findings_count": len(run_findings),
         "severities": severities,
         "has_blocker": _has_blocker(findings),
         "run_succeeded": run_succeeded,
@@ -377,17 +408,17 @@ def approval_decision_inputs(
 
 def decision_summary_lines(inputs: dict[str, object]) -> list[str]:
     """Render ``approval_decision_inputs`` as human-readable check-run summary lines (W8.6)."""
-    findings_count_raw = inputs.get("findings_count", 0)
-    findings_count = int(findings_count_raw) if isinstance(findings_count_raw, (int, float)) else 0
-    severities_raw = inputs.get("severities") or []
-    severities = [str(item) for item in severities_raw] if isinstance(severities_raw, list) else []
+    change_count_raw = inputs.get("change_findings_count", inputs.get("findings_count", 0))
+    run_count_raw = inputs.get("run_findings_count", 0)
+    change_count = int(change_count_raw) if isinstance(change_count_raw, (int, float)) else 0
+    run_count = int(run_count_raw) if isinstance(run_count_raw, (int, float)) else 0
     tier_raw = inputs.get("tier", "trusted")
     tier = str(tier_raw) if tier_raw is not None else "trusted"
     run_succeeded = bool(inputs.get("run_succeeded"))
     has_blocker = bool(inputs.get("has_blocker"))
-    severities_text = ", ".join(severities) if severities else "(none)"
     return [
-        f"- Findings: {findings_count} (severities: {severities_text})",
+        f"- Change findings: {change_count}",
+        f"- Run-health findings: {run_count}",
         f"- Run succeeded: {run_succeeded}",
         f"- Trust tier: {tier}",
         f"- Has blocker: {has_blocker}",
@@ -427,12 +458,16 @@ def log_decision(
 
 def _has_changed_unread_file(packet: MergeEvidencePacket) -> bool:
     """A trajectory finding flagged a file modified but never read."""
-    return any(finding.rule_id == "changed-unread-file" for finding in packet.findings)
+    return any(
+        finding.rule_id == "changed-unread-file" for finding in _packet_attested_findings(packet)
+    )
 
 
 def _has_tool_loop(packet: MergeEvidencePacket) -> bool:
     """A trajectory finding flagged a repeated call loop."""
-    return any(finding.rule_id == "repeated-tool-loop" for finding in packet.findings)
+    return any(
+        finding.rule_id == "repeated-tool-loop" for finding in _packet_attested_findings(packet)
+    )
 
 
 def _is_high_risk_migration(packet: MergeEvidencePacket) -> bool:
@@ -576,6 +611,7 @@ __all__ = [
     "BLOCKING_SEVERITIES",
     "GateAction",
     "approval_decision_inputs",
+    "blocking_findings",
     "build_claude_native_fs_denies",
     "build_opencode_native_fs_permission",
     "decide_action",

@@ -22,8 +22,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review works with no third command
 - `docs/agent-roster.md` — operator guide for slots, named agents, local scope,
   multi-reviewer verdict rules, and the run-start trust snapshot
+- Operator trust knob (`trust.selfReview`: `off` / `analyzers` / `full`) with
+  two-axis resolution — execution trust for analyzers vs authority trust for
+  approval semantics — resolved from the base config snapshot so a PR cannot
+  raise its own tier; `mergecraft trust show` / `set-self-review` CLI
+- Degraded review scope: when the PR head cannot be fetched, `checkout_pr`
+  returns `scope: api-only` with an API-built diff and the run may still reach
+  a terminal verdict (including approve when findings allow)
+- `establish_review_scope` — evidence-backed second route into review scope
+  when a materialized diff already describes the PR head
+- Read-only git MCP verbs (`show-ref`, `for-each-ref`, `ls-remote`, `config
+  --get`) and `checkout_pr` parameter aliases (`pr_number`, `issue_number`)
+- Agent stream logs render human-readable lines instead of dumping raw provider
+  NDJSON. The raw dump is gone rather than demoted: the evidence packet now
+  ships as a workflow artifact, so the trajectory record — tool identity,
+  outcome, paths, failure class — is the forensic surface, and an interleaved
+  raw dump is not reinstated even under `ACTIONS_STEP_DEBUG`
+- Every review run that resolves a pull request number posts a deterministic run
+  record — a sticky progress comment and a mandatory review-body preamble rendered
+  from the same function, so a green review that says nothing is no longer
+  indistinguishable from a review that never ran (#546 post-mortem)
+- The merge-evidence packet gains a `run_health` section (schema `1.11.0`) for
+  run-scoped findings partitioned out of the top-level `findings` list; change
+  findings and run observations now have separate audiences and surfaces
+- `Finding.scope` (`change` | `run`, default `change`) and `FindingSource`
+  `"trajectory"` so trajectory auditor rows are attributed as process evidence,
+  not PR defects
+- Job step summary (`GITHUB_STEP_SUMMARY`) written from `_publish` with outcome,
+  pre-merge rows, and findings — capped at GitHub's 1 MiB with the header intact
+- Evidence packet persisted to a workflow artifact on every review rung
+  (`if: always()`, 30-day retention) so the packet survives runner teardown
+- `MERGECRAFT_ACTION_SHA` workflow variable — one pin definition shared by all
+  three review rungs, with `make action-pin-check` enforcing staleness and
+  rung parity (#532)
+- Action image digest pin gate (`action-image-digest-check`) and halved
+  `wait-for-ci` poll cadence (20s → 10s, #528)
 
 ### Fixed
+
+- A refused terminal verdict now reaches the deterministic run record by name.
+  `rejection_reason` — and the record's reason line — were both gated on the
+  packet having no decision, but `decide_approval` always returns one, so
+  neither could fire: a run that refused for lack of review scope rendered
+  identically to a clean one. The refusal is read from the run state instead,
+  and the non-retryable post-run path records it rather than publishing a
+  second record that the finalize-time upsert would overwrite
+
+- Git MCP containment: refuse `--no-index`, confine positional paths, deny
+  credential paths (`.git/config`, askpass tree), and redact git failure text
+  before it becomes a tool result
+- Post-run retry loop classifies scope and policy refusals before resuming —
+  deterministic refusals no longer spend a second provider turn
+- Single Loguru writer with `enqueue=True` and explicit queue drain — runner
+  logs no longer interleave mid-line from concurrent stdout/stderr writers
+- Bubblewrap namespace failures surface `user_namespace_failure_hint()` once
+  per run (not gated behind a non-zero Codex exit code)
+- `checkov` and `yamllint` catalog rows document linux-amd64 manifest-only
+  provisioning instead of presenting as runtime failures
+- Git config MCP: deny `config --list` and credential-bearing keys on
+  `config --get-all` so brokered auth headers cannot leak through enumeration
+- `get_commit_info` validates unified diff evidence before establishing review
+  scope; successful `checkout_pr` records scope via `register_review_scope`
+- Claude driver: pass ``--verbose`` alongside ``--print
+  --output-format=stream-json``. The CLI refuses that pair without it and exits
+  1 before emitting a single event, so the Claude backstop failed on every run
+  it was ever asked to handle; the failure only became legible once zero-event
+  runs began reporting their stderr (#557)
+- Trajectory findings no longer block merge: `blocking_findings()` is the single
+  predicate shared by the terminal-verdict gate, packet gate, and approval check;
+  run-scoped rows are dropped before severity grading (D2/D3)
+- A review whose inline anchors are all invalid still lands its body and verdict
+  — anchors are pre-validated against the diff, 422 on non-APPROVE reviews is
+  recovered server-side, and a total anchor failure posts zero inline comments
+  instead of losing the review (#530)
+- Trajectory auditor classifies tool failures before counting them, so
+  self-corrected schema slips, policy refusals, and environment faults no
+  longer masquerade as ignored errors that block the PR
+- Status-check summaries are derived from the evidence packet they report — no
+  hardcoded prose that the packet can contradict; failed check posts log at
+  WARNING with a matching `::warning::` annotation (#546 post-mortem)
+- Codex fallback routing reads `decision.verdict` from the in-process evidence
+  packet instead of racing the check-runs API
+
+### Changed
 
 - Enforcement modes and the approval gate now agree on what blocks. The
   gate-facing severity is the single authority, so ``contributes_blocker`` is
