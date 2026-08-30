@@ -158,7 +158,7 @@ env:
   # Single Action SHA for all three review rungs (D10 / #532). Bump here only;
   # every `uses: alexhawat/mergeCraft@…` below must match — enforced by
   # `make action-pin-check`.
-  MERGECRAFT_ACTION_SHA: "fcb64c11d839d8ff4cf18bb925362080873df067"
+  MERGECRAFT_ACTION_SHA: "695d34b0979a84f5c3cea53f12c624f9e9f27521"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -582,7 +582,7 @@ jobs:
         # closed with no mergecraft-approval check at all. Fixed in #545
         # (utils/git_setup.py — basic auth on the documented `x-access-token`
         # username). b3638ea7 is #545's merge commit.
-        uses: alexhawat/mergeCraft@fcb64c11d839d8ff4cf18bb925362080873df067 # env.MERGECRAFT_ACTION_SHA / PR #562
+        uses: alexhawat/mergeCraft@695d34b0979a84f5c3cea53f12c624f9e9f27521 # env.MERGECRAFT_ACTION_SHA / PR #575 promotion
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -627,14 +627,24 @@ jobs:
         if: always()
         env:
           PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
-        run: printf '%s' "$PACKET" > packet-nous.json
+        run: |
+          # $GITHUB_WORKSPACE is created by the Action container's volume
+          # mount and owned by root — this job never checks out, so no
+          # runner-owned directory exists there. Writing the packet into
+          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
+          # always writable by the runner user.
+          if [ -z "${PACKET:-}" ]; then
+            echo "no evidence packet emitted by this rung; nothing to persist"
+            exit 0
+          fi
+          printf '%s' "$PACKET" > "$RUNNER_TEMP/packet-nous.json"
 
       - name: Upload packet artifact (Nous)
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-nous
-          path: packet-nous.json
+          path: ${{ runner.temp }}/packet-nous.json
           retention-days: 30
           if-no-files-found: ignore
 
@@ -757,7 +767,7 @@ jobs:
         # closed with no mergecraft-approval check at all. Fixed in #545
         # (utils/git_setup.py — basic auth on the documented `x-access-token`
         # username). b3638ea7 is #545's merge commit.
-        uses: alexhawat/mergeCraft@fcb64c11d839d8ff4cf18bb925362080873df067 # env.MERGECRAFT_ACTION_SHA / PR #562
+        uses: alexhawat/mergeCraft@695d34b0979a84f5c3cea53f12c624f9e9f27521 # env.MERGECRAFT_ACTION_SHA / PR #575 promotion
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -784,14 +794,24 @@ jobs:
         if: always()
         env:
           PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
-        run: printf '%s' "$PACKET" > packet-codex.json
+        run: |
+          # $GITHUB_WORKSPACE is created by the Action container's volume
+          # mount and owned by root — this job never checks out, so no
+          # runner-owned directory exists there. Writing the packet into
+          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
+          # always writable by the runner user.
+          if [ -z "${PACKET:-}" ]; then
+            echo "no evidence packet emitted by this rung; nothing to persist"
+            exit 0
+          fi
+          printf '%s' "$PACKET" > "$RUNNER_TEMP/packet-codex.json"
 
       - name: Upload packet artifact (Codex)
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-codex
-          path: packet-codex.json
+          path: ${{ runner.temp }}/packet-codex.json
           retention-days: 30
           if-no-files-found: ignore
 
@@ -894,7 +914,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now b3638ea7 (#545).
-        uses: alexhawat/mergeCraft@fcb64c11d839d8ff4cf18bb925362080873df067 # env.MERGECRAFT_ACTION_SHA / PR #562
+        uses: alexhawat/mergeCraft@695d34b0979a84f5c3cea53f12c624f9e9f27521 # env.MERGECRAFT_ACTION_SHA / PR #575 promotion
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -917,14 +937,24 @@ jobs:
         if: always()
         env:
           PACKET: ${{ steps.mergecraft_claude.outputs.evidence_packet }}
-        run: printf '%s' "$PACKET" > packet-claude.json
+        run: |
+          # $GITHUB_WORKSPACE is created by the Action container's volume
+          # mount and owned by root — this job never checks out, so no
+          # runner-owned directory exists there. Writing the packet into
+          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
+          # always writable by the runner user.
+          if [ -z "${PACKET:-}" ]; then
+            echo "no evidence packet emitted by this rung; nothing to persist"
+            exit 0
+          fi
+          printf '%s' "$PACKET" > "$RUNNER_TEMP/packet-claude.json"
 
       - name: Upload packet artifact (Claude)
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-claude
-          path: packet-claude.json
+          path: ${{ runner.temp }}/packet-claude.json
           retention-days: 30
           if-no-files-found: ignore
 
