@@ -34,7 +34,6 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
-W4_XFAIL = pytest.mark.xfail(reason="green after W4: provider status roster view", strict=True)
 
 
 def _invoke(*argv: str, env: dict[str, str] | None = None) -> Any:
@@ -51,7 +50,6 @@ def _require_status_subcommand() -> None:
         pytest.fail("mergecraft provider status is not registered yet")
 
 
-@W4_XFAIL
 def test_provider_status_renders_every_reviewer_slot_and_provider(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -67,7 +65,6 @@ def test_provider_status_renders_every_reviewer_slot_and_provider(
         assert token in output.lower(), f"expected {token!r} in status output"
 
 
-@W4_XFAIL
 def test_provider_status_missing_credential_reports_env_var_not_value(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -86,7 +83,6 @@ def test_provider_status_missing_credential_reports_env_var_not_value(
     assert_no_secret_material(output, secrets=("super-secret-value",))
 
 
-@W4_XFAIL
 def test_provider_status_unwired_is_distinct_from_missing_credential(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -109,7 +105,6 @@ def test_provider_status_unwired_is_distinct_from_missing_credential(
     assert missing_label != "not wired"
 
 
-@W4_XFAIL
 def test_provider_status_renders_dispatch_level_and_after_ordering(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -127,7 +122,6 @@ def test_provider_status_renders_dispatch_level_and_after_ordering(
     assert after_agents, "after: ordering must be visible in JSON"
 
 
-@W4_XFAIL
 def test_provider_status_disabled_provider_renders_disabled(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -147,7 +141,6 @@ def test_provider_status_disabled_provider_renders_disabled(
     assert "anthropic" in output
 
 
-@W4_XFAIL
 def test_provider_status_github_without_token_is_unknown_exit_zero(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -165,7 +158,6 @@ def test_provider_status_github_without_token_is_unknown_exit_zero(
     assert "token" in output or "gh_token" in output or "github_token" in output
 
 
-@W4_XFAIL
 def test_provider_status_github_with_token_reports_secret_presence(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -215,7 +207,6 @@ def test_provider_status_github_with_token_reports_secret_presence(
     assert_no_secret_material(result.stdout, secrets=("test-token",))
 
 
-@W4_XFAIL
 def test_provider_status_json_matches_documented_schema(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -230,7 +221,6 @@ def test_provider_status_json_matches_documented_schema(
     assert schema["version"] == payload["schemaVersion"]
 
 
-@W4_XFAIL
 def test_provider_status_cwd_selects_config_workflow_and_registry_targets(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -254,7 +244,6 @@ def test_provider_status_cwd_selects_config_workflow_and_registry_targets(
     )
 
 
-@W4_XFAIL
 def test_provider_status_is_read_only(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     _require_status_subcommand()
     bootstrap_status_repo(tmp_path, monkeypatch)
