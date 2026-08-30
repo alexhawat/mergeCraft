@@ -13,8 +13,11 @@ fi
 base_ref="origin/${GITHUB_BASE_REF}"
 worktree="${GITHUB_WORKSPACE}/.ci-mergecraft-base-coverage"
 
+base_measure_log="${GITHUB_WORKSPACE}/.ci-base-measure.log"
+
 cleanup() {
   rm -f "${GITHUB_WORKSPACE}/coverage-base.json" 2>/dev/null || true
+  rm -f "$base_measure_log" 2>/dev/null || true
   git worktree remove "$worktree" --force 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -26,6 +29,7 @@ git worktree prune 2>/dev/null || true
 git fetch origin "${GITHUB_BASE_REF}"
 git worktree add "$worktree" "$base_ref"
 orig_workspace="$GITHUB_WORKSPACE"
+: >"$base_measure_log"
 # BASE_WORKTREE_MEASURE_BLOCK — parsed by tests/ci/test_coverage_delta_wrapper.py (D10).
 (
   cd "$worktree"
@@ -48,18 +52,45 @@ orig_workspace="$GITHUB_WORKSPACE"
   # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
   # only runs on the PR checkout, not this detached base worktree.
   make setup-local-analyzers
+  measure_ok=true
   if grep -q '^coverage-measure:' Makefile; then
-    make coverage-measure
+    if ! make coverage-measure >>"$base_measure_log" 2>&1; then
+      measure_ok=false
+    fi
   else
     # Pre-TH base trees only ship ``coverage-gate``; inline the measure recipe
     # so the delta gate can compare against the merge base before TH lands.
-    "${UV:-uv}" run pytest tests -q --tb=short --strict-markers -m "not integration" \
+    if ! "${UV:-uv}" run pytest tests -q --tb=short --strict-markers -m "not integration" \
       --cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
       --randomly-seed="${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}" \
-      -rX
+      -rX >>"$base_measure_log" 2>&1; then
+      measure_ok=false
+    fi
   fi
-  cp coverage.json "${orig_workspace}/coverage-base.json"
+  if [[ "$measure_ok" == true ]]; then
+    cp coverage.json "${orig_workspace}/coverage-base.json"
+  fi
 )
+if [[ ! -f coverage-base.json ]]; then
+  base_reason="base coverage measurement failed"
+  if [[ -s "$base_measure_log" ]]; then
+    base_reason="$(tail -n 5 "$base_measure_log" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //;s/ $//')"
+  fi
+  skip_msg="Coverage delta skipped: base ref ${GITHUB_BASE_REF} could not be measured (${base_reason})."
+  echo "warning: ${skip_msg}" >&2
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    escaped_msg="${skip_msg//'%'/'%25'}"
+    escaped_msg="${escaped_msg//$'\r'/'%0D'}"
+    escaped_msg="${escaped_msg//$'\n'/'%0A'}"
+    echo "::warning title=Coverage delta skipped::${escaped_msg}" >&2
+  fi
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      echo "### Coverage delta skipped"
+      echo "${skip_msg}"
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+fi
 make coverage-gate
 if [[ -f coverage-base.json ]]; then
   uv run python scripts/check_coverage_delta.py coverage.json --base coverage-base.json

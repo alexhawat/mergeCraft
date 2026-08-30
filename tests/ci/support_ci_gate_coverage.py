@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -12,6 +13,20 @@ from tests.ci.workflow_support import REPO_ROOT
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+_MODULE_FLOORS = (
+    "utils/token.py",
+    "utils/git_setup.py",
+    "main.py",
+)
+_PREFIX_NEEDLES = (
+    "/mcp/",
+    "/action/",
+    "/security/",
+    "/analyzers/",
+    "/agents/",
+    "/review/",
+)
 
 _BASE_MEASURE_MARKER = "BASE_WORKTREE_MEASURE_BLOCK"
 _BASE_MEASURE_BLOCK_RE = re.compile(
@@ -89,6 +104,43 @@ def break_coverage_measure(makefile: Path) -> None:
     makefile.write_text(patched, encoding="utf-8")
 
 
+def noop_coverage_measure(makefile: Path) -> None:
+    """Replace ``coverage-measure`` with a no-op so a pre-seeded ``coverage.json`` survives."""
+    text = makefile.read_text(encoding="utf-8")
+    match = re.search(r"^(coverage-measure:.*\n)((?:\t.*\n)+)", text, flags=re.MULTILINE)
+    if match is None:
+        msg = "Makefile is missing a coverage-measure target"
+        raise AssertionError(msg)
+    replacement = f"{match.group(1)}\t@:\n"
+    patched = text[: match.start()] + replacement + text[match.end() :]
+    makefile.write_text(patched, encoding="utf-8")
+
+
+def seed_passing_coverage_json(path: Path) -> None:
+    """Write a ``coverage.json`` that satisfies the head ratchet and floor checks."""
+    summary = {
+        "percent_covered": 100.0,
+        "num_statements": 100,
+        "covered_lines": 100,
+        "num_branches": 100,
+        "covered_branches": 100,
+    }
+    files: dict[str, dict[str, dict[str, float | int]]] = {}
+    for suffix in _MODULE_FLOORS:
+        files[f"src/mergecraft/{suffix}"] = {"summary": summary}
+    for needle in _PREFIX_NEEDLES:
+        files[f"src/mergecraft{needle}module.py"] = {"summary": summary}
+    payload = {
+        "totals": {
+            "percent_covered": 100.0,
+            "num_statements": 100,
+            "covered_lines": 100,
+        },
+        "files": files,
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def run_coverage_delta_gate(
     repo_root: Path,
     *,
@@ -124,7 +176,9 @@ __all__ = [
     "clone_local_repo",
     "git",
     "install_bare_origin",
+    "noop_coverage_measure",
     "run_coverage_delta_gate",
     "script_text",
+    "seed_passing_coverage_json",
     "worktree_path",
 ]

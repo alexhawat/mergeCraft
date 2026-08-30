@@ -6,16 +6,16 @@ import json
 import re
 from typing import TYPE_CHECKING
 
-import pytest
-
 from tests.ci.support_ci_gate_coverage import (
     base_measure_block,
     break_coverage_measure,
     clone_local_repo,
     git,
     install_bare_origin,
+    noop_coverage_measure,
     run_coverage_delta_gate,
     script_text,
+    seed_passing_coverage_json,
     worktree_path,
 )
 from tests.ci.test_coverage_delta_wrapper import (
@@ -26,7 +26,6 @@ from tests.ci.test_coverage_delta_wrapper import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-W3_XFAIL = pytest.mark.xfail(reason="green after W3: base measurement signal not gate", strict=True)
 _INTEGRATION_TIMEOUT = 180
 
 
@@ -38,6 +37,11 @@ def _bootstrap_broken_base(scratch: Path, tmp_path: Path, base_ref: str = "broke
     git(scratch, "commit", "-m", "break base coverage-measure")
     git(scratch, "push", "-u", "origin", base_ref)
     git(scratch, "checkout", "-b", "feature-head")
+    git(scratch, "checkout", f"{base_ref}^", "--", "Makefile")
+    noop_coverage_measure(scratch / "Makefile")
+    seed_passing_coverage_json(scratch / "coverage.json")
+    git(scratch, "add", "Makefile")
+    git(scratch, "commit", "-m", "fast head coverage gate for integration tests")
     git(scratch, "push", "-u", "origin", "feature-head")
 
 
@@ -90,7 +94,6 @@ def test_worktree_cleaned_up_when_base_measurement_fails(tmp_path: Path) -> None
     assert not wt.exists()
 
 
-@W3_XFAIL
 def test_broken_base_measurement_exits_zero_without_base_json(tmp_path: Path) -> None:
     """D4 — a red base is a signal, not a script-killing pre-gate."""
     scratch = clone_local_repo(tmp_path)
@@ -102,7 +105,6 @@ def test_broken_base_measurement_exits_zero_without_base_json(tmp_path: Path) ->
     assert not (scratch / "coverage-base.json").is_file()
 
 
-@W3_XFAIL
 def test_skipped_delta_emits_warning_with_reason(tmp_path: Path) -> None:
     """D6 — a skipped delta must be visible, not silent."""
     scratch = clone_local_repo(tmp_path)
@@ -117,7 +119,6 @@ def test_skipped_delta_emits_warning_with_reason(tmp_path: Path) -> None:
     assert "measure" in combined or "coverage" in combined
 
 
-@W3_XFAIL
 def test_head_coverage_regression_still_fails_when_base_skips(tmp_path: Path) -> None:
     """D5 — relaxing only the base must not disable the head ratchet."""
     scratch = clone_local_repo(tmp_path)
