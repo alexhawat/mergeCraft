@@ -22,7 +22,6 @@ from mergecraft.classify import RuleSet
 from mergecraft.config.compat import CONFIG_SCHEMA_VERSION, migrate_config
 from mergecraft.enterprise.controls import EnterpriseSettings
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
-from mergecraft.utils.source_resolve import is_registered_git_worktree, resolve_git_common_dir
 
 AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
@@ -782,6 +781,9 @@ def _workspace_root(explicit: Path | None = None) -> Path:
         return workspace
     if _path_is_inside(cwd, workspace) or cwd_resolved == workspace_resolved:
         return workspace
+    # Lazy import: source_resolve → analyzers.trust → settings at module load.
+    from mergecraft.utils.source_resolve import is_registered_git_worktree, resolve_git_common_dir
+
     cwd_common = resolve_git_common_dir(cwd_resolved)
     ws_common = resolve_git_common_dir(workspace_resolved)
     if (
