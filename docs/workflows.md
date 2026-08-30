@@ -293,6 +293,79 @@ other in CI — and read the workflow side from the **default branch**
 (`git show origin/main:.github/workflows/mergecraft.yml`), not the working tree.
 Bump order is default branch first, local pin second.
 
+### Automated pin bump — and the order that avoids a deadlock
+
+`action.yml`'s `runs.image` pins the published image **digest** for the same
+Action SHA. Two scripts enforce consistency: `scripts/check_action_pin_freshness.py`
+(self-consistency across the four literal SHA occurrences in `mergecraft.yml`,
+ancestry against the default branch, and a staleness ceiling —
+`MAX_PRODUCT_LAG`, default 5 — of `src/mergecraft/`-touching commits the pin
+may lag the default branch's tip) and `scripts/check_action_image_digest.py`
+(the digest must equal what GHCR actually serves for the pinned SHA, and that
+image must have been built with `--extra tracing`).
+
+There is a **deadlock** hiding in that arrangement: the image for a SHA is
+normally published by `build-images` (`.github/workflows/ci-cd.yml`), which
+runs behind `Full verify` (`ci-cd.yml`'s own `verify` job, i.e. `make ci`),
+which runs `action-pin-check` — the same staleness check that needs the image
+to already exist before it can pass. Promote the default branch enough
+`src/mergecraft/` commits without bumping the pin and the ceiling is exceeded;
+`main` then has no path to green, because the fix (bump the pin) needs an
+image that cannot publish until the branch is green. `action-slim-bootstrap`
+(`.github/workflows/ci.yml`) is the escape hatch: it runs on a `pull_request`
+into `pre-0.0.1`, **before** `Full verify`, and builds the image itself from
+the PR's own Dockerfile if GHCR doesn't have it yet. Its body now lives in a
+reusable workflow, `.github/workflows/ensure-action-slim-image.yml`, so
+nothing has to reimplement it.
+
+`scripts/bump_action_pin.py` does the pin edit itself — atomically, from one
+target SHA:
+
+```console
+$ uv run python scripts/bump_action_pin.py <sha>
+bump-action-pin OK: <old-sha-prefix> -> <new-sha-prefix> (image digest sha256:<prefix>…)
+  .github/workflows/mergecraft.yml: env.MERGECRAFT_ACTION_SHA + 3 uses: rungs updated
+  action.yml: runs.image digest updated
+```
+
+It refuses to write anything unless every precondition holds first: `<sha>`
+must be an ancestor of `--ref` (default `HEAD`), GHCR must already serve
+`ghcr.io/alexhawat/mergecraft:<sha>`, and that image must carry the tracing
+extra. This is what PR #562 got wrong by hand — splitting the pin edit from
+the digest edit across separate commits turned five checks red at once; one
+script call replaces every literal SHA occurrence in one string-replace pass
+and can't land a partial bump.
+
+`.github/workflows/bump-action-pin.yml` (`workflow_dispatch`) wraps the whole
+flow: resolve the target SHA (default: the input branch's own tip), call
+`ensure-action-slim-image.yml` to make sure GHCR has the image, run
+`bump_action_pin.py`, run **both** checker scripts as a gate, and push a
+branch — `bump-action-pin/<short-sha>` — if anything changed.
+
+**It stops at the push.** It does not open a PR: a PR opened with the default
+`GITHUB_TOKEN` does not trigger `pull_request` workflows (GitHub's built-in
+anti-recursion rule), so a bot-opened PR here would carry zero required
+checks and could never satisfy branch protection. A human opens the PR from
+the pushed branch — the workflow's job summary says so, with the branch name.
+No PAT is used to route around this; once [issue
+#550](https://github.com/alexhawat/mergeCraft/issues/550)'s GitHub App exists,
+an App-authored PR *does* trigger `pull_request` workflows, and a future
+revision of this job could open the PR itself the same way the review steps
+already prefer an App token over `github.token`.
+
+**Bump order matters — this is the load-bearing rule, not a nicety:**
+
+1. Bump `pre-0.0.1`'s own pin to `pre-0.0.1`'s own tip **first**
+   (`bump-action-pin.yml`'s default: `base_branch: pre-0.0.1`, `sha` left
+   blank so it resolves that same branch's current tip).
+2. Only **after** that bump has merged into `pre-0.0.1` should `pre-0.0.1` be
+   promoted into `main` — an ordinary merge/PR, not this workflow.
+
+Reversing the order — promoting to `main` first, then pinning `main`'s merge
+commit — was measured at a staleness lag of **35** commits against the
+ceiling of **5**, and deadlocked `main` exactly as described above. Pinning
+`pre-0.0.1` to its own tip first measured a lag of **0**.
+
 Since [June 2026](https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/)
 `actions/checkout` refuses to check out fork PR code under `pull_request_target`
 unless you pass `allow-unsafe-pr-checkout` (v7 GA 2026-06-18, backported to all

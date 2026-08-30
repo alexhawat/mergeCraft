@@ -94,17 +94,18 @@ jobs:
           GITHUB_BASE_REF: ${{ github.base_ref }}
         run: make coverage-gate
 
-  action-slim-bootstrap:
-    name: Bootstrap slim GHCR image for Action SHA pin
+  resolve-action-pin:
+    name: Resolve self-review Action SHA pin
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.base.ref == 'pre-0.0.1' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
       contents: read
-      packages: write
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Resolve self-review Action SHA pin
@@ -114,50 +115,38 @@ jobs:
           SHA=$(grep -E '^\s*MERGECRAFT_ACTION_SHA:\s*"' .github/workflows/mergecraft.yml | head -1 | sed -E 's/.*"([0-9a-f]{40})".*/\1/')
           test -n "${SHA}"
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Check whether slim image tag already exists on GHCR
-        id: tag
-        env:
-          SHA: ${{ steps.pin.outputs.sha }}
-        run: |
-          set -euo pipefail
-          if docker manifest inspect "ghcr.io/alexhawat/mergecraft:${SHA}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Slim image tag already published — skipping bootstrap rebuild"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Slim image tag missing — will build and push"
-          fi
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.tag.outputs.exists != 'true'
-        with:
-          ref: ${{ steps.pin.outputs.sha }}
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        if: steps.tag.outputs.exists != 'true'
-      - name: Build and push slim image for pinned Action SHA
-        if: steps.tag.outputs.exists != 'true'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          tags: ghcr.io/alexhawat/mergecraft:${{ steps.pin.outputs.sha }}
-          labels: |
-            org.opencontainers.image.revision=${{ steps.pin.outputs.sha }}
-          cache-from: type=gha,scope=mergeCraft-slim-bootstrap
-          cache-to: type=gha,mode=max,scope=mergeCraft-slim-bootstrap
+
+  # #562 follow-up — the build/push body now lives in ensure-action-slim-image.yml
+  # so scripts/bump_action_pin.py's workflow_dispatch caller (bump-action-pin.yml)
+  # can call the exact same steps instead of a second implementation drifting
+  # from this one. See that file's header comment for why this has to run before
+  # `Full verify` (ci-cd.yml) at all — it is the deadlock escape hatch.
+  action-slim-bootstrap:
+    name: Bootstrap slim GHCR image for Action SHA pin
+    needs: resolve-action-pin
+    if: needs.resolve-action-pin.result == 'success'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/ensure-action-slim-image.yml
+    with:
+      sha: ${{ needs.resolve-action-pin.outputs.sha }}
 
   static:
     name: Verify (static + build py${{ matrix.python }})
-    needs: action-slim-bootstrap
+    # Both jobs listed directly (not just transitively via action-slim-bootstrap's
+    # own needs:) so their `.result` is readable here — a job's needs-context is
+    # only populated for direct dependencies. A resolve-action-pin failure (e.g. a
+    # garbled MERGECRAFT_ACTION_SHA line) must still block static, exactly as it
+    # did before #526/#532's follow-up split one job into these two — only an
+    # intentional *skip* (not a pre-0.0.1 PR, or a fork) is tolerated.
+    needs: [resolve-action-pin, action-slim-bootstrap]
     if: >-
       always() &&
-      (needs.action-slim-bootstrap.result == 'success' ||
-       needs.action-slim-bootstrap.result == 'skipped')
+      needs.resolve-action-pin.result != 'failure' &&
+      needs.resolve-action-pin.result != 'cancelled' &&
+      needs.action-slim-bootstrap.result != 'failure' &&
+      needs.action-slim-bootstrap.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
