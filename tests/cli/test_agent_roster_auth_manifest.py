@@ -170,3 +170,131 @@ def test_workflow_sync_apply_adds_missing_step_with_owned_keys_only(
     assert after != before
     assert_only_owned_workflow_keys_changed(before, after)
     assert "nous" in after.lower() or "LLM_PROVIDER" in after
+
+
+# --- Review finding (PR #566): auth-kind-aware credential requirements -------
+
+_WORKFLOW_OAUTH_STEP = """\
+name: mergecraft
+on:
+  pull_request_target:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review (oauth)
+        uses: alexhawat/mergeCraft@pre-0.0.1
+        with:
+          model: anthropic/claude-sonnet-4-5
+        env:
+          LLM_PROVIDER_1: anthropic
+          LLM_PROVIDER_1_CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+"""
+
+_WORKFLOW_DEVICE_CODE_STEP = """\
+name: mergecraft
+on:
+  pull_request_target:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: mergeCraft PR review (device code)
+        uses: alexhawat/mergeCraft@pre-0.0.1
+        with:
+          model: openai/gpt-codex
+        env:
+          LLM_PROVIDER_1: openai
+          LLM_PROVIDER_1_CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+"""
+
+
+def _settings_with_entry(*, label: str, auth_kind: str, harness: str, slug: str):
+    from mergecraft.config.settings import RepoSettings
+
+    return RepoSettings.model_validate(
+        {
+            "providers": [
+                {"label": label, "harness": harness, "envIndex": 1, "authKind": auth_kind}
+            ],
+            "agents": {"reviewer": {"modelChain": [slug]}},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("label", "auth_kind", "harness", "slug", "workflow", "env_key"),
+    [
+        (
+            "anthropic",
+            "oauth",
+            "claude",
+            "anthropic/claude-sonnet-4-5",
+            _WORKFLOW_OAUTH_STEP,
+            "LLM_PROVIDER_1_CLAUDE_CODE_OAUTH_TOKEN",
+        ),
+        (
+            "openai",
+            "device_code",
+            "codex",
+            "openai/gpt-codex",
+            _WORKFLOW_DEVICE_CODE_STEP,
+            "LLM_PROVIDER_1_CODEX_AUTH_JSON",
+        ),
+    ],
+    ids=["oauth", "device_code"],
+)
+def test_non_api_key_credential_satisfies_the_roster_check(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    label: str,
+    auth_kind: str,
+    harness: str,
+    slug: str,
+    workflow: str,
+    env_key: str,
+) -> None:
+    """An oauth / device-code credential is a credential (PR #566 review finding).
+
+    The check required ``LLM_PROVIDER_<N>_API_KEY`` for every registered
+    provider, but ``default_auth_kind_for_label`` gives Anthropic ``oauth`` and
+    OpenAI/Codex ``device_code``, whose credentials arrive under different
+    suffixes. A repo that followed the documented ``mergecraft provider auth``
+    quick-start was correctly configured and still failed closed at run start.
+    """
+    from mergecraft.review.roster_auth import _empty_secrets_for_roster
+
+    workflow_path = scaffold_workflow_file(tmp_path, workflow)
+    settings = _settings_with_entry(label=label, auth_kind=auth_kind, harness=harness, slug=slug)
+    monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
+    monkeypatch.setenv(env_key, "token-value")
+
+    empty = _empty_secrets_for_roster(
+        settings=settings,
+        workflow_path=workflow_path,
+        roster_slugs=(slug,),
+        wired=frozenset({label}),
+    )
+    assert empty == (), f"{auth_kind} credential in {env_key} must satisfy the roster check"
+
+
+def test_missing_oauth_credential_names_the_wired_secret(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """With no alternative present it still fails closed, naming the bound secret."""
+    from mergecraft.review.roster_auth import _empty_secrets_for_roster
+
+    workflow_path = scaffold_workflow_file(tmp_path, _WORKFLOW_OAUTH_STEP)
+    settings = _settings_with_entry(
+        label="anthropic", auth_kind="oauth", harness="claude", slug="anthropic/claude-sonnet-4-5"
+    )
+    monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER_1_CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    empty = _empty_secrets_for_roster(
+        settings=settings,
+        workflow_path=workflow_path,
+        roster_slugs=("anthropic/claude-sonnet-4-5",),
+        wired=frozenset({"anthropic"}),
+    )
+    assert empty == ("CLAUDE_CODE_OAUTH_TOKEN",)

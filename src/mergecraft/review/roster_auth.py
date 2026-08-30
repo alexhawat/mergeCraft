@@ -9,7 +9,7 @@ from mergecraft.config.agent_roster import load_roster
 from mergecraft.config.io import config_path_for_root, load_config_dict
 from mergecraft.config.roster_unwired import collect_unwired_roster_models, iter_roster_model_slots
 from mergecraft.config.runtime_provider_registry import (
-    indexed_env_key,
+    credential_env_keys_for_entry,
     lookup_registry_entry,
 )
 from mergecraft.models import parse_model
@@ -85,12 +85,22 @@ def _provider_for_secret(secret_name: str) -> str:
     return label or secret_name.lower().removesuffix("_api_key")
 
 
-def _required_env_keys_for_slug(
+def _acceptable_env_keys_for_slug(
     *,
     settings: RepoSettings,
     slug: str,
     wired: frozenset[str],
 ) -> tuple[str, ...]:
+    """Return the env keys that can satisfy *slug*, as alternatives (OR).
+
+    Every key here is one way to authenticate the provider, not a separate
+    requirement. Demanding ``LLM_PROVIDER_<N>_API_KEY`` specifically failed the
+    seeded providers outright: ``default_auth_kind_for_label`` gives Anthropic
+    ``oauth`` and OpenAI/Codex ``device_code``, whose credentials arrive as
+    ``..._CLAUDE_CODE_OAUTH_TOKEN`` and ``..._CODEX_AUTH_JSON``. A repo that
+    followed the documented ``mergecraft provider auth claude`` quick-start was
+    correctly configured and still failed closed at run start.
+    """
     try:
         provider, _model_id = parse_model(slug)
     except ValueError as exc:
@@ -101,7 +111,7 @@ def _required_env_keys_for_slug(
 
     entry = lookup_registry_entry(settings, provider_key)
     if entry is not None:
-        return (indexed_env_key(entry.env_index, "API_KEY"),)
+        return credential_env_keys_for_entry(entry)
 
     from mergecraft.workflow.auth_manifest import flat_credential_env_keys
 
@@ -121,15 +131,34 @@ def _empty_secrets_for_roster(
     empty: list[str] = []
     seen: set[str] = set()
     for slug in roster_slugs:
-        for env_key in _required_env_keys_for_slug(settings=settings, slug=slug, wired=wired):
-            if os.environ.get(env_key, "").strip():
-                continue
-            secret_name = env_to_secret.get(env_key, env_key)
-            if secret_name in seen:
-                continue
-            seen.add(secret_name)
-            empty.append(secret_name)
+        env_keys = _acceptable_env_keys_for_slug(settings=settings, slug=slug, wired=wired)
+        if not env_keys:
+            continue
+        # The keys are alternatives: any one of them authenticates this
+        # provider, so only an empty set of *all* of them is a missing secret.
+        if any(os.environ.get(env_key, "").strip() for env_key in env_keys):
+            continue
+        secret_name = _secret_name_to_report(env_keys, env_to_secret)
+        if secret_name in seen:
+            continue
+        seen.add(secret_name)
+        empty.append(secret_name)
     return tuple(empty)
+
+
+def _secret_name_to_report(
+    env_keys: tuple[str, ...],
+    env_to_secret: dict[str, str],
+) -> str:
+    """Name the secret an operator should set when no alternative is present.
+
+    Prefer a key the workflow actually binds, so the message names the secret
+    that repo is wired for rather than a generic API-key spelling it never uses.
+    """
+    for env_key in env_keys:
+        if env_key in env_to_secret:
+            return env_to_secret[env_key]
+    return env_keys[0]
 
 
 def validate_roster_against_auth_manifest(
