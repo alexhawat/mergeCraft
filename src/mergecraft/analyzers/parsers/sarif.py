@@ -144,10 +144,7 @@ def parse_sarif(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> lis
     """Parse SARIF 2.1.0 text into normalized findings."""
     document = require_json_object(raw, what="SARIF document")
     if document.get("version") != "2.1.0":
-        runs = document.get("runs")
-        if not isinstance(runs, list) or not runs:
-            msg = f"unsupported SARIF version: {document.get('version')!r}"
-            raise ValueError(msg)
+        raise ValueError(f"unsupported SARIF version: {document.get('version')!r}")
 
     findings: list[Finding] = []
     for run in document.get("runs") or []:
