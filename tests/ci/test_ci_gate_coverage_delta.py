@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import TYPE_CHECKING
 
@@ -13,6 +14,7 @@ from tests.ci.support_ci_gate_coverage import (
     git,
     install_bare_origin,
     noop_coverage_measure,
+    resolve_push_branch,
     run_coverage_delta_gate,
     script_text,
     seed_passing_coverage_json,
@@ -117,6 +119,62 @@ def test_skipped_delta_emits_warning_with_reason(tmp_path: Path) -> None:
     assert "warn" in combined or "::warning" in combined
     assert "base" in combined or "broken-base" in combined
     assert "measure" in combined or "coverage" in combined
+
+
+def test_base_measure_block_tolerates_setup_failures() -> None:
+    """Regression guard — uv sync / setup-local-analyzers failures must not abort the gate."""
+    block = base_measure_block()
+    assert "set +e" in block
+    assert "measure_ok=false" in block
+    assert "uv}" in block or "${UV:-uv}" in block
+    assert "setup-local-analyzers" in block
+
+
+def test_install_bare_origin_pushes_from_detached_head(tmp_path: Path) -> None:
+    """Detached HEAD must not push the literal branch name ``HEAD``."""
+    scratch = clone_local_repo(tmp_path)
+    install_bare_origin(scratch, tmp_path)
+    git(scratch, "checkout", "--detach", "HEAD")
+    branch = resolve_push_branch(scratch, fallback="detached-ci-gate-head")
+    assert branch == "detached-ci-gate-head"
+    git(scratch, "push", "-u", "origin", branch)
+
+
+def test_base_uv_sync_failure_still_warns_and_skips_delta(tmp_path: Path) -> None:
+    """Base ``uv sync`` failure must reach the warn-and-skip path, not abort under set -e."""
+    import shutil
+
+    real_uv = shutil.which("uv")
+    assert real_uv is not None, "uv must be on PATH for this integration test"
+    wrapper = tmp_path / "uv"
+    wrapper.write_text(
+        f"""#!/usr/bin/env bash
+case "$PWD" in
+  *".ci-mergecraft-base-coverage"*)
+    echo "uv sync failed (test)" >&2
+    exit 1
+    ;;
+esac
+exec {real_uv} "$@"
+""",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+
+    scratch = clone_local_repo(tmp_path)
+    _bootstrap_broken_base(scratch, tmp_path)
+
+    result = run_coverage_delta_gate(
+        scratch,
+        base_ref="broken-base",
+        extra_env={"UV": str(wrapper), "PATH": f"{tmp_path}:{os.environ.get('PATH', '')}"},
+        timeout=_INTEGRATION_TIMEOUT,
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 0, combined
+    assert not (scratch / "coverage-base.json").is_file()
+    assert "warn" in combined.lower() or "::warning" in combined.lower()
 
 
 def test_head_coverage_regression_still_fails_when_base_skips(tmp_path: Path) -> None:

@@ -12,7 +12,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 from rich.panel import Panel
@@ -23,13 +23,6 @@ from mergecraft.agents.registry import AgentRole, RegistryValidationError, load_
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
-from mergecraft.cli.provider_cmd import (
-    _config_path,
-    _env_path,
-    _read_env_map,
-    load_provider_registry,
-    resolve_indexed_credential,
-)
 from mergecraft.cli.provider_toggle import resolve_provider_secrets
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.runtime_provider_registry import (
@@ -44,6 +37,17 @@ from mergecraft.workflow.auth_manifest import (
     flat_credential_env_keys,
     parse_auth_manifest,
 )
+
+if TYPE_CHECKING:
+    from mergecraft.config.settings import RepoSettings
+
+
+def _provider_cmd() -> Any:
+    """Lazy import to avoid a circular import with ``provider_cmd.register``."""
+    from mergecraft.cli import provider_cmd as mod
+
+    return mod
+
 
 STATUS_JSON_SCHEMA_VERSION = 1
 
@@ -78,7 +82,25 @@ STATUS_JSON_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "required": ["slot", "model", "provider", "credential", "wired"],
+                            "required": [
+                                "slot",
+                                "model",
+                                "provider",
+                                "credential",
+                                "wired",
+                                "disabled",
+                            ],
+                            "properties": {
+                                "slot": {"type": "string"},
+                                "model": {"type": "string"},
+                                "provider": {"type": "string"},
+                                "wired": {"type": "boolean"},
+                                "disabled": {"type": "boolean"},
+                                "credential": {
+                                    "type": "object",
+                                    "required": ["available", "looked_for", "source"],
+                                },
+                            },
                         },
                     },
                 },
@@ -89,6 +111,7 @@ STATUS_JSON_SCHEMA: dict[str, Any] = {
             "properties": {
                 "status": {"type": "string"},
                 "message": {"type": "string"},
+                "repo": {"type": "string"},
                 "secrets": {
                     "type": "array",
                     "items": {
@@ -114,7 +137,7 @@ class CredentialStatus:
 def credential_status_for_slug(
     slug: str,
     *,
-    settings: Any,
+    settings: RepoSettings,
     cwd: Path,
     wired: bool,
 ) -> CredentialStatus:
@@ -144,23 +167,24 @@ def credential_status_for_slug(
 def _local_credential_status(
     slug: str,
     *,
-    settings: Any,
+    settings: RepoSettings,
     cwd: Path,
     wired: bool,
 ) -> CredentialStatus:
     del wired  # unwired slots still report which env var would be consulted
+    provider_cmd = _provider_cmd()
     try:
         provider, _model_id = parse_model(slug)
     except ValueError:
         return CredentialStatus(available=False, source="unknown", looked_for="")
 
     provider_key = provider.lower()
-    env_map = _read_env_map(_env_path(cwd))
+    env_map = provider_cmd._read_env_map(provider_cmd._env_path(cwd))
     entry = lookup_registry_entry(settings, provider_key)
     keys: tuple[str, ...]
     if entry is not None:
         keys = credential_env_keys_for_entry(entry)
-        if resolve_indexed_credential(
+        if provider_cmd.resolve_indexed_credential(
             {
                 "label": entry.label,
                 "envIndex": entry.env_index,
@@ -171,9 +195,6 @@ def _local_credential_status(
             primary = keys[0] if keys else f"LLM_PROVIDER_{entry.env_index}_API_KEY"
             return CredentialStatus(available=True, source="env", looked_for=primary)
     else:
-        keys = flat_credential_env_keys(provider_key)
-
-    if not keys:
         keys = flat_credential_env_keys(provider_key)
 
     for key in keys:
@@ -188,11 +209,9 @@ def _provider_disabled(label: str, entry: dict[str, Any] | None, *, cwd: Path) -
     secrets = resolve_provider_secrets(label, entry)
     if not secrets.local:
         return False
-    env_map = _read_env_map(_env_path(cwd))
+    env_map = _provider_cmd()._read_env_map(_provider_cmd()._env_path(cwd))
     has_blank = any(key in env_map and not env_map[key].strip() for key in secrets.local)
-    has_value = any(
-        env_map.get(key, "").strip() or os.environ.get(key, "").strip() for key in secrets.local
-    )
+    has_value = any(env_map.get(key, "").strip() for key in secrets.local)
     return has_blank and not has_value
 
 
@@ -222,8 +241,8 @@ def _github_token() -> str | None:
     return None
 
 
-def list_repo_secrets(repo_slug: str) -> list[str]:
-    """Return Actions secret names on *repo_slug* (empty when ``gh`` is unavailable)."""
+def list_repo_secrets(repo_slug: str) -> list[str] | None:
+    """Return Actions secret names on *repo_slug*, or ``None`` when ``gh`` fails."""
     try:
         completed = subprocess.run(  # nosec B603 B607 — fixed argv, gh binary
             ["gh", "secret", "list", "--repo", repo_slug, "--json", "name", "-q", ".[].name"],
@@ -232,32 +251,81 @@ def list_repo_secrets(repo_slug: str) -> list[str]:
             check=False,
         )
     except FileNotFoundError:
-        return []
+        return None
     if completed.returncode != 0:
-        return []
+        return None
     return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
 
 
-def secret_is_present(repo_slug: str, name: str) -> bool:
+def secret_is_present(
+    repo_slug: str,
+    name: str,
+    *,
+    present_names: set[str] | None = None,
+) -> bool:
     """Return whether *name* exists as an Actions secret on *repo_slug*."""
-    return name in list_repo_secrets(repo_slug)
+    if present_names is not None:
+        return name in present_names
+    names = list_repo_secrets(repo_slug)
+    return False if names is None else name in names
 
 
 def _resolve_repo_slug(cwd: Path) -> str:
     """Return ``owner/repo`` for *cwd*, or a placeholder when origin is unreadable."""
-    import re
+    from mergecraft.cli.provider_toggle import resolve_repo_slug
 
-    from mergecraft.utils.git_hardening import read_remote_origin_url
-
-    resolved = cwd.resolve()
     try:
-        url = read_remote_origin_url(str(resolved))
-    except (RuntimeError, OSError):
+        return resolve_repo_slug(cwd)
+    except typer.Exit:
         return "local/unknown"
-    match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
-    if not match:
-        return "local/unknown"
-    return f"{match.group(1)}/{match.group(2)}"
+
+
+def _remote_credential_available(
+    provider_key: str,
+    registry_entry: dict[str, Any] | None,
+    *,
+    present_github_secrets: set[str] | None,
+) -> bool:
+    """Return whether any Actions secret for *provider_key* is present on the repo."""
+    if present_github_secrets is None:
+        return False
+    secrets = resolve_provider_secrets(provider_key, registry_entry)
+    if not secrets.github:
+        return False
+    return any(name in present_github_secrets for name in secrets.github)
+
+
+def _reviewer_agent_entries(registry: Any) -> list[tuple[str, Any]]:
+    """Return ``(config_key, binding)`` pairs for reviewer agents in dispatch order."""
+    return list(registry._ordered_role_entries(AgentRole.reviewer))
+
+
+def _present_github_secret_names(github_block: dict[str, Any] | None) -> set[str] | None:
+    if github_block is None or github_block.get("status") != "ok":
+        return None
+    return {
+        str(row["name"])
+        for row in github_block.get("secrets", [])
+        if isinstance(row, dict) and row.get("present")
+    }
+
+
+def _credential_payload(
+    credential: CredentialStatus,
+    *,
+    remote_available: bool,
+) -> dict[str, str | bool]:
+    if remote_available and not credential.available:
+        return {
+            "available": True,
+            "looked_for": credential.looked_for,
+            "source": "github",
+        }
+    return {
+        "available": credential.available,
+        "looked_for": credential.looked_for,
+        "source": credential.source,
+    }
 
 
 def _collect_github_secrets(
@@ -286,14 +354,25 @@ def _collect_github_secrets(
             ),
         }
 
-    present_names = set(list_repo_secrets(repo_slug))
-    provider_registry = load_provider_registry(_config_path(cwd))
+    secret_names = list_repo_secrets(repo_slug)
+    if secret_names is None:
+        return {
+            "status": "unknown",
+            "message": (
+                "GitHub secret presence unknown — `gh secret list` failed or `gh` is "
+                "unavailable (needs repo scope: read:repo or admin:repo_hook)"
+            ),
+        }
+
+    present_names = set(secret_names)
+    provider_cmd = _provider_cmd()
+    provider_registry = provider_cmd.load_provider_registry(provider_cmd._config_path(cwd))
     provider_entry_by_label = {
         str(row.get("label", "")).lower(): row for row in provider_registry.entries
     }
     required: list[str] = []
     seen: set[str] = set()
-    for binding in registry_data.resolve_roles(AgentRole.reviewer):
+    for _agent_key, binding in _reviewer_agent_entries(registry_data):
         for slug in binding.model_chain:
             try:
                 provider, _ = parse_model(slug)
@@ -320,15 +399,23 @@ def build_status_payload(
 ) -> dict[str, Any]:
     target = resolve_target_dir(cwd)
     settings = load_repo_settings(root=target, load_learnings_files=False)
-    try:
-        registry = load_registry(settings=settings, repo_root=target)
-    except RegistryValidationError as exc:
-        cli_bail(str(exc))
+    registry = load_registry(settings=settings, repo_root=target)
 
     workflow_path = target / DEFAULT_WORKFLOW_RELATIVE_PATH
     wired = _wired_providers(workflow_path)
-    provider_registry = load_provider_registry(_config_path(target))
+    provider_cmd = _provider_cmd()
+    provider_registry = provider_cmd.load_provider_registry(provider_cmd._config_path(target))
     dispatch_levels = _dispatch_level_map(registry)
+
+    github_block: dict[str, Any] | None = None
+    present_github_secrets: set[str] | None = None
+    if github:
+        github_block = _collect_github_secrets(
+            cwd=target,
+            registry_data=registry,
+            wired=wired,
+        )
+        present_github_secrets = _present_github_secret_names(github_block)
 
     reviewers_payload: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
@@ -336,7 +423,7 @@ def build_status_payload(
         str(row.get("label", "")).lower(): row for row in provider_registry.entries
     }
 
-    for binding in registry.resolve_roles(AgentRole.reviewer):
+    for agent_key, binding in _reviewer_agent_entries(registry):
         slots_payload: list[dict[str, Any]] = []
         agent_enabled = True
 
@@ -358,16 +445,21 @@ def build_status_payload(
                 cwd=target,
                 wired=is_wired,
             )
+            remote_available = _remote_credential_available(
+                provider_key,
+                registry_entry,
+                present_github_secrets=present_github_secrets,
+            )
+            effective_available = credential.available or remote_available
             slot_payload = {
                 "slot": slot_name,
                 "model": slug,
                 "provider": provider_key,
                 "wired": is_wired,
-                "credential": {
-                    "available": credential.available,
-                    "looked_for": credential.looked_for,
-                    "source": credential.source,
-                },
+                "credential": _credential_payload(
+                    credential,
+                    remote_available=remote_available,
+                ),
                 "disabled": disabled,
             }
             slots_payload.append(slot_payload)
@@ -375,7 +467,7 @@ def build_status_payload(
             if disabled:
                 skipped.append(
                     {
-                        "agentId": binding.agent_id,
+                        "agentId": agent_key,
                         "slot": slot_name,
                         "reason": f"provider {provider_key!r} is disabled",
                     }
@@ -383,15 +475,15 @@ def build_status_payload(
             elif not is_wired:
                 skipped.append(
                     {
-                        "agentId": binding.agent_id,
+                        "agentId": agent_key,
                         "slot": slot_name,
                         "reason": f"provider {provider_key!r} is not wired in mergecraft.yml",
                     }
                 )
-            elif not credential.available:
+            elif not effective_available:
                 skipped.append(
                     {
-                        "agentId": binding.agent_id,
+                        "agentId": agent_key,
                         "slot": slot_name,
                         "reason": (f"credential not available (consult {credential.looked_for})"),
                     }
@@ -399,7 +491,7 @@ def build_status_payload(
 
         reviewers_payload.append(
             {
-                "agentId": binding.agent_id,
+                "agentId": agent_key,
                 "after": binding.after,
                 "dispatchLevel": dispatch_levels.get(binding.agent_id, 0),
                 "enabled": agent_enabled,
@@ -413,11 +505,15 @@ def build_status_payload(
         for row in reviewer["slots"]
         if row["wired"] and row["credential"]["available"] and not row.get("disabled")
     ]
-    headline = (
-        f"{len(runnable)} slot(s) will run in CI"
-        if runnable
-        else "no roster slots are fully runnable in CI"
-    )
+    if github and present_github_secrets is not None:
+        headline = f"{len(runnable)} slot(s) runnable in CI"
+    elif runnable:
+        headline = f"{len(runnable)} slot(s) runnable with local credentials"
+    else:
+        headline = (
+            "no roster slots are fully runnable with local credentials "
+            "(use --github to check remote Actions secrets)"
+        )
 
     payload: dict[str, Any] = {
         "schemaVersion": STATUS_JSON_SCHEMA_VERSION,
@@ -425,12 +521,8 @@ def build_status_payload(
         "skipped": skipped,
         "reviewers": reviewers_payload,
     }
-    if github:
-        payload["github"] = _collect_github_secrets(
-            cwd=target,
-            registry_data=registry,
-            wired=wired,
-        )
+    if github_block is not None:
+        payload["github"] = github_block
     return payload
 
 
@@ -478,7 +570,10 @@ def _render_text(payload: dict[str, Any]) -> None:
 
             wired_label = "wired" if slot["wired"] else "not wired"
             if cred["available"]:
-                cred_label = "available"
+                if cred.get("source") == "github":
+                    cred_label = "available (Actions secret)"
+                else:
+                    cred_label = "available"
             else:
                 cred_label = f"not available ({cred['looked_for']})"
 
@@ -518,7 +613,10 @@ def provider_status_cmd(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
 ) -> None:
     """Show the reviewer roster, credentials, wiring, and dispatch order."""
-    payload = build_status_payload(cwd=cwd, github=github)
+    try:
+        payload = build_status_payload(cwd=cwd, github=github)
+    except RegistryValidationError as exc:
+        cli_bail(str(exc))
     if json_output:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)

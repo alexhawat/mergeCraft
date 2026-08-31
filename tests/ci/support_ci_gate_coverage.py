@@ -77,6 +77,33 @@ def git(cwd: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def resolve_push_branch(scratch: Path, *, fallback: str = "ci-gate-test-head") -> str:
+    """Return a branch name suitable for ``git push`` from *scratch*.
+
+    Detached HEAD (common on Actions) yields the literal ``HEAD`` from
+    ``rev-parse --abbrev-ref``; resolve via symbolic-ref, ``GITHUB_HEAD_REF``,
+    or a named branch created from the current commit.
+    """
+    sym = subprocess.run(
+        ["git", "symbolic-ref", "-q", "--short", "HEAD"],
+        cwd=scratch,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if sym.returncode == 0:
+        name = sym.stdout.strip()
+        if name and name != "HEAD":
+            return name
+
+    gh_head = os.environ.get("GITHUB_HEAD_REF", "").strip()
+    if gh_head:
+        return gh_head
+
+    git(scratch, "checkout", "-B", fallback)
+    return fallback
+
+
 def install_bare_origin(scratch: Path, tmp_path: Path) -> None:
     """Point *scratch*'s ``origin`` at a local bare repo with current branches."""
     bare = tmp_path / "origin.git"
@@ -87,7 +114,7 @@ def install_bare_origin(scratch: Path, tmp_path: Path) -> None:
         text=True,
     )
     git(scratch, "remote", "set-url", "origin", str(bare))
-    branch = git(scratch, "rev-parse", "--abbrev-ref", "HEAD")
+    branch = resolve_push_branch(scratch)
     git(scratch, "push", "-u", "origin", branch)
 
 
@@ -177,6 +204,7 @@ __all__ = [
     "git",
     "install_bare_origin",
     "noop_coverage_measure",
+    "resolve_push_branch",
     "run_coverage_delta_gate",
     "script_text",
     "seed_passing_coverage_json",

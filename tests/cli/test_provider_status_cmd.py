@@ -202,6 +202,98 @@ def test_provider_status_github_with_token_reports_secret_presence(
     assert_no_secret_material(result.stdout, secrets=("test-token",))
 
 
+def test_provider_status_github_secret_makes_slot_runnable_without_local_key(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Remote-only credentials must participate in CI slot/headline state with --github."""
+    _require_status_subcommand()
+    single_reviewer = """
+models:
+  - anthropic/claude-sonnet
+agents:
+  reviewer:
+    modelChain:
+      - anthropic/claude-sonnet
+"""
+    bootstrap_status_repo(
+        tmp_path,
+        monkeypatch,
+        config_body=single_reviewer,
+        workflow_body=WORKFLOW_UNWIRED_STEP,
+    )
+    register_chain_providers(tmp_path, _invoke)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    present = {"ANTHROPIC_API_KEY"}
+
+    monkeypatch.setattr(
+        "mergecraft.cli.provider_status._resolve_repo_slug",
+        lambda _cwd: "acme/demo",
+    )
+    monkeypatch.setattr(
+        "mergecraft.cli.provider_status.list_repo_secrets",
+        lambda _repo: sorted(present),
+    )
+    monkeypatch.setenv("GH_TOKEN", "test-token")
+
+    result = _invoke(
+        "provider",
+        "status",
+        "--github",
+        "--json",
+        "--cwd",
+        str(tmp_path),
+        env={"GH_TOKEN": "test-token"},
+    )
+    payload = parse_status_json(result.stdout)
+    validate_status_payload(payload)
+
+    assert "runnable in ci" in payload.get("headline", "").lower()
+    skipped_slots = {(row["agentId"], row["slot"]) for row in payload.get("skipped", [])}
+    reviewer_id = payload["reviewers"][0]["agentId"]
+    assert (reviewer_id, "p0") not in skipped_slots
+    anthropic_slot = payload["reviewers"][0]["slots"][0]
+    assert anthropic_slot["credential"]["available"] is True
+    assert anthropic_slot["credential"]["source"] == "github"
+
+
+def test_provider_status_github_gh_failure_reports_unknown_not_ok(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``gh`` failures must not masquerade as an empty secret list with status ok."""
+    _require_status_subcommand()
+    bootstrap_status_repo(tmp_path, monkeypatch)
+    register_chain_providers(tmp_path, _invoke)
+
+    monkeypatch.setattr(
+        "mergecraft.cli.provider_status._resolve_repo_slug",
+        lambda _cwd: "acme/demo",
+    )
+    monkeypatch.setattr(
+        "mergecraft.cli.provider_status.list_repo_secrets",
+        lambda _repo: None,
+    )
+    monkeypatch.setenv("GH_TOKEN", "test-token")
+
+    result = _invoke(
+        "provider",
+        "status",
+        "--github",
+        "--json",
+        "--cwd",
+        str(tmp_path),
+        env={"GH_TOKEN": "test-token"},
+    )
+    payload = parse_status_json(result.stdout)
+    github = payload.get("github") or {}
+
+    assert github.get("status") == "unknown"
+    assert "unknown" in github.get("message", "").lower()
+    assert "runnable in ci" not in payload.get("headline", "").lower()
+
+
 def test_provider_status_json_matches_documented_schema(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

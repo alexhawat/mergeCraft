@@ -37,6 +37,7 @@ orig_workspace="$GITHUB_WORKSPACE"
 : >"$base_measure_log"
 # BASE_WORKTREE_MEASURE_BLOCK — parsed by tests/ci/test_coverage_delta_wrapper.py (D10).
 (
+  set +e
   cd "$worktree"
   export GITHUB_WORKSPACE="$worktree"  # #573: base tree reads its own config, not head's
   # The base worktree gets its own fresh venv. `dev` is a
@@ -53,36 +54,51 @@ orig_workspace="$GITHUB_WORKSPACE"
   # Makefile defers to it — so this also works against an older base tree whose
   # Makefile predates MCB-23 and would otherwise default to `.venv`.
   export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$PWD/.venv-dev}"
-  "${UV:-uv}" sync --extra dev --extra tracing
+  measure_ok=true
+  if ! "${UV:-uv}" sync --extra dev --extra tracing >>"$base_measure_log" 2>&1; then
+    measure_ok=false
+  fi
   # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
   # only runs on the PR checkout, not this detached base worktree.
-  make setup-local-analyzers
-  measure_ok=true
-  if grep -q '^coverage-measure:' Makefile; then
-    if ! make coverage-measure >>"$base_measure_log" 2>&1; then
-      measure_ok=false
-    fi
-  else
-    # Pre-TH base trees only ship ``coverage-gate``; inline the measure recipe
-    # so the delta gate can compare against the merge base before TH lands.
-    if ! "${UV:-uv}" run pytest tests -q --tb=short --strict-markers -m "not integration" \
-      --cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
-      --randomly-seed="${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}" \
-      -rX >>"$base_measure_log" 2>&1; then
+  if [[ "$measure_ok" == true ]]; then
+    if ! make setup-local-analyzers >>"$base_measure_log" 2>&1; then
       measure_ok=false
     fi
   fi
   if [[ "$measure_ok" == true ]]; then
-    cp coverage.json "${orig_workspace}/coverage-base.json"
+    if grep -q '^coverage-measure:' Makefile; then
+      if ! make coverage-measure >>"$base_measure_log" 2>&1; then
+        measure_ok=false
+      fi
+    else
+      # Pre-TH base trees only ship ``coverage-gate``; inline the measure recipe
+      # so the delta gate can compare against the merge base before TH lands.
+      if ! "${UV:-uv}" run pytest tests -q --tb=short --strict-markers -m "not integration" \
+        --cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
+        --randomly-seed="${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}" \
+        -rX >>"$base_measure_log" 2>&1; then
+        measure_ok=false
+      fi
+    fi
   fi
+  if [[ "$measure_ok" == true ]]; then
+    if ! cp coverage.json "${orig_workspace}/coverage-base.json" 2>>"$base_measure_log"; then
+      measure_ok=false
+    fi
+  fi
+  exit 0
 )
 if [[ ! -f coverage-base.json ]]; then
-  base_reason="base coverage measurement failed"
+  base_detail=""
   if [[ -s "$base_measure_log" ]]; then
-    base_reason="$(tail -n 5 "$base_measure_log" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //;s/ $//')"
+    base_detail="$(tail -n 5 "$base_measure_log" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //;s/ $//')"
+    base_detail="${base_detail//::/}"
   fi
-  skip_msg="Coverage delta skipped: base ref ${GITHUB_BASE_REF} could not be measured (${base_reason})."
+  skip_msg="Coverage delta skipped: base ref ${GITHUB_BASE_REF} could not be measured (see .ci-base-measure.log)."
   echo "warning: ${skip_msg}" >&2
+  if [[ -n "$base_detail" ]]; then
+    echo "warning: base measurement tail: ${base_detail}" >&2
+  fi
   if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
     escaped_msg="${skip_msg//'%'/'%25'}"
     escaped_msg="${escaped_msg//$'\r'/'%0D'}"
@@ -93,6 +109,10 @@ if [[ ! -f coverage-base.json ]]; then
     {
       echo "### Coverage delta skipped"
       echo "${skip_msg}"
+      if [[ -n "$base_detail" ]]; then
+        echo ""
+        echo "Base measurement tail: ${base_detail}"
+      fi
     } >>"$GITHUB_STEP_SUMMARY"
   fi
 fi
