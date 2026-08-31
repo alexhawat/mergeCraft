@@ -36,6 +36,7 @@ class NormalizedFailure(TypedDict):
     artifacts: list[str]
     retry_state: str | None
     failure_fingerprint: str
+    failure_paths: list[str]
 
 
 ProviderContext = dict[str, Any]

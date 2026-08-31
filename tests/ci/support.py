@@ -23,6 +23,7 @@ NORMALIZED_FIELDS: tuple[str, ...] = (
     "artifacts",
     "retry_state",
     "failure_fingerprint",
+    "failure_paths",
 )
 
 # Matches current ``get_check_suite_logs`` cap (K2.4 default until configured).

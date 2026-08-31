@@ -311,7 +311,9 @@ upload. Trust-tier details and advanced workflow patterns live in
 mergeCraft also reviews **local diffs** — no pull request required. From a git
 checkout or a patch file, `mergecraft review` materializes the change, runs the
 same analyzer + reviewer pipeline as the Action, and exits with a [named
-code](docs/EXIT-CODES.md) your scripts can branch on.
+code](docs/EXIT-CODES.md) your scripts can branch on. Operator trust knobs
+(`selfReview`, `agentSandbox`) are documented in
+[`docs/trust-policy.md`](docs/trust-policy.md).
 
 | Step | What happens |
 | --- | --- |

@@ -125,6 +125,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex fallback routing reads `decision.verdict` from the in-process evidence
   packet instead of racing the check-runs API
 
+### Lane B — trust boundary & credential truth
+
+#### Security
+
+- The Codex `danger-full-access` override is gated by `trust.agentSandbox`
+  with a hard fork floor — re-check your tier if you expected the override to
+  apply on all `pull_request_target` runs or on fork PRs (#553)
+- Untrusted analyzer runs no longer grant host networking when a manifest
+  declares a non-empty `network_allowlist` — dependency scanners that need
+  upstream access are skipped with a named egress-policy outcome on untrusted
+  events; filtered egress to declared hosts is not implemented yet (#538)
+
+#### Added
+
+- `trust.agentSandbox` ladder (`never` / `merged-only` / `dispatch` /
+  `same-repo`) with `mergecraft trust show` and
+  `mergecraft trust set-agent-sandbox` (#553)
+- `docs/trust-policy.md` documents the sandbox override ladder, fork floor,
+  and residual risks
+- `credential_status_for_slug` consolidates credential detection with four
+  routes (`registry-indexed`, `gateway-singleton`, `legacy-env`, `cli-auth`)
+  and names consulted env vars in `looked_for` skip messages (#552)
+- Action `logfire-token` exports to `MERGECRAFT_LOGFIRE_TOKEN` before the
+  Logfire sink initialises (#551)
+- Actions-visible warning when tracing targets Logfire but no token resolves
+  (#551)
+
+#### Fixed
+
+- Self-review on PRs that edit `.mergecraft/config.yaml` publishes again after
+  the publication guard re-baselines the config hash post-`checkout_pr` (#584)
+- Nous and custom gateway providers are detected when only
+  `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` is set (#552)
+- Bubblewrap namespace failures surface once as a non-blocking run observation
+  instead of inflating the packet gate with repeated Major findings (#553)
+- Entropy redaction no longer strips proven benign analyzer shapes — sweep
+  evidence at `docs/dev/15-w6-entropy-sweep-report.json` (#537)
+
+#### Changed
+
+- #553 boundary amended from the `pull_request_target` event to fork heads —
+  same-repo `pull_request_target` may grant the override at `same-repo` tier
+
 ### Changed
 
 - The self-review Action pin on all three review rungs moves to `3ed2c798`,

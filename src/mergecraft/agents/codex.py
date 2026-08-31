@@ -344,7 +344,12 @@ def _sandbox_is_disabled_by_operator(
     """True when the workflow requested unsandboxed Codex and policy grants it."""
     if _operator_sandbox_override() != CODEX_SANDBOX_UNSANDBOXED:
         return False
-    return decision is not None and decision.honour
+    if decision is not None:
+        return decision.honour
+    # Action runs always resolve policy in main.py before Codex starts. Harness tests
+    # and local CLI paths without tool_state.agent_sandbox_decision keep #70's escape
+    # hatch so operator override env alone still works outside GITHUB_ACTIONS.
+    return os.environ.get("GITHUB_ACTIONS") != "true"
 
 
 def is_user_namespace_failure(text: str) -> bool:

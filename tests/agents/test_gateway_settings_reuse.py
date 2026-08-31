@@ -121,15 +121,19 @@ def test_derived_gateway_cache_reloads_after_config_changes(
 
 
 def test_no_caller_signature_changed() -> None:
-    """AST guard for D22 — opencode/codex call sites unchanged on trunk until AG9."""
-    for rel in ("src/mergecraft/agents/opencode.py", "src/mergecraft/agents/codex.py"):
-        proc = subprocess.run(
-            ["git", "show", f"origin/pre-0.0.1:{rel}"],
-            cwd=_REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        trunk = proc.stdout
-        current = (_REPO_ROOT / rel).read_text(encoding="utf-8")
-        assert current == trunk
+    """AST guard for D22 — opencode call sites unchanged on trunk until AG9.
+
+    Lane B (#553) intentionally edits ``codex.py`` for ``trust.agentSandbox``;
+    only ``opencode.py`` remains frozen here.
+    """
+    rel = "src/mergecraft/agents/opencode.py"
+    proc = subprocess.run(
+        ["git", "show", f"origin/pre-0.0.1:{rel}"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    trunk = proc.stdout
+    current = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+    assert current == trunk

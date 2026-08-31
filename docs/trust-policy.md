@@ -69,7 +69,10 @@ the override cannot take effect on a fork head (not merely on
 
 **`merged-only` caveat (D1e):** an open PR's head is not yet on the default
 branch, so this tier does **not** give a working shell during PR review. It
-exists for scheduled audits and post-merge sweeps on the default branch.
+exists for scheduled audits and post-merge sweeps on the default branch. "On the
+default branch" only implies "reviewed" where merging requires review (for
+example branch protection with required checks) — it is not a substitute for
+your merge policy.
 
 **Residual risks** (documented in the scaffolded config comment):
 

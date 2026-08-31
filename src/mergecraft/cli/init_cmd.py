@@ -9,7 +9,9 @@ import typer
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.provider_cmd import seed_builtin_providers
+from mergecraft.config.io import load_config_dict, patch_config_dict
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.pins import action_pin_minimal
 from mergecraft.review.completed import COMPLETED_REVIEWS_GITIGNORE_LINE
@@ -45,6 +47,7 @@ trust:
   # is honoured. Tiers (tightest first): never | merged-only | dispatch | same-repo.
   # Fork heads always refuse — no tier lifts that floor.
   # merged-only gives no working shell during open PR review (head not on default yet).
+  # "On the default branch" only implies reviewed where merging requires review.
   # same-repo widens override to any non-fork head (including pull_request_target).
   # Residual risks: a fork PR checked out locally, or adding a collaborator.
   agentSandbox: '{agent_sandbox}'
@@ -160,11 +163,10 @@ def run(
     """Scaffold ``.mergecraft/config.yaml`` and an example workflow (local, no API)."""
     sandbox_tier = (agent_sandbox or "dispatch").strip().lower()
     if sandbox_tier not in {"never", "merged-only", "dispatch", "same-repo"}:
-        console.print(
-            f"[red]invalid --agent-sandbox {agent_sandbox!r}[/red] — "
+        cli_bail(
+            f"invalid --agent-sandbox {agent_sandbox!r} — "
             "expected never, merged-only, dispatch, or same-repo"
         )
-        raise typer.Exit(code=1)
     root = Path.cwd()
     config_dir = root / ".mergecraft"
     config_path = config_dir / "config.yaml"
@@ -178,6 +180,9 @@ def run(
         console.print("[dim]no git remote detected — scaffolding locally[/dim]")
 
     config_dir.mkdir(parents=True, exist_ok=True)
+    preserved_agents: object | None = None
+    if force and config_path.is_file():
+        preserved_agents = load_config_dict(config_path).get("agents")
     if config_path.exists() and not force:
         console.print(
             "[yellow].mergecraft/config.yaml already exists[/yellow] — pass --force to overwrite"
@@ -188,6 +193,8 @@ def run(
             encoding="utf-8",
         )
         console.print(f"wrote [green]{config_path.relative_to(root)}[/green]")
+        if preserved_agents is not None:
+            patch_config_dict(config_path, {"agents": preserved_agents})
 
     workflow_dir.mkdir(parents=True, exist_ok=True)
     if workflow_path.exists() and not force:

@@ -111,7 +111,13 @@ def _has_cursor_auth() -> bool:
 _BUILTIN_CLI_AUTH_PROVIDERS: frozenset[str] = frozenset(
     {"anthropic", "openai", "google", "cursor", "bedrock", "vertex"}
 )
-_GATEWAY_PRESET_PROVIDERS: frozenset[str] = frozenset({"nous", "tokenhub", "minimax"})
+
+
+def _gateway_preset_provider_labels() -> frozenset[str]:
+    """Return provider ids that honour singleton gateway env credentials."""
+    from mergecraft.agents.openai_compatible_gateways import _LEGACY_GATEWAY_PRESETS
+
+    return frozenset(_LEGACY_GATEWAY_PRESETS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +147,7 @@ def _cli_auth_available(provider: str) -> bool:
 
 def _honours_gateway_env_credentials(provider: str, settings: RepoSettings) -> bool:
     """Return whether singleton/indexed gateway env vars may satisfy *provider*."""
-    if provider in _GATEWAY_PRESET_PROVIDERS:
+    if provider in _gateway_preset_provider_labels():
         return True
     from mergecraft.config.runtime_provider_registry import lookup_registry_entry
 
@@ -658,13 +664,13 @@ def pick_runnable_slug_from_chain(
     probe_settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
     probe_cwd = Path.cwd()
     for slug in chain:
-        status = credential_status_for_slug(
-            slug,
-            settings=probe_settings,
-            cwd=probe_cwd,
-            wired=True,
-        )
-        if not status.available:
+        if not has_credentials_for_slug(slug):
+            status = credential_status_for_slug(
+                slug,
+                settings=probe_settings,
+                cwd=probe_cwd,
+                wired=True,
+            )
             envs = ", ".join(status.looked_for) or "credential env vars"
             skipped.append(f"{slug} (missing credentials; consult {envs})")
             continue

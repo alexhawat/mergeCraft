@@ -82,9 +82,34 @@ def write_config_dict(path: Path, data: dict[str, Any]) -> None:
         raise
 
 
+def append_config_mapping(path: Path, data: dict[str, Any]) -> None:
+    """Append a YAML mapping to *path* without erasing existing comment lines."""
+    block = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(existing + ("\n" if existing else "") + block, encoding="utf-8")
+
+
+def patch_config_dict(path: Path, patch: dict[str, Any]) -> None:
+    """Merge *patch* into the config file, preserving YAML comment lines when present."""
+    if not patch:
+        return
+    if config_has_yaml_comments(path):
+        append_config_mapping(path, patch)
+        return
+    data = load_config_dict(path)
+    for key, value in patch.items():
+        data[key] = value
+    write_config_dict(path, data)
+
+
 __all__ = [
+    "append_config_mapping",
     "config_has_yaml_comments",
     "config_path_for_root",
     "load_config_dict",
+    "patch_config_dict",
     "write_config_dict",
 ]
