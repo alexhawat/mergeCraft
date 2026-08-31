@@ -96,7 +96,6 @@ def _parse_sarif_raw(raw: str):
     return sarif.parse_sarif(raw, manifest=m, repo_root=Path("."))
 
 
-@pytest.mark.xfail(reason="green after TP4: reject SARIF 2.0.0 with runs", strict=False)
 def test_sarif_2_0_0_with_nonempty_runs_raises_unsupported_version() -> None:
     raw = _sarif_document(version="2.0.0", runs=_MINIMAL_RUNS)
     with pytest.raises(ValueError, match="unsupported SARIF version"):
@@ -115,7 +114,6 @@ def test_sarif_2_1_0_with_empty_runs_returns_no_findings() -> None:
     assert _parse_sarif_raw(raw) == []
 
 
-@pytest.mark.xfail(reason="green after TP4: reject missing SARIF version", strict=False)
 def test_sarif_missing_version_raises_unsupported_version() -> None:
     raw = _sarif_document(version=None, runs=_MINIMAL_RUNS)
     with pytest.raises(ValueError, match="unsupported SARIF version"):
