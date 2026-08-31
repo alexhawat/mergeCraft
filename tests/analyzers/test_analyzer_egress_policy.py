@@ -69,6 +69,21 @@ def _egress_argv(
     )
 
 
+def test_push_event_allows_host_networking_for_allowlist_declaring_analyzer(
+    tmp_path: Path,
+) -> None:
+    """Push CI sets ``GITHUB_EVENT_NAME=push`` — same-repo writers are trusted for egress."""
+    evaluate = import_analyzer_egress_symbol("evaluate_analyzer_egress_policy")
+    outcome = evaluate(
+        analyzer_id="osv-scanner",
+        network_allowlist=_OSV_ALLOWLIST,
+        event_name="push",
+        event={"ref": "refs/heads/main", "repository": {"full_name": "acme/demo"}},
+        self_review_level="off",
+    )
+    assert outcome.status == "allowed"
+
+
 def test_untrusted_non_empty_allowlist_does_not_get_host_networking(tmp_path: Path) -> None:
     """D5 — untrusted tier + declared allowlist must not drop --net isolation."""
     argv = _egress_argv(

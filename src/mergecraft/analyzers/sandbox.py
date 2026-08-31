@@ -429,7 +429,7 @@ def egress_trusted_for_host_networking(
         return False
     if is_fork_pull_request(event):
         return False
-    if event_name == "workflow_dispatch":
+    if event_name in {"workflow_dispatch", "push"}:
         return True
     return event_name == "pull_request"
 
