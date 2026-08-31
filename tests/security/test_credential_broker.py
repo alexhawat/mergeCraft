@@ -18,7 +18,6 @@ from tests.security.support_agent_isolation import (
     MODEL_PATH,
     NON_MODEL_PATHS,
     REAL_OPENAI_API_KEY_FIXTURE,
-    W2_XFAIL,
     MockModelUpstream,
     assert_credential_absent,
     broker_config_for_upstream,
@@ -59,7 +58,6 @@ def _auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-@W2_XFAIL
 def test_broker_binds_loopback_only() -> None:
     """D1 — broker listens on 127.0.0.1, never 0.0.0.0."""
     module = load_broker_module()
@@ -73,7 +71,6 @@ def test_broker_binds_loopback_only() -> None:
         assert response.status_code in {401, 403, 404, 405}
 
 
-@W2_XFAIL
 def test_broker_rejects_non_loopback_bind() -> None:
     """Forcing 0.0.0.0 must fail closed."""
     module = load_broker_module()
@@ -94,7 +91,6 @@ def test_broker_rejects_non_loopback_bind() -> None:
         pass
 
 
-@W2_XFAIL
 def test_broker_rejects_missing_bearer() -> None:
     """No Authorization header → HTTP 401."""
     module = load_broker_module()
@@ -104,7 +100,6 @@ def test_broker_rejects_missing_bearer() -> None:
         assert response.status_code == 401
 
 
-@W2_XFAIL
 def test_broker_rejects_wrong_bearer() -> None:
     """Wrong bearer → HTTP 401."""
     module = load_broker_module()
@@ -118,7 +113,6 @@ def test_broker_rejects_wrong_bearer() -> None:
         assert response.status_code == 401
 
 
-@W2_XFAIL
 def test_bearer_validation_uses_constant_time_compare_digest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -146,7 +140,6 @@ def test_bearer_validation_uses_constant_time_compare_digest(
     assert calls, "broker must call secrets.compare_digest for bearer validation"
 
 
-@W2_XFAIL
 @pytest.mark.parametrize(
     "headers",
     [
@@ -169,7 +162,6 @@ def test_broker_rejects_upstream_host_smuggle(headers: dict[str, str]) -> None:
         assert_credential_absent(response.text)
 
 
-@W2_XFAIL
 def test_broker_rejects_absolute_url_rewrite() -> None:
     """Absolute request URL to a non-allowlisted host → 403 (D4)."""
     module = load_broker_module()
@@ -185,7 +177,6 @@ def test_broker_rejects_absolute_url_rewrite() -> None:
         assert_credential_absent(response.text)
 
 
-@W2_XFAIL
 def test_broker_refuses_redirect_to_non_allowlisted_host() -> None:
     """Redirect off the run allow-list must not be followed."""
     module = load_broker_module()
@@ -204,7 +195,6 @@ def test_broker_refuses_redirect_to_non_allowlisted_host() -> None:
         assert_credential_absent(response.text)
 
 
-@W2_XFAIL
 @pytest.mark.parametrize("path", NON_MODEL_PATHS)
 def test_broker_refuses_non_model_paths(path: str) -> None:
     """Non-model paths are refused — model proxy only (D4)."""
@@ -216,7 +206,6 @@ def test_broker_refuses_non_model_paths(path: str) -> None:
         assert_credential_absent(response.text)
 
 
-@W2_XFAIL
 def test_broker_never_leaks_real_credential_in_responses_errors_or_logs() -> None:
     """#553 — real credential in no response body, error body, or log line."""
     module = load_broker_module()
@@ -245,7 +234,6 @@ def test_broker_never_leaks_real_credential_in_responses_errors_or_logs() -> Non
     assert_credential_absent(combined)
 
 
-@W2_XFAIL
 def test_broker_never_leaks_real_credential_in_evidence_packet_fixture() -> None:
     """Serialized evidence-packet fixture must not carry the upstream API key."""
     module = load_broker_module()
@@ -266,7 +254,6 @@ def test_broker_never_leaks_real_credential_in_evidence_packet_fixture() -> None
     assert_credential_absent(redacted_packet)
 
 
-@W2_XFAIL
 def test_broker_forwards_real_key_on_parent_upstream_leg() -> None:
     """Parent→upstream leg must present the real credential to the model host."""
     module = load_broker_module()
@@ -285,7 +272,6 @@ def test_broker_forwards_real_key_on_parent_upstream_leg() -> None:
     )
 
 
-@W2_XFAIL
 @pytest.mark.asyncio
 async def test_concurrent_requests_with_same_bearer() -> None:
     """Two concurrent agent requests sharing one per-run bearer must both succeed."""
