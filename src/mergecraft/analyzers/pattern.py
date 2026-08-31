@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -278,6 +279,29 @@ def scope_pattern_findings(
     return [finding for finding in findings if finding.path in allowed]
 
 
+def coerce_astgrep_sarif_raw(raw: str) -> str:
+    """Normalize ast-grep SARIF when it emits the tool version instead of ``2.1.0``.
+
+    ast-grep's ``--format sarif`` writes its CLI version (for example ``0.44.1``)
+    into the SARIF ``version`` field. :func:`parse_sarif` still enforces SARIF
+    2.1.0 only; this helper rewrites the known malformed header before parsing.
+    """
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(document, dict):
+        return raw
+    if document.get("version") == "2.1.0":
+        return raw
+    runs = document.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return raw
+    updated = dict(document)
+    updated["version"] = "2.1.0"
+    return json.dumps(updated)
+
+
 def prepare_pattern_plan(
     plan: AnalyzerPlan,
     *,
@@ -406,6 +430,7 @@ __all__ = [
     "SemgrepAdapter",
     "augment_pattern_env",
     "build_pattern_scan_argv",
+    "coerce_astgrep_sarif_raw",
     "detect_astgrep_repo_config",
     "detect_semgrep_repo_config",
     "has_astgrep_config",

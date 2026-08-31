@@ -59,6 +59,10 @@ def parse_output_file(
 ) -> list[Finding]:
     """Parse normalized findings from a persisted analyzer output file."""
     raw = read_output_file(path)
+    if manifest.id == "ast-grep":
+        from mergecraft.analyzers.pattern import coerce_astgrep_sarif_raw
+
+        raw = coerce_astgrep_sarif_raw(raw)
     findings = parse_output(raw, manifest=manifest, repo_root=repo_root)
     return _redact_findings(findings, tool_id=manifest.id)
 
