@@ -14,7 +14,6 @@ import pytest
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from tests.analyzers.support import FIXTURES_DIR, REDACTION_ANALYZER_IDS
-from tests.trust_credentials.support import W6_XFAIL
 
 _BENIGN_FIXTURE_SHAPES: tuple[tuple[str, str], ...] = (
     ("git_sha_40", "a" * 40),
@@ -86,7 +85,6 @@ def test_entropy_sweep_harness_records_redacted_tokens_with_context(tmp_path: Pa
     assert isinstance(hits, list)
 
 
-@W6_XFAIL
 def test_entropy_sweep_classifies_benign_candidates_for_operator_review() -> None:
     """D13/D14 — W6 publishes benign-vs-secret classification from sweep evidence."""
     module = importlib.import_module("mergecraft.analyzers.redact")

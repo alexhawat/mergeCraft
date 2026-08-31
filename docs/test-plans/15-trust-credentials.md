@@ -118,7 +118,7 @@ Pinned API (W2b): `rebaseline_repo_settings_snapshot`, `assert_config_unchanged`
 | W3 | `green after W3:` | `test_analyzer_egress_policy.py` | pending |
 | W4 | `green after W4:` | `test_credential_status_for_slug.py`, `test_credential_p0_skip.py` | **reconciled** — markers removed 2026-08-31 |
 | W5 | `green after W5:` | `test_logfire_action_token_seam.py`, `test_tracing_inactive_summary_warning.py` | **reconciled** — markers removed 2026-08-31 |
-| W6 | `green after W6:` | `test_entropy_redaction_sweep.py` (`classify_entropy_redaction_hits`) | pending |
+| W6 | `green after W6:` | `test_entropy_redaction_sweep.py` (`classify_entropy_redaction_hits`) | **reconciled** — marker removed 2026-08-31 |
 
 ## W1 RED evidence
 
