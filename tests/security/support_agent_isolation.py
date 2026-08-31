@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import importlib
 import json
 import threading
@@ -11,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+import httpx
 import pytest
 
 from tests.evidence.support import sample_minimal_packet_dict
@@ -194,6 +196,46 @@ def broker_config_for_upstream(
 
 def assert_credential_absent(text: str, credential: str = REAL_OPENAI_API_KEY_FIXTURE) -> None:
     assert credential not in text, "real API credential leaked into output"
+
+
+def post_absolute_url_to_broker(
+    handle: Any,
+    absolute_url: str,
+    *,
+    headers: dict[str, str],
+    json_body: dict[str, Any] | None = None,
+) -> httpx.Response:
+    """POST to the loopback broker using an absolute-form request-target.
+
+    ``httpx`` resolves absolute URLs itself and sends origin-form paths when
+    connecting directly, so absolute-URL rewrite probes must dial the broker
+    with :func:`http.client.HTTPConnection.request` and an absolute ``url``.
+    """
+    host = getattr(handle, "host", "127.0.0.1")
+    port = handle.port
+    body_bytes = b""
+    request_headers = dict(headers)
+    if json_body is not None:
+        body_bytes = json.dumps(json_body).encode()
+        request_headers.setdefault("Content-Type", "application/json")
+    if body_bytes:
+        request_headers.setdefault("Content-Length", str(len(body_bytes)))
+
+    conn = http.client.HTTPConnection(host, port, timeout=10)
+    try:
+        conn.request("POST", absolute_url, body=body_bytes, headers=request_headers)
+        raw = conn.getresponse()
+        content = raw.read()
+        response_headers = {key: value for key, value in raw.getheaders()}
+    finally:
+        conn.close()
+
+    return httpx.Response(
+        status_code=raw.status,
+        headers=response_headers,
+        content=content,
+        request=httpx.Request("POST", absolute_url),
+    )
 
 
 def codex_module_path() -> Any:

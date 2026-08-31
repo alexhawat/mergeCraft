@@ -23,6 +23,7 @@ from tests.security.support_agent_isolation import (
     broker_config_for_upstream,
     capture_loguru_messages,
     load_broker_module,
+    post_absolute_url_to_broker,
     require_broker_symbol,
     serialized_evidence_packet_fixture,
 )
@@ -167,12 +168,12 @@ def test_broker_rejects_absolute_url_rewrite() -> None:
     module = load_broker_module()
     with MockModelUpstream() as upstream, _start_broker(module, upstream) as handle:
         evil_url = f"http://{EVIL_UPSTREAM_HOST}{MODEL_PATH}"
-        with _broker_client(handle) as client:
-            response = client.post(
-                evil_url,
-                json={"model": "gpt-stub", "messages": []},
-                headers=_auth_headers(handle.token),
-            )
+        response = post_absolute_url_to_broker(
+            handle,
+            evil_url,
+            headers=_auth_headers(handle.token),
+            json_body={"model": "gpt-stub", "messages": []},
+        )
         assert response.status_code == 403
         assert_credential_absent(response.text)
 

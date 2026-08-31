@@ -34,7 +34,7 @@ xfail-reconciliation: per impl wave (`strict=False` until green; test-creator ag
 | Wrong bearer → 401 | `test_broker_rejects_wrong_bearer` |
 | Constant-time `compare_digest` | `test_bearer_validation_uses_constant_time_compare_digest` |
 | `Host` / `X-Forwarded-Host` smuggle → 403 | `test_broker_rejects_upstream_host_smuggle` |
-| Absolute URL rewrite → 403 | `test_broker_rejects_absolute_url_rewrite` |
+| Absolute URL rewrite → 403 | `test_broker_rejects_absolute_url_rewrite` (uses `post_absolute_url_to_broker` — httpx origin-form bypass) |
 | Redirect off allow-list refused | `test_broker_refuses_redirect_to_non_allowlisted_host` |
 | Non-model paths refused (D4) | `test_broker_refuses_non_model_paths` |
 | Real key absent from bodies/errors/logs | `test_broker_never_leaks_real_credential_in_responses_errors_or_logs` |
