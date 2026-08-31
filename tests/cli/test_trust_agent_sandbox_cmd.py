@@ -6,9 +6,10 @@ import re
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import yaml
-from tests.trust_credentials.support import W2_XFAIL, load_config_dict, write_trust_config
+from tests.trust_credentials.support import load_config_dict, write_trust_config
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -45,7 +46,6 @@ def _init_git_repo(tmp_path: Path) -> None:
     )
 
 
-@W2_XFAIL
 def test_trust_show_prints_configured_and_resolved_agent_sandbox(tmp_path: Path) -> None:
     """trust show prints tier, resolved_from, and the resolved answer for this run."""
     write_trust_config(tmp_path, agent_sandbox="dispatch", self_review="analyzers")
@@ -57,7 +57,6 @@ def test_trust_show_prints_configured_and_resolved_agent_sandbox(tmp_path: Path)
     assert "resolved" in out or "resolved from" in out
 
 
-@W2_XFAIL
 def test_set_agent_sandbox_writes_key(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """set-agent-sandbox writes trust.agentSandbox offline."""
     write_trust_config(tmp_path, agent_sandbox="never")
@@ -68,7 +67,6 @@ def test_set_agent_sandbox_writes_key(tmp_path: Path, monkeypatch: MonkeyPatch) 
     assert config.get("trust", {}).get("agentSandbox") == "dispatch"
 
 
-@W2_XFAIL
 def test_set_agent_sandbox_same_repo_requires_confirmation(tmp_path: Path) -> None:
     """Loosening to same-repo requires a confirmation flag; tightening does not."""
     write_trust_config(tmp_path, agent_sandbox="dispatch")
@@ -97,7 +95,6 @@ def test_set_agent_sandbox_same_repo_requires_confirmation(tmp_path: Path) -> No
     assert tighten.exit_code == 0, tighten.output
 
 
-@W2_XFAIL
 def test_set_agent_sandbox_is_offline_no_workflow_edit(tmp_path: Path) -> None:
     """set-agent-sandbox touches only config — no workflow or API edits."""
     workflow = tmp_path / ".github" / "workflows" / "mergecraft.yml"
@@ -110,14 +107,14 @@ def test_set_agent_sandbox_is_offline_no_workflow_edit(tmp_path: Path) -> None:
     assert workflow.read_text(encoding="utf-8") == before
 
 
-@W2_XFAIL
 def test_init_scaffolds_agent_sandbox_default_with_tier_comment(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """init writes agentSandbox at dispatch with inline tier documentation."""
     _init_git_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(app, ["init", "--force"])
+    with patch("mergecraft.cli.init_cmd.seed_builtin_providers"):
+        result = runner.invoke(app, ["init", "--force"])
     assert result.exit_code == 0, result.output
     config_path = tmp_path / ".mergecraft" / "config.yaml"
     raw = config_path.read_text(encoding="utf-8")
@@ -125,3 +122,44 @@ def test_init_scaffolds_agent_sandbox_default_with_tier_comment(
     assert data.get("trust", {}).get("agentSandbox") == "dispatch"
     assert re.search(r"never|merged-only|dispatch|same-repo", raw, re.IGNORECASE)
     assert "fork" in raw.lower()
+
+
+def _write_commented_config(tmp_path: Path) -> Path:
+    config_dir = tmp_path / ".mergecraft"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.yaml"
+    config_path.write_text(
+        "# tier docs — do not strip\n"
+        "trust:\n"
+        "  selfReview: 'off'\n"
+        "  agentSandbox: 'dispatch'\n"
+        "model: anthropic/claude-sonnet\n"
+        "push: restricted\n"
+        "shell: restricted\n",
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def test_set_agent_sandbox_refuses_commented_config_and_leaves_file_intact(
+    tmp_path: Path,
+) -> None:
+    """W2 option (b) — setter refuses rather than destroying scaffold comments."""
+    config_path = _write_commented_config(tmp_path)
+    before = config_path.read_text(encoding="utf-8")
+    result = runner.invoke(app, ["trust", "set-agent-sandbox", "never", "--cwd", str(tmp_path)])
+    assert result.exit_code != 0, result.output
+    assert "comment" in result.output.lower() or "refusing" in result.output.lower()
+    assert config_path.read_text(encoding="utf-8") == before
+
+
+def test_set_self_review_refuses_commented_config_and_leaves_file_intact(
+    tmp_path: Path,
+) -> None:
+    """set-self-review shares the commented-config refusal path."""
+    config_path = _write_commented_config(tmp_path)
+    before = config_path.read_text(encoding="utf-8")
+    result = runner.invoke(app, ["trust", "set-self-review", "analyzers", "--cwd", str(tmp_path)])
+    assert result.exit_code != 0, result.output
+    assert "comment" in result.output.lower() or "refusing" in result.output.lower()
+    assert config_path.read_text(encoding="utf-8") == before

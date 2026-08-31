@@ -15,7 +15,6 @@ from tests.trust_credentials.support import (
     HEAD_SCENARIOS,
     SANDBOX_MATRIX,
     SELF_REVIEW_LEVELS,
-    W2_XFAIL,
     decision_honours_override,
     import_trust_policy_symbol,
     resolve_agent_sandbox_decision,
@@ -38,7 +37,6 @@ if TYPE_CHECKING:
     [(tier, scenario) for tier in AGENT_SANDBOX_TIERS for scenario in HEAD_SCENARIOS],
     ids=[f"{tier}-{scenario}" for tier in AGENT_SANDBOX_TIERS for scenario in HEAD_SCENARIOS],
 )
-@W2_XFAIL
 def test_agent_sandbox_tier_head_matrix(tmp_path: Path, tier: str, scenario: str) -> None:
     """Every tier x head cell from W1.1 honours or refuses the operator override."""
     decision = resolve_agent_sandbox_decision(
@@ -50,7 +48,6 @@ def test_agent_sandbox_tier_head_matrix(tmp_path: Path, tier: str, scenario: str
     assert decision_honours_override(decision) is expected
 
 
-@W2_XFAIL
 def test_fork_head_is_hard_floor_in_every_tier(tmp_path: Path) -> None:
     """D1b — fork head refuses in all four tiers; name the floor explicitly."""
     for tier in AGENT_SANDBOX_TIERS:
@@ -62,7 +59,6 @@ def test_fork_head_is_hard_floor_in_every_tier(tmp_path: Path) -> None:
         assert decision_honours_override(decision) is False, f"fork must refuse for tier={tier!r}"
 
 
-@W2_XFAIL
 def test_lane_d_coupling_self_review_does_not_open_sandbox_on_prt(tmp_path: Path) -> None:
     """D1a — selfReview analyzers + same-repo pull_request_target + dispatch still refuses."""
     decision = resolve_agent_sandbox_decision(
@@ -75,7 +71,6 @@ def test_lane_d_coupling_self_review_does_not_open_sandbox_on_prt(tmp_path: Path
 
 
 @pytest.mark.parametrize("self_review", SELF_REVIEW_LEVELS)
-@W2_XFAIL
 def test_self_review_level_does_not_change_matrix_cells(tmp_path: Path, self_review: str) -> None:
     """Symmetric guard — flipping selfReview must not change any matrix cell."""
     for tier in AGENT_SANDBOX_TIERS:
@@ -90,7 +85,6 @@ def test_self_review_level_does_not_change_matrix_cells(tmp_path: Path, self_rev
             assert decision_honours_override(decision) is expected
 
 
-@W2_XFAIL
 def test_merged_only_honours_when_head_is_ancestor_of_default(tmp_path: Path) -> None:
     """merged-only uses merge-base against the bound head SHA on the default branch."""
     with patch(
@@ -106,7 +100,6 @@ def test_merged_only_honours_when_head_is_ancestor_of_default(tmp_path: Path) ->
     assert decision_honours_override(decision) is True
 
 
-@W2_XFAIL
 def test_merged_only_refuses_when_default_branch_unfetched(tmp_path: Path) -> None:
     """An unfetched default branch is a refuse, not a crash or an honour."""
     with patch(
@@ -118,11 +111,11 @@ def test_merged_only_refuses_when_default_branch_unfetched(tmp_path: Path) -> No
             tier="merged-only",
             scenario="head_on_default",
             head_sha=DEFAULT_HEAD_SHA,
+            simulate_merged_only_git=False,
         )
     assert decision_honours_override(decision) is False
 
 
-@W2_XFAIL
 def test_refused_override_logs_warning_with_contract_fields(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -147,7 +140,6 @@ def test_refused_override_logs_warning_with_contract_fields(
     assert "acme" in joined or "alexhawat" in joined or "repo" in joined
 
 
-@W2_XFAIL
 def test_granted_override_is_recorded_in_run_manifest(tmp_path: Path) -> None:
     """D2a — honoured overrides land in the run record, not only refusals."""
     manifest_fn = import_trust_policy_symbol("agent_sandbox_manifest_fields")
@@ -178,7 +170,6 @@ def test_unrecognised_codex_sandbox_env_warns_and_returns_none(
     assert any(CODEX_SANDBOX_ENV in message for message in messages)
 
 
-@W2_XFAIL
 @pytest.mark.parametrize("raw", ["", "not-a-tier", "DISPATCH"])
 def test_absent_or_malformed_agent_sandbox_defaults_to_dispatch(tmp_path: Path, raw: str) -> None:
     """Absent / malformed trust.agentSandbox falls back to dispatch, not same-repo."""
@@ -201,7 +192,6 @@ def test_absent_or_malformed_agent_sandbox_defaults_to_dispatch(tmp_path: Path, 
     assert tier in {None, "dispatch"}
 
 
-@W2_XFAIL
 def test_agent_sandbox_policy_reads_base_snapshot_not_pr_head(tmp_path: Path) -> None:
     """D1d/D16 — PR-head config edits cannot flip the sandbox policy mid-run."""
     write_trust_config(tmp_path, agent_sandbox="same-repo", self_review="off")
@@ -218,7 +208,6 @@ def test_agent_sandbox_policy_reads_base_snapshot_not_pr_head(tmp_path: Path) ->
     assert decision_honours_override(decision) is True
 
 
-@W2_XFAIL
 def test_operator_override_requested_false_never_honours(tmp_path: Path) -> None:
     """Without MERGECRAFT_CODEX_SANDBOX the gate must not grant unsandboxed mode."""
     decision = resolve_agent_sandbox_decision(

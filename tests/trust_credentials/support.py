@@ -6,6 +6,7 @@ import importlib
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Literal
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -193,6 +194,7 @@ def resolve_agent_sandbox_decision(
     settings_snapshot: Any | None = None,
     head_sha: str | None = None,
     default_branch: str = "main",
+    simulate_merged_only_git: bool = True,
 ) -> Any:
     """Call the W2 policy resolver (pinned API)."""
     resolve = import_trust_policy_symbol("resolve_agent_sandbox_decision")
@@ -204,15 +206,25 @@ def resolve_agent_sandbox_decision(
     bound_sha = head_sha
     if bound_sha is None:
         bound_sha = DEFAULT_BRANCH_SHA if scenario == "head_on_default" else DEFAULT_HEAD_SHA
-    return resolve(
-        event=event,
-        event_name=event_name,
-        config_root=root,
-        settings_snapshot=snapshot,
-        head_sha=bound_sha,
-        default_branch=default_branch,
-        operator_override_requested=operator_override_requested,
-    )
+
+    def _call() -> Any:
+        return resolve(
+            event=event,
+            event_name=event_name,
+            config_root=root,
+            settings_snapshot=snapshot,
+            head_sha=bound_sha,
+            default_branch=default_branch,
+            operator_override_requested=operator_override_requested,
+        )
+
+    if tier == "merged-only" and scenario == "head_on_default" and simulate_merged_only_git:
+        with patch(
+            "mergecraft.config.trust_policy.subprocess.run",
+            return_value=type("R", (), {"returncode": 0})(),
+        ):
+            return _call()
+    return _call()
 
 
 def decision_honours_override(decision: Any) -> bool:

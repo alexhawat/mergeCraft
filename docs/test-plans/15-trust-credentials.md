@@ -40,6 +40,14 @@ Pinned API (W2): `mergecraft.config.trust_policy.resolve_agent_sandbox_decision`
 | same-repo confirmation | `…::test_set_agent_sandbox_same_repo_requires_confirmation` | E2E |
 | Offline / no workflow edit | `…::test_set_agent_sandbox_is_offline_no_workflow_edit` | E2E |
 | `init` scaffolds default + comment | `…::test_init_scaffolds_agent_sandbox_default_with_tier_comment` | E2E |
+| Commented config refusal (`config_has_yaml_comments`) | `tests/config/test_config_io_comments.py` | unit |
+| `set-agent-sandbox` refuses commented fixture | `tests/cli/test_trust_agent_sandbox_cmd.py::test_set_agent_sandbox_refuses_commented_config_and_leaves_file_intact` | E2E |
+| `set-self-review` refuses commented fixture | `…::test_set_self_review_refuses_commented_config_and_leaves_file_intact` | E2E |
+
+**W2 reconcile notes (2026-08-31):** `resolve_agent_sandbox_decision` stubs git fetch/merge-base for
+`merged-only` by default (`simulate_merged_only_git=True`); the unfetched-default refuse test passes
+`simulate_merged_only_git=False` and supplies its own failing probe. `test_init_scaffolds_*` mocks
+`seed_builtin_providers` so scaffold comment preservation is asserted without provider-seed rewrite.
 
 ## W1.2 — Analyzer egress → W3
 
@@ -93,13 +101,13 @@ Pinned API (W5): `mergecraft.action.inputs.export_tracing_env_from_action_inputs
 
 ## xfail reconciliation
 
-| Wave | Marker reason prefix | Primary files |
-| --- | --- | --- |
-| W2 | `green after W2:` | `test_codex_sandbox_policy.py`, `test_fork_credential_invariant.py`, `test_trust_agent_sandbox_settings.py`, `test_trust_agent_sandbox_cmd.py` |
-| W3 | `green after W3:` | `test_analyzer_egress_policy.py` |
-| W4 | `green after W4:` | `test_credential_status_for_slug.py`, `test_credential_p0_skip.py` |
-| W5 | `green after W5:` | `test_logfire_action_token_seam.py`, `test_tracing_inactive_summary_warning.py` |
-| W6 | `green after W6:` | `test_entropy_redaction_sweep.py` (`classify_entropy_redaction_hits`) |
+| Wave | Marker reason prefix | Primary files | Status |
+| --- | --- | --- | --- |
+| W2 | `green after W2:` | `test_codex_sandbox_policy.py`, `test_fork_credential_invariant.py`, `test_trust_agent_sandbox_settings.py`, `test_trust_agent_sandbox_cmd.py` | **reconciled** — markers removed 2026-08-31 |
+| W3 | `green after W3:` | `test_analyzer_egress_policy.py` | pending |
+| W4 | `green after W4:` | `test_credential_status_for_slug.py`, `test_credential_p0_skip.py` | pending |
+| W5 | `green after W5:` | `test_logfire_action_token_seam.py`, `test_tracing_inactive_summary_warning.py` | pending |
+| W6 | `green after W6:` | `test_entropy_redaction_sweep.py` (`classify_entropy_redaction_hits`) | pending |
 
 ## W1 RED evidence
 

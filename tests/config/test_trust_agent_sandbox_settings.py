@@ -6,10 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from mergecraft.config.settings import TrustSettings
-from tests.trust_credentials.support import W2_XFAIL
 
 
-@W2_XFAIL
 @pytest.mark.parametrize("tier", ["never", "merged-only", "dispatch", "same-repo"])
 def test_trust_settings_accepts_agent_sandbox(tier: str) -> None:
     settings = TrustSettings.model_validate({"selfReview": "off", "agentSandbox": tier})
