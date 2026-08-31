@@ -2,15 +2,35 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from mergecraft.config.settings_snapshot import repo_settings_from_context
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import record_reviewer_dispatch_error, record_reviewer_dispatch_run
+from mergecraft.mcp.tool_state import (
+    primary_repo_state,
+    record_reviewer_dispatch_error,
+    record_reviewer_dispatch_run,
+)
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+
+
+def _validate_reviewer_agent_id(ctx: ToolContext, agent_id: str) -> None:
+    """Reject caller-supplied ids that are not roster reviewer bindings (D6/D7)."""
+    from mergecraft.agents.registry import AgentRole, load_registry
+
+    repo_root = Path(primary_repo_state(ctx.tool_state).dir)
+    settings = repo_settings_from_context(ctx)
+    registry = load_registry(settings=settings, repo_root=repo_root)
+    reviewer_ids = {binding.agent_id for binding in registry.resolve_roles(AgentRole.reviewer)}
+    if agent_id not in reviewer_ids:
+        expected = ", ".join(sorted(reviewer_ids))
+        msg = f"unknown reviewer agent_id {agent_id!r}; expected one of: {expected}"
+        raise ValueError(msg)
 
 
 class RecordReviewerDispatchErrorParams(BaseModel):
@@ -71,7 +91,7 @@ def record_reviewer_dispatch_error_tool(ctx: ToolContext):
             "additionalProperties": False,
         },
         tool_class=ToolClass.REVIEW_WRITE,
-        mutates=True,
+        mutates=False,
         execute=execute(_run, "record_reviewer_dispatch_error"),
     )
 
@@ -79,6 +99,7 @@ def record_reviewer_dispatch_error_tool(ctx: ToolContext):
 def record_reviewer_dispatch_run_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         validated = RecordReviewerDispatchRunParams.model_validate(params)
+        _validate_reviewer_agent_id(ctx, validated.agent_id)
         record_reviewer_dispatch_run(
             ctx.tool_state,
             agent_id=validated.agent_id,
@@ -114,7 +135,7 @@ def record_reviewer_dispatch_run_tool(ctx: ToolContext):
             "additionalProperties": False,
         },
         tool_class=ToolClass.REVIEW_WRITE,
-        mutates=True,
+        mutates=False,
         execute=execute(_run, "record_reviewer_dispatch_run"),
     )
 

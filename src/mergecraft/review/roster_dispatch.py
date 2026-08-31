@@ -45,6 +45,9 @@ def format_reviewer_dispatch_instructions(
             "Do NOT dispatch reviewers from level N+1 until every reviewer at "
             "level N has finished or failed. Within one level, dispatch all "
             "reviewers in parallel (one assistant turn with multiple Task blocks).",
+            "After each reviewer subagent completes successfully, call "
+            "`record_reviewer_dispatch_run` with that reviewer's ``agent_id`` and "
+            "its findings before submit_review_verdict.",
             "A failed dependency does not cancel later levels — call "
             "`record_reviewer_dispatch_error` for each reviewer that produced no "
             "findings before submit_review_verdict.",

@@ -11,7 +11,6 @@ from pydantic import ValidationError
 from mergecraft.agents.ensemble import finding_key
 from mergecraft.agents.registry import AgentRole
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
-from mergecraft.mcp.tool_state import record_reviewer_dispatch_run
 from mergecraft.mcp.verdict import SubmitReviewVerdictParams, register_review_scope
 from mergecraft.review.terminal_submission import (
     _group_findings_by_reviewer,
@@ -145,10 +144,31 @@ def test_inline_placement_unaffected_by_raised_by() -> None:
 
 
 @pytest.mark.asyncio
-async def test_submit_review_verdict_stamps_raised_by_from_dispatch_runs(
+async def test_record_reviewer_dispatch_run_rejects_unknown_agent_id(
     tmp_path: Any,
 ) -> None:
-    """Live terminal path must stamp ``raised_by`` from dispatch pairing (#574)."""
+    """D6 — dispatch run recording must reject forged reviewer ids."""
+    from mergecraft.mcp.reviewer_dispatch import record_reviewer_dispatch_run_tool
+
+    write_config(tmp_path, two_reviewer_config())
+    ctx = publication_ctx(tmp_path)
+    result = await record_reviewer_dispatch_run_tool(ctx).execute(
+        {
+            "agent_id": "forged-reviewer",
+            "findings": [_finding(body="spoofed", severity="Minor")],
+        }
+    )
+    assert result.is_error is True
+    assert "forged-reviewer" in result.content[0]["text"]
+    assert ctx.tool_state.reviewer_dispatch_runs == []
+
+
+@pytest.mark.asyncio
+async def test_submit_review_verdict_stamps_raised_by_from_dispatch_tool(
+    tmp_path: Any,
+) -> None:
+    """End-to-end: dispatch tool → terminal verdict stamps ``raised_by`` (#574)."""
+    from mergecraft.mcp.reviewer_dispatch import record_reviewer_dispatch_run_tool
     from mergecraft.mcp.verdict import submit_review_verdict_tool
 
     write_config(tmp_path, two_reviewer_config())
@@ -158,13 +178,17 @@ async def test_submit_review_verdict_stamps_raised_by_from_dispatch_runs(
         diff_path=str(tmp_path / "diff.patch"),
         provenance="checkout",
     )
-    record_reviewer_dispatch_run(
-        ctx.tool_state,
-        agent_id="reviewer2",
-        findings=[
-            _finding(path="src/b.py", body="from reviewer2 dispatch", severity="Minor"),
-        ],
+    dispatch_result = await record_reviewer_dispatch_run_tool(ctx).execute(
+        {
+            "agent_id": "reviewer2",
+            "findings": [
+                _finding(path="src/b.py", body="from reviewer2 dispatch", severity="Minor"),
+            ],
+        }
     )
+    assert dispatch_result.is_error is False
+    assert len(ctx.tool_state.reviewer_dispatch_runs) == 1
+
     result = await submit_review_verdict_tool(ctx).execute(
         {
             "verdict": "approve",
