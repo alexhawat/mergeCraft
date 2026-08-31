@@ -11,6 +11,7 @@ Exports:
     credential_broker: Context manager that starts and stops the broker.
     redact_broker_output: Redact broker responses, errors, and logs (#553).
     resolve_codex_broker_posture: Subscription vs API-key posture (D3a).
+    subscription_auth_usable: Whether ``CODEX_AUTH_JSON`` carries usable tokens.
 """
 
 from __future__ import annotations
@@ -18,13 +19,12 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import socket
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
@@ -32,7 +32,6 @@ from loguru import logger
 
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.security.egress import (
-    allow_egress,
     inspect_external_url,
     pinned_http_transport,
 )
@@ -48,7 +47,10 @@ _MODEL_PATH_PREFIXES: tuple[str, ...] = (
     "/v1/completions",
     "/v1/embeddings",
     "/v1/models",
+    "/v1/responses",
 )
+
+_MAX_BROKER_BODY_BYTES = 50 * 1024 * 1024
 
 _HOST_SPOOF_HEADERS: tuple[str, ...] = ("Host", "X-Forwarded-Host")
 _REDIRECT_STATUSES: frozenset[int] = frozenset(
@@ -103,7 +105,8 @@ def _normalize_host(host: str) -> str:
     return host.strip().rstrip(".").casefold()
 
 
-def _subscription_auth_usable(raw: str) -> bool:
+def subscription_auth_usable(raw: str) -> bool:
+    """Return whether ``CODEX_AUTH_JSON`` carries usable subscription tokens."""
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
@@ -123,10 +126,14 @@ def _subscription_auth_usable(raw: str) -> bool:
     return False
 
 
+# Backward-compatible alias — tests pin ``_subscription_auth_usable`` until renamed.
+_subscription_auth_usable = subscription_auth_usable
+
+
 def resolve_codex_broker_posture() -> CodexBrokerPosture:
     """Return whether the broker is active for the current Codex auth mode (D3a)."""
     subscription_raw = os.environ.get("CODEX_AUTH_JSON", "").strip()
-    if subscription_raw and _subscription_auth_usable(subscription_raw):
+    if subscription_raw and subscription_auth_usable(subscription_raw):
         return CodexBrokerPosture(
             active=False,
             auth_mode="subscription",
@@ -155,11 +162,14 @@ def broker_run_record_fields(posture: CodexBrokerPosture) -> dict[str, str]:
     }
 
 
+def _allowed_upstream_hosts(config: CredentialBrokerConfig) -> frozenset[str]:
+    hosts = {_normalize_host(item) for item in config.run_upstream_hosts}
+    hosts.add(_configured_upstream_host(config))
+    return frozenset(hosts)
+
+
 def _allowed_upstream_host(host: str, config: CredentialBrokerConfig) -> bool:
-    normalized = _normalize_host(host)
-    if normalized in {_normalize_host(item) for item in config.run_upstream_hosts}:
-        return True
-    return allow_egress(normalized)
+    return _normalize_host(host) in _allowed_upstream_hosts(config)
 
 
 def _configured_upstream_host(config: CredentialBrokerConfig) -> str:
@@ -212,9 +222,9 @@ def _host_from_header(value: str) -> str:
     return host
 
 
-def _broker_log(level: str, message: str, *args: object) -> None:
-    rendered = redact_broker_output(message.format(*args) if args else message)
-    getattr(logger, level)(rendered)
+def _broker_log(level: str, format: str, *args: object) -> None:
+    redacted_args = tuple(redact_broker_output(str(arg)) for arg in args)
+    getattr(logger, level)(redact_broker_output(format), *redacted_args)
 
 
 def _upstream_request_path(request_path: str) -> str:
@@ -222,34 +232,6 @@ def _upstream_request_path(request_path: str) -> str:
     if path.startswith("/v1/"):
         return path[len("/v1") :]
     return path if path.startswith("/") else f"/{path}"
-
-
-@contextmanager
-def _route_absolute_uri_probe_hosts(broker_port: int) -> Iterator[None]:
-    """Route ``evil.example`` absolute-URI probes to the loopback broker port.
-
-    httpx sends absolute request-targets to the URL host; during broker tests the
-    probe host must still reach this process so the broker can refuse the rewrite.
-    """
-    real_getaddrinfo = socket.getaddrinfo
-
-    def _patched_getaddrinfo(
-        host: str | bytes | None,
-        port: str | bytes | int | None,
-        family: int = 0,
-        type: int = 0,
-        proto: int = 0,
-        flags: int = 0,
-    ) -> list[tuple[Any, ...]]:
-        if isinstance(host, str) and _normalize_host(host) == "evil.example":
-            return real_getaddrinfo(BROKER_BIND_HOST, broker_port, family, type, proto, flags)
-        return real_getaddrinfo(host, port, family, type, proto, flags)
-
-    socket.getaddrinfo = _patched_getaddrinfo
-    try:
-        yield
-    finally:
-        socket.getaddrinfo = real_getaddrinfo
 
 
 def _upstream_client(config: CredentialBrokerConfig) -> httpx.Client:
@@ -296,7 +278,7 @@ def credential_broker(
     *,
     bind_host: str | None = None,
 ) -> Iterator[CredentialBrokerHandle]:
-    """Start a loopback broker; yield ``(host, port, token)``; stop on exit."""
+    """Start a loopback broker; yield :class:`CredentialBrokerHandle`; stop on exit."""
     host = bind_host if bind_host is not None else BROKER_BIND_HOST
     if host != BROKER_BIND_HOST:
         msg = f"credential broker must bind loopback {BROKER_BIND_HOST!r}, not {host!r}"
@@ -311,10 +293,21 @@ def credential_broker(
         def log_message(self, format: str, *args: object) -> None:
             _broker_log("debug", format, *args)
 
-        def _read_body(self) -> bytes:
-            length = int(self.headers.get("Content-Length", "0") or "0")
-            if length <= 0:
+        def _read_body(self) -> bytes | None:
+            raw_length = self.headers.get("Content-Length", "0") or "0"
+            try:
+                length = int(raw_length)
+            except ValueError:
+                self._reject(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
+                return None
+            if length < 0:
+                self._reject(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
+                return None
+            if length == 0:
                 return b""
+            if length > _MAX_BROKER_BODY_BYTES:
+                self._reject(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "request body too large")
+                return None
             return self.rfile.read(length)
 
         def _reject(self, status: HTTPStatus, detail: str) -> None:
@@ -366,6 +359,9 @@ def credential_broker(
                 return
 
             body = self._read_body()
+            if body is None:
+                return
+
             upstream_path = path
             if self.path.startswith(("http://", "https://")):
                 upstream_path = urlparse(self.path).path
@@ -378,9 +374,8 @@ def credential_broker(
             forward_headers["Authorization"] = f"Bearer {config.api_key}"
 
             upstream_path = _upstream_request_path(upstream_path)
-            upstream_client = _upstream_client(config)
             try:
-                with upstream_client.stream(
+                with shared_upstream_client.stream(
                     method,
                     upstream_path,
                     content=body if body else None,
@@ -405,8 +400,6 @@ def credential_broker(
                 _broker_log("warning", "broker upstream request failed: {}", exc)
                 self._reject(HTTPStatus.BAD_GATEWAY, "upstream request failed")
                 return
-            finally:
-                upstream_client.close()
 
             if response_body:
                 try:
@@ -441,6 +434,13 @@ def credential_broker(
         def do_DELETE(self) -> None:
             self._reject(HTTPStatus.METHOD_NOT_ALLOWED, "method not allowed")
 
+        def do_PATCH(self) -> None:
+            self._reject(HTTPStatus.METHOD_NOT_ALLOWED, "method not allowed")
+
+        def do_OPTIONS(self) -> None:
+            self._reject(HTTPStatus.METHOD_NOT_ALLOWED, "method not allowed")
+
+    shared_upstream_client = _upstream_client(config)
     httpd = ThreadingHTTPServer((host, 0), _BrokerHandler)
     bound_port = httpd.server_address[1]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -452,9 +452,9 @@ def credential_broker(
         base_url=f"http://{host}:{bound_port}",
     )
     try:
-        with _route_absolute_uri_probe_hosts(bound_port):
-            yield handle
+        yield handle
     finally:
+        shared_upstream_client.close()
         httpd.shutdown()
         httpd.server_close()
         thread.join(timeout=5)

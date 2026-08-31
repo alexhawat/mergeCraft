@@ -289,6 +289,8 @@ def build_agent_env(
                 env[key] = raw
     if extras:
         env.update(extras)
+    if agent_id == "codex" and codex_broker_active:
+        env.pop("OPENAI_API_KEY", None)
     from mergecraft.enterprise.runtime import agent_network_env
 
     env.update(agent_network_env())

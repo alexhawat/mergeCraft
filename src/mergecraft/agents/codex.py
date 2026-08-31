@@ -8,9 +8,14 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+import threading
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
+from dataclasses import dataclass, field
 
 from loguru import logger
 
@@ -45,6 +50,7 @@ from mergecraft.security.broker import (
     CodexBrokerPosture,
     CredentialBrokerConfig,
     CredentialBrokerHandle,
+    subscription_auth_usable,
 )
 from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
@@ -103,20 +109,33 @@ CODEX_SUBAGENT_DEGRADATION = CodexSubagentDegradation(
 )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class CodexBrokeredRun:
     """Result of :func:`prepare_codex_brokered_run` (plan 18 W3)."""
 
     agent_env: dict[str, str]
     broker_base_url: str | None
     posture: CodexBrokerPosture
+    _session: _CodexBrokerSession | None = field(default=None, repr=False)
+
+    def close(self) -> None:
+        """Stop the loopback broker and clear the module session."""
+        if self._session is not None:
+            _stop_broker_session(self._session)
+            _set_broker_session(None)
+
+    def __enter__(self) -> CodexBrokeredRun:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
 
 @dataclass(slots=True)
 class _CodexBrokerSession:
     posture: CodexBrokerPosture
     handle: CredentialBrokerHandle | None = None
-    _broker_cm: Any = None
+    _broker_cm: AbstractContextManager[CredentialBrokerHandle] | None = None
 
     @property
     def active(self) -> bool:
@@ -124,15 +143,18 @@ class _CodexBrokerSession:
 
 
 _active_broker_session: _CodexBrokerSession | None = None
+_broker_session_lock = threading.Lock()
 
 
 def _current_broker_session() -> _CodexBrokerSession | None:
-    return _active_broker_session
+    with _broker_session_lock:
+        return _active_broker_session
 
 
 def _set_broker_session(session: _CodexBrokerSession | None) -> None:
     global _active_broker_session
-    _active_broker_session = session
+    with _broker_session_lock:
+        _active_broker_session = session
 
 
 def _broker_config_for_api_key(api_key: str) -> CredentialBrokerConfig:
@@ -146,8 +168,8 @@ def _broker_config_for_api_key(api_key: str) -> CredentialBrokerConfig:
 def _start_broker_session(*, api_key: str, posture: CodexBrokerPosture) -> _CodexBrokerSession:
     """Start the loopback broker or refuse with a named reason (D10)."""
     config = _broker_config_for_api_key(api_key)
+    broker_cm = _credential_broker_mod.credential_broker(config)
     try:
-        broker_cm = _credential_broker_mod.credential_broker(config)
         handle = broker_cm.__enter__()
     except Exception as exc:
         msg = f"Codex credential broker refused to start: {exc}"
@@ -159,6 +181,22 @@ def _stop_broker_session(session: _CodexBrokerSession | None) -> None:
     if session is None or session._broker_cm is None:
         return
     session._broker_cm.__exit__(None, None, None)
+
+
+def _begin_broker_session(*, openai_api_key: str = "") -> _CodexBrokerSession:
+    """Resolve Codex broker posture and start the loopback broker when active."""
+    posture = _credential_broker_mod.resolve_codex_broker_posture()
+    if not posture.active:
+        return _CodexBrokerSession(posture=posture)
+    api_key = openai_api_key.strip() or os.environ.get(OPENAI_API_KEY_ENV, "").strip()
+    if not api_key:
+        inactive = CodexBrokerPosture(
+            active=False,
+            auth_mode="none",
+            reason="broker inactive: no OpenAI API key configured",
+        )
+        return _CodexBrokerSession(posture=inactive)
+    return _start_broker_session(api_key=api_key, posture=posture)
 
 
 # Mirrors mergecraft.utils.git_setup — Codex refuses PATH aliases under these.
@@ -307,25 +345,7 @@ def _has_openai_api_key() -> bool:
 
 
 def _codex_subscription_auth_usable(raw: str) -> bool:
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(data, dict):
-        return False
-    if _extract_refresh_token(raw):
-        return True
-    tokens = data.get("tokens")
-    if isinstance(tokens, dict):
-        for key in ("access_token", "access", "refresh_token", "refresh"):
-            val = tokens.get(key)
-            if isinstance(val, str) and val.strip():
-                return True
-    for key in ("access_token", "access"):
-        val = data.get(key)
-        if isinstance(val, str) and val.strip():
-            return True
-    return False
+    return subscription_auth_usable(raw)
 
 
 def _setup_codex_auth(
@@ -539,7 +559,12 @@ def _has_any_custom_provider_env() -> bool:
 
 
 def _add_broker_provider_table(config: TomlTable, broker_base_url: str) -> None:
-    """Point ``model_providers.openai`` at the loopback credential broker (W3)."""
+    """Point ``model_providers.openai`` at the loopback credential broker (W3).
+
+    When the broker is active it owns the ``openai`` provider slot so Codex
+    routes default OpenAI models through loopback; custom gateway tables are
+    omitted whenever broker posture is active.
+    """
     model_providers = config.get("model_providers")
     if not isinstance(model_providers, dict):
         model_providers = {}
@@ -947,20 +972,8 @@ def prepare_codex_brokered_run(
     openai_api_key: str = "",
 ) -> CodexBrokeredRun:
     """Start broker, build env, auth stub, and MCP config (plan 18 W3)."""
-    posture = _credential_broker_mod.resolve_codex_broker_posture()
-    session: _CodexBrokerSession | None = None
-    if posture.active:
-        api_key = openai_api_key.strip() or os.environ.get(OPENAI_API_KEY_ENV, "").strip()
-        if not api_key:
-            posture = CodexBrokerPosture(
-                active=False,
-                auth_mode="none",
-                reason="broker inactive: no OpenAI API key configured",
-            )
-        else:
-            session = _start_broker_session(api_key=api_key, posture=posture)
-    if session is None:
-        session = _CodexBrokerSession(posture=posture)
+    session = _begin_broker_session(openai_api_key=openai_api_key)
+    posture = session.posture
     _set_broker_session(session)
     try:
         write_mcp_config(ctx)
@@ -974,6 +987,7 @@ def prepare_codex_brokered_run(
         agent_env=agent_env,
         broker_base_url=handle.base_url if handle is not None else None,
         posture=posture,
+        _session=session,
     )
 
 
@@ -985,32 +999,28 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    posture = _credential_broker_mod.resolve_codex_broker_posture()
-    broker_session: _CodexBrokerSession | None = None
-    if posture.active:
-        api_key = os.environ.get(OPENAI_API_KEY_ENV, "").strip()
-        if not api_key:
-            posture = CodexBrokerPosture(
-                active=False,
-                auth_mode="none",
-                reason="broker inactive: no OpenAI API key configured",
-            )
-        else:
-            try:
-                broker_session = _start_broker_session(api_key=api_key, posture=posture)
-            except RuntimeError as err:
-                failed_posture = CodexBrokerPosture(
-                    active=False,
-                    auth_mode=posture.auth_mode,
-                    reason=str(err),
-                )
-                return AgentResult(
-                    success=False,
-                    error=str(err),
-                    metadata=_credential_broker_mod.broker_run_record_fields(failed_posture),
-                )
-    if broker_session is None:
-        broker_session = _CodexBrokerSession(posture=posture)
+    initial_posture = _credential_broker_mod.resolve_codex_broker_posture()
+    try:
+        broker_session = _begin_broker_session()
+    except RuntimeError as err:
+        failed_posture = CodexBrokerPosture(
+            active=False,
+            auth_mode=initial_posture.auth_mode,
+            reason=str(err),
+        )
+        return AgentResult(
+            success=False,
+            error=str(err),
+            metadata=_credential_broker_mod.broker_run_record_fields(failed_posture),
+        )
+    if initial_posture.active and not broker_session.active:
+        reason = broker_session.posture.reason
+        msg = f"Codex credential broker refused to start: {reason}"
+        return AgentResult(
+            success=False,
+            error=msg,
+            metadata=_credential_broker_mod.broker_run_record_fields(broker_session.posture),
+        )
     _set_broker_session(broker_session)
     try:
         render_result = render_for_run(ctx, "codex")
