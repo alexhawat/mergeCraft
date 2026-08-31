@@ -91,7 +91,6 @@ def _review_handler_for_last_reviewed_sha() -> Callable[[httpx.Request], httpx.R
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after TP2: list_reviews pagination", strict=False)
 async def test_list_reviews_concatenates_three_pages_in_order() -> None:
     reviews_handler = _array_handler("/pulls/2/reviews")
     transport = httpx.MockTransport(reviews_handler)
@@ -105,7 +104,6 @@ async def test_list_reviews_concatenates_three_pages_in_order() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after TP2: list_issue_comments pagination", strict=False)
 async def test_list_issue_comments_concatenates_three_pages_in_order() -> None:
     comments_handler = _array_handler("/issues/1/comments")
     transport = httpx.MockTransport(comments_handler)
@@ -119,7 +117,6 @@ async def test_list_issue_comments_concatenates_three_pages_in_order() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after TP2: list_pull_files pagination", strict=False)
 async def test_list_pull_files_concatenates_three_pages_in_order() -> None:
     files_handler = _array_handler("/pulls/2/files")
     transport = httpx.MockTransport(files_handler)
@@ -188,7 +185,6 @@ async def test_list_issues_with_page_param_issues_single_get() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="green after TP2: pagination safety cap at 50 pages", strict=False)
 async def test_list_reviews_stops_at_fifty_pages_and_logs_truncation_warning() -> None:
     pages_seen: list[int] = []
 
@@ -218,9 +214,6 @@ async def test_list_reviews_stops_at_fifty_pages_and_logs_truncation_warning() -
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason="green after TP2: list_reviews pagination for last_reviewed_sha", strict=False
-)
 async def test_last_reviewed_sha_returns_newest_mergecraft_review_from_page_three() -> None:
     reviews_handler = _review_handler_for_last_reviewed_sha()
     transport = httpx.MockTransport(reviews_handler)
