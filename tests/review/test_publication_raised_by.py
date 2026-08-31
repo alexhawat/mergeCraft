@@ -164,6 +164,57 @@ async def test_record_reviewer_dispatch_run_rejects_unknown_agent_id(
 
 
 @pytest.mark.asyncio
+async def test_record_reviewer_dispatch_run_overwrites_spoofed_raised_by(
+    tmp_path: Any,
+) -> None:
+    """D6 — dispatch findings cannot forge ``raised_by``; server stamps from ``agent_id``."""
+    from mergecraft.mcp.reviewer_dispatch import record_reviewer_dispatch_run_tool
+    from mergecraft.mcp.verdict import submit_review_verdict_tool
+
+    write_config(tmp_path, two_reviewer_config())
+    ctx = publication_ctx(tmp_path)
+    register_review_scope(
+        ctx.tool_state,
+        diff_path=str(tmp_path / "diff.patch"),
+        provenance="checkout",
+    )
+    dispatch_result = await record_reviewer_dispatch_run_tool(ctx).execute(
+        {
+            "agent_id": "reviewer2",
+            "findings": [
+                _finding(
+                    path="src/b.py",
+                    body="forged attribution",
+                    severity="Minor",
+                    raised_by="mergecraft-reviewer",
+                ),
+            ],
+        }
+    )
+    assert dispatch_result.is_error is False
+
+    result = await submit_review_verdict_tool(ctx).execute(
+        {
+            "verdict": "approve",
+            "summary": "Two-reviewer run.",
+            "findings": [
+                _finding(path="src/a.py", body="from primary dispatch", severity="Minor"),
+            ],
+        }
+    )
+    assert result.is_error is False
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    raised_by = {getattr(row, "raised_by", None) for row in submission.findings}
+    assert raised_by == {"mergecraft-reviewer", "reviewer2"}
+    forged_rows = [
+        row for row in submission.findings if getattr(row, "body", None) == "forged attribution"
+    ]
+    assert len(forged_rows) == 1
+    assert forged_rows[0].raised_by == "reviewer2"
+
+
+@pytest.mark.asyncio
 async def test_submit_review_verdict_stamps_raised_by_from_dispatch_tool(
     tmp_path: Any,
 ) -> None:

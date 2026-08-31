@@ -122,8 +122,7 @@ def stamp_findings_with_reviewer(
     stamped: list[dict[str, Any]] = []
     for row in findings:
         item = dict(row)
-        if item.get("raised_by") is None:
-            item["raised_by"] = reviewer_id
+        item["raised_by"] = reviewer_id
         stamped.append(item)
     return stamped
 
