@@ -100,7 +100,7 @@ def test_single_increment_over_ceiling_has_distinct_message_from_steady_drift() 
     bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
     drift = BudgetTracker(bounds)
     drift.record_tokens(50)
-    drift.record_tokens(61)
+    drift.record_tokens(60)
     with pytest.raises(BudgetExhausted) as drift_exc:
         drift.record_tokens(1)
     vault = BudgetTracker(bounds)
@@ -139,3 +139,17 @@ def test_record_cost_path_is_untouched_by_token_band_changes() -> None:
         tracker.record_cost(0.02)
     assert exc_info.value.kind == "cost"
     assert tracker.cost_used == pytest.approx(0.06)
+
+
+def test_two_call_crossing_ceiling_raises_instead_of_truncating() -> None:
+    """D10 — crossing remaining ceiling on a second call must raise, not cap silently."""
+    bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
+    tracker = BudgetTracker(bounds)
+    tracker.record_tokens(95)
+    with pytest.raises(BudgetExhausted) as exc_info:
+        tracker.record_tokens(20)
+    assert tracker.tokens_used == 95
+    message = str(exc_info.value)
+    assert "20" in message
+    assert "15" in message or "remaining" in message.lower()
+    assert "110" in message

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -10,14 +11,16 @@ from pydantic import ValidationError
 from mergecraft.agents.ensemble import finding_key
 from mergecraft.agents.registry import AgentRole
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
-from mergecraft.mcp.verdict import SubmitReviewVerdictParams
+from mergecraft.mcp.tool_state import record_reviewer_dispatch_run
+from mergecraft.mcp.verdict import SubmitReviewVerdictParams, register_review_scope
 from mergecraft.review.terminal_submission import (
     _group_findings_by_reviewer,
     merge_reviewer_findings,
     prepare_terminal_submission,
     verdict_from_merged_findings,
 )
-from tests.publication_attribution.support import two_reviewer_registry
+from tests.cli.support_agent_roster import two_reviewer_config, write_config
+from tests.publication_attribution.support import publication_ctx, two_reviewer_registry
 
 
 def _finding(
@@ -139,3 +142,42 @@ def test_inline_placement_unaffected_by_raised_by() -> None:
     )
     assert len(without.inline) == len(with_tags.inline)
     assert len(without.mechanical) == len(with_tags.mechanical)
+
+
+@pytest.mark.asyncio
+async def test_submit_review_verdict_stamps_raised_by_from_dispatch_runs(
+    tmp_path: Any,
+) -> None:
+    """Live terminal path must stamp ``raised_by`` from dispatch pairing (#574)."""
+    from mergecraft.mcp.verdict import submit_review_verdict_tool
+
+    write_config(tmp_path, two_reviewer_config())
+    ctx = publication_ctx(tmp_path)
+    register_review_scope(
+        ctx.tool_state,
+        diff_path=str(tmp_path / "diff.patch"),
+        provenance="checkout",
+    )
+    record_reviewer_dispatch_run(
+        ctx.tool_state,
+        agent_id="reviewer2",
+        findings=[
+            _finding(path="src/b.py", body="from reviewer2 dispatch", severity="Minor"),
+        ],
+    )
+    result = await submit_review_verdict_tool(ctx).execute(
+        {
+            "verdict": "approve",
+            "summary": "Two-reviewer run.",
+            "findings": [
+                _finding(path="src/a.py", body="from primary dispatch", severity="Minor"),
+            ],
+        }
+    )
+    assert result.is_error is False
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    raised_by = {getattr(row, "raised_by", None) for row in submission.findings}
+    assert raised_by == {"mergecraft-reviewer", "reviewer2"}
+    parsed = json.loads(result.content[0]["text"])
+    assert parsed.get("recorded") is True

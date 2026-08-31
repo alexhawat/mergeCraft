@@ -196,6 +196,39 @@ async def test_demoted_inline_comments_survive_in_final_review_body(tmp_path: Pa
     assert "demoted inline finding must remain visible" in final_body
 
 
+@pytest.mark.asyncio
+async def test_demoted_inline_recovery_audit_row_in_final_review_body(tmp_path: Path) -> None:
+    """422 recovery must surface the inline-recovery audit row in the posted body (#572)."""
+    github = RecordingGitHub(comment_422_without_index=True)
+    ctx = publication_ctx(tmp_path, github=github)
+    bind_terminal_submission(ctx, summary="Summary preamble.", verdict="request_changes")
+    register_review_scope(
+        ctx.tool_state,
+        diff_path=str(tmp_path / "diff.patch"),
+        provenance="checkout",
+    )
+    ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
+
+    await _publish_github_review(
+        ctx,
+        {
+            "pull_number": 7,
+            "body": "Summary preamble.",
+            "request_changes": True,
+            "comments": [
+                {
+                    "path": "src/in_diff.py",
+                    "line": 10,
+                    "body": "Demoted inline finding must remain visible.",
+                }
+            ],
+        },
+    )
+    final_body = str(github.review_payloads[-1].get("body") or "")
+    assert "inline recovery" in final_body.lower()
+    assert "demoted inline comments" in final_body.lower()
+
+
 def test_multi_reviewer_run_still_has_one_terminal_submission() -> None:
     """D13 — plan 11 D7 cardinality is unchanged (regression guard)."""
 

@@ -137,17 +137,12 @@ class BudgetTracker:
         prior_used = self.tokens_used
         charge = count
         if charge > remaining:
-            if prior_used < target:
-                # Cap one increment to remaining slack when still under target so a
-                # single call cannot vault past the ceiling without raising.
-                charge = remaining
-            else:
-                msg = (
-                    "token budget exhausted by single increment "
-                    f"({count} > remaining ceiling {remaining}; used {self.tokens_used}, "
-                    f"target {target}, ceiling {ceiling}, tolerance {tolerance})"
-                )
-                self._raise(BudgetExhausted("token", msg))
+            msg = (
+                "token budget exhausted by single increment "
+                f"({count} > remaining ceiling {remaining}; used {self.tokens_used}, "
+                f"target {target}, ceiling {ceiling}, tolerance {tolerance})"
+            )
+            self._raise(BudgetExhausted("token", msg))
 
         self.tokens_used += charge
         self.phase_totals[phase_key] += charge

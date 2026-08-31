@@ -86,6 +86,37 @@ def merge_deterministic_preamble_into_review_body(
     return f"{block.rstrip()}\n"
 
 
+def _merge_review_body_with_deterministic_preamble(
+    ctx: ToolContext,
+    *,
+    agent_body: str,
+    packet: Any,
+) -> str:
+    """Render the deterministic preamble after demotion state is known (D7 / #572)."""
+    deterministic_block = _deterministic_review_block(ctx, packet=packet)
+    return merge_deterministic_preamble_into_review_body(
+        agent_body=agent_body,
+        deterministic_block=deterministic_block,
+    )
+
+
+def _rebuild_review_body_with_deterministic_preamble(
+    ctx: ToolContext,
+    *,
+    body: str,
+    packet: Any,
+) -> str:
+    """Re-render the deterministic preamble on an existing review body."""
+    from mergecraft.findings.ledger import _strip_deterministic_record_markers
+
+    agent_body = _strip_deterministic_record_markers(body)
+    return _merge_review_body_with_deterministic_preamble(
+        ctx,
+        agent_body=agent_body,
+        packet=packet,
+    )
+
+
 def _deterministic_review_block(
     ctx: ToolContext,
     *,
@@ -642,6 +673,7 @@ async def _create_github_review_with_anchor_recovery(
     *,
     pull_number: int,
     payload: dict[str, Any],
+    packet: Any | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Post a review, recovering APPROVE and inline-anchor 422 rejections (D8, #530)."""
     scm = ctx.scm
@@ -699,6 +731,17 @@ async def _create_github_review_with_anchor_recovery(
                         demoted if demoted is not None else _demote_all_inline_comments(current)
                     )
                     ctx.tool_state.review_inline_comments_demoted = True
+
+                if packet is not None:
+                    current = dict(current)
+                    current["body"] = add_footer(
+                        ctx,
+                        _rebuild_review_body_with_deterministic_preamble(
+                            ctx,
+                            body=str(current.get("body") or ""),
+                            packet=packet,
+                        ),
+                    )
 
                 if _payload_signature(current) == prior_sig:
                     logger.error(
@@ -845,27 +888,18 @@ async def _publish_github_review(
 
     run_succeeded = True
     packet = resolve_prepared_run_packet(ctx, run_succeeded=run_succeeded)
-    deterministic_block = _deterministic_review_block(
-        ctx,
-        packet=packet,
-    )
     await ensure_learnings_review_delta(ctx.tool_state)
     body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body or ""))
-    body_with_sections = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
+    agent_body = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
     if ctx.tool_state.dispatched_lens_ids:
         from mergecraft.modes._pr_summary_format import (
             merge_dispatched_lenses_into_review_metadata,
         )
 
-        body_with_sections = merge_dispatched_lenses_into_review_metadata(
-            body_with_sections,
+        agent_body = merge_dispatched_lenses_into_review_metadata(
+            agent_body,
             dispatched_lens_ids=ctx.tool_state.dispatched_lens_ids,
         )
-    body_with_preamble = merge_deterministic_preamble_into_review_body(
-        agent_body=body_with_sections,
-        deterministic_block=deterministic_block,
-    )
-    payload["body"] = add_footer(ctx, body_with_preamble)
     if commit_id:
         payload["commit_id"] = commit_id
 
@@ -958,10 +992,13 @@ async def _publish_github_review(
         inline = strip_recall_inline_comments(ctx, inline, publish_sets=publish_sets)
     if demoted_bodies:
         ctx.tool_state.review_inline_comments_demoted = True
-        payload["body"] = add_footer(
-            ctx,
-            append_demoted_inline_comments(str(payload.get("body") or ""), demoted_bodies),
-        )
+        agent_body = append_demoted_inline_comments(agent_body, demoted_bodies)
+    body_with_preamble = _merge_review_body_with_deterministic_preamble(
+        ctx,
+        agent_body=agent_body,
+        packet=packet,
+    )
+    payload["body"] = add_footer(ctx, body_with_preamble)
     if inline:
         payload["comments"] = inline
     else:
@@ -978,6 +1015,7 @@ async def _publish_github_review(
         ctx,
         pull_number=pull_number,
         payload=payload,
+        packet=packet,
     )
     review_id = int(result["id"])
     ctx.tool_state.review = ReviewRecord(

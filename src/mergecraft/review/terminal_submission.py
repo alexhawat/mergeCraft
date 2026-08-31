@@ -137,6 +137,23 @@ def reviewer_groups_from_runs(
     ]
 
 
+def stamped_findings_for_terminal_submission(
+    *,
+    registry: Registry,
+    terminal_findings: list[dict[str, Any]],
+    dispatch_runs: list[ReviewerRun],
+) -> list[dict[str, Any]]:
+    """Stamp ``raised_by`` from dispatch pairing before terminal merge (D7)."""
+    from mergecraft.agents.registry import AgentRole
+
+    reviewers = registry.resolve_roles(AgentRole.reviewer)
+    primary_id = reviewers[0].agent_id if reviewers else "reviewer"
+    runs = list(dispatch_runs)
+    runs.append(ReviewerRun(agent_id=primary_id, findings=terminal_findings))
+    groups = reviewer_groups_from_runs(runs)
+    return [row for _, rows in groups for row in rows]
+
+
 def should_render_finding_provenance(findings: list[dict[str, Any]]) -> bool:
     """Return whether multi-reviewer provenance lines belong in the review body (D8)."""
     agents: set[str] = set()
@@ -281,6 +298,7 @@ __all__ = [
     "reviewer_groups_from_runs",
     "should_render_finding_provenance",
     "stamp_findings_with_reviewer",
+    "stamped_findings_for_terminal_submission",
     "terminal_submission_count_from_review_runs",
     "verdict_from_merged_findings",
 ]
