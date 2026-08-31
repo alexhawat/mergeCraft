@@ -63,6 +63,8 @@ def clone_local_repo(tmp_path: Path) -> Path:
         capture_output=True,
         text=True,
     )
+    git(dest, "config", "user.email", "ci-gate@test.local")
+    git(dest, "config", "user.name", "CI Gate Test")
     return dest
 
 
