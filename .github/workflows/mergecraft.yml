@@ -324,7 +324,28 @@ jobs:
       # quota ceiling is the common one — and when they do, the cascade posts no
       # verdict and the approval gate fails closed on every PR at once. Anthropic
       # credentials fail independently of both.
-      HAS_CLAUDE: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      #
+      # DISABLED 2026-08-31 (operator). The Anthropic account is at its monthly
+      # spend ceiling, so the backstop cannot review: on PR #582 it recorded an
+      # approve verdict and then died with HTTP 429 before publishing. A rung
+      # that burns a run slot and returns nothing is worse than no rung.
+      #
+      # Re-enable by restoring the expression below. The secrets stay in place —
+      # CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are also consumed by
+      # integration.yml and e2e.yml, so deleting them is NOT the way to turn
+      # this off. HAS_AUTH below deliberately still counts them, so a
+      # Claude-only repo is not misreported as unconfigured.
+      #
+      # Restore with:
+      #   HAS_CLAUDE: >-
+      #     (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '')
+      #     && (github.event_name == 'workflow_dispatch'
+      #         || github.event.pull_request.head.repo.full_name == github.repository)
+      #
+      # While disabled the cascade is two rungs deep (Nous -> Codex). If both
+      # fail on the same run the gate fails closed with no verdict — that is the
+      # exposure this backstop existed to cover, and it is accepted for now.
+      HAS_CLAUDE: 'false'
       # Duplicated verbatim as `approval-gate.env.HAS_AUTH` (jobs cannot share an
       # `env` expression). Adding a provider here without updating that copy
       # fails the required gate OPEN — see the comment there.
