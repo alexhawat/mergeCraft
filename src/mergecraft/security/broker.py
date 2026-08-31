@@ -41,6 +41,8 @@ if TYPE_CHECKING:
 
 BROKER_BIND_HOST = "127.0.0.1"
 CODEX_BROKER_BEARER_ENV = "MERGECRAFT_CODEX_BROKER_TOKEN"
+OPENAI_UPSTREAM_BASE_URL = "https://api.openai.com/v1"
+OPENAI_UPSTREAM_HOST = "api.openai.com"
 
 _MODEL_PATH_PREFIXES: tuple[str, ...] = (
     "/v1/chat/completions",
@@ -130,7 +132,7 @@ def subscription_auth_usable(raw: str) -> bool:
 _subscription_auth_usable = subscription_auth_usable
 
 
-def resolve_codex_broker_posture() -> CodexBrokerPosture:
+def resolve_codex_broker_posture(*, openai_api_key: str = "") -> CodexBrokerPosture:
     """Return whether the broker is active for the current Codex auth mode (D3a)."""
     subscription_raw = os.environ.get("CODEX_AUTH_JSON", "").strip()
     if subscription_raw and subscription_auth_usable(subscription_raw):
@@ -139,7 +141,7 @@ def resolve_codex_broker_posture() -> CodexBrokerPosture:
             auth_mode="subscription",
             reason="broker inactive: subscription auth is not brokered",
         )
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    api_key = openai_api_key.strip() or os.environ.get("OPENAI_API_KEY", "").strip()
     if api_key:
         return CodexBrokerPosture(
             active=True,
@@ -235,6 +237,11 @@ def _upstream_request_path(request_path: str) -> str:
 
 
 def _upstream_client(config: CredentialBrokerConfig) -> httpx.Client:
+    """Build the shared upstream client for one broker lifetime.
+
+    Hosts listed in ``run_upstream_hosts`` (typically ``api.openai.com``) use a
+    plain TLS-verified client; other configured upstreams use DNS-pinned transport.
+    """
     parsed = urlparse(config.upstream_base_url)
     host = _normalize_host(parsed.hostname or "")
     if host in {_normalize_host(item) for item in config.run_upstream_hosts}:
@@ -458,3 +465,5 @@ def credential_broker(
         httpd.shutdown()
         httpd.server_close()
         thread.join(timeout=5)
+        if thread.is_alive():
+            _broker_log("warning", "credential broker thread did not stop within 5s")

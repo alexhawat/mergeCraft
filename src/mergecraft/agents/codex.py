@@ -8,17 +8,23 @@ import os
 import re
 import shutil
 import subprocess
-import threading
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeAlias
-
-if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-
-from dataclasses import dataclass, field
+from typing import TypeAlias
 
 from loguru import logger
 
+from mergecraft.agents.codex_broker import (
+    OPENAI_API_KEY_ENV,
+    active_broker_handle,
+    add_broker_provider_table,
+    begin_broker_session,
+    broker_run_record_fields,
+    current_broker_session,
+    resolve_codex_broker_posture,
+    set_broker_session,
+    stop_broker_session,
+)
 from mergecraft.agents.codex_stream import (
     CODEX_MODEL_REASONING_EFFORT,
     codex_stream_event_handler,
@@ -44,12 +50,9 @@ from mergecraft.agents.shared import (
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
-from mergecraft.security import broker as _credential_broker_mod
 from mergecraft.security.broker import (
     CODEX_BROKER_BEARER_ENV,
     CodexBrokerPosture,
-    CredentialBrokerConfig,
-    CredentialBrokerHandle,
     subscription_auth_usable,
 )
 from mergecraft.tracing.genai import resolve_capture_policy
@@ -59,10 +62,6 @@ from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
-OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
-_OPENAI_UPSTREAM_BASE_URL = "https://api.openai.com/v1"
-_OPENAI_UPSTREAM_HOST = "api.openai.com"
-_OPENAI_BROKER_PROVIDER_ID = "openai"
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
 # nested value is a table, a scalar is a key in the table that holds it.
 TomlTable: TypeAlias = dict[str, "str | bool | TomlTable"]
@@ -107,96 +106,6 @@ CODEX_SUBAGENT_DEGRADATION = CodexSubagentDegradation(
     kind="prose-only",
     toolset_parity=False,
 )
-
-
-@dataclass(slots=True)
-class CodexBrokeredRun:
-    """Result of :func:`prepare_codex_brokered_run` (plan 18 W3)."""
-
-    agent_env: dict[str, str]
-    broker_base_url: str | None
-    posture: CodexBrokerPosture
-    _session: _CodexBrokerSession | None = field(default=None, repr=False)
-
-    def close(self) -> None:
-        """Stop the loopback broker and clear the module session."""
-        if self._session is not None:
-            _stop_broker_session(self._session)
-            _set_broker_session(None)
-
-    def __enter__(self) -> CodexBrokeredRun:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
-
-
-@dataclass(slots=True)
-class _CodexBrokerSession:
-    posture: CodexBrokerPosture
-    handle: CredentialBrokerHandle | None = None
-    _broker_cm: AbstractContextManager[CredentialBrokerHandle] | None = None
-
-    @property
-    def active(self) -> bool:
-        return self.posture.active and self.handle is not None
-
-
-_active_broker_session: _CodexBrokerSession | None = None
-_broker_session_lock = threading.Lock()
-
-
-def _current_broker_session() -> _CodexBrokerSession | None:
-    with _broker_session_lock:
-        return _active_broker_session
-
-
-def _set_broker_session(session: _CodexBrokerSession | None) -> None:
-    global _active_broker_session
-    with _broker_session_lock:
-        _active_broker_session = session
-
-
-def _broker_config_for_api_key(api_key: str) -> CredentialBrokerConfig:
-    return CredentialBrokerConfig(
-        upstream_base_url=_OPENAI_UPSTREAM_BASE_URL,
-        api_key=api_key,
-        run_upstream_hosts=frozenset({_OPENAI_UPSTREAM_HOST}),
-    )
-
-
-def _start_broker_session(*, api_key: str, posture: CodexBrokerPosture) -> _CodexBrokerSession:
-    """Start the loopback broker or refuse with a named reason (D10)."""
-    config = _broker_config_for_api_key(api_key)
-    broker_cm = _credential_broker_mod.credential_broker(config)
-    try:
-        handle = broker_cm.__enter__()
-    except Exception as exc:
-        msg = f"Codex credential broker refused to start: {exc}"
-        raise RuntimeError(msg) from exc
-    return _CodexBrokerSession(posture=posture, handle=handle, _broker_cm=broker_cm)
-
-
-def _stop_broker_session(session: _CodexBrokerSession | None) -> None:
-    if session is None or session._broker_cm is None:
-        return
-    session._broker_cm.__exit__(None, None, None)
-
-
-def _begin_broker_session(*, openai_api_key: str = "") -> _CodexBrokerSession:
-    """Resolve Codex broker posture and start the loopback broker when active."""
-    posture = _credential_broker_mod.resolve_codex_broker_posture()
-    if not posture.active:
-        return _CodexBrokerSession(posture=posture)
-    api_key = openai_api_key.strip() or os.environ.get(OPENAI_API_KEY_ENV, "").strip()
-    if not api_key:
-        inactive = CodexBrokerPosture(
-            active=False,
-            auth_mode="none",
-            reason="broker inactive: no OpenAI API key configured",
-        )
-        return _CodexBrokerSession(posture=inactive)
-    return _start_broker_session(api_key=api_key, posture=posture)
 
 
 # Mirrors mergecraft.utils.git_setup — Codex refuses PATH aliases under these.
@@ -355,7 +264,7 @@ def _setup_codex_auth(
     broker_base_url: str | None = None,
 ) -> None:
     raw = os.environ.get(CODEX_AUTH_ENV, "").strip()
-    if raw and _codex_subscription_auth_usable(raw):
+    if raw and subscription_auth_usable(raw):
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
         auth_path.write_text(raw, encoding="utf-8")
@@ -367,7 +276,7 @@ def _setup_codex_auth(
             CODEX_AUTH_ENV,
             OPENAI_API_KEY_ENV,
         )
-    session = _current_broker_session()
+    session = current_broker_session()
     if session is not None and session.active:
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
@@ -558,25 +467,6 @@ def _has_any_custom_provider_env() -> bool:
     return False
 
 
-def _add_broker_provider_table(config: TomlTable, broker_base_url: str) -> None:
-    """Point ``model_providers.openai`` at the loopback credential broker (W3).
-
-    When the broker is active it owns the ``openai`` provider slot so Codex
-    routes default OpenAI models through loopback; custom gateway tables are
-    omitted whenever broker posture is active.
-    """
-    model_providers = config.get("model_providers")
-    if not isinstance(model_providers, dict):
-        model_providers = {}
-        config["model_providers"] = model_providers
-    model_providers[_OPENAI_BROKER_PROVIDER_ID] = {
-        "name": _OPENAI_BROKER_PROVIDER_ID,
-        "base_url": broker_base_url,
-        "env_key": CODEX_BROKER_BEARER_ENV,
-        "wire_api": "responses",
-    }
-
-
 def _add_custom_provider_tables(config: TomlTable) -> None:
     """Add a ``model_providers.<id>`` table for every configured custom provider.
 
@@ -690,9 +580,9 @@ def write_mcp_config(
     # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
     # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set.
     _add_custom_provider_tables(config)
-    session = _current_broker_session()
-    if session is not None and session.active and session.handle is not None:
-        _add_broker_provider_table(config, session.handle.base_url)
+    handle = active_broker_handle()
+    if handle is not None:
+        add_broker_provider_table(config, handle.base_url)
     if _codex_use_permission_profiles(ctx):
         _add_read_only_mcp_network_profile(config)
     else:
@@ -725,23 +615,20 @@ def ctx_tmpdir_fallback() -> str:
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     codex_home = _codex_home(ctx)
-    session = _current_broker_session()
-    broker_active = session is not None and session.active
+    handle = active_broker_handle()
+    broker_active = handle is not None
     # D16 — inject the per-run MCP bearer token so Codex can authenticate via
     # ``bearer_token_env_var`` in config.toml. Only inject when a token was
     # issued (dev/test runs without a live MCP server leave this empty).
     extra: dict[str, str] = {"CODEX_HOME": str(codex_home)}
     if ctx.mcp_auth_token:
         extra[_CODEX_MCP_TOKEN_ENV] = ctx.mcp_auth_token
-    if broker_active and session is not None and session.handle is not None:
-        extra[CODEX_BROKER_BEARER_ENV] = session.handle.token
-    env = build_agent_env(
-        "codex",
-        extra,
-        model=ctx.resolved_model,
-        codex_broker_active=broker_active,
-    )
-    broker_base_url = session.handle.base_url if session is not None and session.handle else None
+    if broker_active and handle is not None:
+        extra[CODEX_BROKER_BEARER_ENV] = handle.token
+    env = build_agent_env("codex", extra, model=ctx.resolved_model)
+    if broker_active:
+        env.pop("OPENAI_API_KEY", None)
+    broker_base_url = handle.base_url if handle is not None else None
     _setup_codex_auth(ctx, codex_home=codex_home, broker_base_url=broker_base_url)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
     # (config.toml, mergecraft-instructions.md, auth.json) while this process
@@ -966,31 +853,6 @@ def _run_codex_streaming(
     return AgentResult(success=True, output=output or None, usage=usage)
 
 
-def prepare_codex_brokered_run(
-    ctx: AgentRunContext,
-    *,
-    openai_api_key: str = "",
-) -> CodexBrokeredRun:
-    """Start broker, build env, auth stub, and MCP config (plan 18 W3)."""
-    session = _begin_broker_session(openai_api_key=openai_api_key)
-    posture = session.posture
-    _set_broker_session(session)
-    try:
-        write_mcp_config(ctx)
-        agent_env = _build_env(ctx)
-    except Exception:
-        _stop_broker_session(session)
-        _set_broker_session(None)
-        raise
-    handle = session.handle
-    return CodexBrokeredRun(
-        agent_env=agent_env,
-        broker_base_url=handle.base_url if handle is not None else None,
-        posture=posture,
-        _session=session,
-    )
-
-
 async def _run(ctx: AgentRunContext) -> AgentResult:
     from mergecraft.agents.harness_render import merge_manifest_metadata, render_for_run
 
@@ -999,9 +861,9 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    initial_posture = _credential_broker_mod.resolve_codex_broker_posture()
+    initial_posture = resolve_codex_broker_posture()
     try:
-        broker_session = _begin_broker_session()
+        broker_session = begin_broker_session(posture=initial_posture)
     except RuntimeError as err:
         failed_posture = CodexBrokerPosture(
             active=False,
@@ -1011,17 +873,17 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         return AgentResult(
             success=False,
             error=str(err),
-            metadata=_credential_broker_mod.broker_run_record_fields(failed_posture),
+            metadata=broker_run_record_fields(failed_posture),
         )
     if initial_posture.active and not broker_session.active:
         reason = broker_session.posture.reason
-        msg = f"Codex credential broker refused to start: {reason}"
+        msg = f"Codex credential broker inactive: {reason}"
         return AgentResult(
             success=False,
             error=msg,
-            metadata=_credential_broker_mod.broker_run_record_fields(broker_session.posture),
+            metadata=broker_run_record_fields(broker_session.posture),
         )
-    _set_broker_session(broker_session)
+    set_broker_session(broker_session)
     try:
         render_result = render_for_run(ctx, "codex")
         subagent_block = render_result.payload if isinstance(render_result.payload, str) else None
@@ -1048,15 +910,15 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
         result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
         finalized = await finalize_agent_result(ctx, result)
-        broker_metadata = _credential_broker_mod.broker_run_record_fields(broker_session.posture)
+        broker_metadata = broker_run_record_fields(broker_session.posture)
         if finalized.metadata:
             finalized.metadata.update(broker_metadata)
         else:
             finalized.metadata = broker_metadata
         return merge_manifest_metadata(finalized, render_result)
     finally:
-        _stop_broker_session(broker_session)
-        _set_broker_session(None)
+        stop_broker_session(broker_session)
+        set_broker_session(None)
 
 
 codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)
