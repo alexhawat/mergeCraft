@@ -15,7 +15,7 @@ from mergecraft.analyzers.sandbox import (
     build_sandbox_context,
 )
 from tests.analyzers.support import FORK_PULL_REQUEST_EVENT, SAME_REPO_PULL_REQUEST_EVENT
-from tests.trust_credentials.support import W3_XFAIL, import_analyzer_egress_symbol
+from tests.trust_credentials.support import import_analyzer_egress_symbol
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -69,7 +69,6 @@ def _egress_argv(
     )
 
 
-@W3_XFAIL
 def test_untrusted_non_empty_allowlist_does_not_get_host_networking(tmp_path: Path) -> None:
     """D5 — untrusted tier + declared allowlist must not drop --net isolation."""
     argv = _egress_argv(
@@ -99,7 +98,6 @@ def test_empty_allowlist_still_isolates_network(tmp_path: Path) -> None:
     assert "--net" in argv
 
 
-@W3_XFAIL
 def test_lane_d_self_review_analyzers_prt_still_isolates_network(tmp_path: Path) -> None:
     """D5a — selfReview analyzers + same-repo pull_request_target + allowlist → no host networking."""
     argv = _egress_argv(
@@ -112,7 +110,6 @@ def test_lane_d_self_review_analyzers_prt_still_isolates_network(tmp_path: Path)
     assert "--net" in argv, f"lane-D coupling must not grant host networking: {argv!r}"
 
 
-@W3_XFAIL
 def test_untrusted_allowlist_skip_is_distinct_from_unavailable(tmp_path: Path) -> None:
     """D6 — egress-policy skip is a first-class outcome, not unavailable or clean."""
     evaluate = import_analyzer_egress_symbol("evaluate_analyzer_egress_policy")
@@ -128,7 +125,6 @@ def test_untrusted_allowlist_skip_is_distinct_from_unavailable(tmp_path: Path) -
     assert "egress" in outcome.reason.lower()
 
 
-@W3_XFAIL
 def test_egress_skip_reason_names_analyzer_and_hosts(tmp_path: Path) -> None:
     """Skip reason names the analyzer and declared hosts."""
     evaluate = import_analyzer_egress_symbol("evaluate_analyzer_egress_policy")
@@ -144,7 +140,6 @@ def test_egress_skip_reason_names_analyzer_and_hosts(tmp_path: Path) -> None:
     assert "api.osv.dev" in reason or "osv.dev" in reason
 
 
-@W3_XFAIL
 def test_build_analyzer_env_no_longer_discards_network_allowlist() -> None:
     """trust.py must not silently discard network_allowlist (the #538 root cause)."""
     from mergecraft.analyzers import trust as trust_mod
