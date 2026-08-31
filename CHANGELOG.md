@@ -62,6 +62,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Action image digest pin gate (`action-image-digest-check`) and halved
   `wait-for-ci` poll cadence (20s → 10s, #528)
 
+### Lane E — agent credential broker
+
+### Security
+
+- Codex API-key runs proxy model calls through a loopback credential broker — a
+  stolen per-run bearer is worthless outside the container and after the run, but
+  outbound egress stays open and ChatGPT subscription auth (`CODEX_AUTH_JSON`) is
+  not brokered; clear that secret and use `OPENAI_API_KEY` when broker coverage
+  matters (#553)
+
 ### Fixed
 
 - Anchor-422 recovery no longer spins on an out-of-range comment index — it

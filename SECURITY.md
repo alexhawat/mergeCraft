@@ -71,3 +71,37 @@ code, prompts, or credentials through a third-party SaaS backend.
   `Hadolint`) run locally inside the Action container; see
   [REVIEW-CHECKS.md](REVIEW-CHECKS.md) for the full list of what a review
   checks and what it deliberately never reports.
+
+## Agent credential broker (Codex, #553)
+
+When Codex runs on `OPENAI_API_KEY` without a usable `CODEX_AUTH_JSON`
+subscription bundle, mergeCraft starts a loopback credential broker in the
+parent process before privilege drop. The Codex subprocess receives a per-run
+throwaway bearer token — not the real API key. A stolen bearer is useless
+outside the container and after the run ends.
+
+**What the broker covers**
+
+- The API-key authentication path only
+- The real `OPENAI_API_KEY` stays in the broker's memory (parent, pre-`setpriv`),
+  not in the agent environment or `$CODEX_HOME/auth.json`
+- Upstream model calls are allow-listed and proxied via `security/egress.py`
+  helpers (`allow_egress`, `pinned_http_transport`)
+
+**What the broker does not cover**
+
+- **ChatGPT subscription auth (`CODEX_AUTH_JSON`).** When subscription auth is in
+  use the broker declares itself **inactive**; the subscription bundle remains
+  readable at `$CODEX_HOME/auth.json` under the agent uid. Operators who want
+  broker coverage must clear `CODEX_AUTH_JSON` and configure `OPENAI_API_KEY`
+  instead — gaining credential isolation at the cost of per-token API billing
+  rather than subscription billing.
+- **Outbound egress.** A compromised agent can still reach the internet and
+  exfiltrate what it can read (including a private repo tree). This lane makes
+  the API credential worthless, not unreachable.
+- **Proxy environment variables as egress control.** `HTTP_PROXY`,
+  `HTTPS_PROXY`, and `ALL_PROXY` are not an egress wall and must not be treated
+  as one.
+
+The run record states whether the broker was active for each Codex run. See
+also [Operator trust policy — agent credential broker](docs/trust-policy.md#agent-credential-broker-553).
