@@ -80,9 +80,9 @@ def git(cwd: Path, *args: str) -> str:
 def resolve_push_branch(scratch: Path, *, fallback: str = "ci-gate-test-head") -> str:
     """Return a branch name suitable for ``git push`` from *scratch*.
 
-    Detached HEAD (common on Actions) yields the literal ``HEAD`` from
-    ``rev-parse --abbrev-ref``; resolve via symbolic-ref, ``GITHUB_HEAD_REF``,
-    or a named branch created from the current commit.
+    Named checkouts (local dev) resolve via ``symbolic-ref``. Detached HEAD
+    (common on Actions) must not use ``GITHUB_HEAD_REF`` — create a synthetic
+    local branch so ``install_bare_origin`` never pushes the real PR branch.
     """
     sym = subprocess.run(
         ["git", "symbolic-ref", "-q", "--short", "HEAD"],
@@ -95,10 +95,6 @@ def resolve_push_branch(scratch: Path, *, fallback: str = "ci-gate-test-head") -
         name = sym.stdout.strip()
         if name and name != "HEAD":
             return name
-
-    gh_head = os.environ.get("GITHUB_HEAD_REF", "").strip()
-    if gh_head:
-        return gh_head
 
     git(scratch, "checkout", "-B", fallback)
     return fallback
