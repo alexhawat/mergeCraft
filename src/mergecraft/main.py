@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overrides
+from mergecraft.action.inputs import (
+    apply_setup_overrides,
+    apply_tracing_overrides,
+    collect_tracing_warnings_for_summary,
+    export_tracing_env_from_action_inputs,
+)
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
@@ -578,7 +583,13 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     ctx.scm = create_github_scm(ctx.job_token, client=github_client)
     run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
+    export_tracing_env_from_action_inputs()
     settings = apply_tracing_overrides(run_context.repo_settings)
+    for tracing_warning in collect_tracing_warnings_for_summary():
+        logger.warning(tracing_warning)
+        from mergecraft.utils.gha_log import warning as emit_gha_warning
+
+        emit_gha_warning(tracing_warning)
     ctx.settings = settings
     from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
 

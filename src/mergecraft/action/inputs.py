@@ -136,6 +136,62 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
     }
 
 
+def logfire_token_resolvable() -> bool:
+    """Return whether ``MERGECRAFT_LOGFIRE_TOKEN`` resolves for the Logfire sink."""
+    from mergecraft.tracing.exporters import resolve_token_ref
+
+    token = resolve_token_ref("MERGECRAFT_LOGFIRE_TOKEN")
+    return bool(isinstance(token, str) and token.strip())
+
+
+def export_tracing_env_from_action_inputs() -> None:
+    """Export ``INPUT_LOGFIRE_TOKEN`` to ``MERGECRAFT_LOGFIRE_TOKEN`` (D11).
+
+    Invoked unconditionally on the Action path **before** sink initialisation.
+    An empty or absent action input does not clobber an already-set
+    ``MERGECRAFT_LOGFIRE_TOKEN``.
+    """
+    resolved = resolve_tracing_from_action_inputs()
+    token = resolved.get("logfire_token")
+    if not isinstance(token, str) or not token.strip():
+        return
+    os.environ["MERGECRAFT_LOGFIRE_TOKEN"] = token.strip()
+
+
+def _action_logfire_tracing_enabled() -> bool:
+    """True when the resolved Action tracing config targets Logfire."""
+    resolved = resolve_tracing_from_action_inputs()
+    enabled: bool | None = resolved.get("enabled")
+    if enabled is None:
+        enabled = _parse_bool(os.environ.get("MERGECRAFT_TRACING"))
+    if not enabled:
+        return False
+    tracing_to = _read_input("INPUT_TRACING_TO")
+    if tracing_to == "logfire":
+        return True
+    sinks = resolved.get("sinks")
+    if not isinstance(sinks, list):
+        return False
+    return any(isinstance(item, dict) and item.get("type") == "logfire" for item in sinks)
+
+
+def collect_tracing_warnings_for_summary() -> list[str]:
+    """Return operator-visible warnings when Logfire tracing is configured but inactive (D12).
+
+    Vocabulary matches :mod:`mergecraft.cli.tracing_gh_visibility` — ``logfire-token``,
+    ``tracing-to: logfire``, and ``MERGECRAFT_LOGFIRE_TOKEN``.
+    """
+    if not _action_logfire_tracing_enabled():
+        return []
+    if logfire_token_resolvable():
+        return []
+    return [
+        "Tracing is enabled with tracing-to: logfire but no Logfire token resolved — "
+        "wire logfire-token in the Action with: block (INPUT_LOGFIRE_TOKEN) or set "
+        "MERGECRAFT_LOGFIRE_TOKEN; the Logfire sink will be a no-op until one is present."
+    ]
+
+
 def apply_tracing_overrides(settings: Any) -> Any:
     """Apply Action-input / env tracing onto ``RepoSettings`` (W6.4).
 
@@ -318,6 +374,9 @@ __all__ = [
     "SetupFailurePolicy",
     "apply_setup_overrides",
     "apply_tracing_overrides",
+    "collect_tracing_warnings_for_summary",
+    "export_tracing_env_from_action_inputs",
+    "logfire_token_resolvable",
     "resolve_setup_timeout_s",
     "resolve_tracing_from_action_inputs",
     "validate_fork_credential_invariant",

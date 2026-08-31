@@ -35,6 +35,8 @@ from mergecraft.redaction_structured import DENY_KEYS, redact_structured_value
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mergecraft.tracing.event import TraceEvent
 
 # A CLI argv token that looks like a secret/credential — mask its value (the
@@ -44,12 +46,13 @@ if TYPE_CHECKING:
 _CLI_SECRET_FLAG = re.compile(
     r"^(?:--|[-/])?(?:token|api[-_]?key|secret|password|auth[-_]?token|access[-_]?token"
     r"|refresh[-_]?token|bearer[-_]?token|client[-_]?secret|private[-_]?key"
-    r"|pat|passwd|LOGFIRE_TOKEN|GITHUB_TOKEN|GH_TOKEN|ANTHROPIC_API_KEY|OPENAI_API_KEY"
+    r"|pat|passwd|logfire[-_]?token|LOGFIRE_TOKEN|MERGECRAFT_LOGFIRE_TOKEN|GITHUB_TOKEN|GH_TOKEN"
+    r"|ANTHROPIC_API_KEY|OPENAI_API_KEY"
     r"|GEMINI_API_KEY|CODEX_AUTH_JSON|NOUS_API_KEY|TOKENHUB_API_KEY)$",
     re.IGNORECASE,
 )
 _CLI_SECRET_VALUE = re.compile(
-    r"^(?:sk-|ghp_|gho_|ghu_|ghs_|ghr_|eyJ|AKIA|Bearer\s|Basic\s)", re.IGNORECASE
+    r"^(?:pylf_|sk-|ghp_|gho_|ghu_|ghs_|ghr_|eyJ|AKIA|Bearer\s|Basic\s)", re.IGNORECASE
 )
 REDACTED = REDACTION_SENTINEL
 
@@ -65,6 +68,13 @@ _QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(_QUERY_TOKEN_KEYS)
 # raw ``ghs_``/``gho_`` prefix is no longer visible to the prefix patterns.
 _BEARER_RE = re.compile(r"((?:Bearer|Basic)\s)[A-Za-z0-9+/=._-]{16,}")
 _EMBEDDED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(sk-|ghp_|eyJ)[A-Za-z0-9._-]{8,}")
+
+
+class _RedactedCliLine(str):
+    """Space-joined argv line whose iteration yields tokens, not characters."""
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(str(self).split(" "))
 
 
 def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
@@ -128,7 +138,7 @@ def redact_cli_argv(argv: list[str]) -> str:
             masked.append(REDACTED)
             continue
         masked.append(redact_secrets(token))
-    return " ".join(masked)
+    return _RedactedCliLine(" ".join(masked))
 
 
 def redact_url(url: str) -> str:
