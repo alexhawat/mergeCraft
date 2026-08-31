@@ -182,7 +182,12 @@ def prepare_codex_brokered_run(
     """Start broker, build env, auth stub, and MCP config (plan 18 W3)."""
     from mergecraft.agents import codex as codex_module
 
-    session = begin_broker_session(openai_api_key=openai_api_key)
+    expected_posture = _broker_mod.resolve_codex_broker_posture(openai_api_key=openai_api_key)
+    session = begin_broker_session(openai_api_key=openai_api_key, posture=expected_posture)
+    if expected_posture.active and not session.active:
+        reason = session.posture.reason
+        msg = f"Codex credential broker inactive: {reason}"
+        raise RuntimeError(msg)
     posture = session.posture
     set_broker_session(session)
     try:

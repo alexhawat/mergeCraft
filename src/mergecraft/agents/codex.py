@@ -16,6 +16,7 @@ from loguru import logger
 
 from mergecraft.agents.codex_broker import (
     OPENAI_API_KEY_ENV,
+    CodexBrokeredRun,
     active_broker_handle,
     add_broker_provider_table,
     begin_broker_session,
@@ -919,6 +920,17 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     finally:
         stop_broker_session(broker_session)
         set_broker_session(None)
+
+
+def prepare_codex_brokered_run(
+    ctx: AgentRunContext,
+    *,
+    openai_api_key: str = "",
+) -> CodexBrokeredRun:
+    """Start broker, build env, auth stub, and MCP config (plan 18 W3)."""
+    from mergecraft.agents import codex_broker
+
+    return codex_broker.prepare_codex_brokered_run(ctx, openai_api_key=openai_api_key)
 
 
 codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)

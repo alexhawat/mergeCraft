@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import secrets
 import threading
 from contextlib import contextmanager
@@ -179,11 +180,22 @@ def _configured_upstream_host(config: CredentialBrokerConfig) -> str:
     return _normalize_host(parsed.hostname or "")
 
 
-def _is_model_path(path: str) -> bool:
-    bare = path.split("?", 1)[0]
+def _normalized_request_path(path: str) -> str:
+    bare = _request_path(path)
     if bare.startswith(("http://", "https://")):
         bare = urlparse(bare).path
-    return any(bare == prefix or bare.startswith(f"{prefix}/") for prefix in _MODEL_PATH_PREFIXES)
+    normalized = posixpath.normpath(bare)
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    return normalized
+
+
+def _is_model_path(path: str) -> bool:
+    normalized = _normalized_request_path(path)
+    return any(
+        normalized == prefix or normalized.startswith(f"{prefix}/")
+        for prefix in _MODEL_PATH_PREFIXES
+    )
 
 
 def _extract_bearer(auth_header: str | None) -> str | None:
@@ -230,7 +242,7 @@ def _broker_log(level: str, format: str, *args: object) -> None:
 
 
 def _upstream_request_path(request_path: str) -> str:
-    path = _request_path(request_path)
+    path = _normalized_request_path(request_path)
     if path.startswith("/v1/"):
         return path[len("/v1") :]
     return path if path.startswith("/") else f"/{path}"
@@ -353,7 +365,7 @@ def credential_broker(
                 self._reject(HTTPStatus.UNAUTHORIZED, "missing or invalid bearer token")
                 return None
 
-            path = _request_path(self.path)
+            path = _normalized_request_path(self.path)
             if not _is_model_path(path):
                 self._reject(HTTPStatus.FORBIDDEN, "non-model path refused")
                 return None
@@ -369,9 +381,7 @@ def credential_broker(
             if body is None:
                 return
 
-            upstream_path = path
-            if self.path.startswith(("http://", "https://")):
-                upstream_path = urlparse(self.path).path
+            upstream_path = _normalized_request_path(self.path)
 
             forward_headers = {
                 key: value
@@ -412,7 +422,9 @@ def credential_broker(
                 try:
                     text = response_body.decode()
                 except UnicodeDecodeError:
-                    text = ""
+                    redacted = redact_broker_output(response_body.decode("latin-1"))
+                    if redacted.encode("latin-1") != response_body:
+                        response_body = redacted.encode("latin-1")
                 else:
                     redacted = redact_broker_output(text)
                     if redacted != text:
