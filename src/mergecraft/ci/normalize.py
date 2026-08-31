@@ -7,6 +7,7 @@ import re
 from typing import Any, cast
 
 from mergecraft.analyzers.redact import redact_for_fingerprint, redact_secrets
+from mergecraft.ci.paths import extract_failure_paths
 from mergecraft.ci.types import NormalizedFailure, RawFailure
 
 _TIMESTAMP_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s*")
@@ -71,7 +72,9 @@ def normalize_failure(raw: dict[str, Any]) -> NormalizedFailure:
     exit_code = _coerce_exit_code(typed)
 
     source_excerpt = str(raw.get("log_excerpt") or raw.get("log_text") or "")
-    log_excerpt = redact_secrets(_strip_run_noise(source_excerpt))
+    stripped_excerpt = _strip_run_noise(source_excerpt)
+    failure_paths = extract_failure_paths(stripped_excerpt)
+    log_excerpt = redact_secrets(stripped_excerpt)
     error_signature = _extract_error_signature(typed, log_excerpt)
     artifacts = _coerce_artifacts(typed)
     retry_state = raw.get("retry_state")
@@ -87,6 +90,7 @@ def normalize_failure(raw: dict[str, Any]) -> NormalizedFailure:
         artifacts=artifacts,
         retry_state=retry_state,
         failure_fingerprint=_compute_fingerprint(command=command, error_signature=error_signature),
+        failure_paths=failure_paths,
     )
 
 

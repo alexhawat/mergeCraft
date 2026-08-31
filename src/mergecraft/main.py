@@ -12,7 +12,12 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.action.inputs import apply_setup_overrides, apply_tracing_overrides
+from mergecraft.action.inputs import (
+    apply_setup_overrides,
+    apply_tracing_overrides,
+    collect_tracing_warnings_for_summary,
+    export_tracing_env_from_action_inputs,
+)
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
@@ -401,6 +406,7 @@ async def publish_deterministic_record(
             tool_state.usage_entries,
             budget_tracker=resolved_ctx.budget_tracker,
         ),
+        credential_degradations=list(tool_state.credential_degradations),
     )
     await upsert_sticky_progress_comment(resolved_ctx, block)
 
@@ -577,7 +583,13 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     ctx.scm = create_github_scm(ctx.job_token, client=github_client)
     run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
+    export_tracing_env_from_action_inputs()
     settings = apply_tracing_overrides(run_context.repo_settings)
+    for tracing_warning in collect_tracing_warnings_for_summary():
+        logger.warning(tracing_warning)
+        from mergecraft.utils.gha_log import warning as emit_gha_warning
+
+        emit_gha_warning(tracing_warning)
     ctx.settings = settings
     from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
 
@@ -687,25 +699,53 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     assert ctx.tool_state is not None
     assert ctx.scm is not None
 
+    from mergecraft.action.inputs import (
+        ForkCredentialInvariantError,
+        validate_fork_credential_invariant,
+    )
+    from mergecraft.agents.codex import CODEX_SANDBOX_ENV, CODEX_SANDBOX_UNSANDBOXED
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.config.trust_policy import (
+        agent_sandbox_manifest_fields,
+        bound_head_sha,
+        default_branch_from_event,
         log_trust_policy_at_run_start,
+        resolve_agent_sandbox_decision,
         resolve_trust_policy,
         trust_policy_manifest_fields,
     )
 
     repo_root = Path.cwd()
+    gh_event = ctx.gh_event or {}
+    try:
+        validate_fork_credential_invariant(event=gh_event, env=os.environ)
+    except ForkCredentialInvariantError as exc:
+        raise _ConfigurationError(str(exc)) from exc
+
     snapshot = capture_repo_settings_snapshot(root=repo_root, settings=ctx.settings)
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     shell = str(ctx.payload.get("shell") or "restricted")
     policy = resolve_trust_policy(
-        event=ctx.gh_event or {},
+        event=gh_event,
         config_root=repo_root,
         event_name=event_name,
         settings_snapshot=snapshot,
         shell=shell,
     )
     log_trust_policy_at_run_start(policy)
+
+    operator_override_requested = (
+        os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower() == CODEX_SANDBOX_UNSANDBOXED
+    )
+    sandbox_decision = resolve_agent_sandbox_decision(
+        event=gh_event,
+        event_name=event_name,
+        config_root=repo_root,
+        settings_snapshot=snapshot,
+        head_sha=bound_head_sha(gh_event, event_name=event_name) or "unknown",
+        default_branch=default_branch_from_event(gh_event),
+        operator_override_requested=operator_override_requested,
+    )
 
     trust_tier = policy.execution_trust
     authority_trust = policy.authority_trust
@@ -715,7 +755,11 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     ctx.tool_state.trust_tier = trust_tier
     ctx.tool_state.authority_trust = authority_trust
     ctx.tool_state.trust_self_review_level = policy.level
-    ctx.tool_state.run_manifest_trust = trust_policy_manifest_fields(policy)
+    ctx.tool_state.agent_sandbox_decision = sandbox_decision
+    ctx.tool_state.run_manifest_trust = {
+        **trust_policy_manifest_fields(policy),
+        **agent_sandbox_manifest_fields(sandbox_decision),
+    }
 
     assert ctx.settings is not None
     from mergecraft.config.settings import (
@@ -846,6 +890,22 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     ctx.resolved_model = resolved_model
     ctx.selected_slug = selected_slug
     tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")
+
+    from mergecraft.utils.agent_resolve import collect_roster_credential_degradations
+
+    degradations = collect_roster_credential_degradations(
+        settings=settings,
+        cwd=Path.cwd(),
+    )
+    if degradations:
+        tool_state.credential_degradations = degradations
+        for line in degradations:
+            logger.warning("» {}", line)
+        tool_state.run_manifest_trust = {
+            **tool_state.run_manifest_trust,
+            "credential_degradations": " | ".join(degradations),
+        }
+
     _stamp_requested_model(ctx, payload_model)
 
 

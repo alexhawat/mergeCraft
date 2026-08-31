@@ -273,11 +273,24 @@ def _environment_failure_rollup(record: TrajectoryRecord) -> list[Finding]:
         from mergecraft.agents.codex import user_namespace_failure_hint
 
         return [
-            _finding(
-                "ignored-tool-error",
+            make_finding(
+                tool=_TOOL,
+                rule_id="codex-platform-sandbox-unavailable",
+                category=_CATEGORY,
+                severity="Trivial",
+                confidence="certain",
                 message=user_namespace_failure_hint(),
+                path="",
+                start_line=1,
+                end_line=1,
+                source="trajectory",
+                scope="run",
                 evidence=[call.error or call.command or call.tool for call in env_calls[:3]],
-                severity="Major",
+                remediation=(
+                    "Grant trust.agentSandbox for this head or run on a runner that supports "
+                    "nested user namespaces."
+                ),
+                introduced_by_pr="false",
             )
         ]
     sample = env_calls[0]

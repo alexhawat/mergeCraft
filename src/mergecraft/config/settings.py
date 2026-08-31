@@ -431,10 +431,11 @@ class TracingSettings(BaseModel):
 
 
 SelfReviewLevel = Literal["off", "analyzers", "full"]
+AgentSandboxLevel = Literal["never", "merged-only", "dispatch", "same-repo"]
 
 
 class TrustSettings(BaseModel):
-    """Operator trust knob for same-repo ``pull_request_target`` (plan 13 D14)."""
+    """Operator trust knobs for same-repo ``pull_request_target`` (plan 13 D14, lane B D1)."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -446,6 +447,24 @@ class TrustSettings(BaseModel):
             "full — authority trust too (requires explicit CLI confirmation at write time)"
         ),
     )
+    agent_sandbox: AgentSandboxLevel = Field(
+        default="dispatch",
+        alias="agentSandbox",
+        description=(
+            "never — always keep Codex sandboxed; merged-only — head SHA on default branch; "
+            "dispatch (default) — workflow_dispatch on a non-fork head; "
+            "same-repo — any non-fork head (fork heads always refuse)"
+        ),
+    )
+
+    @field_validator("agent_sandbox", mode="before")
+    @classmethod
+    def _coerce_agent_sandbox(cls, value: object) -> str:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"never", "merged-only", "dispatch", "same-repo"}:
+                return normalized
+        return "dispatch"
 
 
 class RunBoundsSettings(BaseModel):

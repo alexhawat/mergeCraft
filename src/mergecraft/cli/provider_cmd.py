@@ -19,6 +19,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
 from mergecraft.config.io import load_config_dict as _load_config_dict_raw
+from mergecraft.config.io import patch_config_dict
 from mergecraft.config.io import write_config_dict as _write_config_dict
 from mergecraft.config.provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,
@@ -235,7 +236,10 @@ def seed_builtin_providers(config_path: Path) -> None:
 
     data["providers"] = entries
     data["providersSeeded"] = True
-    _write_config_dict(config_path, data)
+    patch_config_dict(
+        config_path,
+        {"providers": entries, "providersSeeded": True},
+    )
 
 
 @app.command("harnesses")

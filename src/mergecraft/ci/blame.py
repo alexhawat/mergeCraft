@@ -37,7 +37,11 @@ def blame_failure(
 ) -> BlameVerdict:
     """Map a raw/normalized failure to a PR attribution verdict."""
     log_excerpt = str(failure.get("log_excerpt") or failure.get("log_text") or "")
-    failure_paths = extract_failure_paths(log_excerpt)
+    stored_paths = failure.get("failure_paths")
+    if isinstance(stored_paths, list) and stored_paths:
+        failure_paths = [str(path) for path in stored_paths]
+    else:
+        failure_paths = extract_failure_paths(log_excerpt)
     if not failure_paths:
         failure_paths = [primary_failure_path(log_excerpt)]
 

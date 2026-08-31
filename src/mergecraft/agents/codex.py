@@ -37,6 +37,7 @@ from mergecraft.agents.shared import (
     spawn_agent_cli,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
@@ -337,9 +338,18 @@ def _operator_sandbox_override() -> str | None:
     return None
 
 
-def _sandbox_is_disabled_by_operator() -> bool:
-    """True when the workflow explicitly opted out of Codex's platform sandbox."""
-    return _operator_sandbox_override() == CODEX_SANDBOX_UNSANDBOXED
+def _sandbox_is_disabled_by_operator(
+    decision: AgentSandboxDecision | None,
+) -> bool:
+    """True when the workflow requested unsandboxed Codex and policy grants it."""
+    if _operator_sandbox_override() != CODEX_SANDBOX_UNSANDBOXED:
+        return False
+    if decision is not None:
+        return decision.honour
+    # Action runs always resolve policy in main.py before Codex starts. Harness tests
+    # and local CLI paths without tool_state.agent_sandbox_decision keep #70's escape
+    # hatch so operator override env alone still works outside GITHUB_ACTIONS.
+    return os.environ.get("GITHUB_ACTIONS") != "true"
 
 
 def is_user_namespace_failure(text: str) -> bool:
@@ -347,7 +357,11 @@ def is_user_namespace_failure(text: str) -> bool:
     return any(signature in text for signature in USER_NAMESPACE_FAILURES)
 
 
-def user_namespace_failure_hint() -> str:
+def user_namespace_failure_hint(
+    *,
+    configured_tier: str | None = None,
+    granting_tier: str | None = None,
+) -> str:
     """Return the actionable remedy for a nested-sandbox failure (#70).
 
     The failure is environmental, not a reviewer error, and the two are worth
@@ -355,24 +369,46 @@ def user_namespace_failure_hint() -> str:
     otherwise see no difference between "this runner cannot sandbox Codex" and
     "the review ran and found nothing".
     """
+    tier_line = ""
+    if configured_tier is not None:
+        tier_line = f"Current trust.agentSandbox={configured_tier!r}. "
+        if granting_tier is not None and granting_tier != configured_tier:
+            tier_line += (
+                f"For this run, set trust.agentSandbox to {granting_tier!r} "
+                f"(mergecraft trust set-agent-sandbox {granting_tier}) to grant "
+                f"{CODEX_SANDBOX_ENV}={CODEX_SANDBOX_UNSANDBOXED}. "
+            )
+        elif granting_tier is None:
+            tier_line += (
+                "No trust.agentSandbox tier grants the override on this head — "
+                "fork heads always refuse. "
+            )
     return (
         "Codex could not start its Linux platform sandbox: bubblewrap cannot create "
         "a user namespace inside a container that is already namespaced (a Docker "
         "container action, or a runner without unprivileged user namespaces). No "
         "review ran.\n"
+        f"{tier_line}"
         "Remedies:\n"
-        f"  - If the runner is already an ephemeral, isolated container, set "
-        f"{CODEX_SANDBOX_ENV}={CODEX_SANDBOX_UNSANDBOXED} on the mergeCraft step to "
-        "skip Codex's redundant nested sandbox. mergeCraft's own shell/push controls "
-        "still apply.\n"
+        f"  - Request {CODEX_SANDBOX_ENV}={CODEX_SANDBOX_UNSANDBOXED} on the mergeCraft "
+        "step; trust.agentSandbox in the consuming repo decides whether it is granted. "
+        "Fork heads always refuse.\n"
         "  - On a self-hosted runner, enable unprivileged user namespaces "
         "(sysctl kernel.unprivileged_userns_clone=1).\n"
         "  - Or run the review with a provider that does not nest a sandbox."
     )
 
 
+def _resolve_agent_sandbox_decision(ctx: AgentRunContext) -> AgentSandboxDecision | None:
+    decision = ctx.tool_state.agent_sandbox_decision
+    if isinstance(decision, AgentSandboxDecision):
+        return decision
+    return None
+
+
 def _sandbox_mode(ctx: AgentRunContext) -> str:
-    if _sandbox_is_disabled_by_operator():
+    decision = _resolve_agent_sandbox_decision(ctx)
+    if _sandbox_is_disabled_by_operator(decision):
         return CODEX_SANDBOX_UNSANDBOXED
     shell = payload_shell_mode(ctx)
     if shell == "enabled":
@@ -764,13 +800,18 @@ def _run_codex_streaming(
         # bwrap fails on the very first exec, so this is the difference between
         # "the environment cannot run Codex" and "the reviewer errored" (#70).
         if is_user_namespace_failure(f"{stderr_text}\n{output or ''}"):
+            decision = _resolve_agent_sandbox_decision(ctx)
+            hint = user_namespace_failure_hint(
+                configured_tier=decision.configured_tier if decision else None,
+                granting_tier=decision.granting_tier if decision else None,
+            )
             logger.error(
                 "codex platform sandbox could not start; no review ran. Set {}={} "
-                "if this runner is already an isolated container.",
+                "if this runner should request unsandboxed Codex (trust.agentSandbox decides).",
                 CODEX_SANDBOX_ENV,
                 CODEX_SANDBOX_UNSANDBOXED,
             )
-            error = f"{user_namespace_failure_hint()}\n\ncodex stderr:\n{error}"
+            error = f"{hint}\n\ncodex stderr:\n{error}"
         # Classify against the provider's message too — a stdout-only failure
         # is invisible to a stderr-only classifier (#445, #446).
         retryable = is_retryable_cli_failure(

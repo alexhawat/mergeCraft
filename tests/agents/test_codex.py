@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from tests.agents.conftest import make_agent_run_context
+from tests.agents.conftest import attach_honoured_sandbox_decision, make_agent_run_context
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -301,6 +301,7 @@ def test_operator_can_opt_out_of_the_nested_sandbox(
     codex_module = _load_codex_module()
     monkeypatch.setenv(codex_module.CODEX_SANDBOX_ENV, codex_module.CODEX_SANDBOX_UNSANDBOXED)
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    attach_honoured_sandbox_decision(ctx)
 
     assert codex_module._sandbox_mode(ctx) == codex_module.CODEX_SANDBOX_UNSANDBOXED
     # The legacy --sandbox path owns policy here, so the flag reaches the CLI
@@ -323,6 +324,7 @@ def test_opt_in_is_written_into_codex_config(monkeypatch: MonkeyPatch, tmp_path:
     codex_module = _load_codex_module()
     monkeypatch.setenv(codex_module.CODEX_SANDBOX_ENV, codex_module.CODEX_SANDBOX_UNSANDBOXED)
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
+    attach_honoured_sandbox_decision(ctx)
 
     config = Path(codex_module.write_mcp_config(ctx)).read_text(encoding="utf-8")
 

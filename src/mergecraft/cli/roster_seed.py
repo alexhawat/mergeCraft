@@ -7,7 +7,7 @@ from pathlib import Path
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.provider_toggle import canonical_provider_label
 from mergecraft.config.agent_roster import AgentRosterError, seed_reviewer_p0_if_empty
-from mergecraft.config.io import config_path_for_root, load_config_dict, write_config_dict
+from mergecraft.config.io import config_path_for_root, load_config_dict, patch_config_dict
 
 
 def seed_reviewer_p0_after_auth(*, cwd: Path, provider_label: str) -> None:
@@ -16,6 +16,8 @@ def seed_reviewer_p0_after_auth(*, cwd: Path, provider_label: str) -> None:
     config_path = config_path_for_root(repo_root)
     data = load_config_dict(config_path)
     catalog_label = canonical_provider_label(provider_label)
+    before_agents = data.get("agents")
+    before_models = data.get("models")
     try:
         slug = seed_reviewer_p0_if_empty(data, catalog_label)
     except AgentRosterError as exc:
@@ -23,7 +25,12 @@ def seed_reviewer_p0_after_auth(*, cwd: Path, provider_label: str) -> None:
         return
     if slug is None:
         return
-    write_config_dict(config_path, data)
+    patch: dict[str, object] = {}
+    if data.get("agents") != before_agents:
+        patch["agents"] = data["agents"]
+    if data.get("models") != before_models:
+        patch["models"] = data["models"]
+    patch_config_dict(config_path, patch)
     console.print(
         f"[green]seeded[/green] agents.reviewer p0 with [cyan]{slug}[/cyan] "
         f"in {config_path.relative_to(repo_root)}"

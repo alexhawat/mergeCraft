@@ -53,9 +53,12 @@ not auto-install (BYOK, convention 5).
 For the GitHub Action, the workflow step should pass
 `tracing-to: logfire` + `logfire-token: ${{ secrets.LOGFIRE_TOKEN }}` (the
 `LOGFIRE_TOKEN` secret is the same value `auth logfire --scope github`
-sets). The Action input `logfire-token` maps to the runtime
-`MERGECRAFT_LOGFIRE_TOKEN` env var; the project label is read from
-`MERGECRAFT_TRACING_PROJECT` or the YAML `tracing.sinks[].project` field.
+sets). The Action input `logfire-token` is exported to
+`MERGECRAFT_LOGFIRE_TOKEN` **before** sink initialisation
+(`export_tracing_env_from_action_inputs` in `action/inputs.py`) — an empty
+or absent input does not clobber an already-set env var. The project label
+is read from `MERGECRAFT_TRACING_PROJECT` or the YAML
+`tracing.sinks[].project` field.
 
 Rather than editing the workflow by hand, let the CLI write it:
 
@@ -639,6 +642,12 @@ renders the value as `*** (redacted)` even in the table form.
 When the token cannot be resolved, the sink is constructed but emits a
 warning and degrades to a no-op for the network path. The local
 `jsonl_file` sink (when configured) keeps writing.
+
+On the Action path, tracing enabled with `tracing-to: logfire` but no
+resolvable token also surfaces in the **job step summary** and run record
+via `collect_tracing_warnings_for_summary()` — a configured-but-inactive
+Logfire sink is no longer silent. The warning names `logfire-token`,
+`INPUT_LOGFIRE_TOKEN`, and `MERGECRAFT_LOGFIRE_TOKEN`.
 
 ## Action inputs (W8.5 / W7.7)
 

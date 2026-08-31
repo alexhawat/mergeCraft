@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from loguru import logger
-from tests.agents.conftest import make_agent_run_context
+from tests.agents.conftest import attach_honoured_sandbox_decision, make_agent_run_context
 
 from mergecraft.agents import codex as codex_module
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
@@ -314,6 +314,7 @@ def test_operator_sandbox_override_accepts_the_documented_value(
     monkeypatch.setenv(codex_module.CODEX_SANDBOX_ENV, "DANGER-FULL-ACCESS")
 
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
+    attach_honoured_sandbox_decision(ctx)
 
     assert codex_module._sandbox_mode(ctx) == codex_module.CODEX_SANDBOX_UNSANDBOXED
     assert codex_module._codex_use_permission_profiles(ctx) is False

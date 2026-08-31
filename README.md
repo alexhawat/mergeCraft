@@ -311,7 +311,9 @@ upload. Trust-tier details and advanced workflow patterns live in
 mergeCraft also reviews **local diffs** — no pull request required. From a git
 checkout or a patch file, `mergecraft review` materializes the change, runs the
 same analyzer + reviewer pipeline as the Action, and exits with a [named
-code](docs/EXIT-CODES.md) your scripts can branch on.
+code](docs/EXIT-CODES.md) your scripts can branch on. Operator trust knobs
+(`selfReview`, `agentSandbox`) are documented in
+[`docs/trust-policy.md`](docs/trust-policy.md).
 
 | Step | What happens |
 | --- | --- |
@@ -451,6 +453,7 @@ When `harness:` is unset, mergeCraft infers the runtime from the model slug — 
 | [`docs/agent-roster.md`](docs/agent-roster.md) | Agent roster, `provider status`, multi-reviewer merge, trust snapshot |
 | [`docs/workflows.md`](docs/workflows.md) | Examples 2–6, trust tiers, `pull_request_target` gotchas |
 | [`docs/cli.md`](docs/cli.md) | Full `mergecraft` command reference |
+| [`docs/trust-policy.md`](docs/trust-policy.md) | Operator trust knobs (`selfReview`, `agentSandbox`) |
 | [`docs/action-reference.md`](docs/action-reference.md) | Every Action `with:` input and output |
 | [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) | Contractual CLI exit codes |
 | [`REVIEW-CHECKS.md`](REVIEW-CHECKS.md) | Every check a review applies — lenses, gates, grading |

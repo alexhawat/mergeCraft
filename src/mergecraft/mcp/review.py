@@ -152,6 +152,7 @@ def _deterministic_review_block(
         token_summary=token_summary,
         publication_entrypoint=tool_state.review_publication_entrypoint,
         inline_comments_demoted=tool_state.review_inline_comments_demoted,
+        credential_degradations=list(tool_state.credential_degradations),
     )
 
 

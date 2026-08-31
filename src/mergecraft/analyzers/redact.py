@@ -7,12 +7,15 @@ import json
 import math
 import re
 from re import Pattern
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from mergecraft.redaction_structured import redact_structured_value
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
@@ -38,8 +41,17 @@ _BENIGN_PURE_HEX_RE = re.compile(r"^[a-f0-9]+$")
 # still match ``_SECRET_PATTERNS`` first.
 _BENIGN_IDENTIFIER_RE = re.compile(
     r"^(?:_[a-z][a-z0-9_]*|[a-z][a-z0-9]*(?:_[a-z0-9_]+)+"
-    r"|[a-z][a-z0-9]*(?:-[a-z0-9]+)+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)$"
+    r"|[a-z][a-z0-9]*(?:-[a-z0-9]+)+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+"
+    r"|[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+"  # RUSTSEC-2024-0001
+    r"|[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+)$"  # camelCase SARIF keys
 )
+_BENIGN_FILENAME_RE = re.compile(
+    r"^[\w.-]+\.(?:txt|json|yaml|yml|sh|py|js|ts|md|toml|lock|html|proto)$"
+)
+_BENIGN_ISO_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?$")
+_BENIGN_HTTP_URL_RE = re.compile(r"^https?://[\w.-]+(?::\d+)?(?:/[\w./#:?=&%+-]*)?$")
+_LOWERCASE_SLUG_RE = re.compile(r"^[a-z]{12,24}$")
+_SLUG_ENTROPY_SLACK = 0.12
 # Analyzer metadata assignments (``catalog=unavailable``, ``status=skipped``) —
 # exempt before the dense-token pass so glanceable catalog rows survive redaction.
 _METADATA_ASSIGNMENT_RE = re.compile(r"^(?P<key>[a-z][a-z0-9_]*)=(?P<value>[a-z][a-z0-9_-]*)$")
@@ -65,10 +77,41 @@ def _entropy_threshold(length: int) -> float:
     return _ENTROPY_RATIO * math.log2(length)
 
 
+def _is_benign_filename(token: str) -> bool:
+    """Common repo-relative filenames that are not credential material."""
+    return _BENIGN_FILENAME_RE.fullmatch(token) is not None
+
+
+def _is_benign_iso_timestamp(token: str) -> bool:
+    """ISO-8601 UTC timestamps from analyzer reports (W6 #537 sweep)."""
+    return _BENIGN_ISO_TIMESTAMP_RE.fullmatch(token) is not None
+
+
+def _is_benign_http_url(token: str) -> bool:
+    """Published http(s) links in analyzer output — not credential material."""
+    return _BENIGN_HTTP_URL_RE.fullmatch(token) is not None
+
+
+def _is_benign_lowercase_slug(token: str) -> bool:
+    """Lowercase analyzer slugs without separators (W6 #537 sweep: ``psscriptanalyzer``)."""
+    if _LOWERCASE_SLUG_RE.fullmatch(token) is None:
+        return False
+    threshold = _entropy_threshold(len(token)) + _SLUG_ENTROPY_SLACK
+    return _shannon_entropy(token) <= threshold
+
+
 def _is_benign_entropy_token(token: str) -> bool:
     if _BENIGN_PURE_HEX_RE.match(token):
         return _shannon_entropy(token) < _entropy_threshold(len(token))
-    return False
+    if _BENIGN_IDENTIFIER_RE.match(token):
+        return True
+    if _is_benign_filename(token):
+        return True
+    if _is_benign_iso_timestamp(token):
+        return True
+    if _is_benign_http_url(token):
+        return True
+    return _is_benign_lowercase_slug(token)
 
 
 def _is_simple_metadata_token(token: str) -> bool:
@@ -103,7 +146,13 @@ def _should_force_redact_dense_token(token: str) -> bool:
 
 def _looks_like_repo_path_token(token: str) -> bool:
     """Repo-relative path prefixes are not secrets — preserve for CI blame paths."""
-    return "/" in token and _REPO_PATH_TOKEN_RE.match(token) is not None
+    if "/" not in token or _REPO_PATH_TOKEN_RE.match(token) is None:
+        return False
+    segments = [segment for segment in token.split("/") if segment]
+    if not segments or not all(re.search(r"[A-Za-z]", segment) for segment in segments):
+        return False
+    last = segments[-1]
+    return "." in last or _is_benign_filename(token)
 
 
 def _entropy_redact(text: str) -> str:
@@ -116,6 +165,14 @@ def _entropy_redact(text: str) -> str:
         if _BENIGN_HEX_40_RE.match(token) or _BENIGN_HEX_64_RE.match(token):
             return token
         if _BENIGN_IDENTIFIER_RE.match(token):
+            return token
+        if _is_benign_filename(token):
+            return token
+        if _is_benign_iso_timestamp(token):
+            return token
+        if _is_benign_http_url(token):
+            return token
+        if _is_benign_lowercase_slug(token):
             return token
         if _is_benign_metadata_assignment(token):
             return token
@@ -145,7 +202,17 @@ def _maybe_redact_entire_string(text: str, redacted: str) -> str:
         return redacted
     if _BENIGN_HEX_40_RE.match(text) or _BENIGN_HEX_64_RE.match(text):
         return redacted
+    if _looks_like_repo_path_token(text):
+        return redacted
     if _BENIGN_IDENTIFIER_RE.match(text):
+        return redacted
+    if _is_benign_filename(text):
+        return redacted
+    if _is_benign_iso_timestamp(text):
+        return redacted
+    if _is_benign_http_url(text):
+        return redacted
+    if _is_benign_lowercase_slug(text):
         return redacted
     if _is_benign_metadata_assignment(text):
         return redacted
@@ -311,9 +378,71 @@ def assert_no_canary(text: str, canary: str) -> None:
         raise AssertionError(msg)
 
 
+def _looks_like_secret_shape(token: str) -> bool:
+    """True when ``token`` matches a known credential prefix or dense secret shape."""
+    for pattern in _SECRET_PATTERNS:
+        if pattern.search(token):
+            return True
+    if len(token) < _MIN_ENTROPY_LENGTH:
+        return False
+    if _looks_like_repo_path_token(token) or _is_benign_filename(token):
+        return False
+    if (
+        _BENIGN_IDENTIFIER_RE.match(token)
+        or _is_benign_lowercase_slug(token)
+        or _is_benign_iso_timestamp(token)
+        or _is_benign_http_url(token)
+    ):
+        return False
+    if _BENIGN_HEX_40_RE.match(token) or _BENIGN_HEX_64_RE.match(token):
+        return False
+    if _is_benign_metadata_assignment(token):
+        return False
+    unique = len(set(token))
+    if unique >= 8 and _shannon_entropy(token) >= _entropy_threshold(len(token)):
+        return True
+    return _should_force_redact_dense_token(token)
+
+
+def _looks_like_benign_harmful_shape(token: str) -> bool:
+    """True for analyzer-output tokens the W6 sweep proved lose operator signal when redacted."""
+    if _looks_like_secret_shape(token):
+        return False
+    return (
+        _BENIGN_IDENTIFIER_RE.match(token) is not None
+        or _looks_like_repo_path_token(token)
+        or _is_benign_filename(token)
+        or _is_benign_iso_timestamp(token)
+        or _is_benign_http_url(token)
+        or _is_benign_lowercase_slug(token)
+    )
+
+
+def classify_entropy_redaction_hits(hits: Iterable[Any]) -> dict[str, list[dict[str, str]]]:
+    """Classify entropy-sweep hits for operator review (wave 15 W6 / D13)."""
+    secret_confirmed: list[dict[str, str]] = []
+    benign_candidates: list[dict[str, str]] = []
+    for hit in hits:
+        token = str(getattr(hit, "token", ""))
+        record = {
+            "analyzer_id": str(getattr(hit, "analyzer_id", "")),
+            "token": token,
+            "context": str(getattr(hit, "context", "")),
+        }
+        if _looks_like_secret_shape(token):
+            secret_confirmed.append(record)
+        elif _looks_like_benign_harmful_shape(token):
+            benign_candidates.append({**record, "classification": "benign_harmful_to_redact"})
+    return {
+        "benign_candidates": benign_candidates,
+        "secret_confirmed": secret_confirmed,
+    }
+
+
 __all__ = [
     "assert_no_canary",
     "cache_key_fragment",
+    "classify_entropy_redaction_hits",
     "install_loguru_redaction_filter",
     "redact_analyzer_output",
     "redact_for_fingerprint",

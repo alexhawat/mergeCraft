@@ -56,3 +56,9 @@ ciEvidence:
 #
 #   trust:
 #     selfReview: "off"
+#     # agentSandbox tiers (tightest first): never | merged-only | dispatch | same-repo
+#     # Fork heads always refuse — no tier lifts that floor.
+#     # merged-only gives no shell during open PR review; default-branch only
+#     # implies reviewed where merging requires review.
+#     # Residual risks: fork PR checked out locally; adding a collaborator.
+#     agentSandbox: "dispatch"

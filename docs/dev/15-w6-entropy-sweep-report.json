@@ -1,0 +1,94 @@
+{
+  "wave": "W6",
+  "issue": "#537",
+  "summary": {
+    "corpus_files": 92,
+    "pre_fix_harmful_hits": 14,
+    "post_fix_remaining_hits": 1,
+    "outcome": "narrow_relaxation",
+    "shapes_relaxed": [
+      "advisory_id (RUSTSEC-YYYY-NNNN)",
+      "camelCase SARIF keys",
+      "lowercase analyzer slugs (12-24 chars)",
+      "repo_path in _maybe_redact_entire_string",
+      "common filenames (*.txt, *.sh, ...)",
+      "iso_timestamp",
+      "http_url"
+    ],
+    "global_entropy_threshold_changed": false
+  },
+  "pre_fix_classified_hits": [
+    {
+      "token": "RUSTSEC-2024-0001",
+      "analyzer_id": "cargo-audit",
+      "classification": "benign_harmful_to_redact",
+      "shape": "advisory_id"
+    },
+    {
+      "token": "RUSTSEC-2024-0002",
+      "analyzer_id": "cargo-audit",
+      "classification": "benign_harmful_to_redact",
+      "shape": "advisory_id"
+    },
+    {
+      "token": "psscriptanalyzer",
+      "analyzer_id": "psscriptanalyzer",
+      "classification": "benign_harmful_to_redact",
+      "shape": "lowercase_slug"
+    },
+    {
+      "token": "artifactLocation",
+      "analyzer_id": "sarif",
+      "classification": "benign_harmful_to_redact",
+      "shape": "camelCase"
+    },
+    {
+      "token": "requirements.txt",
+      "analyzer_id": "osv-scanner",
+      "classification": "benign_harmful_to_redact",
+      "shape": "filename"
+    },
+    {
+      "token": "scripts/deploy.sh",
+      "analyzer_id": "shellcheck",
+      "classification": "benign_harmful_to_redact",
+      "shape": "repo_path"
+    },
+    {
+      "token": "2026-08-20T00:00:00Z",
+      "analyzer_id": "bandit",
+      "classification": "benign_harmful_to_redact",
+      "shape": "iso_timestamp"
+    },
+    {
+      "token": "https://cwe.mitre.org/data/definitions/502.html",
+      "analyzer_id": "bandit",
+      "classification": "benign_harmful_to_redact",
+      "shape": "http_url"
+    },
+    {
+      "token": "http://rubygems.org/",
+      "analyzer_id": "bundler-audit",
+      "classification": "benign_harmful_to_redact",
+      "shape": "http_url"
+    }
+  ],
+  "post_fix_remaining_hits": [
+    {
+      "analyzer_id": "zizmor",
+      "token": "github/workflows/broken.yml",
+      "context": "analyzer-runs/zizmor-7b4b42a9.out: {\"$schema\": \"https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json\", \"runs\": [{\"invocations\""
+    }
+  ],
+  "post_fix_classification": {
+    "benign_candidates": [
+      {
+        "analyzer_id": "zizmor",
+        "token": "github/workflows/broken.yml",
+        "context": "analyzer-runs/zizmor-7b4b42a9.out: {\"$schema\": \"https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json\", \"runs\": [{\"invocations\"",
+        "classification": "benign_harmful_to_redact"
+      }
+    ],
+    "secret_confirmed": []
+  }
+}

@@ -536,10 +536,12 @@ class OTLPSink:
         service_name: str = "mergecraft",
         provider: Any | None = None,
         logfire_module: Any | None = None,
+        token: str | None = None,
     ) -> None:
         self.endpoint = endpoint
         self.headers = dict(headers or {})
         self.service_name = service_name
+        self.token = token
         self._provider = provider
         # When the ``logfire`` package is present, configure its auto-tracing
         # hooks too — that's how Logfire picks up OpenTelemetry spans.
@@ -572,6 +574,7 @@ class OTLPSink:
             headers=headers,
             service_name="mergecraft-logfire",
             logfire_module=logfire_module,
+            token=token,
         )
 
     @classmethod

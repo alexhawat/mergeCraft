@@ -89,6 +89,34 @@ whose secret is missing.
 > `codex_sandbox: danger-full-access`. mergeCraft never sets this itself —
 > its own `shell`/`push` controls remain the security boundary
 > ([issue #70](https://github.com/alexhawat/mergeCraft/issues/70)).
+> Whether the override is honoured is decided by `trust.agentSandbox` — see
+> [`docs/trust-policy.md`](trust-policy.md).
+
+### Credential detection (`credential_status_for_slug`)
+
+`has_credentials_for_slug` and `mergecraft provider status` delegate to a
+single probe — `credential_status_for_slug` in
+`mergecraft.utils.agent_resolve`. It returns:
+
+| Field | Meaning |
+|-------|---------|
+| `available` | Whether a usable credential was found for the model slug |
+| `source` | Which route won, or `None` when absent |
+| `looked_for` | Env var names consulted, for operator-facing skip messages |
+
+Four detection routes are consulted in order (first match wins):
+
+| `source` | When it applies |
+|----------|-----------------|
+| `registry-indexed` | `providers:` registry entry with a populated indexed credential env pair |
+| `gateway-singleton` | Singleton or indexed `MERGECRAFT_CUSTOM_PROVIDER_*` gateway env vars |
+| `cli-auth` | Subscription auth state for built-in providers (`claude`, `codex`, `gemini`, …) |
+| `legacy-env` | Flat per-provider secrets (`NOUS_API_KEY`, preset gateway env aliases) |
+
+When a roster slot is skipped for missing credentials, the run record and PR
+summary name the agent, slot, provider, and the env vars from `looked_for`.
+"Not wired in the workflow" and "env var empty" stay distinct messages —
+workflow wiring is `mergecraft workflow sync`; detection is this probe (#552).
 
 ### Custom OpenAI-compatible provider
 
