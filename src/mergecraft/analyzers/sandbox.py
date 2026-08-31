@@ -483,15 +483,24 @@ def analyzer_egress_skip_reason(
     event_name: str,
     event: dict[str, Any] | None,
     self_review_level: str = "off",
+    execution_tier: str | None = None,
 ) -> str | None:
     """Return a named egress skip reason, or ``None`` when the analyzer may run (D5/D5b/D6)."""
+    import os
+
+    from mergecraft.utils.payload import read_github_event
+
     if not network_allowlist:
         return None
-    event_payload = event if event is not None else {}
+    resolved_event = event if event is not None else read_github_event()
+    resolved_name = event_name or os.environ.get("GITHUB_EVENT_NAME", "")
+    if execution_tier == "trusted" and not resolved_name and resolved_event is None:
+        return None
+    event_payload = resolved_event if resolved_event is not None else {}
     outcome = evaluate_analyzer_egress_policy(
         analyzer_id=analyzer_id,
         network_allowlist=network_allowlist,
-        event_name=event_name,
+        event_name=resolved_name,
         event=event_payload,
         self_review_level=self_review_level,
     )
@@ -500,10 +509,10 @@ def analyzer_egress_skip_reason(
     from mergecraft.mcp.shell import detect_sandbox_method
 
     if (
-        not egress_trusted_for_host_networking(event_name=event_name, event=event_payload)
+        not egress_trusted_for_host_networking(event_name=resolved_name, event=event_payload)
         and detect_sandbox_method() == "none"
     ):
-        tier_label = _egress_tier_label(event_name, event_payload)
+        tier_label = _egress_tier_label(resolved_name, event_payload)
         hosts = ", ".join(network_allowlist)
         return (
             f"Skipped: egress policy — {analyzer_id} declares network hosts "

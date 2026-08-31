@@ -643,7 +643,16 @@ def pick_runnable_slug_from_chain(
 
     if not allow_fallback:
         slug = chain[0]
-        if not has_credentials_for_slug(slug):
+        from mergecraft.config.settings import load_repo_settings
+
+        probe_settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+        status = credential_status_for_slug(
+            slug,
+            settings=probe_settings,
+            cwd=Path.cwd(),
+            wired=True,
+        )
+        if not status.available:
             msg = (
                 f"configuration error: allow_fallback is false and primary model "
                 f"{slug!r} is unavailable (missing credentials)"

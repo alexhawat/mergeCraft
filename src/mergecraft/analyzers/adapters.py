@@ -354,6 +354,7 @@ def run_adapter(
         event_name=resolved_event_name,
         event=resolved_event,
         self_review_level=self_review_level,
+        execution_tier=tier,
     )
     if egress_reason:
         logger.info("{}", egress_reason)

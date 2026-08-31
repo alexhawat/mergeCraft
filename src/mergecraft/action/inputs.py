@@ -325,6 +325,10 @@ _PROVIDER_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
         "OPENAI_API_KEY",
         "CODEX_AUTH_JSON",
         "NOUS_API_KEY",
+        "TOKENHUB_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "CURSOR_API_KEY",
         "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
     }
 )
