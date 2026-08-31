@@ -384,6 +384,15 @@ Formatting rules that are enforced by the prompt:
 - Problem statements describe the problem; asks and fixes live in the technical-details block.
 - Severity emoji on every section heading, no two consecutive prose paragraphs, backticks around every identifier, no repeated diff content, no line-count stats.
 - The opening callout tier (`[!CAUTION]`, `[!IMPORTANT]`, informational, or ✅) must match the author's actual next action — wrapping mergeable feedback in `[!IMPORTANT]` trains people to ignore it.
+- **Multi-reviewer provenance (`raised_by`).** When more than one reviewer binding
+  runs, each finding may carry a `_Raised by: \`reviewer-id\`_` line in the
+  published body. The field is **server-stamped at merge time** from the dispatch
+  pairing `(reviewer_id, findings)` — it is **not** on the agent-facing
+  `submit_review_verdict` schema (`additionalProperties: False`; an agent-supplied
+  `raised_by` is rejected). Unknown provenance reads `unknown`, never the primary
+  reviewer. `raised_by` is display and record only: it does not affect verdict,
+  severity, dedup identity (`finding_key` stays `(path, body, line)`), or inline
+  placement.
 
 ## 10. Trajectory checks (#43, #49)
 
@@ -438,7 +447,8 @@ copy of the markers — dedupe keeps the server's version.
 The block always contains, in order:
 
 1. **Run header** — outcome, verdict diagnostic, decision verdict and reason,
-   model actually used, attempt count, token summary, run URL, reviewed SHA.
+   model actually used, attempt count, token summary, run URL, reviewed SHA,
+   publication path, and whether 422 recovery demoted inline comments into the body.
 2. **Pre-merge checks** — analyzers (dispatched lenses or packet summary),
    static checks from `deterministic_checks`, CI intelligence pointer, trust
    tier.
@@ -453,6 +463,19 @@ The block always contains, in order:
 The same block is merged into the review body as a mandatory preamble through
 `merge_deterministic_preamble_into_review_body` in `mcp/review.py`, applied
 last so nothing can be appended above it.
+
+**Token summary band.** The **Tokens** row reports `used (target N, ceiling M)`,
+optionally `over target` when spend crossed `runBounds.tokenBudget` but remains
+below the ceiling, and `by phase: …` when call sites annotated `record_tokens(…,
+phase=…)`. `tokenBudget` is the soft target; `tokenBudgetTolerance` (default
+`0.10`) defines the hard ceiling as `target × (1 + tolerance)`. Tolerance `0`
+restores strict enforcement at the target.
+
+**`raised_by` on the record.** Terminal-submission finding rows and the
+published review body carry `raised_by` for multi-reviewer attribution (see §8).
+The merge-evidence packet's typed `Finding` model does **not** include
+`raised_by` — provenance lives on the terminal layer and the deterministic run
+record, not in packet `findings[]`.
 
 ## 9. Address-reviews checks
 

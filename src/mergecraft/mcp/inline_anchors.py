@@ -136,8 +136,8 @@ def format_demoted_inline_comment(comment: Mapping[str, Any]) -> str:
     body = str(comment.get("body") or "").strip()
     anchor = f"{path}:{line}" if line is not None else path
     if body:
-        return f"**`{anchor}`** (inline anchor unavailable)\n\n{body}"
-    return f"**`{anchor}`** (inline anchor unavailable)"
+        return f"**`{anchor}`** (demoted inline finding)\n\n{body}"
+    return f"**`{anchor}`** (demoted inline finding)"
 
 
 def adjust_inline_comment_anchor(

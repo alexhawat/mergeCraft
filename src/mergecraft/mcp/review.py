@@ -37,12 +37,16 @@ from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
 from mergecraft.mcp.verdict import (
+    REJECTION_REQUEST_CHANGES_NO_FINDINGS,
     ReviewPhase,
     after_terminal_submission_recorded,
     ensure_review_scope_for_terminal,
     record_validated_terminal_submission,
+    recorded_submission_payload,
     revalidate_recorded_submission,
     stamp_review_phase_on_active_span,
+    validate_submission,
+    validation_state_from_tool_context,
 )
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import (
@@ -82,6 +86,37 @@ def merge_deterministic_preamble_into_review_body(
     return f"{block.rstrip()}\n"
 
 
+def _merge_review_body_with_deterministic_preamble(
+    ctx: ToolContext,
+    *,
+    agent_body: str,
+    packet: Any,
+) -> str:
+    """Render the deterministic preamble after demotion state is known (D7 / #572)."""
+    deterministic_block = _deterministic_review_block(ctx, packet=packet)
+    return merge_deterministic_preamble_into_review_body(
+        agent_body=agent_body,
+        deterministic_block=deterministic_block,
+    )
+
+
+def _rebuild_review_body_with_deterministic_preamble(
+    ctx: ToolContext,
+    *,
+    body: str,
+    packet: Any,
+) -> str:
+    """Re-render the deterministic preamble on an existing review body."""
+    from mergecraft.findings.ledger import _strip_deterministic_record_markers
+
+    agent_body = _strip_deterministic_record_markers(body)
+    return _merge_review_body_with_deterministic_preamble(
+        ctx,
+        agent_body=agent_body,
+        packet=packet,
+    )
+
+
 def _deterministic_review_block(
     ctx: ToolContext,
     *,
@@ -91,6 +126,7 @@ def _deterministic_review_block(
     verdict_diagnostic: VerdictDiagnostic | str | None = None,
 ) -> str:
     from mergecraft.findings.ledger import render_deterministic_review_block
+    from mergecraft.utils.run_bounds import token_summary_from_usage
     from mergecraft.utils.status_checks import _run_url
 
     tool_state = ctx.tool_state
@@ -99,12 +135,10 @@ def _deterministic_review_block(
     submission = tool_state.terminal_submission
     agent_summary = submission.summary if submission is not None else None
     attempt_count = len(tool_state.usage_entries) if tool_state.usage_entries else None
-    token_bits: list[str] = []
-    for usage in tool_state.usage_entries or []:
-        total = getattr(usage, "total_tokens", None)
-        if total:
-            token_bits.append(str(total))
-    token_summary = ", ".join(token_bits) if token_bits else None
+    token_summary = token_summary_from_usage(
+        tool_state.usage_entries or [],
+        budget_tracker=ctx.budget_tracker,
+    )
     return render_deterministic_review_block(
         packet=packet,
         rejection_reason=rejection_reason,
@@ -116,6 +150,8 @@ def _deterministic_review_block(
         trust_tier=ctx.trust_tier,
         attempt_count=attempt_count,
         token_summary=token_summary,
+        publication_entrypoint=tool_state.review_publication_entrypoint,
+        inline_comments_demoted=tool_state.review_inline_comments_demoted,
     )
 
 
@@ -441,6 +477,58 @@ def _reject_mismatched_publication(submission: Any, params: dict[str, Any]) -> N
     raise ValueError(msg)
 
 
+def _terminal_publication_body(submission: Any, params: dict[str, Any]) -> str:
+    """Return the terminal submission body; refuse bare agent body overrides (D4)."""
+    expected = str(submission.summary)
+    supplied = params.get("body")
+    if supplied is not None and str(supplied) != expected:
+        msg = (
+            "refusing publication: create_pull_request_review body parameter "
+            "does not match terminal submission summary"
+        )
+        raise ValueError(msg)
+    return expected
+
+
+def _existing_publication_response(
+    ctx: ToolContext,
+    *,
+    pull_number: int,
+    commit_id: str | None,
+) -> dict[str, Any] | None:
+    """Short-circuit when this run already published for ``(pull_number, commit_id)`` (D5)."""
+    review = ctx.tool_state.review
+    if review is None or not commit_id or review.reviewed_sha != commit_id:
+        return None
+    return {
+        "success": True,
+        "skipped": True,
+        "reason": (f"review {review.id} already submitted for sha {commit_id} this session"),
+        "reviewId": review.id,
+    }
+
+
+def _maybe_revalidate_before_publish(ctx: ToolContext) -> None:
+    """Re-run terminal validation before publish unless already graded at submit."""
+    submission = ctx.tool_state.terminal_submission
+    if submission is None:
+        return
+    if ctx.tool_state.review_phase == ReviewPhase.SUBMIT.value:
+        validation = validate_submission(
+            recorded_submission_payload(submission),
+            state=validation_state_from_tool_context(ctx),
+        )
+        # ``request_changes_without_findings`` is rejected at record time; this
+        # branch is a legacy escape hatch when phase is still SUBMIT and the
+        # stored payload would fail re-validation for that reason only.
+        if (
+            not validation.accepted
+            and validation.rejection_reason == REJECTION_REQUEST_CHANGES_NO_FINDINGS
+        ):
+            return
+    revalidate_recorded_submission(ctx)
+
+
 def _bound_pull_number(ctx: ToolContext) -> int | None:
     """Return the PR number this review run is bound to, if any.
 
@@ -534,11 +622,30 @@ def _inline_anchor_index_for_diff(diff_text: str) -> InlineAnchorIndex | None:
     return index
 
 
-def _demote_inline_comment_from_payload(payload: dict[str, Any], index: int) -> dict[str, Any]:
+ANCHOR_RECOVERY_RETRY_CEILING = 8
+
+
+def _payload_signature(payload: dict[str, Any]) -> tuple[str, int, int, int]:
+    """Cheap structural signature for anchor-recovery progress checks (D1)."""
+    comments = payload.get("comments") or []
+    body = str(payload.get("body") or "")
+    comment_body_len = sum(len(str(comment.get("body") or "")) for comment in comments)
+    return (
+        str(payload.get("event") or ""),
+        len(body),
+        len(comments),
+        comment_body_len,
+    )
+
+
+def _demote_inline_comment_from_payload(
+    payload: dict[str, Any],
+    index: int,
+) -> dict[str, Any] | None:
     """Move one inline comment into the review body and remove it from the payload."""
     comments = list(payload.get("comments") or [])
     if index < 0 or index >= len(comments):
-        return payload
+        return None
     comment = comments.pop(index)
     demoted = format_demoted_inline_comment(comment)
     updated = dict(payload)
@@ -550,16 +657,29 @@ def _demote_inline_comment_from_payload(payload: dict[str, Any], index: int) -> 
     return updated
 
 
+def _demote_all_inline_comments(payload: dict[str, Any]) -> dict[str, Any]:
+    """Demote every inline comment into the review body."""
+    current = dict(payload)
+    while current.get("comments"):
+        demoted = _demote_inline_comment_from_payload(current, 0)
+        if demoted is None:
+            break
+        current = demoted
+    return current
+
+
 async def _create_github_review_with_anchor_recovery(
     ctx: ToolContext,
     *,
     pull_number: int,
     payload: dict[str, Any],
+    packet: Any | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Post a review, recovering APPROVE and inline-anchor 422 rejections (D8, #530)."""
     scm = ctx.scm
     current = dict(payload)
     approve_fallback = False
+    attempt = 0
 
     while True:
         try:
@@ -574,27 +694,69 @@ async def _create_github_review_with_anchor_recovery(
             if exc.response.status_code != 422:
                 raise
 
+            attempt += 1
+            if attempt > ANCHOR_RECOVERY_RETRY_CEILING:
+                raise
+
             if current.get("comments") and is_comments_anchor_422_response(exc.response):
                 index = parse_comment_422_index(exc.response)
+                prior_sig = _payload_signature(current)
+                comments = list(current.get("comments") or [])
+
                 if index is None:
                     logger.warning(
                         "review comment 422 on PR #{} without index; demoting all inline comments",
                         pull_number,
                     )
-                    while current.get("comments"):
-                        current = _demote_inline_comment_from_payload(current, 0)
-                    continue
+                    current = _demote_all_inline_comments(current)
+                    ctx.tool_state.review_inline_comments_demoted = True
+                elif index < 0 or index >= len(comments):
+                    logger.warning(
+                        "review comment 422 on PR #{} at out-of-range index {} "
+                        "(comment count {}); demoting all inline comments",
+                        pull_number,
+                        index,
+                        len(comments),
+                    )
+                    current = _demote_all_inline_comments(current)
+                    ctx.tool_state.review_inline_comments_demoted = True
+                else:
+                    logger.warning(
+                        "review comment 422 on PR #{} at index {}; demoting inline comment to body",
+                        pull_number,
+                        index,
+                    )
+                    demoted = _demote_inline_comment_from_payload(current, index)
+                    current = (
+                        demoted if demoted is not None else _demote_all_inline_comments(current)
+                    )
+                    ctx.tool_state.review_inline_comments_demoted = True
 
-                logger.warning(
-                    "review comment 422 on PR #{} at index {}; demoting inline comment to body",
-                    pull_number,
-                    index,
-                )
-                current = _demote_inline_comment_from_payload(current, index)
+                if packet is not None:
+                    current = dict(current)
+                    current["body"] = add_footer(
+                        ctx,
+                        _rebuild_review_body_with_deterministic_preamble(
+                            ctx,
+                            body=str(current.get("body") or ""),
+                            packet=packet,
+                        ),
+                    )
+
+                if _payload_signature(current) == prior_sig:
+                    logger.error(
+                        "anchor recovery on PR #{} made no progress after attempt {} "
+                        "(signature unchanged: event/body_len/comments_len/comment_body_len={})",
+                        pull_number,
+                        attempt,
+                        prior_sig,
+                    )
+                    raise exc
                 continue
 
             event = str(current.get("event") or "COMMENT")
             if event == "APPROVE":
+                prior_sig = _payload_signature(current)
                 logger.info(
                     "APPROVE review rejected with 422 on PR #{}; falling back to COMMENT",
                     pull_number,
@@ -602,26 +764,96 @@ async def _create_github_review_with_anchor_recovery(
                 current = dict(current)
                 current["event"] = "COMMENT"
                 approve_fallback = True
+                if _payload_signature(current) == prior_sig:
+                    logger.error(
+                        "anchor recovery on PR #{} made no progress after attempt {} "
+                        "(signature unchanged: event/body_len/comments_len/comment_body_len={})",
+                        pull_number,
+                        attempt,
+                        prior_sig,
+                    )
+                    raise exc
                 continue
 
             raise
 
 
-async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> dict[str, Any]:
+def _finding_rows_for_provenance(ctx: ToolContext) -> list[dict[str, Any]]:
+    """Collect finding rows for provenance display, including terminal submission."""
+    rows = [row for row in ctx.tool_state.iter_finding_rows() if isinstance(row, dict)]
+    submission = ctx.tool_state.terminal_submission
+    if submission is None:
+        return rows
+    seen_fingerprints = {
+        str(row.get("fingerprint") or "").strip()
+        for row in rows
+        if str(row.get("fingerprint") or "").strip()
+    }
+    for item in submission.findings:
+        if hasattr(item, "model_dump"):
+            row = item.model_dump()
+        elif isinstance(item, dict):
+            row = item
+        else:
+            continue
+        if not isinstance(row, dict):
+            continue
+        fingerprint = str(row.get("fingerprint") or "").strip()
+        if fingerprint and fingerprint in seen_fingerprints:
+            continue
+        rows.append(row)
+        if fingerprint:
+            seen_fingerprints.add(fingerprint)
+    return rows
+
+
+def _raised_by_lookup_key(row: dict[str, Any]) -> str | None:
+    """Map a finding row to the key used for inline-comment provenance lookup."""
+    fingerprint = str(row.get("fingerprint") or "").strip()
+    if fingerprint:
+        return fingerprint
+    from mergecraft.agents.ensemble import finding_key
+
+    path, body, line = finding_key(row)
+    if not path and not body:
+        return None
+    return f"{path}:{line}:{body}"
+
+
+async def _publish_github_review(
+    ctx: ToolContext,
+    params: dict[str, Any],
+    *,
+    entrypoint: str = "create_pull_request_review",
+) -> dict[str, Any]:
     """Post a GitHub review after a validated terminal submission exists (V6)."""
     primary = primary_repo_state(ctx.tool_state)
     pull_number = _resolve_bound_pull_number(ctx, params)
     commit_id = _resolve_bound_commit_id(ctx, params)
     _assert_publication_scope(ctx, pull_number=pull_number, commit_id=commit_id)
 
+    existing = _existing_publication_response(
+        ctx,
+        pull_number=pull_number,
+        commit_id=commit_id,
+    )
+    if existing is not None:
+        ctx.tool_state.review_publication_entrypoint = entrypoint
+        return existing
+
+    ctx.tool_state.review_publication_entrypoint = entrypoint
+
     approved = bool(params.get("approved"))
     request_changes = bool(params.get("request_changes"))
     submission = ctx.tool_state.terminal_submission
+    body: str | None
     if submission is not None:
         approved = submission.verdict == "approve"
         request_changes = submission.verdict == "request_changes"
+        body = _terminal_publication_body(submission, params)
+    else:
+        body = params.get("body")
 
-    body = params.get("body")
     comments = list(params.get("comments") or [])
 
     primary.issue_number = pull_number
@@ -656,27 +888,18 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
 
     run_succeeded = True
     packet = resolve_prepared_run_packet(ctx, run_succeeded=run_succeeded)
-    deterministic_block = _deterministic_review_block(
-        ctx,
-        packet=packet,
-    )
     await ensure_learnings_review_delta(ctx.tool_state)
     body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body or ""))
-    body_with_sections = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
+    agent_body = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
     if ctx.tool_state.dispatched_lens_ids:
         from mergecraft.modes._pr_summary_format import (
             merge_dispatched_lenses_into_review_metadata,
         )
 
-        body_with_sections = merge_dispatched_lenses_into_review_metadata(
-            body_with_sections,
+        agent_body = merge_dispatched_lenses_into_review_metadata(
+            agent_body,
             dispatched_lens_ids=ctx.tool_state.dispatched_lens_ids,
         )
-    body_with_preamble = merge_deterministic_preamble_into_review_body(
-        agent_body=body_with_sections,
-        deterministic_block=deterministic_block,
-    )
-    payload["body"] = add_footer(ctx, body_with_preamble)
     if commit_id:
         payload["commit_id"] = commit_id
 
@@ -689,6 +912,16 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             incremental_diff_text = Path(incremental_path).read_text(encoding="utf-8")
 
     collateral_map = collateral_by_fingerprint(ctx)
+    finding_rows = _finding_rows_for_provenance(ctx)
+    from mergecraft.review.terminal_submission import should_render_finding_provenance
+
+    show_provenance = should_render_finding_provenance(finding_rows)
+    raised_by_map: dict[str, str | list[str]] = {}
+    for row in finding_rows:
+        lookup_key = _raised_by_lookup_key(row)
+        raised = row.get("raised_by")
+        if lookup_key and raised is not None:
+            raised_by_map[lookup_key] = raised
     anchor_index = _load_inline_anchor_index(primary)
     demoted_bodies: list[str] = []
 
@@ -704,6 +937,9 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
         )
         comment_body = str(c.get("body") or "")
         raw_fingerprint = _comment_fingerprint(c)
+        lookup_key = raw_fingerprint or _raised_by_lookup_key(
+            {"path": path, "body": comment_body, "line": line or 0}
+        )
         short_id = publish_short_ids.get(raw_fingerprint)
         prepared_body = prepare_inline_comment_for_publish(
             ctx,
@@ -714,6 +950,8 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
             fingerprint=raw_fingerprint,
             collateral_map=collateral_map,
             incremental_diff_text=incremental_diff_text,
+            raised_by=raised_by_map.get(lookup_key or "") if lookup_key else None,
+            show_provenance=show_provenance,
         )
         item: dict[str, Any] = {
             "path": path,
@@ -753,10 +991,14 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
     if review_settings.recall_pass:
         inline = strip_recall_inline_comments(ctx, inline, publish_sets=publish_sets)
     if demoted_bodies:
-        payload["body"] = add_footer(
-            ctx,
-            append_demoted_inline_comments(str(payload.get("body") or ""), demoted_bodies),
-        )
+        ctx.tool_state.review_inline_comments_demoted = True
+        agent_body = append_demoted_inline_comments(agent_body, demoted_bodies)
+    body_with_preamble = _merge_review_body_with_deterministic_preamble(
+        ctx,
+        agent_body=agent_body,
+        packet=packet,
+    )
+    payload["body"] = add_footer(ctx, body_with_preamble)
     if inline:
         payload["comments"] = inline
     else:
@@ -773,6 +1015,7 @@ async def _publish_github_review(ctx: ToolContext, params: dict[str, Any]) -> di
         ctx,
         pull_number=pull_number,
         payload=payload,
+        packet=packet,
     )
     review_id = int(result["id"])
     ctx.tool_state.review = ReviewRecord(
@@ -814,13 +1057,23 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
         msg = "no validated terminal submission available for publication"
         raise ValueError(msg)
 
+    pull_number = _bound_pull_number(ctx)
+    if pull_number is None:
+        msg = "no pull number available for validated terminal submission publication"
+        raise ValueError(msg)
+    commit_id = _bound_commit_id(ctx)
+    existing = _existing_publication_response(
+        ctx,
+        pull_number=pull_number,
+        commit_id=commit_id,
+    )
+    if existing is not None:
+        ctx.tool_state.review_publication_entrypoint = "publish_pull_request_review"
+        return existing
+
     pending = ctx.tool_state.pending_review_publication
     if pending is None:
         submission = ctx.tool_state.terminal_submission
-        pull_number = _bound_pull_number(ctx)
-        if pull_number is None:
-            msg = "no pull number available for validated terminal submission publication"
-            raise ValueError(msg)
         pending = {
             "pull_number": pull_number,
             "body": submission.summary,
@@ -828,10 +1081,17 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
             "approved": submission.verdict == "approve",
             "request_changes": submission.verdict == "request_changes",
         }
+    if commit_id:
+        pending = dict(pending)
+        pending["commit_id"] = commit_id
 
     ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
     stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
-    result = await _publish_github_review(ctx, pending)
+    result = await _publish_github_review(
+        ctx,
+        pending,
+        entrypoint="publish_pull_request_review",
+    )
     ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
     stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
     return result
@@ -884,17 +1144,14 @@ def create_pull_request_review_tool(ctx: ToolContext):
         primary = primary_repo_state(ctx.tool_state)
         primary.issue_number = pull_number
 
-        if ctx.tool_state.review and primary.checkout_sha:
-            if ctx.tool_state.review.reviewed_sha == primary.checkout_sha:
-                return {
-                    "success": True,
-                    "skipped": True,
-                    "reason": (
-                        f"review {ctx.tool_state.review.id} already submitted for "
-                        f"sha {primary.checkout_sha} this session"
-                    ),
-                    "reviewId": ctx.tool_state.review.id,
-                }
+        existing = _existing_publication_response(
+            ctx,
+            pull_number=pull_number,
+            commit_id=commit_id,
+        )
+        if existing is not None:
+            ctx.tool_state.review_publication_entrypoint = "create_pull_request_review"
+            return existing
 
         ensure_review_scope_for_terminal(ctx.tool_state, "create_pull_request_review")
 
@@ -905,13 +1162,16 @@ def create_pull_request_review_tool(ctx: ToolContext):
                 after_terminal_submission_recorded(ctx, recorded, replayed=False)
         else:
             _reject_mismatched_publication(ctx.tool_state.terminal_submission, params)
-            revalidate_recorded_submission(ctx)
+            _maybe_revalidate_before_publish(ctx)
 
         publication_params = dict(params)
         publication_params["pull_number"] = pull_number
         bound_commit = _bound_commit_id(ctx)
         if bound_commit:
             publication_params["commit_id"] = bound_commit
+        submission = ctx.tool_state.terminal_submission
+        if submission is not None:
+            publication_params["body"] = submission.summary
         ctx.tool_state.pending_review_publication = publication_params
 
         ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
@@ -919,7 +1179,11 @@ def create_pull_request_review_tool(ctx: ToolContext):
         from mergecraft.mcp.verification import emit_published_findings
 
         emit_published_findings(ctx)
-        result = await _publish_github_review(ctx, publication_params)
+        result = await _publish_github_review(
+            ctx,
+            publication_params,
+            entrypoint="create_pull_request_review",
+        )
         ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
         stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
         return result

@@ -454,6 +454,15 @@ class RunBoundsSettings(BaseModel):
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     token_budget: int = Field(default=2_000_000, alias="tokenBudget", gt=0)
+    token_budget_tolerance: float = Field(
+        default=0.10,
+        alias="tokenBudgetTolerance",
+        ge=0.0,
+        description=(
+            "Fraction above tokenBudget defining the hard ceiling (default 10%). "
+            "0 restores strict target enforcement."
+        ),
+    )
     cost_budget_usd: float = Field(default=50.0, alias="costBudgetUsd", gt=0)
     tool_call_budget: int = Field(default=500, alias="toolCallBudget", gt=0)
     max_diff_lines: int = Field(default=50_000, alias="maxDiffLines", gt=0)

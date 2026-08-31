@@ -74,7 +74,10 @@ from mergecraft.mcp.review_comments import (
     list_pull_request_reviews_tool,
     resolve_review_thread_tool,
 )
-from mergecraft.mcp.reviewer_dispatch import record_reviewer_dispatch_error_tool
+from mergecraft.mcp.reviewer_dispatch import (
+    record_reviewer_dispatch_error_tool,
+    record_reviewer_dispatch_run_tool,
+)
 from mergecraft.mcp.rpc import dispatch_mcp_rpc, package_version
 from mergecraft.mcp.rpc_types import json_rpc_parse_error
 from mergecraft.mcp.select_mode import select_mode_tool
@@ -234,6 +237,7 @@ def build_orchestrator_tools(
         report_progress_tool(ctx),
         select_mode_tool(ctx),
         record_reviewer_dispatch_error_tool(ctx),
+        record_reviewer_dispatch_run_tool(ctx),
         submit_review_verdict_tool(ctx),
         push_branch_tool(ctx),
         push_tags_tool(ctx),

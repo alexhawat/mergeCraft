@@ -322,9 +322,14 @@ class ToolState:
     review_phase: str = ""
     # Stashed ``create_pull_request_review`` params for ``publish_pull_request_review``.
     pending_review_publication: dict[str, Any] | None = None
+    # Lane A W3 — which publication entrypoint won and whether 422 recovery demoted inline.
+    review_publication_entrypoint: str | None = None
+    review_inline_comments_demoted: bool = False
     terminal_submission: TerminalSubmission | None = None
     terminal_submission_conflict: bool = False
     reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)
+    # D7 / #574 — per-reviewer findings recorded before terminal submission.
+    reviewer_dispatch_runs: list[Any] = field(default_factory=list)
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
@@ -496,6 +501,24 @@ def record_reviewer_dispatch_error(
     if not key or not text:
         return
     tool_state.reviewer_dispatch_errors[key] = text
+
+
+def record_reviewer_dispatch_run(
+    tool_state: ToolState,
+    *,
+    agent_id: str,
+    findings: list[dict[str, Any]],
+) -> None:
+    """Record one reviewer subagent's findings before terminal submission (D7)."""
+    from mergecraft.review.terminal_submission import ReviewerRun
+
+    key = agent_id.strip()
+    if not key:
+        return
+    stamped_findings = [dict(row) for row in findings if isinstance(row, dict)]
+    tool_state.reviewer_dispatch_runs.append(
+        ReviewerRun(agent_id=key, findings=stamped_findings),
+    )
 
 
 def append_dispatched_lens(tool_state: ToolState, agent_id: str) -> None:

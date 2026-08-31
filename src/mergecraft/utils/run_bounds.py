@@ -8,8 +8,9 @@ the offline review and Action orchestrators. Budget exhaustion maps to
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, Literal
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from loguru import logger
 
@@ -59,7 +60,15 @@ class RunBounds:
     context_retrieval_timeout_s: float
     max_diff_lines: int
     external_operation_timeout_s: float
+    token_budget_tolerance: float = 0.0
     cache_max_bytes: int = _DEFAULT_CACHE_MAX_BYTES
+
+    @property
+    def token_ceiling(self) -> int:
+        """Hard token ceiling: target plus configured tolerance band (D9)."""
+        if self.token_budget_tolerance <= 0.0:
+            return self.token_budget
+        return int(self.token_budget * (1.0 + self.token_budget_tolerance))
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,13 +106,65 @@ class BudgetTracker:
     cost_used: float = 0.0
     tool_calls: int = 0
     last_exhausted: BudgetExhausted | None = None
+    over_target: bool = False
+    phase_totals: Counter[str] = field(default_factory=Counter)
+    _over_target_warned: bool = field(default=False, repr=False)
 
-    def record_tokens(self, count: int) -> None:
+    def record_tokens(self, count: int, *, phase: str | None = None) -> None:
         if count <= 0:
             return
-        self.tokens_used += count
-        if self.tokens_used > self.bounds.token_budget:
-            msg = f"token budget exhausted ({self.tokens_used} > {self.bounds.token_budget})"
+        phase_key = phase or "unattributed"
+        target = self.bounds.token_budget
+        ceiling = self.bounds.token_ceiling
+        tolerance = self.bounds.token_budget_tolerance
+
+        if tolerance <= 0.0:
+            self.tokens_used += count
+            self.phase_totals[phase_key] += count
+            if self.tokens_used > target:
+                msg = f"token budget exhausted ({self.tokens_used} > {target})"
+                self._raise(BudgetExhausted("token", msg))
+            return
+
+        remaining = ceiling - self.tokens_used
+        if count > ceiling:
+            msg = (
+                f"token budget exhausted by single increment ({count} > ceiling {ceiling}; "
+                f"target {target}, tolerance {tolerance})"
+            )
+            self._raise(BudgetExhausted("token", msg))
+
+        prior_used = self.tokens_used
+        charge = count
+        if charge > remaining:
+            msg = (
+                "token budget exhausted by single increment "
+                f"({count} > remaining ceiling {remaining}; used {self.tokens_used}, "
+                f"target {target}, ceiling {ceiling}, tolerance {tolerance})"
+            )
+            self._raise(BudgetExhausted("token", msg))
+
+        self.tokens_used += charge
+        self.phase_totals[phase_key] += charge
+
+        if prior_used <= target < self.tokens_used:
+            self.over_target = True
+            if not self._over_target_warned:
+                self._over_target_warned = True
+                logger.warning(
+                    "token budget over target ({} > target {}); continuing to ceiling {}",
+                    self.tokens_used,
+                    target,
+                    ceiling,
+                )
+        elif self.tokens_used > target:
+            self.over_target = True
+
+        if self.tokens_used > ceiling:
+            msg = (
+                f"token budget exhausted ({self.tokens_used} > ceiling {ceiling}; "
+                f"target {target}, tolerance {tolerance})"
+            )
             self._raise(BudgetExhausted("token", msg))
 
     def record_cost(self, amount: float) -> None:
@@ -133,7 +194,12 @@ class BudgetTracker:
         raise exc
 
 
-def record_agent_usage(tracker: BudgetTracker | None, usage: AgentUsage | None) -> None:
+def record_agent_usage(
+    tracker: BudgetTracker | None,
+    usage: AgentUsage | None,
+    *,
+    phase: str | None = None,
+) -> None:
     """Charge resolved agent usage against the per-run budget tracker."""
     if tracker is None or usage is None:
         return
@@ -142,7 +208,7 @@ def record_agent_usage(tracker: BudgetTracker | None, usage: AgentUsage | None) 
     # ``cache_write_tokens`` are observability fields only — adding them again
     # here double-counts OpenAI-style cached input against the run budget.
     token_total = usage.input_tokens + usage.output_tokens
-    tracker.record_tokens(token_total)
+    tracker.record_tokens(token_total, phase=phase)
     if usage.cost_usd is not None:
         tracker.record_cost(usage.cost_usd)
 
@@ -227,8 +293,46 @@ def resolve_run_bounds(
         context_retrieval_timeout_s=context_timeout,
         max_diff_lines=max_diff_lines,
         external_operation_timeout_s=external_timeout,
+        token_budget_tolerance=cfg.token_budget_tolerance,
         cache_max_bytes=cache_max,
     )
+
+
+def format_token_budget_summary(tracker: BudgetTracker) -> str:
+    """Render token usage with target, ceiling, phase attribution, and over-target flag."""
+    bounds = tracker.bounds
+    parts = [
+        (
+            f"{tracker.tokens_used:,} used "
+            f"(target {bounds.token_budget:,}, ceiling {bounds.token_ceiling:,})"
+        ),
+    ]
+    if tracker.over_target:
+        parts.append("over target")
+    phase_bits = [
+        f"{phase} {total:,}" for phase, total in sorted(tracker.phase_totals.items()) if total > 0
+    ]
+    if phase_bits:
+        parts.append(f"by phase: {', '.join(phase_bits)}")
+    return "; ".join(parts)
+
+
+def token_summary_from_usage(
+    usage_entries: list[Any],
+    *,
+    budget_tracker: BudgetTracker | None = None,
+) -> str | None:
+    """Prefer budget-tracker band summary; fall back to raw usage entry totals."""
+    if isinstance(budget_tracker, BudgetTracker) and (
+        budget_tracker.tokens_used > 0 or budget_tracker.over_target
+    ):
+        return format_token_budget_summary(budget_tracker)
+    totals = [
+        str(row.total_tokens)
+        for row in usage_entries
+        if getattr(row, "total_tokens", None) is not None
+    ]
+    return ", ".join(totals) if totals else None
 
 
 def enumerate_unbounded_external_operations() -> list[str]:
@@ -352,9 +456,11 @@ __all__ = [
     "apply_diff_line_budget",
     "budget_exhaustion_outcome",
     "enumerate_unbounded_external_operations",
+    "format_token_budget_summary",
     "outcome_with_scope_reduction",
     "record_agent_usage",
     "resolve_run_bounds",
     "round_budget_multiplier",
     "timeout_for_external_operation",
+    "token_summary_from_usage",
 ]

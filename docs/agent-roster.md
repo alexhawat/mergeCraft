@@ -102,6 +102,12 @@ GitHub Actions job per reviewer (D16).
 **Findings merge** across reviewers by `(path, body, line)` — the same key
 `ensemble` uses (D6). Duplicate findings keep the **strictest severity**.
 
+**Attribution (`raised_by`).** Dispatch stamps `raised_by` server-side when
+findings merge — agents cannot supply it on `submit_review_verdict`. Identical
+findings from two reviewers list both agent ids; unknown provenance reads
+`unknown`, never the primary reviewer. The field is display-only on the
+published review and run record; it does not change verdict, severity, or dedup.
+
 **One verdict** is submitted by the orchestrator as today (D7). Terminal-verdict
 cardinality is unchanged: `mergecraft-approval` stays a single hardcoded check
 name because there is only ever one submission.

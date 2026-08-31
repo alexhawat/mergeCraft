@@ -22,6 +22,7 @@ def render_step_summary(
     analyzer_summary: str | None = None,
     agent_summary: str | None = None,
     trust_tier: str | None = None,
+    token_summary: str | None = None,
 ) -> str:
     """Render the step summary body: header table plus the W5 record sections."""
     from mergecraft.findings.ledger import render_deterministic_review_block
@@ -59,6 +60,7 @@ def render_step_summary(
         analyzer_summary=analyzer_summary,
         agent_summary=agent_summary,
         trust_tier=trust_tier,
+        token_summary=token_summary,
     )
     return _cap_step_summary("\n".join(header_lines) + record)
 

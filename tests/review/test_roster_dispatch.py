@@ -20,6 +20,7 @@ def test_format_dispatch_instructions_parallel_level() -> None:
     text = format_reviewer_dispatch_instructions((("reviewer-a", "reviewer-b"),))
     assert "Level 0 (parallel): reviewer-a, reviewer-b" in text
     assert "level N+1" in text
+    assert "record_reviewer_dispatch_run" in text
     assert "record_reviewer_dispatch_error" in text
 
 
