@@ -10,7 +10,7 @@ import pytest
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.utils.agent_resolve import has_credentials_for_slug
 from tests.cli.support_provider_registry import bootstrap_nous_registry, scaffold_mergecraft_home
-from tests.trust_credentials.support import NOUS_SLUG, W4_XFAIL, import_agent_resolve_symbol
+from tests.trust_credentials.support import NOUS_SLUG, import_agent_resolve_symbol
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -37,7 +37,6 @@ def _credential_status(slug: str, *, tmp_path: Path) -> object:
     return status_fn(slug, settings=settings, cwd=tmp_path, wired=True)
 
 
-@W4_XFAIL
 def test_nous_slug_true_with_only_singleton_custom_provider_key(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -49,7 +48,6 @@ def test_nous_slug_true_with_only_singleton_custom_provider_key(
     assert has_credentials_for_slug(NOUS_SLUG) is True
 
 
-@W4_XFAIL
 def test_nous_slug_true_with_indexed_custom_provider_key(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -76,7 +74,6 @@ def test_nous_slug_true_via_legacy_nous_api_key_with_once_warning(
     assert has_credentials_for_slug(NOUS_SLUG) is True
 
 
-@W4_XFAIL
 def test_no_credential_reports_looked_for_env_vars(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -91,7 +88,6 @@ def test_no_credential_reports_looked_for_env_vars(
     assert "MERGECRAFT_CUSTOM_PROVIDER_API_KEY" in joined or "NOUS_API_KEY" in joined
 
 
-@W4_XFAIL
 @pytest.mark.parametrize(
     ("setup", "expected_source"),
     [
@@ -123,6 +119,8 @@ def test_credential_status_reports_source_route(
     else:
         bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
         monkeypatch.delenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_PROVIDER_1", raising=False)
         monkeypatch.setenv("NOUS_API_KEY", "legacy-key")
     status = _credential_status(NOUS_SLUG, tmp_path=tmp_path)
     assert status.available is True
@@ -151,7 +149,6 @@ def test_other_provider_branches_unchanged(
     assert has_credentials_for_slug(slug) is True
 
 
-@W4_XFAIL
 def test_unwired_provider_message_differs_from_missing_credential(tmp_path: Path) -> None:
     """D9 — plan-11 unwired vs empty-env messages stay distinct."""
     format_fn = import_agent_resolve_symbol("format_credential_gap_message")

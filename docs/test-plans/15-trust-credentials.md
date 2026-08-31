@@ -105,7 +105,7 @@ Pinned API (W5): `mergecraft.action.inputs.export_tracing_env_from_action_inputs
 | --- | --- | --- | --- |
 | W2 | `green after W2:` | `test_codex_sandbox_policy.py`, `test_fork_credential_invariant.py`, `test_trust_agent_sandbox_settings.py`, `test_trust_agent_sandbox_cmd.py` | **reconciled** — markers removed 2026-08-31 |
 | W3 | `green after W3:` | `test_analyzer_egress_policy.py` | pending |
-| W4 | `green after W4:` | `test_credential_status_for_slug.py`, `test_credential_p0_skip.py` | pending |
+| W4 | `green after W4:` | `test_credential_status_for_slug.py`, `test_credential_p0_skip.py` | **reconciled** — markers removed 2026-08-31 |
 | W5 | `green after W5:` | `test_logfire_action_token_seam.py`, `test_tracing_inactive_summary_warning.py` | pending |
 | W6 | `green after W6:` | `test_entropy_redaction_sweep.py` (`classify_entropy_redaction_hits`) | pending |
 

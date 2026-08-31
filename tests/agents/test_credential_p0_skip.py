@@ -6,13 +6,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.cli.support_provider_registry import scaffold_mergecraft_home
-from tests.trust_credentials.support import NOUS_SLUG, W4_XFAIL, import_agent_resolve_symbol
+from tests.trust_credentials.support import NOUS_SLUG, import_agent_resolve_symbol
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 
-@W4_XFAIL
 def test_skipped_p0_names_agent_slot_provider_and_env_var(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
