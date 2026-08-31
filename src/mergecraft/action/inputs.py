@@ -324,6 +324,7 @@ _PROVIDER_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
         "CLAUDE_CODE_OAUTH_TOKEN",
         "OPENAI_API_KEY",
         "CODEX_AUTH_JSON",
+        "NOUS_API_KEY",
         "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
     }
 )

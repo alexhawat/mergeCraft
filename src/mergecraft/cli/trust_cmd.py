@@ -15,6 +15,7 @@ from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
 from mergecraft.config.io import write_config_dict
 from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
 from mergecraft.config.trust_policy import (
+    AGENT_SANDBOX_LEVELS,
     bound_head_sha,
     default_branch_from_event,
     resolve_agent_sandbox_decision,
@@ -28,7 +29,6 @@ app = typer.Typer(
 )
 
 _SELF_REVIEW_LEVELS: frozenset[str] = frozenset({"off", "analyzers", "full"})
-_AGENT_SANDBOX_LEVELS: frozenset[str] = frozenset({"never", "merged-only", "dispatch", "same-repo"})
 _APPROVAL_AUTHORITY_FLAG = "--i-understand-this-grants-approval-authority"
 _SAME_REPO_SANDBOX_FLAG = "--i-understand-same-repo-sandbox"
 
@@ -135,7 +135,7 @@ def set_agent_sandbox_cmd(
 ) -> None:
     """Write ``trust.agentSandbox`` to the committed config at ``--cwd``."""
     normalized = tier.strip().lower()
-    if normalized not in _AGENT_SANDBOX_LEVELS:
+    if normalized not in AGENT_SANDBOX_LEVELS:
         cli_bail(f"invalid tier {tier!r} — expected never, merged-only, dispatch, or same-repo")
 
     target = cwd.resolve()

@@ -34,6 +34,7 @@ SelfReviewLevel = Literal["off", "analyzers", "full"]
 ResolvedFrom = Literal["base_snapshot", "live_load"]
 
 _AGENT_SANDBOX_LEVELS: frozenset[str] = frozenset({"never", "merged-only", "dispatch", "same-repo"})
+AGENT_SANDBOX_LEVELS = _AGENT_SANDBOX_LEVELS
 _TIER_LOOSEN_ORDER: tuple[AgentSandboxLevel, ...] = (
     "never",
     "merged-only",
@@ -476,6 +477,7 @@ def trust_policy_manifest_fields(policy: TrustPolicy) -> dict[str, str]:
 
 
 __all__ = [
+    "AGENT_SANDBOX_LEVELS",
     "AgentSandboxDecision",
     "AuthorityTrust",
     "ExecutionTrust",

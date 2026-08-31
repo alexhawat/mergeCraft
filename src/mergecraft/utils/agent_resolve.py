@@ -664,13 +664,13 @@ def pick_runnable_slug_from_chain(
     probe_settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
     probe_cwd = Path.cwd()
     for slug in chain:
-        if not has_credentials_for_slug(slug):
-            status = credential_status_for_slug(
-                slug,
-                settings=probe_settings,
-                cwd=probe_cwd,
-                wired=True,
-            )
+        status = credential_status_for_slug(
+            slug,
+            settings=probe_settings,
+            cwd=probe_cwd,
+            wired=True,
+        )
+        if not status.available:
             envs = ", ".join(status.looked_for) or "credential env vars"
             skipped.append(f"{slug} (missing credentials; consult {envs})")
             continue

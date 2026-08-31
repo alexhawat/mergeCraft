@@ -476,6 +476,43 @@ def evaluate_analyzer_egress_policy(
     return AnalyzerEgressPolicyOutcome(status="skipped", reason=reason)
 
 
+def analyzer_egress_skip_reason(
+    *,
+    analyzer_id: str,
+    network_allowlist: list[str],
+    event_name: str,
+    event: dict[str, Any] | None,
+    self_review_level: str = "off",
+) -> str | None:
+    """Return a named egress skip reason, or ``None`` when the analyzer may run (D5/D5b/D6)."""
+    if not network_allowlist:
+        return None
+    event_payload = event if event is not None else {}
+    outcome = evaluate_analyzer_egress_policy(
+        analyzer_id=analyzer_id,
+        network_allowlist=network_allowlist,
+        event_name=event_name,
+        event=event_payload,
+        self_review_level=self_review_level,
+    )
+    if outcome.status == "skipped":
+        return outcome.reason
+    from mergecraft.mcp.shell import detect_sandbox_method
+
+    if (
+        not egress_trusted_for_host_networking(event_name=event_name, event=event_payload)
+        and detect_sandbox_method() == "none"
+    ):
+        tier_label = _egress_tier_label(event_name, event_payload)
+        hosts = ", ".join(network_allowlist)
+        return (
+            f"Skipped: egress policy — {analyzer_id} declares network hosts "
+            f"({hosts}) but {tier_label} cannot enforce filtered egress "
+            "(sandbox isolation unavailable on this runner)"
+        )
+    return None
+
+
 def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
     argv: list[str] = ["unshare", "--pid", "--fork", "--mount-proc"]
@@ -545,6 +582,7 @@ __all__ = [
     "SandboxContext",
     "SandboxLimits",
     "SandboxPlan",
+    "analyzer_egress_skip_reason",
     "analyzer_isolation_mount_fragment",
     "analyzer_socket_mask_fragment",
     "build_analyzer_sandbox_argv",

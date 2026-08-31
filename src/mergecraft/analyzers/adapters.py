@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -326,6 +326,9 @@ def run_adapter(
     base_ref: str | None = None,
     offline: bool = False,
     allow_repo_binaries: bool = True,
+    event_name: str | None = None,
+    event: dict[str, Any] | None = None,
+    self_review_level: str = "off",
 ) -> AdapterRunResult:
     """Run one catalog analyzer and return normalized findings.
 
@@ -335,6 +338,26 @@ def run_adapter(
     """
     repo_root = repo_root.resolve()
     manifest = get_manifest(tool_id)
+
+    import os
+
+    from mergecraft.analyzers.sandbox import analyzer_egress_skip_reason
+    from mergecraft.utils.payload import read_github_event
+
+    resolved_event_name = (
+        event_name if event_name is not None else os.environ.get("GITHUB_EVENT_NAME", "")
+    )
+    resolved_event = event if event is not None else read_github_event()
+    egress_reason = analyzer_egress_skip_reason(
+        analyzer_id=tool_id,
+        network_allowlist=list(manifest.network_allowlist or []),
+        event_name=resolved_event_name,
+        event=resolved_event,
+        self_review_level=self_review_level,
+    )
+    if egress_reason:
+        logger.info("{}", egress_reason)
+        return AdapterRunResult(findings=[], skipped=True, skip_reason=egress_reason)
 
     from mergecraft.analyzers.contracts import resolve_analyzer_base_ref, run_differential_adapter
 
@@ -472,7 +495,14 @@ def run_adapter(
             argv=(plan.argv[0], "--output", str(scratch_dir), *plan.argv[1:]),
         )
 
-    outcome = run_plan(plan, sandbox_context=sandbox_context)
+    outcome = run_plan(
+        plan,
+        sandbox_context=sandbox_context,
+        event_name=resolved_event_name,
+        event=resolved_event,
+        self_review_level=self_review_level,
+        analyzer_id=tool_id,
+    )
     if not outcome.ran:
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
