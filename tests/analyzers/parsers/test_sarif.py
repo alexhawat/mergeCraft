@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,78 @@ def test_artifact_location_resolves_to_repo_relative_path() -> None:
     )
     findings = sarif.parse_sarif(raw, manifest=m, repo_root=Path("."))
     assert findings[0].path == "Dockerfile"
+
+
+_MINIMAL_RUNS = [
+    {
+        "tool": {
+            "driver": {
+                "name": "actionlint",
+                "rules": [{"id": "syntax-check", "defaultConfiguration": {"level": "error"}}],
+            }
+        },
+        "results": [
+            {
+                "ruleId": "syntax-check",
+                "level": "error",
+                "message": {"text": "unexpected key"},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {
+                                "uri": ".github/workflows/broken.yml",
+                                "uriBaseId": "%SRCROOT%",
+                            },
+                            "region": {"startLine": 2, "endLine": 2},
+                        }
+                    }
+                ],
+            }
+        ],
+    }
+]
+
+
+def _sarif_document(*, version: str | None, runs: list[object]) -> str:
+    document: dict[str, object] = {"runs": runs}
+    if version is not None:
+        document["version"] = version
+    return json.dumps(document)
+
+
+def _parse_sarif_raw(raw: str):
+    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    manifest = import_module("mergecraft.analyzers.manifest")
+    m = manifest.load_manifest_file(
+        Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
+    )
+    return sarif.parse_sarif(raw, manifest=m, repo_root=Path("."))
+
+
+@pytest.mark.xfail(reason="green after TP4: reject SARIF 2.0.0 with runs", strict=False)
+def test_sarif_2_0_0_with_nonempty_runs_raises_unsupported_version() -> None:
+    raw = _sarif_document(version="2.0.0", runs=_MINIMAL_RUNS)
+    with pytest.raises(ValueError, match="unsupported SARIF version"):
+        _parse_sarif_raw(raw)
+
+
+def test_sarif_2_1_0_with_same_runs_parses() -> None:
+    raw = _sarif_document(version="2.1.0", runs=_MINIMAL_RUNS)
+    findings = _parse_sarif_raw(raw)
+    assert len(findings) >= 1
+    assert findings[0].severity == "Major"
+
+
+def test_sarif_2_1_0_with_empty_runs_returns_no_findings() -> None:
+    raw = _sarif_document(version="2.1.0", runs=[])
+    assert _parse_sarif_raw(raw) == []
+
+
+@pytest.mark.xfail(reason="green after TP4: reject missing SARIF version", strict=False)
+def test_sarif_missing_version_raises_unsupported_version() -> None:
+    raw = _sarif_document(version=None, runs=_MINIMAL_RUNS)
+    with pytest.raises(ValueError, match="unsupported SARIF version"):
+        _parse_sarif_raw(raw)
 
 
 def test_export_round_trips_to_valid_sarif() -> None:

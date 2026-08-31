@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mergecraft.review_taxonomy import BODY_ONLY_EFFORT, BODY_ONLY_SEVERITY
 from tests.analyzers.support import INLINE_BUDGET, import_module
 
@@ -182,6 +184,68 @@ def test_overflow_agent_finding_keeps_supplied_fingerprint() -> None:
     )
     overflow = [f for f in placement.deferred if f.source == "agent"]
     assert [f.fingerprint for f in overflow] == ["deadbeefcafe"]
+
+
+def _overflow_agent_finding(**overrides: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "severity": "Major",
+        "path": "src/overflow.py",
+        "line": 0,
+        "body": "overflow agent finding",
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.mark.xfail(reason="green after TP5: overflow line 0 clamp", strict=False)
+def test_overflow_agent_line_zero_clamps_to_start_line_one() -> None:
+    budget = import_module("mergecraft.analyzers.budget")
+    placement = budget.place_findings(
+        [],
+        inline_budget=0,
+        agent_findings=[_overflow_agent_finding()],
+    )
+    overflow = [finding for finding in placement.deferred if finding.source == "agent"]
+    assert len(overflow) == 1
+    assert overflow[0].start_line == 1
+    assert overflow[0].end_line == 1
+
+
+@pytest.mark.xfail(reason="green after TP5: overflow negative line clamp", strict=False)
+def test_overflow_agent_negative_line_clamps_to_one() -> None:
+    budget = import_module("mergecraft.analyzers.budget")
+    placement = budget.place_findings(
+        [],
+        inline_budget=0,
+        agent_findings=[_overflow_agent_finding(line=-3)],
+    )
+    overflow = [finding for finding in placement.deferred if finding.source == "agent"]
+    assert len(overflow) == 1
+    assert overflow[0].start_line == 1
+
+
+def test_overflow_agent_supplied_line_twelve_is_unchanged() -> None:
+    budget = import_module("mergecraft.analyzers.budget")
+    placement = budget.place_findings(
+        [],
+        inline_budget=0,
+        agent_findings=[_overflow_agent_finding(line=12)],
+    )
+    overflow = [finding for finding in placement.deferred if finding.source == "agent"]
+    assert len(overflow) == 1
+    assert overflow[0].start_line == 12
+    assert overflow[0].end_line == 12
+
+
+def test_overflow_agent_invalid_severity_still_raises() -> None:
+    budget = import_module("mergecraft.analyzers.budget")
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    with pytest.raises(finding_mod.FindingValidationError, match=r"severity"):
+        budget.place_findings(
+            [],
+            inline_budget=0,
+            agent_findings=[_overflow_agent_finding(severity="NotASeverity", line=12)],
+        )
 
 
 def test_agent_findings_win_ties_over_analyzer() -> None:
