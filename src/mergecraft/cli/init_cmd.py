@@ -6,12 +6,10 @@ import subprocess
 from pathlib import Path
 
 import typer
-import yaml
 from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.provider_cmd import seed_builtin_providers
-from mergecraft.config.io import load_config_dict
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.pins import action_pin_minimal
 from mergecraft.review.completed import COMPLETED_REVIEWS_GITIGNORE_LINE
@@ -30,6 +28,28 @@ _DEFAULT_MODELS = DEFAULT_CONFIG["models"]
 assert isinstance(_DEFAULT_MODELS, list)
 assert _DEFAULT_MODELS
 _DEFAULT_MODEL = str(_DEFAULT_MODELS[0])
+
+
+def _config_template(*, agent_sandbox: str = "dispatch") -> str:
+    """Return scaffolded ``.mergecraft/config.yaml`` with trust tier comments."""
+    return f"""\
+models:
+- {_DEFAULT_MODEL}
+push: restricted
+shell: restricted
+signedCommits: false
+prApproveEnabled: false
+autoMergeEnabled: false
+trust:
+  # trust.agentSandbox decides whether MERGECRAFT_CODEX_SANDBOX=danger-full-access
+  # is honoured. Tiers (tightest first): never | merged-only | dispatch | same-repo.
+  # Fork heads always refuse — no tier lifts that floor.
+  # merged-only gives no working shell during open PR review (head not on default yet).
+  # same-repo widens override to any non-fork head (including pull_request_target).
+  # Residual risks: a fork PR checked out locally, or adding a collaborator.
+  agentSandbox: '{agent_sandbox}'
+  selfReview: 'off'
+"""
 
 
 def _workflow_template() -> str:
@@ -131,8 +151,20 @@ def _parse_git_remote() -> tuple[str, str] | None:
 
 def run(
     force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing files."),
+    agent_sandbox: str | None = typer.Option(
+        None,
+        "--agent-sandbox",
+        help="trust.agentSandbox tier for the scaffolded config (default: dispatch).",
+    ),
 ) -> None:
     """Scaffold ``.mergecraft/config.yaml`` and an example workflow (local, no API)."""
+    sandbox_tier = (agent_sandbox or "dispatch").strip().lower()
+    if sandbox_tier not in {"never", "merged-only", "dispatch", "same-repo"}:
+        console.print(
+            f"[red]invalid --agent-sandbox {agent_sandbox!r}[/red] — "
+            "expected never, merged-only, dispatch, or same-repo"
+        )
+        raise typer.Exit(code=1)
     root = Path.cwd()
     config_dir = root / ".mergecraft"
     config_path = config_dir / "config.yaml"
@@ -151,14 +183,8 @@ def run(
             "[yellow].mergecraft/config.yaml already exists[/yellow] — pass --force to overwrite"
         )
     else:
-        config_to_write: dict[str, object] = dict(DEFAULT_CONFIG)
-        if config_path.is_file():
-            existing = load_config_dict(config_path)
-            existing_agents = existing.get("agents")
-            if existing_agents is not None:
-                config_to_write["agents"] = existing_agents
         config_path.write_text(
-            yaml.safe_dump(config_to_write, sort_keys=False, default_flow_style=False),
+            _config_template(agent_sandbox=sandbox_tier),
             encoding="utf-8",
         )
         console.print(f"wrote [green]{config_path.relative_to(root)}[/green]")

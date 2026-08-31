@@ -687,25 +687,53 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     assert ctx.tool_state is not None
     assert ctx.scm is not None
 
+    from mergecraft.action.inputs import (
+        ForkCredentialInvariantError,
+        validate_fork_credential_invariant,
+    )
+    from mergecraft.agents.codex import CODEX_SANDBOX_ENV, CODEX_SANDBOX_UNSANDBOXED
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.config.trust_policy import (
+        agent_sandbox_manifest_fields,
+        bound_head_sha,
+        default_branch_from_event,
         log_trust_policy_at_run_start,
+        resolve_agent_sandbox_decision,
         resolve_trust_policy,
         trust_policy_manifest_fields,
     )
 
     repo_root = Path.cwd()
+    gh_event = ctx.gh_event or {}
+    try:
+        validate_fork_credential_invariant(event=gh_event, env=os.environ)
+    except ForkCredentialInvariantError as exc:
+        raise _ConfigurationError(str(exc)) from exc
+
     snapshot = capture_repo_settings_snapshot(root=repo_root, settings=ctx.settings)
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     shell = str(ctx.payload.get("shell") or "restricted")
     policy = resolve_trust_policy(
-        event=ctx.gh_event or {},
+        event=gh_event,
         config_root=repo_root,
         event_name=event_name,
         settings_snapshot=snapshot,
         shell=shell,
     )
     log_trust_policy_at_run_start(policy)
+
+    operator_override_requested = (
+        os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower() == CODEX_SANDBOX_UNSANDBOXED
+    )
+    sandbox_decision = resolve_agent_sandbox_decision(
+        event=gh_event,
+        event_name=event_name,
+        config_root=repo_root,
+        settings_snapshot=snapshot,
+        head_sha=bound_head_sha(gh_event, event_name=event_name) or "unknown",
+        default_branch=default_branch_from_event(gh_event),
+        operator_override_requested=operator_override_requested,
+    )
 
     trust_tier = policy.execution_trust
     authority_trust = policy.authority_trust
@@ -715,7 +743,11 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     ctx.tool_state.trust_tier = trust_tier
     ctx.tool_state.authority_trust = authority_trust
     ctx.tool_state.trust_self_review_level = policy.level
-    ctx.tool_state.run_manifest_trust = trust_policy_manifest_fields(policy)
+    ctx.tool_state.agent_sandbox_decision = sandbox_decision
+    ctx.tool_state.run_manifest_trust = {
+        **trust_policy_manifest_fields(policy),
+        **agent_sandbox_manifest_fields(sandbox_decision),
+    }
 
     assert ctx.settings is not None
     from mergecraft.config.settings import (

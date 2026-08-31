@@ -18,9 +18,13 @@ the run starts (no silent widening of the run's outcome shape).
 from __future__ import annotations
 
 import os
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from mergecraft.config.settings import TraceSinkEntry, TracingSettings
+from mergecraft.config.trust_policy import is_fork_pull_request
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 Shorthand = Literal["local_files", "logfire", "otel"]
 
@@ -254,11 +258,67 @@ def apply_setup_overrides(settings: Any) -> Any:
     return settings.model_copy(update=update)
 
 
+class ForkCredentialInvariantError(RuntimeError):
+    """Fork head + provider credential present — refuse before review starts (D2b)."""
+
+
+_PROVIDER_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OPENAI_API_KEY",
+        "CODEX_AUTH_JSON",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+    }
+)
+
+
+def _provider_credential_present(env: Mapping[str, str]) -> bool:
+    for key in _PROVIDER_CREDENTIAL_ENV_KEYS:
+        value = env.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    for key, value in env.items():
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if key.startswith("MERGECRAFT_CUSTOM_PROVIDER_API_KEY_"):
+            return True
+        if key.startswith("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_"):
+            continue
+    return False
+
+
+def validate_fork_credential_invariant(
+    *,
+    event: dict[str, Any],
+    env: Mapping[str, str] | None = None,
+    agent_sandbox_tier: str | None = None,
+) -> None:
+    """Refuse fork-head runs that carry provider credentials (lane B D2b).
+
+    Independent of ``trust.agentSandbox`` and the consumer workflow YAML.
+    """
+    _ = agent_sandbox_tier
+    if not is_fork_pull_request(event):
+        return
+    env_map = env if env is not None else os.environ
+    if not _provider_credential_present(env_map):
+        return
+    msg = (
+        "refusing fork pull request run: provider credentials are present in the "
+        "environment but fork heads must not execute with secrets. Skip the review "
+        "or remove credential env vars for fork PRs."
+    )
+    raise ForkCredentialInvariantError(msg)
+
+
 __all__ = [
     "DEFAULT_SETUP_TIMEOUT_S",
+    "ForkCredentialInvariantError",
     "SetupFailurePolicy",
     "apply_setup_overrides",
     "apply_tracing_overrides",
     "resolve_setup_timeout_s",
     "resolve_tracing_from_action_inputs",
+    "validate_fork_credential_invariant",
 ]

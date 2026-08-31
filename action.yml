@@ -78,7 +78,14 @@ inputs:
     required: false
     default: "false"
   codex_sandbox:
-    description: "Codex platform-sandbox policy. Leave unset (default) to keep Codex's own bubblewrap/Landlock sandbox. Set to `danger-full-access` ONLY when the runner is already an ephemeral, isolated container — inside a Docker container action, bubblewrap cannot create a nested user namespace and every Codex call fails before doing work. mergeCraft's own shell/push controls are unaffected either way. See issue #70."
+    description: >-
+      Request Codex platform-sandbox policy for this run. Set to danger-full-access
+      to ask mergeCraft to skip Codex's nested bubblewrap/Landlock sandbox when
+      the runner is already isolated (for example inside a Docker container action).
+      This input is a request only: trust.agentSandbox in the consuming repo's
+      .mergecraft/config.yaml decides whether it is granted. Fork heads always
+      refuse regardless of tier. mergeCraft's own shell/push controls are unaffected.
+      See issue #70 and docs/trust-policy.md.
     required: false
   provider_base_url:
     description: >-
