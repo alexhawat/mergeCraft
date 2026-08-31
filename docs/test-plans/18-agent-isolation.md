@@ -59,6 +59,13 @@ Guard-deletion note: auth tests assert **401** on missing/wrong bearer — permi
 | `prepare_codex_brokered_run` does not reference lane-B symbols (D8) | `test_prepare_codex_brokered_run_does_not_reference_lane_b_sandbox_symbols` |
 | Lane-B symbols remain in `codex.py` (D8) | `test_lane_b_sandbox_symbols_remain_defined_in_codex_module` |
 
+## W4 reconciliation — AG9 trunk guard
+
+| Fix | Rationale |
+| --- | --- |
+| `test_no_caller_signature_changed` exempts `codex.py` | Lane E W3 legitimately changed `codex.py` for broker wire-up; AG9 guard (`test_gateway_settings_reuse.py`) now pins only `opencode.py`. Codex broker contracts stay in `test_codex_credential_broker.py`. |
+| `test_claim_sink_handoff` binds telemetry `on` before OTLP | Full-suite xdist workers can inherit enterprise opt-out; explicit `bind_enterprise_from_settings(telemetry="on")` prevents `NullSink` degradation during coverage-gate. |
+
 ## Contract → files
 
 | Greening wave | Test file |

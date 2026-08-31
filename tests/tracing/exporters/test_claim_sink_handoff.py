@@ -2,14 +2,34 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mergecraft.config import RepoSettings
+from mergecraft.enterprise.controls import EnterpriseSettings
+from mergecraft.enterprise.runtime import bind_enterprise_from_settings
 from mergecraft.tracing.exporters import OTLPSink, captured_payload
 from mergecraft.tracing.sinks import _PENDING_SINK, MemorySink, claim_sink, sink_factory
 from mergecraft.tracing.tracer import get_tracer_from_settings, reset_process_tracer_cache
 
 
+def _ensure_remote_export_ready() -> None:
+    """Pin OTLP export on — xdist workers may inherit enterprise opt-out leaks."""
+    pytest.importorskip("opentelemetry")
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+
+    from mergecraft.tracing.exporters import _reset_test_seam
+
+    bind_enterprise_from_settings(EnterpriseSettings(telemetry="on"))
+    existing = trace.get_tracer_provider()
+    if type(existing).__name__ == "ProxyTracerProvider":
+        trace.set_tracer_provider(TracerProvider())
+    _reset_test_seam()
+
+
 def test_claim_sink_ignores_stale_memory_handoff_for_otel_settings() -> None:
     """A leftover memory ``sink_factory`` handoff must not poison OTLP export."""
+    _ensure_remote_export_ready()
     memory_settings = RepoSettings.model_validate(
         {"tracing": {"enabled": True, "sinks": [{"type": "memory"}]}}
     ).tracing
@@ -45,6 +65,7 @@ def test_get_tracer_exports_after_stale_memory_handoff() -> None:
     sink_factory(memory_settings.tracing)
 
     reset_process_tracer_cache()
+    _ensure_remote_export_ready()
     otel_settings = RepoSettings.model_validate(
         {
             "tracing": {
