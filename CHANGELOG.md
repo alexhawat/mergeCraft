@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - GitHub list endpoints now walk every page instead of treating the first 100 rows as the full catalog
+- TruffleHog JSONL parsing skips malformed lines instead of aborting the analyzer run
 
 ### Added
 

@@ -67,7 +67,10 @@ def parse_trufflehog_jsonl(
         stripped = line.strip()
         if not stripped:
             continue
-        item = json.loads(stripped)
+        try:
+            item = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
         if not isinstance(item, dict):
             continue
         if item.get("level") and item.get("msg"):
