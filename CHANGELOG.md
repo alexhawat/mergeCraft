@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub list endpoints now walk every page instead of treating the first 100 rows as the full catalog
 - TruffleHog JSONL parsing skips malformed lines instead of aborting the analyzer run
 - SARIF ingest rejects non-2.1.0 documents before parsing runs
+- Overflow finding construction no longer raises when agent findings supply `line: 0`
 
 ### Added
 
