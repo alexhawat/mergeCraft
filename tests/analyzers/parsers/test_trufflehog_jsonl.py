@@ -1,11 +1,10 @@
-"""B3 TruffleHog JSONL skip contracts (green after TP3)."""
+"""B3 TruffleHog JSONL skip contracts."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import pytest
 from tests.analyzers.support import import_module
 
 _VALID_FINDING = {
@@ -31,7 +30,6 @@ def _parse(raw: str):
     return parser.parse_trufflehog_jsonl(raw, manifest=_manifest(), repo_root=Path("."))
 
 
-@pytest.mark.xfail(reason="green after TP3: skip truncated JSONL lines", strict=False)
 def test_truncated_first_line_plus_valid_detector_yields_one_finding() -> None:
     raw = "\n".join(
         [
