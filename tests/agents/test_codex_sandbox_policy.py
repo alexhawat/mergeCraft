@@ -158,16 +158,12 @@ def test_unrecognised_codex_sandbox_env_warns_and_returns_none(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Regression — unknown MERGECRAFT_CODEX_SANDBOX values stay ignored (codex.py)."""
-    messages: list[str] = []
-    handler_id = logger.add(
-        lambda record: messages.append(record.record["message"]), level="WARNING"
-    )
-    try:
-        monkeypatch.setenv(CODEX_SANDBOX_ENV, "typo-danger-full-access")
+    monkeypatch.setenv(CODEX_SANDBOX_ENV, "typo-danger-full-access")
+    with patch.object(logger, "warning") as warn_mock:
         assert _operator_sandbox_override() is None
-    finally:
-        logger.remove(handler_id)
-    assert any(CODEX_SANDBOX_ENV in message for message in messages)
+    warn_mock.assert_called_once()
+    call_args = warn_mock.call_args[0]
+    assert CODEX_SANDBOX_ENV in str(call_args[0]) or CODEX_SANDBOX_ENV in str(call_args)
 
 
 @pytest.mark.parametrize("raw", ["", "not-a-tier", "DISPATCH"])

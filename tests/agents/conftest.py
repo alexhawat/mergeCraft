@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
+from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
 from mergecraft.mcp.tool_state import init_tool_state
 
@@ -26,4 +27,18 @@ def make_agent_run_context(
         instructions=ResolvedInstructions(user="review this diff"),
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         resolved_model=resolved_model,
+    )
+
+
+def attach_honoured_sandbox_decision(ctx: AgentRunContext) -> None:
+    """Simulate ``resolve_agent_sandbox_decision`` granting the operator override."""
+    ctx.tool_state.agent_sandbox_decision = AgentSandboxDecision(
+        honour=True,
+        reason="test harness grants operator sandbox override",
+        configured_tier="dispatch",
+        resolved_from="base_snapshot",
+        event_name="pull_request",
+        head_status="same_repo",
+        operator_override_requested=True,
+        granting_tier="dispatch",
     )

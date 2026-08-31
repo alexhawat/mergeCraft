@@ -80,10 +80,21 @@ docker run --rm \
   "${IMAGE}" \
   gha
 
+# Fork-head pull_request_target + provider credentials must refuse before review
+# (lane B D2b). The fixture event is an external fork; credentials stay in env
+# so the gate is exercised.
+if [[ "${EVENT_NAME}" == "pull_request_target" ]]; then
+  EXPECT_OUTCOME="configuration_error"
+  REQUIRE_CHECK_RUNS_ARG=()
+else
+  EXPECT_OUTCOME="passed"
+  REQUIRE_CHECK_RUNS_ARG=(--require-check-runs)
+fi
+
 python3 "${E2E_DIR}/assert_e2e_outputs.py" \
   --github-output "${WORK_DIR}/github/output" \
   --check-runs-dir "${CHECK_RUNS_DIR}" \
-  --expect-outcome passed \
-  --require-check-runs
+  --expect-outcome "${EXPECT_OUTCOME}" \
+  "${REQUIRE_CHECK_RUNS_ARG[@]}"
 
 echo "» E2E OK: ${EVENT_NAME}"
