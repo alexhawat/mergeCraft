@@ -83,9 +83,12 @@ def prepare_inline_comment_for_publish(
     fingerprint: str | None = None,
     collateral_map: Mapping[str, list[str]] | None = None,
     incremental_diff_text: str | None = None,
+    raised_by: str | list[str] | None = None,
+    show_provenance: bool = False,
 ) -> str:
     """Apply incremental miss labelling and collateral append at publish time."""
     from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.review.terminal_submission import enrich_finding_body_with_provenance
     from mergecraft.review_taxonomy import finding_fingerprint
     from mergecraft.types import INCREMENTAL_REVIEW_MODE
 
@@ -113,7 +116,11 @@ def prepare_inline_comment_for_publish(
         resolved_collateral = mapping.get(lookup_fp)
     if resolved_collateral:
         prepared = append_collateral_to_inline_body(prepared, list(resolved_collateral))
-    return prepared
+    return enrich_finding_body_with_provenance(
+        prepared,
+        raised_by,
+        show_provenance=show_provenance,
+    )
 
 
 def apply_recall_pass_post_process(

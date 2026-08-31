@@ -27,6 +27,14 @@ if TYPE_CHECKING:
 
 __all__ = ["GitHubClient", "checkout_pr_tool", "ensure_local_base_branch_alias", "get_git_status"]
 
+
+def _rebaseline_config_after_checkout(ctx: ToolContext) -> None:
+    """Re-baseline the config hash after PR checkout (D14)."""
+    from mergecraft.config.settings_snapshot import rebaseline_repo_settings_snapshot
+
+    rebaseline_repo_settings_snapshot(ctx)
+
+
 # A review authored by mergeCraft carries the run footer, or (for a review whose
 # body was suppressed) at least one finding marker. Reviews from humans and other
 # bots carry neither, and their commit ids must never be mistaken for "the head
@@ -354,6 +362,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 provenance="api",
                 review_scope=API_ONLY_SCOPE,
             )
+            _rebaseline_config_after_checkout(ctx)
             prior_reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
             round_index = review_round_index(prior_reviews)
             ctx.tool_state.review_round_index = round_index
@@ -436,6 +445,7 @@ def checkout_pr_tool(ctx: ToolContext):
         from mergecraft.mcp.verdict import register_review_scope
 
         register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
+        _rebaseline_config_after_checkout(ctx)
 
         result = {
             "pullNumber": pull_number,

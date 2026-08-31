@@ -97,7 +97,7 @@ def test_prepare_terminal_submission_without_reviewers() -> None:
     assert verdict == "approve"
 
 
-def test_prepare_terminal_submission_routes_unassigned_findings_to_primary() -> None:
+def test_prepare_terminal_submission_routes_unassigned_findings_to_unknown() -> None:
     registry = Registry(
         {
             "reviewer": _binding("mergecraft-reviewer"),
@@ -109,7 +109,7 @@ def test_prepare_terminal_submission_routes_unassigned_findings_to_primary() -> 
         findings=[_finding(body="unassigned")],
         verdict="approve",
     )
-    assert merged[0]["raised_by"] == "mergecraft-reviewer"
+    assert merged[0]["raised_by"] == "unknown"
     assert verdict == "approve"
 
 

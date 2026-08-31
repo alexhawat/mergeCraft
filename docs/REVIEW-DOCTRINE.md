@@ -349,11 +349,21 @@ mergeCraft separates three layers that older review flows conflated:
 2. **Structural verdict** — `decide_approval(findings, *, run_succeeded, tier)`
    is a pure function of typed findings and run state. It never reads agent
    prose, `result.output`, or `ApprovalRecord.would_approve`.
-3. **Publication** — an internal `publish_pull_request_review` path posts to
-   GitHub after a validated terminal submission. `create_pull_request_review`
-   remains registered for backward compatibility: it maps legacy params through
-   `validate_submission`, then publishes. It cannot write
-   `ApprovalRecord.would_approve` without a passing submission.
+3. **Publication** — `publish_pull_request_review` is the internal publisher
+   (not an MCP tool). `create_pull_request_review` maps legacy params through
+   `validate_submission`, derives the body from the terminal submission, and
+   routes through the same publisher. Publication is idempotent per
+   `(pull_number, commit_id)`; a second publish short-circuits. The published
+   body must match the terminal submission — probe or health-check strings are
+   hard failures when a submission is bound.
+
+**Per-run token band (`runBounds`).** `tokenBudget` is the soft target.
+`tokenBudgetTolerance` (default `0.10`) defines the hard ceiling as
+`target × (1 + tolerance)`. Crossing the target warns once and annotates the
+run record; crossing the ceiling raises `BudgetExhausted`. Tolerance `0`
+restores strict enforcement at the target. The run-record **Tokens** row and
+job step summary name target, ceiling, over-target status, and per-phase totals
+when `record_tokens(…, phase=…)` was used.
 
 **Enforcement default (VP4).** `gates.terminal_verdict` defaults to `enforce`.
 A provider success without a usable terminal submission maps to

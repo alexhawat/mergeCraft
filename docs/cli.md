@@ -121,6 +121,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft provider harnesses` | List supported agent harnesses (generated from code). |
 | `mergecraft provider list` | List registered provider labels. |
 | `mergecraft provider migrate` | Migrate legacy `*_API_KEY` env vars into indexed provider registry layout (D2 / #483). |
+| `mergecraft provider status` | Show the reviewer roster, credentials, wiring, and dispatch order. |
 | `mergecraft replay` | Replay a stored review run from local traces (read-only). |
 | `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
 | `mergecraft requirements inspect` | List ingested requirements and their states. |

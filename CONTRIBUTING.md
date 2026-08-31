@@ -35,6 +35,46 @@ merge-base **lowering guard** that blocks undeclared ``fail_under`` drops runs
 only on pull requests, because on ``push`` / ``workflow_dispatch`` the
 merge-base comparison is self-referential.
 
+### Config path resolution (#573)
+
+``load_repo_settings()`` resolves ``.mergecraft/config.yaml`` through this
+ladder (first hit wins):
+
+1. explicit ``root=`` argument
+2. ``MERGECRAFT_CONFIG`` when the file exists
+3. ``<workspace-root>/.mergecraft/config.yaml``
+
+**Workspace root** (the base for step 3 when no explicit path is set):
+
+| Situation | Root used |
+|-----------|-----------|
+| No ``GITHUB_WORKSPACE`` | process ``cwd`` |
+| ``cwd`` inside ``GITHUB_WORKSPACE`` (normal CI) | ``GITHUB_WORKSPACE`` |
+| ``cwd`` in a **sibling git worktree** of the same repo | the **cwd** worktree (#573 / D2) |
+| otherwise | ``GITHUB_WORKSPACE`` |
+
+The coverage gate's base measurement runs inside a detached worktree and
+**re-exports ``GITHUB_WORKSPACE`` at that worktree** before calling
+``make coverage-measure`` (D1). Each tree therefore reads its own config even
+when Actions still has the PR checkout as the outer workspace.
+
+### Coverage gate contract (#432 / #536)
+
+On ``pull_request``, ``scripts/ci_coverage_delta_gate.sh``:
+
+1. measures coverage on the merge-base worktree (signal only)
+2. runs ``make coverage-gate`` on the **PR checkout** (hard gate — always)
+3. compares head vs base when ``coverage-base.json`` exists
+
+| Step | On failure |
+|------|------------|
+| Base measurement | **No** ``coverage-base.json``; delta **skipped** with an Actions ``::warning::`` and a job-summary line naming ``GITHUB_BASE_REF`` and the reason (D4/D6) |
+| Head ``make coverage-gate`` | Run **fails** — the ratchet stays on (D5) |
+| Delta comparison | Runs only when base measurement succeeded |
+
+On ``push`` / ``workflow_dispatch`` the script runs the head gate only (no
+merge-base worktree).
+
 To run the live slice (requires provider secrets such as `ANTHROPIC_API_KEY`):
 
 ```bash

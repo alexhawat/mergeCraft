@@ -107,6 +107,28 @@ def capture_run_scope_snapshot(
     return snapshot
 
 
+def rebaseline_repo_settings_snapshot(ctx: ToolContext) -> RepoSettingsSnapshot:
+    """Re-pin the config hash after ``checkout_pr`` materializes the PR head (D14).
+
+    ``checkout_pr`` checks out the PR branch, so ``.mergecraft/config.yaml`` on
+    disk may legitimately differ from the snapshot taken at run start. Re-baseline
+    once at the controlled checkout boundary; edits after that still trip
+    :func:`assert_config_unchanged`.
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    repo_root = Path(primary_repo_state(ctx.tool_state).dir or Path.cwd()).resolve()
+    prior = ctx.repo_settings_snapshot
+    settings = prior.settings if prior is not None else None
+    snapshot = capture_repo_settings_snapshot(
+        root=repo_root,
+        settings=settings,
+        load_learnings_files=False,
+    )
+    ctx.repo_settings_snapshot = snapshot
+    return snapshot
+
+
 def assert_config_unchanged(snapshot: RepoSettingsSnapshot) -> None:
     """Refuse when pinned config inputs changed after the snapshot was taken."""
     current = config_yaml_hash(root=snapshot.repo_root)
@@ -211,6 +233,7 @@ __all__ = [
     "config_yaml_hash",
     "load_repo_settings",
     "pinned_repo_settings_from_context",
+    "rebaseline_repo_settings_snapshot",
     "repo_settings_for_gateway_resolvers",
     "repo_settings_from_context",
     "reset_gateway_settings_cache",

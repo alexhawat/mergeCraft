@@ -111,6 +111,8 @@ def test_reviewer_tools_list_includes_create_pull_request_review(tmp_path: Path)
         assert session_tool in names, f"{session_tool!r} must be on primary /mcp/reviewer"
     for c6_tool in ("submit_review_verdict", "verify_agent_findings", "record_finding_verdict"):
         assert c6_tool in names, f"{c6_tool!r} must be on primary /mcp/reviewer (C6)"
+    for dispatch_tool in ("record_reviewer_dispatch_run", "record_reviewer_dispatch_error"):
+        assert dispatch_tool in names, f"{dispatch_tool!r} must be on primary /mcp/reviewer (D7)"
 
 
 def test_reviewer_tools_list_keeps_git_and_excludes_repo_mutations(tmp_path: Path) -> None:

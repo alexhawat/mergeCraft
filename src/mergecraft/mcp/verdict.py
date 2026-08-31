@@ -769,6 +769,12 @@ class SubmitReviewVerdictParams(BaseModel):
             raise ValueError(msg)
         coerced: list[Any] = []
         for item in value:
+            if isinstance(item, dict) and item.get("raised_by") is not None:
+                msg = (
+                    "raised_by is server-stamped at collection time and must not "
+                    "be supplied by agents"
+                )
+                raise ValueError(msg)
             finding = coerce_agent_finding(item)
             if finding.severity not in FINDING_SEVERITIES:
                 msg = f"severity must be one of {FINDING_SEVERITIES!r}, got {finding.severity!r}"
@@ -834,6 +840,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
         from mergecraft.review.terminal_submission import (
             append_degradation_to_summary,
             prepare_terminal_submission,
+            stamped_findings_for_terminal_submission,
         )
 
         raw_findings = [
@@ -842,9 +849,14 @@ def submit_review_verdict_tool(ctx: ToolContext):
         ]
         settings = repo_settings_from_context(ctx)
         registry = load_registry(settings=settings, repo_root=repo_root)
+        stamped_findings = stamped_findings_for_terminal_submission(
+            registry=registry,
+            terminal_findings=raw_findings,
+            dispatch_runs=list(ctx.tool_state.reviewer_dispatch_runs),
+        )
         merged_raw, enforced_verdict = prepare_terminal_submission(
             registry=registry,
-            findings=raw_findings,
+            findings=stamped_findings,
             verdict=validated.verdict,
             errors=ctx.tool_state.reviewer_dispatch_errors or None,
         )
