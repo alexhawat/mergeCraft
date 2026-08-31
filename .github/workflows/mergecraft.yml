@@ -582,6 +582,12 @@ jobs:
         # closed with no mergecraft-approval check at all. Fixed in #545
         # (utils/git_setup.py — basic auth on the documented `x-access-token`
         # username). b3638ea7 is #545's merge commit.
+        # 2026-08-31 (twelfth bump, PR #582): re-bumped to 3ed2c798 so the
+        # reviewer runs publication attribution and the token-budget band
+        # (#570, #571, #572, #574) plus the coverage-gate / provider-status
+        # work (#573, #536, #520). 3ed2c798 is the sync of main into
+        # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
+        # main. pull_request_target still resolves from main until then.
         uses: alexhawat/mergeCraft@3ed2c798c0e487f44a737fcecb49ab632ed4bad5 # env.MERGECRAFT_ACTION_SHA / lane A+C promotion
         with:
           prompt: ${{ steps.prompt.outputs.text }}
@@ -767,6 +773,12 @@ jobs:
         # closed with no mergecraft-approval check at all. Fixed in #545
         # (utils/git_setup.py — basic auth on the documented `x-access-token`
         # username). b3638ea7 is #545's merge commit.
+        # 2026-08-31 (twelfth bump, PR #582): re-bumped to 3ed2c798 so the
+        # reviewer runs publication attribution and the token-budget band
+        # (#570, #571, #572, #574) plus the coverage-gate / provider-status
+        # work (#573, #536, #520). 3ed2c798 is the sync of main into
+        # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
+        # main. pull_request_target still resolves from main until then.
         uses: alexhawat/mergeCraft@3ed2c798c0e487f44a737fcecb49ab632ed4bad5 # env.MERGECRAFT_ACTION_SHA / lane A+C promotion
         with:
           prompt: ${{ steps.prompt.outputs.text }}
@@ -913,7 +925,7 @@ jobs:
         # Same mandatory full-SHA pin as the rungs above — keep all three in
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
-        # all three rungs run the same product code (#532). Now b3638ea7 (#545).
+        # all three rungs run the same product code (#532). Now 3ed2c798 (#582).
         uses: alexhawat/mergeCraft@3ed2c798c0e487f44a737fcecb49ab632ed4bad5 # env.MERGECRAFT_ACTION_SHA / lane A+C promotion
         with:
           prompt: ${{ steps.prompt.outputs.text }}

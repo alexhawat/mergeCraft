@@ -7,49 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Lane A — publication & attribution integrity
-
-#### Fixed
-
-- Anchor-422 recovery no longer spins on an out-of-range comment index — it
-  demotes all inline comments and posts once (#570)
-- The published GitHub review body always matches the terminal submission;
-  probe strings and split publication races no longer land a placeholder review
-  (#572)
-- Multi-reviewer findings carry server-stamped `raised_by` attribution on the
-  published review; agents cannot supply the field via `submit_review_verdict`
-  (#574)
-- Token spend slightly over `runBounds.tokenBudget` warns and completes instead
-  of failing at the cliff; crossing the hard ceiling still ends the run (#571)
-
-#### Changed
-
-- `runBounds.tokenBudget` is the soft target; `tokenBudgetTolerance` (default
-  `0.10`) sets the hard ceiling — set tolerance `0` to restore strict enforcement
-- Run record and job step summary token lines name target, ceiling, over-target
-  status, and per-phase attribution when phases are recorded
-
-### Lane C — CI gate correctness & operator surface
-
-#### Added
+### Added
 
 - `mergecraft provider status` shows what CI will run — each reviewer agent's
   `pN` slots, credential and workflow-wiring state, dispatch level, and skipped
   slots — with `--json` for scripting and optional `--github` to report repo
   secret presence without printing values (#520)
-
-#### Fixed
-
-- Coverage delta on pull requests no longer fails when the merge-base branch
-  cannot measure coverage; the PR checkout still runs `make coverage-gate` and
-  the skip is surfaced as an Actions warning and job-summary line naming the
-  base ref and reason (#536)
-- Base-branch coverage measurement reads that worktree's
-  `.mergecraft/config.yaml` instead of the PR head's — a PR that adds a config
-  key and its schema field no longer fails the base run (#573)
-
-### Added
-
 - `mergecraft agent` and `mergecraft agent-local` author the agent roster —
   positional `pN` slots, named agents, `after:` dispatch levels, and dense
   `modelChain` editing; local overrides write `.mergecraft/config.local.yaml`
@@ -101,6 +64,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Anchor-422 recovery no longer spins on an out-of-range comment index — it
+  demotes all inline comments and posts once (#570)
+- The published GitHub review body always matches the terminal submission;
+  probe strings and split publication races no longer land a placeholder review
+  (#572)
+- Multi-reviewer findings carry server-stamped `raised_by` attribution on the
+  published review; agents cannot supply the field via `submit_review_verdict`
+  (#574)
+- Token spend slightly over `runBounds.tokenBudget` warns and completes instead
+  of failing at the cliff; crossing the hard ceiling still ends the run (#571)
+- Coverage delta on pull requests no longer fails when the merge-base branch
+  cannot measure coverage; the PR checkout still runs `make coverage-gate` and
+  the skip is surfaced as an Actions warning and job-summary line naming the
+  base ref and reason (#536)
+- Base-branch coverage measurement reads that worktree's
+  `.mergecraft/config.yaml` instead of the PR head's — a PR that adds a config
+  key and its schema field no longer fails the base run (#573)
 - A refused terminal verdict now reaches the deterministic run record by name.
   `rejection_reason` — and the record's reason line — were both gated on the
   packet having no decision, but `decide_approval` always returns one, so
@@ -147,6 +127,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The self-review Action pin on all three review rungs moves to `3ed2c798`,
+  the lane A/C sync on `pre-0.0.1` (#582). Reviews run publication attribution,
+  the token-budget band, and the coverage-gate work instead of the #575 pin
+- `runBounds.tokenBudget` is the soft target; `tokenBudgetTolerance` (default
+  `0.10`) sets the hard ceiling — set tolerance `0` to restore strict enforcement
+- Run record and job step summary token lines name target, ceiling, over-target
+  status, and per-phase attribution when phases are recorded
 - Enforcement modes and the approval gate now agree on what blocks. The
   gate-facing severity is the single authority, so ``contributes_blocker`` is
   read off it rather than computed beside it. ``blocking`` floors a

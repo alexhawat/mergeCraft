@@ -11,6 +11,7 @@ Pins:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -231,7 +232,7 @@ def test_installed_wheel_reports_build_commit(tmp_path: Path) -> None:
     assert output == head
 
 
-def test_mergecraft_commit_is_lazy() -> None:
+def test_mergecraft_commit_is_lazy(tmp_path: Path) -> None:
     """Unit — ``import mergecraft`` does not resolve ``__commit__`` until accessed."""
     script = """
 import mergecraft.build_metadata as build_metadata
@@ -250,4 +251,14 @@ assert calls == 0
 assert mergecraft.__commit__ is None
 assert calls == 1
 """
-    subprocess.run([sys.executable, "-c", script], check=True)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"PYTHONPATH", "UV_PROJECT_ENVIRONMENT"}
+    }
+    subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        cwd=tmp_path,
+        env=env,
+    )

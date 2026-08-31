@@ -53,7 +53,12 @@ orig_workspace="$GITHUB_WORKSPACE"
   # Exporting it here settles both halves on one path, and `?=` means the
   # Makefile defers to it — so this also works against an older base tree whose
   # Makefile predates MCB-23 and would otherwise default to `.venv`.
-  export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$PWD/.venv-dev}"
+  # Always `$PWD/.venv-dev`: the parent `make test` job exports
+  # `UV_PROJECT_ENVIRONMENT` to the PR checkout's venv. Keeping that value
+  # made `uv sync` rewrite the job environment to the base worktree, so a
+  # later subprocess import of `mergecraft` loaded the base tree
+  # (`test_mergecraft_commit_is_lazy`).
+  export UV_PROJECT_ENVIRONMENT="$PWD/.venv-dev"
   measure_ok=true
   if ! "${UV:-uv}" sync --extra dev --extra tracing >>"$base_measure_log" 2>&1; then
     measure_ok=false

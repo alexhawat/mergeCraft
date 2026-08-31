@@ -57,8 +57,8 @@ def test_base_measure_block_markers_remain_parseable() -> None:
 def test_base_measure_block_exports_uv_project_environment() -> None:
     """Regression guard — ``UV_PROJECT_ENVIRONMENT`` export must survive W3 edits."""
     block = base_measure_block()
-    assert "UV_PROJECT_ENVIRONMENT" in block
-    assert "export UV_PROJECT_ENVIRONMENT" in block
+    assert 'export UV_PROJECT_ENVIRONMENT="$PWD/.venv-dev"' in block
+    assert "${UV_PROJECT_ENVIRONMENT:-" not in block
 
 
 def test_base_measure_block_keeps_pre_th_inline_fallback() -> None:
