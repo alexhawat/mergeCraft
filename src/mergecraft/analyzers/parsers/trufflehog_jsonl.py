@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     coerce_line,
@@ -70,6 +72,7 @@ def parse_trufflehog_jsonl(
         try:
             item = json.loads(stripped)
         except json.JSONDecodeError:
+            logger.debug("trufflehog jsonl: skipping malformed line")
             continue
         if not isinstance(item, dict):
             continue

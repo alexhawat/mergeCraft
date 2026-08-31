@@ -119,6 +119,36 @@ async def paginate_github_list_pages(
     return ListedItems(items=collected, incomplete=incomplete, total_count=total_count)
 
 
+async def paginate_github_bare_array(
+    fetch_page: Callable[[int], Awaitable[Any]],
+    *,
+    path_for_log: str,
+    page_size: int = GITHUB_LIST_PAGE_SIZE,
+    max_pages: int = GITHUB_LIST_MAX_PAGES,
+    strict_rows: bool = True,
+) -> list[dict[str, Any]]:
+    """Walk bare JSON array list pages returned by GitHub REST endpoints."""
+    collected: list[dict[str, Any]] = []
+    for page in range(1, max_pages + 1):
+        payload = await fetch_page(page)
+        if strict_rows:
+            batch = _as_list(payload)
+        elif isinstance(payload, list):
+            batch = [item for item in payload if isinstance(item, dict)]
+        else:
+            batch = []
+        collected.extend(batch)
+        if len(batch) < page_size:
+            break
+        if page == max_pages:
+            logger.warning(
+                "github list pagination: hit max_pages={} for {}; catalog is truncated",
+                max_pages,
+                path_for_log,
+            )
+    return collected
+
+
 class RepoContext:
     """Parsed ``owner`` / ``name`` from ``GITHUB_REPOSITORY``."""
 
@@ -272,21 +302,12 @@ class GitHubClient:
     async def _paginate_bare_array(self, path: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Walk GitHub list pages for endpoints that return a bare JSON array."""
         extra_params = kwargs.pop("params", None) or {}
-        page_size = GITHUB_LIST_PAGE_SIZE
-        collected: list[dict[str, Any]] = []
-        for page in range(1, GITHUB_LIST_MAX_PAGES + 1):
-            params = {**extra_params, "per_page": page_size, "page": page}
-            batch = _as_list(await self.get(path, params=params, **kwargs))
-            collected.extend(batch)
-            if len(batch) < page_size:
-                break
-            if page == GITHUB_LIST_MAX_PAGES:
-                logger.warning(
-                    "github list pagination: hit max_pages={} for {}; catalog is truncated",
-                    GITHUB_LIST_MAX_PAGES,
-                    path,
-                )
-        return collected
+
+        async def _fetch_page(page: int) -> Any:
+            params = {**extra_params, "per_page": GITHUB_LIST_PAGE_SIZE, "page": page}
+            return await self.get(path, params=params, **kwargs)
+
+        return await paginate_github_bare_array(_fetch_page, path_for_log=path)
 
     async def graphql(
         self,

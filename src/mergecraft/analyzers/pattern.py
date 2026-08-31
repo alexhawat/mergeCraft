@@ -295,7 +295,7 @@ def coerce_astgrep_sarif_raw(raw: str) -> str:
     if document.get("version") == "2.1.0":
         return raw
     runs = document.get("runs")
-    if not isinstance(runs, list) or not runs:
+    if not isinstance(runs, list):
         return raw
     updated = dict(document)
     updated["version"] = "2.1.0"
