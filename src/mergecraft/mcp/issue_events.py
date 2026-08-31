@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.utils.github import GITHUB_LIST_MAX_PAGES, GITHUB_LIST_PAGE_SIZE
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -17,12 +20,25 @@ def get_issue_events_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issue_number"])
         primary_repo_state(ctx.tool_state).issue_number = issue_number
-        raw = await ctx.scm.get(
-            f"/repos/{ctx.repo.owner}/{ctx.repo.name}/issues/{issue_number}/timeline",
-            headers={"Accept": "application/vnd.github+json"},
-            params={"per_page": 100},
-        )
-        events = raw if isinstance(raw, list) else []
+        timeline_path = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/issues/{issue_number}/timeline"
+        timeline_headers = {"Accept": "application/vnd.github+json"}
+        events: list[dict[str, Any]] = []
+        for page in range(1, GITHUB_LIST_MAX_PAGES + 1):
+            raw = await ctx.scm.get(
+                timeline_path,
+                headers=timeline_headers,
+                params={"per_page": GITHUB_LIST_PAGE_SIZE, "page": page},
+            )
+            batch = raw if isinstance(raw, list) else []
+            events.extend(item for item in batch if isinstance(item, dict))
+            if len(batch) < GITHUB_LIST_PAGE_SIZE:
+                break
+            if page == GITHUB_LIST_MAX_PAGES:
+                logger.warning(
+                    "github list pagination: hit max_pages={} for {}; catalog is truncated",
+                    GITHUB_LIST_MAX_PAGES,
+                    timeline_path,
+                )
         parsed: list[dict[str, Any]] = []
         for event in events:
             etype = event.get("event")

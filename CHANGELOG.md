@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- GitHub list endpoints now walk every page instead of treating the first 100 rows as the full catalog
+
 ### Added
 
 - `mergecraft provider status` shows what CI will run — each reviewer agent's

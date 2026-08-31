@@ -29,7 +29,7 @@ DEFAULT_API_URL = "https://api.github.com"
 DEFAULT_ACCEPT = "application/vnd.github+json"
 DEFAULT_API_VERSION = "2022-11-28"
 GITHUB_LIST_PAGE_SIZE: Final[int] = 100
-GITHUB_LIST_MAX_PAGES: Final[int] = 20
+GITHUB_LIST_MAX_PAGES: Final[int] = 50
 
 
 def _as_dict(data: Any) -> dict[str, Any]:
@@ -269,6 +269,25 @@ class GitHubClient:
     async def delete(self, path: str, **kwargs: Any) -> Any:
         return await self.request("DELETE", path, **kwargs)
 
+    async def _paginate_bare_array(self, path: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """Walk GitHub list pages for endpoints that return a bare JSON array."""
+        extra_params = kwargs.pop("params", None) or {}
+        page_size = GITHUB_LIST_PAGE_SIZE
+        collected: list[dict[str, Any]] = []
+        for page in range(1, GITHUB_LIST_MAX_PAGES + 1):
+            params = {**extra_params, "per_page": page_size, "page": page}
+            batch = _as_list(await self.get(path, params=params, **kwargs))
+            collected.extend(batch)
+            if len(batch) < page_size:
+                break
+            if page == GITHUB_LIST_MAX_PAGES:
+                logger.warning(
+                    "github list pagination: hit max_pages={} for {}; catalog is truncated",
+                    GITHUB_LIST_MAX_PAGES,
+                    path,
+                )
+        return collected
+
     async def graphql(
         self,
         query: str,
@@ -337,11 +356,9 @@ class GitHubClient:
         issue_number: int,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        return _as_list(
-            await self.get(
-                f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
-                **kwargs,
-            )
+        return await self._paginate_bare_array(
+            f"/repos/{owner}/{repo}/issues/{issue_number}/comments",
+            **kwargs,
         )
 
     async def get_issue_comment(
@@ -441,8 +458,9 @@ class GitHubClient:
         pull_number: int,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        return _as_list(
-            await self.get(f"/repos/{owner}/{repo}/pulls/{pull_number}/files", **kwargs)
+        return await self._paginate_bare_array(
+            f"/repos/{owner}/{repo}/pulls/{pull_number}/files",
+            **kwargs,
         )
 
     async def list_reviews(
@@ -452,8 +470,9 @@ class GitHubClient:
         pull_number: int,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        return _as_list(
-            await self.get(f"/repos/{owner}/{repo}/pulls/{pull_number}/reviews", **kwargs)
+        return await self._paginate_bare_array(
+            f"/repos/{owner}/{repo}/pulls/{pull_number}/reviews",
+            **kwargs,
         )
 
     async def get_review(
@@ -570,9 +589,22 @@ class GitHubClient:
         ref: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        return _as_dict(
-            await self.get(f"/repos/{owner}/{repo}/commits/{ref}/check-suites", **kwargs)
-        )
+        path = f"/repos/{owner}/{repo}/commits/{ref}/check-suites"
+        extra = kwargs.pop("params", None) or {}
+
+        async def _fetch_page(page: int) -> Any:
+            params = {
+                **extra,
+                "per_page": GITHUB_LIST_PAGE_SIZE,
+                "page": page,
+            }
+            return await self.get(path, params=params, **kwargs)
+
+        listed = await paginate_github_list_pages(_fetch_page, item_key="check_suites")
+        total = listed.total_count
+        if total is None and not listed.incomplete:
+            total = len(listed.items)
+        return {"total_count": total, "check_suites": listed.items}
 
     async def get_check_suite(
         self,
