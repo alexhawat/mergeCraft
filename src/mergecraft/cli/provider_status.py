@@ -157,8 +157,12 @@ def credential_status_for_slug(
         else:
             return CredentialStatus(
                 available=bool(status.available),
-                source=str(status.source),
-                looked_for=str(status.looked_for),
+                source=str(status.source or "env"),
+                looked_for=(
+                    ", ".join(status.looked_for)
+                    if isinstance(status.looked_for, tuple)
+                    else str(status.looked_for)
+                ),
             )
 
     return _local_credential_status(slug, settings=settings, cwd=cwd, wired=wired)

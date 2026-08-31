@@ -373,6 +373,8 @@ class ToolState:
     run_manifest_trust: dict[str, str] = field(default_factory=dict)
     # Lane B / #553 — resolved agent sandbox decision from the base snapshot.
     agent_sandbox_decision: AgentSandboxDecision | None = None
+    # Lane B / #552 — loud roster slots skipped for missing credentials (D10).
+    credential_degradations: tuple[str, ...] = ()
     # When ``setup_script`` is skipped on an untrusted tier (W1.2), the reason
     # string is recorded here for harness/tests and later RunOutcome mapping.
     setup_script_skip_reason: str | None = None

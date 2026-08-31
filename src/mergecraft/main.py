@@ -401,6 +401,7 @@ async def publish_deterministic_record(
             tool_state.usage_entries,
             budget_tracker=resolved_ctx.budget_tracker,
         ),
+        credential_degradations=list(tool_state.credential_degradations),
     )
     await upsert_sticky_progress_comment(resolved_ctx, block)
 
@@ -878,6 +879,22 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     ctx.resolved_model = resolved_model
     ctx.selected_slug = selected_slug
     tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")
+
+    from mergecraft.utils.agent_resolve import collect_roster_credential_degradations
+
+    degradations = collect_roster_credential_degradations(
+        settings=settings,
+        cwd=Path.cwd(),
+    )
+    if degradations:
+        tool_state.credential_degradations = degradations
+        for line in degradations:
+            logger.warning("» {}", line)
+        tool_state.run_manifest_trust = {
+            **tool_state.run_manifest_trust,
+            "credential_degradations": " | ".join(degradations),
+        }
+
     _stamp_requested_model(ctx, payload_model)
 
 
