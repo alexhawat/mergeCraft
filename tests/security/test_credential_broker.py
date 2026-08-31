@@ -287,3 +287,101 @@ async def test_concurrent_requests_with_same_bearer() -> None:
                 client.post(MODEL_PATH, json=payload, headers=headers),
             )
         assert all(response.status_code == 200 for response in responses)
+
+
+def test_resolve_codex_broker_posture_no_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D3a — no subscription or API key → inactive ``auth_mode=none``."""
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    module = load_broker_module()
+    resolve = require_broker_symbol(module, "resolve_codex_broker_posture")
+    posture = resolve()
+    assert posture.active is False
+    assert posture.auth_mode == "none"
+    assert "no openai api key" in posture.reason.casefold()
+
+
+def test_resolve_codex_broker_posture_api_key_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D3a — API key present without usable subscription → broker active."""
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
+    module = load_broker_module()
+    resolve = require_broker_symbol(module, "resolve_codex_broker_posture")
+    posture = resolve()
+    assert posture.active is True
+    assert posture.auth_mode == "api_key"
+
+
+def test_resolve_codex_broker_posture_subscription_not_brokered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D3a — usable subscription auth → broker inactive (not brokered)."""
+    monkeypatch.setenv(
+        "CODEX_AUTH_JSON",
+        '{"tokens": {"access_token": "subscription-token"}}',
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    module = load_broker_module()
+    resolve = require_broker_symbol(module, "resolve_codex_broker_posture")
+    posture = resolve()
+    assert posture.active is False
+    assert posture.auth_mode == "subscription"
+    assert "not brokered" in posture.reason.casefold()
+
+
+def test_broker_rejects_put_method() -> None:
+    """Disallowed HTTP methods must fail closed with 405."""
+    module = load_broker_module()
+    with MockModelUpstream() as upstream, _start_broker(module, upstream) as handle:
+        with _broker_client(handle) as client:
+            response = client.put(MODEL_PATH, headers=_auth_headers(handle.token))
+        assert response.status_code == 405
+        assert_credential_absent(response.text)
+
+
+@pytest.mark.parametrize(
+    ("raw", "usable"),
+    [
+        ('{"tokens": {"access_token": "sub-token"}}', True),
+        ('{"tokens": {"access": "sub-token"}}', True),
+        ('{"tokens": {"refresh": "sub-token"}}', True),
+        ('{"access_token": "top-level-token"}', True),
+        ('{"refresh": "top-level-token"}', True),
+        ("not-json", False),
+        ("[]", False),
+    ],
+    ids=[
+        "tokens-access_token",
+        "tokens-access",
+        "tokens-refresh",
+        "top-level-access_token",
+        "top-level-refresh",
+        "invalid-json",
+        "non-dict-json",
+    ],
+)
+def test_subscription_auth_usable_shapes(raw: str, usable: bool) -> None:
+    """``_subscription_auth_usable`` token-shape branches (D3a)."""
+    module = load_broker_module()
+    checker = getattr(module, "_subscription_auth_usable", None)
+    assert checker is not None, "_subscription_auth_usable must exist on broker module"
+    assert checker(raw) is usable
+
+
+def test_broker_run_record_fields_serializes_posture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run-record helper exposes broker posture fields (D3a/D10)."""
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    module = load_broker_module()
+    resolve = require_broker_symbol(module, "resolve_codex_broker_posture")
+    fields_fn = require_broker_symbol(module, "broker_run_record_fields")
+    record = fields_fn(resolve())
+    assert record["broker_active"] == "false"
+    assert record["broker_auth_mode"] == "none"
+    assert record["broker_reason"]

@@ -41,6 +41,12 @@ xfail-reconciliation: per impl wave (`strict=False` until green; test-creator ag
 | Real key absent from evidence-packet fixture | `test_broker_never_leaks_real_credential_in_evidence_packet_fixture` |
 | Parent→upstream `Authorization` uses real key | `test_broker_forwards_real_key_on_parent_upstream_leg` |
 | Concurrent requests with same bearer | `test_concurrent_requests_with_same_bearer` |
+| No credentials → `auth_mode=none` (D3a) | `test_resolve_codex_broker_posture_no_credentials` |
+| API key without subscription → active (D3a) | `test_resolve_codex_broker_posture_api_key_active` |
+| Usable subscription → inactive (D3a) | `test_resolve_codex_broker_posture_subscription_not_brokered` |
+| Disallowed HTTP methods → 405 | `test_broker_rejects_put_method` |
+| Subscription token-shape branches (D3a) | `test_subscription_auth_usable_shapes` |
+| Run-record posture serialization (D3a/D10) | `test_broker_run_record_fields_serializes_posture` |
 
 Guard-deletion note: auth tests assert **401** on missing/wrong bearer — permissive 200 would fail.
 
