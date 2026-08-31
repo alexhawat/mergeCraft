@@ -330,6 +330,11 @@ _PROVIDER_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
         "GOOGLE_GENERATIVE_AI_API_KEY",
         "CURSOR_API_KEY",
         "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "VERTEX_SERVICE_ACCOUNT_JSON",
     }
 )
 
@@ -343,6 +348,8 @@ def _provider_credential_present(env: Mapping[str, str]) -> bool:
         if not isinstance(value, str) or not value.strip():
             continue
         if key.startswith("MERGECRAFT_CUSTOM_PROVIDER_API_KEY_"):
+            return True
+        if key.startswith("LLM_PROVIDER_") and key.endswith("_API_KEY"):
             return True
         if key.startswith("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_"):
             continue

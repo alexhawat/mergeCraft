@@ -494,7 +494,7 @@ def analyzer_egress_skip_reason(
         return None
     resolved_event = event if event is not None else read_github_event()
     resolved_name = event_name or os.environ.get("GITHUB_EVENT_NAME", "")
-    if execution_tier == "trusted" and not resolved_name and resolved_event is None:
+    if execution_tier == "trusted" and resolved_event is None:
         return None
     event_payload = resolved_event if resolved_event is not None else {}
     outcome = evaluate_analyzer_egress_policy(
