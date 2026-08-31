@@ -7,7 +7,7 @@ import resource
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -159,16 +159,33 @@ def _early_unavailable_outcome(plan: AnalyzerPlan) -> AnalyzerOutcome | None:
 
 
 def _sandboxed_argv(
-    plan: AnalyzerPlan, sandbox_context: SandboxContext | None
+    plan: AnalyzerPlan,
+    sandbox_context: SandboxContext | None,
+    *,
+    event_name: str = "",
+    event: dict[str, Any] | None = None,
+    self_review_level: str = "off",
+    analyzer_id: str = "",
 ) -> tuple[list[str], Callable[[], None] | None]:
     """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it."""
     run_argv = list(plan.argv)
     if sandbox_context is None or not sandbox_context.read_only_source or sys.platform == "win32":
         return run_argv, None
     preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
-    from mergecraft.analyzers.sandbox import build_analyzer_sandbox_argv
+    from mergecraft.analyzers.sandbox import build_analyzer_sandbox_argv_for_run
 
-    return build_analyzer_sandbox_argv(plan.argv, context=sandbox_context), preexec_fn
+    event_payload = event if event is not None else {}
+    return (
+        build_analyzer_sandbox_argv_for_run(
+            plan.argv,
+            context=sandbox_context,
+            event_name=event_name,
+            event=event_payload,
+            self_review_level=self_review_level,
+            analyzer_id=analyzer_id or plan.manifest_id,
+        ),
+        preexec_fn,
+    )
 
 
 def _run_subprocess(
@@ -240,9 +257,21 @@ def _outcome_from_completed(
 
 
 def run_plan(
-    plan: AnalyzerPlan, *, sandbox_context: SandboxContext | None = None
+    plan: AnalyzerPlan,
+    *,
+    sandbox_context: SandboxContext | None = None,
+    event_name: str = "",
+    event: dict[str, Any] | None = None,
+    self_review_level: str = "off",
+    analyzer_id: str = "",
 ) -> AnalyzerOutcome:
     """Run one resolved plan. Never raises."""
+    import os
+
+    from mergecraft.utils.payload import read_github_event
+
+    resolved_event_name = event_name or os.environ.get("GITHUB_EVENT_NAME", "")
+    resolved_event = event if event is not None else read_github_event()
     early = _early_unavailable_outcome(plan)
     if early is not None:
         return early
@@ -252,7 +281,14 @@ def run_plan(
     if sandbox_context is not None:
         timeout_s = min(timeout_s, sandbox_context.timeout_s)
     command = _command_string(plan.argv)
-    run_argv, preexec_fn = _sandboxed_argv(plan, sandbox_context)
+    run_argv, preexec_fn = _sandboxed_argv(
+        plan,
+        sandbox_context,
+        event_name=resolved_event_name,
+        event=resolved_event,
+        self_review_level=self_review_level,
+        analyzer_id=analyzer_id or plan.manifest_id,
+    )
 
     result = _run_subprocess(
         run_argv, plan=plan, cwd=cwd, timeout_s=timeout_s, preexec_fn=preexec_fn, command=command

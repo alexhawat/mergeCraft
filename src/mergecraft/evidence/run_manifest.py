@@ -15,6 +15,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from mergecraft import __version__
+from mergecraft.action.inputs import logfire_token_resolvable
 from mergecraft.analyzers.registry import load_catalog
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, default_settings
@@ -119,7 +120,7 @@ def resolve_local_telemetry_defaults(
             cwd=cwd,
         )
     explicit_remote = os.environ.get("MERGECRAFT_TRACING_TO", "").strip().lower() in _REMOTE_SINKS
-    explicit_token = bool(os.environ.get("MERGECRAFT_LOGFIRE_TOKEN", "").strip())
+    explicit_token = logfire_token_resolvable()
     if explicit_remote or explicit_token:
         return resolve_tracing_settings(
             cli_args=[],
@@ -154,7 +155,7 @@ def apply_local_telemetry_defaults(
             and os.environ.get("MERGECRAFT_TRACING_TO", "").strip().lower() in _REMOTE_SINKS
         ):
             continue
-        if key in os.environ and key == "MERGECRAFT_LOGFIRE_TOKEN" and os.environ[key].strip():
+        if key in os.environ and key == "MERGECRAFT_LOGFIRE_TOKEN" and logfire_token_resolvable():
             continue
         if key in os.environ:
             previous[key] = os.environ[key]

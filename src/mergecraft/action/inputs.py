@@ -18,9 +18,13 @@ the run starts (no silent widening of the run's outcome shape).
 from __future__ import annotations
 
 import os
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from mergecraft.config.settings import TraceSinkEntry, TracingSettings
+from mergecraft.config.trust_policy import is_fork_pull_request
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 Shorthand = Literal["local_files", "logfire", "otel"]
 
@@ -130,6 +134,62 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
         "otel_endpoint": otel_endpoint,
         "settings": settings,
     }
+
+
+def logfire_token_resolvable() -> bool:
+    """Return whether ``MERGECRAFT_LOGFIRE_TOKEN`` resolves for the Logfire sink."""
+    from mergecraft.tracing.exporters import resolve_token_ref
+
+    token = resolve_token_ref("MERGECRAFT_LOGFIRE_TOKEN")
+    return bool(isinstance(token, str) and token.strip())
+
+
+def export_tracing_env_from_action_inputs() -> None:
+    """Export ``INPUT_LOGFIRE_TOKEN`` to ``MERGECRAFT_LOGFIRE_TOKEN`` (D11).
+
+    Invoked unconditionally on the Action path **before** sink initialisation.
+    An empty or absent action input does not clobber an already-set
+    ``MERGECRAFT_LOGFIRE_TOKEN``.
+    """
+    resolved = resolve_tracing_from_action_inputs()
+    token = resolved.get("logfire_token")
+    if not isinstance(token, str) or not token.strip():
+        return
+    os.environ["MERGECRAFT_LOGFIRE_TOKEN"] = token.strip()
+
+
+def _action_logfire_tracing_enabled() -> bool:
+    """True when the resolved Action tracing config targets Logfire."""
+    resolved = resolve_tracing_from_action_inputs()
+    enabled: bool | None = resolved.get("enabled")
+    if enabled is None:
+        enabled = _parse_bool(os.environ.get("MERGECRAFT_TRACING"))
+    if not enabled:
+        return False
+    tracing_to = _read_input("INPUT_TRACING_TO")
+    if tracing_to == "logfire":
+        return True
+    sinks = resolved.get("sinks")
+    if not isinstance(sinks, list):
+        return False
+    return any(isinstance(item, dict) and item.get("type") == "logfire" for item in sinks)
+
+
+def collect_tracing_warnings_for_summary() -> list[str]:
+    """Return operator-visible warnings when Logfire tracing is configured but inactive (D12).
+
+    Vocabulary matches :mod:`mergecraft.cli.tracing_gh_visibility` — ``logfire-token``,
+    ``tracing-to: logfire``, and ``MERGECRAFT_LOGFIRE_TOKEN``.
+    """
+    if not _action_logfire_tracing_enabled():
+        return []
+    if logfire_token_resolvable():
+        return []
+    return [
+        "Tracing is enabled with tracing-to: logfire but no Logfire token resolved — "
+        "wire logfire-token in the Action with: block (INPUT_LOGFIRE_TOKEN) or set "
+        "MERGECRAFT_LOGFIRE_TOKEN; the Logfire sink will be a no-op until one is present."
+    ]
 
 
 def apply_tracing_overrides(settings: Any) -> Any:
@@ -254,11 +314,82 @@ def apply_setup_overrides(settings: Any) -> Any:
     return settings.model_copy(update=update)
 
 
+class ForkCredentialInvariantError(RuntimeError):
+    """Fork head + provider credential present — refuse before review starts (D2b)."""
+
+
+_PROVIDER_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OPENAI_API_KEY",
+        "CODEX_AUTH_JSON",
+        "NOUS_API_KEY",
+        "TOKENHUB_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "CURSOR_API_KEY",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "VERTEX_SERVICE_ACCOUNT_JSON",
+    }
+)
+
+
+def _provider_credential_present(env: Mapping[str, str]) -> bool:
+    for key in _PROVIDER_CREDENTIAL_ENV_KEYS:
+        value = env.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    for key, value in env.items():
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if key.startswith("MERGECRAFT_CUSTOM_PROVIDER_API_KEY_"):
+            return True
+        if key.startswith("LLM_PROVIDER_") and key.endswith("_API_KEY"):
+            return True
+        if key.startswith("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_"):
+            continue
+    return False
+
+
+def validate_fork_credential_invariant(
+    *,
+    event: dict[str, Any],
+    env: Mapping[str, str] | None = None,
+    agent_sandbox_tier: str | None = None,
+) -> None:
+    """Refuse fork-head runs that carry provider credentials (lane B D2b).
+
+    Independent of ``trust.agentSandbox`` and the consumer workflow YAML.
+    """
+    _ = agent_sandbox_tier
+    if not is_fork_pull_request(event):
+        return
+    env_map = env if env is not None else os.environ
+    if not _provider_credential_present(env_map):
+        return
+    msg = (
+        "refusing fork pull request run: provider credentials are present in the "
+        "environment but fork heads must not execute with secrets. Skip the review "
+        "or remove credential env vars for fork PRs."
+    )
+    raise ForkCredentialInvariantError(msg)
+
+
 __all__ = [
     "DEFAULT_SETUP_TIMEOUT_S",
+    "ForkCredentialInvariantError",
     "SetupFailurePolicy",
     "apply_setup_overrides",
     "apply_tracing_overrides",
+    "collect_tracing_warnings_for_summary",
+    "export_tracing_env_from_action_inputs",
+    "logfire_token_resolvable",
     "resolve_setup_timeout_s",
     "resolve_tracing_from_action_inputs",
+    "validate_fork_credential_invariant",
 ]

@@ -29,6 +29,7 @@ Configured in `.mergecraft/config.yaml` (default when absent: `off`).
 ```yaml
 trust:
   selfReview: "off"   # quote — YAML 1.1 coerces bare off/on to booleans
+  agentSandbox: "dispatch"  # lane B / #553 — see agentSandbox ladder below
 ```
 
 Valid levels: `off`, `analyzers`, `full` (default when absent: `off`).
@@ -41,6 +42,57 @@ Valid levels: `off`, `analyzers`, `full` (default when absent: `off`).
 
 **Fork PRs are unaffected at every level** — both axes stay untrusted regardless
 of `selfReview`.
+
+## `trust.agentSandbox` — Codex sandbox override ladder (#553)
+
+The Action input `codex_sandbox` (env `MERGECRAFT_CODEX_SANDBOX`) is a **request**
+to skip Codex's nested bubblewrap/Landlock sandbox. Whether that request is
+honoured is decided by `trust.agentSandbox` in the **base snapshot** at run
+start — the same snapshot rule as `selfReview` (D1d). A PR-head edit cannot
+raise its own tier mid-run.
+
+Valid tiers (tightest first): `never`, `merged-only`, `dispatch` (default),
+`same-repo`.
+
+| Tier | Grants `danger-full-access` when… |
+|------|-----------------------------------|
+| `never` | Never |
+| `merged-only` | Bound head SHA is an ancestor of `origin/<default-branch>` (after fetch) |
+| `dispatch` | `workflow_dispatch` on a non-fork head |
+| `same-repo` | Any non-fork head (`workflow_dispatch`, `pull_request`, `pull_request_target`) |
+
+**Fork floor (hard):** a fork head refuses in **every** tier. No config value,
+Action input, or event name reaches it. This is the amended #553 boundary:
+the override cannot take effect on a fork head (not merely on
+`pull_request_target` — same-repo `pull_request_target` may grant at
+`same-repo`).
+
+**`merged-only` caveat (D1e):** an open PR's head is not yet on the default
+branch, so this tier does **not** give a working shell during PR review. It
+exists for scheduled audits and post-merge sweeps on the default branch. "On the
+default branch" only implies "reviewed" where merging requires review (for
+example branch protection with required checks) — it is not a substitute for
+your merge policy.
+
+**Residual risks** (documented in the scaffolded config comment):
+
+- A fork PR checked out onto a local branch looks like a same-repo head.
+- Adding a collaborator widens `same-repo` to anyone with write access.
+
+Inspect and configure:
+
+```bash
+mergecraft trust show
+mergecraft trust set-agent-sandbox dispatch
+mergecraft trust set-agent-sandbox same-repo --i-understand-same-repo-sandbox
+```
+
+Upgrade the pinned Action image **before** writing `agentSandbox` in config —
+`TrustSettings` is `extra="forbid"`, so an unknown key against an older pin
+fails the whole config load (D1f).
+
+Run manifest fields (`agent_sandbox_tier`, `agent_sandbox_honoured`, …) land in
+the evidence packet alongside the `trust_*` keys.
 
 ### Why `full` is not the default
 

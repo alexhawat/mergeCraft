@@ -622,6 +622,7 @@ def render_deterministic_review_block(
     token_summary: str | None = None,
     publication_entrypoint: str | None = None,
     inline_comments_demoted: bool = False,
+    credential_degradations: Sequence[str] | None = None,
 ) -> str:
     """Render the authoritative deterministic review record (D6/D7).
 
@@ -711,6 +712,11 @@ def render_deterministic_review_block(
 
     pre_merge_lines.append("- **CI intelligence:** see packet findings")
     pre_merge_lines.append(f"- **Trust tier:** `{trust_tier or 'unknown'}`")
+    if credential_degradations:
+        for line in credential_degradations:
+            stripped = line.strip()
+            if stripped:
+                pre_merge_lines.append(f"- **Credential gap:** {stripped}")
 
     finding_lines = ["", "### Change-scoped findings", ""]
     if change_findings:

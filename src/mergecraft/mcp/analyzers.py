@@ -93,6 +93,7 @@ def run_analyzers_tool(ctx: ToolContext):
                 # resolves to it on untrusted runs) only narrows selection if it
                 # actually reaches the pipeline.
                 mode=ctx.analyzers_mode,
+                self_review_level=str(ctx.tool_state.trust_self_review_level or "off"),
             )
         _store_run_state(ctx, run_state)
 

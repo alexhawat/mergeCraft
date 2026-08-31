@@ -134,6 +134,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft tracing logfire enable` | Enable Logfire tracing by writing the token + project locally and on GitHub. |
 | `mergecraft tracing logfire unwire-workflow` | Remove Logfire tracing wiring from the consumer workflow. |
 | `mergecraft tracing logfire wire-workflow` | Wire Logfire tracing into the consumer workflow. |
+| `mergecraft trust set-agent-sandbox <tier>` | Write `trust.agentSandbox` to the committed config at `--cwd`. |
 | `mergecraft trust set-self-review <level>` | Write `trust.selfReview` to the committed config at `--cwd`. |
 | `mergecraft trust show` | Show the effective trust policy, level, and resolution source. |
 | `mergecraft update` | Reinstall mergecraft from GitHub using `uv tool install --reinstall`. |

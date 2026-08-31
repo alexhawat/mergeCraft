@@ -49,6 +49,8 @@ cp "${EVENT_FILE}" "${WORK_DIR}/github/event.json"
 chmod +x "${E2E_DIR}/fake-provider-cli/claude" "${E2E_DIR}/fake-provider-cli/codex"
 
 echo "» E2E: image=${IMAGE} event=${EVENT_NAME} api=${API_URL}"
+set +e
+ACTION_EXIT=0
 docker run --rm \
   --add-host=host.docker.internal:host-gateway \
   -v "${WORK_DIR}/workspace:/github/workspace" \
@@ -78,12 +80,31 @@ docker run --rm \
   -e INPUT_MODEL_PIN=enabled \
   -e ANTHROPIC_API_KEY=sk-e2e-fake-anthropic-key \
   "${IMAGE}" \
-  gha
+  gha || ACTION_EXIT=$?
+set -e
+
+# Fork-head pull_request_target + provider credentials must refuse before review
+# (lane B D2b). The fixture event is an external fork; credentials stay in env
+# so the gate is exercised. mergecraft gha exits 30 (configuration_error).
+if [[ "${EVENT_NAME}" == "pull_request_target" ]]; then
+  EXPECT_OUTCOME="configuration_error"
+  REQUIRE_CHECK_RUNS_ARG=()
+  if [[ "${ACTION_EXIT}" -ne 30 ]]; then
+    echo "FAIL: fork pull_request_target expected exit 30 (configuration_error), got ${ACTION_EXIT}" >&2
+    exit 1
+  fi
+else
+  EXPECT_OUTCOME="passed"
+  REQUIRE_CHECK_RUNS_ARG=(--require-check-runs)
+  if [[ "${ACTION_EXIT}" -ne 0 ]]; then
+    exit "${ACTION_EXIT}"
+  fi
+fi
 
 python3 "${E2E_DIR}/assert_e2e_outputs.py" \
   --github-output "${WORK_DIR}/github/output" \
   --check-runs-dir "${CHECK_RUNS_DIR}" \
-  --expect-outcome passed \
-  --require-check-runs
+  --expect-outcome "${EXPECT_OUTCOME}" \
+  "${REQUIRE_CHECK_RUNS_ARG[@]}"
 
 echo "» E2E OK: ${EVENT_NAME}"

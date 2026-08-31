@@ -215,6 +215,9 @@ def run_analyzer_pipeline(
     base_ref: str | None = None,
     shell: str = "restricted",
     mode: AnalyzersMode = "auto",
+    event_name: str | None = None,
+    event: dict[str, Any] | None = None,
+    self_review_level: str = "off",
 ) -> AnalyzerRunState:
     """Run enabled analyzers end-to-end and return scoped, budgeted findings.
 
@@ -256,7 +259,15 @@ def run_analyzer_pipeline(
             ),
         )
 
+    import os
+
+    from mergecraft.utils.payload import read_github_event
+
     repo_binaries_allowed = allow_repo_provided_binaries(shell=shell)
+    resolved_event_name = (
+        event_name if event_name is not None else os.environ.get("GITHUB_EVENT_NAME", "")
+    )
+    resolved_event = event if event is not None else read_github_event()
     effective_mode = resolve_effective_analyzers_mode(mode=mode, tier=tier)
     selection_tier = resolve_selection_tier(mode=effective_mode, tier=tier)
     tier_skip_cause = (
@@ -318,6 +329,9 @@ def run_analyzer_pipeline(
                         base_ref=base_ref,
                         offline=offline,
                         allow_repo_binaries=repo_binaries_allowed,
+                        event_name=resolved_event_name,
+                        event=resolved_event,
+                        self_review_level=self_review_level,
                     )
                 except (KeyError, OSError, ValueError) as exc:
                     logger.info("analyzer {} unavailable: {}", manifest.id, exc)
