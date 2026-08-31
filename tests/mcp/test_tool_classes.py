@@ -149,6 +149,8 @@ def test_reviewer_receives_no_mutation_tool(tool_ctx: ToolContext) -> None:
         "create_pull_request_review",
         "report_progress",
         "record_finding_verdict",
+        "record_reviewer_dispatch_error",
+        "record_reviewer_dispatch_run",
         "submit_review_verdict",
     }, f"reviewer received unexpected mutation tools: {leaked}"
     # Allowed non-base classes on the primary reviewer (deliberate C6 / D9 admissions).
@@ -492,6 +494,9 @@ def test_live_reviewer_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
             "submit_review_verdict",
             "verify_agent_findings",
             "record_finding_verdict",
+            # D7/D15 roster dispatch attribution (REVIEW_WRITE, mutates=False).
+            "record_reviewer_dispatch_run",
+            "record_reviewer_dispatch_error",
         ):
             assert present in names, f"{present!r} must be on primary /mcp/reviewer"
         for denied in (
