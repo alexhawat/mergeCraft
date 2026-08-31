@@ -1,4 +1,4 @@
-"""B1 GitHub list pagination contracts (green after TP2)."""
+"""B1 GitHub list pagination contracts."""
 
 from __future__ import annotations
 

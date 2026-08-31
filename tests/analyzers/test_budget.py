@@ -197,7 +197,6 @@ def _overflow_agent_finding(**overrides: object) -> dict[str, object]:
     return row
 
 
-@pytest.mark.xfail(reason="green after TP5: overflow line 0 clamp", strict=False)
 def test_overflow_agent_line_zero_clamps_to_start_line_one() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     placement = budget.place_findings(
@@ -211,7 +210,6 @@ def test_overflow_agent_line_zero_clamps_to_start_line_one() -> None:
     assert overflow[0].end_line == 1
 
 
-@pytest.mark.xfail(reason="green after TP5: overflow negative line clamp", strict=False)
 def test_overflow_agent_negative_line_clamps_to_one() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     placement = budget.place_findings(
