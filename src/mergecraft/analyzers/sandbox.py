@@ -8,7 +8,7 @@ import re
 import resource
 import subprocess
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -114,6 +114,17 @@ class SandboxPlan:
     skip_reason: str | None = None
     skip_finding: Finding | None = None
     context: SandboxContext | None = None
+
+
+EgressPolicyStatus = Literal["allowed", "skipped"]
+
+
+@dataclass(frozen=True, slots=True)
+class AnalyzerEgressPolicyOutcome:
+    """Result of ``evaluate_analyzer_egress_policy`` (D6)."""
+
+    status: EgressPolicyStatus
+    reason: str
 
 
 _PROBE_TEST_DOUBLE: dict[str, str] = {
@@ -398,6 +409,73 @@ def analyzer_socket_mask_fragment() -> str:
     )
 
 
+def egress_trusted_for_host_networking(
+    *,
+    event_name: str | None,
+    event: dict[str, Any] | None,
+) -> bool:
+    """Whether a non-empty ``network_allowlist`` may drop ``--net`` (D5/D5a/D7).
+
+    Keys on fork status and event name — never ``execution_trust`` or
+    ``selfReview`` elevation (D5a).
+    """
+    if event_name is None and event is None:
+        return True
+    if not event:
+        return False
+    from mergecraft.config.trust_policy import is_fork_pull_request
+
+    if event_name == "pull_request_target":
+        return False
+    if is_fork_pull_request(event):
+        return False
+    if event_name == "workflow_dispatch":
+        return True
+    return event_name == "pull_request"
+
+
+def _egress_tier_label(event_name: str, event: dict[str, Any]) -> str:
+    from mergecraft.config.trust_policy import is_fork_pull_request
+
+    if is_fork_pull_request(event):
+        return f"untrusted ({event_name}, fork head)"
+    return f"untrusted ({event_name})"
+
+
+def _resolve_isolate_network(
+    context: SandboxContext,
+    *,
+    event_name: str,
+    event: dict[str, Any],
+) -> bool:
+    if not context.network_allowlist:
+        return True
+    return not egress_trusted_for_host_networking(event_name=event_name, event=event)
+
+
+def evaluate_analyzer_egress_policy(
+    *,
+    analyzer_id: str,
+    network_allowlist: list[str],
+    event_name: str,
+    event: dict[str, Any],
+    self_review_level: str = "off",
+) -> AnalyzerEgressPolicyOutcome:
+    """Decide whether an analyzer may run with declared egress (D5/D6)."""
+    _ = self_review_level  # D5a: egress keys on fork/event, not selfReview elevation
+    if not network_allowlist:
+        return AnalyzerEgressPolicyOutcome(status="allowed", reason="")
+    if egress_trusted_for_host_networking(event_name=event_name, event=event):
+        return AnalyzerEgressPolicyOutcome(status="allowed", reason="")
+    tier_label = _egress_tier_label(event_name, event)
+    hosts = ", ".join(network_allowlist)
+    reason = (
+        f"Skipped: egress policy — {analyzer_id} declares network hosts "
+        f"({hosts}) but {tier_label} cannot enforce filtered egress"
+    )
+    return AnalyzerEgressPolicyOutcome(status="skipped", reason=reason)
+
+
 def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
     argv: list[str] = ["unshare", "--pid", "--fork", "--mount-proc"]
@@ -420,27 +498,23 @@ def build_analyzer_sandbox_argv(
     argv: tuple[str, ...],
     *,
     context: SandboxContext,
+    isolate_network: bool | None = None,
 ) -> list[str]:
     """Return argv for a sandboxed analyzer subprocess (D6)."""
     from mergecraft.mcp.shell import detect_sandbox_method
 
     method = detect_sandbox_method()
     wrapped = build_analyzer_sandbox_command(argv, context=context)
-    # An analyzer that declares ``network_allowlist`` needs egress to do its job
-    # at all: ``osv-scanner`` fetches from api.osv.dev, ``trivy`` from
-    # ghcr.io / trivy-db.github.io. ``unshare --net`` gives a namespace with no
-    # external connectivity, so isolating those would not harden them, it would
-    # break them -- and silently, because an analyzer that errors is reported
-    # unavailable rather than as a finding, so dependency-vuln scanning would
-    # just stop producing results.
-    #
-    # LIMITATION: this honours the manifest's *declared* intent. Nothing yet
-    # restricts a network-declaring analyzer to the hosts it listed -- the
-    # allowlist reaches ``SandboxContext`` and is discarded at
-    # ``trust.py:228``. Until egress filtering exists, declaring a non-empty
-    # allowlist buys host networking, not filtered networking. Analyzers with
-    # an empty allowlist keep full network isolation.
-    unshare_argv = _analyzer_unshare_argv(isolate_network=not context.network_allowlist)
+    if isolate_network is None:
+        isolate_network = not context.network_allowlist
+    # Trusted runs with a declared ``network_allowlist`` drop ``--net`` so
+    # ``osv-scanner`` / ``trivy`` can reach their upstreams (D7). Untrusted
+    # runs always keep ``--net`` when the allowlist is non-empty — filtered
+    # egress does not exist yet, so host networking is never granted on fork
+    # heads or ``pull_request_target`` (D5/D5a). See
+    # ``evaluate_analyzer_egress_policy`` for the named skip when running
+    # isolated would be pointless or sandboxing is unavailable (D5b/D6).
+    unshare_argv = _analyzer_unshare_argv(isolate_network=isolate_network)
     if method == "sudo-unshare":
         return ["sudo", *unshare_argv, "bash", "-c", wrapped]
     if method == "unshare":
@@ -448,7 +522,24 @@ def build_analyzer_sandbox_argv(
     return list(argv)
 
 
+def build_analyzer_sandbox_argv_for_run(
+    argv: tuple[str, ...],
+    *,
+    context: SandboxContext,
+    event_name: str,
+    event: dict[str, Any],
+    self_review_level: str = "off",
+    analyzer_id: str = "",
+) -> list[str]:
+    """Trust-aware wrapper around ``build_analyzer_sandbox_argv`` (D5/D5a)."""
+    _ = analyzer_id, self_review_level
+    isolate = _resolve_isolate_network(context, event_name=event_name, event=event)
+    return build_analyzer_sandbox_argv(argv, context=context, isolate_network=isolate)
+
+
 __all__ = [
+    "AnalyzerEgressPolicyOutcome",
+    "EgressPolicyStatus",
     "NetworkDefault",
     "SandboxCapabilities",
     "SandboxContext",
@@ -457,8 +548,11 @@ __all__ = [
     "analyzer_isolation_mount_fragment",
     "analyzer_socket_mask_fragment",
     "build_analyzer_sandbox_argv",
+    "build_analyzer_sandbox_argv_for_run",
     "build_analyzer_sandbox_command",
     "build_sandbox_context",
+    "egress_trusted_for_host_networking",
+    "evaluate_analyzer_egress_policy",
     "plan_sandbox",
     "probe_capabilities",
     "reset_detection_cache",
