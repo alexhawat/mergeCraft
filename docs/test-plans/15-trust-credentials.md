@@ -91,6 +91,17 @@ Pinned API (W4): `mergecraft.utils.agent_resolve.credential_status_for_slug`, `f
 
 Pinned API (W5): `mergecraft.action.inputs.export_tracing_env_from_action_inputs`, `collect_tracing_warnings_for_summary`.
 
+## W2b — Publication guard re-baseline → W2b Step 3
+
+| Contract | Tests | Layer |
+| --- | --- | --- |
+| checkout_pr tree swap publishes (#582) | `tests/config/test_publication_guard_w2b.py::test_checkout_pr_tree_swap_publishes_normally` | unit |
+| Post-rebaseline edit refuses | `…::test_config_edit_after_rebaseline_refuses` | unit |
+| Absent config snapshot no fail-closed | `…::test_snapshot_without_config_file_does_not_fail_closed` | unit |
+| Legitimate PR config edit publishes (#562) | `…::test_pr_config_edit_in_diff_publishes_with_pinned_settings` | unit |
+
+Pinned API (W2b): `rebaseline_repo_settings_snapshot`, `assert_config_unchanged`, `repo_settings_from_context`.
+
 ## W1.5 — Entropy redaction → W6
 
 | Contract | Tests | Layer |
@@ -106,7 +117,7 @@ Pinned API (W5): `mergecraft.action.inputs.export_tracing_env_from_action_inputs
 | W2 | `green after W2:` | `test_codex_sandbox_policy.py`, `test_fork_credential_invariant.py`, `test_trust_agent_sandbox_settings.py`, `test_trust_agent_sandbox_cmd.py` | **reconciled** — markers removed 2026-08-31 |
 | W3 | `green after W3:` | `test_analyzer_egress_policy.py` | pending |
 | W4 | `green after W4:` | `test_credential_status_for_slug.py`, `test_credential_p0_skip.py` | **reconciled** — markers removed 2026-08-31 |
-| W5 | `green after W5:` | `test_logfire_action_token_seam.py`, `test_tracing_inactive_summary_warning.py` | pending |
+| W5 | `green after W5:` | `test_logfire_action_token_seam.py`, `test_tracing_inactive_summary_warning.py` | **reconciled** — markers removed 2026-08-31 |
 | W6 | `green after W6:` | `test_entropy_redaction_sweep.py` (`classify_entropy_redaction_hits`) | pending |
 
 ## W1 RED evidence
@@ -130,5 +141,6 @@ env -u VIRTUAL_ENV uv run pytest --collect-only -q \
   tests/analyzers/test_entropy_redaction_sweep.py \
   tests/utils/test_credential_status_for_slug.py \
   tests/tracing/exporters/test_logfire_action_token_seam.py \
-  tests/tracing/test_tracing_inactive_summary_warning.py
+  tests/tracing/test_tracing_inactive_summary_warning.py \
+  tests/config/test_publication_guard_w2b.py
 ```

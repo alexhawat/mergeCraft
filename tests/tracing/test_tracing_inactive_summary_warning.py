@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.trust_credentials.support import W5_XFAIL, import_action_symbol
+from tests.trust_credentials.support import import_action_symbol
 
 if TYPE_CHECKING:
     import pytest
 
 
-@W5_XFAIL
 def test_tracing_enabled_without_token_surfaces_run_summary_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

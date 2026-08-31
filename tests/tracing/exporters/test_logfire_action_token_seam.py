@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from tests.trust_credentials.support import W5_XFAIL, import_action_symbol
+from tests.trust_credentials.support import import_action_symbol
 
 _CANARY = "pylf_v2_lane_b_canary_token_do_not_log"
 
 
-@W5_XFAIL
 def test_input_logfire_token_reaches_build_logfire_sink(monkeypatch: pytest.MonkeyPatch) -> None:
     """D11 — INPUT_LOGFIRE_TOKEN + tracing-to logfire resolves at _build_logfire_sink."""
     pytest.importorskip("logfire")
@@ -57,7 +56,6 @@ def test_absent_input_keeps_logfire_no_op_warning_path(
     assert any("no token resolved" in message.lower() for message in captured)
 
 
-@W5_XFAIL
 def test_empty_input_does_not_clobber_existing_mergecraft_logfire_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -73,7 +71,6 @@ def test_empty_input_does_not_clobber_existing_mergecraft_logfire_token(
     assert os.environ.get("MERGECRAFT_LOGFIRE_TOKEN") == _CANARY
 
 
-@W5_XFAIL
 def test_logfire_token_never_in_model_context_or_prompt_dump(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -92,7 +89,6 @@ def test_logfire_token_never_in_model_context_or_prompt_dump(
     assert "logfire_token" not in dumped.lower()
 
 
-@W5_XFAIL
 def test_logfire_token_redacted_in_logs(monkeypatch: pytest.MonkeyPatch) -> None:
     """tracing/redaction.py — LOGFIRE_TOKEN-shaped values are redacted in log output."""
     from mergecraft.tracing.redaction import redact_cli_argv
