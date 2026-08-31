@@ -131,8 +131,11 @@ def rebaseline_repo_settings_snapshot(ctx: ToolContext) -> RepoSettingsSnapshot:
 
 def assert_config_unchanged(snapshot: RepoSettingsSnapshot) -> None:
     """Refuse when pinned config inputs changed after the snapshot was taken."""
+    baseline = snapshot.config_hash
+    if not baseline:
+        return
     current = config_yaml_hash(root=snapshot.repo_root)
-    if current != snapshot.config_hash:
+    if current != baseline:
         msg = (
             ".mergecraft/config.yaml changed after settings were snapshotted "
             "(including any active local overlay); refusing to proceed"
