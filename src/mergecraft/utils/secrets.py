@@ -215,6 +215,8 @@ def build_agent_env(
     agent_id: str,
     extras: dict[str, str] | None = None,
     model: str | None = None,
+    *,
+    codex_broker_active: bool = False,
 ) -> dict[str, str]:
     """Build an explicit allowlist env for agent CLI subprocesses (D2 / W2.1).
 
@@ -245,9 +247,11 @@ def build_agent_env(
 
     active_key = ACTIVE_PROVIDER_KEY_BY_AGENT.get(agent_id)
     if active_key and active_key not in registry_mapped:
-        raw = os.environ.get(active_key, "").strip()
-        if raw:
-            env[active_key] = raw
+        skip_codex_openai = agent_id == "codex" and codex_broker_active
+        if not skip_codex_openai:
+            raw = os.environ.get(active_key, "").strip()
+            if raw:
+                env[active_key] = raw
         if agent_id == "gemini":
             alt = os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY", "").strip()
             if alt and not env.get("GEMINI_API_KEY"):

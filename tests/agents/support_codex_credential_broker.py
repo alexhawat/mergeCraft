@@ -6,6 +6,7 @@ import ast
 import importlib
 import json
 import tomllib
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -20,8 +21,6 @@ from tests.security.support_agent_isolation import (
 __all__ = ["REAL_OPENAI_API_KEY_FIXTURE"]
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.agents.shared import AgentRunContext
 
 
@@ -42,8 +41,8 @@ def load_codex_module() -> Any:
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 
 
-def parse_codex_config(config_path: Path) -> dict[str, Any]:
-    return tomllib.loads(config_path.read_text(encoding="utf-8"))
+def parse_codex_config(config_path: Path | str) -> dict[str, Any]:
+    return tomllib.loads(Path(config_path).read_text(encoding="utf-8"))
 
 
 def brokered_codex_context(

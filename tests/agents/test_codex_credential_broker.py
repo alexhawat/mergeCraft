@@ -8,7 +8,9 @@ and lane-B sandbox symbol isolation (D8).
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+import sys
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,7 +28,6 @@ from tests.agents.support_codex_credential_broker import (
 from tests.security.support_agent_isolation import (
     LANE_B_SANDBOX_SYMBOLS,
     REAL_OPENAI_API_KEY_FIXTURE,
-    W3_XFAIL,
     assert_credential_absent,
     load_broker_module,
     require_broker_symbol,
@@ -34,15 +35,22 @@ from tests.security.support_agent_isolation import (
 
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 def _simulate_root_chown(monkeypatch: pytest.MonkeyPatch, codex_module: Any) -> None:
     from mergecraft.utils import privilege as privilege_module
 
+    class _FakePw:
+        pw_name = "mergecraft"
+        pw_uid = 1001
+        pw_gid = 1001
+        pw_dir = "/home/mergecraft"
+
     monkeypatch.setattr(privilege_module.os, "getuid", lambda: 0)
+    monkeypatch.setattr(privilege_module, "_in_action_image", lambda: True)
     monkeypatch.setattr(codex_module, "_FORBIDDEN_TEMP_ROOTS", ())
+    fake_pwd = MagicMock()
+    fake_pwd.getpwnam.return_value = _FakePw()
+    monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
     captured: list[list[str]] = []
 
     def _fake_chown_run(cmd: list[str], **kwargs: object) -> object:
@@ -57,11 +65,10 @@ def _baseline_mcp_tables(ctx_path: Path) -> dict[str, Any]:
     codex_module = load_codex_module()
     ctx = brokered_codex_context(ctx_path)
     config_path = codex_module.write_mcp_config(ctx)
-    parsed = parse_codex_config(config_path)
+    parsed = parse_codex_config(Path(config_path))
     return parsed.get("mcp_servers", {})
 
 
-@W3_XFAIL
 def test_brokered_agent_env_carries_throwaway_not_live_openai_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -79,7 +86,6 @@ def test_brokered_agent_env_carries_throwaway_not_live_openai_key(
     assert REAL_OPENAI_API_KEY_FIXTURE not in env.values()
 
 
-@W3_XFAIL
 def test_auth_json_contains_no_real_api_credential_after_setup_and_chown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -100,7 +106,6 @@ def test_auth_json_contains_no_real_api_credential_after_setup_and_chown(
     assert REAL_OPENAI_API_KEY_FIXTURE not in auth_text
 
 
-@W3_XFAIL
 def test_model_providers_base_url_points_at_loopback_broker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -125,7 +130,6 @@ def test_model_providers_base_url_points_at_loopback_broker(
         assert block.get("base_url") == broker_base
 
 
-@W3_XFAIL
 def test_mcp_table_unchanged_under_broker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -146,7 +150,6 @@ def test_mcp_table_unchanged_under_broker(
             assert before[name] == after[name]
 
 
-@W3_XFAIL
 def test_subscription_auth_marks_broker_inactive_and_run_record_says_so(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -166,7 +169,6 @@ def test_subscription_auth_marks_broker_inactive_and_run_record_says_so(
     assert "inactive" in record_text.casefold() or "subscription" in record_text.casefold()
 
 
-@W3_XFAIL
 def test_subscription_auth_leaves_auth_json_untouched(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -187,7 +189,6 @@ def test_subscription_auth_leaves_auth_json_untouched(
     assert auth_json_text(codex_module, ctx) == USABLE_SUBSCRIPTION_AUTH_JSON
 
 
-@W3_XFAIL
 def test_broker_start_failure_does_not_silently_reinject_openai_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -231,7 +232,6 @@ def test_broker_start_failure_does_not_silently_reinject_openai_key(
         pytest.fail("silent fallback re-injected the live OPENAI_API_KEY")
 
 
-@W3_XFAIL
 def test_build_env_does_not_reference_lane_b_sandbox_symbols() -> None:
     """D8 — broker wire-up must not touch lane-B sandbox gate symbols."""
     referenced = referenced_names_in_function("_build_env")
@@ -239,7 +239,6 @@ def test_build_env_does_not_reference_lane_b_sandbox_symbols() -> None:
     assert not overlap, f"_build_env must not reference lane-B symbols: {sorted(overlap)}"
 
 
-@W3_XFAIL
 def test_prepare_codex_brokered_run_does_not_reference_lane_b_sandbox_symbols() -> None:
     """D8 — dedicated broker prep must stay clear of lane-B sandbox gate symbols."""
     codex_module = load_codex_module()
@@ -253,7 +252,6 @@ def test_prepare_codex_brokered_run_does_not_reference_lane_b_sandbox_symbols() 
     )
 
 
-@W3_XFAIL
 def test_lane_b_sandbox_symbols_remain_defined_in_codex_module() -> None:
     """D8 regression guard — lane-B symbols must remain present for parallel lane B."""
     codex_module = load_codex_module()
