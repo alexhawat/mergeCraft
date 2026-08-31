@@ -200,7 +200,12 @@ markers = [
 [tool.coverage.run]
 source = ["mergecraft"]
 branch = true
-omit = ["*/tests/*"]
+omit = [
+    "*/tests/*",
+    "*/pytest-of-*/*",
+    "*/scratch/*",
+    "*/.ci-mergecraft-base-coverage/*",
+]
 
 [tool.coverage.report]
 fail_under = 82

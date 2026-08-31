@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Lane C — CI gate correctness & operator surface
+
+#### Added
+
+- `mergecraft provider status` shows what CI will run — each reviewer agent's
+  `pN` slots, credential and workflow-wiring state, dispatch level, and skipped
+  slots — with `--json` for scripting and optional `--github` to report repo
+  secret presence without printing values (#520)
+
+#### Fixed
+
+- Coverage delta on pull requests no longer fails when the merge-base branch
+  cannot measure coverage; the PR checkout still runs `make coverage-gate` and
+  the skip is surfaced as an Actions warning and job-summary line naming the
+  base ref and reason (#536)
+- Base-branch coverage measurement reads that worktree's
+  `.mergecraft/config.yaml` instead of the PR head's — a PR that adds a config
+  key and its schema field no longer fails the base run (#573)
+
 ### Added
 
 - `mergecraft agent` and `mergecraft agent-local` author the agent roster —

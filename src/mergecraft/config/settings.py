@@ -750,13 +750,50 @@ def parse_learnings_headings(body: str | None) -> list[LearningsHeading]:
     return result
 
 
+def _path_is_inside(child: Path, parent: Path) -> bool:
+    try:
+        child.resolve().relative_to(parent.resolve())
+    except (OSError, ValueError):
+        return False
+    else:
+        return True
+
+
 def _workspace_root(explicit: Path | None = None) -> Path:
+    """Resolve the repo root for config and learnings paths.
+
+    #573: the coverage gate re-points ``GITHUB_WORKSPACE`` at the base worktree
+    it is measuring. When settings load from a *different* linked worktree of the
+    same repo (cwd in the base tree, ``GITHUB_WORKSPACE`` at the head checkout),
+    prefer the cwd worktree so each tree reads its own ``.mergecraft/config``.
+    """
     if explicit is not None:
         return explicit
-    workspace = os.environ.get("GITHUB_WORKSPACE")
-    if workspace:
-        return Path(workspace)
-    return Path.cwd()
+    cwd = Path.cwd()
+    workspace_env = os.environ.get("GITHUB_WORKSPACE")
+    if not workspace_env:
+        return cwd
+    workspace = Path(workspace_env)
+    try:
+        workspace_resolved = workspace.resolve()
+        cwd_resolved = cwd.resolve()
+    except OSError:
+        return workspace
+    if _path_is_inside(cwd, workspace) or cwd_resolved == workspace_resolved:
+        return workspace
+    # Lazy import: source_resolve → analyzers.trust → settings at module load.
+    from mergecraft.utils.source_resolve import is_registered_git_worktree, resolve_git_common_dir
+
+    cwd_common = resolve_git_common_dir(cwd_resolved)
+    ws_common = resolve_git_common_dir(workspace_resolved)
+    if (
+        cwd_common is not None
+        and ws_common is not None
+        and cwd_common == ws_common
+        and is_registered_git_worktree(cwd_resolved)
+    ):
+        return cwd_resolved
+    return workspace
 
 
 def _read_text(path: Path) -> str | None:

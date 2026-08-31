@@ -256,6 +256,7 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 | `mergecraft review --json out.json` | Structured findings on disk |
 | [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) | Contractual exit codes — branch on them instead of parsing text |
 | `mergecraft doctor` | Self-diagnosis of git, providers, analyzers, auth, config and MCP wiring |
+| `mergecraft provider status` | Roster inspection — what CI will run, credential and wiring state, optional `--github` secret check |
 | [`docs/mcp.md`](docs/mcp.md) | **Public MCP install** — six review-only tools over stdio for Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode |
 | `mergecraft mcp serve` | The reviewer's **in-run** MCP tool surface at `/mcp/reviewer`, Bearer-authenticated (not the public stdio profile) |
 
@@ -451,6 +452,7 @@ When `harness:` is unset, mergeCraft infers the runtime from the model slug — 
 | [`docs/glossary.md`](docs/glossary.md) | Plain-language definitions for landing-page terms |
 | [`docs/install.md`](docs/install.md) | Action vs CLI vs Docker install paths |
 | [`docs/authentication.md`](docs/authentication.md) | Providers, custom gateways, model fallback chains |
+| [`docs/agent-roster.md`](docs/agent-roster.md) | Agent roster, `provider status`, multi-reviewer merge, trust snapshot |
 | [`docs/workflows.md`](docs/workflows.md) | Examples 2–6, trust tiers, `pull_request_target` gotchas |
 | [`docs/cli.md`](docs/cli.md) | Full `mergecraft` command reference |
 | [`docs/action-reference.md`](docs/action-reference.md) | Every Action `with:` input and output |
