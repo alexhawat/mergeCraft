@@ -642,6 +642,26 @@ class GitHubClient:
 
         return await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
 
+    async def list_workflow_runs_for_head_sha(
+        self,
+        owner: str,
+        repo: str,
+        head_sha: str,
+    ) -> ListedItems:
+        """List workflow runs for a commit SHA (every page, not only the first 100)."""
+
+        async def _fetch_page(page: int) -> Any:
+            return await self.get(
+                f"/repos/{owner}/{repo}/actions/runs",
+                params={
+                    "head_sha": head_sha,
+                    "per_page": GITHUB_LIST_PAGE_SIZE,
+                    "page": page,
+                },
+            )
+
+        return await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
+
     async def list_workflow_run_artifacts(
         self,
         owner: str,

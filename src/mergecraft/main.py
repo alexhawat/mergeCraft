@@ -1494,6 +1494,7 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
+    await _ingest_ci_sarif_from_action_env(ctx)
     await _run_setup_script_phase(ctx)
 
     assert ctx.settings is not None
@@ -1798,4 +1799,101 @@ async def main() -> MainResult:
             reset_gateway_settings_cache()
 
 
-__all__ = ["MainResult", "RunOutcome", "main", "publish_deterministic_record"]
+def _ci_wait_inputs_from_env() -> tuple[str, int] | None:
+    """Read wait-for-ci outputs forwarded by the consumer workflow into the Action env."""
+    state = (os.environ.get("MERGECRAFT_CI_WAIT_STATE") or os.environ.get("CI_STATE") or "").strip()
+    if not state:
+        return None
+    raw_count = (
+        os.environ.get("MERGECRAFT_CI_FAILED_COUNT") or os.environ.get("CI_FAILED_COUNT") or "0"
+    ).strip()
+    try:
+        failed_count = int(raw_count)
+    except ValueError:
+        failed_count = 0
+    return state, failed_count
+
+
+async def ingest_ci_sarif_after_ci_wait(
+    ctx: ToolContext,
+    *,
+    ci_wait_state: str,
+    ci_failed_count: int,
+    head_sha: str,
+    check_suite_id: int | None = None,
+) -> None:
+    """Ingest declared CI SARIF artifacts after wait-for-ci completes (D9 / #600).
+
+    ``check_suite_id`` is accepted for call-site symmetry with failed-CI prompts but
+    is not required: green CI lists workflow runs for ``head_sha`` instead.
+    """
+    _ = (ci_failed_count, check_suite_id)
+    if ci_wait_state != "complete":
+        return
+    if not head_sha.strip():
+        return
+
+    from mergecraft.ci.evidence import record_ci_findings
+    from mergecraft.ci.intelligence import collect_ci_sarif_findings
+    from mergecraft.utils import gha_log
+
+    client = github_client_from_scm(ctx.scm)
+    if client is None:
+        gha_log.warning("ci evidence: SARIF ingest skipped — no GitHub client")
+        return
+
+    try:
+        listed = await client.list_workflow_runs_for_head_sha(
+            ctx.repo.owner,
+            ctx.repo.name,
+            head_sha.strip(),
+        )
+    except Exception as err:
+        message = f"ci evidence: workflow run listing failed for {head_sha[:7]} — {err}"
+        logger.warning(message)
+        gha_log.warning(message)
+        return
+
+    if listed.incomplete:
+        message = (
+            f"ci evidence: workflow run listing truncated for {head_sha[:7]} — "
+            "not treating as complete"
+        )
+        logger.warning(message)
+        gha_log.warning(message)
+        return
+
+    findings = await collect_ci_sarif_findings(ctx, client=client, runs=listed.items)
+    if findings:
+        record_ci_findings(ctx.tool_state, findings)
+
+
+async def _ingest_ci_sarif_from_action_env(ctx: RunContext) -> None:
+    """Action-side SARIF ingest lane — not agent-invoked (D9)."""
+    assert ctx.tool_context is not None
+    wait_inputs = _ci_wait_inputs_from_env()
+    if wait_inputs is None:
+        return
+    ci_wait_state, ci_failed_count = wait_inputs
+    from mergecraft.config.trust_policy import bound_head_sha
+
+    gh_event = ctx.gh_event or {}
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    head_sha = bound_head_sha(gh_event, event_name=event_name)
+    if not head_sha:
+        return
+    await ingest_ci_sarif_after_ci_wait(
+        ctx.tool_context,
+        ci_wait_state=ci_wait_state,
+        ci_failed_count=ci_failed_count,
+        head_sha=head_sha,
+    )
+
+
+__all__ = [
+    "MainResult",
+    "RunOutcome",
+    "ingest_ci_sarif_after_ci_wait",
+    "main",
+    "publish_deterministic_record",
+]

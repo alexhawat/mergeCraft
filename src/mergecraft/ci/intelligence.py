@@ -233,11 +233,11 @@ async def collect_ci_sarif_findings(
                 for document in _sarif_documents(archive):
                     findings.extend(sarif_findings(document, artifact=name, repo_root=repo_root))
             except Exception as artifact_err:
-                logger.warning(
-                    "ci evidence: SARIF artifact {} ingest failed — {}",
-                    name,
-                    artifact_err,
-                )
+                message = f"ci evidence: SARIF artifact {name} ingest failed — {artifact_err}"
+                logger.warning(message)
+                from mergecraft.utils import gha_log
+
+                gha_log.warning(message)
                 continue
     return findings
 
