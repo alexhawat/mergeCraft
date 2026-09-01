@@ -139,7 +139,9 @@ def test_codex_brokered_env_throwaway_in_openai_api_key_allowed(
     )
     prepared = prepare_codex_brokered_run(ctx)
     _assert_no_credentials(prepared.agent_env, active_key=_ACTIVE_PROVIDER_KEY["codex"])
-    assert prepared.agent_env.get("OPENAI_API_KEY") != REAL_OPENAI_API_KEY_FIXTURE
+    throwaway = prepared.agent_env.get("OPENAI_API_KEY")
+    assert throwaway, "broker throwaway must be routed through OPENAI_API_KEY for Codex 0.149"
+    assert throwaway != REAL_OPENAI_API_KEY_FIXTURE
 
 
 def test_opencode_agent_env_contains_no_credentials() -> None:
