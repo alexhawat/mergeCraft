@@ -258,7 +258,6 @@ def _setup_codex_auth(
     ctx: AgentRunContext,
     *,
     codex_home: Path,
-    broker_base_url: str | None = None,
 ) -> None:
     raw = os.environ.get(CODEX_AUTH_ENV, "").strip()
     if raw and subscription_auth_usable(raw):
@@ -275,15 +274,6 @@ def _setup_codex_auth(
         )
     session = current_broker_session()
     if session is not None and session.active:
-        codex_home.mkdir(parents=True, exist_ok=True)
-        auth_path = codex_home / "auth.json"
-        stub: dict[str, str] = {
-            "auth_mode": "broker",
-            "bearer_env": OPENAI_API_KEY_ENV,
-        }
-        if broker_base_url:
-            stub["broker_base_url"] = broker_base_url
-        auth_path.write_text(json.dumps(stub), encoding="utf-8")
         return
     if _has_openai_api_key():
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
@@ -625,8 +615,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
         # in build_agent_env so the real parent key never reaches the agent.
         extra[OPENAI_API_KEY_ENV] = handle.token
     env = build_agent_env("codex", extra, model=ctx.resolved_model)
-    broker_base_url = handle.base_url if handle is not None else None
-    _setup_codex_auth(ctx, codex_home=codex_home, broker_base_url=broker_base_url)
+    _setup_codex_auth(ctx, codex_home=codex_home)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
     # (config.toml, mergecraft-instructions.md, auth.json) while this process
     # still runs as root. wrap_agent_command()'s setpriv drops the actual

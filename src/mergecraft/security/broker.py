@@ -38,7 +38,7 @@ from mergecraft.security.egress import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
 BROKER_BIND_HOST = "127.0.0.1"
 CODEX_BROKER_BEARER_ENV = "MERGECRAFT_CODEX_BROKER_TOKEN"
@@ -56,6 +56,36 @@ _MODEL_PATH_PREFIXES: tuple[str, ...] = (
 _MAX_BROKER_BODY_BYTES = 50 * 1024 * 1024
 
 _HOST_SPOOF_HEADERS: tuple[str, ...] = ("Host", "X-Forwarded-Host")
+_HOP_BY_HOP_HEADERS: frozenset[str] = frozenset(
+    {
+        "transfer-encoding",
+        "connection",
+        "te",
+        "trailer",
+        "upgrade",
+        "proxy-authorization",
+        "expect",
+        "host",
+        "content-length",
+        "authorization",
+    }
+)
+_ALLOWED_FORWARD_HEADERS: frozenset[str] = frozenset(
+    {
+        "content-type",
+        "accept",
+        "accept-encoding",
+    }
+)
+_ALLOWED_FORWARD_HEADER_PREFIXES: tuple[str, ...] = ("openai-", "beta")
+_STRIPPED_RESPONSE_HEADERS: frozenset[str] = frozenset(
+    {
+        "transfer-encoding",
+        "content-length",
+        "content-encoding",
+        "connection",
+    }
+)
 _REDIRECT_STATUSES: frozenset[int] = frozenset(
     {
         HTTPStatus.MOVED_PERMANENTLY,
@@ -248,6 +278,48 @@ def _upstream_request_path(request_path: str) -> str:
     return path if path.startswith("/") else f"/{path}"
 
 
+def _upstream_timeout() -> httpx.Timeout:
+    agent_timeout = float(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
+    return httpx.Timeout(
+        connect=30.0,
+        read=agent_timeout,
+        write=agent_timeout,
+        pool=agent_timeout,
+    )
+
+
+def _forward_parent_headers(
+    headers: Iterable[tuple[str, str]],
+    *,
+    api_key: str,
+) -> dict[str, str]:
+    forward: dict[str, str] = {}
+    for key, value in headers:
+        lowered = key.lower()
+        if lowered in _HOP_BY_HOP_HEADERS:
+            continue
+        if lowered in _ALLOWED_FORWARD_HEADERS or lowered.startswith(
+            _ALLOWED_FORWARD_HEADER_PREFIXES
+        ):
+            forward[key] = value
+    forward["Authorization"] = f"Bearer {api_key}"
+    return forward
+
+
+def _redact_stream_chunk(chunk: bytes) -> bytes:
+    try:
+        text = chunk.decode()
+    except UnicodeDecodeError:
+        try:
+            text = chunk.decode("latin-1")
+        except UnicodeDecodeError:
+            return chunk
+        redacted = redact_broker_output(text)
+        return redacted.encode("latin-1") if redacted != text else chunk
+    redacted = redact_broker_output(text)
+    return redacted.encode() if redacted != text else chunk
+
+
 def _is_loopback_upstream_base_url(url: str) -> bool:
     """Return whether ``url`` targets a loopback host (test fixture upstreams only)."""
     host = _normalize_host(urlparse(url).hostname or "")
@@ -256,10 +328,11 @@ def _is_loopback_upstream_base_url(url: str) -> bool:
 
 def _upstream_client(config: CredentialBrokerConfig) -> httpx.Client:
     """Build the shared upstream client for one broker lifetime."""
+    timeout = _upstream_timeout()
     if _is_loopback_upstream_base_url(config.upstream_base_url):
         return httpx.Client(
             base_url=config.upstream_base_url,
-            timeout=30.0,
+            timeout=timeout,
             follow_redirects=False,
             verify=True,
         )
@@ -272,7 +345,7 @@ def _upstream_client(config: CredentialBrokerConfig) -> httpx.Client:
     return httpx.Client(
         transport=transport,
         base_url=config.upstream_base_url,
-        timeout=30.0,
+        timeout=timeout,
         follow_redirects=False,
         verify=True,
     )
@@ -383,12 +456,10 @@ def credential_broker(
 
             upstream_path = _normalized_request_path(self.path)
 
-            forward_headers = {
-                key: value
-                for key, value in self.headers.items()
-                if key.lower() not in {"authorization", "host", "content-length"}
-            }
-            forward_headers["Authorization"] = f"Bearer {config.api_key}"
+            forward_headers = _forward_parent_headers(
+                self.headers.items(),
+                api_key=config.api_key,
+            )
 
             upstream_path = _upstream_request_path(upstream_path)
             try:
@@ -410,41 +481,23 @@ def credential_broker(
                         self._reject(HTTPStatus.BAD_GATEWAY, "upstream redirect refused")
                         return
 
-                    response_body = upstream_response.read()
-                    status_code = upstream_response.status_code
-                    response_headers = dict(upstream_response.headers.items())
+                    self.send_response(upstream_response.status_code)
+                    for header, value in upstream_response.headers.items():
+                        if header.lower() in _STRIPPED_RESPONSE_HEADERS:
+                            continue
+                        self.send_header(header, redact_broker_output(value))
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+
+                    for chunk in upstream_response.iter_bytes():
+                        if not chunk:
+                            continue
+                        self.wfile.write(_redact_stream_chunk(chunk))
             except httpx.HTTPError as exc:
                 _broker_log("warning", "broker upstream request failed: {}", exc)
                 self._reject(HTTPStatus.BAD_GATEWAY, "upstream request failed")
                 return
 
-            if response_body:
-                try:
-                    text = response_body.decode()
-                except UnicodeDecodeError:
-                    redacted = redact_broker_output(response_body.decode("latin-1"))
-                    if redacted.encode("latin-1") != response_body:
-                        response_body = redacted.encode("latin-1")
-                else:
-                    redacted = redact_broker_output(text)
-                    if redacted != text:
-                        response_body = redacted.encode()
-
-            self.send_response(status_code)
-            for header, value in response_headers.items():
-                lowered = header.lower()
-                if lowered in {
-                    "transfer-encoding",
-                    "content-length",
-                    "content-encoding",
-                    "connection",
-                }:
-                    continue
-                self.send_header(header, redact_broker_output(value))
-            self.send_header("Content-Length", str(len(response_body)))
-            self.send_header("Connection", "close")
-            self.end_headers()
-            self.wfile.write(response_body)
             self.close_connection = True
 
         def do_GET(self) -> None:
