@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,9 +24,16 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
 _SCAN_PATHS = ("src", "tests", "scripts", "action.yml")
-_TRUFFLEHOG_EXCLUDE_GLOBS = (
-    ".git/**,.venv*/**,.venv-dev/**,.mergecraft/analyzer-cache/**,"
-    "**/node_modules/**,graphify-out/**,**/.mypy_cache/**,**/.ruff_cache/**"
+# ``filesystem`` on 3.96.0 has ``--exclude-paths`` (newline-separated regexes),
+# not ``--exclude-globs`` (git-only). See trufflesecurity/trufflehog#4289.
+_TRUFFLEHOG_EXCLUDE_REGEXES = (
+    r"\.git/",
+    r"\.venv",
+    r"\.mergecraft/analyzer-cache/",
+    r"node_modules/",
+    r"graphify-out/",
+    r"\.mypy_cache/",
+    r"\.ruff_cache/",
 )
 _NATIVE_CONVERTER = Path(__file__).with_name("native_output_to_sarif.py")
 
@@ -119,7 +127,20 @@ def emit_semgrep_sarif(*, out: Path, repo_root: Path | None = None) -> None:
     out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _trufflehog_scan_argv(*, manifest: AnalyzerManifest, repo_root: Path) -> list[str]:
+def write_trufflehog_exclude_paths(directory: Path) -> Path:
+    """Write 3.96.0 ``--exclude-paths`` regexes and return the file path."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "trufflehog-exclude-paths.txt"
+    path.write_text("\n".join(_TRUFFLEHOG_EXCLUDE_REGEXES) + "\n", encoding="utf-8")
+    return path
+
+
+def _trufflehog_scan_argv(
+    *,
+    manifest: AnalyzerManifest,
+    repo_root: Path,
+    exclude_paths: Path | None = None,
+) -> list[str]:
     from mergecraft.analyzers.execution import provision_managed_argv
     from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv
 
@@ -134,8 +155,11 @@ def _trufflehog_scan_argv(*, manifest: AnalyzerManifest, repo_root: Path) -> lis
         msg = "trufflehog managed binary could not be provisioned"
         raise EmitError(msg)
     argv = list(provisioned.argv)
-    if "--exclude-globs" not in argv:
-        argv.extend(["--exclude-globs", _TRUFFLEHOG_EXCLUDE_GLOBS])
+    if "--exclude-paths" not in argv and "-x" not in argv:
+        path = exclude_paths or write_trufflehog_exclude_paths(
+            repo_root / ".mergecraft" / "analyzer-scratch"
+        )
+        argv.extend(["--exclude-paths", str(path)])
     return argv
 
 
@@ -145,14 +169,17 @@ def emit_trufflehog_sarif(*, out: Path, repo_root: Path | None = None) -> None:
     from mergecraft.analyzers.registry import get_manifest
 
     manifest = get_manifest("trufflehog")
-    argv = _trufflehog_scan_argv(manifest=manifest, repo_root=root)
-    completed = subprocess.run(
-        argv,
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+
+    with tempfile.TemporaryDirectory(prefix="mc-thog-") as tmp:
+        exclude = write_trufflehog_exclude_paths(Path(tmp))
+        argv = _trufflehog_scan_argv(manifest=manifest, repo_root=root, exclude_paths=exclude)
+        completed = subprocess.run(
+            argv,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     if completed.returncode not in {0, 183}:
         detail = (completed.stderr or completed.stdout or "").strip().splitlines()
         tail = detail[-1] if detail else f"exit {completed.returncode}"

@@ -212,3 +212,42 @@ def test_emit_trufflehog_truncated_jsonl_does_not_write_sarif(
     with pytest.raises(module.EmitError):
         module.emit_trufflehog_sarif(out=out, repo_root=tmp_path)
     assert not out.exists()
+
+
+def test_write_trufflehog_exclude_paths_is_regex_file(tmp_path: Path) -> None:
+    """3.96.0 ``filesystem`` takes regexes via ``--exclude-paths``, not globs."""
+    module = importlib.import_module("scripts.ci_extended_sarif")
+    path = module.write_trufflehog_exclude_paths(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    assert "--exclude-globs" not in text
+    assert r"\.git/" in text
+    assert "node_modules/" in text
+
+
+def test_trufflehog_scan_argv_uses_exclude_paths_not_exclude_globs(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Pinned 3.96.0 rejects ``--exclude-globs`` on ``filesystem``."""
+    from mergecraft.analyzers.registry import get_manifest
+    from mergecraft.analyzers.resolve import AnalyzerPlan
+
+    module = importlib.import_module("scripts.ci_extended_sarif")
+
+    def _fake_provision(plan: object, **_kwargs: object) -> AnalyzerPlan:
+        _ = plan
+        return AnalyzerPlan(
+            manifest_id="trufflehog",
+            mode="managed",
+            argv=("trufflehog", "filesystem", "-j", "."),
+        )
+
+    monkeypatch.setattr("mergecraft.analyzers.execution.provision_managed_argv", _fake_provision)
+    exclude = module.write_trufflehog_exclude_paths(tmp_path)
+    argv = module._trufflehog_scan_argv(
+        manifest=get_manifest("trufflehog"),
+        repo_root=tmp_path,
+        exclude_paths=exclude,
+    )
+    assert "--exclude-globs" not in argv
+    assert "--exclude-paths" in argv
+    assert str(exclude) in argv
