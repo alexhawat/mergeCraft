@@ -555,10 +555,12 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             "- **Green only substitutes.** A declared check run that passed rewrites "
             "the gate row to `satisfied-by-ci`. A declared check run that *failed* "
             "leaves the row alone and is reported as a `source: ci` finding instead.",
-            "- **Green CI SARIF ingest.** Declared `sarifArtifacts` are downloaded "
-            "after `wait-for-ci` completes successfully — not only when Verify jobs "
-            "failed. On green CI, mergeCraft lists workflow runs for the PR head SHA "
-            "and fetches matching artifacts from those runs.",
+            "- **CI SARIF ingest on complete wait.** Declared `sarifArtifacts` are "
+            "downloaded after `wait-for-ci` reaches `state=complete` (green or red "
+            "CI). mergeCraft lists workflow runs for the PR head SHA and fetches "
+            "matching artifacts from those runs. Wait states `timeout`, `absent`, "
+            "and `skipped` skip ingest; `workflow_dispatch` does not pre-ingest "
+            "because the wait job is PR-only.",
             "- **`actions: read` required.** The review workflow job must grant "
             "`actions: read` so artifact download succeeds. Without it GitHub "
             "answers 403 and SARIF ingest is skipped (the review still completes).",

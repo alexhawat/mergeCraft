@@ -162,6 +162,10 @@ self-review at:
 | `trust.selfReview` | `analyzers` | Trusted-tier analyzers run on same-repo `pull_request_target` PRs; the agent still cannot APPROVE — structural approval stays in `mergecraft-approve.yml` |
 | `trust.agentSandbox` | `same-repo` | `MERGECRAFT_CODEX_SANDBOX=danger-full-access` is honoured on any non-fork head |
 
+Those knobs are read from the **base-branch config snapshot** at run start.
+`pull_request_target` resolves the workflow from the default branch, so a
+self-review PR cannot enable them until the config lands on base after merge.
+
 `same-repo` rests on "a branch in this repository was written by someone I
 trust" — it cannot catch pulling a fork PR onto a local branch to run CI. See
 the residual risks in the scaffolded config comment and

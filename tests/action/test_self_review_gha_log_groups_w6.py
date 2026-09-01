@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-_GROUP_TITLES = ("setup", "model-chain", "publish")
+_GROUP_TITLES = ("setup", "model-chain", "agent-dispatch", "publish")
 _GITHUB_ACTIONS_ENV = {"GITHUB_ACTIONS": "true"}
 
 
@@ -34,7 +34,7 @@ async def test_main_emits_log_groups_for_setup_model_chain_publish(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """D13 — setup / model-chain / publish phases collapse under GitHub log groups."""
+    """D13 — setup / model-chain / agent-dispatch / publish emit GitHub log groups."""
     buffer = _capture_stdout(monkeypatch)
     await run_main_for_test(
         monkeypatch=monkeypatch,

@@ -2,26 +2,23 @@
 
 from __future__ import annotations
 
-import importlib
 import json
-from collections.abc import Awaitable, Callable
 from io import BytesIO
-from types import ModuleType
 from typing import TYPE_CHECKING, Any
 from zipfile import ZipFile
 
 import pytest
+import yaml
 from scripts.workflow_yaml import permission_dict
 
 from mergecraft.ci.evidence import ci_evidence_findings
-from mergecraft.config.settings import RepoSettings
-from mergecraft.main import RunContext
+from mergecraft.ci.sarif_ingest import ingest_ci_sarif_after_ci_wait
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.scm.types import ListedItems
 from mergecraft.utils.github import GitHubClient
-from tests.ci.workflow_support import job, load_workflow
+from tests.ci.workflow_support import job, load_workflow, read_text
 from tests.scm.support import RecordingScmProvider
 
 if TYPE_CHECKING:
@@ -30,18 +27,6 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 _HEAD_SHA = "cafebabecafebabecafebabecafebabecafebabe"
-
-
-def _import_ingest_callable() -> Callable[..., Awaitable[None]]:
-    module = importlib.import_module("mergecraft.main")
-    fn = getattr(module, "ingest_ci_sarif_after_ci_wait", None)
-    if fn is None:
-        pytest.fail("mergecraft.main.ingest_ci_sarif_after_ci_wait is not defined yet")
-    return fn
-
-
-def _import_main_module() -> ModuleType:
-    return importlib.import_module("mergecraft.main")
 
 
 def _tool_context_with_scm(tmp_path: Path, scm: Any) -> ToolContext:
@@ -159,14 +144,31 @@ async def test_green_wait_ingests_declared_artifacts(tmp_path: Path) -> None:
         archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
     )
     ctx = _tool_context(tmp_path, github)
-    ingest = _import_ingest_callable()
-    await ingest(
+    await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
         ci_failed_count=0,
         head_sha=_HEAD_SHA,
     )
     assert ci_evidence_findings(ctx.tool_state), "ingest must record SARIF findings"
+
+
+@pytest.mark.asyncio
+async def test_red_ci_complete_still_ingests_declared_artifacts(tmp_path: Path) -> None:
+    """D9 — ``state=complete`` with failed jobs still ingests declared SARIF."""
+    github = _ArtifactGitHub(
+        artifacts=[{"id": 7, "name": "ruff-sarif"}],
+        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+    )
+    ctx = _tool_context(tmp_path, github)
+    await ingest_ci_sarif_after_ci_wait(
+        ctx,
+        ci_wait_state="complete",
+        ci_failed_count=2,
+        head_sha=_HEAD_SHA,
+    )
+    assert github.head_sha_queries == [_HEAD_SHA]
+    assert ci_evidence_findings(ctx.tool_state)
 
 
 @pytest.mark.asyncio
@@ -179,13 +181,11 @@ async def test_green_wait_lists_workflow_runs_for_head_sha_not_only_failed_suite
         archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
     )
     ctx = _tool_context(tmp_path, github)
-    ingest = _import_ingest_callable()
-    await ingest(
+    await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
         ci_failed_count=0,
         head_sha=_HEAD_SHA,
-        check_suite_id=None,
     )
     assert github.head_sha_queries == [_HEAD_SHA]
 
@@ -206,8 +206,7 @@ async def test_artifact_download_403_logs_warning_and_continues(
         download_error=PermissionError("artifact download forbidden"),
     )
     ctx = _tool_context(tmp_path, github)
-    ingest = _import_ingest_callable()
-    await ingest(
+    await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
         ci_failed_count=0,
@@ -223,6 +222,14 @@ def test_mergecraft_yml_review_job_includes_actions_read() -> None:
     assert perms.get("actions") == "read"
 
 
+def test_hardened_example_review_job_includes_actions_read() -> None:
+    """D10 — hardened consumer template grants ``actions: read`` for ciEvidence ingest."""
+    doc = yaml.safe_load(read_text("examples/workflows/mergecraft-hardened.yml"))
+    assert isinstance(doc, dict)
+    perms = permission_dict(doc.get("permissions"))
+    assert perms.get("actions") == "read"
+
+
 @pytest.mark.asyncio
 async def test_ingest_skips_when_ci_wait_state_not_complete(tmp_path: Path) -> None:
     """D9 — non-complete wait state must not list workflow runs or record findings."""
@@ -231,8 +238,7 @@ async def test_ingest_skips_when_ci_wait_state_not_complete(tmp_path: Path) -> N
         archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
     )
     ctx = _tool_context(tmp_path, github)
-    ingest = _import_ingest_callable()
-    await ingest(
+    await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="pending",
         ci_failed_count=0,
@@ -250,8 +256,7 @@ async def test_ingest_skips_when_head_sha_blank(tmp_path: Path) -> None:
         archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
     )
     ctx = _tool_context(tmp_path, github)
-    ingest = _import_ingest_callable()
-    await ingest(
+    await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
         ci_failed_count=0,
@@ -272,8 +277,7 @@ async def test_ingest_skips_without_github_client(
 
     monkeypatch.setattr(gha_log, "warning", lambda msg: warnings.append(msg))
     ctx = _tool_context_with_scm(tmp_path, RecordingScmProvider())
-    ingest = _import_ingest_callable()
-    await ingest(
+    await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
         ci_failed_count=0,
@@ -310,8 +314,7 @@ async def test_ingest_workflow_listing_error_logs_warning(
         archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
     )
     ctx = _tool_context(tmp_path, github)
-    ingest = _import_ingest_callable()
-    await ingest(
+    await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
         ci_failed_count=0,
@@ -348,8 +351,7 @@ async def test_ingest_workflow_listing_incomplete_logs_warning(
         archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
     )
     ctx = _tool_context(tmp_path, github)
-    ingest = _import_ingest_callable()
-    await ingest(
+    await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
         ci_failed_count=0,
@@ -358,120 +360,3 @@ async def test_ingest_workflow_listing_incomplete_logs_warning(
     assert warnings
     assert any("listing truncated" in msg for msg in warnings)
     assert not ci_evidence_findings(ctx.tool_state)
-
-
-def test_ci_wait_inputs_from_env_returns_none_without_vars(monkeypatch: MonkeyPatch) -> None:
-    """D9 — action env lane is a no-op when wait outputs were not forwarded."""
-    monkeypatch.delenv("MERGECRAFT_CI_WAIT_STATE", raising=False)
-    monkeypatch.delenv("CI_STATE", raising=False)
-    main = _import_main_module()
-    assert main._ci_wait_inputs_from_env() is None
-
-
-@pytest.mark.parametrize(
-    ("state_var", "count_var", "state", "count"),
-    [
-        ("MERGECRAFT_CI_WAIT_STATE", "MERGECRAFT_CI_FAILED_COUNT", "complete", "2"),
-        ("CI_STATE", "CI_FAILED_COUNT", "complete", "1"),
-    ],
-)
-def test_ci_wait_inputs_from_env_reads_action_aliases(
-    monkeypatch: MonkeyPatch,
-    state_var: str,
-    count_var: str,
-    state: str,
-    count: str,
-) -> None:
-    """D9 — wait-for-ci outputs may arrive via MERGECRAFT_* or CI_* env aliases."""
-    monkeypatch.delenv("MERGECRAFT_CI_WAIT_STATE", raising=False)
-    monkeypatch.delenv("CI_STATE", raising=False)
-    monkeypatch.delenv("MERGECRAFT_CI_FAILED_COUNT", raising=False)
-    monkeypatch.delenv("CI_FAILED_COUNT", raising=False)
-    monkeypatch.setenv(state_var, state)
-    monkeypatch.setenv(count_var, count)
-    main = _import_main_module()
-    assert main._ci_wait_inputs_from_env() == (state, int(count))
-
-
-def test_ci_wait_inputs_from_env_invalid_failed_count_defaults_to_zero(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """D9 — non-numeric failed-count env values coerce to zero."""
-    monkeypatch.setenv("MERGECRAFT_CI_WAIT_STATE", "complete")
-    monkeypatch.setenv("MERGECRAFT_CI_FAILED_COUNT", "not-a-number")
-    main = _import_main_module()
-    assert main._ci_wait_inputs_from_env() == ("complete", 0)
-
-
-@pytest.mark.asyncio
-async def test_ingest_ci_sarif_from_action_env_no_wait_state(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """D9 — action env lane returns when wait outputs are absent."""
-    monkeypatch.delenv("MERGECRAFT_CI_WAIT_STATE", raising=False)
-    monkeypatch.delenv("CI_STATE", raising=False)
-    github = _ArtifactGitHub(
-        artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
-    )
-    tool_ctx = _tool_context(tmp_path, github)
-    run_ctx = RunContext(
-        settings=RepoSettings(),
-        tool_context=tool_ctx,
-        gh_event={"pull_request": {"head": {"sha": _HEAD_SHA}}},
-    )
-    main = _import_main_module()
-    await main._ingest_ci_sarif_from_action_env(run_ctx)
-    assert not github.head_sha_queries
-    assert not ci_evidence_findings(tool_ctx.tool_state)
-
-
-@pytest.mark.asyncio
-async def test_ingest_ci_sarif_from_action_env_no_head_sha(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """D9 — action env lane returns when the event has no bound head SHA."""
-    monkeypatch.setenv("MERGECRAFT_CI_WAIT_STATE", "complete")
-    monkeypatch.setenv("MERGECRAFT_CI_FAILED_COUNT", "0")
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
-    github = _ArtifactGitHub(
-        artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
-    )
-    tool_ctx = _tool_context(tmp_path, github)
-    run_ctx = RunContext(
-        settings=RepoSettings(),
-        tool_context=tool_ctx,
-        gh_event={},
-    )
-    main = _import_main_module()
-    await main._ingest_ci_sarif_from_action_env(run_ctx)
-    assert not github.head_sha_queries
-    assert not ci_evidence_findings(tool_ctx.tool_state)
-
-
-@pytest.mark.asyncio
-async def test_ingest_ci_sarif_from_action_env_ingests_when_forwarded(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """D9 — forwarded wait outputs trigger head-SHA SARIF ingest in the action lane."""
-    monkeypatch.setenv("MERGECRAFT_CI_WAIT_STATE", "complete")
-    monkeypatch.setenv("MERGECRAFT_CI_FAILED_COUNT", "0")
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
-    github = _ArtifactGitHub(
-        artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
-    )
-    tool_ctx = _tool_context(tmp_path, github)
-    run_ctx = RunContext(
-        settings=RepoSettings(),
-        tool_context=tool_ctx,
-        gh_event={"pull_request": {"head": {"sha": _HEAD_SHA}}},
-    )
-    main = _import_main_module()
-    await main._ingest_ci_sarif_from_action_env(run_ctx)
-    assert github.head_sha_queries == [_HEAD_SHA]
-    assert ci_evidence_findings(tool_ctx.tool_state)

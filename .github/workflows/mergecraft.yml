@@ -342,6 +342,10 @@ jobs:
       # The approve lane lives in mergecraft-approve.yml, which holds its own
       # copy of the PAT and never re-reads PR content — see the review steps'
       # `token:` comment and PR #200.
+      MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
+      MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
+      CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
+      CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -427,8 +431,6 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || steps.dispatch_pr.outputs.number }}
           BASE_REF: ${{ github.event.pull_request.base.ref || steps.dispatch_pr.outputs.base_ref }}
           DISPATCH_PROMPT: ${{ inputs.prompt }}
-          CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
-          CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
           CI_FAILED_NAMES: ${{ needs.wait-for-ci.outputs.failed_names }}
           CI_CHECK_SUITE_ID: ${{ needs.wait-for-ci.outputs.check_suite_id }}
         run: |
@@ -632,8 +634,6 @@ jobs:
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
           MERGECRAFT_TRACING_REGION: eu
-          CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
-          CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
 
       - name: Persist evidence packet (Nous)
         if: always()
@@ -679,54 +679,7 @@ jobs:
           BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
           NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
           NOUS_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
-        run: |
-          set -euo pipefail
-          need="false"
-          if [ -n "${NOUS_PACKET:-}" ]; then
-            verdict="$(printf '%s' "$NOUS_PACKET" | jq -r '.decision.verdict // empty')"
-            case "${verdict}" in
-              failure|success)
-                echo "packet decision.verdict=${verdict} — Nous review posted a verdict; not falling back to Codex."
-                ;;
-              *)
-                need="true"
-                echo "::notice title=mergecraft Codex fallback::Nous review posted no verdict in evidence packet (action outcome: ${NOUS_OUTCOME}); retrying with openai/gpt-codex."
-                ;;
-            esac
-          elif [ "${EVENT_NAME}" = "pull_request_target" ]; then
-            latest=""
-            for attempt in $(seq 1 3); do
-              if latest="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
-                --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
-                | sort_by(.completed_at // .started_at) | last
-                | "\(.id // "")|\(.conclusion // "")"')"; then
-                break
-              fi
-              echo "check-runs query failed (attempt ${attempt}/3); retrying in 3s…" >&2
-              sleep 3
-            done
-            id="${latest%%|*}"
-            conclusion="${latest#*|}"
-            # A verdict only counts when the check-run is NOT the one that was
-            # already there before this Nous attempt ran.
-            if [ -n "${id}" ] && [ "${id}" = "${BASELINE_ID}" ]; then
-              echo "mergecraft-approval ${id} predates this Nous attempt — treating as no verdict."
-              conclusion=""
-            fi
-            case "${conclusion}" in
-              failure|success)
-                echo "mergecraft-approval=${conclusion} — Nous review posted a verdict; not falling back to Codex."
-                ;;
-              *)
-                need="true"
-                echo "::notice title=mergecraft Codex fallback::Nous review posted no verdict (action outcome: ${NOUS_OUTCOME}); retrying with openai/gpt-codex."
-                ;;
-            esac
-          elif [ "${NOUS_OUTCOME}" != "success" ]; then
-            need="true"
-            echo "::notice title=mergecraft Codex fallback::Nous review failed; retrying with openai/gpt-codex."
-          fi
-          echo "need=${need}" >> "${GITHUB_OUTPUT}"
+        run: ./scripts/decide_codex_fallback.sh
 
       - name: mergeCraft PR review (Codex)
         if: >-
@@ -807,8 +760,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
           MERGECRAFT_TRACING_REGION: eu
-          CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
-          CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
 
       - name: Persist evidence packet (Codex)
         if: always()
@@ -872,59 +823,7 @@ jobs:
           CODEX_OUTCOME: ${{ steps.mergecraft_codex.outcome }}
           NOUS_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
           CODEX_PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
-        run: |
-          set -euo pipefail
-          need="true"
-          if [ "${CODEX_OUTCOME:-}" = "success" ]; then
-            need="false"
-            echo "Codex step outcome=success — not spending the Claude backstop."
-          else
-            packet="${CODEX_PACKET:-${NOUS_PACKET:-}}"
-            if [ -n "${packet}" ]; then
-              verdict="$(printf '%s' "$packet" | jq -r '.decision.verdict // empty' 2>/dev/null || true)"
-              case "${verdict}" in
-                failure|success|neutral)
-                  need="false"
-                  echo "packet decision.verdict=${verdict} — a rung posted a verdict despite failing later; not spending the Claude backstop."
-                  ;;
-              esac
-            fi
-            if [ "${need}" = "true" ] && [ "${EVENT_NAME}" = "pull_request_target" ]; then
-              latest=""
-              for attempt in $(seq 1 3); do
-                if latest="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
-                  --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
-                  | sort_by(.completed_at // .started_at) | last
-                  | "\(.id // "")|\(.conclusion // "")"')"; then
-                  break
-                fi
-                echo "check-runs query failed (attempt ${attempt}/3); retrying in 3s…" >&2
-                sleep 3
-              done
-              id="${latest%%|*}"
-              conclusion="${latest#*|}"
-              # Same identity rule as the Codex fallback: a verdict only counts
-              # when it is NOT the one that was already on this SHA beforehand.
-              if [ -n "${id}" ] && [ "${id}" = "${BASELINE_ID}" ]; then
-                echo "mergecraft-approval ${id} predates this run — treating as no verdict."
-                conclusion=""
-              fi
-              case "${conclusion}" in
-                failure|success|neutral)
-                  need="false"
-                  echo "mergecraft-approval=${conclusion} — a rung posted a verdict despite failing later; not spending the Claude backstop."
-                  ;;
-              esac
-            fi
-          fi
-          if [ "${need}" = "true" ]; then
-            if [ "${CODEX_OUTCOME:-}" = "failure" ]; then
-              echo "::notice title=mergecraft Claude backstop::Codex failed retryably (nous=${NOUS_OUTCOME:-skipped}) and no verdict was found in the evidence packet or mergecraft-approval check-run; retrying with anthropic/claude-sonnet."
-            else
-              echo "::notice title=mergecraft Claude backstop::Nous failed retryably (codex=${CODEX_OUTCOME:-skipped}) and no verdict was found in the evidence packet or mergecraft-approval check-run; retrying with anthropic/claude-sonnet."
-            fi
-          fi
-          echo "need=${need}" >> "${GITHUB_OUTPUT}"
+        run: ./scripts/decide_claude_fallback.sh
 
       - name: mergeCraft PR review (Claude)
         # Two ways in: as the backstop after a retryable provider failure, or as
@@ -962,8 +861,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
           MERGECRAFT_TRACING_REGION: eu
-          CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
-          CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
 
       - name: Persist evidence packet (Claude)
         if: always()

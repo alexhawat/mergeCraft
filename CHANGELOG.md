@@ -191,10 +191,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Same-repo `pull_request_target` self-review runs trusted-tier analyzers when
   `trust.selfReview` is `analyzers` — execution trust without widening approval
   authority
-- Declared CI SARIF artifacts are downloaded and recorded even when Verify CI
-  is green; the review job needs `actions: read` to fetch them
-- Action log phases (setup, model chain, publish) emit collapsible `::group::`
-  blocks in GitHub Actions logs
+- Declared CI SARIF artifacts are downloaded and recorded when `wait-for-ci`
+  reaches `state=complete` (green or red); the review job needs `actions: read`
+  to fetch them. Wait states `timeout`, `absent`, and `skipped` skip ingest
+- Action log phases (setup, model chain, agent dispatch, publish) emit
+  collapsible `::group::` blocks in GitHub Actions logs
 
 #### Added
 
@@ -203,9 +204,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI SARIF ingest covers actionlint, zizmor, and semgrep alongside ruff,
   mypy, and bandit — matching `ci.yml` uploads and
   `ciEvidence.sarifArtifacts` (#464)
+- Hardened consumer template grants `actions: read` for ciEvidence SARIF ingest
 
 ### Changed
 
+- Dogfood `trust.selfReview` / `trust.agentSandbox` knobs apply after merge to
+  the default branch — `pull_request_target` reads the base config snapshot, not
+  the PR head
 - The self-review Action pin on all three review rungs moves to `4ab87265`,
   pin 3 of 3 — lane E agent credential broker (#594). Reviews run the loopback
   broker, pinned egress, and Codex routing fixes instead of the lane B pin

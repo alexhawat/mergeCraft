@@ -13,6 +13,10 @@ from tests.ci.workflow_support import job, load_workflow
 
 _WORKFLOW = "mergecraft.yml"
 _REVIEW_JOB = "review"
+_SCRIPT_BY_STEP_ID = {
+    "fallback": "scripts/decide_codex_fallback.sh",
+    "claude_fallback": "scripts/decide_claude_fallback.sh",
+}
 
 
 def step_by_id(step_id: str) -> dict[str, Any]:
@@ -25,12 +29,14 @@ def step_by_id(step_id: str) -> dict[str, Any]:
     raise AssertionError(f"review job missing step id={step_id!r}")
 
 
-def decide_script(step_id: str) -> str:
-    """Return the bash ``run:`` body for a decide step."""
-    run = step_by_id(step_id).get("run")
-    assert isinstance(run, str), f"{step_id} has no run script"
-    assert run.strip(), f"{step_id} run script is empty"
-    return run
+def decide_script(step_id: str) -> Path:
+    """Return the extracted decide-step script path."""
+    rel = _SCRIPT_BY_STEP_ID.get(step_id)
+    if rel is None:
+        raise AssertionError(f"no extracted script for step id={step_id!r}")
+    path = Path(__file__).resolve().parents[2] / rel
+    assert path.is_file(), f"missing decide script at {path}"
+    return path
 
 
 def evidence_packet(*, verdict: str | None = None, broken: bool = False) -> str:
@@ -63,17 +69,21 @@ def write_gh_mock(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     gh_path = bin_dir / "gh"
-    payload = json.dumps(
-        {
-            "check_runs": [
-                {
-                    "id": int(check_run_id),
-                    "name": "mergecraft-approval",
-                    "conclusion": conclusion,
-                    "completed_at": "2026-09-01T00:00:00Z",
-                }
-            ]
-        }
+    payload_path = tmp_path / "gh_check_runs.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "check_runs": [
+                    {
+                        "id": int(check_run_id),
+                        "name": "mergecraft-approval",
+                        "conclusion": conclusion,
+                        "completed_at": "2026-09-01T00:00:00Z",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
     )
     gh_path.write_text(
         textwrap.dedent(
@@ -81,7 +91,7 @@ def write_gh_mock(
             #!/usr/bin/env bash
             set -euo pipefail
             if [[ "$*" == *check-runs* ]]; then
-              printf '%s' '{payload}'
+              cat {json.dumps(str(payload_path))}
               exit 0
             fi
             echo "unexpected gh invocation: $*" >&2
@@ -96,7 +106,7 @@ def write_gh_mock(
 
 def run_decide_script(
     tmp_path: Path,
-    script: str,
+    script: Path,
     *,
     env: dict[str, str],
     gh_mock_dir: Path | None = None,
@@ -116,12 +126,14 @@ def run_decide_script(
     if gh_mock_dir is not None:
         script_env["PATH"] = f"{gh_mock_dir}:{script_env['PATH']}"
     script_env.update(env)
+    repo_root = Path(__file__).resolve().parents[2]
     completed = subprocess.run(
-        ["bash", "-c", script],
+        [str(script)],
         check=False,
         capture_output=True,
         text=True,
         env=script_env,
+        cwd=str(repo_root),
     )
     assert completed.returncode == 0, (
         f"decide script failed ({completed.returncode}): "

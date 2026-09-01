@@ -85,6 +85,8 @@ on:
 
 permissions:
   contents: read
+  # Download SARIF artifacts uploaded by the consumer CI workflow (ciEvidence ingest).
+  actions: read
   # Post the inline PR review + comments.
   pull-requests: write
   issues: write

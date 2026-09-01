@@ -228,13 +228,12 @@ jobs:
           if-no-files-found: warn
       # W5 extended SARIF (lane D / #600): actionlint + zizmor for sandbox-blocked
       # workflow analyzers. trufflehog omitted — JSONL-only, no SARIF emitter (D12).
+      # SARIF uploads run on Python 3.14 only — one canonical artifact set per PR.
       - name: Emit actionlint and zizmor SARIF
         if: always() && matrix.python == '3.14'
         env:
           MERGECRAFT_WORKFLOW_SARIF_DIR: .sarif
-        run: |
-          chmod +x scripts/workflow_lint.sh
-          ./scripts/workflow_lint.sh
+        run: ./scripts/workflow_lint.sh
       - name: Upload actionlint SARIF
         if: always() && matrix.python == '3.14'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -269,6 +268,12 @@ jobs:
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/cache@1bd1e96a3e841c399a12ad672e2f83ebe8744c9e # v4.2.0
+        with:
+          path: .mergecraft/analyzer-cache
+          key: analyzer-cache-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            analyzer-cache-${{ runner.os }}-py${{ matrix.python }}-
       - name: bandit + pip-audit (OSV.dev)
         env:
           BANDIT_JSON: .sarif/bandit.json
@@ -288,6 +293,7 @@ jobs:
           path: .sarif/bandit.sarif
           if-no-files-found: warn
       # W5 extended SARIF (lane D / #600): semgrep for sandbox-blocked pattern scan.
+      # Python 3.14 matrix leg only — one canonical semgrep-sarif artifact per PR.
       - name: Emit semgrep SARIF
         if: always() && matrix.python == '3.14'
         env:
