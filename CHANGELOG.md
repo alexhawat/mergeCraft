@@ -212,6 +212,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The self-review Action pin on all three review rungs moves to `e5f9ed5f`,
+  the lane D sync on `pre-0.0.1` (#601). Reviews run the selfReview catalog,
+  Claude backstop, green-CI SARIF ingest, and `agentSandbox: same-repo`
+  instead of the lane E pin (`4ab87265`)
 - Dogfood `trust.selfReview` / `trust.agentSandbox` knobs apply after merge to
   the default branch — `pull_request_target` reads the base config snapshot, not
   the PR head
