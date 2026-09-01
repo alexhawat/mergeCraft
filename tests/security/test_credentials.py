@@ -115,6 +115,33 @@ def test_agent_env_contains_no_credentials(
     _assert_no_credentials(env, active_key=_ACTIVE_PROVIDER_KEY[agent_id])
 
 
+def test_codex_brokered_env_throwaway_in_openai_api_key_allowed(
+    make_agent_run_ctx, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """W2.1 broker path — throwaway in ``OPENAI_API_KEY`` satisfies the codex active-key guard."""
+    from tests.agents.support_codex_credential_broker import (
+        REAL_OPENAI_API_KEY_FIXTURE,
+        brokered_codex_context,
+        prepare_codex_brokered_run,
+    )
+
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    for key, value in _PLANTED_SECRETS.items():
+        if key == "OPENAI_API_KEY":
+            continue
+        monkeypatch.setenv(key, value)
+
+    ctx = brokered_codex_context(
+        tmp_path,
+        mcp_server_url="",
+        mcp_auth_token="",
+    )
+    prepared = prepare_codex_brokered_run(ctx)
+    _assert_no_credentials(prepared.agent_env, active_key=_ACTIVE_PROVIDER_KEY["codex"])
+    assert prepared.agent_env.get("OPENAI_API_KEY") != REAL_OPENAI_API_KEY_FIXTURE
+
+
 def test_opencode_agent_env_contains_no_credentials() -> None:
     """W2.1 — opencode must not pass the raw process environment to its CLI.
 

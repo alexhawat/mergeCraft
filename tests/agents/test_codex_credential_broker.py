@@ -1,8 +1,8 @@
 """Plan 18 W1.2 — Codex credential-broker wire-up RED contracts (implementation W3).
 
-Pins throwaway bearer env, auth.json hygiene (D3), loopback ``model_providers``
-(D1/D4), subscription-auth inactivity (D3a), broker fail-closed posture (D10),
-and lane-B sandbox symbol isolation (D8).
+Pins throwaway bearer env (Codex 0.149: ``OPENAI_API_KEY``), auth.json hygiene (D3),
+loopback ``openai_base_url`` (D1/D4), subscription-auth inactivity (D3a), broker
+fail-closed posture (D10), and lane-B sandbox symbol isolation (D8).
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def test_brokered_agent_env_carries_throwaway_not_live_openai_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Under the broker fixture the agent env gets a throwaway bearer, not ``OPENAI_API_KEY``."""
+    """Brokered Codex 0.149 env carries throwaway in ``OPENAI_API_KEY``, not the live key."""
     monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
     monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
     ctx = brokered_codex_context(tmp_path)
@@ -81,7 +81,11 @@ def test_brokered_agent_env_carries_throwaway_not_live_openai_key(
 
     env = prepared.agent_env
     bearer_env = require_broker_symbol(load_broker_module(), "CODEX_BROKER_BEARER_ENV")
-    assert env.get(bearer_env), "throwaway bearer must be present in agent env"
+    throwaway = env.get(bearer_env) or env.get("OPENAI_API_KEY")
+    assert throwaway, "throwaway bearer must be present in agent env"
+    assert env.get("OPENAI_API_KEY") == throwaway, (
+        "Codex 0.149 routes via OPENAI_API_KEY; broker throwaway must land there"
+    )
     assert env.get("OPENAI_API_KEY") != REAL_OPENAI_API_KEY_FIXTURE
     assert REAL_OPENAI_API_KEY_FIXTURE not in env.values()
 
@@ -106,11 +110,11 @@ def test_auth_json_contains_no_real_api_credential_after_setup_and_chown(
     assert REAL_OPENAI_API_KEY_FIXTURE not in auth_text
 
 
-def test_model_providers_base_url_points_at_loopback_broker(
+def test_openai_base_url_points_at_loopback_broker_without_model_providers_openai(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``model_providers.<id>.base_url`` must be the loopback broker with ``/v1`` (D1)."""
+    """Codex 0.149: ``openai_base_url`` → loopback ``/v1`` broker; no ``model_providers.openai`` (D1)."""
     monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
     monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
     ctx = brokered_codex_context(tmp_path)
@@ -119,17 +123,21 @@ def test_model_providers_base_url_points_at_loopback_broker(
     codex_module = load_codex_module()
     config_path = codex_module._codex_home(ctx) / "config.toml"
     parsed = parse_codex_config(config_path)
-    providers = parsed.get("model_providers")
-    assert isinstance(providers, dict)
-    assert providers, "model_providers must be populated"
 
     broker_base = prepared.broker_base_url
     assert broker_base is not None
     assert broker_base.startswith("http://127.0.0.1:")
     assert broker_base.endswith("/v1")
-    for block in providers.values():
-        assert isinstance(block, dict)
-        assert block.get("base_url") == broker_base
+
+    openai_base_url = parsed.get("openai_base_url")
+    assert isinstance(openai_base_url, str), "brokered config.toml must set openai_base_url"
+    assert openai_base_url == broker_base
+
+    providers = parsed.get("model_providers")
+    if isinstance(providers, dict):
+        assert "openai" not in providers, (
+            "broker must not occupy model_providers.openai — Codex 0.149 reserves that id"
+        )
 
 
 def test_mcp_table_unchanged_under_broker(
