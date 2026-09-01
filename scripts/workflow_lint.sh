@@ -55,6 +55,32 @@ if [[ ! -x "${ZIZMOR_BIN}" ]]; then
   install -m 0755 "${tmp}/zizmor" "${ZIZMOR_BIN}"
 fi
 
+if [[ -n "${MERGECRAFT_WORKFLOW_SARIF_DIR:-}" ]]; then
+  mkdir -p "${MERGECRAFT_WORKFLOW_SARIF_DIR}"
+  echo "» actionlint ${ACTIONLINT_VERSION} (SARIF)"
+  set +e
+  "${ACTIONLINT_BIN}" -format sarif .github/workflows/*.yml \
+    > "${MERGECRAFT_WORKFLOW_SARIF_DIR}/actionlint.sarif"
+  actionlint_rc=$?
+  set -e
+  if [[ ! -s "${MERGECRAFT_WORKFLOW_SARIF_DIR}/actionlint.sarif" ]]; then
+    echo "workflow-lint: actionlint produced no SARIF (exit ${actionlint_rc})" >&2
+    exit 1
+  fi
+  echo "» zizmor ${ZIZMOR_VERSION} (SARIF)"
+  set +e
+  "${ZIZMOR_BIN}" --config "${ROOT}/zizmor.yml" --format sarif .github/workflows/ \
+    > "${MERGECRAFT_WORKFLOW_SARIF_DIR}/zizmor.sarif"
+  zizmor_rc=$?
+  set -e
+  if [[ ! -s "${MERGECRAFT_WORKFLOW_SARIF_DIR}/zizmor.sarif" ]]; then
+    echo "workflow-lint: zizmor produced no SARIF (exit ${zizmor_rc})" >&2
+    exit 1
+  fi
+  echo "workflow SARIF OK"
+  exit 0
+fi
+
 echo "» actionlint ${ACTIONLINT_VERSION}"
 "${ACTIONLINT_BIN}" -color .github/workflows/*.yml
 
