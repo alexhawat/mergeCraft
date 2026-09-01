@@ -46,19 +46,5 @@ ciEvidence:
 #               --i-understand-this-grants-approval-authority (exceptional opt-out)
 # Real PAT-backed APPROVE for self-review still flows through mergecraft-approve.yml
 # when the structural mergecraft-approval check passes — see docs/trust-policy.md.
-#
-# The `trust:` block is deliberately absent while `selfReview` is `off`, which is
-# already the model default. The integration coverage gate runs the *base* tree's
-# tests from a worktree inside this checkout, so a key introduced in the same PR
-# that adds its schema field is parsed by base code that does not know it yet and
-# fails `extra="forbid"`. Add the block in a follow-up, or when setting a non-off
-# level:
-#
-#   trust:
-#     selfReview: "off"
-#     # agentSandbox tiers (tightest first): never | merged-only | dispatch | same-repo
-#     # Fork heads always refuse — no tier lifts that floor.
-#     # merged-only gives no shell during open PR review; default-branch only
-#     # implies reviewed where merging requires review.
-#     # Residual risks: fork PR checked out locally; adding a collaborator.
-#     agentSandbox: "dispatch"
+trust:
+  selfReview: "analyzers"
