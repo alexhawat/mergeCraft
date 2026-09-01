@@ -24,11 +24,6 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-W4_XFAIL = pytest.mark.xfail(
-    reason="green after W4: ingest CI SARIF on green wait-for-ci",
-    strict=True,
-)
-
 _HEAD_SHA = "cafebabecafebabecafebabecafebabecafebabe"
 
 
@@ -129,7 +124,6 @@ def _tool_context(tmp_path: Path, github: GitHubClient) -> ToolContext:
     )
 
 
-@W4_XFAIL
 @pytest.mark.asyncio
 async def test_green_wait_ingests_declared_artifacts(tmp_path: Path) -> None:
     """D9 — ``state=complete`` + ``failed_count=0`` still downloads declared SARIF."""
@@ -148,7 +142,6 @@ async def test_green_wait_ingests_declared_artifacts(tmp_path: Path) -> None:
     assert ci_evidence_findings(ctx.tool_state), "ingest must record SARIF findings"
 
 
-@W4_XFAIL
 @pytest.mark.asyncio
 async def test_green_wait_lists_workflow_runs_for_head_sha_not_only_failed_suite(
     tmp_path: Path,
@@ -170,7 +163,6 @@ async def test_green_wait_lists_workflow_runs_for_head_sha_not_only_failed_suite
     assert github.head_sha_queries == [_HEAD_SHA]
 
 
-@W4_XFAIL
 @pytest.mark.asyncio
 async def test_artifact_download_403_logs_warning_and_continues(
     tmp_path: Path,
@@ -198,7 +190,6 @@ async def test_artifact_download_403_logs_warning_and_continues(
     assert not ci_evidence_findings(ctx.tool_state)
 
 
-@W4_XFAIL
 def test_mergecraft_yml_review_job_includes_actions_read() -> None:
     """D10 — dogfood review job needs ``actions: read`` to download ``ci.yml`` artifacts."""
     perms = permission_dict(job(load_workflow("mergecraft.yml"), "review").get("permissions"))
