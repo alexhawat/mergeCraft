@@ -23,6 +23,7 @@ from loguru import logger
 
 from mergecraft.agents import claude, codex, gemini
 from mergecraft.agents import opencode as opencode_mod
+from mergecraft.security.broker import CODEX_BROKER_BEARER_ENV
 from mergecraft.utils.git_setup import (
     register_created_path,
     setup_git,
@@ -84,8 +85,11 @@ def _assert_no_credentials(env: dict[str, str], *, active_key: str | None) -> No
         if name == active_key:
             continue
         assert name not in env, f"agent env leaks non-active provider key {name}"
+    allowed_token_shaped = {CODEX_BROKER_BEARER_ENV}
+    if active_key is not None:
+        allowed_token_shaped.add(active_key)
     for name in env:
-        assert "TOKEN" not in name or name in {active_key}, (
+        assert "TOKEN" not in name or name in allowed_token_shaped, (
             f"agent env carries unexpected token-shaped variable {name}"
         )
 
