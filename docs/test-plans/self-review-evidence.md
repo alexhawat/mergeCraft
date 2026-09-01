@@ -74,7 +74,7 @@ Pinned module: `mergecraft.utils.gha_log`, `mergecraft.main.main`.
 | W3 | *(greened — xfails removed)* | `tests/ci/test_self_review_cascade_w3.py` |
 | W4 | *(greened — xfails removed)* | `tests/ci/test_self_review_green_ingest_w4.py` |
 | W5 | `green after W5: extend ci.yml SARIF catalog (operator opt-in)` | `tests/ci/test_self_review_sarif_extension_w5.py` |
-| W6 | `green after W6: gha_log.group around Action phases` | `tests/action/test_self_review_gha_log_groups_w6.py` |
+| W6 | *(greened — xfails removed)* | `tests/action/test_self_review_gha_log_groups_w6.py` |
 
 Guard tests (no xfail) must stay green through W2–W6 implementation.
 
