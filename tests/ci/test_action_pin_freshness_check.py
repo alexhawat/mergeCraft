@@ -116,24 +116,18 @@ class TestRepoWorkflowsAreConsistent:
         module = _load_module()
         text = (REPO_ROOT / ".github" / "workflows" / "mergecraft.yml").read_text(encoding="utf-8")
         pins = module._pins_in(text)
-        assert len(pins) >= 4, "expected the env var plus at least 3 rungs + the subpath ref"
+        assert len(pins) == 3, "expected the three review rungs (mint is a local composite)"
         assert module._check_self_consistency("mergecraft.yml", pins) == []
         assert module._check_env_parity("mergecraft.yml", text, pins) == []
 
-    def test_mergecraft_approve_yml_pin_matches_mergecraft_yml(self) -> None:
-        """Cross-file check the per-file self-consistency scan cannot express."""
+    def test_mergecraft_approve_yml_has_no_remote_action_pin(self) -> None:
+        """Mint uses ./get-installation-token so approve is not a pin site."""
         module = _load_module()
         approve_text = (REPO_ROOT / ".github" / "workflows" / "mergecraft-approve.yml").read_text(
             encoding="utf-8"
         )
-        review_text = (REPO_ROOT / ".github" / "workflows" / "mergecraft.yml").read_text(
-            encoding="utf-8"
-        )
-        approve_pins = module._pins_in(approve_text)
-        review_pins = module._pins_in(review_text)
-        assert approve_pins, "mergecraft-approve.yml should carry the get-installation-token pin"
-        assert review_pins
-        assert {sha for _, sha in approve_pins} == {sha for _, sha in review_pins}
+        assert module._pins_in(approve_text) == []
+        assert "uses: ./get-installation-token" in approve_text
 
 
 __all__ = [

@@ -2691,23 +2691,30 @@ other workflows to call directly.
 
 `.github/workflows/mergecraft.yml`'s `review` job and
 `.github/workflows/mergecraft-approve.yml`'s `approve` job each mint an App
-token in a `Mint reviewer App installation token` step (via
-`alexhawat/mergeCraft/get-installation-token@<pinned-sha>`) and use it in
-preference to `github.token`:
+token in a `Mint reviewer App installation token` step (via the local
+`./get-installation-token` composite, after checkout) and use it in
+preference to `github.token`. App-secret presence is hoisted into job-level
+`env.HAS_APP` — `secrets.*` is not a valid context inside a step `if:`
+(actionlint rejects it):
 
 ```yaml
-- name: Mint reviewer App installation token
-  id: app_token
-  if: secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != ''
-  continue-on-error: true
-  uses: alexhawat/mergeCraft/get-installation-token@<pinned-sha>
-  env:
-    GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
-    GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+jobs:
+  review:
+    env:
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' }}
+    steps:
+      - name: Mint reviewer App installation token
+        id: app_token
+        if: env.HAS_APP == 'true' && env.IS_SAME_REPO == 'true'
+        continue-on-error: true
+        uses: ./get-installation-token
+        env:
+          GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
 
-# ... later, on the review step ...
-with:
-  token: ${{ steps.app_token.outputs.token || github.token }}
+      # ... later, on the review step ...
+      with:
+        token: ${{ steps.app_token.outputs.token || github.token }}
 ```
 
 The fallback is load-bearing, not cosmetic: `steps.app_token.outputs.token`

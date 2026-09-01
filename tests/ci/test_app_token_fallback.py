@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.ci.workflow_support import job, load_workflow
+from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
 
 _MERGECRAFT_WORKFLOW = "mergecraft.yml"
 _APPROVE_WORKFLOW = "mergecraft-approve.yml"
@@ -53,15 +53,32 @@ class TestMergecraftReviewAppToken:
         mint = _step(steps, _MINT_STEP)
         assert mint.get("id") == "app_token"
 
-    def test_mint_step_uses_the_composite_action_at_the_pinned_sha(self) -> None:
+    def test_mint_step_uses_the_local_composite(self) -> None:
+        """The mint must not ride the Action SHA pin.
+
+        ``uses: alexhawat/mergeCraft/get-installation-token@<pin>`` runs the
+        composite from that pin, so a revoke-before-use fix in this PR cannot
+        take effect until a later bump — and it added a fifth pin site the
+        freshness gate had to grow to see. The local composite is the copy
+        ``pull_request_target`` already checked out from the default branch.
+        """
         steps = _review_steps()
         mint = _step(steps, _MINT_STEP)
-        uses = mint.get("uses")
-        assert isinstance(uses, str)
-        assert uses.startswith("alexhawat/mergeCraft/get-installation-token@")
-        sha = uses.rsplit("@", 1)[1]
-        assert len(sha) == 40
-        assert all(c in "0123456789abcdef" for c in sha)
+        assert mint.get("uses") == "./get-installation-token"
+
+    def test_composite_does_not_revoke_before_callers_read_the_token(self) -> None:
+        """Composite actions have no post-job hook; a sequential revoke step
+        killed the just-minted token before any review rung ran (#578).
+        """
+        import yaml
+
+        text = (REPO_ROOT / "get-installation-token" / "action.yml").read_text(encoding="utf-8")
+        loaded = yaml.safe_load(text)
+        steps = loaded["runs"]["steps"]
+        names = [step.get("name", "") for step in steps]
+        assert not any("revoke" in name.lower() for name in names)
+        for step in steps:
+            assert "--post" not in str(step.get("run", ""))
 
     def test_mint_step_is_gated_on_app_secrets(self) -> None:
         """Unconfigured consumers (no App secrets) must skip minting outright.
@@ -176,6 +193,11 @@ class TestMergecraftApproveAppToken:
         has_app = env.get("HAS_APP", "")
         assert "secrets.MERGECRAFT_APP_ID" in has_app
         assert "secrets.MERGECRAFT_APP_PRIVATE_KEY" in has_app
+
+    def test_mint_step_uses_the_local_composite(self) -> None:
+        steps = self._approve_steps()
+        mint = _step(steps, _MINT_STEP)
+        assert mint.get("uses") == "./get-installation-token"
 
     def test_no_step_if_reads_secrets_directly(self) -> None:
         """Same regression guard as the mergecraft.yml side (#550)."""

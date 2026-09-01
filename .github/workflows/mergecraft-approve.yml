@@ -109,11 +109,20 @@ jobs:
       # step's own outcome so an unconfigured or failed mint never blocks the
       # (skippable) approve step below — continue-on-error plus the empty-token
       # guard in that step reproduce the old "PAT not configured" no-op path.
+      # Checkout is required so `uses: ./get-installation-token` resolves the
+      # composite from this workflow's default-branch copy (workflow_run always
+      # reads this file from the default branch). persist-credentials stays
+      # false: the mint uses App secrets, not the job token in .git/config.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        if: steps.verdict.outputs.conclusion == 'success' && env.HAS_APP == 'true'
+        with:
+          persist-credentials: false
+          fetch-depth: 1
       - name: Mint reviewer App installation token
         id: app_token
         if: steps.verdict.outputs.conclusion == 'success' && env.HAS_APP == 'true'
         continue-on-error: true
-        uses: alexhawat/mergeCraft/get-installation-token@e5f9ed5f799d8d352fd850724ceaca333dedb1ce # env.MERGECRAFT_ACTION_SHA (mergecraft.yml) — covered by make action-pin-check's self-consistency scan
+        uses: ./get-installation-token
         env:
           GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}

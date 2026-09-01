@@ -537,7 +537,11 @@ jobs:
           env.IS_SAME_REPO == 'true' &&
           env.HAS_APP == 'true'
         continue-on-error: true
-        uses: alexhawat/mergeCraft/get-installation-token@e5f9ed5f799d8d352fd850724ceaca333dedb1ce # env.MERGECRAFT_ACTION_SHA — kept in lockstep with the review rungs below; covered by make action-pin-check's self-consistency scan
+        # Local composite from this checkout (default branch under
+        # pull_request_target), not the Action SHA pin. Pinning the companion
+        # action independently caused split-pin drift, and a pin cannot carry
+        # the composite's revoke-before-use fix until a later bump.
+        uses: ./get-installation-token
         env:
           GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
           GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}

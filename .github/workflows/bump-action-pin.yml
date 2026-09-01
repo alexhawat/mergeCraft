@@ -1,41 +1,19 @@
 # SPDX-License-Identifier: MIT
-# Automates the self-review Action pin bump (#450/#526/#532/#562) that used
-# to be a hand-run, error-prone checklist: rewrite MERGECRAFT_ACTION_SHA +
-# three uses: rungs in mergecraft.yml, rewrite action.yml's runs.image digest,
-# and keep both consistent — splitting those two edits across separate PRs is
-# exactly what turned five checks red at once on PR #562.
+# Two-commit Action pin bump (plan 19 / #562 / #603).
 #
-# === ORDER MATTERS — read this before running it ===
-# Bump `pre-0.0.1`'s own pin to `pre-0.0.1`'s own tip FIRST (this workflow's
-# default: `base_branch: pre-0.0.1`, `sha` left blank so it resolves that same
-# branch's tip). Only AFTER that bump has merged into `pre-0.0.1` should
-# `pre-0.0.1` be promoted into `main` (an ordinary merge/PR — not this
-# workflow). Reversing the order — promoting to `main` first, then pinning
-# main's merge commit — measured a staleness lag of 35 src-touching commits
-# against `check_action_pin_freshness.py`'s ceiling of 5 (MAX_PRODUCT_LAG) and
-# deadlocked `main` with no path to green: the only fix (bump the pin) needs
-# an image that only publishes after `Full verify` passes, which cannot pass
-# while the pin is this stale. Pinning `pre-0.0.1` to its own tip first
-# measured a lag of 0. See docs/workflows.md "Action pin and evidence
-# artifacts" for the full account.
+# action-slim-bootstrap in ci.yml is the only image publisher. It runs on a
+# pull_request whose base is pre-0.0.1. So the pin PR must target pre-0.0.1,
+# and the digest cannot exist until commit 1 (SHA bump) has been pushed and
+# that PR's bootstrap job has finished.
 #
-# Why this doesn't build the image itself: it calls
-# ensure-action-slim-image.yml (the same reusable workflow ci.yml's
-# `action-slim-bootstrap` job calls) rather than re-implementing "build a
-# Dockerfile, push it to GHCR" a second time — one body, two callers.
+# Dispatch twice:
+#   1. stage=sha    — commit 1 on ci/bump-action-pin-<sha8>, based on pre-0.0.1.
+#                      Open the PR against pre-0.0.1. Wait for bootstrap.
+#   2. stage=digest — commit 2 on the same branch (action.yml digest).
+# Never merge after commit 1 alone.
 #
-# Why this pushes a branch and stops, rather than opening a PR: a PR opened
-# with the default GITHUB_TOKEN does not trigger `pull_request` workflows
-# (a deliberate GitHub anti-recursion rule), so a bot-opened PR here would
-# carry zero required checks and could never satisfy branch protection. A
-# human opens the PR from the pushed branch instead — see the job summary
-# this workflow writes, and docs/workflows.md. This restriction lifts once
-# issue #550's GitHub App exists: an App-authored PR *does* trigger
-# `pull_request` workflows, so a future revision of this job could open the
-# PR itself once an App token is available here the way mergecraft.yml and
-# mergecraft-approve.yml already prefer one. No PAT is used to work around
-# this in the meantime — see that issue's discussion of why a PAT is not an
-# acceptable substitute for either problem it would nominally solve.
+# A human opens the PR: GITHUB_TOKEN-opened PRs do not trigger pull_request
+# workflows and would carry zero required checks. No PAT is used.
 name: Bump action pin
 
 on:
@@ -43,17 +21,26 @@ on:
     inputs:
       base_branch:
         description: >-
-          Branch whose own workflow pin gets bumped, and that the pushed
-          branch is based on / will be PR'd against. Follow the ORDER note
-          above: bump pre-0.0.1 to its own tip before ever promoting to main.
+          Branch the sha-stage commit is based on and the pin PR targets.
+          Must stay pre-0.0.1 so action-slim-bootstrap can publish the image.
         required: false
         default: pre-0.0.1
       sha:
         description: >-
           Full 40-hex commit SHA to pin. Leave blank to resolve base_branch's
-          own current tip (the common case — see the ORDER note above).
+          current tip (the common case after syncing main into pre-0.0.1).
         required: false
         default: ""
+      stage:
+        description: >-
+          sha = commit 1 (workflow pin only). digest = commit 2 (action.yml
+          after action-slim-bootstrap has published the image).
+        required: false
+        default: sha
+        type: choice
+        options:
+          - sha
+          - digest
 
 permissions:
   contents: read
@@ -67,14 +54,13 @@ jobs:
       contents: read
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
+      short: ${{ steps.resolve.outputs.short }}
+      branch: ${{ steps.resolve.outputs.branch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.base_branch }}
-          # Read-only job — no push happens here, so don't leave the token
-          # sitting in .git/config (unlike the `bump` job below, which needs
-          # it for `git push`).
           persist-credentials: false
       - name: Resolve target SHA
         id: resolve
@@ -92,28 +78,19 @@ jobs:
           else
             SHA="$(git rev-parse HEAD)"
           fi
+          SHORT="${SHA:0:8}"
+          BRANCH="ci/bump-action-pin-${SHORT}"
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
-          echo "Resolved target SHA: ${SHA} (base_branch=${BASE_BRANCH})"
-
-  ensure-image:
-    name: Ensure GHCR image exists
-    needs: resolve
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/ensure-action-slim-image.yml
-    with:
-      sha: ${{ needs.resolve.outputs.sha }}
+          echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "Resolved target SHA: ${SHA} (base_branch=${BASE_BRANCH}, branch=${BRANCH})"
 
   bump:
     name: Bump pin, verify, push branch
-    needs: [resolve, ensure-image]
+    needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      # Only contents: write — this job pushes a branch and nothing else. No
-      # PAT, no App token: the default job token is sufficient for a branch
-      # push, and (per the header comment) opening the PR is a human step.
       contents: write
     env:
       UV_PROJECT_ENVIRONMENT: .venv-dev
@@ -121,65 +98,81 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ inputs.base_branch }}
+          ref: ${{ inputs.stage == 'digest' && needs.resolve.outputs.branch || inputs.base_branch }}
       - uses: ./.github/actions/bootstrap
       - name: Bump the pin
         id: bump
         env:
           SHA: ${{ needs.resolve.outputs.sha }}
+          STAGE: ${{ inputs.stage }}
         run: |
           set -euo pipefail
-          uv run python scripts/bump_action_pin.py "${SHA}" --ref HEAD
+          uv run python scripts/bump_action_pin.py "${SHA}" --stage "${STAGE}" --ref HEAD
       - name: Verify — action pin freshness
         run: uv run python scripts/check_action_pin_freshness.py
       - name: Verify — action image digest
+        if: inputs.stage == 'digest'
         run: uv run python scripts/check_action_image_digest.py
       - name: Create + push the bump branch
         id: branch
         env:
           SHA: ${{ needs.resolve.outputs.sha }}
+          SHORT: ${{ needs.resolve.outputs.short }}
+          BRANCH: ${{ needs.resolve.outputs.branch }}
           BASE_BRANCH: ${{ inputs.base_branch }}
+          STAGE: ${{ inputs.stage }}
         run: |
           set -euo pipefail
-          SHORT="${SHA:0:12}"
-          BRANCH="bump-action-pin/${SHORT}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- .github/workflows/mergecraft.yml action.yml; then
-            echo "::notice::No changes after bump — pin was already current. Nothing to push."
+          if [ "${STAGE}" = "sha" ]; then
+            PATHS=".github/workflows/mergecraft.yml .github/workflows/mergecraft-approve.yml"
+            SUBJECT="ci: bump the reviewer action pin to ${SHORT}"
+          else
+            PATHS="action.yml"
+            SUBJECT="ci: match action.yml runs.image to the GHCR digest for ${SHORT}"
+          fi
+          # shellcheck disable=SC2086
+          if git diff --quiet -- ${PATHS}; then
+            echo "::notice::No changes after ${STAGE} bump — already current. Nothing to push."
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git checkout -b "${BRANCH}"
-          git add .github/workflows/mergecraft.yml action.yml
+          if [ "${STAGE}" = "sha" ]; then
+            git checkout -B "${BRANCH}"
+          fi
+          # shellcheck disable=SC2086
+          git add ${PATHS}
           git commit \
-            -m "chore(ci): bump self-review action pin to ${SHORT}" \
-            -m "Bumped by the bump-action-pin workflow (base_branch=${BASE_BRANCH}, target sha=${SHA})."
+            -m "${SUBJECT}" \
+            -m "Bumped by the bump-action-pin workflow (stage=${STAGE}, base_branch=${BASE_BRANCH}, target sha=${SHA}). Never merge after the sha commit alone."
           git push origin "HEAD:refs/heads/${BRANCH}"
           echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
       - name: Summary
         if: always()
         env:
-          BRANCH: ${{ steps.branch.outputs.branch }}
+          BRANCH: ${{ needs.resolve.outputs.branch }}
           PUSHED: ${{ steps.branch.outputs.pushed }}
           BASE_BRANCH: ${{ inputs.base_branch }}
           SHA: ${{ needs.resolve.outputs.sha }}
+          STAGE: ${{ inputs.stage }}
         run: |
           {
-            echo "### Action pin bump"
+            echo "### Action pin bump (${STAGE})"
             echo
             if [ "${PUSHED}" = "true" ]; then
-              echo "Pushed \`${BRANCH}\` (target SHA \`${SHA}\`)."
+              echo "Pushed \`${BRANCH}\` (target SHA \`${SHA}\`, stage \`${STAGE}\`)."
               echo
-              echo "**A human must open the PR** — a bot-pushed branch is deliberate here:"
-              echo "a PR opened with the default \`GITHUB_TOKEN\` does not trigger"
-              echo "\`pull_request\` workflows, so a bot-opened PR would carry zero required"
-              echo "checks. Open a PR from \`${BRANCH}\` against \`${BASE_BRANCH}\` manually."
-              echo
-              echo "Remember the ORDER: only promote \`pre-0.0.1\` into \`main\` after this"
-              echo "bump has merged into \`pre-0.0.1\` — never pin main's merge commit first."
+              if [ "${STAGE}" = "sha" ]; then
+                echo "**Open a PR from \`${BRANCH}\` against \`${BASE_BRANCH}\`** so"
+                echo "\`action-slim-bootstrap\` can publish the image. Then re-run this"
+                echo "workflow with \`stage=digest\`. Do not merge after commit 1 alone."
+              else
+                echo "Digest commit is on \`${BRANCH}\`. Merge the pin PR into \`${BASE_BRANCH}\`,"
+                echo "then open the promotion PR against \`main\`."
+              fi
             else
-              echo "Pin was already current for \`${BASE_BRANCH}\` — nothing pushed."
+              echo "Nothing pushed for stage \`${STAGE}\` on \`${BASE_BRANCH}\`."
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
