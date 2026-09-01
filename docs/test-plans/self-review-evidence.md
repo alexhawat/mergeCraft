@@ -44,6 +44,9 @@ Pinned API: `mergecraft.config.trust_policy.resolve_trust_policy`.
 | `collect_ci_sarif_findings` fed head-SHA workflow run ids, not only failed suite | `…::test_green_wait_lists_workflow_runs_for_head_sha_not_only_failed_suite` | integration |
 | Download 403 → warning, review continues | `…::test_artifact_download_403_logs_warning_and_continues` | integration |
 | Dogfood `mergecraft.yml` review job `permissions` includes `actions: read` | `…::test_mergecraft_yml_review_job_includes_actions_read` | parsed YAML |
+| Non-complete wait state / blank head SHA → no ingest | `…::test_ingest_skips_when_ci_wait_state_not_complete`, `…::test_ingest_skips_when_head_sha_blank` | unit |
+| Non-GitHub SCM / listing error / truncated listing → warning, no findings | `…::test_ingest_skips_without_github_client`, `…::test_ingest_workflow_listing_error_logs_warning`, `…::test_ingest_workflow_listing_incomplete_logs_warning` | integration |
+| Action env lane (`MERGECRAFT_CI_WAIT_STATE` / `CI_STATE`) | `…::test_ci_wait_inputs_from_env_*`, `…::test_ingest_ci_sarif_from_action_env_*` | unit + integration |
 | D8 guard — `mergecraft.yml` not SARIF upload surface | `tests/ci/test_ci_sarif_evidence_464.py::test_mergecraft_yml_is_not_the_sarif_upload_surface` | parsed YAML (guard, no xfail) |
 
 Pinned API (W4): `mergecraft.main.ingest_ci_sarif_after_ci_wait`, `mergecraft.ci.intelligence.collect_ci_sarif_findings`.
@@ -89,4 +92,7 @@ Guard tests (no xfail) must stay green through W2–W6 implementation.
   artifact.
 - **W4 guard amendment (2026-09-01):** `test_dogfood_config_enables_first_wave_ci_evidence` requires
   the first-wave subset only; W5-extended names in `sarifArtifacts` are allowed.
+- **W8 coverage escalation (2026-09-01):** added W4 skip/error/action-env branch tests in
+  `test_self_review_green_ingest_w4.py` to cover `main.py` `ingest_ci_sarif_after_ci_wait` /
+  `_ingest_ci_sarif_from_action_env` paths for the coverage-gate floor.
 - W2 implementation waits on lane C W2 (#573) and lane B W2 coupling (D6a); tests are authored regardless.
