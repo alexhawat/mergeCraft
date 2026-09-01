@@ -80,9 +80,11 @@ jobs:
           fi
           SHORT="${SHA:0:8}"
           BRANCH="ci/bump-action-pin-${SHORT}"
-          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
-          echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
-          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=${SHA}"
+            echo "short=${SHORT}"
+            echo "branch=${BRANCH}"
+          } >> "$GITHUB_OUTPUT"
           echo "Resolved target SHA: ${SHA} (base_branch=${BASE_BRANCH}, branch=${BRANCH})"
 
   bump:
@@ -147,8 +149,10 @@ jobs:
             -m "${SUBJECT}" \
             -m "Bumped by the bump-action-pin workflow (stage=${STAGE}, base_branch=${BASE_BRANCH}, target sha=${SHA}). Never merge after the sha commit alone."
           git push origin "HEAD:refs/heads/${BRANCH}"
-          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "branch=${BRANCH}"
+            echo "pushed=true"
+          } >> "$GITHUB_OUTPUT"
       - name: Summary
         if: always()
         env:
