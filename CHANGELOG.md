@@ -180,6 +180,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The self-review Action pin on all three review rungs moves to `4ab87265`,
+  pin 3 of 3 — lane E agent credential broker (#594). Reviews run the loopback
+  broker, pinned egress, and Codex routing fixes instead of the lane B pin
+  (`4182fd45`)
 - The self-review Action pin on all three review rungs moves to `3ed2c798`,
   the lane A/C sync on `pre-0.0.1` (#582). Reviews run publication attribution,
   the token-budget band, and the coverage-gate work instead of the #575 pin
