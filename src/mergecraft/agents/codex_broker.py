@@ -155,6 +155,14 @@ def begin_broker_session(
     return _start_broker_session(api_key=api_key, posture=resolved)
 
 
+def broker_provider_base_url(broker_base_url: str) -> str:
+    """Return the loopback broker URL Codex should use for ``model_providers``."""
+    normalized = broker_base_url.rstrip("/")
+    if normalized.endswith("/v1"):
+        return normalized
+    return f"{normalized}/v1"
+
+
 def add_broker_provider_table(config: dict[str, Any], broker_base_url: str) -> None:
     """Point ``model_providers.openai`` at the loopback credential broker (W3).
 
@@ -168,7 +176,7 @@ def add_broker_provider_table(config: dict[str, Any], broker_base_url: str) -> N
         config["model_providers"] = model_providers
     model_providers[OPENAI_BROKER_PROVIDER_ID] = {
         "name": OPENAI_BROKER_PROVIDER_ID,
-        "base_url": broker_base_url,
+        "base_url": broker_provider_base_url(broker_base_url),
         "env_key": CODEX_BROKER_BEARER_ENV,
         "wire_api": "responses",
     }
@@ -198,9 +206,10 @@ def prepare_codex_brokered_run(
         set_broker_session(None)
         raise
     handle = session.handle
+    broker_base_url = broker_provider_base_url(handle.base_url) if handle is not None else None
     return CodexBrokeredRun(
         agent_env=agent_env,
-        broker_base_url=handle.base_url if handle is not None else None,
+        broker_base_url=broker_base_url,
         posture=posture,
         _session=session,
     )
@@ -216,6 +225,7 @@ __all__ = [
     "add_broker_provider_table",
     "begin_broker_session",
     "broker_config_for_api_key",
+    "broker_provider_base_url",
     "broker_run_record_fields",
     "current_broker_session",
     "prepare_codex_brokered_run",

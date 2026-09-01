@@ -248,15 +248,15 @@ def _upstream_request_path(request_path: str) -> str:
     return path if path.startswith("/") else f"/{path}"
 
 
-def _upstream_client(config: CredentialBrokerConfig) -> httpx.Client:
-    """Build the shared upstream client for one broker lifetime.
+def _is_loopback_upstream_base_url(url: str) -> bool:
+    """Return whether ``url`` targets a loopback host (test fixture upstreams only)."""
+    host = _normalize_host(urlparse(url).hostname or "")
+    return host in {"127.0.0.1", "localhost", "::1", "[::1]", "ip6-localhost", "ip6-loopback"}
 
-    Hosts listed in ``run_upstream_hosts`` (typically ``api.openai.com``) use a
-    plain TLS-verified client; other configured upstreams use DNS-pinned transport.
-    """
-    parsed = urlparse(config.upstream_base_url)
-    host = _normalize_host(parsed.hostname or "")
-    if host in {_normalize_host(item) for item in config.run_upstream_hosts}:
+
+def _upstream_client(config: CredentialBrokerConfig) -> httpx.Client:
+    """Build the shared upstream client for one broker lifetime."""
+    if _is_loopback_upstream_base_url(config.upstream_base_url):
         return httpx.Client(
             base_url=config.upstream_base_url,
             timeout=30.0,
@@ -432,7 +432,13 @@ def credential_broker(
 
             self.send_response(status_code)
             for header, value in response_headers.items():
-                if header.lower() in {"transfer-encoding", "content-length", "connection"}:
+                lowered = header.lower()
+                if lowered in {
+                    "transfer-encoding",
+                    "content-length",
+                    "content-encoding",
+                    "connection",
+                }:
                     continue
                 self.send_header(header, redact_broker_output(value))
             self.send_header("Content-Length", str(len(response_body)))
