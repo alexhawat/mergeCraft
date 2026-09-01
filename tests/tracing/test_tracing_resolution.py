@@ -32,6 +32,10 @@ _LOG_KEYS = (
     "MERGECRAFT_LOGFIRE_TOKEN",
     "MERGECRAFT_OTEL_ENDPOINT",
     "MERGECRAFT_TRACING_PROJECT",
+    "MERGECRAFT_TRACING_REGION",
+    "INPUT_TRACING",
+    "INPUT_TRACING_TO",
+    "INPUT_TRACING_REGION",
 )
 
 
@@ -179,3 +183,46 @@ def test_diff_review_forwards_tracing(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert settings.enabled is True
     assert settings.sinks[0].type == "logfire"
+
+
+def test_action_enablement_without_tracing_env_applies_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Action ``INPUT_TRACING`` must not drop ``MERGECRAFT_TRACING_REGION``.
+
+    Enablement on the GitHub Action path comes from ``INPUT_TRACING``, not
+    ``MERGECRAFT_TRACING``. The resolver used to keep the Action shorthand
+    sinks (region default ``us``) and ignore the env, so an EU write token
+    was posted to ``logfire-us.pydantic.dev``.
+    """
+    _clear_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+    monkeypatch.setenv("MERGECRAFT_TRACING_REGION", "eu")
+
+    from mergecraft.action.inputs import apply_tracing_overrides
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.tracing.resolve import resolve_active_tracing
+
+    settings = apply_tracing_overrides(RepoSettings())
+    active = resolve_active_tracing(config=settings.tracing)
+    assert active.enabled is True
+    assert active.sinks[0].type == "logfire"
+    assert active.sinks[0].region == "eu"
+
+
+def test_action_enablement_without_tracing_env_defaults_region_us(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset region env keeps the US default when Action inputs enable Logfire."""
+    _clear_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+
+    from mergecraft.action.inputs import apply_tracing_overrides
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.tracing.resolve import resolve_active_tracing
+
+    settings = apply_tracing_overrides(RepoSettings())
+    active = resolve_active_tracing(config=settings.tracing)
+    assert active.sinks[0].region == "us"

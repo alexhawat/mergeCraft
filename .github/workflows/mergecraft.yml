@@ -634,7 +634,7 @@ jobs:
         env:
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
-          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+          MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
       - name: Persist evidence packet (Nous)
@@ -760,7 +760,7 @@ jobs:
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+          MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
       - name: Persist evidence packet (Codex)
@@ -861,7 +861,7 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}
+          MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
       - name: Persist evidence packet (Claude)

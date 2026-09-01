@@ -83,7 +83,7 @@ US one:
 | Surface | How |
 | ------- | --- |
 | Local   | `mergecraft tracing logfire enable --region eu` (writes `MERGECRAFT_TRACING_REGION` to `.env`) |
-| Action  | `mergecraft tracing logfire wire-workflow --region eu --apply` (writes it to the step's `env:`) |
+| Action  | `mergecraft tracing logfire wire-workflow --region eu --apply` (writes it to the step's `env:`). The Action applies that env onto the logfire sink even when tracing is enabled via the `tracing` input rather than `MERGECRAFT_TRACING` |
 
 Both paths converge on the same precedence layer
 (`cli/tracing_precedence.py`) and the same resolver

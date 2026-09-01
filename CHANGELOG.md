@@ -74,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- GitHub Action Logfire tracing honors `MERGECRAFT_TRACING_REGION`, so an EU write token is no longer posted to the US ingest host
 - Anchor-422 recovery no longer spins on an out-of-range comment index — it
   demotes all inline comments and posts once (#570)
 - The published GitHub review body always matches the terminal submission;

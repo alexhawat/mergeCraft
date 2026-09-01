@@ -75,6 +75,20 @@ def _build_sinks(merged: dict[str, Any]) -> list[TraceSinkEntry]:
     return [TraceSinkEntry(type="jsonl_file", path=path)]
 
 
+def _overlay_logfire_region(
+    sinks: list[TraceSinkEntry], merged: dict[str, Any]
+) -> list[TraceSinkEntry]:
+    """Apply env/CLI ``region`` onto adopted logfire sinks, if present."""
+    raw_region = merged.get("region")
+    if raw_region not in ("us", "eu"):
+        return sinks
+    region: Literal["us", "eu"] = raw_region
+    return [
+        sink.model_copy(update={"region": region}) if sink.type == "logfire" else sink
+        for sink in sinks
+    ]
+
+
 def resolve_active_tracing(
     *,
     cli_args: list[str] | None = None,
@@ -135,7 +149,15 @@ def resolve_active_tracing(
         # sinks so a settings-driven run emits. Env/CLI override takes
         # precedence: when ``merged["enabled"]`` is already True/False from a
         # higher layer, that decision stands and ``_build_sinks`` applies.
-        return TracingSettings(enabled=bool(config.enabled), sinks=list(config.sinks))
+        #
+        # Region is special: Action enablement arrives via ``INPUT_TRACING``,
+        # so ``MERGECRAFT_TRACING`` is often unset even when tracing is on.
+        # Still overlay ``MERGECRAFT_TRACING_REGION`` onto logfire sinks so an
+        # EU write token is not posted to the US OTLP host.
+        return TracingSettings(
+            enabled=bool(config.enabled),
+            sinks=_overlay_logfire_region(list(config.sinks), merged),
+        )
     return TracingSettings(
         enabled=bool(merged.get("enabled")),
         sinks=_build_sinks(merged),

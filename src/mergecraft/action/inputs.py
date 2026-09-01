@@ -58,6 +58,25 @@ def _read_input(name: str) -> str | None:
     return value
 
 
+def _read_logfire_region() -> Literal["us", "eu"] | None:
+    """Return a valid Logfire region from Action input or ``MERGECRAFT_TRACING_REGION``.
+
+    ``INPUT_TRACING_REGION`` (if a consumer sets it) beats
+    ``MERGECRAFT_TRACING_REGION``. Invalid or unset values return ``None`` so
+    the sink keeps the US default.
+    """
+    for name in ("INPUT_TRACING_REGION", "MERGECRAFT_TRACING_REGION"):
+        raw = os.environ.get(name)
+        if raw is None or raw == "":
+            continue
+        region = raw.strip().lower()
+        if region == "us":
+            return "us"
+        if region == "eu":
+            return "eu"
+    return None
+
+
 def _parse_bool(value: str | None) -> bool | None:
     """Parse a tri-state bool string (true / false / unset-or-garbage → None).
 
@@ -114,7 +133,11 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
         if tracing_to == "local_files":
             sinks.append({"type": "jsonl_file", "path": _resolve_local_path(None)})
         elif tracing_to == "logfire":
-            sinks.append({"type": "logfire"})
+            logfire_entry: dict[str, Any] = {"type": "logfire"}
+            region = _read_logfire_region()
+            if region is not None:
+                logfire_entry["region"] = region
+            sinks.append(logfire_entry)
         elif tracing_to == "otel":
             entry: dict[str, Any] = {"type": "otel"}
             if otel_endpoint:
