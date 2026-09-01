@@ -226,6 +226,28 @@ jobs:
           name: mypy-sarif
           path: .sarif/mypy.sarif
           if-no-files-found: warn
+      # W5 extended SARIF (lane D / #600): actionlint + zizmor for sandbox-blocked
+      # workflow analyzers. trufflehog omitted — JSONL-only, no SARIF emitter (D12).
+      # SARIF uploads run on Python 3.14 only — one canonical artifact set per PR.
+      - name: Emit actionlint and zizmor SARIF
+        if: always() && matrix.python == '3.14'
+        env:
+          MERGECRAFT_WORKFLOW_SARIF_DIR: .sarif
+        run: ./scripts/workflow_lint.sh
+      - name: Upload actionlint SARIF
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: actionlint-sarif
+          path: .sarif/actionlint.sarif
+          if-no-files-found: warn
+      - name: Upload zizmor SARIF
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: zizmor-sarif
+          path: .sarif/zizmor.sarif
+          if-no-files-found: warn
 
   security:
     name: Verify (security audit py${{ matrix.python }})
@@ -246,6 +268,13 @@ jobs:
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        if: github.event_name == 'push'
+        with:
+          path: .mergecraft/analyzer-cache
+          key: analyzer-cache-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            analyzer-cache-${{ runner.os }}-py${{ matrix.python }}-
       - name: bandit + pip-audit (OSV.dev)
         env:
           BANDIT_JSON: .sarif/bandit.json
@@ -263,6 +292,20 @@ jobs:
         with:
           name: bandit-sarif
           path: .sarif/bandit.sarif
+          if-no-files-found: warn
+      # W5 extended SARIF (lane D / #600): semgrep for sandbox-blocked pattern scan.
+      # Python 3.14 matrix leg only — one canonical semgrep-sarif artifact per PR.
+      - name: Emit semgrep SARIF
+        if: always() && matrix.python == '3.14'
+        env:
+          UV_PROJECT_ENVIRONMENT: .venv-dev
+        run: uv run python scripts/ci_extended_sarif.py .sarif/semgrep.sarif
+      - name: Upload semgrep SARIF
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: semgrep-sarif
+          path: .sarif/semgrep.sarif
           if-no-files-found: warn
 
   integration:

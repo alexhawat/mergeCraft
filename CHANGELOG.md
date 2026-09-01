@@ -178,8 +178,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - #553 boundary amended from the `pull_request_target` event to fork heads —
   same-repo `pull_request_target` may grant the override at `same-repo` tier
 
+### Lane D — self-review evidence
+
+#### Fixed
+
+- Claude backstop no longer runs when an earlier rung succeeds or posts a
+  verdict including `neutral` — only retryable rung failures without a verdict
+  trigger Claude (#600)
+
+#### Changed
+
+- Same-repo `pull_request_target` self-review runs trusted-tier analyzers when
+  `trust.selfReview` is `analyzers` — execution trust without widening approval
+  authority
+- Declared CI SARIF artifacts are downloaded and recorded when `wait-for-ci`
+  reaches `state=complete` (green or red). The review job must forward
+  `wait-for-ci` `state` / `failed_count` (as `MERGECRAFT_CI_WAIT_STATE` /
+  `MERGECRAFT_CI_FAILED_COUNT` or `CI_STATE` / `CI_FAILED_COUNT`) and grant
+  `actions: read` to download artifacts. Wait states `timeout`, `absent`, and
+  `skipped` skip ingest
+- Action log phases (setup, model chain, agent dispatch, publish) emit
+  collapsible `::group::` blocks in GitHub Actions logs
+
+#### Added
+
+- Dogfood config sets `trust.agentSandbox: same-repo` so Codex
+  `danger-full-access` is honoured on same-repo review runs (#553)
+- CI SARIF ingest covers actionlint, zizmor, and semgrep alongside ruff,
+  mypy, and bandit — matching `ci.yml` uploads and
+  `ciEvidence.sarifArtifacts` (#464)
+- Hardened consumer template forwards wait-for-ci outputs and grants
+  `actions: read` for ciEvidence SARIF ingest
+
 ### Changed
 
+- The self-review Action pin on all three review rungs moves to `e5f9ed5f`,
+  the lane D sync on `pre-0.0.1` (#601). Reviews run the selfReview catalog,
+  Claude backstop, green-CI SARIF ingest, and `agentSandbox: same-repo`
+  instead of the lane E pin (`4ab87265`)
+- Dogfood `trust.selfReview` / `trust.agentSandbox` knobs apply after merge to
+  the default branch — `pull_request_target` reads the base config snapshot, not
+  the PR head
 - The self-review Action pin on all three review rungs moves to `4ab87265`,
   pin 3 of 3 — lane E agent credential broker (#594). Reviews run the loopback
   broker, pinned egress, and Codex routing fixes instead of the lane B pin

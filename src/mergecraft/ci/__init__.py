@@ -1,4 +1,4 @@
-"""CI pipeline intelligence — providers, normalization, and fingerprints."""
+"""CI package — providers, normalization, and fingerprints."""
 
 from __future__ import annotations
 
@@ -9,7 +9,10 @@ from mergecraft.ci.normalize import normalize_failure
 if TYPE_CHECKING:
     from mergecraft.ci.providers import PipelineProvider
 
-__all__ = ["get_provider", "normalize_failure"]
+__all__ = [
+    "get_provider",
+    "normalize_failure",
+]
 
 
 def get_provider(provider_id: str) -> PipelineProvider:

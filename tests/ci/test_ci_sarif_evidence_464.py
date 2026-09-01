@@ -432,14 +432,12 @@ def test_settings_accept_first_wave_sarif_artifacts() -> None:
 
 
 def test_dogfood_config_enables_first_wave_ci_evidence() -> None:
-    """D8: this repo's ``ciEvidence`` lists ruff/mypy/bandit SARIF artifacts."""
+    """D8: this repo's ``ciEvidence`` still lists ruff/mypy/bandit SARIF artifacts."""
     settings = load_repo_settings(root=REPO_ROOT, load_learnings_files=False)
     artifacts = list(settings.ci_evidence.sarif_artifacts)
     assert set(_FIRST_WAVE) <= set(artifacts), (
         f"D8: enable ciEvidence for ruff/mypy/bandit first (got sarifArtifacts={artifacts!r})"
     )
-    leaked = [name for name in artifacts if name not in _FIRST_WAVE]
-    assert leaked == [], f"D8: do not port the rest of the catalog yet (extra={leaked!r})"
 
 
 def test_ci_yml_uploads_first_wave_sarif() -> None:

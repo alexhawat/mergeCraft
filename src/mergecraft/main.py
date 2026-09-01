@@ -29,6 +29,7 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
+from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.main_outcome import (
     _classify_outcome,
@@ -57,6 +58,7 @@ from mergecraft.tracing.review_context import (
     resolve_review_id,
 )
 from mergecraft.tracing.tracer import resolve_correlation_from_env
+from mergecraft.utils import gha_log
 from mergecraft.utils.agent_resolve import (
     ModelFallbackPolicyError,
     effective_model_chain,
@@ -203,18 +205,23 @@ class RunContext:
     budget_exhaustion: Any = None
 
     async def materialize(self) -> None:
-        await _setup_run(self)
-        await _resolve_credentials(self)
+        with gha_log.group("setup"):
+            await _setup_run(self)
+            await _resolve_credentials(self)
+        if self.setup_script_skip_reason:
+            gha_log.warning(self.setup_script_skip_reason)
 
     async def analyze(self) -> None:
-        await _assemble_model_chain(self)
-        await _build_run_tool_context(self)
+        with gha_log.group("model-chain"):
+            await _assemble_model_chain(self)
+            await _build_run_tool_context(self)
 
     async def review(self) -> AgentResult | SkipAgentReview:
         return await _run_review_after_analyze(self)
 
     async def publish(self, review_out: AgentResult | SkipAgentReview) -> MainResult:
-        return await _finalize(self, review_out)
+        with gha_log.group("publish"):
+            return await _finalize(self, review_out)
 
 
 @dataclass(frozen=True, slots=True)
@@ -587,9 +594,7 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     settings = apply_tracing_overrides(run_context.repo_settings)
     for tracing_warning in collect_tracing_warnings_for_summary():
         logger.warning(tracing_warning)
-        from mergecraft.utils.gha_log import warning as emit_gha_warning
-
-        emit_gha_warning(tracing_warning)
+        gha_log.warning(tracing_warning)
     ctx.settings = settings
     from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
 
@@ -1494,7 +1499,17 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
+    assert ctx.tool_context is not None
+    await ingest_ci_sarif_from_action_env(
+        ctx.tool_context,
+        ctx.gh_event or {},
+        event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+    )
     await _run_setup_script_phase(ctx)
+
+    # Plan 12 B5 — run-record setup reasons must also appear outside any open group.
+    if ctx.setup_hook_failure:
+        gha_log.warning(ctx.setup_hook_failure)
 
     assert ctx.settings is not None
 
@@ -1528,8 +1543,9 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         # Engine publish (``_finalize``) owns completion; do not publish here.
         return SkipAgentReview(reason=skip_reason)
 
-    await _prepare_agent_dispatch(ctx)
-    return await _dispatch_agent_with_deadline(ctx)
+    with gha_log.group("agent-dispatch"):
+        await _prepare_agent_dispatch(ctx)
+        return await _dispatch_agent_with_deadline(ctx)
 
 
 async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
@@ -1798,4 +1814,9 @@ async def main() -> MainResult:
             reset_gateway_settings_cache()
 
 
-__all__ = ["MainResult", "RunOutcome", "main", "publish_deterministic_record"]
+__all__ = [
+    "MainResult",
+    "RunOutcome",
+    "main",
+    "publish_deterministic_record",
+]

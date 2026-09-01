@@ -12,6 +12,7 @@ from loguru import logger
 from mergecraft.ci.archive_bounds import extract_sarif_documents
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 from mergecraft.scm.github import github_client_from_scm
+from mergecraft.utils import gha_log
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -21,6 +22,12 @@ if TYPE_CHECKING:
 
 _COMMAND_HINT = re.compile(r"(make\s+\S+|uv run\s+\S+|pytest[^\n]*)")
 _GITHUB_PROVIDER = GitHubActionsProvider()
+
+
+def warn_ci_evidence(message: str) -> None:
+    """Log CI evidence warnings to loguru and GitHub Actions workflow commands."""
+    logger.warning(message)
+    gha_log.warning(message)
 
 
 def provider_jobs_to_raw_failures(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -209,16 +216,11 @@ async def collect_ci_sarif_findings(
                 ctx.repo.owner, ctx.repo.name, run_id
             )
         except Exception as listing_err:
-            logger.warning(
-                "ci evidence: SARIF listing failed for run {} — {}",
-                run_id,
-                listing_err,
-            )
+            warn_ci_evidence(f"ci evidence: SARIF listing failed for run {run_id} — {listing_err}")
             continue
         if listed.incomplete:
-            logger.warning(
-                "ci evidence: SARIF listing truncated for run {} — not treating as complete",
-                run_id,
+            warn_ci_evidence(
+                f"ci evidence: SARIF listing truncated for run {run_id} — not treating as complete"
             )
             continue
         for artifact in listed.items:
@@ -233,10 +235,8 @@ async def collect_ci_sarif_findings(
                 for document in _sarif_documents(archive):
                     findings.extend(sarif_findings(document, artifact=name, repo_root=repo_root))
             except Exception as artifact_err:
-                logger.warning(
-                    "ci evidence: SARIF artifact {} ingest failed — {}",
-                    name,
-                    artifact_err,
+                warn_ci_evidence(
+                    f"ci evidence: SARIF artifact {name} ingest failed — {artifact_err}"
                 )
                 continue
     return findings
@@ -283,6 +283,8 @@ async def run_ci_intelligence(
                 reason="check-suite run listing incomplete",
             )
         runs = listed.items
+        # Action-side ingest may have already recorded SARIF for this head;
+        # ``record_ci_findings`` dedupes on ``finding_dedupe_key``.
         sarif = await collect_ci_sarif_findings(ctx, client=client, runs=runs)
         if sarif:
             record_ci_findings(ctx.tool_state, sarif)
@@ -327,4 +329,5 @@ __all__ = [
     "intelligence_from_failures",
     "provider_jobs_to_raw_failures",
     "run_ci_intelligence",
+    "warn_ci_evidence",
 ]

@@ -622,6 +622,37 @@ class GitHubClient:
             total_count=total,
         )
 
+    async def _list_workflow_runs(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        check_suite_id: int | None = None,
+        head_sha: str | None = None,
+    ) -> ListedItems:
+        """Paginate ``/actions/runs`` with either check-suite or head-SHA filters."""
+        if (check_suite_id is None) == (head_sha is None):
+            msg = "exactly one of check_suite_id or head_sha must be set"
+            raise ValueError(msg)
+
+        params: dict[str, Any] = {}
+        if check_suite_id is not None:
+            params["check_suite_id"] = check_suite_id
+        if head_sha is not None:
+            params["head_sha"] = head_sha
+
+        async def _fetch_page(page: int) -> Any:
+            return await self.get(
+                f"/repos/{owner}/{repo}/actions/runs",
+                params={
+                    **params,
+                    "per_page": GITHUB_LIST_PAGE_SIZE,
+                    "page": page,
+                },
+            )
+
+        return await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
+
     async def list_workflow_runs_for_check_suite(
         self,
         owner: str,
@@ -629,18 +660,16 @@ class GitHubClient:
         check_suite_id: int,
     ) -> ListedItems:
         """List workflow runs for a check suite (every page, not only the first 100)."""
+        return await self._list_workflow_runs(owner, repo, check_suite_id=check_suite_id)
 
-        async def _fetch_page(page: int) -> Any:
-            return await self.get(
-                f"/repos/{owner}/{repo}/actions/runs",
-                params={
-                    "check_suite_id": check_suite_id,
-                    "per_page": GITHUB_LIST_PAGE_SIZE,
-                    "page": page,
-                },
-            )
-
-        return await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
+    async def list_workflow_runs_for_head_sha(
+        self,
+        owner: str,
+        repo: str,
+        head_sha: str,
+    ) -> ListedItems:
+        """List workflow runs for a commit SHA (every page, not only the first 100)."""
+        return await self._list_workflow_runs(owner, repo, head_sha=head_sha)
 
     async def list_workflow_run_artifacts(
         self,

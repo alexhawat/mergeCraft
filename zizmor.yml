@@ -29,3 +29,8 @@ rules:
       # to that exact commit_id. pull_requests[0] is empty for fork PRs by
       # GitHub's own documented behavior, so this never fires for them.
       - mergecraft-approve.yml
+  cache-poisoning:
+    ignore:
+      # security job analyzer-cache: step runs only on push (not pull_request);
+      # caches dev-tooling under .mergecraft/, not release artifacts.
+      - ci.yml
