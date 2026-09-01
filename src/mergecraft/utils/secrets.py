@@ -283,6 +283,8 @@ def build_agent_env(
             raw = os.environ.get(key, "").strip()
             if raw:
                 env[key] = raw
+    # Extras apply last so callers can override reinjected provider keys — e.g.
+    # Codex broker runs replace OPENAI_API_KEY with the per-run throwaway token.
     if extras:
         env.update(extras)
     from mergecraft.enterprise.runtime import agent_network_env

@@ -155,6 +155,38 @@ Run manifest fields (`trust_self_review`, `trust_execution`, `trust_authority`,
 `trust_resolved_from`, `trust_config_hash`) land in the evidence packet so
 readers of a review can see the posture it was produced under.
 
+## Agent credential broker (#553)
+
+Separate from `trust.selfReview` — this addresses what credentials the Codex
+agent subprocess can read during a review run.
+
+When Codex authenticates with `OPENAI_API_KEY` (and `CODEX_AUTH_JSON` is absent
+or unusable), mergeCraft routes model API calls through a loopback credential
+broker started in the parent process. The agent receives a per-run throwaway
+bearer; the real key never enters the agent environment or `$CODEX_HOME/auth.json`.
+
+| Posture | Broker | Credential exposure |
+|---------|--------|---------------------|
+| `OPENAI_API_KEY` only | Active | Throwaway bearer only — a stolen token is useless after the run |
+| `CODEX_AUTH_JSON` (subscription) | **Inactive** | Raw subscription bundle remains agent-readable at `$CODEX_HOME/auth.json` |
+
+### Subscription vs API-key trade (D3a)
+
+Clearing `CODEX_AUTH_JSON` and running Codex on `OPENAI_API_KEY` **enables**
+broker coverage. The cost is billing: per-token API usage instead of ChatGPT
+subscription pricing. The broker does not broker subscription auth — deleting
+`auth.json` would also break Codex writeback for subscription sessions.
+
+### What this lane does not build
+
+- **Outbound egress stays open.** A hijacked agent can still send whatever it
+  can read; for a private repo the tree itself remains a real residual.
+- **`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` are not egress controls.** Do not
+  configure or document them as a wall.
+
+The run record (`broker_active`, auth mode fields) states whether the broker
+covered each Codex run. Read more: [SECURITY.md — agent credential broker](../SECURITY.md#agent-credential-broker-codex-553).
+
 ## Related pages
 
 - [Workflows — security model](workflows.md#security-model)

@@ -14,6 +14,18 @@ from typing import TypeAlias
 
 from loguru import logger
 
+from mergecraft.agents.codex_broker import (
+    OPENAI_API_KEY_ENV,
+    CodexBrokeredRun,
+    active_broker_handle,
+    add_broker_openai_config,
+    begin_broker_session,
+    broker_run_record_fields,
+    current_broker_session,
+    resolve_codex_broker_posture,
+    set_broker_session,
+    stop_broker_session,
+)
 from mergecraft.agents.codex_stream import (
     CODEX_MODEL_REASONING_EFFORT,
     codex_stream_event_handler,
@@ -39,6 +51,7 @@ from mergecraft.agents.shared import (
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
+from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
 from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
@@ -46,7 +59,6 @@ from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
-OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
 # nested value is a table, a scalar is a key in the table that holds it.
 TomlTable: TypeAlias = dict[str, "str | bool | TomlTable"]
@@ -91,6 +103,7 @@ CODEX_SUBAGENT_DEGRADATION = CodexSubagentDegradation(
     kind="prose-only",
     toolset_parity=False,
 )
+
 
 # Mirrors mergecraft.utils.git_setup — Codex refuses PATH aliases under these.
 _FORBIDDEN_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/usr/tmp")
@@ -238,30 +251,16 @@ def _has_openai_api_key() -> bool:
 
 
 def _codex_subscription_auth_usable(raw: str) -> bool:
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(data, dict):
-        return False
-    if _extract_refresh_token(raw):
-        return True
-    tokens = data.get("tokens")
-    if isinstance(tokens, dict):
-        for key in ("access_token", "access", "refresh_token", "refresh"):
-            val = tokens.get(key)
-            if isinstance(val, str) and val.strip():
-                return True
-    for key in ("access_token", "access"):
-        val = data.get(key)
-        if isinstance(val, str) and val.strip():
-            return True
-    return False
+    return subscription_auth_usable(raw)
 
 
-def _setup_codex_auth(ctx: AgentRunContext, *, codex_home: Path) -> None:
+def _setup_codex_auth(
+    ctx: AgentRunContext,
+    *,
+    codex_home: Path,
+) -> None:
     raw = os.environ.get(CODEX_AUTH_ENV, "").strip()
-    if raw and _codex_subscription_auth_usable(raw):
+    if raw and subscription_auth_usable(raw):
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
         auth_path.write_text(raw, encoding="utf-8")
@@ -273,6 +272,9 @@ def _setup_codex_auth(ctx: AgentRunContext, *, codex_home: Path) -> None:
             CODEX_AUTH_ENV,
             OPENAI_API_KEY_ENV,
         )
+    session = current_broker_session()
+    if session is not None and session.active:
+        return
     if _has_openai_api_key():
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
 
@@ -565,6 +567,9 @@ def write_mcp_config(
     # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
     # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set.
     _add_custom_provider_tables(config)
+    handle = active_broker_handle()
+    if handle is not None:
+        add_broker_openai_config(config, handle.base_url)
     if _codex_use_permission_profiles(ctx):
         _add_read_only_mcp_network_profile(config)
     else:
@@ -597,12 +602,18 @@ def ctx_tmpdir_fallback() -> str:
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     codex_home = _codex_home(ctx)
+    handle = active_broker_handle()
+    broker_active = handle is not None
     # D16 — inject the per-run MCP bearer token so Codex can authenticate via
     # ``bearer_token_env_var`` in config.toml. Only inject when a token was
     # issued (dev/test runs without a live MCP server leave this empty).
     extra: dict[str, str] = {"CODEX_HOME": str(codex_home)}
     if ctx.mcp_auth_token:
         extra[_CODEX_MCP_TOKEN_ENV] = ctx.mcp_auth_token
+    if broker_active and handle is not None:
+        # D3 — throwaway bearer in OPENAI_API_KEY; extras overwrite reinjection
+        # in build_agent_env so the real parent key never reaches the agent.
+        extra[OPENAI_API_KEY_ENV] = handle.token
     env = build_agent_env("codex", extra, model=ctx.resolved_model)
     _setup_codex_auth(ctx, codex_home=codex_home)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
@@ -836,32 +847,75 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    render_result = render_for_run(ctx, "codex")
-    subagent_block = render_result.payload if isinstance(render_result.payload, str) else None
-    mcp_config = write_mcp_config(ctx, subagent_block=subagent_block)
-    # Blocking Popen/wait/stream consume runs in a worker thread so
-    # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
-    initial = await asyncio.to_thread(
-        _run_codex_once,
-        cli=cli,
-        prompt=ctx.instructions.user,
-        ctx=ctx,
-        mcp_config=mcp_config,
-    )
-
-    async def resume(prompt: str) -> AgentResult:
-        return await asyncio.to_thread(
+    initial_posture = resolve_codex_broker_posture()
+    try:
+        broker_session = begin_broker_session(posture=initial_posture)
+    except RuntimeError as err:
+        failed_posture = CodexBrokerPosture(
+            active=False,
+            auth_mode=initial_posture.auth_mode,
+            reason=str(err),
+        )
+        return AgentResult(
+            success=False,
+            error=str(err),
+            metadata=broker_run_record_fields(failed_posture),
+        )
+    if initial_posture.active and not broker_session.active:
+        reason = broker_session.posture.reason
+        msg = f"Codex credential broker inactive: {reason}"
+        return AgentResult(
+            success=False,
+            error=msg,
+            metadata=broker_run_record_fields(broker_session.posture),
+        )
+    set_broker_session(broker_session)
+    try:
+        render_result = render_for_run(ctx, "codex")
+        subagent_block = render_result.payload if isinstance(render_result.payload, str) else None
+        mcp_config = write_mcp_config(ctx, subagent_block=subagent_block)
+        # Blocking Popen/wait/stream consume runs in a worker thread so
+        # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
+        initial = await asyncio.to_thread(
             _run_codex_once,
             cli=cli,
-            prompt=prompt,
+            prompt=ctx.instructions.user,
             ctx=ctx,
             mcp_config=mcp_config,
-            continue_session=True,
         )
 
-    result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
-    finalized = await finalize_agent_result(ctx, result)
-    return merge_manifest_metadata(finalized, render_result)
+        async def resume(prompt: str) -> AgentResult:
+            return await asyncio.to_thread(
+                _run_codex_once,
+                cli=cli,
+                prompt=prompt,
+                ctx=ctx,
+                mcp_config=mcp_config,
+                continue_session=True,
+            )
+
+        result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
+        finalized = await finalize_agent_result(ctx, result)
+        broker_metadata = broker_run_record_fields(broker_session.posture)
+        if finalized.metadata:
+            finalized.metadata.update(broker_metadata)
+        else:
+            finalized.metadata = broker_metadata
+        return merge_manifest_metadata(finalized, render_result)
+    finally:
+        stop_broker_session(broker_session)
+        set_broker_session(None)
+
+
+def prepare_codex_brokered_run(
+    ctx: AgentRunContext,
+    *,
+    openai_api_key: str = "",
+) -> CodexBrokeredRun:
+    """Start broker, build env, auth stub, and MCP config (plan 18 W3)."""
+    from mergecraft.agents import codex_broker
+
+    return codex_broker.prepare_codex_brokered_run(ctx, openai_api_key=openai_api_key)
 
 
 codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)

@@ -123,8 +123,9 @@ def test_derived_gateway_cache_reloads_after_config_changes(
 def test_no_caller_signature_changed() -> None:
     """AST guard for D22 — opencode call sites unchanged on trunk until AG9.
 
-    Lane B (#553) intentionally edits ``codex.py`` for ``trust.agentSandbox``;
-    only ``opencode.py`` remains frozen here.
+    ``codex.py`` is exempt: lane B (#553) edits it for ``trust.agentSandbox`` and
+    lane E (plan 18) rewires Codex for the credential broker; broker behavior is
+    pinned in ``test_codex_credential_broker.py``. Only ``opencode.py`` stays frozen here.
     """
     rel = "src/mergecraft/agents/opencode.py"
     proc = subprocess.run(

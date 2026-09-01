@@ -91,9 +91,9 @@ def _has_codex_subscription_auth() -> bool:
     raw = os.environ.get("CODEX_AUTH_JSON", "").strip()
     if not raw:
         return False
-    from mergecraft.agents.codex import _codex_subscription_auth_usable
+    from mergecraft.security.broker import subscription_auth_usable
 
-    return _codex_subscription_auth_usable(raw)
+    return subscription_auth_usable(raw)
 
 
 def _has_openai_api_key_auth() -> bool:
