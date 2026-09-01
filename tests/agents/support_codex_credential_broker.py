@@ -102,9 +102,13 @@ def referenced_names_in_function(function_name: str) -> set[str]:
     return set()
 
 
-def auth_json_text(codex_module: Any, ctx: AgentRunContext) -> str:
+def auth_json_path(codex_module: Any, ctx: AgentRunContext) -> Path:
     codex_home = codex_module._codex_home(ctx)
-    auth_path = codex_home / "auth.json"
+    return codex_home / "auth.json"
+
+
+def auth_json_text(codex_module: Any, ctx: AgentRunContext) -> str:
+    auth_path = auth_json_path(codex_module, ctx)
     if not auth_path.exists():
         return ""
     return auth_path.read_text(encoding="utf-8")

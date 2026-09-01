@@ -7,6 +7,7 @@ import http.client
 import importlib
 import json
 import threading
+import time
 from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +33,9 @@ MODEL_PATH = "/v1/chat/completions"
 RESPONSES_PATH = "/v1/responses"
 CODEX_WIRE_API_SUFFIX = "responses"
 NON_MODEL_PATHS = ("/v1/files", "/admin", "/healthz")
+
+# PR #594 — broker upstream read timeout must exceed httpx's default 30s ceiling.
+UPSTREAM_SLOW_RESPONSE_SECONDS = 31.0
 
 LANE_B_SANDBOX_SYMBOLS = (
     "_operator_sandbox_override",
@@ -83,6 +87,10 @@ def serialized_evidence_packet_fixture(*, error_detail: str) -> str:
     return json.dumps(payload)
 
 
+def _snapshot_request_headers(handler: BaseHTTPRequestHandler) -> dict[str, str]:
+    return {name: value for name, value in handler.headers.items()}
+
+
 class MockModelUpstream:
     """Loopback OpenAI-shaped upstream that records Authorization headers."""
 
@@ -99,6 +107,7 @@ class MockModelUpstream:
         self._host = "127.0.0.1"
         self._port = 0
         self.authorization_headers: list[str] = []
+        self.request_header_maps: list[dict[str, str]] = []
         self._lock = threading.Lock()
 
     @property
@@ -123,13 +132,15 @@ class MockModelUpstream:
             def log_message(self, format: str, *args: object) -> None:
                 return
 
-            def _record_auth(self) -> None:
+            def _record_request(self) -> None:
                 header = self.headers.get("Authorization", "")
+                headers = _snapshot_request_headers(self)
                 with upstream._lock:
                     upstream.authorization_headers.append(header)
+                    upstream.request_header_maps.append(headers)
 
             def do_POST(self) -> None:
-                self._record_auth()
+                self._record_request()
                 if redirect_to is not None:
                     self.send_response(HTTPStatus.FOUND)
                     self.send_header("Location", redirect_to)
@@ -158,7 +169,7 @@ class MockModelUpstream:
                 self.wfile.write(body)
 
             def do_GET(self) -> None:
-                self._record_auth()
+                self._record_request()
                 if redirect_to is not None:
                     self.send_response(HTTPStatus.FOUND)
                     self.send_header("Location", redirect_to)
@@ -193,6 +204,176 @@ class MockModelUpstream:
         self.stop()
 
 
+class SlowModelUpstream:
+    """Loopback upstream that stays silent longer than httpx's 30s default timeout."""
+
+    def __init__(
+        self,
+        *,
+        delay_seconds: float = UPSTREAM_SLOW_RESPONSE_SECONDS,
+    ) -> None:
+        self._delay_seconds = delay_seconds
+        self._httpd: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self._host = "127.0.0.1"
+        self._port = 0
+        self.authorization_headers: list[str] = []
+        self.request_header_maps: list[dict[str, str]] = []
+        self._lock = threading.Lock()
+
+    @property
+    def base_url(self) -> str:
+        if self._httpd is None:
+            raise RuntimeError("upstream not started")
+        return f"http://{self._host}:{self._port}/v1"
+
+    @property
+    def origin(self) -> str:
+        if self._httpd is None:
+            raise RuntimeError("upstream not started")
+        return f"http://{self._host}:{self._port}"
+
+    def start(self) -> None:
+        delay_seconds = self._delay_seconds
+        upstream = self
+
+        class _Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_POST(self) -> None:
+                headers = _snapshot_request_headers(self)
+                with upstream._lock:
+                    upstream.authorization_headers.append(self.headers.get("Authorization", ""))
+                    upstream.request_header_maps.append(headers)
+                time.sleep(delay_seconds)
+                body = json.dumps(
+                    {
+                        "id": "chatcmpl-slow",
+                        "object": "chat.completion",
+                        "choices": [
+                            {"index": 0, "message": {"role": "assistant", "content": "slow-ok"}}
+                        ],
+                    }
+                ).encode()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self._httpd = ThreadingHTTPServer((self._host, 0), _Handler)
+        self._port = self._httpd.server_address[1]
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._httpd is not None:
+            self._httpd.shutdown()
+            self._httpd.server_close()
+            self._httpd = None
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
+
+    def __enter__(self) -> SlowModelUpstream:
+        self.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.stop()
+
+
+class StreamingSSEUpstream:
+    """Loopback upstream that emits SSE chunks over time (streaming contract probe)."""
+
+    def __init__(
+        self,
+        *,
+        chunk_count: int = 5,
+        inter_chunk_delay: float = 0.15,
+    ) -> None:
+        self._chunk_count = chunk_count
+        self._inter_chunk_delay = inter_chunk_delay
+        self._httpd: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self._host = "127.0.0.1"
+        self._port = 0
+        self.authorization_headers: list[str] = []
+        self.request_header_maps: list[dict[str, str]] = []
+        self.chunks_sent = 0
+        self._lock = threading.Lock()
+
+    @property
+    def base_url(self) -> str:
+        if self._httpd is None:
+            raise RuntimeError("upstream not started")
+        return f"http://{self._host}:{self._port}/v1"
+
+    @property
+    def origin(self) -> str:
+        if self._httpd is None:
+            raise RuntimeError("upstream not started")
+        return f"http://{self._host}:{self._port}"
+
+    @property
+    def expected_stream_duration(self) -> float:
+        return self._inter_chunk_delay * max(self._chunk_count - 1, 0)
+
+    def start(self) -> None:
+        chunk_count = self._chunk_count
+        inter_chunk_delay = self._inter_chunk_delay
+        upstream = self
+
+        class _Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_POST(self) -> None:
+                headers = _snapshot_request_headers(self)
+                with upstream._lock:
+                    upstream.authorization_headers.append(self.headers.get("Authorization", ""))
+                    upstream.request_header_maps.append(headers)
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                for index in range(chunk_count):
+                    if index:
+                        time.sleep(inter_chunk_delay)
+                    chunk = f'data: {{"chunk": {index}}}\n\n'.encode()
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                    with upstream._lock:
+                        upstream.chunks_sent += 1
+
+        self._httpd = ThreadingHTTPServer((self._host, 0), _Handler)
+        self._port = self._httpd.server_address[1]
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._httpd is not None:
+            self._httpd.shutdown()
+            self._httpd.server_close()
+            self._httpd = None
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+            self._thread = None
+
+    def __enter__(self) -> StreamingSSEUpstream:
+        self.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.stop()
+
+
 def codex_provider_base_url(handle: Any) -> str:
     """Return the ``model_providers`` base URL Codex uses with ``wire_api = responses``."""
     base = getattr(handle, "base_url", None)
@@ -208,7 +389,7 @@ def codex_provider_base_url(handle: Any) -> str:
 
 def broker_config_for_upstream(
     module: Any,
-    upstream: MockModelUpstream,
+    upstream: MockModelUpstream | SlowModelUpstream | StreamingSSEUpstream,
     *,
     api_key: str = REAL_OPENAI_API_KEY_FIXTURE,
 ) -> Any:

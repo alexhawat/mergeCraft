@@ -56,6 +56,9 @@ Guard-deletion note: auth tests assert **401** on missing/wrong bearer — permi
 | --- | --- |
 | Codex `wire_api=responses` succeeds via loopback broker when provider `base_url` ends with `/v1` | `test_broker_forwards_codex_shaped_responses_request` |
 | Gzip upstream body decoded by httpx is not re-labelled with `Content-Encoding` | `test_broker_strips_content_encoding_for_decoded_gzip_upstream` |
+| Upstream silent >30s still returns 200 — broker read timeout must exceed 30s (no 502) | `test_broker_survives_slow_upstream_beyond_thirty_seconds` |
+| SSE upstream chunks relayed incrementally to client (not buffered blob) | `test_broker_streams_sse_incrementally_to_client` |
+| Hop-by-hop headers (`Connection`, `Keep-Alive`) not forwarded to upstream | `test_broker_does_not_forward_hop_by_hop_headers` |
 | Codex 0.149: `openai_base_url` → loopback broker with `/v1`; no `model_providers.openai` | `test_openai_base_url_points_at_loopback_broker_without_model_providers_openai` |
 
 ## W1.2 — Codex wire-up (greening wave W3)
@@ -63,7 +66,7 @@ Guard-deletion note: auth tests assert **401** on missing/wrong bearer — permi
 | Contract | Test |
 | --- | --- |
 | Agent env: throwaway in `OPENAI_API_KEY`, not live parent key (Codex 0.149) | `test_brokered_agent_env_carries_throwaway_not_live_openai_key` |
-| `auth.json` has no real API credential after chown (D3) | `test_auth_json_contains_no_real_api_credential_after_setup_and_chown` |
+| Brokered API-key path writes no `auth.json` stub (PR #594 / D3) | `test_brokered_api_key_path_writes_no_auth_json` |
 | `openai_base_url` → loopback broker with `/v1`; no `model_providers.openai` | `test_openai_base_url_points_at_loopback_broker_without_model_providers_openai` |
 | MCP table unchanged | `test_mcp_table_unchanged_under_broker` |
 | `CODEX_AUTH_JSON` → broker inactive + run record (D3a) | `test_subscription_auth_marks_broker_inactive_and_run_record_says_so` |

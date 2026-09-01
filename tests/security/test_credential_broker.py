@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import time
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -19,7 +21,10 @@ from tests.security.support_agent_isolation import (
     MODEL_PATH,
     NON_MODEL_PATHS,
     REAL_OPENAI_API_KEY_FIXTURE,
+    UPSTREAM_SLOW_RESPONSE_SECONDS,
     MockModelUpstream,
+    SlowModelUpstream,
+    StreamingSSEUpstream,
     assert_credential_absent,
     broker_config_for_upstream,
     capture_loguru_messages,
@@ -36,7 +41,7 @@ if TYPE_CHECKING:
 
 def _start_broker(
     module: Any,
-    upstream: MockModelUpstream,
+    upstream: MockModelUpstream | SlowModelUpstream | StreamingSSEUpstream,
     *,
     bind_host: str | None = None,
 ) -> Iterator[Any]:
@@ -428,3 +433,92 @@ def test_broker_run_record_fields_serializes_posture(
     assert record["broker_active"] == "false"
     assert record["broker_auth_mode"] == "none"
     assert record["broker_reason"]
+
+
+def test_broker_survives_slow_upstream_beyond_thirty_seconds() -> None:
+    """PR #594 — upstream silent >30s must not trip a 30s read timeout (no 502)."""
+    module = load_broker_module()
+    client_timeout = UPSTREAM_SLOW_RESPONSE_SECONDS + 15.0
+    with (
+        SlowModelUpstream() as upstream,
+        _start_broker(module, upstream) as handle,
+        _broker_client(handle) as client,
+    ):
+        client.timeout = httpx.Timeout(client_timeout)
+        response = client.post(
+            MODEL_PATH,
+            json={"model": "gpt-stub", "messages": [{"role": "user", "content": "ping"}]},
+            headers=_auth_headers(handle.token),
+        )
+    assert response.status_code != HTTPStatus.BAD_GATEWAY, (
+        "broker must not 502 when upstream is slow but still responds"
+    )
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["choices"][0]["message"]["content"] == "slow-ok"
+
+
+def test_broker_streams_sse_incrementally_to_client() -> None:
+    """PR #594 — broker must relay upstream SSE chunks as they arrive, not one blob."""
+    module = load_broker_module()
+    with (
+        StreamingSSEUpstream(chunk_count=5, inter_chunk_delay=0.15) as upstream,
+        _start_broker(module, upstream) as handle,
+    ):
+        chunk_times: list[float] = []
+        start = time.monotonic()
+        with (
+            httpx.Client(
+                base_url=getattr(handle, "base_url", f"http://{handle.host}:{handle.port}"),
+                timeout=30.0,
+            ) as client,
+            client.stream(
+                "POST",
+                MODEL_PATH,
+                json={"model": "gpt-stub", "stream": True, "messages": []},
+                headers=_auth_headers(handle.token),
+            ) as response,
+        ):
+            assert response.status_code == HTTPStatus.OK
+            for chunk in response.iter_bytes():
+                if chunk:
+                    chunk_times.append(time.monotonic() - start)
+    assert len(chunk_times) >= 2, "client must observe multiple body chunks"
+    assert chunk_times[0] < upstream.expected_stream_duration * 0.85, (
+        "first chunk must arrive before upstream finishes streaming"
+    )
+    assert upstream.chunks_sent >= 2
+
+
+@pytest.mark.parametrize(
+    ("hop_by_hop_header", "smuggle_marker"),
+    [
+        ({"Connection": "close"}, "close"),
+        ({"Keep-Alive": "timeout=5, max=594-smuggle"}, "594-smuggle"),
+    ],
+    ids=["connection-close", "keep-alive"],
+)
+def test_broker_does_not_forward_hop_by_hop_headers(
+    hop_by_hop_header: dict[str, str],
+    smuggle_marker: str,
+) -> None:
+    """PR #594 — hop-by-hop agent headers must not be smuggled to upstream."""
+    module = load_broker_module()
+    with MockModelUpstream() as upstream, _start_broker(module, upstream) as handle:
+        with _broker_client(handle) as client:
+            response = client.post(
+                MODEL_PATH,
+                json={"model": "gpt-stub", "messages": [{"role": "user", "content": "ping"}]},
+                headers={**_auth_headers(handle.token), **hop_by_hop_header},
+            )
+        assert response.status_code == HTTPStatus.OK
+    assert upstream.request_header_maps, "upstream must receive proxied request"
+    forwarded = upstream.request_header_maps[-1]
+    for header_name, header_value in hop_by_hop_header.items():
+        forwarded_value = forwarded.get(header_name)
+        assert forwarded_value != header_value, (
+            f"agent hop-by-hop value for {header_name!r} must not reach upstream"
+        )
+        assert smuggle_marker not in (forwarded_value or ""), (
+            f"smuggled marker {smuggle_marker!r} must not appear in forwarded {header_name!r}"
+        )

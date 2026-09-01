@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from tests.agents.support_codex_credential_broker import (
     USABLE_SUBSCRIPTION_AUTH_JSON,
+    auth_json_path,
     auth_json_text,
     broker_run_record_fields,
     brokered_codex_context,
@@ -28,7 +29,6 @@ from tests.agents.support_codex_credential_broker import (
 from tests.security.support_agent_isolation import (
     LANE_B_SANDBOX_SYMBOLS,
     REAL_OPENAI_API_KEY_FIXTURE,
-    assert_credential_absent,
     load_broker_module,
     require_broker_symbol,
 )
@@ -90,11 +90,11 @@ def test_brokered_agent_env_carries_throwaway_not_live_openai_key(
     assert REAL_OPENAI_API_KEY_FIXTURE not in env.values()
 
 
-def test_auth_json_contains_no_real_api_credential_after_setup_and_chown(
+def test_brokered_api_key_path_writes_no_auth_json(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """D3 — ``$CODEX_HOME/auth.json`` after ``_setup_codex_auth`` + chown has no real key."""
+    """PR #594 / D3 — brokered API-key path must not write ``auth.json`` (no stub)."""
     codex_module = load_codex_module()
     monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
     monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
@@ -104,10 +104,14 @@ def test_auth_json_contains_no_real_api_credential_after_setup_and_chown(
     prepared = prepare_codex_brokered_run(ctx)
     _ = prepared.agent_env
 
-    auth_text = auth_json_text(codex_module, ctx)
-    assert auth_text, "brokered API-key path must still emit auth.json or an explicit stub"
-    assert_credential_absent(auth_text)
-    assert REAL_OPENAI_API_KEY_FIXTURE not in auth_text
+    auth_path = auth_json_path(codex_module, ctx)
+    assert not auth_path.exists(), "brokered API-key path must not create auth.json"
+
+    codex_home = codex_module._codex_home(ctx)
+    codex_module._setup_codex_auth(ctx, codex_home=codex_home)
+    assert not auth_path.exists(), (
+        "_setup_codex_auth must not create auth.json when broker is active"
+    )
 
 
 def test_openai_base_url_points_at_loopback_broker_without_model_providers_openai(
