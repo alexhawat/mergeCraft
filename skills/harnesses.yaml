@@ -20,6 +20,10 @@ harnesses:
     alt_paths: [.cursor/skills/mergecraft/]
     source: https://cursor.com/docs/skills
     verified: 2026-08-21
+  - id: grok-bot
+    alt_paths: []
+    source: https://docs.x.ai/grok-bot/skills-routines-and-automations
+    verified: 2026-09-01
   - id: opencode
     alt_paths: [.opencode/skills/mergecraft/, .claude/skills/mergecraft/]
     source: https://opencode.ai/docs/skills
