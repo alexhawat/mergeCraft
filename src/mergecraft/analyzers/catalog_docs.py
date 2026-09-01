@@ -555,6 +555,20 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             "- **Green only substitutes.** A declared check run that passed rewrites "
             "the gate row to `satisfied-by-ci`. A declared check run that *failed* "
             "leaves the row alone and is reported as a `source: ci` finding instead.",
+            "- **Green CI SARIF ingest.** Declared `sarifArtifacts` are downloaded "
+            "after `wait-for-ci` completes successfully — not only when Verify jobs "
+            "failed. On green CI, mergeCraft lists workflow runs for the PR head SHA "
+            "and fetches matching artifacts from those runs.",
+            "- **`actions: read` required.** The review workflow job must grant "
+            "`actions: read` so artifact download succeeds. Without it GitHub "
+            "answers 403 and SARIF ingest is skipped (the review still completes).",
+            "- **CI SARIF catalog.** Tools that arrive via CI SARIF when declared "
+            "in `ciEvidence.sarifArtifacts` and uploaded from the consumer's "
+            "`ci.yml` include **ruff**, **mypy**, **bandit**, **actionlint**, "
+            "**zizmor**, and **semgrep** — artifact names follow the "
+            "`<tool>-sarif` pattern and must match both config and workflow "
+            "upload steps. **trufflehog** is JSONL-only and is not ingested "
+            "via CI SARIF on this surface.",
             "- **Reported, not blamed.** Bare check-run findings start non-blocking; "
             "SARIF `error` from declared `sarifArtifacts` keeps Major/Critical. "
             "`introduced_by_pr` stays `unknown` until `ci/blame.py` / `ci/flaky.py` "

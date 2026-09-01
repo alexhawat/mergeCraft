@@ -178,6 +178,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - #553 boundary amended from the `pull_request_target` event to fork heads —
   same-repo `pull_request_target` may grant the override at `same-repo` tier
 
+### Lane D — self-review evidence
+
+#### Fixed
+
+- Claude backstop no longer runs when an earlier rung succeeds or posts a
+  verdict including `neutral` — only retryable rung failures without a verdict
+  trigger Claude (#600)
+
+#### Changed
+
+- Same-repo `pull_request_target` self-review runs trusted-tier analyzers when
+  `trust.selfReview` is `analyzers` — execution trust without widening approval
+  authority
+- Declared CI SARIF artifacts are downloaded and recorded even when Verify CI
+  is green; the review job needs `actions: read` to fetch them
+- Action log phases (setup, model chain, publish) emit collapsible `::group::`
+  blocks in GitHub Actions logs
+
+#### Added
+
+- Dogfood config sets `trust.agentSandbox: same-repo` so Codex
+  `danger-full-access` is honoured on same-repo review runs (#553)
+- CI SARIF ingest covers actionlint, zizmor, and semgrep alongside ruff,
+  mypy, and bandit — matching `ci.yml` uploads and
+  `ciEvidence.sarifArtifacts` (#464)
+
 ### Changed
 
 - The self-review Action pin on all three review rungs moves to `4ab87265`,

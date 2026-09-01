@@ -24,7 +24,9 @@
 # (Codex) is the one-shot fallback when Nous is absent or its review posts no
 # verdict; Anthropic (Claude) is the cross-vendor backstop when an earlier rung
 # fails RETRYABLY (quota ceiling, timeout, transport death) without posting a
-# verdict. The two fallbacks route on different signals on purpose — see the
+# verdict. Claude is a failed-rung backstop only — a posted verdict (including
+# mergecraft-approval=neutral) or a successful earlier rung does not trigger
+# Claude. The two fallbacks route on different signals on purpose — see the
 # comments on each decide step.
 #
 # Codex reviews previously posted mergecraft-approval=neutral because every tool
