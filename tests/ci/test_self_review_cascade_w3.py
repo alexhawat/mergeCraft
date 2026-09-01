@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from tests.ci.support_self_review_cascade import (
     claude_review_if_expression,
     claude_step_if_expression,
@@ -18,16 +16,10 @@ from tests.ci.support_self_review_cascade import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-W3_XFAIL = pytest.mark.xfail(
-    reason="green after W3: Claude backstop respects Codex verdicts",
-    strict=True,
-)
-
 _CLAUDE_SCRIPT = decide_script("claude_fallback")
 _CODEX_SCRIPT = decide_script("fallback")
 
 
-@W3_XFAIL
 def test_codex_success_with_neutral_packet_does_not_need_claude(tmp_path: Path) -> None:
     """D1/D2 — Codex ``outcome == success`` + packet ``verdict=neutral`` clears Claude."""
     outputs, _ = run_decide_script(
@@ -43,7 +35,6 @@ def test_codex_success_with_neutral_packet_does_not_need_claude(tmp_path: Path) 
     assert outputs.get("need") == "false"
 
 
-@W3_XFAIL
 def test_codex_success_unparseable_packet_falls_through_to_neutral_check_run(
     tmp_path: Path,
 ) -> None:
@@ -161,7 +152,6 @@ def test_nous_neutral_verdict_does_not_skip_codex(tmp_path: Path) -> None:
     assert outputs.get("need") == "true"
 
 
-@W3_XFAIL
 def test_codex_success_short_circuits_even_when_lookups_fail(tmp_path: Path) -> None:
     """D4 — Codex ``outcome == success`` must clear Claude even with empty packet."""
     outputs, _ = run_decide_script(
@@ -177,8 +167,8 @@ def test_codex_success_short_circuits_even_when_lookups_fail(tmp_path: Path) -> 
     assert outputs.get("need") == "false"
 
 
-@W3_XFAIL
 def test_claude_decide_step_not_gated_on_nous_failure_when_codex_succeeded() -> None:
     """W3 Step 1 — decide step must not run when Codex already succeeded."""
     expr = claude_step_if_expression()
-    assert "mergecraft_codex.outcome != 'success'" in expr.replace(" ", "")
+    compact = "".join(expr.split())
+    assert "mergecraft_codex.outcome!='success'" in compact

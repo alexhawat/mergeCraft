@@ -71,7 +71,7 @@ Pinned module: `mergecraft.utils.gha_log`, `mergecraft.main.main`.
 | Wave | Marker reason prefix | Files |
 | --- | --- | --- |
 | W2 | *(greened — xfails removed)* | `tests/config/test_self_review_trust_config_w2.py` |
-| W3 | `green after W3: Claude backstop respects Codex verdicts` | `tests/ci/test_self_review_cascade_w3.py` |
+| W3 | *(greened — xfails removed)* | `tests/ci/test_self_review_cascade_w3.py` |
 | W4 | `green after W4: ingest CI SARIF on green wait-for-ci` | `tests/ci/test_self_review_green_ingest_w4.py` |
 | W5 | `green after W5: extend ci.yml SARIF catalog (operator opt-in)` | `tests/ci/test_self_review_sarif_extension_w5.py` |
 | W6 | `green after W6: gha_log.group around Action phases` | `tests/action/test_self_review_gha_log_groups_w6.py` |
