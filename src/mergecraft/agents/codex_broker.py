@@ -3,9 +3,8 @@
 Exports:
     CodexBrokeredRun: Prepared broker env + posture with explicit teardown.
     OPENAI_API_KEY_ENV: Env var name for the OpenAI API key.
-    OPENAI_BROKER_PROVIDER_ID: ``model_providers`` table id for the broker.
     active_broker_handle: Running loopback handle when the session is active.
-    add_broker_provider_table: Point ``model_providers.openai`` at the broker.
+    add_broker_openai_config: Point built-in OpenAI routing at the broker.
     begin_broker_session: Resolve posture and start the loopback broker.
     broker_config_for_api_key: Build broker config for an OpenAI API key.
     current_broker_session: Active session for this process, if any.
@@ -23,7 +22,6 @@ from typing import TYPE_CHECKING, Any
 
 from mergecraft.security import broker as _broker_mod
 from mergecraft.security.broker import (
-    CODEX_BROKER_BEARER_ENV,
     OPENAI_UPSTREAM_BASE_URL,
     OPENAI_UPSTREAM_HOST,
     CodexBrokerPosture,
@@ -37,7 +35,6 @@ if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentRunContext
 
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
-OPENAI_BROKER_PROVIDER_ID = "openai"
 
 broker_run_record_fields = _broker_mod.broker_run_record_fields
 resolve_codex_broker_posture = _broker_mod.resolve_codex_broker_posture
@@ -156,30 +153,21 @@ def begin_broker_session(
 
 
 def broker_provider_base_url(broker_base_url: str) -> str:
-    """Return the loopback broker URL Codex should use for ``model_providers``."""
+    """Return the loopback broker URL Codex should use for ``openai_base_url``."""
     normalized = broker_base_url.rstrip("/")
     if normalized.endswith("/v1"):
         return normalized
     return f"{normalized}/v1"
 
 
-def add_broker_provider_table(config: dict[str, Any], broker_base_url: str) -> None:
-    """Point ``model_providers.openai`` at the loopback credential broker (W3).
+def add_broker_openai_config(config: dict[str, Any], broker_base_url: str) -> None:
+    """Route built-in OpenAI through the loopback credential broker (W3 / #594).
 
-    When the broker is active it owns the ``openai`` provider slot so Codex
-    routes default OpenAI models through loopback. Custom gateway tables may
-    still be present when ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set.
+    Codex 0.149+ reserves ``model_providers.openai``; use top-level
+    ``openai_base_url`` instead. The throwaway bearer belongs in
+    ``OPENAI_API_KEY`` (see :func:`mergecraft.agents.codex._build_env`).
     """
-    model_providers = config.get("model_providers")
-    if not isinstance(model_providers, dict):
-        model_providers = {}
-        config["model_providers"] = model_providers
-    model_providers[OPENAI_BROKER_PROVIDER_ID] = {
-        "name": OPENAI_BROKER_PROVIDER_ID,
-        "base_url": broker_provider_base_url(broker_base_url),
-        "env_key": CODEX_BROKER_BEARER_ENV,
-        "wire_api": "responses",
-    }
+    config["openai_base_url"] = broker_provider_base_url(broker_base_url)
 
 
 def prepare_codex_brokered_run(
@@ -216,13 +204,11 @@ def prepare_codex_brokered_run(
 
 
 __all__ = [
-    "CODEX_BROKER_BEARER_ENV",
     "OPENAI_API_KEY_ENV",
-    "OPENAI_BROKER_PROVIDER_ID",
     "CodexBrokerSession",
     "CodexBrokeredRun",
     "active_broker_handle",
-    "add_broker_provider_table",
+    "add_broker_openai_config",
     "begin_broker_session",
     "broker_config_for_api_key",
     "broker_provider_base_url",

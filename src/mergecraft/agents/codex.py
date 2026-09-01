@@ -18,7 +18,7 @@ from mergecraft.agents.codex_broker import (
     OPENAI_API_KEY_ENV,
     CodexBrokeredRun,
     active_broker_handle,
-    add_broker_provider_table,
+    add_broker_openai_config,
     begin_broker_session,
     broker_run_record_fields,
     current_broker_session,
@@ -51,11 +51,7 @@ from mergecraft.agents.shared import (
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
-from mergecraft.security.broker import (
-    CODEX_BROKER_BEARER_ENV,
-    CodexBrokerPosture,
-    subscription_auth_usable,
-)
+from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
 from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
@@ -283,7 +279,7 @@ def _setup_codex_auth(
         auth_path = codex_home / "auth.json"
         stub: dict[str, str] = {
             "auth_mode": "broker",
-            "bearer_env": CODEX_BROKER_BEARER_ENV,
+            "bearer_env": OPENAI_API_KEY_ENV,
         }
         if broker_base_url:
             stub["broker_base_url"] = broker_base_url
@@ -583,7 +579,7 @@ def write_mcp_config(
     _add_custom_provider_tables(config)
     handle = active_broker_handle()
     if handle is not None:
-        add_broker_provider_table(config, handle.base_url)
+        add_broker_openai_config(config, handle.base_url)
     if _codex_use_permission_profiles(ctx):
         _add_read_only_mcp_network_profile(config)
     else:
@@ -625,10 +621,10 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     if ctx.mcp_auth_token:
         extra[_CODEX_MCP_TOKEN_ENV] = ctx.mcp_auth_token
     if broker_active and handle is not None:
-        extra[CODEX_BROKER_BEARER_ENV] = handle.token
+        # D3 — throwaway bearer in OPENAI_API_KEY; extras overwrite reinjection
+        # in build_agent_env so the real parent key never reaches the agent.
+        extra[OPENAI_API_KEY_ENV] = handle.token
     env = build_agent_env("codex", extra, model=ctx.resolved_model)
-    if broker_active:
-        env.pop("OPENAI_API_KEY", None)
     broker_base_url = handle.base_url if handle is not None else None
     _setup_codex_auth(ctx, codex_home=codex_home, broker_base_url=broker_base_url)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
