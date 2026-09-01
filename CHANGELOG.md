@@ -204,9 +204,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Dogfood config sets `trust.agentSandbox: same-repo` so Codex
   `danger-full-access` is honoured on same-repo review runs (#553)
-- CI SARIF ingest covers actionlint, zizmor, and semgrep alongside ruff,
-  mypy, and bandit — matching `ci.yml` uploads and
+- CI SARIF ingest covers actionlint, zizmor, semgrep, and trufflehog
+  alongside ruff, mypy, and bandit — matching `ci.yml` uploads and
   `ciEvidence.sarifArtifacts` (#464)
+- TruffleHog CI evidence converts JSONL to SARIF so a clean scan uploads
+  a valid empty-results document with tool metadata, not a blank file
 - Hardened consumer template forwards wait-for-ci outputs and grants
   `actions: read` for ciEvidence SARIF ingest
 

@@ -571,10 +571,12 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             "- **CI SARIF catalog.** Tools that arrive via CI SARIF when declared "
             "in `ciEvidence.sarifArtifacts` and uploaded from the consumer's "
             "`ci.yml` include **ruff**, **mypy**, **bandit**, **actionlint**, "
-            "**zizmor**, and **semgrep** — artifact names follow the "
-            "`<tool>-sarif` pattern and must match both config and workflow "
-            "upload steps. **trufflehog** is JSONL-only and is not ingested "
-            "via CI SARIF on this surface.",
+            "**zizmor**, **semgrep**, and **trufflehog** — artifact names follow "
+            "the `<tool>-sarif` pattern and must match both config and workflow "
+            "upload steps. **trufflehog**'s catalog parser is JSONL; CI converts "
+            "that output to SARIF so ingest stays one path. A clean scan still "
+            "uploads a valid empty-results SARIF with tool metadata, never a "
+            "0-byte file.",
             "- **Reported, not blamed.** Bare check-run findings start non-blocking; "
             "SARIF `error` from declared `sarifArtifacts` keeps Major/Critical. "
             "`introduced_by_pr` stays `unknown` until `ci/blame.py` / `ci/flaky.py` "

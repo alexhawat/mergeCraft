@@ -62,15 +62,16 @@ Pinned API (W4): `mergecraft.ci.sarif_ingest.ingest_ci_sarif_after_ci_wait`, `me
 
 Pinned module: `mergecraft.utils.gha_log`, `mergecraft.main.main`.
 
-## W1.5 — SARIF extension → W5 (shipped subset + D12 skip)
+## W1.5 — SARIF extension → W5 (shipped subset + trufflehog CI evidence)
 
 | Contract | Tests | Layer |
 | --- | --- | --- |
 | `ci.yml` uploads actionlint / zizmor / semgrep SARIF artifacts | `tests/ci/test_self_review_sarif_extension_w5.py::test_ci_yml_uploads_extended_sarif_artifact` | parsed YAML |
-| D12 — trufflehog has no SARIF upload or config entry | `…::test_ci_yml_does_not_upload_trufflehog_sarif`, `…::test_committed_config_omits_trufflehog_sarif_artifact` | parsed YAML + config |
-| `.mergecraft/config.yaml` `ciEvidence.sarifArtifacts` lists shipped W5 names | `…::test_committed_config_lists_shipped_extended_sarif_artifacts` | config |
+| trufflehog CI evidence — `ci.yml` uploads `trufflehog-sarif` | `…::test_ci_yml_uploads_trufflehog_sarif` | parsed YAML |
+| `.mergecraft/config.yaml` `ciEvidence.sarifArtifacts` lists shipped W5 names plus trufflehog | `…::test_committed_config_lists_shipped_extended_sarif_artifacts`, `…::test_committed_config_lists_trufflehog_sarif_artifact` | config |
 | `MERGECRAFT_WORKFLOW_SARIF_DIR` on static emit step | `…::test_ci_yml_static_job_sets_workflow_sarif_dir` | parsed YAML |
 | `scripts/ci_extended_sarif.py` / `emit_semgrep_sarif` deliverable | `…::test_ci_extended_sarif_exports_emit_semgrep_sarif`, `…::test_ci_extended_sarif_cli_requires_output_path` | import + CLI |
+| `emit_trufflehog_sarif` + `ci_extended_sarif.py trufflehog` | `…::test_ci_extended_sarif_exports_emit_trufflehog_sarif`, `…::test_ci_yml_security_job_invokes_trufflehog_sarif` | import + parsed YAML |
 | D8 guard — no SARIF upload names on `mergecraft.yml` | `…::test_mergecraft_yml_is_not_the_sarif_upload_surface_guard` | parsed YAML (guard) |
 
 ## xfail reconciliation
@@ -80,17 +81,16 @@ Pinned module: `mergecraft.utils.gha_log`, `mergecraft.main.main`.
 | W2 | *(greened — xfails removed)* | `tests/config/test_self_review_trust_config_w2.py` |
 | W3 | *(greened — xfails removed)* | `tests/ci/test_self_review_cascade_w3.py` |
 | W4 | *(greened — xfails removed)* | `tests/ci/test_self_review_green_ingest_w4.py` |
-| W5 | *(greened — xfails removed; trufflehog D12 skip asserted)* | `tests/ci/test_self_review_sarif_extension_w5.py` |
+| W5 | *(greened — xfails removed; trufflehog CI SARIF follow-up)* | `tests/ci/test_self_review_sarif_extension_w5.py` |
 | W6 | *(greened — xfails removed)* | `tests/action/test_self_review_gha_log_groups_w6.py` |
 
 Guard tests (no xfail) must stay green through W2–W6 implementation.
 
 ## Escalation notes
 
-- **W5 test amendment (2026-09-01):** trufflehog is a named D12 skip (JSONL-only, no SARIF
-  emitter). Shipped W5 tests assert actionlint / zizmor / semgrep uploads and config names;
-  trufflehog tests assert absence from `ci.yml` uploads and `sarifArtifacts`, not a fake SARIF
-  artifact.
+- **W5 test amendment (2026-09-01):** trufflehog was a named D12 skip (JSONL-only, no SARIF
+  emitter). Follow-up: CI converts JSONL to SARIF and uploads `trufflehog-sarif`; tests assert
+  presence in `ci.yml` and `sarifArtifacts`. Catalog path remains JSONL.
 - **W4 guard amendment (2026-09-01):** `test_dogfood_config_enables_first_wave_ci_evidence` requires
   the first-wave subset only; W5-extended names in `sarifArtifacts` are allowed.
 - **W8 coverage escalation (2026-09-01):** added W4 skip/error/action-env branch tests in
