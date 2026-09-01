@@ -45,6 +45,28 @@ Use this when asked to add AI PR review to another repository.
    **`mergecraft review`** (not `diff-review`, which is a deprecated alias that
    emits one stderr warning per invocation).
 
+## Setup with Grok Bot
+
+Use this when a Grok Bot (including the in-account **mergeCraft** bot) is
+asked to add mergeCraft to another repository.
+
+Grok Bot does **not** read `.agents/skills/` in a consumer repo. Install the
+generated skill from [`skills/grok-bot/mergecraft/SKILL.md`](skills/grok-bot/mergecraft/SKILL.md)
+as a Grok Bot user skill (Settings → Plugins → Yours; enable it for the Bot).
+
+Follow the same consumer flow as other agents:
+
+1. **`uv tool install`** the CLI (see above).
+2. In the **consumer repo root** (never in the mergeCraft source tree), run
+   **`mergecraft init`**.
+3. **STOP for authentication.** Ask the human to run exactly one
+   `mergecraft auth …` command. **Never** invent, paste, or commit credentials,
+   tokens, secrets, or `.env` files.
+4. After the human confirms the GitHub Actions secret is stored, you may run
+   **`mergecraft doctor`** and **`mergecraft review`** as needed.
+5. Commit only `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
+   on a new branch in the consumer repo.
+
 ## Working on this repo (development)
 
 mergeCraft itself: Python **3.11+**, managed with uv, recurring commands via **Make**

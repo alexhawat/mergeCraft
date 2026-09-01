@@ -105,6 +105,7 @@ config keys, exit codes, and failure modes.
    your agent reads. Examples:
 
      skills/cursor/mergecraft/     -> Cursor
+     skills/grok-bot/mergecraft/   -> Grok Bot (user skill; not .agents/skills/)
      skills/opencode/mergecraft/   -> OpenCode
      skills/codex/mergecraft/      -> Codex CLI
      skills/gemini-cli/mergecraft/ -> Gemini CLI
@@ -133,7 +134,7 @@ config keys, exit codes, and failure modes.
 ```
 
 <details>
-<summary><b>Per-agent one-liners</b> — Claude Code, Cursor, Codex, OpenCode, Gemini, Copilot, OpenClaw, Hermes</summary>
+<summary><b>Per-agent one-liners</b> — Claude Code, Cursor, Grok Bot, Codex, OpenCode, Gemini, Copilot, OpenClaw, Hermes</summary>
 
 **Claude Code** — the only *packaged* install. Skill + slash commands in one step:
 
@@ -154,6 +155,22 @@ open a PR with the workflow. Print the `mergecraft auth <provider>` command for
 me to run myself — never touch credentials. Then copy
 skills/cursor/mergecraft/ into .agents/skills/mergecraft/ so you keep the
 knowledge.
+```
+
+**Grok Bot** — install the generated skill as a user skill (Settings → Plugins);
+Grok Bot does not read `.agents/skills/` in consumer repos. The in-account
+**mergeCraft** bot follows this same recipe:
+
+```text
+Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md and set
+mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python —
+do not install Python), run `mergecraft init` in the consumer repo (never in the
+mergeCraft source tree), wire .mergecraft/config.yaml, and open a PR with the
+workflow. Print the `mergecraft auth <provider>` command for me to run myself —
+never touch credentials. After I confirm the secret is stored, run
+`mergecraft doctor` as needed. Install the generated skill from
+skills/grok-bot/mergecraft/ as a Grok Bot user skill (Settings → Plugins → Yours;
+enable it for this Bot) so you keep the knowledge.
 ```
 
 **Codex CLI / ChatGPT cloud agent:**
@@ -244,7 +261,7 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 
 | Surface | What it gives an agent |
 |---|---|
-| [`AGENTS.md`](AGENTS.md) | Cross-vendor setup + contribution guidance, read natively by Codex, Cursor, OpenCode, Gemini CLI and Copilot |
+| [`AGENTS.md`](AGENTS.md) | Cross-vendor setup + contribution guidance, read natively by Codex, Cursor, Grok Bot, OpenCode, Gemini CLI and Copilot |
 | [`skills/mergecraft/SKILL.md`](skills/mergecraft/SKILL.md) | Agent-Skills package: setup checklist, CLI map, config keys, troubleshooting |
 | [`llms.txt`](llms.txt) · [`llms-full.txt`](llms-full.txt) | Curated doc map, and the full corpus in one file |
 | [`.claude-plugin/`](.claude-plugin/plugin.json) · [`commands/`](commands/) | Claude plugin manifest and `/mergecraft-setup` · `/mergecraft-review` |

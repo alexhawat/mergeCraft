@@ -38,6 +38,7 @@ provider credentials securely — never paste secrets into the skill body.
 | --- | --- | --- |
 | Codex | https://learn.chatgpt.com/docs/build-skills | 2026-08-21 |
 | Cursor | https://cursor.com/docs/skills | 2026-08-21 |
+| Grok Bot | https://docs.x.ai/grok-bot/skills-routines-and-automations | 2026-09-01 |
 | OpenCode | https://opencode.ai/docs/skills | 2026-08-21 |
 | Gemini CLI | https://geminicli.com/docs/cli/skills | 2026-08-21 |
 | OpenClaw | https://docs.openclaw.ai/tools/skills | 2026-08-21 |

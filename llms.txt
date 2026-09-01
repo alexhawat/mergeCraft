@@ -15,6 +15,7 @@
 - skills/harnesses.yaml — harness manifest (install paths + primary sources)
 - skills/codex/mergecraft/SKILL.md — generated Codex Agent Skills package
 - skills/cursor/mergecraft/SKILL.md — generated Cursor Agent Skills package
+- skills/grok-bot/mergecraft/SKILL.md — generated Grok Bot user skill package
 - skills/opencode/mergecraft/SKILL.md — generated OpenCode Agent Skills package
 - skills/gemini-cli/mergecraft/SKILL.md — generated Gemini CLI Agent Skills package
 - skills/openclaw/mergecraft/SKILL.md — generated OpenClaw Agent Skills package
