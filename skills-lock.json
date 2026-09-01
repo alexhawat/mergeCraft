@@ -84,6 +84,12 @@
       "sourceType": "local",
       "skillPath": "skills/claude-code/mergecraft/SKILL.md",
       "computedHash": "1bf6eca6cb64b636e0bf6f929796c95eafdb4eeefb038761f7d0d6a6299bc7f7"
+    },
+    "mergecraft-grok-bot": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/grok-bot/mergecraft/SKILL.md",
+      "computedHash": "1bf6eca6cb64b636e0bf6f929796c95eafdb4eeefb038761f7d0d6a6299bc7f7"
     }
   }
 }
