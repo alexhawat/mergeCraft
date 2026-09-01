@@ -50,13 +50,21 @@ xfail-reconciliation: per impl wave (`strict=False` until green; test-creator ag
 
 Guard-deletion note: auth tests assert **401** on missing/wrong bearer — permissive 200 would fail.
 
+## PR #594 review — broker forwarding gaps
+
+| Contract | Test |
+| --- | --- |
+| Codex `wire_api=responses` succeeds via loopback broker when provider `base_url` ends with `/v1` | `test_broker_forwards_codex_shaped_responses_request` |
+| Gzip upstream body decoded by httpx is not re-labelled with `Content-Encoding` | `test_broker_strips_content_encoding_for_decoded_gzip_upstream` |
+| `model_providers.<id>.base_url` includes `/v1` suffix for Codex append semantics | `test_model_providers_base_url_points_at_loopback_broker` |
+
 ## W1.2 — Codex wire-up (greening wave W3)
 
 | Contract | Test |
 | --- | --- |
 | Agent env: throwaway bearer, no live `OPENAI_API_KEY` | `test_brokered_agent_env_carries_throwaway_not_live_openai_key` |
 | `auth.json` has no real API credential after chown (D3) | `test_auth_json_contains_no_real_api_credential_after_setup_and_chown` |
-| `model_providers.<id>.base_url` → loopback broker | `test_model_providers_base_url_points_at_loopback_broker` |
+| `model_providers.<id>.base_url` → loopback broker with `/v1` | `test_model_providers_base_url_points_at_loopback_broker` |
 | MCP table unchanged | `test_mcp_table_unchanged_under_broker` |
 | `CODEX_AUTH_JSON` → broker inactive + run record (D3a) | `test_subscription_auth_marks_broker_inactive_and_run_record_says_so` |
 | Subscription path leaves `auth.json` untouched (D3a) | `test_subscription_auth_leaves_auth_json_untouched` |

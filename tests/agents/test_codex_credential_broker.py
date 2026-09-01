@@ -110,7 +110,7 @@ def test_model_providers_base_url_points_at_loopback_broker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``model_providers.<id>.base_url`` must be the loopback broker (D1)."""
+    """``model_providers.<id>.base_url`` must be the loopback broker with ``/v1`` (D1)."""
     monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
     monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
     ctx = brokered_codex_context(tmp_path)
@@ -124,7 +124,9 @@ def test_model_providers_base_url_points_at_loopback_broker(
     assert providers, "model_providers must be populated"
 
     broker_base = prepared.broker_base_url
+    assert broker_base is not None
     assert broker_base.startswith("http://127.0.0.1:")
+    assert broker_base.endswith("/v1")
     for block in providers.values():
         assert isinstance(block, dict)
         assert block.get("base_url") == broker_base

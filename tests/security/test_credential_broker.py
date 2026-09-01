@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from tests.security.support_agent_isolation import (
+    CODEX_WIRE_API_SUFFIX,
     EVIL_UPSTREAM_HOST,
     MODEL_PATH,
     NON_MODEL_PATHS,
@@ -22,6 +23,7 @@ from tests.security.support_agent_isolation import (
     assert_credential_absent,
     broker_config_for_upstream,
     capture_loguru_messages,
+    codex_provider_base_url,
     load_broker_module,
     post_absolute_url_to_broker,
     require_broker_symbol,
@@ -253,6 +255,46 @@ def test_broker_never_leaks_real_credential_in_evidence_packet_fixture() -> None
         redacted_packet = redact(packet_text)
     assert_credential_absent(redacted_response)
     assert_credential_absent(redacted_packet)
+
+
+def test_broker_forwards_codex_shaped_responses_request() -> None:
+    """Codex ``wire_api=responses`` appends to a ``/v1`` provider base URL (PR #594)."""
+    module = load_broker_module()
+    with MockModelUpstream() as upstream, _start_broker(module, upstream) as handle:
+        provider_base = codex_provider_base_url(handle)
+        assert provider_base.endswith("/v1")
+        payload = {"model": "gpt-stub", "input": "ping"}
+        with httpx.Client(base_url=provider_base, timeout=10.0) as client:
+            response = client.post(
+                CODEX_WIRE_API_SUFFIX,
+                json=payload,
+                headers=_auth_headers(handle.token),
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body.get("object") == "response"
+        assert upstream.authorization_headers, "upstream must receive Authorization"
+
+
+def test_broker_strips_content_encoding_for_decoded_gzip_upstream() -> None:
+    """Broker must not forward ``Content-Encoding`` after httpx decodes gzip (PR #594)."""
+    module = load_broker_module()
+    with (
+        MockModelUpstream(gzip_response=True) as upstream,
+        _start_broker(module, upstream) as handle,
+    ):
+        with _broker_client(handle) as client:
+            response = client.post(
+                MODEL_PATH,
+                json={"model": "gpt-stub", "messages": [{"role": "user", "content": "ping"}]},
+                headers=_auth_headers(handle.token),
+            )
+        assert response.status_code == 200
+        assert "content-encoding" not in {key.lower() for key in response.headers}
+        body = response.json()
+        assert body.get("object") == "chat.completion"
+        assert body["choices"][0]["message"]["content"] == "ok"
+        assert upstream.authorization_headers
 
 
 def test_broker_forwards_real_key_on_parent_upstream_leg() -> None:

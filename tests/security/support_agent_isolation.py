@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import http.client
 import importlib
 import json
@@ -28,6 +29,8 @@ REAL_OPENAI_API_KEY_FIXTURE = "sk-live-run-fixture-openai-never-leak-18"
 
 EVIL_UPSTREAM_HOST = "evil.example"
 MODEL_PATH = "/v1/chat/completions"
+RESPONSES_PATH = "/v1/responses"
+CODEX_WIRE_API_SUFFIX = "responses"
 NON_MODEL_PATHS = ("/v1/files", "/admin", "/healthz")
 
 LANE_B_SANDBOX_SYMBOLS = (
@@ -83,8 +86,14 @@ def serialized_evidence_packet_fixture(*, error_detail: str) -> str:
 class MockModelUpstream:
     """Loopback OpenAI-shaped upstream that records Authorization headers."""
 
-    def __init__(self, *, redirect_to: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        redirect_to: str | None = None,
+        gzip_response: bool = False,
+    ) -> None:
         self._redirect_to = redirect_to
+        self._gzip_response = gzip_response
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._host = "127.0.0.1"
@@ -126,17 +135,24 @@ class MockModelUpstream:
                     self.send_header("Location", redirect_to)
                     self.end_headers()
                     return
-                body = json.dumps(
-                    {
-                        "id": "chatcmpl-stub",
-                        "object": "chat.completion",
-                        "choices": [
-                            {"index": 0, "message": {"role": "assistant", "content": "ok"}}
-                        ],
+                payload = {
+                    "id": "chatcmpl-stub",
+                    "object": "chat.completion",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}}],
+                }
+                if self.path.rstrip("/").endswith("/responses"):
+                    payload = {
+                        "id": "resp-stub",
+                        "object": "response",
+                        "output": [{"type": "message", "content": "ok"}],
                     }
-                ).encode()
+                body = json.dumps(payload).encode()
+                if upstream._gzip_response:
+                    body = gzip.compress(body)
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json")
+                if upstream._gzip_response:
+                    self.send_header("Content-Encoding", "gzip")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -175,6 +191,19 @@ class MockModelUpstream:
 
     def __exit__(self, *exc: object) -> None:
         self.stop()
+
+
+def codex_provider_base_url(handle: Any) -> str:
+    """Return the ``model_providers`` base URL Codex uses with ``wire_api = responses``."""
+    base = getattr(handle, "base_url", None)
+    if not isinstance(base, str):
+        host = getattr(handle, "host", "127.0.0.1")
+        port = handle.port
+        base = f"http://{host}:{port}"
+    normalized = base.rstrip("/")
+    if normalized.endswith("/v1"):
+        return normalized
+    return f"{normalized}/v1"
 
 
 def broker_config_for_upstream(
