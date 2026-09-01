@@ -15,6 +15,7 @@ CACHE_DIR="${MERGECRAFT_TOOL_CACHE:-${ROOT}/.cache/workflow-lint}"
 mkdir -p "${CACHE_DIR}"
 ACTIONLINT_BIN="${CACHE_DIR}/actionlint"
 ZIZMOR_BIN="${CACHE_DIR}/zizmor"
+ACTIONLINT_SARIF_TEMPLATE="${ROOT}/src/mergecraft/analyzers/catalog/actionlint-sarif-template.txt"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
@@ -59,7 +60,7 @@ run_actionlint_sarif() {
   local out="$1"
   echo "» actionlint ${ACTIONLINT_VERSION} (SARIF)"
   set +e
-  "${ACTIONLINT_BIN}" -format sarif .github/workflows/*.yml > "${out}"
+  "${ACTIONLINT_BIN}" -format "${ACTIONLINT_SARIF_TEMPLATE}" .github/workflows/*.yml > "${out}"
   local rc=$?
   set -e
   if [[ ! -s "${out}" ]]; then
