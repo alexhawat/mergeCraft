@@ -59,8 +59,10 @@ fi
 run_actionlint_sarif() {
   local out="$1"
   echo "» actionlint ${ACTIONLINT_VERSION} (SARIF)"
+  local template
+  template="$(<"${ACTIONLINT_SARIF_TEMPLATE}")"
   set +e
-  "${ACTIONLINT_BIN}" -format "${ACTIONLINT_SARIF_TEMPLATE}" .github/workflows/*.yml > "${out}"
+  "${ACTIONLINT_BIN}" -format "${template}" .github/workflows/*.yml > "${out}"
   local rc=$?
   set -e
   if [[ ! -s "${out}" ]]; then

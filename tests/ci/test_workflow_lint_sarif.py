@@ -22,7 +22,10 @@ def test_workflow_lint_script_uses_catalog_actionlint_sarif_template() -> None:
     script = (REPO_ROOT / "scripts" / "workflow_lint.sh").read_text(encoding="utf-8")
     assert "ACTIONLINT_SARIF_TEMPLATE=" in script
     assert "actionlint-sarif-template.txt" in script
-    assert '-format "${ACTIONLINT_SARIF_TEMPLATE}"' in script
+    assert (
+        '-format "${template}"' in script
+        or 'template="$(<"${ACTIONLINT_SARIF_TEMPLATE}")"' in script
+    )
     assert _ACTIONLINT_TEMPLATE.is_file()
 
 
