@@ -37,14 +37,26 @@ ciEvidence:
     - mypy-sarif
     - bandit-sarif
 
-# Operator trust knob for same-repo pull_request_target (plan 13 D14–D16).
+# Operator trust knobs for same-repo pull_request_target (plan 13 D14–D16).
 # Resolved from the BASE snapshot at run start — a PR-head edit cannot raise
 # its own tier. Default when absent: off (today's untrusted posture).
+#
+# selfReview levels:
 #   off       — no change from pre-knob behaviour
 #   analyzers — trusted-tier analyzers on same-repo PRs; agent still cannot APPROVE
 #   full      — authority trust too; requires mergecraft trust set-self-review full
 #               --i-understand-this-grants-approval-authority (exceptional opt-out)
+#
+# agentSandbox decides whether MERGECRAFT_CODEX_SANDBOX=danger-full-access is honoured.
+# Tiers (tightest first): never | merged-only | dispatch | same-repo.
+# Fork heads always refuse — no tier lifts that floor.
+# merged-only gives no working shell during open PR review (head not on default yet).
+# "On the default branch" only implies reviewed where merging requires review.
+# same-repo widens override to any non-fork head (including pull_request_target).
+# Residual risks: a fork PR checked out locally, or adding a collaborator.
+#
 # Real PAT-backed APPROVE for self-review still flows through mergecraft-approve.yml
 # when the structural mergecraft-approval check passes — see docs/trust-policy.md.
 trust:
   selfReview: "analyzers"
+  agentSandbox: "same-repo"
