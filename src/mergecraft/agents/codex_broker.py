@@ -195,6 +195,9 @@ def prepare_codex_brokered_run(
         raise
     handle = session.handle
     broker_base_url = broker_provider_base_url(handle.base_url) if handle is not None else None
+    # Clear the process-wide probe so later ``write_mcp_config`` calls without an
+    # active ``_run()`` do not inherit broker routing from this setup path.
+    set_broker_session(None)
     return CodexBrokeredRun(
         agent_env=agent_env,
         broker_base_url=broker_base_url,
