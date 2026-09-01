@@ -226,3 +226,31 @@ def test_action_enablement_without_tracing_env_defaults_region_us(
     settings = apply_tracing_overrides(RepoSettings())
     active = resolve_active_tracing(config=settings.tracing)
     assert active.sinks[0].region == "us"
+
+
+def test_action_input_region_wins_over_conflicting_env_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``INPUT_TRACING_REGION`` beats ``MERGECRAFT_TRACING_REGION`` end to end.
+
+    ``apply_tracing_overrides`` stamps Action shorthand sinks onto
+    ``RepoSettings``; ``resolve_active_tracing`` then overlays region. When
+    both vars are set to conflicting values, the Action input wins — it is
+    more specific than job env. GitHub does not declare a ``tracing-region``
+    input today, so this is the contract if ``INPUT_TRACING_REGION`` is set.
+    """
+    _clear_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+    monkeypatch.setenv("INPUT_TRACING_REGION", "eu")
+    monkeypatch.setenv("MERGECRAFT_TRACING_REGION", "us")
+
+    from mergecraft.action.inputs import apply_tracing_overrides
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.tracing.resolve import resolve_active_tracing
+
+    settings = apply_tracing_overrides(RepoSettings())
+    active = resolve_active_tracing(config=settings.tracing)
+    assert active.enabled is True
+    assert active.sinks[0].type == "logfire"
+    assert active.sinks[0].region == "eu"

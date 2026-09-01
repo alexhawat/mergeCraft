@@ -129,6 +129,13 @@ def _resolve_env_layer(env: dict[str, str]) -> dict[str, Any]:
         region = env["MERGECRAFT_TRACING_REGION"].strip().lower()
         if region in {"us", "eu"}:
             out["region"] = region
+    # Action input is more specific than job ``env:``. There is currently no
+    # ``tracing-region`` Action input, so GitHub never injects this var; if
+    # both are set, ``INPUT_TRACING_REGION`` still wins.
+    if "INPUT_TRACING_REGION" in env:
+        region = env["INPUT_TRACING_REGION"].strip().lower()
+        if region in {"us", "eu"}:
+            out["region"] = region
     return out
 
 

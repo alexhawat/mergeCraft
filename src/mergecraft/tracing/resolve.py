@@ -15,6 +15,7 @@ Exports:
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, Literal
 
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
@@ -76,10 +77,22 @@ def _build_sinks(merged: dict[str, Any]) -> list[TraceSinkEntry]:
 
 
 def _overlay_logfire_region(
-    sinks: list[TraceSinkEntry], merged: dict[str, Any]
+    sinks: list[TraceSinkEntry],
+    merged: dict[str, Any],
+    env: dict[str, str] | None = None,
 ) -> list[TraceSinkEntry]:
-    """Apply env/CLI ``region`` onto adopted logfire sinks, if present."""
-    raw_region = merged.get("region")
+    """Apply env/CLI ``region`` onto adopted logfire sinks, if present.
+
+    ``INPUT_TRACING_REGION`` beats ``MERGECRAFT_TRACING_REGION`` (and the
+    merged env-layer ``region``) because a GitHub Action input is more
+    specific than the job ``env:``.
+    """
+    source = env if env is not None else os.environ
+    raw_input = source.get("INPUT_TRACING_REGION")
+    if isinstance(raw_input, str) and raw_input.strip().lower() in ("us", "eu"):
+        raw_region: Any = raw_input.strip().lower()
+    else:
+        raw_region = merged.get("region")
     if raw_region not in ("us", "eu"):
         return sinks
     region: Literal["us", "eu"] = raw_region
@@ -152,11 +165,13 @@ def resolve_active_tracing(
         #
         # Region is special: Action enablement arrives via ``INPUT_TRACING``,
         # so ``MERGECRAFT_TRACING`` is often unset even when tracing is on.
-        # Still overlay ``MERGECRAFT_TRACING_REGION`` onto logfire sinks so an
-        # EU write token is not posted to the US OTLP host.
+        # Overlay ``INPUT_TRACING_REGION`` (if set) over
+        # ``MERGECRAFT_TRACING_REGION`` onto logfire sinks so an EU write
+        # token is not posted to the US OTLP host, and a more-specific Action
+        # input is not clobbered by the job env.
         return TracingSettings(
             enabled=bool(config.enabled),
-            sinks=_overlay_logfire_region(list(config.sinks), merged),
+            sinks=_overlay_logfire_region(list(config.sinks), merged, env),
         )
     return TracingSettings(
         enabled=bool(merged.get("enabled")),
