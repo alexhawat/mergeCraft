@@ -23,6 +23,7 @@ from loguru import logger
 
 from mergecraft.agents import claude, codex, gemini
 from mergecraft.agents import opencode as opencode_mod
+from mergecraft.security.broker import CODEX_BROKER_BEARER_ENV
 from mergecraft.utils.git_setup import (
     register_created_path,
     setup_git,
@@ -84,8 +85,11 @@ def _assert_no_credentials(env: dict[str, str], *, active_key: str | None) -> No
         if name == active_key:
             continue
         assert name not in env, f"agent env leaks non-active provider key {name}"
+    allowed_token_shaped = {CODEX_BROKER_BEARER_ENV}
+    if active_key is not None:
+        allowed_token_shaped.add(active_key)
     for name in env:
-        assert "TOKEN" not in name or name in {active_key}, (
+        assert "TOKEN" not in name or name in allowed_token_shaped, (
             f"agent env carries unexpected token-shaped variable {name}"
         )
 
@@ -109,6 +113,35 @@ def test_agent_env_contains_no_credentials(
     }
     env = builders[agent_id](ctx)
     _assert_no_credentials(env, active_key=_ACTIVE_PROVIDER_KEY[agent_id])
+
+
+def test_codex_brokered_env_throwaway_in_openai_api_key_allowed(
+    make_agent_run_ctx, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """W2.1 broker path — throwaway in ``OPENAI_API_KEY`` satisfies the codex active-key guard."""
+    from tests.agents.support_codex_credential_broker import (
+        REAL_OPENAI_API_KEY_FIXTURE,
+        brokered_codex_context,
+        prepare_codex_brokered_run,
+    )
+
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    for key, value in _PLANTED_SECRETS.items():
+        if key == "OPENAI_API_KEY":
+            continue
+        monkeypatch.setenv(key, value)
+
+    ctx = brokered_codex_context(
+        tmp_path,
+        mcp_server_url="",
+        mcp_auth_token="",
+    )
+    prepared = prepare_codex_brokered_run(ctx)
+    _assert_no_credentials(prepared.agent_env, active_key=_ACTIVE_PROVIDER_KEY["codex"])
+    throwaway = prepared.agent_env.get("OPENAI_API_KEY")
+    assert throwaway, "broker throwaway must be routed through OPENAI_API_KEY for Codex 0.149"
+    assert throwaway != REAL_OPENAI_API_KEY_FIXTURE
 
 
 def test_opencode_agent_env_contains_no_credentials() -> None:
