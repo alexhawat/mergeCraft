@@ -116,7 +116,7 @@ class SandboxPlan:
     context: SandboxContext | None = None
 
 
-EgressPolicyStatus = Literal["allowed", "skipped"]
+EgressPolicyStatus = Literal["allowed", "skipped", "filtered"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,8 +239,10 @@ def sandbox_skip_findings(plan: SandboxPlan) -> list[Finding]:
 def reset_detection_cache() -> None:
     """Clear cached sandbox probes (xdist isolation / #421)."""
     probe_capabilities.cache_clear()
+    from mergecraft.analyzers.egress import reset_filtered_egress_cache
     from mergecraft.mcp.shell import _reset_shell_detection_globals
 
+    reset_filtered_egress_cache()
     _reset_shell_detection_globals()
 
 
@@ -460,6 +462,7 @@ def evaluate_analyzer_egress_policy(
     event_name: str,
     event: dict[str, Any],
     self_review_level: str = "off",
+    filtered_egress: bool | None = None,
 ) -> AnalyzerEgressPolicyOutcome:
     """Decide whether an analyzer may run with declared egress (D5/D6)."""
     _ = self_review_level  # D5a: egress keys on fork/event, not selfReview elevation
@@ -467,6 +470,12 @@ def evaluate_analyzer_egress_policy(
         return AnalyzerEgressPolicyOutcome(status="allowed", reason="")
     if egress_trusted_for_host_networking(event_name=event_name, event=event):
         return AnalyzerEgressPolicyOutcome(status="allowed", reason="")
+    if filtered_egress is None:
+        from mergecraft.analyzers.egress import filtered_egress_available
+
+        filtered_egress = filtered_egress_available()
+    if filtered_egress:
+        return AnalyzerEgressPolicyOutcome(status="filtered", reason="")
     tier_label = _egress_tier_label(event_name, event)
     hosts = ", ".join(network_allowlist)
     reason = (
@@ -555,11 +564,11 @@ def build_analyzer_sandbox_argv(
         isolate_network = not context.network_allowlist
     # Trusted runs with a declared ``network_allowlist`` drop ``--net`` so
     # ``osv-scanner`` / ``trivy`` can reach their upstreams (D7). Untrusted
-    # runs always keep ``--net`` when the allowlist is non-empty — filtered
-    # egress does not exist yet, so host networking is never granted on fork
-    # heads or ``pull_request_target`` (D5/D5a). See
-    # ``evaluate_analyzer_egress_policy`` for the named skip when running
-    # isolated would be pointless or sandboxing is unavailable (D5b/D6).
+    # runs always keep ``--net`` when the allowlist is non-empty — host
+    # networking is never granted on fork heads or ``pull_request_target``
+    # (D5/D5a). Filtered netns is applied only when
+    # ``filtered_egress_available()``; otherwise
+    # ``evaluate_analyzer_egress_policy`` named-skips (D5b/D6).
     unshare_argv = _analyzer_unshare_argv(isolate_network=isolate_network)
     if method == "sudo-unshare":
         return ["sudo", *unshare_argv, "bash", "-c", wrapped]
@@ -576,11 +585,19 @@ def build_analyzer_sandbox_argv_for_run(
     event: dict[str, Any],
     self_review_level: str = "off",
     analyzer_id: str = "",
+    netns_name: str | None = None,
 ) -> list[str]:
     """Trust-aware wrapper around ``build_analyzer_sandbox_argv`` (D5/D5a)."""
+    from mergecraft.analyzers.egress import wrap_argv_for_filtered_netns
+
     _ = analyzer_id, self_review_level
     isolate = _resolve_isolate_network(context, event_name=event_name, event=event)
-    return build_analyzer_sandbox_argv(argv, context=context, isolate_network=isolate)
+    if netns_name:
+        isolate = False
+    built = build_analyzer_sandbox_argv(argv, context=context, isolate_network=isolate)
+    if netns_name:
+        return wrap_argv_for_filtered_netns(built, netns_name)
+    return built
 
 
 __all__ = [

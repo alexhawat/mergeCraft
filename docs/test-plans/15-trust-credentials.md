@@ -60,6 +60,11 @@ Pinned API (W2): `mergecraft.config.trust_policy.resolve_agent_sandbox_decision`
 | Skip ≠ unavailable (D6) | `…::test_untrusted_allowlist_skip_is_distinct_from_unavailable` | unit |
 | Skip reason names hosts | `…::test_egress_skip_reason_names_analyzer_and_hosts` | unit |
 | No silent allowlist discard | `…::test_build_analyzer_env_no_longer_discards_network_allowlist` | structural |
+| Untrusted + filter → filtered (W3 Step 3) | `…::test_untrusted_with_filter_is_filtered_not_skipped` | unit |
+| Filter keeps `--net` / named netns | `…::test_untrusted_with_filter_still_isolates_network`, `…::test_filtered_netns_wrap_drops_net_and_never_uses_host_net` | unit |
+| Fork heads never get host net | `…::test_fork_head_never_drops_net_even_when_filter_available` | unit |
+| Sandbox `none` still named-skips | `…::test_sandbox_none_named_skips_even_when_filter_available` | unit |
+| CONNECT deny/allow | `tests/analyzers/test_filtered_egress.py` | unit |
 
 Pinned API (W3): `build_analyzer_sandbox_argv_for_run`, `evaluate_analyzer_egress_policy`.
 
@@ -115,7 +120,7 @@ Pinned API (W2b): `rebaseline_repo_settings_snapshot`, `assert_config_unchanged`
 | Wave | Marker reason prefix | Primary files | Status |
 | --- | --- | --- | --- |
 | W2 | `green after W2:` | `test_codex_sandbox_policy.py`, `test_fork_credential_invariant.py`, `test_trust_agent_sandbox_settings.py`, `test_trust_agent_sandbox_cmd.py` | **reconciled** — markers removed 2026-08-31 |
-| W3 | `green after W3:` | `test_analyzer_egress_policy.py` | pending |
+| W3 | `green after W3:` | `test_analyzer_egress_policy.py` | **reconciled** — fail-closed skip greened in W3; Step 3 filter path in `test_filtered_egress.py` |
 | W4 | `green after W4:` | `test_credential_status_for_slug.py`, `test_credential_p0_skip.py` | **reconciled** — markers removed 2026-08-31 |
 | W5 | `green after W5:` | `test_logfire_action_token_seam.py`, `test_tracing_inactive_summary_warning.py` | **reconciled** — markers removed 2026-08-31 |
 | W6 | `green after W6:` | `test_entropy_redaction_sweep.py` (`classify_entropy_redaction_hits`) | **reconciled** — marker removed 2026-08-31 |
