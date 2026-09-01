@@ -6,22 +6,23 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from mergecraft.ci.evidence import ci_evidence_findings
 from mergecraft.ci.sarif_ingest import ci_wait_inputs_from_env, ingest_ci_sarif_from_action_env
-from mergecraft.config.settings import RepoSettings
-from mergecraft.main import RunContext
 from mergecraft.utils import gha_log
-from tests.ci.test_self_review_green_ingest_w4 import (
-    _HEAD_SHA,
-    _ArtifactGitHub,
-    _sarif_document,
-    _tool_context,
-    _zip_bytes,
+from tests.ci.support_self_review_sarif import (
+    ArtifactGitHub,
+    head_sha,
+    sarif_document,
+    tool_context,
+    zip_bytes,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
+
+_HEAD_SHA = head_sha()
 
 
 def test_ci_wait_inputs_from_env_returns_none_without_vars(monkeypatch: MonkeyPatch) -> None:
@@ -75,17 +76,12 @@ async def test_ingest_ci_sarif_from_action_env_no_wait_state(
     """D9 — action env lane returns when wait outputs are absent."""
     monkeypatch.delenv("MERGECRAFT_CI_WAIT_STATE", raising=False)
     monkeypatch.delenv("CI_STATE", raising=False)
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    tool_ctx = _tool_context(tmp_path, github)
-    run_ctx = RunContext(
-        settings=RepoSettings(),
-        tool_context=tool_ctx,
-        gh_event={"pull_request": {"head": {"sha": _HEAD_SHA}}},
-    )
-    await ingest_ci_sarif_from_action_env(run_ctx)
+    tool_ctx = tool_context(tmp_path, github)
+    await ingest_ci_sarif_from_action_env(tool_ctx, {})
     assert not github.head_sha_queries
 
 
@@ -98,17 +94,12 @@ async def test_ingest_ci_sarif_from_action_env_no_head_sha(
     monkeypatch.setenv("MERGECRAFT_CI_WAIT_STATE", "complete")
     monkeypatch.setenv("MERGECRAFT_CI_FAILED_COUNT", "0")
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    tool_ctx = _tool_context(tmp_path, github)
-    run_ctx = RunContext(
-        settings=RepoSettings(),
-        tool_context=tool_ctx,
-        gh_event={},
-    )
-    await ingest_ci_sarif_from_action_env(run_ctx)
+    tool_ctx = tool_context(tmp_path, github)
+    await ingest_ci_sarif_from_action_env(tool_ctx, {})
     assert not github.head_sha_queries
 
 
@@ -118,21 +109,17 @@ async def test_ingest_ci_sarif_from_action_env_ingests_when_forwarded(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """D9 — forwarded wait outputs trigger head-SHA SARIF ingest in the action lane."""
-    from mergecraft.ci.evidence import ci_evidence_findings
-
     monkeypatch.setenv("MERGECRAFT_CI_WAIT_STATE", "complete")
     monkeypatch.setenv("MERGECRAFT_CI_FAILED_COUNT", "0")
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    tool_ctx = _tool_context(tmp_path, github)
-    run_ctx = RunContext(
-        settings=RepoSettings(),
-        tool_context=tool_ctx,
-        gh_event={"pull_request": {"head": {"sha": _HEAD_SHA}}},
+    tool_ctx = tool_context(tmp_path, github)
+    await ingest_ci_sarif_from_action_env(
+        tool_ctx,
+        {"pull_request": {"head": {"sha": _HEAD_SHA}}},
     )
-    await ingest_ci_sarif_from_action_env(run_ctx)
     assert github.head_sha_queries == [_HEAD_SHA]
     assert ci_evidence_findings(tool_ctx.tool_state)

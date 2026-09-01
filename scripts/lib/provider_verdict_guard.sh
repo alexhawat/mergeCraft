@@ -33,3 +33,19 @@ verdict_from_packet() {
     printf '%s' "$packet" | jq -r '.decision.verdict // empty' 2>/dev/null || true
   fi
 }
+
+# Codex fallback: only failure|success count as a posted verdict (neutral still falls back).
+verdict_blocks_codex_fallback() {
+  case "$1" in
+    failure|success) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Claude backstop: failure|success|neutral all count as a posted verdict.
+verdict_blocks_claude_backstop() {
+  case "$1" in
+    failure|success|neutral) return 0 ;;
+    *) return 1 ;;
+  esac
+}

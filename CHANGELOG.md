@@ -192,8 +192,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `trust.selfReview` is `analyzers` — execution trust without widening approval
   authority
 - Declared CI SARIF artifacts are downloaded and recorded when `wait-for-ci`
-  reaches `state=complete` (green or red); the review job needs `actions: read`
-  to fetch them. Wait states `timeout`, `absent`, and `skipped` skip ingest
+  reaches `state=complete` (green or red). The review job must forward
+  `wait-for-ci` `state` / `failed_count` (as `MERGECRAFT_CI_WAIT_STATE` /
+  `MERGECRAFT_CI_FAILED_COUNT` or `CI_STATE` / `CI_FAILED_COUNT`) and grant
+  `actions: read` to download artifacts. Wait states `timeout`, `absent`, and
+  `skipped` skip ingest
 - Action log phases (setup, model chain, agent dispatch, publish) emit
   collapsible `::group::` blocks in GitHub Actions logs
 
@@ -204,7 +207,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI SARIF ingest covers actionlint, zizmor, and semgrep alongside ruff,
   mypy, and bandit — matching `ci.yml` uploads and
   `ciEvidence.sarifArtifacts` (#464)
-- Hardened consumer template grants `actions: read` for ciEvidence SARIF ingest
+- Hardened consumer template forwards wait-for-ci outputs and grants
+  `actions: read` for ciEvidence SARIF ingest
 
 ### Changed
 

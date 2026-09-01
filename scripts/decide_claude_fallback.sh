@@ -16,22 +16,18 @@ else
   packet="${CODEX_PACKET:-${NOUS_PACKET:-}}"
   if [ -n "${packet}" ]; then
     verdict="$(verdict_from_packet "${packet}")"
-    case "${verdict}" in
-      failure|success|neutral)
-        need="false"
-        echo "packet decision.verdict=${verdict} — a rung posted a verdict despite failing later; not spending the Claude backstop."
-        ;;
-    esac
+    if verdict_blocks_claude_backstop "${verdict}"; then
+      need="false"
+      echo "packet decision.verdict=${verdict} — a rung posted a verdict despite failing later; not spending the Claude backstop."
+    fi
   fi
   if [ "${need}" = "true" ] && [ "${EVENT_NAME}" = "pull_request_target" ]; then
     latest="$(latest_mergecraft_approval)"
     conclusion="$(discard_baseline_verdict "${latest}")"
-    case "${conclusion}" in
-      failure|success|neutral)
-        need="false"
-        echo "mergecraft-approval=${conclusion} — a rung posted a verdict despite failing later; not spending the Claude backstop."
-        ;;
-    esac
+    if verdict_blocks_claude_backstop "${conclusion}"; then
+      need="false"
+      echo "mergecraft-approval=${conclusion} — a rung posted a verdict despite failing later; not spending the Claude backstop."
+    fi
   fi
 fi
 if [ "${need}" = "true" ]; then

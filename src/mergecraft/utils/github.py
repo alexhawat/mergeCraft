@@ -631,6 +631,9 @@ class GitHubClient:
         head_sha: str | None = None,
     ) -> ListedItems:
         """Paginate ``/actions/runs`` with either check-suite or head-SHA filters."""
+        if (check_suite_id is None) == (head_sha is None):
+            msg = "exactly one of check_suite_id or head_sha must be set"
+            raise ValueError(msg)
 
         params: dict[str, Any] = {}
         if check_suite_id is not None:

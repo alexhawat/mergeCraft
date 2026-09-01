@@ -561,6 +561,10 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             "matching artifacts from those runs. Wait states `timeout`, `absent`, "
             "and `skipped` skip ingest; `workflow_dispatch` does not pre-ingest "
             "because the wait job is PR-only.",
+            "- **Wait outputs required.** Forward `wait-for-ci` `state` and "
+            "`failed_count` into the review job as `MERGECRAFT_CI_WAIT_STATE` / "
+            "`MERGECRAFT_CI_FAILED_COUNT` (or the `CI_STATE` / `CI_FAILED_COUNT` "
+            "aliases). Without `state=complete` ingest is skipped.",
             "- **`actions: read` required.** The review workflow job must grant "
             "`actions: read` so artifact download succeeds. Without it GitHub "
             "answers 403 and SARIF ingest is skipped (the review still completes).",

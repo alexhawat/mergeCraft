@@ -342,6 +342,8 @@ jobs:
       # The approve lane lives in mergecraft-approve.yml, which holds its own
       # copy of the PAT and never re-reads PR content — see the review steps'
       # `token:` comment and PR #200.
+      # Forward wait-for-ci outputs for action-side SARIF ingest (D9). Dual
+      # MERGECRAFT_* / CI_* aliases support older consumer templates that only set CI_*.
       MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
       MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
       CI_STATE: ${{ needs.wait-for-ci.outputs.state }}

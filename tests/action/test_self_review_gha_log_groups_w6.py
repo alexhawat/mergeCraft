@@ -30,6 +30,12 @@ def _groups_in_output(text: str, title: str) -> bool:
     return f"::group::{title}" in text and "::endgroup::" in text
 
 
+def _group_titles(text: str) -> list[str]:
+    import re
+
+    return re.findall(r"::group::([^\n]+)", text)
+
+
 async def test_main_emits_log_groups_for_setup_model_chain_publish(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -43,6 +49,9 @@ async def test_main_emits_log_groups_for_setup_model_chain_publish(
         env=_GITHUB_ACTIONS_ENV,
     )
     output = buffer.getvalue()
+    titles = _group_titles(output)
+    assert titles == list(_GROUP_TITLES)
+    assert len(titles) == len(_GROUP_TITLES)
     for title in _GROUP_TITLES:
         assert _groups_in_output(output, title), f"missing log group for {title!r}"
 

@@ -29,6 +29,7 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
+from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.main_outcome import (
     _classify_outcome,
@@ -1498,9 +1499,12 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
-    from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
-
-    await ingest_ci_sarif_from_action_env(ctx)
+    assert ctx.tool_context is not None
+    await ingest_ci_sarif_from_action_env(
+        ctx.tool_context,
+        ctx.gh_event or {},
+        event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+    )
     await _run_setup_script_phase(ctx)
 
     # Plan 12 B5 — run-record setup reasons must also appear outside any open group.

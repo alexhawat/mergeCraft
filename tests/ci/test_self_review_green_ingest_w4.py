@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from io import BytesIO
 from typing import TYPE_CHECKING, Any
-from zipfile import ZipFile
 
 import pytest
 import yaml
@@ -13,11 +10,14 @@ from scripts.workflow_yaml import permission_dict
 
 from mergecraft.ci.evidence import ci_evidence_findings
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_after_ci_wait
-from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
-from mergecraft.mcp.tool_state import init_tool_state
-from mergecraft.modes import compute_modes
-from mergecraft.scm.types import ListedItems
-from mergecraft.utils.github import GitHubClient
+from tests.ci.support_self_review_sarif import (
+    ArtifactGitHub,
+    head_sha,
+    sarif_document,
+    tool_context,
+    tool_context_with_scm,
+    zip_bytes,
+)
 from tests.ci.workflow_support import job, load_workflow, read_text
 from tests.scm.support import RecordingScmProvider
 
@@ -26,124 +26,23 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-_HEAD_SHA = "cafebabecafebabecafebabecafebabecafebabe"
-
-
-def _tool_context_with_scm(tmp_path: Path, scm: Any) -> ToolContext:
-    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
-    return ToolContext(
-        agent_id="claude",
-        repo=RepoIdentity(owner="acme", name="demo"),
-        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request_target")),
-        scm=scm,
-        github_installation_token="",
-        git_token="",
-        api_token="",
-        modes=compute_modes("claude"),
-        tool_state=state,
-        mcp_server_url="",
-        tmpdir=str(tmp_path),
-        ci_sarif_artifacts=["ruff-sarif", "mypy-sarif", "bandit-sarif"],
-    )
-
-
-def _sarif_document(tool: str = "ruff") -> str:
-    return json.dumps(
-        {
-            "version": "2.1.0",
-            "runs": [
-                {
-                    "tool": {"driver": {"name": tool}},
-                    "results": [
-                        {
-                            "ruleId": "F401",
-                            "level": "error",
-                            "message": {"text": "lint"},
-                            "locations": [
-                                {
-                                    "physicalLocation": {
-                                        "artifactLocation": {"uri": "src/a.py"},
-                                        "region": {"startLine": 1},
-                                    }
-                                }
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
-    )
-
-
-def _zip_bytes(name: str, document: str) -> bytes:
-    buffer = BytesIO()
-    with ZipFile(buffer, "w") as archive:
-        archive.writestr(name, document)
-    return buffer.getvalue()
-
-
-class _ArtifactGitHub(GitHubClient):
-    def __init__(
-        self,
-        *,
-        artifacts: list[dict[str, Any]],
-        archives: dict[int, bytes],
-        head_sha_runs: list[dict[str, Any]] | None = None,
-        download_error: Exception | None = None,
-    ) -> None:
-        super().__init__(token="test-token")
-        self.artifacts = artifacts
-        self.archives = archives
-        self.head_sha_runs = head_sha_runs or [{"id": 901, "head_sha": _HEAD_SHA}]
-        self.head_sha_queries: list[str] = []
-        self._download_error = download_error
-
-    async def get(self, path: str, **kwargs: Any) -> Any:
-        params = kwargs.get("params") or {}
-        if path.endswith("/actions/runs") and params.get("head_sha"):
-            self.head_sha_queries.append(str(params["head_sha"]))
-            return {"workflow_runs": self.head_sha_runs}
-        return {"workflow_runs": []}
-
-    async def list_workflow_run_artifacts(self, owner: str, repo: str, run_id: int) -> ListedItems:
-        _ = (owner, repo, run_id)
-        return ListedItems(
-            items=list(self.artifacts), incomplete=False, total_count=len(self.artifacts)
-        )
-
-    async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes:
-        _ = (owner, repo)
-        if self._download_error is not None:
-            raise self._download_error
-        return self.archives[artifact_id]
-
-
-def _tool_context(tmp_path: Path, github: GitHubClient) -> ToolContext:
-    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
-    return ToolContext(
-        agent_id="claude",
-        repo=RepoIdentity(owner="acme", name="demo"),
-        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request_target")),
-        github=github,
-        github_installation_token="",
-        git_token="",
-        api_token="",
-        modes=compute_modes("claude"),
-        tool_state=state,
-        mcp_server_url="",
-        tmpdir=str(tmp_path),
-        ci_sarif_artifacts=["ruff-sarif", "mypy-sarif", "bandit-sarif"],
-    )
+_HEAD_SHA = head_sha()
+_WAIT_ENV_FORWARD = (
+    ("MERGECRAFT_CI_WAIT_STATE", "${{ needs.wait-for-ci.outputs.state }}"),
+    ("MERGECRAFT_CI_FAILED_COUNT", "${{ needs.wait-for-ci.outputs.failed_count }}"),
+    ("CI_STATE", "${{ needs.wait-for-ci.outputs.state }}"),
+    ("CI_FAILED_COUNT", "${{ needs.wait-for-ci.outputs.failed_count }}"),
+)
 
 
 @pytest.mark.asyncio
 async def test_green_wait_ingests_declared_artifacts(tmp_path: Path) -> None:
     """D9 — ``state=complete`` + ``failed_count=0`` still downloads declared SARIF."""
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    ctx = _tool_context(tmp_path, github)
+    ctx = tool_context(tmp_path, github)
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
@@ -156,11 +55,11 @@ async def test_green_wait_ingests_declared_artifacts(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_red_ci_complete_still_ingests_declared_artifacts(tmp_path: Path) -> None:
     """D9 — ``state=complete`` with failed jobs still ingests declared SARIF."""
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    ctx = _tool_context(tmp_path, github)
+    ctx = tool_context(tmp_path, github)
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
@@ -176,11 +75,11 @@ async def test_green_wait_lists_workflow_runs_for_head_sha_not_only_failed_suite
     tmp_path: Path,
 ) -> None:
     """D9 — ingest must list workflow runs for the head SHA, not only a failed suite id."""
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    ctx = _tool_context(tmp_path, github)
+    ctx = tool_context(tmp_path, github)
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
@@ -200,12 +99,12 @@ async def test_artifact_download_403_logs_warning_and_continues(
     from mergecraft.utils import gha_log
 
     monkeypatch.setattr(gha_log, "warning", lambda msg: warnings.append(msg))
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
         archives={7: b""},
         download_error=PermissionError("artifact download forbidden"),
     )
-    ctx = _tool_context(tmp_path, github)
+    ctx = tool_context(tmp_path, github)
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
@@ -230,14 +129,28 @@ def test_hardened_example_review_job_includes_actions_read() -> None:
     assert perms.get("actions") == "read"
 
 
+def test_hardened_example_review_job_forwards_wait_env_for_sarif_ingest() -> None:
+    """D10 — hardened template forwards wait-for-ci outputs for action-side SARIF ingest."""
+    doc = yaml.safe_load(read_text("examples/workflows/mergecraft-hardened.yml"))
+    assert isinstance(doc, dict)
+    jobs = doc.get("jobs")
+    assert isinstance(jobs, dict)
+    review = jobs.get("review")
+    assert isinstance(review, dict)
+    env = review.get("env")
+    assert isinstance(env, dict)
+    for key, expected in _WAIT_ENV_FORWARD:
+        assert env.get(key) == expected
+
+
 @pytest.mark.asyncio
 async def test_ingest_skips_when_ci_wait_state_not_complete(tmp_path: Path) -> None:
     """D9 — non-complete wait state must not list workflow runs or record findings."""
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    ctx = _tool_context(tmp_path, github)
+    ctx = tool_context(tmp_path, github)
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="pending",
@@ -251,11 +164,11 @@ async def test_ingest_skips_when_ci_wait_state_not_complete(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_ingest_skips_when_head_sha_blank(tmp_path: Path) -> None:
     """D9 — blank head SHA must short-circuit before workflow listing."""
-    github = _ArtifactGitHub(
+    github = ArtifactGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    ctx = _tool_context(tmp_path, github)
+    ctx = tool_context(tmp_path, github)
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
@@ -276,7 +189,7 @@ async def test_ingest_skips_without_github_client(
     from mergecraft.utils import gha_log
 
     monkeypatch.setattr(gha_log, "warning", lambda msg: warnings.append(msg))
-    ctx = _tool_context_with_scm(tmp_path, RecordingScmProvider())
+    ctx = tool_context_with_scm(tmp_path, RecordingScmProvider())
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
@@ -299,21 +212,21 @@ async def test_ingest_workflow_listing_error_logs_warning(
 
     monkeypatch.setattr(gha_log, "warning", lambda msg: warnings.append(msg))
 
-    class _ListingErrorGitHub(_ArtifactGitHub):
+    class ListingErrorGitHub(ArtifactGitHub):
         async def list_workflow_runs_for_head_sha(
             self,
             owner: str,
             repo: str,
             head_sha: str,
-        ) -> ListedItems:
+        ) -> Any:
             _ = (owner, repo, head_sha)
             raise RuntimeError("workflow listing failed")
 
-    github = _ListingErrorGitHub(
+    github = ListingErrorGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    ctx = _tool_context(tmp_path, github)
+    ctx = tool_context(tmp_path, github)
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",
@@ -336,21 +249,23 @@ async def test_ingest_workflow_listing_incomplete_logs_warning(
 
     monkeypatch.setattr(gha_log, "warning", lambda msg: warnings.append(msg))
 
-    class _IncompleteListingGitHub(_ArtifactGitHub):
+    class IncompleteListingGitHub(ArtifactGitHub):
         async def list_workflow_runs_for_head_sha(
             self,
             owner: str,
             repo: str,
             head_sha: str,
-        ) -> ListedItems:
+        ) -> Any:
             _ = (owner, repo, head_sha)
+            from mergecraft.scm.types import ListedItems
+
             return ListedItems(items=[], incomplete=True)
 
-    github = _IncompleteListingGitHub(
+    github = IncompleteListingGitHub(
         artifacts=[{"id": 7, "name": "ruff-sarif"}],
-        archives={7: _zip_bytes("ruff.sarif.json", _sarif_document())},
+        archives={7: zip_bytes("ruff.sarif.json", sarif_document())},
     )
-    ctx = _tool_context(tmp_path, github)
+    ctx = tool_context(tmp_path, github)
     await ingest_ci_sarif_after_ci_wait(
         ctx,
         ci_wait_state="complete",

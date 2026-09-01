@@ -242,43 +242,6 @@ async def collect_ci_sarif_findings(
     return findings
 
 
-async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
-    """List workflow runs for ``head_sha`` and record declared SARIF artifacts.
-
-    Shared by the action-side wait-for-ci lane and ``run_ci_intelligence``.
-    """
-    if not head_sha.strip():
-        return
-
-    from mergecraft.ci.evidence import record_ci_findings
-
-    client = github_client_from_scm(ctx.scm)
-    if client is None:
-        warn_ci_evidence("ci evidence: SARIF ingest skipped — no GitHub client")
-        return
-
-    try:
-        listed = await client.list_workflow_runs_for_head_sha(
-            ctx.repo.owner,
-            ctx.repo.name,
-            head_sha.strip(),
-        )
-    except Exception as err:
-        warn_ci_evidence(f"ci evidence: workflow run listing failed for {head_sha[:7]} — {err}")
-        return
-
-    if listed.incomplete:
-        warn_ci_evidence(
-            f"ci evidence: workflow run listing truncated for {head_sha[:7]} — "
-            "not treating as complete"
-        )
-        return
-
-    findings = await collect_ci_sarif_findings(ctx, client=client, runs=listed.items)
-    if findings:
-        record_ci_findings(ctx.tool_state, findings)
-
-
 async def run_ci_intelligence(
     ctx: ToolContext,
     *,
@@ -320,6 +283,8 @@ async def run_ci_intelligence(
                 reason="check-suite run listing incomplete",
             )
         runs = listed.items
+        # Action-side ingest may have already recorded SARIF for this head;
+        # ``record_ci_findings`` dedupes on ``finding_dedupe_key``.
         sarif = await collect_ci_sarif_findings(ctx, client=client, runs=runs)
         if sarif:
             record_ci_findings(ctx.tool_state, sarif)
@@ -361,7 +326,6 @@ async def run_ci_intelligence(
 __all__ = [
     "build_ci_intelligence_payload",
     "collect_ci_sarif_findings",
-    "ingest_ci_sarif_for_head_sha",
     "intelligence_from_failures",
     "provider_jobs_to_raw_failures",
     "run_ci_intelligence",

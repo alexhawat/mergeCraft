@@ -13,8 +13,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-_SEMGREP_VERSION = "1.170.0"
 _SCAN_PATHS = ("src", "tests", "scripts", "action.yml")
+
+
+def _semgrep_catalog_version() -> str:
+    from mergecraft.analyzers.registry import get_manifest
+
+    return get_manifest("semgrep").version
 
 
 class EmitError(RuntimeError):
@@ -37,7 +42,7 @@ def emit_semgrep_sarif(*, out: Path, repo_root: Path | None = None) -> None:
     cache_dir = root / ".mergecraft" / "analyzer-cache"
     script = provision_pip_script(
         package="semgrep",
-        version=_SEMGREP_VERSION,
+        version=_semgrep_catalog_version(),
         script="semgrep",
         cache_dir=cache_dir,
     )

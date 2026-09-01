@@ -225,6 +225,12 @@ jobs:
       # ``uses:`` step walks them in the order `.mergecraft/config.yaml`
       # declares under ``models:``.
       HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' || secrets.CODEX_AUTH_JSON != '' || secrets.GEMINI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Forward wait-for-ci outputs for action-side SARIF ingest (D9). Dual
+      # MERGECRAFT_* / CI_* aliases match dogfood mergecraft.yml for older templates.
+      MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
+      MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
+      CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
+      CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
 
     steps:
       # No `ref:` here, deliberately. Under pull_request_target this checks out
