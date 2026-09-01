@@ -1,18 +1,12 @@
-"""W1.2 — committed ``trust.selfReview`` flip contracts (lane D, green after W2)."""
+"""W1.2 — committed ``trust.selfReview`` flip contracts (lane D, greened W2)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT
-
-W2_XFAIL = pytest.mark.xfail(
-    reason="green after W2: flip trust.selfReview to analyzers",
-    strict=True,
-)
 
 _COMMITTED_CONFIG = REPO_ROOT / ".mergecraft" / "config.yaml"
 _FORK_EVENT: dict = {"pull_request": {"head": {"repo": {"fork": True, "full_name": "fork/demo"}}}}
@@ -31,7 +25,6 @@ def _resolve_policy(**kwargs):
     return resolve_trust_policy(**kwargs)
 
 
-@W2_XFAIL
 def test_committed_config_has_self_review_analyzers_quoted() -> None:
     """D6 — dogfood config must carry ``trust.selfReview: \"analyzers\"`` (quoted)."""
     text = _COMMITTED_CONFIG.read_text(encoding="utf-8")
@@ -43,7 +36,6 @@ def test_committed_config_has_self_review_analyzers_quoted() -> None:
     assert 'selfReview: "analyzers"' in text or "selfReview: 'analyzers'" in text
 
 
-@W2_XFAIL
 def test_committed_config_resolves_execution_trusted_on_same_repo_prt() -> None:
     """Plan 13 — committed dogfood config must elevate execution on same-repo PRT."""
     policy = _resolve_policy(
