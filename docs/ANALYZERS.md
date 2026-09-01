@@ -93,9 +93,15 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   events (`workflow_dispatch`, same-repo `pull_request`) keep today's
   behaviour: a declared allowlist drops network isolation so
   `osv-scanner`, `trivy`, `govulncheck`, and `bundler-audit` can reach
-  their upstreams. Filtered egress to the declared hosts is not implemented
-  yet — the untrusted path fails closed. Enforced by
-  `evaluate_analyzer_egress_policy()` and `build_analyzer_sandbox_argv_for_run()`.
+  their upstreams. On runners where `ip netns`, veth, and iptables are
+  available, untrusted allowlisted analyzers run inside an isolated
+  netns whose host-side FORWARD filter permits only the declared
+  hosts (sandbox enforcement, not `HTTP_PROXY`). A CONNECT proxy
+  encodes the same hostname allowlist in tests. The GitHub Action
+  image typically lacks `CAP_NET_ADMIN` / `CAP_SYS_ADMIN`, so that
+  path stays a named skip. Enforced by
+  `evaluate_analyzer_egress_policy()`, `filtered_egress_available()`,
+  and `build_analyzer_sandbox_argv_for_run()`.
 - **mode** (`analyzers:` in the workflow) — `off | auto | full |
   untrusted-only`. Enforced by `evaluate_manifest_for_mode()` plus
   `resolve_selection_tier()`.

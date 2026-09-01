@@ -166,6 +166,7 @@ def _sandboxed_argv(
     event: dict[str, Any] | None = None,
     self_review_level: str = "off",
     analyzer_id: str = "",
+    netns_name: str | None = None,
 ) -> tuple[list[str], Callable[[], None] | None]:
     """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it."""
     run_argv = list(plan.argv)
@@ -183,6 +184,7 @@ def _sandboxed_argv(
             event=event_payload,
             self_review_level=self_review_level,
             analyzer_id=analyzer_id or plan.manifest_id,
+            netns_name=netns_name,
         ),
         preexec_fn,
     )
@@ -281,21 +283,60 @@ def run_plan(
     if sandbox_context is not None:
         timeout_s = min(timeout_s, sandbox_context.timeout_s)
     command = _command_string(plan.argv)
-    run_argv, preexec_fn = _sandboxed_argv(
-        plan,
-        sandbox_context,
-        event_name=resolved_event_name,
-        event=resolved_event,
-        self_review_level=self_review_level,
-        analyzer_id=analyzer_id or plan.manifest_id,
-    )
+    from mergecraft.analyzers.egress import FilteredEgressSetupError, FilteredNetnsSession
 
-    result = _run_subprocess(
-        run_argv, plan=plan, cwd=cwd, timeout_s=timeout_s, preexec_fn=preexec_fn, command=command
-    )
-    if isinstance(result, AnalyzerOutcome):
-        return result
-    return _outcome_from_completed(result, plan=plan, command=command)
+    session: FilteredNetnsSession | None = None
+    if sandbox_context is not None:
+        from mergecraft.analyzers.sandbox import evaluate_analyzer_egress_policy
+
+        event_payload = resolved_event if resolved_event is not None else {}
+        outcome = evaluate_analyzer_egress_policy(
+            analyzer_id=analyzer_id or plan.manifest_id,
+            network_allowlist=list(sandbox_context.network_allowlist),
+            event_name=resolved_event_name,
+            event=event_payload,
+            self_review_level=self_review_level,
+        )
+        if outcome.status == "filtered":
+            try:
+                session = FilteredNetnsSession(list(sandbox_context.network_allowlist))
+                session.start()
+            except FilteredEgressSetupError as exc:
+                reason = (
+                    f"Skipped: egress policy — {plan.manifest_id} declares network hosts "
+                    f"but filtered egress could not be applied ({exc})"
+                )
+                logger.info("{}", reason)
+                return AnalyzerOutcome(
+                    name=plan.manifest_id,
+                    command=command,
+                    status="unavailable",
+                    output=reason,
+                )
+    try:
+        run_argv, preexec_fn = _sandboxed_argv(
+            plan,
+            sandbox_context,
+            event_name=resolved_event_name,
+            event=resolved_event,
+            self_review_level=self_review_level,
+            analyzer_id=analyzer_id or plan.manifest_id,
+            netns_name=session.ns_name if session is not None else None,
+        )
+        result = _run_subprocess(
+            run_argv,
+            plan=plan,
+            cwd=cwd,
+            timeout_s=timeout_s,
+            preexec_fn=preexec_fn,
+            command=command,
+        )
+        if isinstance(result, AnalyzerOutcome):
+            return result
+        return _outcome_from_completed(result, plan=plan, command=command)
+    finally:
+        if session is not None:
+            session.close()
 
 
 def run_plans(
