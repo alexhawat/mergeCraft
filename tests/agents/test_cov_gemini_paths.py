@@ -395,7 +395,9 @@ def test_argv_omits_model_and_yes_flag_and_adds_resume_for_a_session_continuatio
     monkeypatch.delenv("CI", raising=False)
     captured: dict[str, Any] = {}
 
-    def _fake_streaming(*, cmd: list[str], ctx: Any, model: str | None) -> Any:
+    def _fake_streaming(
+        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+    ) -> Any:
         captured["cmd"] = cmd
         captured["model"] = model
         return gemini_mod.AgentResult(success=True, output="ok")
@@ -428,7 +430,9 @@ def test_argv_strips_the_provider_prefix_from_the_model_flag(
     monkeypatch.setenv("CI", "true")
     captured: dict[str, Any] = {}
 
-    def _fake_streaming(*, cmd: list[str], ctx: Any, model: str | None) -> Any:
+    def _fake_streaming(
+        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+    ) -> Any:
         captured["cmd"] = cmd
         return gemini_mod.AgentResult(success=True)
 
@@ -449,7 +453,9 @@ def test_empty_prompt_falls_back_to_the_context_user_instruction(
     monkeypatch.delenv("CI", raising=False)
     captured: dict[str, Any] = {}
 
-    def _fake_streaming(*, cmd: list[str], ctx: Any, model: str | None) -> Any:
+    def _fake_streaming(
+        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+    ) -> Any:
         captured["cmd"] = cmd
         return gemini_mod.AgentResult(success=True)
 

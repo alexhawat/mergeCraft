@@ -23,6 +23,7 @@ from mergecraft.agents.shared import (
     log_token_table,
     mcp_auth_headers,
     spawn_agent_cli,
+    with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.tracing._tool_attrs import (
@@ -30,7 +31,11 @@ from mergecraft.tracing._tool_attrs import (
     enrich_tool_request,
     enrich_tool_response,
 )
-from mergecraft.tracing.genai import output_messages_attrs, resolve_capture_policy
+from mergecraft.tracing.genai import (
+    input_messages_attrs,
+    output_messages_attrs,
+    resolve_capture_policy,
+)
 from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.tracing.tracer import (
     ProviderLLMPair,
@@ -279,6 +284,7 @@ def _run_gemini_once(
         cmd=cmd,
         ctx=ctx,
         model=model,
+        prompt=user_prompt,
     )
 
 
@@ -287,30 +293,19 @@ def _run_gemini_streaming(
     cmd: list[str],
     ctx: AgentRunContext,
     model: str | None,
+    prompt: str | None = None,
 ) -> AgentResult:
     """Streaming read loop for ``gemini --output-format stream-json`` (W6)."""
     from mergecraft.agents._stream_consumer import (
         StreamSpanAccumulator,
         consume_stream,
     )
-    from mergecraft.tracing.sinks import claim_sink
-    from mergecraft.tracing.tracer import (
-        Tracer,
-        resolve_correlation_from_env,
-        resolve_session_id,
-    )
+    from mergecraft.tracing import resolve_driver_tracer
 
     accumulator = StreamSpanAccumulator(agent_name="gemini")
     tracer: Tracer | None = None
     try:
-        from mergecraft.tracing.resolve import resolve_active_tracing
-
-        sink = claim_sink(resolve_active_tracing())
-        if sink is not None:
-            correlation = resolve_correlation_from_env()
-            session_id = resolve_session_id()
-            run_id = str(correlation.get("run_id") or session_id)
-            tracer = Tracer(sink=sink, session_id=session_id, run_id=run_id)
+        tracer = resolve_driver_tracer()
     except Exception as exc:
         logger.debug("gemini stream tracer resolution failed: {}", exc)
 
@@ -323,12 +318,13 @@ def _run_gemini_streaming(
         tracer=tracer,
         model_id=model or "default",
         capture_policy=capture_policy,
+        input_prompt=prompt,
     )
 
     try:
         process = spawn_agent_cli(cmd, env=_build_env(ctx))
     except FileNotFoundError as err:
-        return AgentResult(success=False, error=str(err))
+        return with_prompt(AgentResult(success=False, error=str(err)), prompt)
 
     assert process.stdout is not None
     assert process.stderr is not None
@@ -349,7 +345,7 @@ def _run_gemini_streaming(
                     timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
                 )
             except subprocess.TimeoutExpired:
-                return AgentResult(success=False, error="gemini CLI timed out")
+                return with_prompt(AgentResult(success=False, error="gemini CLI timed out"), prompt)
     finally:
         try:
             close_all_open_spans()
@@ -365,14 +361,17 @@ def _run_gemini_streaming(
 
     if returncode != 0:
         retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
-        return AgentResult(
-            success=False,
-            output=output or None,
-            error=stderr_text.strip() or f"gemini exited {returncode}",
-            usage=usage,
-            metadata={"retryable": True} if retryable else {},
+        return with_prompt(
+            AgentResult(
+                success=False,
+                output=output or None,
+                error=stderr_text.strip() or f"gemini exited {returncode}",
+                usage=usage,
+                metadata={"retryable": True} if retryable else {},
+            ),
+            prompt,
         )
-    return AgentResult(success=True, output=output or None, usage=usage)
+    return with_prompt(AgentResult(success=True, output=output or None, usage=usage), prompt)
 
 
 def _gemini_stream_event_handler(
@@ -380,6 +379,7 @@ def _gemini_stream_event_handler(
     tracer: Tracer | None,
     model_id: str,
     capture_policy: ContentCapture | None = None,
+    input_prompt: str | None = None,
 ) -> tuple[
     Callable[[StreamSpanAccumulator, dict[str, Any]], None],
     Callable[[], None],
@@ -454,6 +454,12 @@ def _gemini_stream_event_handler(
                     pair.llm.set_attribute("gen_ai.operation.name", "chat")
                     pair.llm.set_attribute("gen_ai.request.model", model_id)
                     pair.llm.set_attribute("gen_ai.response.model", model_id)
+                    if capture_policy is not None and input_prompt:
+                        for attr_key, attr_value in input_messages_attrs(
+                            [{"role": "user", "content": input_prompt}],
+                            policy=capture_policy,
+                        ).items():
+                            pair.llm.set_attribute(attr_key, attr_value)
                 open_pairs["default"] = pair
                 open_pair_bookkeeping["default"] = {"tokens_in": 0, "tokens_out": 0}
             return

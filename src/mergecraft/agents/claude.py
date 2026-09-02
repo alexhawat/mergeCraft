@@ -44,6 +44,7 @@ from mergecraft.tracing._tool_attrs import (
 )
 from mergecraft.tracing.genai import (
     ModelParams,
+    input_messages_attrs,
     output_messages_attrs,
     request_attrs,
     resolve_capture_policy,
@@ -51,7 +52,6 @@ from mergecraft.tracing.genai import (
     thinking_attrs,
 )
 from mergecraft.tracing.redaction import redact_tool_payload
-from mergecraft.tracing.sinks import claim_sink
 from mergecraft.tracing.tracer import (
     ProviderLLMPair,
     _close_provider_llm_pair,
@@ -340,6 +340,7 @@ def _claude_stream_event_handler(
     model_id: str,
     resolved_model: str | None = None,
     capture_policy: ContentCapture | None = None,
+    input_prompt: str | None = None,
 ) -> tuple[Any, Callable[[], None]]:
     """Build a per-event handler that emits ``tool.call`` / ``llm.call`` spans.
 
@@ -432,6 +433,12 @@ def _claude_stream_event_handler(
                     params=ModelParams(reasoning_effort=_CLAUDE_EFFORT),
                 ).items():
                     span.set_attribute(attr_key, attr_value)
+                if capture_policy is not None and input_prompt:
+                    for attr_key, attr_value in input_messages_attrs(
+                        [{"role": "user", "content": input_prompt}],
+                        policy=capture_policy,
+                    ).items():
+                        span.set_attribute(attr_key, attr_value)
                 span.set_attribute(
                     "gen_ai.usage.input_tokens", int(usage_payload.get("input_tokens") or 0)
                 )
@@ -709,41 +716,15 @@ def _run_claude_legacy_blob_parse(
 
 
 def _resolve_active_tracer() -> Tracer | None:
-    """Resolve the tracer that the calling context has prepared for spans.
+    """Resolve the tracer for per-event ``tool.call`` / ``llm.call`` spans.
 
-    The W6 streaming driver emits ``tool.call`` / ``llm.call`` spans during
-    the subprocess read loop. Production callers (Batch B / W4's chain)
-    resolve a tracer via ``get_tracer_from_settings`` ahead of time and
-    store it on the agent context. The W5 RED suite's
-    ``captured_streaming_sink`` fixture pre-resolves a MemorySink-backed
-    tracer via ``sink_factory`` and leaves it on ``_PENDING_SINK``; this
-    helper claims that pending sink if present, falling back to a fresh
-    ``NullTracer`` when tracing is not active (convention 9).
+    Prefer the in-flight run tracer so driver spans parent onto the same
+    Logfire tree. Fall back to ``claim_sink`` for tests that pre-seed a
+    pending MemorySink without opening a parent span.
     """
-    try:
-        from mergecraft.tracing.resolve import resolve_active_tracing
+    from mergecraft.tracing import resolve_driver_tracer
 
-        sink = claim_sink(resolve_active_tracing())
-    except Exception:
-        return None
-
-    if sink is None:
-        return None
-    # The MemorySink fixture's wrapping makes ``sink.inner`` a MultiSink;
-    # when the sink factory built a real sink, ``sink`` is itself a RedactingSink.
-    # Either way, return a Tracer that emits to ``sink``.
-    from mergecraft.tracing.tracer import (
-        Tracer as _Tracer,
-    )
-    from mergecraft.tracing.tracer import (
-        resolve_correlation_from_env,
-        resolve_session_id,
-    )
-
-    correlation = resolve_correlation_from_env()
-    session_id = resolve_session_id()
-    run_id = str(correlation.get("run_id") or session_id)
-    return _Tracer(sink=sink, session_id=session_id, run_id=run_id)
+    return resolve_driver_tracer()
 
 
 def _run_claude_once(
@@ -845,6 +826,7 @@ def _run_claude_once(
         model_id=model or "default",
         resolved_model=ctx.resolved_model,
         capture_policy=capture_policy,
+        input_prompt=user_prompt,
     )
 
     stderr_text = ""
@@ -1031,9 +1013,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         ctx=ctx,
         mcp_config=mcp_config,
     )
+    initial.prompt = ctx.instructions.user
 
     async def resume(prompt: str) -> AgentResult:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             _run_claude_once,
             cli=cli,
             prompt=prompt,
@@ -1041,6 +1024,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             mcp_config=mcp_config,
             continue_session=True,
         )
+        result.prompt = prompt
+        return result
 
     result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
     return await finalize_agent_result(ctx, result)

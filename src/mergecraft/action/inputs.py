@@ -1,10 +1,11 @@
 """Resolve GitHub Action ``INPUT_*`` tracing + setup inputs (W8.5 / W7.7 / S1).
 
-The four new action inputs — ``tracing``, ``tracing-to``, ``logfire-token``,
-``otel-endpoint`` — flow through ``INPUT_TRACING*`` env vars that the Docker
-runtime injects. The contract is that each input maps to a deterministic
-field on :class:`mergecraft.config.settings.TracingSettings` and that the
-existing GitHub auth input (``INPUT_TOKEN``) is never confused with
+The tracing action inputs — ``tracing``, ``tracing-to``, ``logfire-token``,
+``otel-endpoint``, ``tracing-content``, ``tracing-export-untrusted-content``
+— flow through ``INPUT_TRACING*`` env vars that the Docker runtime injects.
+The contract is that each input maps to a deterministic field on
+:class:`mergecraft.config.settings.TracingSettings` and that the existing
+GitHub auth input (``INPUT_TOKEN``) is never confused with
 ``INPUT_LOGFIRE_TOKEN``.
 
 ``GITHUB_WORKSPACE`` is honoured for the local ``jsonl_file`` sink's path so
@@ -125,6 +126,8 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
     tracing_to = _read_input("INPUT_TRACING_TO")
     logfire_token = _read_input("INPUT_LOGFIRE_TOKEN")
     otel_endpoint = _read_input("INPUT_OTEL_ENDPOINT")
+    tracing_content = _read_input("INPUT_TRACING_CONTENT")
+    export_untrusted = _parse_bool(_read_input("INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT"))
 
     enabled = _parse_bool(tracing_input)
     sinks: list[dict[str, Any]] = []
@@ -147,14 +150,22 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
             msg = f"unknown tracing-to value: {tracing_to!r}"
             raise ValueError(msg)
 
-    settings = TracingSettings.model_validate(
-        {"enabled": enabled, "sinks": [TraceSinkEntry.model_validate(item) for item in sinks]}
-    )
+    settings_payload: dict[str, Any] = {
+        "enabled": enabled,
+        "sinks": [TraceSinkEntry.model_validate(item) for item in sinks],
+    }
+    if tracing_content is not None:
+        settings_payload["content"] = tracing_content
+    if export_untrusted is not None:
+        settings_payload["export_untrusted_content"] = export_untrusted
+    settings = TracingSettings.model_validate(settings_payload)
     return {
         "enabled": enabled,
         "sinks": sinks,
         "logfire_token": logfire_token,
         "otel_endpoint": otel_endpoint,
+        "content": tracing_content,
+        "export_untrusted_content": export_untrusted,
         "settings": settings,
     }
 
@@ -168,17 +179,26 @@ def logfire_token_resolvable() -> bool:
 
 
 def export_tracing_env_from_action_inputs() -> None:
-    """Export ``INPUT_LOGFIRE_TOKEN`` to ``MERGECRAFT_LOGFIRE_TOKEN`` (D11).
+    """Export Action tracing inputs into ``MERGECRAFT_*`` env vars (D11).
 
     Invoked unconditionally on the Action path **before** sink initialisation.
     An empty or absent action input does not clobber an already-set
-    ``MERGECRAFT_LOGFIRE_TOKEN``.
+    ``MERGECRAFT_LOGFIRE_TOKEN``. Content-capture inputs overwrite when set
+    so the Action ``with:`` block wins over job env for this run; the capture
+    policy reads those env vars, not the in-memory settings overlay.
     """
     resolved = resolve_tracing_from_action_inputs()
     token = resolved.get("logfire_token")
-    if not isinstance(token, str) or not token.strip():
-        return
-    os.environ["MERGECRAFT_LOGFIRE_TOKEN"] = token.strip()
+    if isinstance(token, str) and token.strip():
+        os.environ["MERGECRAFT_LOGFIRE_TOKEN"] = token.strip()
+    content = resolved.get("content")
+    if isinstance(content, str) and content.strip():
+        os.environ["MERGECRAFT_TRACING_CONTENT"] = content.strip()
+    export_untrusted = resolved.get("export_untrusted_content")
+    if export_untrusted is True:
+        os.environ["MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"] = "true"
+    elif export_untrusted is False:
+        os.environ["MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"] = "false"
 
 
 def _action_logfire_tracing_enabled() -> bool:
@@ -220,7 +240,9 @@ def apply_tracing_overrides(settings: Any) -> Any:
 
     Precedence: action input (``INPUT_TRACING*``) > ``MERGECRAFT_TRACING`` env
     > YAML ``tracing:`` block > default (``enabled=None`` → tracer treats as off).
-    Unset layers do not force ``False``.
+    Unset enablement does not force ``False``. Content-capture inputs overlay
+    even when enablement is unset so ``tracing-content`` / ``tracing-export-
+    untrusted-content`` take effect on an already-enabled YAML block.
     """
     from mergecraft.config.settings import RepoSettings
 
@@ -231,13 +253,22 @@ def apply_tracing_overrides(settings: Any) -> Any:
     enabled: bool | None = resolved["enabled"]
     if enabled is None:
         enabled = _parse_bool(os.environ.get("MERGECRAFT_TRACING"))
-    if enabled is None:
-        return settings
 
-    update: dict[str, Any] = {"enabled": enabled}
+    update: dict[str, Any] = {}
+    if enabled is not None:
+        update["enabled"] = enabled
     action_settings = resolved["settings"]
     if isinstance(action_settings, TracingSettings) and action_settings.sinks:
         update["sinks"] = action_settings.sinks
+    content = resolved.get("content")
+    if isinstance(content, str) and content.strip():
+        update["content"] = content.strip()
+    export_untrusted = resolved.get("export_untrusted_content")
+    if export_untrusted is True or export_untrusted is False:
+        update["export_untrusted_content"] = export_untrusted
+    if not update:
+        return settings
+
     new_tracing = settings.tracing.model_copy(update=update)
     return settings.model_copy(update={"tracing": new_tracing})
 
