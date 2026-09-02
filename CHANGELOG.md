@@ -214,6 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The self-review Action pin on all three review rungs moves to `5d68b56f`,
+  pin 5 — GitHub Action Logfire honors `MERGECRAFT_TRACING_REGION` (#607)
 - Self-review Codex fallback uses `openai/gpt-terra` (GPT 5.6 Terra) instead of
   `openai/gpt-codex`
 - The self-review Action pin on all three review rungs moves to `e5f9ed5f`,

@@ -160,7 +160,7 @@ env:
   # Single Action SHA for all three review rungs (D10 / #532). Bump here only;
   # every `uses: alexhawat/mergeCraft@…` below must match — enforced by
   # `make action-pin-check`.
-  MERGECRAFT_ACTION_SHA: "e5f9ed5f799d8d352fd850724ceaca333dedb1ce"
+  MERGECRAFT_ACTION_SHA: "5d68b56fdc37e6d5981392ee3b6e29b05dd3db4b"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -596,7 +596,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@e5f9ed5f799d8d352fd850724ceaca333dedb1ce # env.MERGECRAFT_ACTION_SHA / lane D promotion / pin 4
+        uses: alexhawat/mergeCraft@5d68b56fdc37e6d5981392ee3b6e29b05dd3db4b # env.MERGECRAFT_ACTION_SHA / Logfire region #607 / pin 5
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -740,7 +740,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@e5f9ed5f799d8d352fd850724ceaca333dedb1ce # env.MERGECRAFT_ACTION_SHA / lane D promotion / pin 4
+        uses: alexhawat/mergeCraft@5d68b56fdc37e6d5981392ee3b6e29b05dd3db4b # env.MERGECRAFT_ACTION_SHA / Logfire region #607 / pin 5
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -845,7 +845,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now 3ed2c798 (#582).
-        uses: alexhawat/mergeCraft@e5f9ed5f799d8d352fd850724ceaca333dedb1ce # env.MERGECRAFT_ACTION_SHA / lane D promotion / pin 4
+        uses: alexhawat/mergeCraft@5d68b56fdc37e6d5981392ee3b6e29b05dd3db4b # env.MERGECRAFT_ACTION_SHA / Logfire region #607 / pin 5
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
