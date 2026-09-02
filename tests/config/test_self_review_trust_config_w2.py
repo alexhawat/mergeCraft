@@ -25,26 +25,38 @@ def _resolve_policy(**kwargs):
     return resolve_trust_policy(**kwargs)
 
 
-def test_committed_config_has_self_review_analyzers_quoted() -> None:
-    """D6 — dogfood config must carry ``trust.selfReview: \"analyzers\"`` (quoted)."""
+def test_committed_config_has_self_review_full_quoted() -> None:
+    """D6 — dogfood config must carry ``trust.selfReview: \"full\"`` (quoted)."""
     text = _COMMITTED_CONFIG.read_text(encoding="utf-8")
     loaded = yaml.safe_load(text)
     assert isinstance(loaded, dict)
     trust = loaded.get("trust")
     assert isinstance(trust, dict), "committed config must define trust.selfReview"
-    assert trust.get("selfReview") == "analyzers"
-    assert 'selfReview: "analyzers"' in text or "selfReview: 'analyzers'" in text
+    assert trust.get("selfReview") == "full"
+    assert 'selfReview: "full"' in text or "selfReview: 'full'" in text
 
 
 def test_committed_config_resolves_execution_trusted_on_same_repo_prt() -> None:
-    """Plan 13 — committed dogfood config must elevate execution on same-repo PRT."""
+    """Plan 13 — committed dogfood config must elevate execution and authority on same-repo PRT."""
     policy = _resolve_policy(
         event=_SAME_REPO_EVENT,
         config_root=REPO_ROOT,
         event_name="pull_request_target",
     )
-    assert policy.level == "analyzers"
+    assert policy.level == "full"
     assert policy.execution_trust == "trusted"
+    assert policy.authority_trust == "trusted"
+
+
+def test_committed_config_fork_pr_stays_untrusted() -> None:
+    """Fork floor — committed ``full`` must not grant trust on a fork head."""
+    policy = _resolve_policy(
+        event=_FORK_EVENT,
+        config_root=REPO_ROOT,
+        event_name="pull_request_target",
+    )
+    assert policy.level == "full"
+    assert policy.execution_trust == "untrusted"
     assert policy.authority_trust == "untrusted"
 
 

@@ -16,5 +16,5 @@ ciEvidence:
     - semgrep-sarif
 
 trust:
-  selfReview: "analyzers"
+  selfReview: "full"
   agentSandbox: "same-repo"
