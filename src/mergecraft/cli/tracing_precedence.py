@@ -10,7 +10,8 @@ Issue #56 specifies the precedence order:
 This module exposes a small helper :func:`resolve_tracing_settings` that the
 CLI commands use to compute the resolved tracing state. ``diff-review``
 flags (``--tracing``, ``--no-tracing``, ``--tracing-to``, ``--trace-dir``,
-``--logfire-token``, ``--otel-endpoint``) take precedence over the
+``--logfire-token``, ``--otel-endpoint``, ``--tracing-content``,
+``--tracing-export-untrusted-content``) take precedence over the
 ``MERGECRAFT_TRACING*`` env vars, which take precedence over the YAML
 ``tracing`` block. The result is a plain dict the CLI can render and tests
 can assert against without booting the full review.
@@ -27,7 +28,15 @@ from mergecraft.config.settings import load_repo_settings
 _TRUE_VALUES = {"true", "1", "yes", "on"}
 _FALSE_VALUES = {"false", "0", "no", "off"}
 
-_TRACING_FLAGS = {"--tracing", "--no-tracing", "--tracing-to", "--trace-dir"}
+_TRACING_FLAGS = {
+    "--tracing",
+    "--no-tracing",
+    "--tracing-to",
+    "--trace-dir",
+    "--tracing-content",
+    "--tracing-export-untrusted-content",
+    "--no-tracing-export-untrusted-content",
+}
 
 
 def _flag_value(args: list[str], flag: str) -> str | None:
@@ -93,6 +102,13 @@ def _resolve_cli_layer(args: list[str]) -> dict[str, Any]:
     region = _flag_value(args, "--region")
     if region is not None:
         out["region"] = region.strip().lower()
+    tracing_content = _flag_value(args, "--tracing-content")
+    if tracing_content is not None:
+        out["content"] = tracing_content
+    if _flag_present(args, "--tracing-export-untrusted-content"):
+        out["export_untrusted_content"] = True
+    if _flag_present(args, "--no-tracing-export-untrusted-content"):
+        out["export_untrusted_content"] = False
     return out
 
 
@@ -136,6 +152,14 @@ def _resolve_env_layer(env: dict[str, str]) -> dict[str, Any]:
         region = env["INPUT_TRACING_REGION"].strip().lower()
         if region in {"us", "eu"}:
             out["region"] = region
+    if "MERGECRAFT_TRACING_CONTENT" in env:
+        content = env["MERGECRAFT_TRACING_CONTENT"].strip()
+        if content:
+            out["content"] = content
+    if "MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT" in env:
+        parsed = _parse_bool(env["MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"])
+        if parsed is not None:
+            out["export_untrusted_content"] = parsed
     return out
 
 
@@ -163,6 +187,11 @@ def _resolve_config_layer(config_path: str | None) -> dict[str, Any]:
             # the project the YAML declared (parity with the env layer).
             if sink_type == "logfire" and first.get("project"):
                 out["tracing_project"] = first["project"]
+    if "content" in block:
+        out["content"] = block["content"]
+    export_untrusted = block.get("exportUntrustedContent", block.get("export_untrusted_content"))
+    if export_untrusted is not None:
+        out["export_untrusted_content"] = bool(export_untrusted)
     return out
 
 

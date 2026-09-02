@@ -9,12 +9,18 @@ default** (D6): four levels — ``off`` / ``metadata`` (counts + hash) /
 only, local debugging) — defaulting to ``redacted``.
 
 D7 is the security assertion: an **untrusted** trust tier is capped at
-``metadata`` and this cannot be configured away — not by YAML, not by
+``metadata`` by default — not by YAML ``content: full`` and not by
 ``MERGECRAFT_TRACING_CONTENT``. The cap applies *after* precedence
 resolution, only ever lowers a level, and never lowers to ``off``. The
 rationale is ``docs/TRACING.md`` D15: remote sinks export reviewed-repo
 content, and shipping a fork PR's prompt bodies to a remote sink is the
 exfiltration path trust tiers exist to close.
+
+Operators who own the sink can lift the cap with an **explicit second
+knob** (``tracing.exportUntrustedContent``, env
+``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT``, CLI
+``--tracing-export-untrusted-content``, or the matching Action input).
+``content: full`` alone still does not ship bodies on an untrusted run.
 
 D8: the ``.sha256`` of the ORIGINAL payload is emitted at every level above
 ``off`` — it detects prompt drift between two runs even when neither
@@ -47,6 +53,9 @@ from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
 
 CONTENT_ENV_VAR: Final[str] = "MERGECRAFT_TRACING_CONTENT"
+EXPORT_UNTRUSTED_ENV_VAR: Final[str] = "MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"
+_TRUE_VALUES: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
+_FALSE_VALUES: Final[frozenset[str]] = frozenset({"0", "false", "no", "off"})
 
 
 class ContentCapture(StrEnum):
@@ -82,7 +91,30 @@ def _parse_level(raw: str | None) -> ContentCapture | None:
         return None
 
 
-def resolve_content_capture(configured: str | None, trust_tier: str) -> ContentCapture:
+def _env_export_untrusted() -> bool | None:
+    """Parse ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`` when set."""
+    raw = os.environ.get(EXPORT_UNTRUSTED_ENV_VAR)
+    if raw is None or not raw.strip():
+        return None
+    lowered = raw.strip().lower()
+    if lowered in _TRUE_VALUES:
+        return True
+    if lowered in _FALSE_VALUES:
+        return False
+    logger.warning(
+        "unknown {} value {!r} — ignoring (untrusted bodies stay capped)",
+        EXPORT_UNTRUSTED_ENV_VAR,
+        raw,
+    )
+    return None
+
+
+def resolve_content_capture(
+    configured: str | None,
+    trust_tier: str,
+    *,
+    export_untrusted: bool | None = None,
+) -> ContentCapture:
     """Resolve the effective capture level: env → configured → default, then D7.
 
     Precedence is ``MERGECRAFT_TRACING_CONTENT`` over the YAML ``content``
@@ -90,12 +122,16 @@ def resolve_content_capture(configured: str | None, trust_tier: str) -> ContentC
     step falls through to the next, ending at the default — fail safe,
     never open. The D7 untrusted cap applies **after** precedence: at any
     tier other than ``trusted`` a body-emitting level is lowered to
-    ``metadata``; ``off`` and ``metadata`` pass through unchanged (the cap
-    lowers, it never raises — and never to ``off``).
+    ``metadata`` unless the operator set the explicit export-untrusted
+    knob (env beats the ``export_untrusted`` argument). ``off`` and
+    ``metadata`` pass through unchanged (the cap lowers, it never raises —
+    and never to ``off``).
 
     Args:
         configured (str | None): The YAML ``tracing.content`` value, if any.
         trust_tier (str): The run's trust tier (``trusted`` / ``untrusted``).
+        export_untrusted (bool | None): YAML / Action ``exportUntrustedContent``
+            when env does not set the flag.
 
     Returns:
         ContentCapture: The effective, cap-applied capture level.
@@ -105,7 +141,9 @@ def resolve_content_capture(configured: str | None, trust_tier: str) -> ContentC
         level = _parse_level(configured)
     if level is None:
         level = _DEFAULT
-    if trust_tier != "trusted" and level.emits_body:
+    env_flag = _env_export_untrusted()
+    allow_untrusted_bodies = env_flag if env_flag is not None else bool(export_untrusted)
+    if trust_tier != "trusted" and level.emits_body and not allow_untrusted_bodies:
         return ContentCapture.METADATA
     return level
 
@@ -178,6 +216,7 @@ def _capture_text(
 
 __all__ = [
     "CONTENT_ENV_VAR",
+    "EXPORT_UNTRUSTED_ENV_VAR",
     "ContentCapture",
     "capture_text",
     "resolve_content_capture",

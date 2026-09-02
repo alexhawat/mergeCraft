@@ -345,7 +345,9 @@ def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
     closed to the capped path. The configured level comes from the repo
     settings' ``tracing.content``; ``MERGECRAFT_TRACING_CONTENT`` still
     overrides it inside :func:`resolve_content_capture` (env → configured →
-    default), and the D7 cap applies last.
+    default). The D7 cap applies last unless
+    ``tracing.exportUntrustedContent`` /
+    ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`` is set.
 
     Args:
         trust_tier (str | None): The run's derived trust tier.
@@ -354,14 +356,17 @@ def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
         ContentCapture: The effective, cap-applied capture level.
     """
     configured: str | None = None
+    export_untrusted: bool | None = None
     try:
         from mergecraft.config import load_repo_settings
 
-        configured = load_repo_settings(load_learnings_files=False).tracing.content
+        tracing = load_repo_settings(load_learnings_files=False).tracing
+        configured = tracing.content
+        export_untrusted = tracing.export_untrusted_content
     except Exception as exc:
         logger.debug("tracing content config load failed (using default): {}", exc)
     tier = trust_tier if trust_tier in ("trusted", "untrusted") else "untrusted"
-    return resolve_content_capture(configured, tier)
+    return resolve_content_capture(configured, tier, export_untrusted=export_untrusted)
 
 
 __all__ = [

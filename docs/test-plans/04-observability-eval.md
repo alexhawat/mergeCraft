@@ -114,9 +114,10 @@ removed and the suite is 13/13 clean real passes, 0 xfail/xpass.
 
 Locked decisions covered: **D6** (four capture levels — `off` / `metadata` /
 `redacted` / `full` — default `redacted`), **D7** (an untrusted trust tier is
-capped at `metadata` and this cannot be configured away — not by YAML config,
-not by env var; the security assertion), **D8** (content hash emitted at every
-level above `off`). Also pins: bodies capped with a `.truncated` marker,
+capped at `metadata` by `content` / `MERGECRAFT_TRACING_CONTENT` alone; lifting
+the cap requires an explicit second knob `exportUntrustedContent` /
+`MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`), **D8** (content hash emitted at
+every level above `off`). Also pins: bodies capped with a `.truncated` marker,
 original size reported before truncation, invalid level falls back to the
 default (fail safe, never open to `full`).
 
@@ -133,7 +134,8 @@ the post-OB2.2 reconciliation, so the suite ends with 13 clean real passes.
 
 | Env var | Meaning |
 | --- | --- |
-| `MERGECRAFT_TRACING_CONTENT` | Capture-level override; beats YAML `tracing.content` (normal precedence) but never beats the D7 untrusted cap. Follows the existing `MERGECRAFT_TRACING*` family in `src/mergecraft/cli/tracing_precedence.py`. |
+| `MERGECRAFT_TRACING_CONTENT` | Capture-level override; beats YAML `tracing.content` (normal precedence) but never beats the D7 untrusted cap by itself. Follows the existing `MERGECRAFT_TRACING*` family in `src/mergecraft/cli/tracing_precedence.py`. |
+| `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT` | Explicit second knob; when true, a body-emitting capture level is allowed on untrusted runs. |
 
 ### Span-attribute contract pinned by these tests
 

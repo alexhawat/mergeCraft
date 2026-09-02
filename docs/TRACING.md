@@ -271,13 +271,31 @@ byte-capped at the shared `TRACE_ATTRS_JSON_MAX_BYTES` budget and flagged
 **original** payload (D8), so the hash detects prompt drift between two
 runs even when neither shipped a body.
 
-**D7 — the untrusted cap cannot be configured away.** At any trust tier
-other than `trusted`, a body-emitting level is lowered to `metadata`
-**after** precedence resolution: `content: full` in YAML and
+**D7 — untrusted runs cap at `metadata` unless you opt in twice.** At any
+trust tier other than `trusted`, a body-emitting level is lowered to
+`metadata` **after** precedence resolution. `content: full` in YAML and
 `MERGECRAFT_TRACING_CONTENT=full` both yield `metadata` on a fork-PR-shaped
 run. The cap only ever lowers a level — `off` stays `off`, and nothing is
-ever raised. Shipping a fork PR's prompt bodies to a remote sink is
-exactly the exfiltration path trust tiers exist to close.
+ever raised.
+
+To ship prompt/completion bodies from an untrusted run to a sink **you
+own**, set a second explicit knob as well as a body-emitting level:
+
+```yaml
+tracing:
+  enabled: true
+  to: logfire
+  content: full
+  exportUntrustedContent: true
+```
+
+Same effect from `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT=true`,
+`--tracing-export-untrusted-content`, or the Action input
+`tracing-export-untrusted-content: "true"`. `content: full` alone still
+does not lift the cap — shipping a fork PR's prompt text to a remote sink
+is the exfiltration path trust tiers exist to close. Codex/Claude/Gemini
+CLI traces stamp the prompt mergeCraft already built (the wire request is
+not visible to those harnesses); OpenCode HTTP still sees the live request.
 
 ## Span tree (W4 — Batch B)
 
@@ -302,10 +320,11 @@ mergecraft.run                       (root; run_id, repo, pr_number,
 │    │                                  agent.cli_argv — redacted,
 │    │                                  model.fallback_index, status,
 │    │                                  error)
-│    └── llm.call                    (cost.tokens_in, cost.tokens_out,
-│                                       cost.cache_read, cost.cache_write,
-│                                       cost.usd)
-├── tool.call  ×N                    (tool.name, tool.server)
+│    └── llm.call                    (wraps the agent attempt: duration,
+│         │                            gen_ai.input.messages /
+│         │                            gen_ai.output.messages when capture
+│         │                            policy allows, plus token usage)
+│         └── tool.call  ×N          (tool.name, tool.server — same trace)
 └── mergecraft.publish               (finalisation: persist learnings,
                                         report status checks, emit packet)
 ```
@@ -653,15 +672,17 @@ Logfire sink is no longer silent. The warning names `logfire-token`,
 
 ## Action inputs (W8.5 / W7.7)
 
-`action.yml` exposes four inputs so a consuming repo can wire tracing
+`action.yml` exposes tracing inputs so a consuming repo can wire tracing
 without touching `.mergecraft/config.yaml`:
 
-| Input            | Maps to                                              |
-| ---------------- | ---------------------------------------------------- |
-| `tracing`        | `tracing.enabled` (overrides config)                 |
-| `tracing-to`     | `tracing.to` shorthand (overrides config)            |
-| `logfire-token`  | resolved logfire token (D5 — held at runtime only)   |
-| `otel-endpoint`  | `tracing.sinks[].endpoint` for the `otel` sink type  |
+| Input                                | Maps to                                              |
+| ------------------------------------ | ---------------------------------------------------- |
+| `tracing`                            | `tracing.enabled` (overrides config)                 |
+| `tracing-to`                         | `tracing.to` shorthand (overrides config)            |
+| `logfire-token`                      | resolved logfire token (D5 — held at runtime only)   |
+| `otel-endpoint`                      | `tracing.sinks[].endpoint` for the `otel` sink type  |
+| `tracing-content`                    | `tracing.content` (`off` / `metadata` / `redacted` / `full`) |
+| `tracing-export-untrusted-content`   | `tracing.exportUntrustedContent` (lifts D7 on untrusted runs) |
 
 The Action wraps `${{ secrets.LOGFIRE_TOKEN }}` into `logfire-token`
 so the secret never appears in the workflow file.
@@ -671,7 +692,9 @@ so the secret never appears in the workflow file.
 ```text
 mergecraft review --tracing|--no-tracing [--tracing-to <shorthand>] \
                        [--trace-dir <path>] [--logfire-token <token>] \
-                       [--otel-endpoint <url>]
+                       [--otel-endpoint <url>] \
+                       [--tracing-content off|metadata|redacted|full] \
+                       [--tracing-export-untrusted-content]
 mergecraft config tracing     # render resolved state with token redacted
 mergecraft traces <run-id>    # read back local JSONL spans for a run id
 ```

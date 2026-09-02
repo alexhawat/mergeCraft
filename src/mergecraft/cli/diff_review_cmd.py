@@ -443,6 +443,28 @@ def run(
         ),
         rich_help_panel=_PANEL_TRACING,
     ),
+    tracing_content: str | None = typer.Option(
+        None,
+        "--tracing-content",
+        help=(
+            "Model-payload capture level: off, metadata, redacted, or full. "
+            "Wins over MERGECRAFT_TRACING_CONTENT and tracing.content. "
+            "Untrusted runs still cap at metadata unless "
+            "--tracing-export-untrusted-content is also set."
+        ),
+        rich_help_panel=_PANEL_TRACING,
+    ),
+    tracing_export_untrusted_content: bool | None = typer.Option(
+        None,
+        "--tracing-export-untrusted-content/--no-tracing-export-untrusted-content",
+        help=(
+            "Allow prompt/completion bodies on untrusted runs when the capture "
+            "level emits bodies. Required to ship fork-PR content to Logfire. "
+            "Wins over MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT and "
+            "tracing.exportUntrustedContent."
+        ),
+        rich_help_panel=_PANEL_TRACING,
+    ),
     shell: ShellPermission = typer.Option(
         "disabled",
         "--shell",
@@ -545,6 +567,12 @@ def run(
         tracing_cli.extend(["--logfire-token", logfire_token])
     if otel_endpoint is not None:
         tracing_cli.extend(["--otel-endpoint", otel_endpoint])
+    if tracing_content is not None:
+        tracing_cli.extend(["--tracing-content", tracing_content])
+    if tracing_export_untrusted_content is True:
+        tracing_cli.append("--tracing-export-untrusted-content")
+    elif tracing_export_untrusted_content is False:
+        tracing_cli.append("--no-tracing-export-untrusted-content")
 
     # The CLI always asks the agent for structured findings. Precedence of the
     # structured sink path:

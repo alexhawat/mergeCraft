@@ -392,7 +392,9 @@ class TracingSettings(BaseModel):
     ``tracing.content.resolve_content_capture`` so an invalid value fails
     safe to the default at resolution time rather than rejecting the whole
     config block, and ``MERGECRAFT_TRACING_CONTENT`` overrides it (env →
-    configured → default), never overriding the untrusted cap.
+    configured → default). The D7 untrusted cap still applies unless
+    ``exportUntrustedContent`` (env
+    ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT``) is explicitly true.
     ``exclude_if`` keeps the W1.1 round-trip contract (cf.
     ``TraceSinkEntry._drop_unset``): a config that never mentions
     ``content`` dumps exactly as before — the field only serializes when it
@@ -406,6 +408,11 @@ class TracingSettings(BaseModel):
     sinks: list[TraceSinkEntry] = Field(default_factory=list)
     redaction: bool = True
     content: str = Field(default="redacted", exclude_if=lambda value: value == "redacted")
+    export_untrusted_content: bool = Field(
+        default=False,
+        alias="exportUntrustedContent",
+        exclude_if=lambda value: value is False,
+    )
 
     @model_validator(mode="before")
     @classmethod

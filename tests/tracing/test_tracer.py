@@ -238,10 +238,29 @@ def test_span_cap_logs_once_and_does_not_raise() -> None:
     assert len(captured) == 1, f"expected exactly one cap warning, got {captured!r}"
 
 
+def test_resolve_driver_tracer_prefers_live_tracer() -> None:
+    """An in-flight span's tracer wins over ``claim_sink`` so ``tool.call`` stays on the run tree."""
+    from mergecraft.tracing import MemorySink, Tracer, resolve_driver_tracer
+    from mergecraft.tracing.sinks import _PENDING_SINK
+
+    live_sink = MemorySink()
+    pending_sink = MemorySink()
+    tracer = Tracer(sink=live_sink, session_id="live", run_id="live-run")
+    token = _PENDING_SINK.set(pending_sink)
+    try:
+        with tracer.start_span("agent.attempt"):
+            resolved = resolve_driver_tracer()
+            assert resolved is tracer
+        assert _PENDING_SINK.get() is pending_sink
+    finally:
+        _PENDING_SINK.reset(token)
+
+
 __all__ = [
     "test_active_span_contextvar_restores_on_exception",
     "test_nested_spans_form_a_parent_chain",
     "test_null_tracer_is_a_true_noop",
+    "test_resolve_driver_tracer_prefers_live_tracer",
     "test_span_cap_logs_once_and_does_not_raise",
     "test_span_close_is_idempotent",
     "test_span_count_cap_stops_emission_at_limit",

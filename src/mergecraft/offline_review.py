@@ -328,6 +328,12 @@ def _apply_tracing_cli_overrides(
             overrides["MERGECRAFT_LOGFIRE_TOKEN"] = next(iterator, "")
         elif token == "--otel-endpoint":
             overrides["MERGECRAFT_OTEL_ENDPOINT"] = next(iterator, "")
+        elif token == "--tracing-content":
+            overrides["MERGECRAFT_TRACING_CONTENT"] = next(iterator, "")
+        elif token == "--tracing-export-untrusted-content":
+            overrides["MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"] = "true"
+        elif token == "--no-tracing-export-untrusted-content":
+            overrides["MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"] = "false"
         elif token.startswith("--tracing-to="):
             overrides["MERGECRAFT_TRACING_TO"] = token.split("=", 1)[1]
         elif token.startswith("--trace-dir="):
@@ -336,6 +342,8 @@ def _apply_tracing_cli_overrides(
             overrides["MERGECRAFT_LOGFIRE_TOKEN"] = token.split("=", 1)[1]
         elif token.startswith("--otel-endpoint="):
             overrides["MERGECRAFT_OTEL_ENDPOINT"] = token.split("=", 1)[1]
+        elif token.startswith("--tracing-content="):
+            overrides["MERGECRAFT_TRACING_CONTENT"] = token.split("=", 1)[1]
 
     previous: dict[str, str | None] = {}
     for key, value in overrides.items():
