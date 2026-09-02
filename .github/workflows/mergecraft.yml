@@ -748,7 +748,7 @@ jobs:
           # only diagnostic is lost. Job timeout-minutes is composed from the same
           # per-attempt budget (D8) so both attempts can finish before the ceiling.
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
-          model: openai/gpt-codex
+          model: openai/gpt-terra
           push: disabled
           shell: disabled
           status_checks: enabled
