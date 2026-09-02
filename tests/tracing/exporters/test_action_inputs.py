@@ -192,3 +192,64 @@ def test_action_inputs_are_dropped_into_github_workspace(
         settings["sinks"][0]["path"].endswith("traces")
         or ".mergecraft" in settings["sinks"][0]["path"]
     )
+
+
+def _clear_action_tracing_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in (
+        "INPUT_TRACING",
+        "INPUT_TRACING_TO",
+        "INPUT_TRACING_REGION",
+        "INPUT_LOGFIRE_TOKEN",
+        "INPUT_OTEL_ENDPOINT",
+        "MERGECRAFT_TRACING",
+        "MERGECRAFT_TRACING_REGION",
+        "GITHUB_WORKSPACE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_action_logfire_shorthand_honors_tracing_region_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``MERGECRAFT_TRACING_REGION=eu`` lands on the Action logfire sink."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+    monkeypatch.setenv("MERGECRAFT_TRACING_REGION", "eu")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["sinks"][0]["type"] == "logfire"
+    assert resolved["sinks"][0]["region"] == "eu"
+    assert resolved["settings"].sinks[0].region == "eu"
+
+
+def test_action_logfire_shorthand_honors_tracing_region_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``INPUT_TRACING_REGION`` wins over ``MERGECRAFT_TRACING_REGION``."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+    monkeypatch.setenv("INPUT_TRACING_REGION", "eu")
+    monkeypatch.setenv("MERGECRAFT_TRACING_REGION", "us")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["settings"].sinks[0].region == "eu"
+
+
+def test_action_logfire_region_defaults_us_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset region env keeps the US OTLP host default for other consumers."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["settings"].sinks[0].region == "us"

@@ -33,7 +33,7 @@ if [[ ! -x "${ACTIONLINT_BIN}" ]]; then
   fi
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' EXIT
-  curl -fsSL -o "${tmp}/actionlint.tar.gz" \
+  curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o "${tmp}/actionlint.tar.gz" \
     "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${arch_norm}.tar.gz"
   echo "${ACTIONLINT_SHA256}  ${tmp}/actionlint.tar.gz" | sha256sum -c -
   tar -xzf "${tmp}/actionlint.tar.gz" -C "${tmp}" actionlint
@@ -45,7 +45,7 @@ if [[ ! -x "${ZIZMOR_BIN}" ]]; then
     exit 0
   fi
   tmp="${tmp:-$(mktemp -d)}"
-  curl -fsSL -o "${tmp}/zizmor.tar.gz" \
+  curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o "${tmp}/zizmor.tar.gz" \
     "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${zizmor_arch}-unknown-linux-gnu.tar.gz"
   # ARM64 digest differs from the amd64 pin in Dockerfile.analyzers — SARIF emit
   # runs on ubuntu-latest amd64 only; arm64 installs trust the release HTTPS path.
