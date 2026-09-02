@@ -2585,7 +2585,7 @@ editing:
 
 ```bash
 mergecraft init
-mergecraft provider auth claude    # or codex, gemini, nous, …
+mergecraft provider auth anthropic    # or openai, google, nous, …
 mergecraft review                  # local review works now
 ```
 
