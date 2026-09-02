@@ -23,6 +23,9 @@ Commit `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml` after
 auth. Run `mergecraft workflow sync --check` before pushing if you assign roster
 models whose providers are not yet wired in the workflow.
 
+This repository's workflow does not listen for `@mergecraft review` — reviews
+run on `pull_request_target` (opened / synchronize).
+
 ## Provider reference
 
 | Provider | Subscription (recommended) | API key | Recommended model | Inferred harness |
