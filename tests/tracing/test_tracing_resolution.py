@@ -254,3 +254,31 @@ def test_action_input_region_wins_over_conflicting_env_region(
     assert active.enabled is True
     assert active.sinks[0].type == "logfire"
     assert active.sinks[0].region == "eu"
+
+
+def test_cli_region_wins_over_action_input_on_adopt_config_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI ``--region`` beats ``INPUT_TRACING_REGION`` when overlaying config sinks.
+
+    The adopt-config path used to re-read the Action input from the env dict
+    and invert the documented CLI > env stack. Overlay must use the already
+    merged region so ``--region`` still wins.
+    """
+    _clear_tracing_env(monkeypatch)
+
+    from mergecraft.config.settings import TraceSinkEntry, TracingSettings
+    from mergecraft.tracing.resolve import resolve_active_tracing
+
+    config = TracingSettings(
+        enabled=True,
+        sinks=[TraceSinkEntry(type="logfire", region="us")],
+    )
+    active = resolve_active_tracing(
+        cli_args=["--region", "eu"],
+        env={"INPUT_TRACING_REGION": "us"},
+        config=config,
+    )
+    assert active.enabled is True
+    assert active.sinks[0].type == "logfire"
+    assert active.sinks[0].region == "eu"
