@@ -91,6 +91,17 @@ def _snapshot_request_headers(handler: BaseHTTPRequestHandler) -> dict[str, str]
     return {name: value for name, value in handler.headers.items()}
 
 
+def _consume_request_body(handler: BaseHTTPRequestHandler) -> None:
+    """Drain the request body so HTTP/1.1 keep-alive reuse is not poisoned."""
+    raw_length = handler.headers.get("Content-Length", "0") or "0"
+    try:
+        length = int(raw_length)
+    except ValueError:
+        return
+    if length > 0:
+        handler.rfile.read(length)
+
+
 class MockModelUpstream:
     """Loopback OpenAI-shaped upstream that records Authorization headers."""
 
@@ -141,6 +152,7 @@ class MockModelUpstream:
 
             def do_POST(self) -> None:
                 self._record_request()
+                _consume_request_body(self)
                 if redirect_to is not None:
                     self.send_response(HTTPStatus.FOUND)
                     self.send_header("Location", redirect_to)
@@ -170,6 +182,7 @@ class MockModelUpstream:
 
             def do_GET(self) -> None:
                 self._record_request()
+                _consume_request_body(self)
                 if redirect_to is not None:
                     self.send_response(HTTPStatus.FOUND)
                     self.send_header("Location", redirect_to)
@@ -248,6 +261,7 @@ class SlowModelUpstream:
                 with upstream._lock:
                     upstream.authorization_headers.append(self.headers.get("Authorization", ""))
                     upstream.request_header_maps.append(headers)
+                _consume_request_body(self)
                 time.sleep(delay_seconds)
                 body = json.dumps(
                     {
@@ -338,6 +352,7 @@ class StreamingSSEUpstream:
                 with upstream._lock:
                     upstream.authorization_headers.append(self.headers.get("Authorization", ""))
                     upstream.request_header_maps.append(headers)
+                _consume_request_body(self)
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
