@@ -212,6 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Self-review Codex fallback uses `openai/gpt-terra` (GPT 5.6 Terra) instead of
+  `openai/gpt-codex`
 - The self-review Action pin on all three review rungs moves to `e5f9ed5f`,
   the lane D sync on `pre-0.0.1` (#601). Reviews run the selfReview catalog,
   Claude backstop, green-CI SARIF ingest, and `agentSandbox: same-repo`
