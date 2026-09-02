@@ -74,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Authentication quick start uses registry labels (`anthropic`, `openai`,
+  `google`) instead of harness names that `provider auth` rejects (#590)
 - GitHub Action Logfire tracing honors `MERGECRAFT_TRACING_REGION`, so an EU
   write token is no longer posted to the US ingest host (#607)
 - Anchor-422 recovery no longer spins on an out-of-range comment index — it
