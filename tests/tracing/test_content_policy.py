@@ -327,3 +327,123 @@ def test_yaml_export_untrusted_content_field() -> None:
     defaulted = TracingSettings()
     assert defaulted.export_untrusted_content is False
     assert "exportUntrustedContent" not in defaulted.model_dump(by_alias=True)
+
+
+class _ForkHeadSettings:
+    """Stand-in for `.mergecraft/config.yaml` on a fork PR head."""
+
+    def __init__(self) -> None:
+        from mergecraft.config.settings import TracingSettings
+
+        self.tracing = TracingSettings.model_validate(
+            {"content": "full", "exportUntrustedContent": True}
+        )
+
+
+def test_fork_head_yaml_cannot_lift_untrusted_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """D7 — fork HEAD ``exportUntrustedContent: true`` does not lift the cap.
+
+    ``resolve_capture_policy`` loads live repo settings from the checked-out
+    tree. On a fork PR that tree is attacker-controlled, so YAML must not
+    be treated as the operator knob.
+    """
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.METADATA
+
+
+def test_fork_head_yaml_env_export_still_lifts_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Operator env still lifts D7 even when fork YAML also sets the flag."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.setenv(_EXPORT_ENV_VAR, "true")
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.FULL
+
+
+def test_trusted_yaml_export_still_lifts_cap(monkeypatch: MonkeyPatch) -> None:
+    """Same-repo trusted runs still honor YAML ``exportUntrustedContent``."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("trusted") == ContentCapture.FULL
+
+
+def test_prt_base_snapshot_yaml_lifts_untrusted_cap(monkeypatch: MonkeyPatch) -> None:
+    """``pull_request_target`` honors ``exportUntrustedContent`` from the base snapshot."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
+        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings()})(),
+    )
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.FULL
+
+
+def test_fork_pull_request_snapshot_yaml_cannot_lift_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A ``pull_request`` snapshot is the fork HEAD — YAML still cannot lift D7."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
+        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings()})(),
+    )
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.METADATA

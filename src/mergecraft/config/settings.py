@@ -392,9 +392,10 @@ class TracingSettings(BaseModel):
     ``tracing.content.resolve_content_capture`` so an invalid value fails
     safe to the default at resolution time rather than rejecting the whole
     config block, and ``MERGECRAFT_TRACING_CONTENT`` overrides it (env →
-    configured → default). The D7 untrusted cap still applies unless
-    ``exportUntrustedContent`` (env
-    ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT``) is explicitly true.
+    configured → default). The D7 untrusted cap still applies unless an
+    operator-owned ``exportUntrustedContent`` source is explicitly true
+    (env ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT``, Action input, or
+    trusted / base YAML — not fork HEAD YAML).
     ``exclude_if`` keeps the W1.1 round-trip contract (cf.
     ``TraceSinkEntry._drop_unset``): a config that never mentions
     ``content`` dumps exactly as before — the field only serializes when it

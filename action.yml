@@ -169,9 +169,9 @@ inputs:
     description: |
       Allow prompt and completion bodies on untrusted (fork-PR) runs when
       the capture level emits bodies. Required to ship fork-PR content to
-      Logfire. Wins over MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT and
-      tracing.exportUntrustedContent. Default false; content full alone
-      does not lift the cap.
+      Logfire. Fork-controlled repository config cannot lift this cap.
+      Wins over MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT. Default
+      false; content full alone does not lift the cap.
     required: false
     default: ""
   setup_failure_policy:

@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -333,6 +334,26 @@ def thinking_attrs(
     return attrs
 
 
+def _yaml_export_untrusted_for_capture(trust_tier: str, live_yaml: bool) -> bool | None:
+    """Return YAML ``exportUntrustedContent`` only from operator-owned sources.
+
+    Fork HEAD ``.mergecraft/config.yaml`` cannot lift D7. Trusted runs honor
+    live YAML. Untrusted ``pull_request_target`` honors the run-start
+    snapshot (the base checkout). Other untrusted events return ``None`` so
+    only env / Action can lift.
+    """
+    if trust_tier == "trusted":
+        return live_yaml
+    if os.environ.get("GITHUB_EVENT_NAME", "") != "pull_request_target":
+        return None
+    from mergecraft.config.settings_snapshot import run_scope_settings_snapshot
+
+    snapshot = run_scope_settings_snapshot()
+    if snapshot is None:
+        return None
+    return snapshot.settings.tracing.export_untrusted_content
+
+
 def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
     """Resolve the content-capture policy for a driver wiring site.
 
@@ -345,9 +366,10 @@ def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
     closed to the capped path. The configured level comes from the repo
     settings' ``tracing.content``; ``MERGECRAFT_TRACING_CONTENT`` still
     overrides it inside :func:`resolve_content_capture` (env → configured →
-    default). The D7 cap applies last unless
-    ``tracing.exportUntrustedContent`` /
-    ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`` is set.
+    default). The D7 cap applies last unless an **operator-owned**
+    ``exportUntrustedContent`` source is set (env / Action, trusted YAML,
+    or the ``pull_request_target`` base snapshot). Live fork HEAD YAML
+    cannot lift the cap.
 
     Args:
         trust_tier (str | None): The run's derived trust tier.
@@ -356,16 +378,17 @@ def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
         ContentCapture: The effective, cap-applied capture level.
     """
     configured: str | None = None
-    export_untrusted: bool | None = None
+    live_yaml_export: bool = False
     try:
         from mergecraft.config import load_repo_settings
 
         tracing = load_repo_settings(load_learnings_files=False).tracing
         configured = tracing.content
-        export_untrusted = tracing.export_untrusted_content
+        live_yaml_export = tracing.export_untrusted_content
     except Exception as exc:
         logger.debug("tracing content config load failed (using default): {}", exc)
     tier = trust_tier if trust_tier in ("trusted", "untrusted") else "untrusted"
+    export_untrusted = _yaml_export_untrusted_for_capture(tier, live_yaml_export)
     return resolve_content_capture(configured, tier, export_untrusted=export_untrusted)
 
 

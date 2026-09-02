@@ -69,6 +69,11 @@ def reset_gateway_settings_cache() -> None:
     _RUN_SCOPE_SNAPSHOT.set(None)
 
 
+def run_scope_settings_snapshot() -> RepoSettingsSnapshot | None:
+    """Return the run-scope settings snapshot when one is installed."""
+    return _RUN_SCOPE_SNAPSHOT.get()
+
+
 def capture_repo_settings_snapshot(
     *,
     root: Path,
@@ -240,4 +245,5 @@ __all__ = [
     "repo_settings_for_gateway_resolvers",
     "repo_settings_from_context",
     "reset_gateway_settings_cache",
+    "run_scope_settings_snapshot",
 ]

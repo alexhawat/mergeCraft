@@ -10,10 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Untrusted reviews can export prompt bodies to Logfire when `tracing.content`
-  is `full` **and** `exportUntrustedContent` is true (YAML,
-  `--tracing-export-untrusted-content`, `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`,
-  or Action `tracing-export-untrusted-content`); `content: full` alone still
-  caps fork-PR bodies at metadata
+  is `full` **and** an operator-owned export flag is true (Action
+  `tracing-export-untrusted-content`, `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`,
+  `--tracing-export-untrusted-content`, trusted YAML, or the
+  `pull_request_target` base snapshot); fork HEAD YAML cannot lift the cap;
+  `content: full` alone still caps fork-PR bodies at metadata
 - `mergecraft review --tracing-content` and Action `tracing-content` set the
   capture level without editing YAML
 - `mergecraft provider status` shows what CI will run — each reviewer agent's
@@ -73,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
+  tracing-content cap; export of prompt bodies on fork PRs requires the Action
+  input, env, or trusted base settings
 - Codex API-key runs proxy model calls through a loopback credential broker — a
   stolen per-run bearer is worthless outside the container and after the run, but
   outbound egress stays open and ChatGPT subscription auth (`CODEX_AUTH_JSON`) is

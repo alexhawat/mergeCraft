@@ -2047,7 +2047,19 @@ run. The cap only ever lowers a level — `off` stays `off`, and nothing is
 ever raised.
 
 To ship prompt/completion bodies from an untrusted run to a sink **you
-own**, set a second explicit knob as well as a body-emitting level:
+own**, set a second explicit **operator-owned** knob as well as a
+body-emitting level. Fork-controlled `.mergecraft/config.yaml` on the PR
+head cannot lift the cap — that file is attacker-controlled on a fork PR.
+
+Operator-owned sources, in order:
+
+1. Action input `tracing-export-untrusted-content: "true"` (workflow from
+   the base on `pull_request_target`)
+2. Env `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT=true` / CLI
+   `--tracing-export-untrusted-content`
+3. YAML `tracing.exportUntrustedContent: true` on a **trusted** run, or
+   on the run-start snapshot of a `pull_request_target` job (the base
+   checkout — not the fork HEAD after `checkout_pr`)
 
 ```yaml
 tracing:
@@ -2057,13 +2069,11 @@ tracing:
   exportUntrustedContent: true
 ```
 
-Same effect from `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT=true`,
-`--tracing-export-untrusted-content`, or the Action input
-`tracing-export-untrusted-content: "true"`. `content: full` alone still
-does not lift the cap — shipping a fork PR's prompt text to a remote sink
-is the exfiltration path trust tiers exist to close. Codex/Claude/Gemini
-CLI traces stamp the prompt mergeCraft already built (the wire request is
-not visible to those harnesses); OpenCode HTTP still sees the live request.
+`content: full` alone still does not lift the cap — shipping a fork PR's
+prompt text to a remote sink is the exfiltration path trust tiers exist
+to close. Codex/Claude/Gemini CLI traces stamp the prompt mergeCraft
+already built (the wire request is not visible to those harnesses);
+OpenCode HTTP still sees the live request.
 
 ## Span tree (W4 — Batch B)
 
@@ -2450,7 +2460,7 @@ without touching `.mergecraft/config.yaml`:
 | `logfire-token`                      | resolved logfire token (D5 — held at runtime only)   |
 | `otel-endpoint`                      | `tracing.sinks[].endpoint` for the `otel` sink type  |
 | `tracing-content`                    | `tracing.content` (`off` / `metadata` / `redacted` / `full`) |
-| `tracing-export-untrusted-content`   | `tracing.exportUntrustedContent` (lifts D7 on untrusted runs) |
+| `tracing-export-untrusted-content`   | operator D7 lift (env / Action; fork HEAD YAML cannot) |
 
 The Action wraps `${{ secrets.LOGFIRE_TOKEN }}` into `logfire-token`
 so the secret never appears in the workflow file.
