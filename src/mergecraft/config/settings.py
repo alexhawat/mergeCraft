@@ -392,7 +392,9 @@ class TracingSettings(BaseModel):
     ``tracing.content.resolve_content_capture`` so an invalid value fails
     safe to the default at resolution time rather than rejecting the whole
     config block, and ``MERGECRAFT_TRACING_CONTENT`` overrides it (env →
-    configured → default), never overriding the untrusted cap.
+    configured → default). The D7 untrusted cap still applies unless
+    ``exportUntrustedContent`` (env
+    ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT``) is explicitly true.
     ``exclude_if`` keeps the W1.1 round-trip contract (cf.
     ``TraceSinkEntry._drop_unset``): a config that never mentions
     ``content`` dumps exactly as before — the field only serializes when it
@@ -406,6 +408,11 @@ class TracingSettings(BaseModel):
     sinks: list[TraceSinkEntry] = Field(default_factory=list)
     redaction: bool = True
     content: str = Field(default="redacted", exclude_if=lambda value: value == "redacted")
+    export_untrusted_content: bool = Field(
+        default=False,
+        alias="exportUntrustedContent",
+        exclude_if=lambda value: value is False,
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -456,6 +463,17 @@ class TrustSettings(BaseModel):
             "same-repo — any non-fork head (fork heads always refuse)"
         ),
     )
+    sandbox_trusted_authors: list[str] = Field(
+        default_factory=list,
+        alias="sandboxTrustedAuthors",
+        description=(
+            "Empty (default) — no additional author gate; agentSandbox tier alone decides "
+            "whether the sandbox override is honoured. Non-empty — every commit in the PR "
+            "head range must have both its author and committer email in this list "
+            "(case-insensitive) or the override is refused, even on a tier that would "
+            "otherwise grant it. Additive only — never widens what a tier grants."
+        ),
+    )
 
     @field_validator("agent_sandbox", mode="before")
     @classmethod
@@ -465,6 +483,24 @@ class TrustSettings(BaseModel):
             if normalized in {"never", "merged-only", "dispatch", "same-repo"}:
                 return normalized
         return "dispatch"
+
+    @field_validator("sandbox_trusted_authors", mode="before")
+    @classmethod
+    def _normalize_sandbox_trusted_authors(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            msg = "trust.sandboxTrustedAuthors must be a list of email strings"
+            raise ValueError(msg)
+        normalized: list[str] = []
+        for entry in value:
+            if not isinstance(entry, str):
+                msg = f"trust.sandboxTrustedAuthors entries must be strings, got {entry!r}"
+                raise ValueError(msg)
+            stripped = entry.strip().lower()
+            if stripped:
+                normalized.append(stripped)
+        return normalized
 
 
 class RunBoundsSettings(BaseModel):

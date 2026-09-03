@@ -15,6 +15,7 @@ from mergecraft.tracing._tool_attrs import (
 )
 from mergecraft.tracing.genai import (
     ModelParams,
+    input_messages_attrs,
     output_messages_attrs,
     request_attrs,
     thinking_attrs,
@@ -89,6 +90,7 @@ def codex_stream_event_handler(
     tracer: Tracer | None,
     model_id: str,
     capture_policy: ContentCapture | None = None,
+    input_prompt: str | None = None,
 ) -> tuple[
     Callable[[StreamSpanAccumulator, dict[str, Any]], None],
     Callable[[], None],
@@ -181,6 +183,12 @@ def codex_stream_event_handler(
                         params=ModelParams(reasoning_effort=CODEX_MODEL_REASONING_EFFORT),
                     ).items():
                         pair.llm.set_attribute(attr_key, attr_value)
+                    if capture_policy is not None and input_prompt:
+                        for attr_key, attr_value in input_messages_attrs(
+                            [{"role": "user", "content": input_prompt}],
+                            policy=capture_policy,
+                        ).items():
+                            pair.llm.set_attribute(attr_key, attr_value)
                 open_pairs[thread_id] = pair
                 open_pair_bookkeeping[thread_id] = {"tokens_in": 0, "tokens_out": 0}
             return

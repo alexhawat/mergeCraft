@@ -37,3 +37,10 @@ repos:
         language: system
         stages: [commit-msg]
         pass_filenames: true
+
+      - id: mergecraft-push-authors
+        name: push authors (block foreign-authored commits on push)
+        entry: uv run python scripts/check_push_authors.py
+        language: system
+        stages: [pre-push]
+        pass_filenames: false

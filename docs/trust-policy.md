@@ -76,7 +76,8 @@ your merge policy.
 
 **Residual risks** (documented in the scaffolded config comment):
 
-- A fork PR checked out onto a local branch looks like a same-repo head.
+- A fork PR checked out onto a local branch looks like a same-repo head. —
+  mitigated by `trust.sandboxTrustedAuthors` below.
 - Adding a collaborator widens `same-repo` to anyone with write access.
 
 Inspect and configure:
@@ -89,10 +90,56 @@ mergecraft trust set-agent-sandbox same-repo --i-understand-same-repo-sandbox
 
 Upgrade the pinned Action image **before** writing `agentSandbox` in config —
 `TrustSettings` is `extra="forbid"`, so an unknown key against an older pin
-fails the whole config load (D1f).
+fails the whole config load (D1f). The same ordering applies to
+`sandboxTrustedAuthors` below — see its own D1f note.
 
 Run manifest fields (`agent_sandbox_tier`, `agent_sandbox_honoured`, …) land in
 the evidence packet alongside the `trust_*` keys.
+
+### `trust.sandboxTrustedAuthors` — author gate on the override (additive-only)
+
+`same-repo` (and, more narrowly, `merged-only` and `dispatch`) rest on "a branch
+in this repository was written by someone I trust." They cannot tell that from
+"a branch in this repository exists" — a fork PR checked out with `gh pr
+checkout` and pushed to `origin` on a local branch looks identical to a
+same-repo head, and the override is then granted over content the operator did
+not write. `trust.sandboxTrustedAuthors` closes that gap: it lets "same-repo"
+mean "same-repo **and** authored by someone I named."
+
+```yaml
+trust:
+  agentSandbox: "same-repo"
+  sandboxTrustedAuthors:
+    - "alex@example.com"
+    - "release-bot@example.com"
+```
+
+**Default-off, additive-only semantics:**
+
+- **Empty (the default)** — no author gate. Behaviour is exactly what
+  `agentSandbox` alone would produce; existing consumers see zero change.
+- **Non-empty** — every commit in the PR head range must have **both** its
+  author email and its committer email on the list (case-insensitive), or the
+  override is refused. One foreign commit refuses it.
+- **Additive only.** The gate can turn a tier-granted override into a refusal;
+  it can **never** grant an override the tier itself refuses. The fork floor
+  still runs first and still wins — an all-trusted commit range on a fork head
+  changes nothing.
+
+**Fail closed.** If the commit range cannot be computed — no base sha resolves
+from the event or `origin/<default-branch>`, the `git log` call fails, or it
+returns no commits when commits were expected — the override is refused, not
+granted. A detection failure is never treated as "no foreign commits."
+
+Run manifest fields carry the outcome: `agent_sandbox_author_gate` is one of
+`not-configured` (list empty), `passed`, `refused`, or `unevaluated` (the tier
+itself already refused, so the gate was never the deciding factor), plus
+`agent_sandbox_author_gate_offending_email` when a specific commit tripped it.
+
+**D1f applies here too:** `TrustSettings` is `extra="forbid"`, so writing
+`sandboxTrustedAuthors` against a pinned Action image that predates this field
+fails the whole config load. Upgrade the pin first, confirm the new schema is
+live, **then** write the key.
 
 ### Why `full` is not the default
 
@@ -167,7 +214,9 @@ Those knobs are read from the **base-branch config snapshot** at run start.
 self-review PR cannot enable them until the config lands on base after merge.
 
 `same-repo` rests on "a branch in this repository was written by someone I
-trust" — it cannot catch pulling a fork PR onto a local branch to run CI. See
+trust" — it cannot catch pulling a fork PR onto a local branch to run CI on its
+own. `trust.sandboxTrustedAuthors` mitigates that (additive-only, default
+off — not currently set in this repo's committed config; see D1f above). See
 the residual risks in the scaffolded config comment and
 [`trust.agentSandbox`](#trustagentsandbox--codex-sandbox-override-ladder-553)
 above.

@@ -610,3 +610,98 @@ async def test_approve_is_recorded_when_no_analyzer_run_happened(tmp_path: Path)
 
     assert result.is_error is False
     assert ctx.tool_state.terminal_submission is not None
+
+
+@pytest.mark.asyncio
+async def test_terminal_finding_backfills_into_agent_findings_for_the_packet(
+    tmp_path: Path,
+) -> None:
+    """#619 — a finding that only ever reaches the terminal payload must still
+
+    surface through ``load_run_findings``, the one loader ``decide_approval``
+    and the merge-evidence packet both read. Before this back-fill, a finding
+    submitted here but never drafted via ``verify_agent_findings`` was
+    invisible to the gate no matter how blocking it was.
+    """
+    from mergecraft.evidence.findings import load_run_findings
+
+    ctx = _ctx(tmp_path)
+    finding = AgentFinding(
+        path="src/auth.py",
+        body="Session token is logged in plaintext on every request.",
+        severity="Critical",
+        line=42,
+    )
+    result = await _submit(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "One critical security finding stands.",
+            "findings": [finding.model_dump()],
+        },
+    )
+
+    assert result.is_error is False
+    fingerprint = finding.identity()
+    stored_fingerprints = {
+        row.get("fingerprint") for row in ctx.tool_state.agent_findings if isinstance(row, dict)
+    }
+    assert fingerprint in stored_fingerprints
+
+    loaded = load_run_findings(ctx)
+    matching = [item for item in loaded if item.fingerprint == fingerprint]
+    assert len(matching) == 1
+    assert matching[0].severity == "Critical"
+
+
+@pytest.mark.asyncio
+async def test_backfill_does_not_clobber_a_prior_downgrade(tmp_path: Path) -> None:
+    """A ``record_finding_verdict`` downgrade must win over a stale draft (#619).
+
+    ``agent_findings`` already carries a row for this fingerprint at a
+    downgraded (non-blocking) severity — the terminal payload re-submitting
+    the same fingerprint at ``Critical`` must not overwrite that stored row.
+    """
+    from mergecraft.analyzers.finding import make_finding
+
+    ctx = _ctx(tmp_path)
+    fingerprint = "fp-already-downgraded"
+    downgraded = make_finding(
+        tool="agent",
+        rule_id="agent:draft",
+        category="Maintainability & Code Quality",
+        severity="Minor",
+        confidence="likely",
+        message="Session token is logged in plaintext on every request.",
+        path="src/auth.py",
+        start_line=42,
+        end_line=42,
+        source="agent",
+        fingerprint=fingerprint,
+    )
+    ctx.tool_state.agent_findings = [downgraded.model_dump(mode="json")]
+
+    finding = AgentFinding(
+        path="src/auth.py",
+        body="Session token is logged in plaintext on every request.",
+        severity="Critical",
+        line=42,
+        fingerprint=fingerprint,
+    )
+    result = await _submit(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "One finding stands.",
+            "findings": [finding.model_dump()],
+        },
+    )
+
+    assert result.is_error is False
+    stored = [
+        row
+        for row in ctx.tool_state.agent_findings
+        if isinstance(row, dict) and row.get("fingerprint") == fingerprint
+    ]
+    assert len(stored) == 1
+    assert stored[0]["severity"] == "Minor"

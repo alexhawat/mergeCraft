@@ -75,6 +75,35 @@ def current_tracer() -> Tracer | NullTracer | None:
     return None
 
 
+def resolve_driver_tracer() -> Tracer | None:
+    """Tracer for CLI stream drivers: prefer the live run tracer.
+
+    Production reviews already have an in-flight ``agent.attempt`` span on
+    the process tracer. Reusing that tracer is what parents ``tool.call`` /
+    per-turn ``llm.call`` onto the same Logfire tree. A fresh ``Tracer``
+    from ``claim_sink`` orphans those spans (or never flushes them).
+
+    Tests that pre-seed ``_PENDING_SINK`` without opening a parent span
+    still take the ``claim_sink`` fallback.
+    """
+    live = current_tracer()
+    if isinstance(live, Tracer):
+        return live
+    try:
+        from mergecraft.tracing.resolve import resolve_active_tracing
+        from mergecraft.tracing.sinks import claim_sink
+
+        sink = claim_sink(resolve_active_tracing())
+    except Exception:
+        return None
+    if sink is None:
+        return None
+    correlation = resolve_correlation_from_env()
+    session_id = resolve_session_id()
+    run_id = str(correlation.get("run_id") or session_id)
+    return Tracer(sink=sink, session_id=session_id, run_id=run_id)
+
+
 __all__ = [
     "DENY_KEYS",
     "TRACE_ATTRS_JSON_MAX_BYTES",
@@ -109,6 +138,7 @@ __all__ = [
     "resolve_capture_policy",
     "resolve_content_capture",
     "resolve_correlation_from_env",
+    "resolve_driver_tracer",
     "resolve_review_id",
     "resolve_session_id",
     "resolve_token_ref",

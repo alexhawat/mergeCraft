@@ -51,6 +51,8 @@ def test_default_is_off() -> None:
         "--trace-dir",
         "--logfire-token",
         "--otel-endpoint",
+        "--tracing-content",
+        "--tracing-export-unt",
     ):
         assert flag in out, f"missing CLI flag {flag!r} in --help"
 

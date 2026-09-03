@@ -156,6 +156,24 @@ inputs:
       ``http://127.0.0.1:4318/v1/traces``. Wins over the config block.
     required: false
     default: ""
+  tracing-content:
+    description: |
+      Model-payload capture level: off, metadata, redacted, or full.
+      Wins over MERGECRAFT_TRACING_CONTENT and tracing.content when set.
+      Untrusted runs still cap at metadata unless
+      tracing-export-untrusted-content is also true. Unset defers to
+      config (default redacted).
+    required: false
+    default: ""
+  tracing-export-untrusted-content:
+    description: |
+      Allow prompt and completion bodies on untrusted (fork-PR) runs when
+      the capture level emits bodies. Required to ship fork-PR content to
+      Logfire. Wins over MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT and
+      tracing.exportUntrustedContent. Default false; content full alone
+      does not lift the cap.
+    required: false
+    default: ""
   setup_failure_policy:
     description: >-
       S1 / D10 — what happens when a trusted-tier ``setupScript`` fails (non-zero
@@ -239,6 +257,8 @@ runs:
     INPUT_TRACING_TO: ${{ inputs.tracing-to }}
     INPUT_LOGFIRE_TOKEN: ${{ inputs.logfire-token }}
     INPUT_OTEL_ENDPOINT: ${{ inputs.otel-endpoint }}
+    INPUT_TRACING_CONTENT: ${{ inputs.tracing-content }}
+    INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT: ${{ inputs.tracing-export-untrusted-content }}
     INPUT_SETUP_FAILURE_POLICY: ${{ inputs.setup_failure_policy }}
     INPUT_SETUP_TIMEOUT: ${{ inputs.setup_timeout }}
 

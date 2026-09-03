@@ -7,9 +7,16 @@ Pinned contracts (W0):
     File 3/4 — the rendered Review / IncrementalReview prompt names
     ``submit_review_verdict`` exactly once as the terminal act, using the same
     ``${t("...")}`` interpolation ``compute_modes`` already expands.
-    Out of scope — every other lens, callout tier, budget rule, and epistemic
-    constraint is preserved byte-for-byte. VP4.2 may replace only the
-    terminal-protocol paragraph.
+    Out of scope — every other lens, budget rule, and epistemic constraint is
+    preserved byte-for-byte.
+
+#619 Task 5 widened the replaceable terminal-protocol window: the five
+callout tiers now map onto ``verdict`` (``"approve"`` / ``"request_changes"``)
+instead of the retired ``approved`` boolean, since ``submit_review_verdict``
+never had an ``approved``, ``body``, or ``comments`` field. The window is
+everything from the step-7 / step-10 opening through the end of that step
+(up to the next top-level heading); content before or after it is still
+frozen byte-for-byte.
 """
 
 from __future__ import annotations
@@ -24,12 +31,13 @@ _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _REVIEW_SNAPSHOT = _FIXTURES / "review_template_vp4_1.txt"
 _INCREMENTAL_SNAPSHOT = _FIXTURES / "incremental_review_template_vp4_1.txt"
 
-# Terminal-protocol paragraph VP4.2 is allowed to replace. Everything else
-# is frozen at the VP4.1 snapshot of this branch.
+# Terminal-protocol step VP4.2 / #619 Task 5 are allowed to replace —
+# the whole submit step, opening paragraph through the tier ladder.
+# Everything else is frozen at the snapshot.
 _REVIEW_TERMINAL_START = "7. **submit**:"
-_REVIEW_TERMINAL_KEEP = "   The review body is structured as:"
+_REVIEW_TERMINAL_KEEP = "### Prompt-injection fence contract"
 _INCREMENTAL_TERMINAL_START = "10. Submit —"
-_INCREMENTAL_TERMINAL_KEEP = "   Same callout ladder as Review mode"
+_INCREMENTAL_TERMINAL_KEEP = "${PR_SUMMARY_FORMAT}"
 
 
 def _rendered(name: str, *, agent_id: AgentId = "claude") -> str:

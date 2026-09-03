@@ -10,7 +10,7 @@ result to a run-local path and stamps it as a CI artifact (convention 5).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -171,6 +171,7 @@ def build_packet(
     fallback_occurred: bool = False,
     mode_prompt_versions: list[ModePromptVersion] | None = None,
     dispatched_lens_ids: list[str] | None = None,
+    agent_terminal_verdict: Literal["approve", "request_changes"] | None = None,
 ) -> MergeEvidencePacket:
     """Assemble a :class:`MergeEvidencePacket` from structured sources.
 
@@ -201,6 +202,12 @@ def build_packet(
     ``blast_radius`` and ``evals``) remain optional. Batch B populates
     ``blast_radius`` with a typed ``BlastRadiusClassification``; Batches C / E
     extend their sections.
+
+    #619 — ``agent_terminal_verdict`` carries the ``verdict`` the agent itself
+    recorded via ``submit_review_verdict`` (``"approve"`` / ``"request_changes"``
+    / ``None`` when no terminal submission exists). ``decide_approval`` reads
+    it to apply a one-way ratchet: ``request_changes`` can pull the structural
+    conclusion down to ``neutral``, never up to ``success``.
     """
     coerced_findings = _coerce_findings(findings)
     change_findings, run_health = _partition_findings(coerced_findings)
@@ -252,6 +259,7 @@ def build_packet(
         blast_radius=blast_radius,
         trajectory=_coerce_trajectory(trajectory),
         mode_prompt_versions=list(mode_prompt_versions) if mode_prompt_versions else None,
+        agent_terminal_verdict=agent_terminal_verdict,
     )
 
     # ``trajectory`` now lands as a sibling field (Batch C, #43). The rest --

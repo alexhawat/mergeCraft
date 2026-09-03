@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Untrusted reviews can export prompt bodies to Logfire when `tracing.content`
+  is `full` **and** `exportUntrustedContent` is true (YAML,
+  `--tracing-export-untrusted-content`, `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`,
+  or Action `tracing-export-untrusted-content`); `content: full` alone still
+  caps fork-PR bodies at metadata
+- `mergecraft review --tracing-content` and Action `tracing-content` set the
+  capture level without editing YAML
 - `mergecraft provider status` shows what CI will run — each reviewer agent's
   `pN` slots, credential and workflow-wiring state, dispatch level, and skipped
   slots — with `--json` for scripting and optional `--github` to report repo
@@ -74,6 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Logfire `llm.call` rows now include the prompt mergeCraft sent and the model
+  output, with a real duration instead of an empty ~2µs span
+- Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on
+  the same Logfire trace as the review run
 - Authentication quick start uses registry labels (`anthropic`, `openai`,
   `google`) instead of harness names that `provider auth` rejects (#590)
 - GitHub Action Logfire tracing honors `MERGECRAFT_TRACING_REGION`, so an EU

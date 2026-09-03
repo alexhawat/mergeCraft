@@ -38,6 +38,7 @@ from mergecraft.agents.shared import (
     mcp_auth_headers,
     resolve_cache_read,
     spawn_agent_cli,
+    with_prompt,
 )
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.security.review_integrity import hash_tree, verify_tree_unchanged
@@ -658,10 +659,13 @@ async def _prompt_session_http(
             # them retryable so the chain moves to the next entry (#444). Other
             # 4xx are request-shaped faults that the next model would repeat.
             retryable = resp.status_code == 429 or resp.status_code >= 500
-            return AgentResult(
-                success=False,
-                error=f"opencode prompt failed ({resp.status_code}): {resp.text[:500]}",
-                metadata={"retryable": True} if retryable else {},
+            return with_prompt(
+                AgentResult(
+                    success=False,
+                    error=f"opencode prompt failed ({resp.status_code}): {resp.text[:500]}",
+                    metadata={"retryable": True} if retryable else {},
+                ),
+                text,
             )
         data = resp.json() if resp.content else {}
 
@@ -693,7 +697,7 @@ async def _prompt_session_http(
                     output=out,
                     cost_usd=usage.cost_usd,
                 )
-    return AgentResult(success=True, output=output or None, usage=usage)
+    return with_prompt(AgentResult(success=True, output=output or None, usage=usage), text)
 
 
 def _capture_integrity_baseline(ctx: AgentRunContext) -> tuple[Path, str] | None:

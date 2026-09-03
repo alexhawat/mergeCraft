@@ -28,7 +28,10 @@ from mergecraft.models import (
     resolve_display_alias,
 )
 from mergecraft.tracing.genai import (
+    input_messages_attrs,
+    output_messages_attrs,
     request_attrs,
+    resolve_capture_policy,
     response_attrs,
     usage_attrs_from_agent_usage,
     usage_unavailable_attrs,
@@ -852,6 +855,57 @@ def _attach_model_evidence(
     return result
 
 
+def _stamp_chain_llm_call(
+    span: Any,
+    *,
+    slug: str,
+    requested_model: str | None,
+    chain_index: int,
+    result: AgentResult,
+    trust_tier: str | None,
+) -> None:
+    """Stamp usage, identity, and policy-gated prompt/completion on ``llm.call``."""
+    span.set_attribute("model.id", slug)
+    span.set_attribute("model.requested", requested_model or slug)
+    span.set_attribute("model.resolved", slug)
+    span.set_attribute("model.fallback_index", chain_index)
+    span.set_attribute("gen_ai.operation.name", "chat")
+    span.set_attribute("gen_ai.system", _agent_provider_for_slug(slug))
+    for key, value in request_attrs(model=slug).items():
+        span.set_attribute(key, value)
+    for key, value in response_attrs(model=slug).items():
+        span.set_attribute(key, value)
+    usage = result.usage
+    if usage is not None:
+        for key, value in usage_attrs_from_agent_usage(
+            input_tokens=getattr(usage, "input_tokens", None),
+            output_tokens=getattr(usage, "output_tokens", None),
+            cache_read_tokens=getattr(usage, "cache_read_tokens", None),
+            cache_write_tokens=getattr(usage, "cache_write_tokens", None),
+            cost_usd=getattr(usage, "cost_usd", None),
+        ).items():
+            span.set_attribute(key, value)
+        for key, value in _cost_attrs_from_usage(usage).items():
+            if key.startswith("cost."):
+                span.set_attribute(key, value)
+    else:
+        for key, value in usage_unavailable_attrs().items():
+            span.set_attribute(key, value)
+    policy = resolve_capture_policy(trust_tier)
+    if result.prompt:
+        for key, value in input_messages_attrs(
+            [{"role": "user", "content": result.prompt}],
+            policy=policy,
+        ).items():
+            span.set_attribute(key, value)
+    if result.output:
+        for key, value in output_messages_attrs(
+            [{"role": "assistant", "content": result.output}],
+            policy=policy,
+        ).items():
+            span.set_attribute(key, value)
+
+
 def stamp_attempt_id(
     tool_state: ToolState,
     *,
@@ -1060,46 +1114,28 @@ async def run_with_model_chain(
                 parent_span_id=root_parent_id,
                 attrs_source=_snapshot_attrs(attempt_attrs),
             ) as attempt_span:
-                result = await run_once(slug)
-                last_result = result
-                last_executed_slug = slug
-
-                call_attrs: dict[str, Any] = {
-                    "model.id": slug,
-                    "model.requested": requested_model or slug,
-                    "model.resolved": slug,
-                    "model.fallback_index": chain_index,
-                    "gen_ai.operation.name": "chat",
-                    "gen_ai.system": _agent_provider_for_slug(slug),
-                }
-                call_attrs.update(request_attrs(model=slug))
-                call_attrs.update(response_attrs(model=slug))
-                usage = result.usage
-                if usage is not None:
-                    call_attrs.update(
-                        usage_attrs_from_agent_usage(
-                            input_tokens=getattr(usage, "input_tokens", None),
-                            output_tokens=getattr(usage, "output_tokens", None),
-                            cache_read_tokens=getattr(usage, "cache_read_tokens", None),
-                            cache_write_tokens=getattr(usage, "cache_write_tokens", None),
-                            cost_usd=getattr(usage, "cost_usd", None),
-                        )
-                    )
-                    for key, value in _cost_attrs_from_usage(usage).items():
-                        if key.startswith("cost."):
-                            call_attrs[key] = value
-                else:
-                    call_attrs.update(usage_unavailable_attrs())
-
                 attempt_parent_id = (
                     attempt_span.span_id if hasattr(attempt_span, "span_id") else None
                 )
                 with tracer.start_span(
                     "llm.call",
                     parent_span_id=attempt_parent_id,
-                    attrs_source=_snapshot_attrs(call_attrs),
-                ) as _call_span:
-                    pass
+                ) as call_span:
+                    result = await run_once(slug)
+                    last_result = result
+                    last_executed_slug = slug
+                    _stamp_chain_llm_call(
+                        call_span,
+                        slug=slug,
+                        requested_model=requested_model,
+                        chain_index=chain_index,
+                        result=result,
+                        trust_tier=(
+                            getattr(tool_state, "trust_tier", None)
+                            if tool_state is not None
+                            else None
+                        ),
+                    )
 
                 skip_reason = _classify_skip_reason(result, chain_index)
                 # Live path: IncrementalReview ``report_progress`` and

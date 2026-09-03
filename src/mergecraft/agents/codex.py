@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 from loguru import logger
 
@@ -47,6 +47,7 @@ from mergecraft.agents.shared import (
     agent,
     payload_shell_mode,
     spawn_agent_cli,
+    with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
 from mergecraft.config.trust_policy import AgentSandboxDecision
@@ -57,6 +58,9 @@ from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
+
+if TYPE_CHECKING:
+    from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
@@ -706,6 +710,7 @@ def _run_codex_once(
         cmd=cmd,
         ctx=ctx,
         model=model,
+        prompt=prompt or ctx.instructions.user,
     )
 
 
@@ -714,6 +719,7 @@ def _run_codex_streaming(
     cmd: list[str],
     ctx: AgentRunContext,
     model: str | None,
+    prompt: str | None = None,
 ) -> AgentResult:
     """Streaming read loop for ``codex exec --json`` (W6).
 
@@ -728,24 +734,12 @@ def _run_codex_streaming(
         StreamSpanAccumulator,
         consume_stream,
     )
-    from mergecraft.tracing.sinks import claim_sink
-    from mergecraft.tracing.tracer import (
-        Tracer,
-        resolve_correlation_from_env,
-        resolve_session_id,
-    )
+    from mergecraft.tracing import resolve_driver_tracer
 
     accumulator = StreamSpanAccumulator(agent_name="codex")
     tracer: Tracer | None = None
     try:
-        from mergecraft.tracing.resolve import resolve_active_tracing
-
-        sink = claim_sink(resolve_active_tracing())
-        if sink is not None:
-            correlation = resolve_correlation_from_env()
-            session_id = resolve_session_id()
-            run_id = str(correlation.get("run_id") or session_id)
-            tracer = Tracer(sink=sink, session_id=session_id, run_id=run_id)
+        tracer = resolve_driver_tracer()
     except Exception as exc:
         logger.debug("codex stream tracer resolution failed: {}", exc)
 
@@ -759,12 +753,13 @@ def _run_codex_streaming(
         tracer=tracer,
         model_id=model or "default",
         capture_policy=capture_policy,
+        input_prompt=prompt,
     )
 
     try:
         process = spawn_agent_cli(cmd, env=_build_env(ctx))
     except FileNotFoundError as err:
-        return AgentResult(success=False, error=str(err))
+        return with_prompt(AgentResult(success=False, error=str(err)), prompt)
 
     assert process.stdout is not None
     assert process.stderr is not None
@@ -785,7 +780,7 @@ def _run_codex_streaming(
                     timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
                 )
             except subprocess.TimeoutExpired:
-                return AgentResult(success=False, error="codex CLI timed out")
+                return with_prompt(AgentResult(success=False, error="codex CLI timed out"), prompt)
     finally:
         try:
             close_all_open_spans()
@@ -829,14 +824,17 @@ def _run_codex_streaming(
             returncode=returncode,
             stderr=f"{stream_error or ''}\n{stderr_text}",
         )
-        return AgentResult(
-            success=False,
-            output=output or None,
-            error=error,
-            usage=usage,
-            metadata={"retryable": True} if retryable else {},
+        return with_prompt(
+            AgentResult(
+                success=False,
+                output=output or None,
+                error=error,
+                usage=usage,
+                metadata={"retryable": True} if retryable else {},
+            ),
+            prompt,
         )
-    return AgentResult(success=True, output=output or None, usage=usage)
+    return with_prompt(AgentResult(success=True, output=output or None, usage=usage), prompt)
 
 
 async def _run(ctx: AgentRunContext) -> AgentResult:

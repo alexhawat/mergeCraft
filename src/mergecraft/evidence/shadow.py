@@ -178,13 +178,17 @@ def predict_verdict_protocol(
     setup_policy: str = "warn",
     prep_reason: str | None = None,
     final_summary_written: bool = False,
+    terminal_publication_failed: bool = False,
 ) -> VerdictProtocolPrediction:
     """Read the terminal-verdict protocol prediction without recording it (VP3).
 
     Mirrors the enforce path of ``_classify_outcome`` so a later flip is
     comparable: IncrementalReview + ``final_summary_written`` is complete,
-    and setup/prep failures map to the same outcomes the resolver would
-    produce with ``verdict_protocol="enforce"``.
+    setup/prep failures map to the same outcomes the resolver would produce
+    with ``verdict_protocol="enforce"``, and a recorded-but-unpublished
+    terminal submission (#619 Task 3b) predicts the same ``inconclusive``
+    outcome the enforce path now returns, so the ``mergecraft.publish``
+    span's diagnostic never disagrees with the actual outcome.
     """
     from mergecraft.mcp.verdict import VerdictDiagnostic
 
@@ -207,6 +211,11 @@ def predict_verdict_protocol(
         return VerdictProtocolPrediction(
             outcome=RunOutcome.inconclusive,
             diagnostic=VerdictDiagnostic.policy_rejection.value,
+        )
+    if mode in _REVIEW_MODE_NAMES and terminal_publication_failed:
+        return VerdictProtocolPrediction(
+            outcome=RunOutcome.inconclusive,
+            diagnostic=VerdictDiagnostic.terminal_submission_unpublished.value,
         )
     if mode in _REVIEW_MODE_NAMES and not result.terminal_submission_received:
         if mode in _INCREMENTAL_REVIEW_NAMES and final_summary_written:
