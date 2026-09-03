@@ -326,6 +326,20 @@ class ToolState:
     # Lane A W3 — which publication entrypoint won and whether 422 recovery demoted inline.
     review_publication_entrypoint: str | None = None
     review_inline_comments_demoted: bool = False
+    # #619 Task 4b — set when every targeted 422 recovery (comments-anchor
+    # demotion, APPROVE->COMMENT) failed and the last-resort bare COMMENT
+    # retry (no inline comments) is what actually landed the review.
+    review_comment_fallback_applied: bool = False
+    # #619 Task 4c — set when the review body exceeded GitHub's
+    # 65536-character cap and was truncated before posting.
+    review_body_truncated: bool = False
+    # #619 Task 3a — set in the exception path of
+    # ``mcp/review.py::_create_github_review_with_anchor_recovery`` when
+    # every 422 recovery attempt, including the last resort, still failed:
+    # the terminal verdict was recorded but never published to GitHub.
+    # ``main_outcome.py`` maps this to ``RunOutcome.inconclusive`` rather
+    # than ``passed`` so a lost review cannot read as a clean run.
+    terminal_publication_failed: bool = False
     terminal_submission: TerminalSubmission | None = None
     terminal_submission_conflict: bool = False
     reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)

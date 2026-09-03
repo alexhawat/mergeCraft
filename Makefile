@@ -47,6 +47,7 @@ setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
 	else \
 	  $(PRE_COMMIT) install; \
 	  $(PRE_COMMIT) install --hook-type commit-msg; \
+	  $(PRE_COMMIT) install --hook-type pre-push; \
 	fi
 
 setup-local-analyzers: ## Install pinned repo-native analyzer npm CLIs (#427)

@@ -414,6 +414,7 @@ async def publish_deterministic_record(
             budget_tracker=resolved_ctx.budget_tracker,
         ),
         credential_degradations=list(tool_state.credential_degradations),
+        agent_sandbox_decision=tool_state.agent_sandbox_decision,
     )
     await upsert_sticky_progress_comment(resolved_ctx, block)
 
@@ -1609,6 +1610,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             mode=tool_state.selected_mode,
             verdict_protocol=settings.gates.terminal_verdict,
             final_summary_written=tool_state.final_summary_written,
+            terminal_publication_failed=tool_state.terminal_publication_failed,
         )
     verdict_publish = _verdict_protocol_publish(
         result=agent_result,
@@ -1618,6 +1620,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         prep_reason=prep_reason,
         final_summary_written=tool_state.final_summary_written,
         terminal_verdict=settings.gates.terminal_verdict,
+        terminal_publication_failed=tool_state.terminal_publication_failed,
     )
     diagnostic_attrs = verdict_publish.attrs
     verdict_prediction = verdict_publish.prediction

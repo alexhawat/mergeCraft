@@ -346,6 +346,23 @@ def _decide_approval_from_packet(
     conclusion = _decide_approval_from_findings(
         _packet_attested_findings(packet), run_succeeded=run_succeeded, tier=tier
     )
+    # One-way ratchet (#619): the agent's own terminal ``submit_review_verdict``
+    # call can bind the conclusion downward but never up. On PR #619 the
+    # reviewing agent's verifier confirmed a blocking security finding and the
+    # agent called the terminal tool with ``verdict="request_changes"`` — but
+    # the confirmed finding never reached ``packet.findings`` (a separate
+    # leak, closed in ``mcp/verdict.py``), so the blocker-only check above saw
+    # nothing and returned ``"success"``. This ratchet is the second,
+    # independent line of defense: a recorded ``request_changes`` verdict
+    # alone is now enough to stop the check-run from reading ``success``,
+    # regardless of whether a typed blocker survived into the findings list.
+    # ``approve`` stays advisory exactly as before — it is never allowed to
+    # raise a conclusion the typed evidence did not itself reach — which is
+    # also why this is safe against prompt injection: untrusted PR content
+    # can at most talk the agent into a stricter verdict (request_changes),
+    # never into upgrading a computed ``neutral``/``failure`` to ``success``.
+    if conclusion == "success" and packet.agent_terminal_verdict == "request_changes":
+        conclusion = "neutral"
     return PacketDecision(
         verdict=conclusion,
         reason=_packet_decision_reason(conclusion, packet),
@@ -364,6 +381,12 @@ def _packet_decision_reason(
     evidence lives in the packet itself and downstream consumers should
     read it from there.
     """
+    if (
+        conclusion == "neutral"
+        and packet.agent_terminal_verdict == "request_changes"
+        and not _packet_has_blockers(packet)
+    ):
+        return "neutral: agent terminal verdict request_changes; no structural blocker attested"
     if packet.self_assessment is not None and packet.self_assessment.approved:
         # The agent said approved; the structural verdict is whatever the
         # evidence proved. Surface both so a human reader can see the

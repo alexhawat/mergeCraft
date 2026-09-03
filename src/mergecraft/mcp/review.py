@@ -152,7 +152,10 @@ def _deterministic_review_block(
         token_summary=token_summary,
         publication_entrypoint=tool_state.review_publication_entrypoint,
         inline_comments_demoted=tool_state.review_inline_comments_demoted,
+        comment_fallback_applied=tool_state.review_comment_fallback_applied,
+        review_body_truncated=tool_state.review_body_truncated,
         credential_degradations=list(tool_state.credential_degradations),
+        agent_sandbox_decision=tool_state.agent_sandbox_decision,
     )
 
 
@@ -669,6 +672,98 @@ def _demote_all_inline_comments(payload: dict[str, Any]) -> dict[str, Any]:
     return current
 
 
+# GitHub caps a pull request review body at 65536 characters (#619 Task 4c).
+# The deterministic preamble plus every demoted inline comment can exceed it,
+# and an over-cap body is itself a 422 — the same failure mode this whole
+# recovery ladder exists to avoid.
+REVIEW_BODY_MAX_CHARS = 65536
+_REVIEW_BODY_TRUNCATION_MARKER = (
+    "\n\n> _[mergeCraft] review body truncated — exceeded GitHub's "
+    f"{REVIEW_BODY_MAX_CHARS}-character review body cap._"
+)
+
+
+def _truncate_review_body_for_github(
+    ctx: ToolContext,
+    payload: dict[str, Any],
+    *,
+    pull_number: int,
+) -> dict[str, Any]:
+    """Cap ``payload['body']`` at GitHub's review-body limit, with a visible marker."""
+    body = str(payload.get("body") or "")
+    if len(body) <= REVIEW_BODY_MAX_CHARS:
+        return payload
+    marker = _REVIEW_BODY_TRUNCATION_MARKER
+    keep = max(REVIEW_BODY_MAX_CHARS - len(marker), 0)
+    logger.warning(
+        "review body for PR #{} was {} chars, over GitHub's {}-character cap; truncating",
+        pull_number,
+        len(body),
+        REVIEW_BODY_MAX_CHARS,
+    )
+    ctx.tool_state.review_body_truncated = True
+    updated = dict(payload)
+    updated["body"] = body[:keep] + marker
+    return updated
+
+
+def _log_review_422_payload(
+    exc: httpx.HTTPStatusError,
+    *,
+    pull_number: int,
+    event: str,
+) -> None:
+    """Log GitHub's redacted 422 response body at warning level (#619 Task 4a).
+
+    ``str(exc)`` alone drops GitHub's ``errors[]`` array — the one piece of
+    evidence that would have diagnosed the #619 422 loop from the run log.
+    Structure-aware redaction (JSON when the body parses, text otherwise) so
+    a stray secret in an echoed header cannot leak onto the log either.
+    """
+    from mergecraft.tracing.redaction import redact_tool_payload
+
+    try:
+        body: Any = exc.response.json()
+    except ValueError:
+        body = exc.response.text
+    logger.warning(
+        "create_review 422 on PR #{} (event={}): {}",
+        pull_number,
+        event,
+        redact_tool_payload(body),
+    )
+
+
+def _last_resort_comment_payload(
+    ctx: ToolContext,
+    current: dict[str, Any],
+    *,
+    pull_number: int,
+) -> dict[str, Any]:
+    """Build the final COMMENT-only retry payload once normal 422 recovery is exhausted.
+
+    #619 Task 4b — before this, an unrecovered 422 simply re-raised and the
+    review was lost: the terminal verdict stayed recorded on ``ToolState``
+    but never reached the Reviews tab. This is the single extra attempt
+    callers make before giving up — every inline comment is dropped and
+    ``event`` is forced to ``COMMENT`` (accepted unconditionally, unlike
+    ``APPROVE``/``REQUEST_CHANGES``), so an unresolvable inline anchor or a
+    refused review event cannot make the whole review vanish. The terminal
+    submission's body is left otherwise intact.
+    """
+    logger.warning(
+        "review publication on PR #{} exhausted normal 422 recovery; retrying once as a "
+        "bare COMMENT review with no inline comments (dropping {} pending comment(s))",
+        pull_number,
+        len(current.get("comments") or []),
+    )
+    fallback = dict(current)
+    fallback["event"] = "COMMENT"
+    fallback.pop("comments", None)
+    ctx.tool_state.review_comment_fallback_applied = True
+    return fallback
+
+
 async def _create_github_review_with_anchor_recovery(
     ctx: ToolContext,
     *,
@@ -681,8 +776,10 @@ async def _create_github_review_with_anchor_recovery(
     current = dict(payload)
     approve_fallback = False
     attempt = 0
+    last_resort_attempted = False
 
     while True:
+        current = _truncate_review_body_for_github(ctx, current, pull_number=pull_number)
         try:
             result = await scm.create_review(
                 ctx.repo.owner,
@@ -695,9 +792,16 @@ async def _create_github_review_with_anchor_recovery(
             if exc.response.status_code != 422:
                 raise
 
+            event_attempted = str(current.get("event") or "COMMENT")
+            _log_review_422_payload(exc, pull_number=pull_number, event=event_attempted)
+
             attempt += 1
             if attempt > ANCHOR_RECOVERY_RETRY_CEILING:
-                raise
+                if last_resort_attempted:
+                    raise
+                current = _last_resort_comment_payload(ctx, current, pull_number=pull_number)
+                last_resort_attempted = True
+                continue
 
             if current.get("comments") and is_comments_anchor_422_response(exc.response):
                 index = parse_comment_422_index(exc.response)
@@ -752,7 +856,10 @@ async def _create_github_review_with_anchor_recovery(
                         attempt,
                         prior_sig,
                     )
-                    raise exc
+                    if last_resort_attempted:
+                        raise exc
+                    current = _last_resort_comment_payload(ctx, current, pull_number=pull_number)
+                    last_resort_attempted = True
                 continue
 
             event = str(current.get("event") or "COMMENT")
@@ -773,10 +880,19 @@ async def _create_github_review_with_anchor_recovery(
                         attempt,
                         prior_sig,
                     )
-                    raise exc
+                    if last_resort_attempted:
+                        raise exc
+                    current = _last_resort_comment_payload(ctx, current, pull_number=pull_number)
+                    last_resort_attempted = True
                 continue
 
-            raise
+            # Not a comments-anchor 422 and not an APPROVE rejection — every
+            # targeted recovery has been tried. #619 Task 4b: one last resort
+            # (bare COMMENT, no inline comments) before giving up entirely.
+            if last_resort_attempted:
+                raise
+            current = _last_resort_comment_payload(ctx, current, pull_number=pull_number)
+            last_resort_attempted = True
 
 
 def _finding_rows_for_provenance(ctx: ToolContext) -> list[dict[str, Any]]:
@@ -1012,12 +1128,23 @@ async def _publish_github_review(
 
     record_published_findings_in_ledger(ctx.tool_state, inline)
 
-    result, approve_fallback = await _create_github_review_with_anchor_recovery(
-        ctx,
-        pull_number=pull_number,
-        payload=payload,
-        packet=packet,
-    )
+    try:
+        result, approve_fallback = await _create_github_review_with_anchor_recovery(
+            ctx,
+            pull_number=pull_number,
+            payload=payload,
+            packet=packet,
+        )
+    except Exception:
+        # #619 Task 3a — the terminal submission is already recorded on
+        # ``ToolState`` (that happened before this function ran), but the
+        # review itself never reached GitHub: every 422 recovery attempt,
+        # including the last resort, failed, or GitHub refused the call for
+        # some other reason entirely. ``main_outcome.py`` reads this flag to
+        # map the run to ``RunOutcome.inconclusive`` instead of ``passed`` —
+        # a recorded-but-unpublished verdict must never read as a clean run.
+        ctx.tool_state.terminal_publication_failed = True
+        raise
     review_id = int(result["id"])
     ctx.tool_state.review = ReviewRecord(
         id=review_id,
@@ -1041,6 +1168,10 @@ async def _publish_github_review(
     if approve_fallback:
         response["approveFallbackDueTo422"] = True
         response["requestedReviewState"] = "APPROVE"
+    if ctx.tool_state.review_comment_fallback_applied:
+        response["commentFallbackDueTo422"] = True
+    if ctx.tool_state.review_body_truncated:
+        response["bodyTruncated"] = True
     resolved = await _resolve_fixed_finding_threads(
         ctx,
         pull_number=pull_number,

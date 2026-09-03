@@ -10,6 +10,13 @@ snapshot (lane C ``settings_snapshot`` / MCB-19) — never from a PR head edit.
 ``trust.agentSandbox`` (lane B / #553) is resolved the same way but gates only
 whether ``MERGECRAFT_CODEX_SANDBOX=danger-full-access`` is honoured — never
 ``execution_trust`` or ``tool_state.trust_tier`` (D1a).
+
+``trust.sandboxTrustedAuthors`` is an additive-only precondition on top of the
+``agentSandbox`` tier: empty (default) changes nothing; non-empty requires every
+commit's author *and* committer email in the bound PR head range to be on the
+list, or the override is refused even on a tier that would otherwise grant it.
+It can never grant an override a tier refuses, and the fork floor still runs
+first. See ``docs/trust-policy.md``.
 """
 
 from __future__ import annotations
@@ -54,6 +61,9 @@ class TrustPolicy:
     config_hash: str
 
 
+AuthorGateStatus = Literal["not-configured", "passed", "refused", "unevaluated"]
+
+
 @dataclass(frozen=True, slots=True)
 class AgentSandboxDecision:
     """Whether ``danger-full-access`` is granted for one run (lane B D1/D2)."""
@@ -66,6 +76,17 @@ class AgentSandboxDecision:
     head_status: str
     operator_override_requested: bool
     granting_tier: AgentSandboxLevel | None = None
+    author_gate: AuthorGateStatus = "not-configured"
+    author_gate_offending_email: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _AuthorGateOutcome:
+    """Result of evaluating ``trust.sandboxTrustedAuthors`` against one head range."""
+
+    status: Literal["not-configured", "passed", "refused"]
+    offending_email: str | None = None
+    detail: str | None = None
 
 
 def is_fork_pull_request(event: dict[str, Any]) -> bool:
@@ -132,6 +153,15 @@ def _read_agent_sandbox_level(settings: Any) -> AgentSandboxLevel:
     return "dispatch"
 
 
+def _read_sandbox_trusted_authors(settings: Any) -> tuple[str, ...]:
+    """Read ``trust.sandboxTrustedAuthors`` defensively; empty means "not configured"."""
+    trust = getattr(settings, "trust", None)
+    raw = getattr(trust, "sandbox_trusted_authors", [])
+    if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+        return tuple(raw)
+    return ()
+
+
 def _head_repo_label(event: dict[str, Any]) -> str:
     pull_request = event.get("pull_request")
     if isinstance(pull_request, dict):
@@ -193,7 +223,109 @@ def _head_is_ancestor_of_default(
     return probe.returncode == 0
 
 
-def _tier_honours_override(
+def _base_sha_for_author_gate(
+    *,
+    event: dict[str, Any],
+    default_branch: str,
+    config_root: Path,
+) -> str | None:
+    """Resolve the range's base sha: ``pull_request.base.sha``, else ``origin/<default>``."""
+    pull_request = event.get("pull_request")
+    if isinstance(pull_request, dict):
+        base = pull_request.get("base")
+        if isinstance(base, dict):
+            sha = base.get("sha")
+            if isinstance(sha, str) and sha.strip():
+                return sha.strip()
+    remote_ref = f"origin/{default_branch}"
+    fetch = subprocess.run(
+        git_argv(["fetch", "origin", default_branch]),
+        cwd=str(config_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        return None
+    probe = subprocess.run(
+        git_argv(["rev-parse", remote_ref]),
+        cwd=str(config_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        return None
+    resolved = probe.stdout.strip()
+    return resolved or None
+
+
+def _commit_emails_in_range(
+    *,
+    base_sha: str,
+    head_sha: str,
+    config_root: Path,
+) -> list[str] | None:
+    """Return every author+committer email over ``(base_sha, head_sha]``, or None on failure."""
+    result = subprocess.run(
+        git_argv(["log", "--format=%ae%n%ce", f"{base_sha}..{head_sha}"]),
+        cwd=str(config_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _evaluate_author_gate(
+    *,
+    trusted_authors: tuple[str, ...],
+    event: dict[str, Any],
+    head_sha: str,
+    default_branch: str,
+    config_root: Path,
+) -> _AuthorGateOutcome:
+    """Evaluate ``trust.sandboxTrustedAuthors`` against the PR head range (fails closed)."""
+    if not trusted_authors:
+        return _AuthorGateOutcome(status="not-configured")
+    if not head_sha.strip():
+        return _AuthorGateOutcome(
+            status="refused",
+            detail="no head sha bound for this run — commit range cannot be computed",
+        )
+    base_sha = _base_sha_for_author_gate(
+        event=event, default_branch=default_branch, config_root=config_root
+    )
+    if not base_sha:
+        return _AuthorGateOutcome(
+            status="refused",
+            detail="base sha could not be resolved from the event or origin/<default-branch>",
+        )
+    emails = _commit_emails_in_range(base_sha=base_sha, head_sha=head_sha, config_root=config_root)
+    if emails is None:
+        return _AuthorGateOutcome(
+            status="refused",
+            detail=f"git log over {base_sha[:12]}..{head_sha[:12]} failed",
+        )
+    if not emails:
+        return _AuthorGateOutcome(
+            status="refused",
+            detail=f"git log over {base_sha[:12]}..{head_sha[:12]} returned no commits",
+        )
+    allowlist = {author.lower() for author in trusted_authors}
+    for email in emails:
+        if email.lower() not in allowlist:
+            return _AuthorGateOutcome(
+                status="refused",
+                offending_email=email,
+                detail=f"commit author/committer {email!r} is not in trust.sandboxTrustedAuthors",
+            )
+    return _AuthorGateOutcome(status="passed")
+
+
+def _tier_native_honours_override(
     tier: AgentSandboxLevel,
     *,
     event_name: str,
@@ -202,6 +334,7 @@ def _tier_honours_override(
     default_branch: str,
     config_root: Path,
 ) -> bool:
+    """Whether ``tier`` grants the override on this head, ignoring the author gate."""
     if _is_fork_pull_request(event):
         return False
     if tier == "never":
@@ -219,6 +352,34 @@ def _tier_honours_override(
     return event_name == "workflow_dispatch"
 
 
+def _tier_honours_override(
+    tier: AgentSandboxLevel,
+    *,
+    event_name: str,
+    event: dict[str, Any],
+    head_sha: str,
+    default_branch: str,
+    config_root: Path,
+    author_gate: _AuthorGateOutcome | None = None,
+) -> bool:
+    """Whether ``tier`` grants the override — tier logic, then the additive author gate.
+
+    ``author_gate`` is a precondition that can only tighten this result: it may turn
+    a tier-granted override into a refusal, never the reverse. Omit it (or pass a
+    ``not-configured`` outcome) to get the tier's native behaviour unchanged.
+    """
+    if not _tier_native_honours_override(
+        tier,
+        event_name=event_name,
+        event=event,
+        head_sha=head_sha,
+        default_branch=default_branch,
+        config_root=config_root,
+    ):
+        return False
+    return not (author_gate is not None and author_gate.status == "refused")
+
+
 def _minimal_granting_tier(
     *,
     event_name: str,
@@ -226,6 +387,7 @@ def _minimal_granting_tier(
     head_sha: str,
     default_branch: str,
     config_root: Path,
+    author_gate: _AuthorGateOutcome | None = None,
 ) -> AgentSandboxLevel | None:
     if _is_fork_pull_request(event):
         return None
@@ -237,6 +399,7 @@ def _minimal_granting_tier(
             head_sha=head_sha,
             default_branch=default_branch,
             config_root=config_root,
+            author_gate=author_gate,
         ):
             return tier
     return None
@@ -253,6 +416,19 @@ def _log_agent_sandbox_decision(decision: AgentSandboxDecision) -> None:
         )
         return
     if not decision.operator_override_requested:
+        return
+    if decision.author_gate == "refused":
+        logger.warning(
+            "agent sandbox override refused: head={} event={} configured_tier={} "
+            "operator_override_requested=true reason={}. "
+            "Commit author/committer {} is not in trust.sandboxTrustedAuthors — "
+            "add it to trust.sandboxTrustedAuthors or do not push fork branches to origin.",
+            decision.head_status,
+            decision.event_name,
+            decision.configured_tier,
+            decision.reason,
+            decision.author_gate_offending_email or "(unresolved — see reason)",
+        )
         return
     if decision.granting_tier is None:
         logger.warning(
@@ -301,15 +477,9 @@ def resolve_agent_sandbox_decision(
         resolved_from = "live_load"
 
     configured_tier = _read_agent_sandbox_level(settings)
+    trusted_authors = _read_sandbox_trusted_authors(settings)
     head_status = _describe_head_status(event_name, event)
     repo_root = config_root.resolve()
-    granting_tier = _minimal_granting_tier(
-        event_name=event_name,
-        event=event,
-        head_sha=head_sha,
-        default_branch=default_branch,
-        config_root=repo_root,
-    )
 
     if _is_fork_pull_request(event):
         decision = AgentSandboxDecision(
@@ -321,9 +491,51 @@ def resolve_agent_sandbox_decision(
             head_status=head_status,
             operator_override_requested=operator_override_requested,
             granting_tier=None,
+            author_gate="unevaluated" if trusted_authors else "not-configured",
         )
         _log_agent_sandbox_decision(decision)
         return decision
+
+    # Native tier logic — before the author gate — decides whether the gate is the
+    # deciding factor for the *configured* tier's own outcome. It does not gate
+    # whether we compute the author-gate result at all: reaching here means this
+    # head is not a fork, so "same-repo" always natively honours, and
+    # ``_minimal_granting_tier`` below needs the real gate result to avoid
+    # recommending a looser tier the gate would refuse anyway.
+    configured_native_honour = _tier_native_honours_override(
+        configured_tier,
+        event_name=event_name,
+        event=event,
+        head_sha=head_sha,
+        default_branch=default_branch,
+        config_root=repo_root,
+    )
+
+    author_gate_outcome = _AuthorGateOutcome(status="not-configured")
+    if trusted_authors:
+        author_gate_outcome = _evaluate_author_gate(
+            trusted_authors=trusted_authors,
+            event=event,
+            head_sha=head_sha,
+            default_branch=default_branch,
+            config_root=repo_root,
+        )
+
+    granting_tier = _minimal_granting_tier(
+        event_name=event_name,
+        event=event,
+        head_sha=head_sha,
+        default_branch=default_branch,
+        config_root=repo_root,
+        author_gate=author_gate_outcome if trusted_authors else None,
+    )
+
+    if trusted_authors:
+        author_gate_status: AuthorGateStatus = (
+            author_gate_outcome.status if configured_native_honour else "unevaluated"
+        )
+    else:
+        author_gate_status = "not-configured"
 
     if not operator_override_requested:
         return AgentSandboxDecision(
@@ -335,24 +547,23 @@ def resolve_agent_sandbox_decision(
             head_status=head_status,
             operator_override_requested=False,
             granting_tier=granting_tier,
+            author_gate=author_gate_status,
+            author_gate_offending_email=author_gate_outcome.offending_email,
         )
 
-    honour = _tier_honours_override(
-        configured_tier,
-        event_name=event_name,
-        event=event,
-        head_sha=head_sha,
-        default_branch=default_branch,
-        config_root=repo_root,
-    )
-    reason = (
-        f"trust.agentSandbox={configured_tier} grants override for {head_status}"
-        if honour
-        else (
+    honour = configured_native_honour and author_gate_outcome.status != "refused"
+    if not configured_native_honour:
+        reason = (
             f"trust.agentSandbox={configured_tier} refuses override for "
             f"event={event_name} head={head_status}"
         )
-    )
+    elif author_gate_outcome.status == "refused":
+        reason = (
+            f"trust.agentSandbox={configured_tier} would grant override for {head_status}, "
+            f"but trust.sandboxTrustedAuthors refuses it: {author_gate_outcome.detail}"
+        )
+    else:
+        reason = f"trust.agentSandbox={configured_tier} grants override for {head_status}"
     decision = AgentSandboxDecision(
         honour=honour,
         reason=reason,
@@ -362,6 +573,8 @@ def resolve_agent_sandbox_decision(
         head_status=head_status,
         operator_override_requested=operator_override_requested,
         granting_tier=granting_tier,
+        author_gate=author_gate_status,
+        author_gate_offending_email=author_gate_outcome.offending_email,
     )
     _log_agent_sandbox_decision(decision)
     return decision
@@ -386,6 +599,9 @@ def agent_sandbox_manifest_fields(decision: AgentSandboxDecision) -> dict[str, s
         fields["agent_sandbox_granted"] = "false"
     if decision.granting_tier is not None:
         fields["agent_sandbox_granting_tier"] = decision.granting_tier
+    fields["agent_sandbox_author_gate"] = decision.author_gate
+    if decision.author_gate_offending_email:
+        fields["agent_sandbox_author_gate_offending_email"] = decision.author_gate_offending_email
     return fields
 
 
@@ -479,6 +695,7 @@ def trust_policy_manifest_fields(policy: TrustPolicy) -> dict[str, str]:
 __all__ = [
     "AGENT_SANDBOX_LEVELS",
     "AgentSandboxDecision",
+    "AuthorGateStatus",
     "AuthorityTrust",
     "ExecutionTrust",
     "ResolvedFrom",
