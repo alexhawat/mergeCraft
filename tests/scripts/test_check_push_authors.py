@@ -225,3 +225,81 @@ def test_pre_commit_from_to_ref_env_vars_are_used(
     exit_code = main([])
     assert exit_code == 1
     assert "attacker@evil.example" in capsys.readouterr().err
+
+
+# --- #623 — a first push to a new remote branch must not bypass the guard ----
+
+_ZERO_SHA = "0" * 40
+_ZERO_SHA_256 = "0" * 64
+
+
+def _repo_with_origin_default(repo: Path, *, author_email: str) -> None:
+    """Give ``repo`` an ``origin/main`` to resolve against, then a branch commit.
+
+    Mirrors the real shape of the bypass: a branch whose commits are not yet on
+    the remote, pushed for the first time, so git hands the hook an all-zeros
+    ``<remote-sha>``.
+    """
+    _commit(
+        repo,
+        author_email="trusted@example.com",
+        committer_email="trusted@example.com",
+        message="base",
+    )
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    _git(repo, "checkout", "-q", "-b", "feature")
+    _commit(repo, author_email=author_email, committer_email=author_email, message="branch work")
+
+
+def test_new_remote_branch_still_checks_authors(repo: Path, monkeypatch: MonkeyPatch) -> None:
+    """The #623 bypass: an all-zeros from-ref must not skip the author check.
+
+    Git's pre-push protocol sends an all-zeros ``<remote-sha>`` when the remote
+    ref does not exist yet, and pre-commit forwards it as
+    ``PRE_COMMIT_FROM_REF``. Passing that through as a range made ``git log``
+    fail, which the script treated as "undeterminable, pass" — turning the
+    guard into a no-op on exactly the push it exists to catch (a fork branch
+    pushed to ``origin`` for the first time).
+    """
+    _repo_with_origin_default(repo, author_email="attacker@evil.example")
+    monkeypatch.setenv("MERGECRAFT_TRUSTED_AUTHORS", "trusted@example.com")
+    monkeypatch.setenv("PRE_COMMIT_FROM_REF", _ZERO_SHA)
+    monkeypatch.setenv("PRE_COMMIT_TO_REF", "HEAD")
+
+    assert main([]) == 1, "a new-branch push with a foreign author must be refused"
+
+
+def test_new_remote_branch_passes_for_trusted_authors(repo: Path, monkeypatch: MonkeyPatch) -> None:
+    """The new-branch path resolves a real range, so trusted commits still pass."""
+    _repo_with_origin_default(repo, author_email="trusted@example.com")
+    monkeypatch.setenv("MERGECRAFT_TRUSTED_AUTHORS", "trusted@example.com")
+    monkeypatch.setenv("PRE_COMMIT_FROM_REF", _ZERO_SHA)
+    monkeypatch.setenv("PRE_COMMIT_TO_REF", "HEAD")
+
+    assert main([]) == 0
+
+
+def test_new_remote_branch_sentinel_is_matched_by_shape(
+    repo: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A SHA-256 repository spells the same sentinel with 64 zeros, not 40."""
+    _repo_with_origin_default(repo, author_email="attacker@evil.example")
+    monkeypatch.setenv("MERGECRAFT_TRUSTED_AUTHORS", "trusted@example.com")
+    monkeypatch.setenv("PRE_COMMIT_FROM_REF", _ZERO_SHA_256)
+    monkeypatch.setenv("PRE_COMMIT_TO_REF", "HEAD")
+
+    assert main([]) == 1
+
+
+def test_branch_deletion_passes_without_error(
+    repo: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
+    """An all-zeros *to*-ref is a branch deletion — nothing to check, pass cleanly."""
+    _repo_with_origin_default(repo, author_email="attacker@evil.example")
+    monkeypatch.setenv("MERGECRAFT_TRUSTED_AUTHORS", "trusted@example.com")
+    monkeypatch.setenv("PRE_COMMIT_FROM_REF", "HEAD")
+    monkeypatch.setenv("PRE_COMMIT_TO_REF", _ZERO_SHA)
+
+    assert main([]) == 0
+    assert "branch deletion" in capsys.readouterr().err

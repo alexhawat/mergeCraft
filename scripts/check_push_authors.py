@@ -7,8 +7,14 @@ gates the Codex sandbox override server-side; this guard catches the same
 mistake — a fork PR checked out onto a local branch and pushed to ``origin`` —
 before the branch ever reaches origin at all.
 
-This is a guardrail, not a gate: when the push range can't be determined it
-**passes**. It must never block a legitimate push on a detection failure.
+This is a guardrail, not a gate: when the push range genuinely can't be
+determined it **passes**. It must never block a legitimate push on a detection
+failure. "Genuinely" excludes a *new* remote branch: git's pre-push protocol
+passes an all-zeros ``<remote-sha>`` when the remote ref does not exist yet,
+and pre-commit forwards it as ``PRE_COMMIT_FROM_REF``. That case is not
+undeterminable — it means every commit on the branch is new to the remote,
+which is the case this guard most needs to check, and is exactly the shape a
+fork branch pushed to ``origin`` for the first time takes.
 
 Module: scripts.check_push_authors
 Depends: pathlib, subprocess, sys
@@ -56,18 +62,53 @@ def _default_branch() -> str | None:
     return None
 
 
+def _is_zero_sha(ref: str | None) -> bool:
+    """True for git's all-zeros sentinel sha.
+
+    Matched by shape rather than against a fixed 40-character literal: a
+    SHA-256 repository uses 64 zeros for the same sentinel.
+    """
+    return bool(ref) and set(str(ref)) == {"0"}
+
+
+def _new_branch_range(to_ref: str) -> str | None:
+    """Return the range for a push creating a new remote branch, or None.
+
+    Prefers ``merge-base(origin/<default>, <to_ref>)..<to_ref>`` so the range is
+    the branch's own commits rather than everything that landed on the default
+    branch since it diverged. Falls back to ``origin/<default>..<to_ref>``.
+    """
+    default_branch = _default_branch()
+    if not default_branch:
+        return None
+    base_ref = f"origin/{default_branch}"
+    if _run_git(["rev-parse", "--verify", base_ref]).returncode != 0:
+        return None
+    merge_base = _run_git(["merge-base", base_ref, to_ref])
+    if merge_base.returncode == 0 and merge_base.stdout.strip():
+        return f"{merge_base.stdout.strip()}..{to_ref}"
+    return f"{base_ref}..{to_ref}"
+
+
 def _resolve_range(explicit: str | None) -> str | None:
     """Return a ``<base>..<head>`` git range for the push, or None if undeterminable.
 
     Precedence: an explicit ``--range``; ``PRE_COMMIT_FROM_REF`` /
-    ``PRE_COMMIT_TO_REF`` (set by pre-commit for the ``pre-push`` stage);
-    ``@{upstream}..HEAD``; ``origin/<default-branch>..HEAD``.
+    ``PRE_COMMIT_TO_REF`` (set by pre-commit for the ``pre-push`` stage), with
+    an all-zeros ``from`` ref resolved against the default branch instead of
+    passed through as a bogus range; ``@{upstream}..HEAD``;
+    ``origin/<default-branch>..HEAD``.
     """
     if explicit:
         return explicit
 
     from_ref = os.environ.get("PRE_COMMIT_FROM_REF")
     to_ref = os.environ.get("PRE_COMMIT_TO_REF")
+    if to_ref and _is_zero_sha(from_ref):
+        # New remote branch: `git log 000..000..HEAD` is not a valid range, and
+        # letting it fail turned this guard into a no-op on exactly the push it
+        # exists to catch.
+        return _new_branch_range(to_ref)
     if from_ref and to_ref:
         return f"{from_ref}..{to_ref}"
 
@@ -124,9 +165,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if _is_zero_sha(os.environ.get("PRE_COMMIT_TO_REF")):
+        print(
+            "check_push_authors: PRE_COMMIT_TO_REF is the all-zeros sentinel "
+            "(branch deletion) — nothing to check",
+            file=sys.stderr,
+        )
+        return 0
+
     range_spec = _resolve_range(args.range_spec)
     if range_spec is None:
-        print("check_push_authors: could not determine the push range; skipping", file=sys.stderr)
+        print(
+            "check_push_authors: could not determine the push range "
+            "(no --range, no pre-commit refs, no upstream, no origin default branch) "
+            "— skipping the author check",
+            file=sys.stderr,
+        )
         return 0
 
     commits = _commits_in_range(range_spec)
