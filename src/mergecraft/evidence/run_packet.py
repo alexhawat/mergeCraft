@@ -285,6 +285,9 @@ def _assemble_packet_core(
         trajectory=trajectory,
         mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
         dispatched_lens_ids=list(state.dispatched_lens_ids),
+        agent_terminal_verdict=(
+            state.terminal_submission.verdict if state.terminal_submission is not None else None
+        ),
     )
 
 

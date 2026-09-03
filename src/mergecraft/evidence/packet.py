@@ -82,7 +82,13 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   (MCB-15 / D7 / D9).
 # - 1.11.0 — W7 (plan 12) adds ``run_health``: run-scoped findings and their
 #   advisory conclusion, partitioned out of the top-level ``findings`` list.
-PACKET_SCHEMA_VERSION = "1.11.0"
+# - 1.12.0 — #619 adds ``agent_terminal_verdict``: the ``verdict`` value the
+#   agent recorded via ``submit_review_verdict``, carried onto the packet so
+#   ``decide_approval`` can apply the one-way ratchet (a ``request_changes``
+#   terminal verdict can bind the structural conclusion downward, never up).
+#   Optional and defaults to ``None`` — a packet built before this version
+#   still validates.
+PACKET_SCHEMA_VERSION = "1.12.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -261,6 +267,12 @@ class MergeEvidencePacket(BaseModel):
     trajectory: TrajectoryRecord | None = None
     evals: list[EvalMetadata] | None = None
     mode_prompt_versions: list[ModePromptVersion] | None = None
+    # #619 — the agent's own terminal ``submit_review_verdict`` call, distinct
+    # from ``self_assessment`` (the legacy ``create_pull_request_review``
+    # ``approved`` boolean) and from ``decision`` (the structural verdict this
+    # field feeds into as a one-way ratchet; see
+    # ``mergecraft.agents.gates._decide_approval_from_packet``).
+    agent_terminal_verdict: Literal["approve", "request_changes"] | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:
