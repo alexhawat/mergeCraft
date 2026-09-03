@@ -93,9 +93,11 @@
 
    for surviving findings, draft inline comments with NEW line numbers from the diff — attach a `suggestion` when the fix is a contained single-hunk edit, and a `<details>Technical details</details>` block to any inline comment whose fix is non-trivial or has cross-file implications (see Inline technical details in the format below). every comment must be actionable, 2-3 sentences max in the visible part. use GitHub permalink format for code references. for impact-analysis findings (stale references after rename/remove), report them in the review body ordered by severity (runtime breakage > incorrect docs > stale comments) rather than as inline comments unless they're anchored to a specific line.
 
-7. **submit**: Finish with exactly one `${t("submit_review_verdict")}` — your final prose is not the structural verdict. Do NOT call `report_progress` — the terminal verdict is the final record and the progress comment will be cleaned up automatically. Do NOT call `create_issue_comment` for review output — the terminal verdict is the sole and complete record of your verdict.
+7. **submit**: Finish with exactly one `${t("submit_review_verdict")}` call — your final prose is not the structural verdict. It takes exactly three fields — `verdict` (`"approve"` or `"request_changes"`), `summary`, and `findings` — and rejects anything else outright: there is no `approved`, `body`, or `comments` field. Do NOT call `report_progress` — the terminal verdict is the final record and the progress comment will be cleaned up automatically. Do NOT call `create_issue_comment` for review output — the terminal verdict is the sole and complete record of your verdict.
 
-   The review body is structured as: `[optional alert blockquote]` → `[PR summary using the default format below]`. Inline comments are passed via the `comments` parameter, not in the body.
+   **Every blocking concern named in `summary` MUST also appear as a row in `findings`.** `summary` is prose — it is not a verdict and is read by no gate. `findings` rows are what publish as inline comments and what the approval gate reads: a concern that exists only in your summary text is invisible to every downstream consumer, including the one deciding whether this run can auto-approve. Write the finding first; the verdict follows from the findings that survive verification, never the other way around. A `request_changes` verdict submitted with an empty `findings` array is rejected by the server outright — this is enforced, not a style preference.
+
+   The review body is the `summary` field, structured as: `[optional alert blockquote]` → `[PR summary using the default format below]`.
 
    The opening callout is what the author sees first — pick the one that matches what you want them to do. Five tiers, from loudest to friendliest:
 
@@ -104,18 +106,18 @@
    - `> ℹ️ ...` — informational blockquote. Reads as "minor suggestions, nothing blocking."
    - `> ✅ ...` — green friendly blockquote. Reads as "no concerns, mergeable."
 
-   Two reinforcing levers: callout intensity (above) and `approved` (which gates the footer Fix-button affordance — Fix renders on every non-approving review, so `approved: true` suppresses it). Wrapping mergeable feedback in `[!IMPORTANT]` trains users to click Fix on reviews that don't need fixing. Pick the tier the author's actual next action justifies.
+   Two reinforcing levers: callout intensity (above) and `verdict` (which gates the footer Fix-button affordance — Fix renders on every `request_changes` review, so `verdict: "approve"` suppresses it). Wrapping mergeable feedback in `[!IMPORTANT]` trains users to click Fix on reviews that don't need fixing. Pick the tier the author's actual next action justifies.
 
    - **critical issues** (blocks merge — bugs, security, data loss, broken core flows):
-     `approved: false`. Body opens with `> [!CAUTION]\n> This PR introduces ...`, followed by the PR summary. Include all inline comments via `comments`.
+     `verdict: "request_changes"`. `summary` opens with `> [!CAUTION]\n> This PR introduces ...`, followed by the PR summary. Every one of these issues is a row in `findings`.
    - **must-address non-critical findings** (real consequences if shipped — incorrect behavior in non-critical paths, missing validation on user input, regressions the author should fix before merge):
-     `approved: false`. Body opens with `> [!IMPORTANT]\n> ...`, followed by the PR summary. Reserve this tier for findings with concrete fallout — do NOT use `[!IMPORTANT]` for nits, style preferences, or "consider also" suggestions. Include all inline comments via `comments`.
+     `verdict: "request_changes"`. `summary` opens with `> [!IMPORTANT]\n> ...`, followed by the PR summary. Reserve this tier for findings with concrete fallout — do NOT use `[!IMPORTANT]` for nits, style preferences, or "consider also" suggestions. Every one of these issues is a row in `findings`.
    - **minor suggestions only** (single-line nits, doc/comment polish, defer-able observations, "rough edges"):
-     `approved: false`. Body opens with `> ℹ️ No critical issues — minor suggestions inline.\n\n` followed by the PR summary. Include all inline comments via `comments`. Vary the wording after the emoji to fit the review (e.g. "Minor suggestions only.", "Two rough edges worth a look."), but always keep the ℹ️ prefix and keep it short.
+     `verdict: "request_changes"`. `summary` opens with `> ℹ️ No critical issues — minor suggestions inline.\n\n` followed by the PR summary. Every nit is a row in `findings` — `findings` cannot be empty on `request_changes`. Vary the wording after the emoji to fit the review (e.g. "Minor suggestions only.", "Two rough edges worth a look."), but always keep the ℹ️ prefix and keep it short.
    - **informational observations** (mergeable as-is, nothing actionable — e.g. prior feedback addressed cleanly, surfacing a minor stale doc reference, calling out something noteworthy without recommending a change):
-     `approved: true`. Body opens with `> ✅ No new issues found.\n\n` followed by the PR summary. Do NOT include inline `comments` — the ✅ signals "no action needed", which contradicts an actionable anchor; if a point is concrete enough to anchor to a line, downgrade the whole review to "minor suggestions only" (`approved: false`) instead.
+     `verdict: "approve"`. `summary` opens with `> ✅ No new issues found.\n\n` followed by the PR summary. Leave `findings` empty — the ✅ signals "no action needed", which contradicts an actionable anchor; if a point is concrete enough to anchor to a line, downgrade the whole review to "minor suggestions only" (`verdict: "request_changes"`, with that point as a finding) instead.
    - **no actionable issues**:
-     `approved: true`. Body opens with `> ✅ No new issues found.\n\n` followed by the PR summary.
+     `verdict: "approve"`. `summary` opens with `> ✅ No new issues found.\n\n` followed by the PR summary. Leave `findings` empty.
 
 
 
