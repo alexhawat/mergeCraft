@@ -30,6 +30,7 @@ from mergecraft.mcp.git_guards import (
     _reject_config_invocation,
     _reject_credential_path_operands,
     _reject_file_writing_flags,
+    _reject_grep_pager_exec,
     _reject_namespace_flag,
     _reject_no_index,
     _split_end_of_options,
@@ -62,6 +63,7 @@ __all__ = [
     "_reject_config_invocation",
     "_reject_credential_path_operands",
     "_reject_file_writing_flags",
+    "_reject_grep_pager_exec",
     "_reject_namespace_flag",
     "_reject_no_index",
     "_split_end_of_options",
@@ -384,6 +386,8 @@ def _validate_git_invocation(
         _reject_branch_writes(args)
     if command == "config":
         _reject_config_invocation(args)
+    if command == "grep":
+        _reject_grep_pager_exec(args)
     _reject_file_writing_flags(command, args)
     _reject_credential_path_operands(args, cwd=cwd, tmpdir=tmpdir)
     _validate_positional_path_confinement(args, cwd)

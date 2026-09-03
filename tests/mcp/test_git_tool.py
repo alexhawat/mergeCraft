@@ -500,6 +500,183 @@ async def test_file_writing_flags_rejected(
     assert recorder.calls == []
 
 
+async def test_grep_ls_tree_added_to_readonly_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#619 Task 6 — both verbs are strictly read-only and now allowlisted."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    for subcommand in ("grep", "ls-tree"):
+        recorder.calls.clear()
+        result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand})
+        assert result.is_error is False, result.content[0]["text"]
+        assert recorder.calls == [[subcommand]]
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "-O",
+        "-Oless",
+        "--open-files-in-pager",
+        "--open-files-in-pager=less",
+        # Unambiguous abbreviations git itself resolves.
+        "--op",
+        "--open",
+        "--open-files",
+    ],
+)
+async def test_grep_pager_exec_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    """#619 Task 6 — ``git grep -O`` / ``--open-files-in-pager`` is command execution."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": [flag, "pattern"]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+    assert "pager" in result.content[0]["text"].lower()
+
+
+async def test_grep_pager_exec_rejected_when_bundled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bundled ``-vO`` must not smuggle the pager-exec flag past position zero."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": ["-vO", "pattern"]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_grep_ambiguous_open_abbreviation_still_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--on`` resolves to ``--only-matching``, not the pager flag — must not be blocked by this guard."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "grep", "args": ["--on", "pattern"]}
+    )
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", "--on", "pattern"]]
+
+
+async def test_grep_dash_capital_c_stays_context_lines_not_global_chdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#619 Task 6 — ``grep -C3`` is context lines; must not be hoisted to the global slot."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": ["-C3", "pattern"]})
+    assert result.is_error is False, result.content[0]["text"]
+    # `-C3` stays attached to `grep`, unlike `status -C <dir>` which hoists.
+    assert recorder.calls == [["grep", "-C3", "pattern"]]
+
+
+async def test_grep_spaced_dash_capital_c_with_numeric_value_stays_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The spaced form (``-C 3``) must also stay put, not be read as a chdir target."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "grep", "args": ["-C", "3", "pattern"]}
+    )
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", "-C", "3", "pattern"]]
+
+
+async def test_ls_tree_recursive_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#619 Task 6 — ``git ls-tree -r HEAD`` is a plain read-only listing."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "ls-tree", "args": ["-r", "HEAD"]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["ls-tree", "-r", "HEAD"]]
+
+
+@pytest.mark.parametrize("subcommand", ["grep", "ls-tree"])
+async def test_grep_and_ls_tree_still_refuse_glued_dash_c_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """#619 Task 6 — the alias-execution refusal still holds for both new verbs.
+
+    The glued ``-c<key>=<value>`` spelling is unambiguous regardless of
+    whether the subcommand declares ``c`` for itself (``grep`` does, for
+    ``--count``; ``ls-tree`` does not), so both refuse it with the same
+    alias-execution message.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": subcommand, "args": ["-calias.x=!true"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+    assert CONFIG_FLAG_MESSAGE in result.content[0]["text"]
+
+
+async def test_ls_tree_bare_dash_c_is_refused_as_ambiguous_not_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ls-tree`` does not declare its own ``-c``, so a bare one stays refused."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "ls-tree", "args": ["-c"]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_grep_bare_dash_c_is_forwarded_as_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``grep`` declares its own ``-c`` (``--count``); a bare one is forwarded."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": ["-c", "pattern"]})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", "-c", "pattern"]]
+
+
+@pytest.mark.parametrize("subcommand", ["grep", "ls-tree"])
+async def test_grep_and_ls_tree_still_refuse_no_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """#619 Task 6 — ``--no-index`` bypasses path confinement; still refused."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand, "args": ["--no-index"]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("subcommand", ["grep", "ls-tree"])
+async def test_grep_and_ls_tree_still_refuse_paths_outside_the_repo_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """#619 Task 6 — path-confinement refusals still hold for both new verbs."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": subcommand, "args": ["--", OUTSIDE_DIR]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
 @pytest.mark.parametrize("subcommand", ["push", "fetch", "pull", "clone"])
 async def test_auth_requiring_subcommands_name_their_dedicated_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str

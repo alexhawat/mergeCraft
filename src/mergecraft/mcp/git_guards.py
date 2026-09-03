@@ -22,6 +22,7 @@ Exports:
     _SUBCOMMAND_SHORT_FLAGS -- per-subcommand declared short-flag letter sets.
     _SUBCOMMAND_OWNS_DASH_C -- subcommands where -C is their own flag, not git chdir.
     _OUTPUT_FLAG_SPELLINGS -- --output-family spellings that write a file.
+    _GREP_PAGER_EXEC_LONG_SPELLINGS -- --open-files-in-pager spellings git resolves.
     reject_if_leading_dash -- raise if value starts with a dash.
     reject_special_ref -- raise if value is a special/symbolic ref.
     validate_tag_name -- raise if tag contains refspec/flag characters.
@@ -33,6 +34,7 @@ Exports:
     _reject_credential_path_operands -- raise on credential-bearing path operands.
     _reject_branch_writes -- raise on branch write flags/positionals.
     _reject_file_writing_flags -- raise on --output-family flags for a subcommand.
+    _reject_grep_pager_exec -- raise on ``git grep -O`` / --open-files-in-pager (#619).
 """
 
 from __future__ import annotations
@@ -68,6 +70,14 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
         "for-each-ref",
         "ls-remote",
         "config",
+        # #619 Task 6 — both strictly read-only. ``grep`` needs the two
+        # dedicated guards below (``_reject_grep_pager_exec``, the
+        # ``_SUBCOMMAND_OWNS_DASH_C`` entry); ``ls-tree`` needs neither — it
+        # has no pager-exec flag and no output-file flag, so the existing
+        # path-confinement checks (``_validate_positional_path_confinement``)
+        # are the whole story for it.
+        "grep",
+        "ls-tree",
     }
 )
 # Rejected verbs that have a dedicated tool. Not an auth gate — a redirect
@@ -143,6 +153,21 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
     "for-each-ref": frozenset("cq"),
     "ls-remote": frozenset("ht"),
     "config": frozenset(),
+    # #619 Task 6 — context/pattern/list flags: -n line numbers, -i ignore-case,
+    # -l/-L files-with/without-matches, -w word-regexp, -v invert-match,
+    # -e pattern, -f pattern-file, -h no-filename, -c count, -A/-B/-C context
+    # lines, -E/-F/-P regexp-engine selectors. Deliberately excludes ``O``
+    # (``--open-files-in-pager``, rejected outright by
+    # ``_reject_grep_pager_exec`` — declaring it here would only make it
+    # eligible for the ``-c``-bundling carve-out, which is not the guard that
+    # flag needs) and every other letter not in this set, so an undeclared
+    # bundle is still refused wherever ``_subcommand_declares_shorts`` is
+    # consulted (the ``-c`` ambiguity check).
+    "grep": frozenset("nilLwvefhcABCEFP"),
+    # #619 Task 6 — -d directories-only, -l long format, -r recursive,
+    # -t show trees, -z NUL-terminate. No write, no pager-exec, no
+    # output-file letter among git's real ls-tree flags.
+    "ls-tree": frozenset("dlrtz"),
 }
 
 # ---------------------------------------------------------------------------
@@ -153,7 +178,13 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
 # ``log`` and ``show``, whitespace-insensitive blame to ``blame``, and
 # copy-force to ``branch`` — a write, which ``_reject_branch_writes`` refuses on
 # its own; what matters here is only that none of them is the chdir option.
-_SUBCOMMAND_OWNS_DASH_C: frozenset[str] = frozenset({"diff", "log", "show", "blame", "branch"})
+# #619 Task 6 — ``grep -C<n>`` is context lines (paired with -A/-B), not the
+# global chdir option; without this entry ``_extract_global_opts`` would hoist
+# it into the global slot and produce a nonsense invocation (``git -C <n>
+# grep ...`` with ``<n>`` — a context-line count — parsed as a directory).
+_SUBCOMMAND_OWNS_DASH_C: frozenset[str] = frozenset(
+    {"diff", "log", "show", "blame", "branch", "grep"}
+)
 
 # ---------------------------------------------------------------------------
 # Q4 — Which ``--output``-family flags write a file?
@@ -166,6 +197,38 @@ _SUBCOMMAND_OWNS_DASH_C: frozenset[str] = frozenset({"diff", "log", "show", "bla
 # four exactly suffices. ``-o`` is scoped, because it is ``--others`` to
 # ``ls-files`` and writes nothing.
 _OUTPUT_FLAG_SPELLINGS: frozenset[str] = frozenset({"--out", "--outp", "--outpu", "--output"})
+
+# ---------------------------------------------------------------------------
+# Q5 — Which ``git grep`` spellings execute an arbitrary pager command?
+# ---------------------------------------------------------------------------
+# ``git grep -O[<pager>]`` / ``--open-files-in-pager[=<pager>]`` shells out to
+# the named pager (or ``$PAGER``) with the matched files as arguments — a real
+# RCE vector, not just a write. Every unambiguous abbreviation git itself
+# resolves is named: ``--o`` and ``--on`` are ambiguous with ``--only-
+# matching`` (git refuses those itself), so the shortest safe prefix is
+# ``--op``; every longer prefix up to the full spelling resolves the same way.
+_GREP_PAGER_EXEC_LONG_SPELLINGS: frozenset[str] = frozenset(
+    {
+        "--op",
+        "--ope",
+        "--open",
+        "--open-",
+        "--open-f",
+        "--open-fi",
+        "--open-fil",
+        "--open-file",
+        "--open-files",
+        "--open-files-",
+        "--open-files-i",
+        "--open-files-in",
+        "--open-files-in-",
+        "--open-files-in-p",
+        "--open-files-in-pa",
+        "--open-files-in-pag",
+        "--open-files-in-page",
+        "--open-files-in-pager",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Ref-validation helpers
@@ -618,6 +681,31 @@ def _reject_file_writing_flags(command: str, args: list[str]) -> None:
             raise ValueError(msg)
 
 
+def _reject_grep_pager_exec(args: list[str]) -> None:
+    """Reject ``git grep -O`` / ``--open-files-in-pager`` unconditionally (#619 Task 6).
+
+    ``-O[<pager>]`` opens every matched file in a pager (``$PAGER`` by
+    default, or the named one) — command execution, not a write, so it is
+    refused regardless of ``payload.shell`` the same way ``-c`` is. Covers the
+    spaced form (``-O``), the attached form (``-Oless``), the inline long form
+    (``--open-files-in-pager=less``), and every unambiguous abbreviation git
+    itself resolves (``_GREP_PAGER_EXEC_LONG_SPELLINGS``). Checked anywhere in
+    a short-flag token (not only the leading letter) so a bundle like ``-vO``
+    cannot smuggle it past a check that only looked at position zero.
+
+    Raises:
+        ValueError: when any argument enables the pager.
+    """
+    for arg in args:
+        if arg.startswith("-") and not arg.startswith("--") and "O" in arg[1:]:
+            msg = f"Blocked: 'grep {arg}' opens a pager — arbitrary command execution."
+            raise ValueError(msg)
+        name = arg.split("=", 1)[0]
+        if name in _GREP_PAGER_EXEC_LONG_SPELLINGS:
+            msg = f"Blocked: 'grep {arg}' opens a pager — arbitrary command execution."
+            raise ValueError(msg)
+
+
 __all__ = [
     "_BAD_REF_CHARS",
     "_BRANCH_FLAGS_TAKING_VALUE",
@@ -625,6 +713,7 @@ __all__ = [
     "_CONFIG_FLAGS",
     "_CONFIG_FLAGS_TAKING_VALUE",
     "_CONFIG_READONLY_FLAGS",
+    "_GREP_PAGER_EXEC_LONG_SPELLINGS",
     "_OUTPUT_FLAG_SPELLINGS",
     "_READONLY_SUBCOMMANDS",
     "_REDIRECT_TO_TOOL",
@@ -640,6 +729,7 @@ __all__ = [
     "_reject_config_invocation",
     "_reject_credential_path_operands",
     "_reject_file_writing_flags",
+    "_reject_grep_pager_exec",
     "_reject_namespace_flag",
     "_reject_no_index",
     "_subcommand_declares_shorts",
