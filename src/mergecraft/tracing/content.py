@@ -20,9 +20,12 @@ Operators who own the sink can lift the cap with an **explicit second
 knob**: env ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT``, CLI
 ``--tracing-export-untrusted-content``, the matching Action input, or
 ``tracing.exportUntrustedContent`` from a **trusted** source (same-repo
-YAML, or the run-start snapshot on ``pull_request_target`` — the base
-checkout). Fork-controlled HEAD YAML cannot lift D7.
-``content: full`` alone still does not ship bodies on an untrusted run.
+YAML, or the run-scope settings snapshot when its provenance says it was
+captured from a checkout a fork cannot control — in practice, the base ref
+on a ``pull_request_target`` run, pinned before ``checkout_pr`` ever runs;
+see ``RepoSettingsSnapshot.operator_owned``). Fork-controlled HEAD YAML
+cannot lift D7. ``content: full`` alone still does not ship bodies on an
+untrusted run.
 
 D8: the ``.sha256`` of the ORIGINAL payload is emitted at every level above
 ``off`` — it detects prompt drift between two runs even when neither

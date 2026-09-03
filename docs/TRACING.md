@@ -293,6 +293,15 @@ Operator-owned sources, in order:
    on the run-start snapshot of a `pull_request_target` job (the base
    checkout — not the fork HEAD after `checkout_pr`)
 
+Source (3) is gated by the snapshot's own `operator_owned` provenance
+(`RepoSettingsSnapshot.operator_owned`, set once when the snapshot is
+captured, from the same event name that derived `trust_tier` — never a
+second, independent read of `GITHUB_EVENT_NAME`). A snapshot with no
+provenance, or one rebaselined after `checkout_pr` with no prior snapshot
+to carry it forward from (a live load off whatever is on disk, which may
+already be the fork's own HEAD), is never operator-owned — it falls
+through to `None`, i.e. only (1) or (2) can lift the cap.
+
 ```yaml
 tracing:
   enabled: true

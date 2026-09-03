@@ -404,18 +404,23 @@ def test_trusted_yaml_export_still_lifts_cap(monkeypatch: MonkeyPatch) -> None:
 
 
 def test_prt_base_snapshot_yaml_lifts_untrusted_cap(monkeypatch: MonkeyPatch) -> None:
-    """``pull_request_target`` honors ``exportUntrustedContent`` from the base snapshot."""
+    """An ``operator_owned`` run-scope snapshot honors ``exportUntrustedContent``.
+
+    This is what a real ``pull_request_target`` run produces: the run-start
+    snapshot captured before ``checkout_pr`` ever runs is stamped
+    ``operator_owned=True`` (see ``main.py:_resolve_credentials``).
+    """
     from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
     from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.genai import resolve_capture_policy
 
     monkeypatch.delenv(_ENV_VAR, raising=False)
     monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     reset_gateway_settings_cache()
     monkeypatch.setattr(
         "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
-        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings()})(),
+        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings(), "operator_owned": True})(),
     )
     monkeypatch.setattr(
         "mergecraft.config.load_repo_settings",
@@ -428,18 +433,79 @@ def test_prt_base_snapshot_yaml_lifts_untrusted_cap(monkeypatch: MonkeyPatch) ->
 def test_fork_pull_request_snapshot_yaml_cannot_lift_cap(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """A ``pull_request`` snapshot is the fork HEAD — YAML still cannot lift D7."""
+    """A non-operator-owned snapshot (a plain ``pull_request`` fork run) cannot lift D7.
+
+    For a plain fork ``pull_request`` run the checkout at capture time is
+    already the fork HEAD, so ``main.py`` never stamps ``operator_owned=True``
+    on it. The cap must hold even though the mocked snapshot carries YAML
+    that asks to lift it.
+    """
     from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
     from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.genai import resolve_capture_policy
 
     monkeypatch.delenv(_ENV_VAR, raising=False)
     monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     reset_gateway_settings_cache()
     monkeypatch.setattr(
         "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
-        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings()})(),
+        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings(), "operator_owned": False})(),
+    )
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.METADATA
+
+
+def test_ambient_github_event_name_does_not_influence_the_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The ambient ``GITHUB_EVENT_NAME`` must never be consulted directly (review finding).
+
+    Set it to ``pull_request_target`` — the one value that used to bypass the
+    cap outright — while the snapshot (the actual authority, stamped from
+    whatever event really drove ``trust_tier``) says this run is NOT
+    operator-owned. The cap must still hold: only ``snapshot.operator_owned``
+    may lift it, never a second, independent read of the event name.
+    """
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    # The lie: ambient env claims pull_request_target even though the
+    # authoritative event (reflected in the snapshot's provenance) was not.
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
+        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings(), "operator_owned": False})(),
+    )
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.METADATA
+
+
+def test_no_run_scope_snapshot_fails_closed(monkeypatch: MonkeyPatch) -> None:
+    """No installed run-scope snapshot at all ⇒ ``None`` ⇒ cap holds (fail closed)."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
+        lambda: None,
     )
     monkeypatch.setattr(
         "mergecraft.config.load_repo_settings",

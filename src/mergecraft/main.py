@@ -174,6 +174,11 @@ class RunContext:
     authority_trust: TrustTier = "untrusted"
     trust_self_review_level: str = "off"
     token_ref: TokenRef | None = None
+    # D7 — whether the run-start settings snapshot is operator-owned (the base
+    # ref, on a ``pull_request_target`` run, before ``checkout_pr`` ever runs).
+    # Carried forward so ``_build_run_tool_context`` doesn't take a second,
+    # independent read of ``GITHUB_EVENT_NAME`` for the same decision.
+    settings_snapshot_operator_owned: bool = False
 
     # -- populated by ``_execute_agent`` -------------------------------------
     model_pin: bool = False
@@ -728,8 +733,23 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     except ForkCredentialInvariantError as exc:
         raise _ConfigurationError(str(exc)) from exc
 
-    snapshot = capture_repo_settings_snapshot(root=repo_root, settings=ctx.settings)
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    # D7 — the same ``event_name`` read below for ``resolve_trust_policy``
+    # also decides whether the settings this snapshot pins are operator-owned
+    # (the base ref, which only a ``pull_request_target`` run checks out
+    # before ``checkout_pr`` ever runs). Every downstream reader of this
+    # snapshot's provenance (tracing's D7 cap included) must consult
+    # ``snapshot.operator_owned`` rather than re-deriving its own opinion of
+    # the event from the ambient environment — see
+    # ``mergecraft.tracing.genai._yaml_export_untrusted_for_capture`` and
+    # e656debc's lesson: two independent reads of the same env var can disagree.
+    operator_owned_settings = event_name == "pull_request_target"
+    ctx.settings_snapshot_operator_owned = operator_owned_settings
+    snapshot = capture_repo_settings_snapshot(
+        root=repo_root,
+        settings=ctx.settings,
+        operator_owned=operator_owned_settings,
+    )
     shell = str(ctx.payload.get("shell") or "restricted")
     policy = resolve_trust_policy(
         event=gh_event,
@@ -1011,6 +1031,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         root=Path(primary_repo_state(tool_state).dir),
         settings=settings,
         load_learnings_files=False,
+        operator_owned=ctx.settings_snapshot_operator_owned,
     )
     from mergecraft.review.roster_auth import (
         RosterAuthError,

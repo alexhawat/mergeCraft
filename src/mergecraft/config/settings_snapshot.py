@@ -27,11 +27,30 @@ _DERIVED_GATEWAY_CACHE: ContextVar[RepoSettingsSnapshot | None] = ContextVar(
 
 @dataclass(frozen=True, slots=True)
 class RepoSettingsSnapshot:
-    """Settings resolved once at run start plus a config-file integrity hash."""
+    """Settings resolved once at run start plus a config-file integrity hash.
+
+    ``operator_owned`` is the sole authority tracing's D7 cap consults to
+    decide whether this snapshot's ``tracing.exportUntrustedContent`` may
+    lift the untrusted-run body-export cap (see
+    :func:`mergecraft.tracing.genai._yaml_export_untrusted_for_capture`).
+    It is ``True`` only when ``settings`` is known — by the caller that
+    captured it, not inferred here — to have been read from a checkout a
+    fork cannot control: the base ref on a ``pull_request_target`` run,
+    before :func:`rebaseline_repo_settings_snapshot` re-points at the PR
+    head. Every other capture (trusted runs don't need it; other untrusted
+    event shapes check out the fork head from the start; a rebaseline with
+    no prior snapshot falls back to a live load off whatever is on disk,
+    which may already be the fork's own HEAD) defaults to ``False`` —
+    fail closed, matching D6/D7's "safe default" posture. This is a
+    property of *how the value was obtained*, never of the YAML content
+    itself — fork-controlled HEAD YAML is never operator-owned regardless
+    of what it says.
+    """
 
     settings: RepoSettings
     config_hash: str
     repo_root: Path
+    operator_owned: bool = False
 
 
 def config_yaml_hash(*, root: Path) -> str:
@@ -79,8 +98,14 @@ def capture_repo_settings_snapshot(
     root: Path,
     settings: RepoSettings | None = None,
     load_learnings_files: bool = False,
+    operator_owned: bool = False,
 ) -> RepoSettingsSnapshot:
-    """Resolve settings once and record the config hash for later fail-closed checks."""
+    """Resolve settings once and record the config hash for later fail-closed checks.
+
+    ``operator_owned`` must be passed truthfully by the caller — see
+    :class:`RepoSettingsSnapshot`. It defaults to ``False`` so a caller that
+    doesn't reason about it gets the fail-closed answer.
+    """
     repo_root = root.resolve()
     resolved = settings or load_repo_settings(
         root=repo_root,
@@ -90,6 +115,7 @@ def capture_repo_settings_snapshot(
         settings=resolved,
         config_hash=config_yaml_hash(root=repo_root),
         repo_root=repo_root,
+        operator_owned=operator_owned,
     )
     _RUN_SCOPE_SNAPSHOT.set(snapshot)
     return snapshot
@@ -101,12 +127,14 @@ def capture_run_scope_snapshot(
     root: Path,
     settings: RepoSettings | None = None,
     load_learnings_files: bool = False,
+    operator_owned: bool = False,
 ) -> RepoSettingsSnapshot:
     """Pin repo settings on ``ctx`` and the run-scope ContextVar in one write."""
     snapshot = capture_repo_settings_snapshot(
         root=root,
         settings=settings,
         load_learnings_files=load_learnings_files,
+        operator_owned=operator_owned,
     )
     ctx.repo_settings_snapshot = snapshot
     return snapshot
@@ -119,16 +147,30 @@ def rebaseline_repo_settings_snapshot(ctx: ToolContext) -> RepoSettingsSnapshot:
     disk may legitimately differ from the snapshot taken at run start. Re-baseline
     once at the controlled checkout boundary; edits after that still trip
     :func:`assert_config_unchanged`.
+
+    When a prior snapshot exists (the production path — the run-start
+    snapshot captured before ``checkout_pr`` ever runs), its ``settings``
+    (and ``operator_owned`` provenance, D7) are carried forward unchanged;
+    only ``config_hash``/``repo_root`` are re-derived from the now-checked-out
+    head. When there is no prior snapshot (a caller — e.g. local ``mcp serve``
+    — that never called :func:`capture_run_scope_snapshot` before invoking
+    ``checkout_pr``), this falls back to a live load off whatever is on disk
+    *after* checkout, which may be a fork's own HEAD. That result is never
+    operator-owned regardless of what it says, so ``operator_owned`` is
+    forced to ``False`` on this branch — fail closed, never inferred from
+    content that could itself be fork-controlled.
     """
     from mergecraft.mcp.tool_state import primary_repo_state
 
     repo_root = Path(primary_repo_state(ctx.tool_state).dir or Path.cwd()).resolve()
     prior = ctx.repo_settings_snapshot
     settings = prior.settings if prior is not None else None
+    operator_owned = prior.operator_owned if prior is not None else False
     snapshot = capture_repo_settings_snapshot(
         root=repo_root,
         settings=settings,
         load_learnings_files=False,
+        operator_owned=operator_owned,
     )
     ctx.repo_settings_snapshot = snapshot
     return snapshot
