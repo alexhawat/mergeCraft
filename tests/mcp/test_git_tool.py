@@ -1232,3 +1232,61 @@ async def test_commit_changes_description_matches_the_local_only_contract(tmp_pa
         if re.search(rf"\b{claim}\b", description)
     ]
     assert claims == []
+
+
+# --- #623 — --textconv / --ext-diff run a git-config content filter -----------
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["--textconv", "--textc", "--ext-diff", "--ext", "--external-diff"],
+)
+@pytest.mark.parametrize("command", ["grep", "show", "log", "diff", "blame"])
+async def test_content_filter_exec_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str, flag: str
+) -> None:
+    """#623 — ``--textconv`` / ``--ext-diff`` shell out to a configured filter.
+
+    Refused on **every** allowlisted verb, not just the ``grep`` #619 added:
+    ``show``, ``log``, ``diff`` and ``blame`` accept both flags and predate
+    that entry, so a grep-only guard would have left the older half open.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": command, "args": [flag, "HEAD"]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+    assert "content filter" in result.content[0]["text"].lower()
+
+
+async def test_content_filter_exec_rejected_in_the_global_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pre-subcommand slot is guarded too, like ``-c`` and ``--namespace``."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "git --textconv show", "args": ["HEAD"]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("flag", ["--no-textconv", "--no-ext-diff", "--text"])
+async def test_content_filter_disabling_spellings_still_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    """The disabling spellings turn the filter *off* — refusing them helps nobody.
+
+    ``--text`` (``-a``) is a different flag entirely: git resolves an exact
+    match before any abbreviation, so only ``--textc`` and longer reach
+    ``--textconv``.
+    """
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "show", "args": [flag, "HEAD"]})
+    assert result.is_error is not True, result.content[0]["text"]
+    assert recorder.calls, "a disabling spelling must reach git"

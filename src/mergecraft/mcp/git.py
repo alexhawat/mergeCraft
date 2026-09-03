@@ -28,6 +28,7 @@ from mergecraft.mcp.git_guards import (
     _reject_branch_writes,
     _reject_config_flags,
     _reject_config_invocation,
+    _reject_content_filter_exec,
     _reject_credential_path_operands,
     _reject_file_writing_flags,
     _reject_grep_pager_exec,
@@ -388,6 +389,10 @@ def _validate_git_invocation(
         _reject_config_invocation(args)
     if command == "grep":
         _reject_grep_pager_exec(args)
+    # Unconditional: --textconv / --ext-diff execute a git-config content
+    # filter on every diff-family verb, not just the one #619 added (#623).
+    _reject_content_filter_exec(global_opts)
+    _reject_content_filter_exec(args)
     _reject_file_writing_flags(command, args)
     _reject_credential_path_operands(args, cwd=cwd, tmpdir=tmpdir)
     _validate_positional_path_confinement(args, cwd)

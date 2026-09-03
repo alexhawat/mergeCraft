@@ -35,6 +35,7 @@ Exports:
     _reject_branch_writes -- raise on branch write flags/positionals.
     _reject_file_writing_flags -- raise on --output-family flags for a subcommand.
     _reject_grep_pager_exec -- raise on ``git grep -O`` / --open-files-in-pager (#619).
+    _reject_content_filter_exec -- raise on --textconv / --ext-diff (#623).
 """
 
 from __future__ import annotations
@@ -227,6 +228,41 @@ _GREP_PAGER_EXEC_LONG_SPELLINGS: frozenset[str] = frozenset(
         "--open-files-in-pag",
         "--open-files-in-page",
         "--open-files-in-pager",
+    }
+)
+
+# ---------------------------------------------------------------------------
+# Q6 — Which flags run a configured content filter? (#623)
+# ---------------------------------------------------------------------------
+# ``--textconv`` and ``--ext-diff`` make git shell out to the command named by
+# ``diff.<driver>.textconv`` / ``diff.external``. That is the same class as
+# ``grep -O``: command execution reached through a read-only verb. It is not
+# exploitable on its own — defining a driver needs ``-c``/``--config-env``
+# (refused unconditionally by ``_reject_config_flags``) or a writable
+# ``.git/config`` — but the guard is the thing that keeps it that way, so the
+# flags are refused rather than left resting on a second control.
+#
+# Applied to every allowlisted verb, not only ``grep``: ``show``, ``log``,
+# ``diff`` and ``blame`` all accept both flags and all predate #619's grep
+# entry, so scoping this to ``grep`` would leave the older half of the gap open.
+#
+# ``--no-textconv`` / ``--no-ext-diff`` are the *disabling* spellings and stay
+# allowed. ``--text`` (``-a``) is a different flag and is unaffected: git
+# resolves an exact match first, so only ``--textc`` and longer reach
+# ``--textconv``.
+_CONTENT_FILTER_EXEC_SPELLINGS: frozenset[str] = frozenset(
+    {
+        "--textc",
+        "--textco",
+        "--textcon",
+        "--textconv",
+        "--ext",
+        "--ext-",
+        "--ext-d",
+        "--ext-di",
+        "--ext-dif",
+        "--ext-diff",
+        "--external-diff",
     }
 )
 
@@ -706,6 +742,31 @@ def _reject_grep_pager_exec(args: list[str]) -> None:
             raise ValueError(msg)
 
 
+def _reject_content_filter_exec(args: list[str]) -> None:
+    """Reject ``--textconv`` / ``--ext-diff`` on any read-only verb (#623).
+
+    Both make git execute a command named in git config — ``diff.<driver>.textconv``
+    and ``diff.external`` — so a read-only verb becomes an execution primitive.
+    Refused regardless of ``payload.shell``, the same way ``-c`` and ``grep -O``
+    are, and refused for every verb rather than just ``grep``: ``show``, ``log``,
+    ``diff`` and ``blame`` accept them too and were allowlisted long before.
+
+    The disabling spellings (``--no-textconv``, ``--no-ext-diff``) are not
+    matched and stay allowed.
+
+    Raises:
+        ValueError: when any argument enables a configured content filter.
+    """
+    for arg in args:
+        name = arg.split("=", 1)[0]
+        if name in _CONTENT_FILTER_EXEC_SPELLINGS:
+            msg = (
+                f"Blocked: {arg!r} runs a git-config content filter "
+                "(diff.<driver>.textconv / diff.external) — arbitrary command execution."
+            )
+            raise ValueError(msg)
+
+
 __all__ = [
     "_BAD_REF_CHARS",
     "_BRANCH_FLAGS_TAKING_VALUE",
@@ -713,6 +774,7 @@ __all__ = [
     "_CONFIG_FLAGS",
     "_CONFIG_FLAGS_TAKING_VALUE",
     "_CONFIG_READONLY_FLAGS",
+    "_CONTENT_FILTER_EXEC_SPELLINGS",
     "_GREP_PAGER_EXEC_LONG_SPELLINGS",
     "_OUTPUT_FLAG_SPELLINGS",
     "_READONLY_SUBCOMMANDS",
