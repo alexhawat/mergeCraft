@@ -47,9 +47,7 @@ def test_untrusted_run_strips_secret_env(monkeypatch, fork_pr_event: dict[str, o
     trust = import_module("mergecraft.analyzers.trust")
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk_secret")
-    env = trust.build_analyzer_env(
-        tier="untrusted", repo_env={"GITHUB_TOKEN": "ghp_secret"}
-    )
+    env = trust.build_analyzer_env(tier="untrusted", repo_env={"GITHUB_TOKEN": "ghp_secret"})
     values = " ".join(f"{k}={v}" for k, v in env.items())
     assert "ghp_secret" not in values
     assert "sk_secret" not in values
