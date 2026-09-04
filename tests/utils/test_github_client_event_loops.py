@@ -47,6 +47,27 @@ class _Handler(BaseHTTPRequestHandler):
         """Silence the stdlib access log."""
 
 
+class _QuietServer(ThreadingHTTPServer):
+    """A loopback server that cannot leak into another test's output.
+
+    Two hardenings, both learned from a real CI failure. ``socketserver``
+    writes "Exception occurred during processing of request ..." plus a
+    traceback straight to ``sys.stderr``; when an unrelated test is running
+    under a Click/Typer ``CliRunner``, that lands inside the runner's captured
+    output and fails *its* assertions (``tests/cli/test_doctor.py``). And
+    ``ThreadingHTTPServer`` defaults to ``daemon_threads = True``, which makes
+    ``block_on_close`` False, so ``server_close()`` returns while per-connection
+    handler threads are still alive — the keep-alive connection this module
+    needs guarantees at least one is parked in ``rfile.readline()``.
+    """
+
+    daemon_threads = False  # so block_on_close is True and server_close() joins
+    allow_reuse_address = True
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        """Swallow handler errors instead of printing them to stderr."""
+
+
 @pytest.fixture
 def api_base_url() -> Iterator[str]:
     """A real loopback HTTP server, so the httpx connection pool is exercised.
@@ -54,7 +75,7 @@ def api_base_url() -> Iterator[str]:
     A mock or ASGI transport would not do: those bypass the pool, and the pool
     is precisely what carries the loop-bound primitives this test is about.
     """
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    server = _QuietServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
