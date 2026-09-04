@@ -164,7 +164,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Untrusted analyzer runs no longer grant host networking when a manifest
   declares a non-empty `network_allowlist` — dependency scanners that need
   upstream access are skipped with a named egress-policy outcome on untrusted
-  events; filtered egress to declared hosts is not implemented yet (#538)
+  events unless the runner can enforce a filtered netns (`ip netns`, veth,
+  iptables). The GitHub Action image typically cannot, so that path stays
+  fail-closed (#538)
 
 #### Added
 
