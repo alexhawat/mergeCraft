@@ -532,7 +532,7 @@ def test_logfire_extra_probe_reports_absence_without_raising(monkeypatch: Monkey
 
 
 # ---------------------------------------------------------------------------
-# interactive command arms
+# auth logfire — interactive command arms
 # ---------------------------------------------------------------------------
 
 
@@ -547,134 +547,40 @@ def _stub_getpass(monkeypatch: MonkeyPatch, value: str | BaseException) -> None:
     monkeypatch.setattr(getpass, "getpass", _prompt)
 
 
-def test_empty_input_cancels_cleanly_without_writing_anything(
+def test_empty_logfire_token_cancels_cleanly_without_writing_anything(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     env_path = _local_env(monkeypatch, tmp_path)
     _stub_getpass(monkeypatch, "   ")
-    result = runner.invoke(app, ["auth", "claude", "--scope", "local"], env=_ENV_WIDE)
+    result = runner.invoke(app, ["auth", "logfire", "--scope", "local"], env=_ENV_WIDE)
     assert result.exit_code == 0, result.stdout + result.stderr
     assert "canceled." in result.stdout + result.stderr
     assert not env_path.exists()
 
 
-def test_a_keyboard_interrupt_at_the_prompt_cancels_cleanly(
+def test_a_keyboard_interrupt_at_the_logfire_prompt_cancels_cleanly(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     env_path = _local_env(monkeypatch, tmp_path)
     _stub_getpass(monkeypatch, KeyboardInterrupt())
-    result = runner.invoke(app, ["auth", "gemini", "--scope", "local"], env=_ENV_WIDE)
+    result = runner.invoke(app, ["auth", "logfire", "--scope", "local"], env=_ENV_WIDE)
     assert result.exit_code == 0, result.stdout + result.stderr
     assert "canceled." in result.stdout + result.stderr
     assert not env_path.exists()
 
 
-def test_claude_warns_about_an_unexpected_prefix_but_still_saves(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    env_path = _local_env(monkeypatch, tmp_path)
-    _stub_getpass(monkeypatch, "ghp_not_an_oauth_token")
-    result = runner.invoke(app, ["auth", "claude", "--scope", "local"], env=_ENV_WIDE)
-    assert result.exit_code == 0, result.stdout + result.stderr
-    assert "doesn't look like a claude setup-token" in result.stdout + result.stderr
-    assert dotenv_values(env_path)["CLAUDE_CODE_OAUTH_TOKEN"] == "ghp_not_an_oauth_token"
-
-
-def test_a_rejected_provider_key_bails_before_writing_the_env(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    env_path = _local_env(monkeypatch, tmp_path)
-    _stub_getpass(monkeypatch, "bad-key")
-    _mock_httpx(monkeypatch, _status(401))
-    result = runner.invoke(app, ["auth", "gemini", "--scope", "local"], env=_ENV_WIDE)
-    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
-    assert "Gemini API key validation failed" in result.stdout + result.stderr
-    assert not env_path.exists()
-
-
-def test_codex_bails_when_the_cli_is_not_on_path(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
-    _local_env(monkeypatch, tmp_path)
-    monkeypatch.setattr(auth_cmd.shutil, "which", lambda _name: None)
-    result = runner.invoke(app, ["auth", "codex", "--scope", "local"], env=_ENV_WIDE)
-    combined = result.stdout + result.stderr
-    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
-    assert "codex CLI not found on PATH" in combined or "deprecated" in combined.lower()
-
-
-def test_codex_bails_when_the_login_writes_no_auth_json(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    _local_env(monkeypatch, tmp_path)
-    monkeypatch.setattr(auth_cmd.shutil, "which", lambda _name: "/usr/bin/codex")
-    monkeypatch.setattr(
-        auth_cmd.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(cmd, 0)
-    )
-    result = runner.invoke(app, ["auth", "codex", "--scope", "local"], env=_ENV_WIDE)
-    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
-    assert "no auth.json was written" in result.stdout + result.stderr
-
-
-def test_codex_bails_when_the_login_command_fails(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
-    _local_env(monkeypatch, tmp_path)
-    monkeypatch.setattr(auth_cmd.shutil, "which", lambda _name: "/usr/bin/codex")
-    monkeypatch.setattr(
-        auth_cmd.subprocess, "run", _raiser(subprocess.CalledProcessError(7, ["codex"]))
-    )
-    result = runner.invoke(app, ["auth", "codex", "--scope", "local"], env=_ENV_WIDE)
-    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
-    assert "codex login failed (exit 7)" in result.stdout + result.stderr
-
-
-def test_nous_success_names_the_model_slug_to_configure(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    env_path = _local_env(monkeypatch, tmp_path)
-    _stub_getpass(monkeypatch, "nk-good")
-    _mock_httpx(monkeypatch, _status(200))
-    result = runner.invoke(app, ["auth", "nous", "--scope", "local"], env=_ENV_WIDE)
-    combined = result.stdout + result.stderr
-    assert result.exit_code == 0, combined
-    assert dotenv_values(env_path)["NOUS_API_KEY"] == "nk-good"
-    assert "nous/deepseek/deepseek-v4-flash" in combined
-
-
-def test_tokenhub_rejects_a_bad_key_and_keeps_the_env_untouched(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    env_path = _local_env(monkeypatch, tmp_path)
-    _stub_getpass(monkeypatch, "th-bad")
-    _mock_httpx(monkeypatch, _status(403))
-    result = runner.invoke(app, ["auth", "tokenhub", "--scope", "local"], env=_ENV_WIDE)
-    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
-    assert "TokenHub API key validation failed" in result.stdout + result.stderr
-    assert not env_path.exists()
-
-
-def test_minimax_rejects_a_bad_key_and_names_the_custom_provider_secret(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    env_path = _local_env(monkeypatch, tmp_path)
-    _stub_getpass(monkeypatch, "mm-good")
-    _mock_httpx(monkeypatch, _status(200))
-    result = runner.invoke(app, ["auth", "minimax", "--scope", "local"], env=_ENV_WIDE)
-    combined = result.stdout + result.stderr
-    assert result.exit_code == 0, combined
-    assert dotenv_values(env_path)["MERGECRAFT_CUSTOM_PROVIDER_API_KEY"] == "mm-good"
-    assert "minimax/MiniMax-M3" in combined
-
-
-def test_an_invalid_scope_stops_the_command_before_the_prompt(
+def test_an_invalid_scope_stops_logfire_before_the_prompt(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     _local_env(monkeypatch, tmp_path)
     _stub_getpass(monkeypatch, AssertionError("prompted despite a bad scope"))
-    result = runner.invoke(app, ["auth", "cursor", "--scope", "remote"], env=_ENV_WIDE)
+    result = runner.invoke(app, ["auth", "logfire", "--scope", "remote"], env=_ENV_WIDE)
     assert result.exit_code == CLI_USAGE_EXIT_CODE
     assert "expected one of: local, github, both" in result.stdout + result.stderr
 
 
 # ---------------------------------------------------------------------------
-# auth logfire
+# auth logfire — persistence
 # ---------------------------------------------------------------------------
 
 

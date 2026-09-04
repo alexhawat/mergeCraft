@@ -51,14 +51,6 @@ app = typer.Typer(
 )
 
 
-def _warn_agents_model_deprecation(verb: str, replacement: str) -> None:
-    """Point operators at ``mergecraft agent`` model verbs (wave plan 11 / W3)."""
-    message = (
-        f"mergecraft agents {verb} is deprecated — use mergecraft agent {replacement} instead."
-    )
-    console.print(f"[yellow]warning:[/yellow] {message}")
-
-
 def _tool_ctx(target_dir: Path) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(target_dir))
     return ToolContext(
@@ -102,15 +94,6 @@ def _replace_primary_in_entry(entry: dict[str, Any], new_primary: str) -> None:
         entry["modelChain"] = [new_primary, *chain[1:]]
     else:
         entry["modelChain"] = [new_primary]
-
-
-def _append_backup_to_entry(entry: dict[str, Any], backup_slug: str) -> None:
-    chain = model_chain_from_entry(entry)
-    if backup_slug in chain:
-        cli_bail(f"duplicate model {backup_slug!r} already in chain")
-    if not chain:
-        cli_bail("cannot add backup model — set a primary model first")
-    entry["modelChain"] = [*chain, backup_slug]
 
 
 def format_model_slug(provider_label: str, model_id: str) -> str:
@@ -169,55 +152,6 @@ def _agent_entry(agents: dict[str, Any], role_key: str) -> dict[str, Any]:
     if not isinstance(entry, dict):
         cli_bail(f"agents.{role_key} must be a mapping")
     return entry
-
-
-def _prompt_agent_role() -> str:
-    choices = _known_roles_message()
-    return _validate_role_key(str(typer.prompt(f"agent role ({choices})")))
-
-
-def _prompt_provider(labels: list[str]) -> str:
-    choices = ", ".join(labels)
-    return str(typer.prompt(f"provider ({choices})"))
-
-
-def _prompt_model() -> str:
-    return str(typer.prompt("model id"))
-
-
-def _configured_agent_roles(agents: dict[str, Any]) -> list[str]:
-    roles: list[str] = []
-    for key in sorted(agents):
-        if not isinstance(agents.get(key), dict):
-            continue
-        try:
-            AgentRole(key)
-        except ValueError:
-            continue
-        roles.append(key)
-    return roles
-
-
-def _resolve_provider_model(
-    data: dict[str, Any],
-    *,
-    provider: str | None,
-    model: str | None,
-) -> str:
-    entries = _provider_entries(data)
-    labels = _registered_labels(entries)
-    if not labels:
-        cli_bail("no providers registered — run mergecraft provider add first")
-
-    provider_label = provider
-    if provider_label is None:
-        provider_label = _prompt_provider(labels)
-
-    model_id = model
-    if model_id is None:
-        model_id = _prompt_model()
-
-    return validate_registered_model_slug(data, provider_label, model_id)
 
 
 @app.command("list")
@@ -313,80 +247,9 @@ def set_cmd(
     console.print(f"[green]updated agents.{role_key} in {config_path}[/green]")
 
 
-@app.command("setmodel")
-def setmodel_cmd(
-    agent: str | None = typer.Option(None, "--agent", help="Agent role to update."),
-    provider: str | None = typer.Option(None, "--provider", help="Registered provider label."),
-    model: str | None = typer.Option(None, "--model", help="Registered model id."),
-    all_agents: bool = typer.Option(
-        False,
-        "--all",
-        help="Replace primary model on every configured agent role.",
-    ),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
-) -> None:
-    """Replace the primary model for an agent role; backups are preserved (D8)."""
-    _warn_agents_model_deprecation("setmodel", "assign-model <name> p0 <slug>")
-    if all_agents and agent is not None:
-        cli_bail("pass either --agent or --all, not both")
-
-    target_dir = resolve_target_dir(cwd)
-    config_path = _config_path(target_dir)
-    raw, agents = _load_agents_block(config_path)
-
-    slug = _resolve_provider_model(raw, provider=provider, model=model)
-
-    if all_agents:
-        role_keys = _configured_agent_roles(agents)
-        if not role_keys:
-            cli_bail("no configured agent roles — set agents.<role> in config first")
-        for role_key in role_keys:
-            console.print(f"updating primary model for agent [bold]{role_key}[/bold]")
-            entry = _agent_entry(agents, role_key)
-            _replace_primary_in_entry(entry, slug)
-            validate_agent_binding_override(entry)
-        write_config_dict(config_path, raw)
-        console.print(f"[green]updated primary model for {len(role_keys)} agent role(s)[/green]")
-        return
-
-    role_key = _prompt_agent_role() if agent is None else _validate_role_key(agent)
-
-    entry = _agent_entry(agents, role_key)
-    _replace_primary_in_entry(entry, slug)
-    validate_agent_binding_override(entry)
-    write_config_dict(config_path, raw)
-    console.print(f"[green]updated primary model for agents.{role_key}[/green]")
-
-
-@app.command("addbackupmodel")
-def addbackupmodel_cmd(
-    agent: str | None = typer.Option(None, "--agent", help="Agent role to update."),
-    provider: str | None = typer.Option(None, "--provider", help="Registered provider label."),
-    model: str | None = typer.Option(None, "--model", help="Registered model id."),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
-) -> None:
-    """Append a registered model to an agent's backup chain."""
-    _warn_agents_model_deprecation("addbackupmodel", "add-model <name> <slug>")
-    target_dir = resolve_target_dir(cwd)
-    config_path = _config_path(target_dir)
-    raw, agents = _load_agents_block(config_path)
-
-    slug = _resolve_provider_model(raw, provider=provider, model=model)
-
-    role_key = _prompt_agent_role() if agent is None else _validate_role_key(agent)
-
-    entry = _agent_entry(agents, role_key)
-    _append_backup_to_entry(entry, slug)
-    validate_agent_binding_override(entry)
-    write_config_dict(config_path, raw)
-    console.print(f"[green]appended backup model to agents.{role_key}[/green]")
-
-
 __all__ = [
-    "addbackupmodel_cmd",
     "app",
     "format_model_slug",
-    "setmodel_cmd",
     "validate_agent_binding_override",
     "validate_registered_model_slug",
 ]

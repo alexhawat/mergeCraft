@@ -474,23 +474,6 @@ def test_auth_precedence_order(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resolve_auth().source == "anonymous"
 
 
-def test_review_alias_diff_review_still_works(tmp_path: Path) -> None:
-    """D8 — ``diff-review`` remains a working entry point (Harbor pin)."""
-    patch = tmp_path / "change.diff"
-    patch.write_text(
-        "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n",
-        encoding="utf-8",
-    )
-    result = runner.invoke(
-        app,
-        ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
-        env={"NO_COLOR": "1", "TERM": "dumb"},
-    )
-    assert result.exit_code == 0, result.stdout + result.stderr
-    out = _plain(result.stdout + result.stderr)
-    assert "offline" in out.lower()
-    assert "demo.py" in out
-
 
 def test_downstream_pipeline_unchanged(tmp_path: Path) -> None:
     """Resolver produces the same ``DiffMaterialization`` shape as ``materialize_diff``."""

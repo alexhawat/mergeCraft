@@ -1,4 +1,4 @@
-"""``mergecraft auth`` — Codex device auth / Claude token → ``gh secret set``."""
+"""``mergecraft auth`` — Logfire tracing credentials and shared auth helpers."""
 
 from __future__ import annotations
 
@@ -6,9 +6,7 @@ import getpass
 import json
 import os
 import re
-import shutil
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -30,24 +28,15 @@ from mergecraft.utils.workspace import git_repo_root
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-_LEGACY_AUTH_WARNED = False
-
 app = typer.Typer(
-    help="Manage provider credentials for the current repository.", no_args_is_help=True
+    help="Manage Logfire tracing credentials for the current repository.",
+    no_args_is_help=True,
 )
 
-CODEX_AUTH_SECRET = "CODEX_AUTH_JSON"
-CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN"
-GEMINI_API_SECRET = "GEMINI_API_KEY"
-CURSOR_API_SECRET = "CURSOR_API_KEY"
-NOUS_API_SECRET = "NOUS_API_KEY"
-NOUS_PORTAL_BASE_URL = "https://inference-api.nousresearch.com/v1"
-TOKENHUB_API_SECRET = "TOKENHUB_API_KEY"
-MINIMAX_API_SECRET = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
-MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
-DEFAULT_NOUS_PORTAL = "https://inference-api.nousresearch.com/v1"
+NOUS_PORTAL_BASE_URL = "https://inference-api.nousresearch.com/v1"
 DEFAULT_TOKENHUB = "https://tokenhub-intl.tencentcloudmaas.com/v1"
+MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 # Logfire setup (issue #56 / D5). ``LOGFIRE_TOKEN`` is the Action secret the
 # ``logfire-token`` input maps to; ``MERGECRAFT_LOGFIRE_TOKEN`` is the
 # runtime-only env var the sink factory resolves as a fallback; the project
@@ -74,19 +63,6 @@ _LOGFIRE_WRITE_TOKEN_RE = re.compile(r"^pylf_v\d+_(?P<region>[a-z]{2})_")
 # (``CODEX_AUTH_JSON`` is raw JSON) gets quoted.
 _ENV_WORD_SAFE = re.compile(r"^[A-Za-z0-9_./:@=+-]*$")
 CredentialScope = Literal["local", "github", "both"]
-# Shared by every ``mergecraft auth <provider>`` command (#221 / D11). The
-# default stays ``github`` so a CI-only setup keeps today's behaviour and does
-# not start writing ``.env``; ``auth logfire`` keeps its own ``both`` default.
-_SCOPE_OPTION: str = typer.Option(
-    "github",
-    "--scope",
-    "-s",
-    help=(
-        "Where to persist the credential: 'local' (.env only), 'github' "
-        "(gh secret set, the default), or 'both'. Use 'local' or 'both' to be "
-        "able to run the CLI locally after authenticating."
-    ),
-)
 
 
 def _get_gh_token() -> str:
@@ -287,74 +263,6 @@ def _persist_credential(
         )
 
 
-@app.command("codex")
-def auth_codex(scope: str = _SCOPE_OPTION) -> None:
-    """Mint a Codex subscription credential and save it as CODEX_AUTH_JSON."""
-    _legacy_auth_hint("codex")
-    target = _resolve_auth_target(scope)
-
-    if not shutil.which("codex"):
-        cli_bail(
-            "codex CLI not found on PATH.\n"
-            "  install: npm i -g @openai/codex\n"
-            "  then:    mergecraft auth codex"
-        )
-
-    with tempfile.TemporaryDirectory(prefix="mergecraft-codex-") as tmp:
-        env = {**os.environ, "CODEX_HOME": tmp}
-        console.print("running [cyan]codex login --device-auth[/cyan] (isolated CODEX_HOME)...")
-        try:
-            subprocess.run(
-                ["codex", "login", "--device-auth"],
-                env=env,
-                check=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            cli_bail(f"codex login failed (exit {exc.returncode})")
-
-        auth_path = Path(tmp) / "auth.json"
-        if not auth_path.is_file():
-            cli_bail("no auth.json was written — enable device-code auth and retry")
-        # Read inside the block: ``tmp`` is deleted on exit, so the captured
-        # bytes must be in scope before teardown for the local write to have
-        # anything to persist (#221).
-        value = auth_path.read_text(encoding="utf-8")
-
-    if _legacy_auth_shim("codex", scope, {"API_KEY": value}):
-        return
-
-    _persist_credential(target=target, name=CODEX_AUTH_SECRET, value=value)
-
-
-@app.command("claude")
-def auth_claude(scope: str = _SCOPE_OPTION) -> None:
-    """Save a Claude Code OAuth token as CLAUDE_CODE_OAUTH_TOKEN."""
-    _legacy_auth_hint("claude")
-    target = _resolve_auth_target(scope)
-    console.print(
-        "mint a token with [cyan]claude setup-token[/cyan], then paste it below "
-        f"(expected prefix [cyan]{CLAUDE_OAUTH_TOKEN_PREFIX}…[/cyan])."
-    )
-    try:
-        oauth_token = getpass.getpass("Claude Code OAuth token (Enter to cancel): ").strip()
-    except (EOFError, KeyboardInterrupt):  # fmt: skip
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
-    if not oauth_token:
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-    if not oauth_token.startswith(CLAUDE_OAUTH_TOKEN_PREFIX):
-        console.print(
-            f"[yellow]warning:[/yellow] that doesn't look like a claude setup-token "
-            f"(expected {CLAUDE_OAUTH_TOKEN_PREFIX}…). saving it anyway."
-        )
-
-    if _legacy_auth_shim("claude", scope, {"API_KEY": oauth_token}):
-        return
-
-    _persist_credential(target=target, name=CLAUDE_OAUTH_SECRET, value=oauth_token)
-
-
 def _validate_gemini_api_key(api_key: str) -> bool:
     try:
         with httpx.Client(timeout=15.0) as client:
@@ -373,31 +281,6 @@ def _validate_gemini_api_key(api_key: str) -> bool:
     except httpx.HTTPError as exc:
         logger.warning("gemini key validation skipped (network): {}", exc)
         return True
-
-
-@app.command("gemini")
-def auth_gemini(scope: str = _SCOPE_OPTION) -> None:
-    """Save a Gemini API key as GEMINI_API_KEY."""
-    _legacy_auth_hint("gemini")
-    target = _resolve_auth_target(scope)
-    console.print(
-        "create an API key at [cyan]https://aistudio.google.com/apikey[/cyan], then paste it below."
-    )
-    try:
-        api_key = getpass.getpass("Gemini API key (Enter to cancel): ").strip()
-    except (EOFError, KeyboardInterrupt):  # fmt: skip
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
-    if not api_key:
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-    if not _validate_gemini_api_key(api_key):
-        cli_bail("Gemini API key validation failed (401/403). Check the key and retry.")
-
-    if _legacy_auth_shim("gemini", scope, {"API_KEY": api_key}):
-        return
-
-    _persist_credential(target=target, name=GEMINI_API_SECRET, value=api_key)
 
 
 def _validate_cursor_api_key(api_key: str) -> bool:
@@ -425,32 +308,6 @@ def _validate_cursor_api_key(api_key: str) -> bool:
     except httpx.HTTPError as exc:
         logger.warning("cursor key validation skipped (network): {}", exc)
         return True
-
-
-@app.command("cursor")
-def auth_cursor(scope: str = _SCOPE_OPTION) -> None:
-    """Save a Cursor API key as CURSOR_API_KEY."""
-    _legacy_auth_hint("cursor")
-    target = _resolve_auth_target(scope)
-    console.print(
-        "create an API key in the Cursor dashboard, then paste it below "
-        "(Cloud Agent API — Phase A; local Cursor CLI is not wired yet)."
-    )
-    try:
-        api_key = getpass.getpass("Cursor API key (Enter to cancel): ").strip()
-    except (EOFError, KeyboardInterrupt):  # fmt: skip
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
-    if not api_key:
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-    if not _validate_cursor_api_key(api_key):
-        cli_bail("Cursor API key validation failed (401/403). Check the key and retry.")
-
-    if _legacy_auth_shim("cursor", scope, {"API_KEY": api_key}):
-        return
-
-    _persist_credential(target=target, name=CURSOR_API_SECRET, value=api_key)
 
 
 def _validate_openai_compatible_key(*, api_key: str, base_url: str, label: str) -> bool:
@@ -511,68 +368,6 @@ def _validate_nous_api_key(api_key: str) -> bool:
     except httpx.HTTPError as exc:
         logger.warning("nous key validation skipped (network): {}", exc)
         return True
-
-
-@app.command("nous")
-def auth_nous(scope: str = _SCOPE_OPTION) -> None:
-    """Save a Nous Portal API key as NOUS_API_KEY."""
-    _legacy_auth_hint("nous")
-    target = _resolve_auth_target(scope)
-    console.print(
-        "create an API key at [cyan]https://portal.nousresearch.com[/cyan], then paste it below."
-    )
-    try:
-        api_key = getpass.getpass("Nous Portal API key (Enter to cancel): ").strip()
-    except (EOFError, KeyboardInterrupt):  # fmt: skip
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
-    if not api_key:
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-    if not _validate_nous_api_key(api_key):
-        cli_bail("Nous API key validation failed (401/403). Check the key and retry.")
-
-    if _legacy_auth_shim("nous", scope, {"API_KEY": api_key}):
-        return
-
-    _persist_credential(target=target, name=NOUS_API_SECRET, value=api_key)
-    console.print(
-        "use model [cyan]nous/deepseek/deepseek-v4-flash[/cyan] "
-        "(opencode harness; no MERGECRAFT_CUSTOM_PROVIDER_* required)."
-    )
-
-
-@app.command("tokenhub")
-def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
-    """Save a Tencent TokenHub API key as TOKENHUB_API_KEY."""
-    _legacy_auth_hint("tokenhub")
-    target = _resolve_auth_target(scope)
-    console.print(
-        "create an API key in the TokenHub console, then paste it below "
-        f"(OpenAI-compatible endpoint [cyan]{DEFAULT_TOKENHUB}[/cyan]; models include "
-        "[cyan]hy3[/cyan], DeepSeek, GLM, Kimi)."
-    )
-    try:
-        api_key = getpass.getpass("TokenHub API key (Enter to cancel): ").strip()
-    except (EOFError, KeyboardInterrupt):  # fmt: skip
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
-    if not api_key:
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-    if not _validate_openai_compatible_key(
-        api_key=api_key, base_url=DEFAULT_TOKENHUB, label="tokenhub"
-    ):
-        cli_bail("TokenHub API key validation failed (401/403). Check the key and retry.")
-
-    if _legacy_auth_shim("tokenhub", scope, {"API_KEY": api_key}):
-        return
-
-    _persist_credential(target=target, name=TOKENHUB_API_SECRET, value=api_key)
-    console.print(
-        "use model [cyan]tokenhub/hy3[/cyan] (or any TokenHub model id as "
-        "[cyan]tokenhub/<id>[/cyan]; opencode harness)."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -791,36 +586,6 @@ def _normalise_scope(value: str) -> CredentialScope:
     raise AssertionError("unreachable")
 
 
-def _warn_legacy_auth_once(message: str) -> None:
-    """Emit the yellow-box deprecation line (shim calls this once per process)."""
-    console.print(f"[yellow]warning:[/yellow] {message}")
-
-
-def _legacy_deprecation_message(label: str) -> str:
-    return (
-        f"mergecraft auth {label} is deprecated — use "
-        f"mergecraft provider auth {label} (unified provider auth)."
-    )
-
-
-def _legacy_auth_hint(label: str) -> None:
-    """Print deprecation guidance; yellow warning box only once per process (D7)."""
-    global _LEGACY_AUTH_WARNED
-    message = _legacy_deprecation_message(label)
-    if not _LEGACY_AUTH_WARNED:
-        _warn_legacy_auth_once(message)
-        _LEGACY_AUTH_WARNED = True
-    else:
-        console.print(message, markup=False)
-
-
-def _legacy_auth_shim(label: str, scope: str, credential_map: Mapping[str, str]) -> bool:
-    """Try indexed provider auth; return whether delegation succeeded."""
-    from mergecraft.cli.provider_cmd import persist_legacy_indexed_auth
-
-    return persist_legacy_indexed_auth(label, scope, credential_map)
-
-
 @app.command("logfire")
 def auth_logfire(
     scope: str = typer.Option(
@@ -838,7 +603,7 @@ def auth_logfire(
 
     Writes ``MERGECRAFT_LOGFIRE_TOKEN`` and ``MERGECRAFT_TRACING_PROJECT``
     into the local ``.env`` and/or the ``LOGFIRE_TOKEN`` Actions secret on the
-    ``origin`` GitHub repo. After this runs, ``mergecraft diff-review
+    ``origin`` GitHub repo. After this runs, ``mergecraft review
     --tracing --tracing-to logfire`` ships spans to Logfire; ``mergecraft
     config tracing`` shows the project and a redacted token.
 
@@ -926,7 +691,7 @@ def auth_logfire(
         "\n[bold]next steps[/bold]\n"
         "  - verify wiring: [cyan]mergecraft config tracing[/cyan] "
         "(token is redacted)\n"
-        "  - run with traces: [cyan]mergecraft diff-review --tracing --tracing-to logfire[/cyan]\n"
+        "  - run with traces: [cyan]mergecraft review --tracing --tracing-to logfire[/cyan]\n"
     )
     if target.github is not None:
         next_steps += (
@@ -968,42 +733,3 @@ def _validate_minimax_api_key(api_key: str) -> bool:
     except httpx.HTTPError as exc:
         logger.warning("minimax key validation skipped (network): {}", exc)
         return True
-
-
-@app.command("minimax")
-def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
-    """Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY.
-
-    MiniMax is reachable through the existing custom-provider helper
-    (D10 / option ii) — no first-party ``mmx-cli`` install is required.
-    The key is stored under the D7 singleton secret name so it pairs with
-    the singleton ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` (which the
-    operator may override, or rely on the preset's default
-    ``https://api.minimax.io/v1``).
-    """
-    _legacy_auth_hint("minimax")
-    target = _resolve_auth_target(scope)
-    console.print(
-        "create an API key on the MiniMax platform "
-        f"([cyan]{MINIMAX_BASE_URL}[/cyan]), then paste it below."
-    )
-    try:
-        api_key = getpass.getpass("MiniMax API key (Enter to cancel): ").strip()
-    except (EOFError, KeyboardInterrupt):  # fmt: skip
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
-    if not api_key:
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
-    if not _validate_minimax_api_key(api_key):
-        cli_bail("MiniMax API key validation failed (401/403). Check the key and retry.")
-
-    if _legacy_auth_shim("minimax", scope, {"API_KEY": api_key}):
-        return
-
-    _persist_credential(target=target, name=MINIMAX_API_SECRET, value=api_key)
-    console.print(
-        "use model [cyan]minimax/MiniMax-M3[/cyan] (opencode harness; no "
-        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL required if you accept the "
-        f"default endpoint [cyan]{MINIMAX_BASE_URL}[/cyan])."
-    )

@@ -1,4 +1,4 @@
-"""Tests for offline diff materialization and ``mergecraft diff-review``."""
+"""Tests for offline diff materialization and ``mergecraft review``."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ def _plain(text: str) -> str:
     return _ANSI.sub("", text)
 
 
-def test_cli_diff_review_help() -> None:
-    result = runner.invoke(app, ["diff-review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
+def test_cli_review_help() -> None:
+    result = runner.invoke(app, ["review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
     out = _plain(result.stdout)
     assert "offline" in out.lower() or "diff" in out.lower()
@@ -103,7 +103,7 @@ def test_build_offline_review_prompt_forbids_github_tools(tmp_path: Path) -> Non
     assert "origin/main" in prompt
 
 
-def test_cli_diff_review_dry_run_with_patch(tmp_path: Path) -> None:
+def test_cli_review_dry_run_with_patch(tmp_path: Path) -> None:
     patch = tmp_path / "change.diff"
     patch.write_text(
         "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n",
@@ -111,7 +111,7 @@ def test_cli_diff_review_dry_run_with_patch(tmp_path: Path) -> None:
     )
     result = runner.invoke(
         app,
-        ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
+        ["review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
@@ -121,12 +121,12 @@ def test_cli_diff_review_dry_run_with_patch(tmp_path: Path) -> None:
     assert "demo.py" in out
 
 
-def test_cli_diff_review_empty_patch(tmp_path: Path) -> None:
+def test_cli_review_empty_patch(tmp_path: Path) -> None:
     patch = tmp_path / "empty.diff"
     patch.write_text("\n", encoding="utf-8")
     result = runner.invoke(
         app,
-        ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
+        ["review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     assert result.exit_code == 0, result.stdout + result.stderr

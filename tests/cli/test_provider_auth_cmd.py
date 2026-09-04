@@ -2,7 +2,7 @@
 
 Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-24-b-provider-registry-wave-plan.md``
 BB — test-creator. Pins unified provider auth: indexed secret naming, interactive
-picker, auth-kind strategies, legacy shim (D7), and ``auth logfire`` isolation (D6).
+picker, auth-kind strategies, and ``auth logfire`` isolation (D6).
 """
 
 from __future__ import annotations
@@ -21,10 +21,8 @@ from dotenv import dotenv_values
 from tests.cli.support_provider_registry import (
     AUTH_KIND_API_KEY,
     AUTH_KIND_CLOUD_CHAIN,
-    AUTH_KIND_PRIMARY_SUFFIX,
     BEDROCK_INDEXED_KEYS,
     CUSTOM_BASE_URL,
-    LEGACY_AUTH_SUBCOMMANDS,
     NOUS_BASE_URL,
     VERTEX_INDEXED_KEYS,
     indexed_env_key,
@@ -407,128 +405,3 @@ def test_provider_auth_vertex_refuses_multiline_json_for_local_scope(
     assert not (tmp_path / ".env").exists() or indexed_env_key(
         4, "VERTEX_SERVICE_ACCOUNT_JSON"
     ) not in read_env_file(tmp_path)
-
-
-# ---------------------------------------------------------------------------
-# Legacy shim — warn once per process, delegate to unified path (D7)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("legacy_cmd", LEGACY_AUTH_SUBCOMMANDS)
-def test_legacy_auth_commands_warn_and_write_indexed_secret(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-    legacy_cmd: str,
-) -> None:
-    scaffold_mergecraft_home(tmp_path)
-    write_provider_entry(
-        tmp_path,
-        label=legacy_cmd if legacy_cmd != "minimax" else "minimax",
-        env_index=1,
-        url=CUSTOM_BASE_URL if legacy_cmd not in {"codex", "claude", "gemini", "cursor"} else None,
-        harness={
-            "codex": "codex",
-            "claude": "claude",
-            "gemini": "gemini",
-            "cursor": "cursor",
-        }.get(legacy_cmd, "opencode"),
-        auth_kind=AUTH_KIND_API_KEY,
-    )
-    monkeypatch.chdir(tmp_path)
-    _stub_scope_local(monkeypatch, tmp_path)
-    _patch_httpx_noop(monkeypatch)
-
-    module = _load_auth_cmd()
-    for validator_name in (
-        "_validate_gemini_api_key",
-        "_validate_cursor_api_key",
-        "_validate_nous_api_key",
-        "_validate_tokenhub_api_key",
-        "_validate_minimax_api_key",
-    ):
-        if hasattr(module, validator_name):
-            monkeypatch.setattr(module, validator_name, lambda _key: True)
-
-    if legacy_cmd == "codex":
-        monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/codex")
-        monkeypatch.setattr(
-            module.subprocess,
-            "run",
-            lambda *_a, **_kw: None,
-        )
-        monkeypatch.setattr(
-            module.tempfile,
-            "TemporaryDirectory",
-            lambda **_kw: _FakeCodexHome(),
-        )
-    elif legacy_cmd == "claude":
-        monkeypatch.setattr(
-            getpass,
-            "getpass",
-            lambda _prompt: "sk-ant-oat-legacy-delegate",
-        )
-    else:
-        monkeypatch.setattr(getpass, "getpass", lambda _prompt: f"{legacy_cmd}-legacy-key")
-
-    result = _invoke("auth", legacy_cmd, "--scope", "local")
-    output = _plain(result.stdout + result.stderr).lower()
-    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
-    assert "deprecated" in output or "provider auth" in output or "unified" in output
-
-    suffix = AUTH_KIND_PRIMARY_SUFFIX.get(AUTH_KIND_API_KEY, "API_KEY")
-    env = dotenv_values(tmp_path / ".env")
-    assert env.get(indexed_env_key(1, suffix)) is not None
-
-
-class _FakeCodexHome:
-    """Minimal ``TemporaryDirectory`` stand-in that leaves a one-line auth.json."""
-
-    def __enter__(self) -> str:
-        import tempfile
-
-        self._dir = tempfile.mkdtemp(prefix="mergecraft-codex-test-")
-        auth_path = Path(self._dir) / "auth.json"
-        auth_path.write_text(
-            '{"tokens":{"access_token":"codex-legacy","refresh_token":"r"}}',
-            encoding="utf-8",
-        )
-        return self._dir
-
-    def __exit__(self, *_exc: object) -> None:
-        import shutil
-
-        shutil.rmtree(self._dir, ignore_errors=True)
-
-
-def test_legacy_auth_warning_emitted_once_per_process(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    scaffold_mergecraft_home(tmp_path)
-    write_provider_entry(
-        tmp_path,
-        label="nous",
-        env_index=1,
-        url=NOUS_BASE_URL,
-        auth_kind=AUTH_KIND_API_KEY,
-    )
-    monkeypatch.chdir(tmp_path)
-    _stub_scope_local(monkeypatch, tmp_path)
-    _patch_nous_validator(monkeypatch)
-    _patch_httpx_noop(monkeypatch)
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "nous-key")
-
-    warnings: list[str] = []
-
-    def _warn(message: str) -> None:
-        warnings.append(message)
-
-    module = _load_auth_cmd()
-    if hasattr(module, "_warn_legacy_auth_once"):
-        monkeypatch.setattr(module, "_warn_legacy_auth_once", _warn)
-
-    first = _invoke("auth", "nous", "--scope", "local")
-    second = _invoke("auth", "nous", "--scope", "local")
-    assert first.exit_code == CLI_SUCCESS_EXIT_CODE
-    assert second.exit_code == CLI_SUCCESS_EXIT_CODE
-    assert len(warnings) <= 1

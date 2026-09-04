@@ -578,7 +578,7 @@ def bench_cmd(
         "--model",
         "-m",
         help="Model slug to drive live detection with (otherwise .mergecraft/config.yaml / "
-        "MERGECRAFT_MODEL — same resolution as `diff-review`).",
+        "MERGECRAFT_MODEL — same resolution as `review`).",
     ),
     json_output: bool = typer.Option(
         False,
@@ -589,12 +589,12 @@ def bench_cmd(
     """Join structural decision replay with a live finding-location run (#140, B3).
 
     Structural replay (keyless) always runs. Live detection additionally runs
-    ``diff-review`` against the patch-bearing detection corpus, if credentials
+    ``review`` against the patch-bearing detection corpus, if credentials
     for ``--model`` are available and the corpus is non-empty — otherwise the
     ``detection`` section is omitted and the reason is reported, never
     fabricated (see ``evals/README.md``).
 
-    ``--model`` is resolved the same way ``diff-review`` resolves its own
+    ``--model`` is resolved the same way ``review`` resolves its own
     ``--model`` — never hardcoded to a specific vendor here (a prior
     hardcoded default silently broke the credential check entirely and
     presumed every operator wants the same provider; mergeCraft self-review,

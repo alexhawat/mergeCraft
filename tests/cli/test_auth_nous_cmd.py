@@ -1,22 +1,11 @@
-"""RED tests for ``mergecraft auth nous`` (#57 / W1).
+"""Unit tests for ``_validate_nous_api_key`` (#57 / W1).
 
-Wave plan: ``.ignorelocal/waves/issues-nous-deepseek-v4-flash-wave-plan.md``
-W1 — test-creator. Pins the contract for the new ``auth nous`` subcommand:
-
-- ``getpass`` prompt → ``_validate_nous_api_key`` → ``gh secret set NOUS_API_KEY``
-  on the ``origin`` repo.
-- Validator probes ``/v1/chat/completions`` (per W0.4 — ``/v1/models`` is a
-  public catalogue that returns 200 even for an invalid key). 200 → accept;
-  401 / 403 → reject; 5xx / ``httpx.HTTPError`` → warn-and-save (parity with
-  ``_validate_gemini_api_key``).
-- Fails closed when ``gh auth token`` returns nothing or ``gh`` is absent.
-- Network access goes through ``httpx.MockTransport`` only — no real call to
-  ``inference-api.nousresearch.com`` from this file (W1.15 / convention 7).
+Provider authentication lives under ``mergecraft provider auth nous``; this file
+pins the shared validator helper in ``mergecraft.cli.auth_cmd``.
 """
 
 from __future__ import annotations
 
-import getpass
 import importlib
 import json
 from pathlib import Path
@@ -24,14 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
-from typer.testing import CliRunner
-
-from mergecraft.cli.app import app
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
-
-runner = CliRunner()
 
 NOUS_PROBE_PATH = "/v1/chat/completions"
 NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1"
@@ -91,114 +75,6 @@ def _capture_secret_set(monkeypatch: MonkeyPatch) -> list[dict[str, Any]]:
     module = _load_auth_cmd()
     monkeypatch.setattr(module, "_set_gh_secret", _recorder)
     return captured
-
-
-# ── W1.10 — happy path: prompt → validate → write ────────────────────────────
-
-
-def test_auth_nous_prompts_with_getpass_and_writes_secret(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Full happy path: getpass → 200 from validator → gh secret set NOUS_API_KEY on origin."""
-
-    # Validator says yes (the unit-level validator tests cover the 200 branch).
-    def _handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == NOUS_PROBE_PATH
-        return httpx.Response(200, json={"choices": []})
-
-    _patch_httpx_with(monkeypatch, _handler)
-    _stub_gh_token(monkeypatch)
-    _stub_git_remote(monkeypatch)
-    captured = _capture_secret_set(monkeypatch)
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "nous-test-key")
-
-    result = runner.invoke(app, ["auth", "nous"])
-
-    assert result.exit_code == 0, result.stdout + result.stderr
-    assert len(captured) == 1
-    record = captured[0]
-    assert record["name"] == "NOUS_API_KEY"
-    assert record["repo_slug"] == "acme/widgets"
-    # Convention 7: the test never asserts on the secret value itself, only on
-    # its destination. The validator received the token, not this assertion.
-
-
-# ── W1.11 — fails closed when ``gh`` is unauthenticated ─────────────────────
-
-
-def test_auth_nous_fails_closed_when_gh_is_unauthenticated(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """``_get_gh_token`` raising (gh absent or no token) → subcommand exits non-zero with a hint."""
-
-    def _bail(*_a, **_kw):  # type: ignore[no-untyped-def]
-        raise SystemExit("gh cli not found or not authenticated.")
-
-    module = _load_auth_cmd()
-    monkeypatch.setattr(module, "_get_gh_token", _bail)
-    # If the subcommand ever tries to validate or set the secret after this bail,
-    # we want to know — those calls must not happen.
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: pytest.fail("should not be reached"))
-    validator_calls: list[str] = []
-    monkeypatch.setattr(
-        module, "_validate_nous_api_key", lambda key: validator_calls.append(key) or True
-    )
-
-    result = runner.invoke(app, ["auth", "nous"])
-
-    assert result.exit_code != 0
-    assert "gh" in (result.stdout + result.stderr).lower()
-    assert validator_calls == []
-
-
-# ── W1.12 — validator returns False on 401 / 403 → subcommand bails ─────────
-
-
-def test_auth_nous_rejects_on_401_or_403(monkeypatch: MonkeyPatch) -> None:
-    """401 / 403 from the validator → subcommand bails before ``gh secret set``."""
-    seen_status: list[int] = []
-
-    def _handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == NOUS_PROBE_PATH
-        # Alternate 401 and 403 across the two sub-cases via a counter.
-        seen_status.append(401)
-        return httpx.Response(401, json={"status": 401, "message": "Your API key is invalid"})
-
-    _patch_httpx_with(monkeypatch, _handler)
-    _stub_gh_token(monkeypatch)
-    _stub_git_remote(monkeypatch)
-    captured = _capture_secret_set(monkeypatch)
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "nous-test-key")
-
-    result = runner.invoke(app, ["auth", "nous"])
-
-    assert result.exit_code != 0
-    assert captured == []
-    output = (result.stdout + result.stderr).lower()
-    assert "401" in output or "403" in output or "validation" in output or "invalid" in output
-    assert seen_status == [401]
-
-
-# ── W1.13 — network error → warn-and-save (parity with gemini/cursor) ────────
-
-
-def test_auth_nous_warns_and_saves_on_network_error(monkeypatch: MonkeyPatch) -> None:
-    """``httpx.ConnectError`` from the validator → warning + ``gh secret set`` still runs."""
-
-    def _handler(_request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("simulated dns failure")
-
-    _patch_httpx_with(monkeypatch, _handler)
-    _stub_gh_token(monkeypatch)
-    _stub_git_remote(monkeypatch)
-    captured = _capture_secret_set(monkeypatch)
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "nous-test-key")
-
-    result = runner.invoke(app, ["auth", "nous"])
-
-    assert result.exit_code == 0, result.stdout + result.stderr
-    assert len(captured) == 1
-    assert captured[0]["name"] == "NOUS_API_KEY"
 
 
 # ── W1.14 — direct unit tests for the validator ──────────────────────────────
@@ -334,23 +210,6 @@ def test_auth_nous_real_portal_probe_round_trip(
     # A fake key should be 401. We only assert this contract when ``NOUS_API_KEY``
     # is set, so a stale fixture cannot false-pass.
     assert validator(key) is True
-
-
-# ── Structural / collection smoke (always green) ─────────────────────────────
-
-
-def test_auth_nous_subcommand_is_collectable() -> None:
-    """``mergecraft auth nous`` must register as a Typer subcommand (collection-only).
-
-    This is a structural guard: when W2 registers the subcommand the help
-    output surfaces it; until then the xfail-marked behavioural tests above
-    drive the contract forward.
-    """
-    result = runner.invoke(app, ["auth", "--help"])
-    assert result.exit_code == 0
-    assert "nous" in result.stdout.lower(), (
-        f"expected 'nous' in auth --help output, got: {result.stdout!r}"
-    )
 
 
 # ── W1.8 — PR #79 regression pin for ``build_security_config`` ───────────────

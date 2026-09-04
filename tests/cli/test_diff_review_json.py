@@ -1,4 +1,4 @@
-"""RED tests for ``mergecraft diff-review --json`` structured findings (issue #30, Batch A W1)."""
+"""RED tests for ``mergecraft review --json`` structured findings (issue #30, Batch A W1)."""
 
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ def test_build_offline_review_prompt_requires_set_output_when_json_mode(
     assert "if available" not in step_four
 
 
-def test_cli_diff_review_json_dry_run_does_not_write_file(tmp_path: Path) -> None:
+def test_cli_review_json_dry_run_does_not_write_file(tmp_path: Path) -> None:
     patch = tmp_path / "change.diff"
     patch.write_text(_SAMPLE_PATCH, encoding="utf-8")
     json_out = tmp_path / "structured.json"
@@ -96,7 +96,7 @@ def test_cli_diff_review_json_dry_run_does_not_write_file(tmp_path: Path) -> Non
     result = runner.invoke(
         app,
         [
-            "diff-review",
+            "review",
             "--diff",
             str(patch),
             "--cwd",
@@ -112,7 +112,7 @@ def test_cli_diff_review_json_dry_run_does_not_write_file(tmp_path: Path) -> Non
     assert not json_out.exists()
 
 
-def test_cli_diff_review_json_empty_diff_writes_empty_findings(tmp_path: Path) -> None:
+def test_cli_review_json_empty_diff_writes_empty_findings(tmp_path: Path) -> None:
     patch = tmp_path / "empty.diff"
     patch.write_text("\n", encoding="utf-8")
     json_out = tmp_path / "findings.json"
@@ -120,7 +120,7 @@ def test_cli_diff_review_json_empty_diff_writes_empty_findings(tmp_path: Path) -
     result = runner.invoke(
         app,
         [
-            "diff-review",
+            "review",
             "--diff",
             str(patch),
             "--cwd",
@@ -174,7 +174,7 @@ def _install_fake_agent_review(
     ],
     ids=["valid_finding", "invalid_finding"],
 )
-def test_cli_diff_review_json_validates_findings(
+def test_cli_review_json_validates_findings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     findings: list[dict[str, object]],
@@ -188,7 +188,7 @@ def test_cli_diff_review_json_validates_findings(
     result = runner.invoke(
         app,
         [
-            "diff-review",
+            "review",
             "--diff",
             str(patch),
             "--cwd",
@@ -217,7 +217,7 @@ def test_cli_diff_review_json_validates_findings(
         ), combined
 
 
-def test_cli_diff_review_help_lists_json() -> None:
-    result = runner.invoke(app, ["diff-review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
+def test_cli_review_help_lists_json() -> None:
+    result = runner.invoke(app, ["review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
     assert "--json" in _plain(result.stdout)

@@ -1,4 +1,4 @@
-"""``mergecraft diff-review`` — offline local git/patch review (no GitHub PR posting)."""
+"""``mergecraft review`` — offline local git/patch review (no GitHub PR posting)."""
 
 from __future__ import annotations
 
@@ -242,11 +242,6 @@ def _finish_agent_protocol(
     )
     stream.verdict(outcome.value, exit_code)
     stream.run_finished(exit_code)
-
-
-_DIFF_REVIEW_DEPRECATION = (
-    "warning: `mergecraft diff-review` is deprecated; use `mergecraft review` instead."
-)
 
 
 def run(
@@ -506,8 +501,6 @@ def run(
         rich_help_panel=_PANEL_OUTPUT,
     ),
 ) -> None:
-    if ctx.info_name == "diff-review":
-        console.print(_DIFF_REVIEW_DEPRECATION)
     configure_logging()
     effective_output_format = _resolve_review_output_format(ctx, output_format=output_format)
     invocation_root = Path.cwd().resolve()
@@ -729,7 +722,7 @@ def run(
                     seen=seen,
                     streamed_short_ids=streamed_short_ids,
                 )
-            _exit_with_message(result.error or "diff-review failed", exit_code)
+            _exit_with_message(result.error or "review failed", exit_code)
 
         if agent_mode and stream is not None:
             _finish_agent_protocol(

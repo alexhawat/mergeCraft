@@ -222,7 +222,7 @@ def _review_exit_for_label(label: str, tmp_path: Path, monkeypatch: pytest.Monke
 def _usage_exit_code() -> int:
     result = runner.invoke(
         app,
-        ["auth", "codex", "--scope", "everywhere"],
+        ["auth", "logfire", "--scope", "everywhere"],
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     return int(result.exit_code)
