@@ -115,8 +115,10 @@ removed and the suite is 13/13 clean real passes, 0 xfail/xpass.
 Locked decisions covered: **D6** (four capture levels — `off` / `metadata` /
 `redacted` / `full` — default `redacted`), **D7** (an untrusted trust tier is
 capped at `metadata` by `content` / `MERGECRAFT_TRACING_CONTENT` alone; lifting
-the cap requires an explicit second knob `exportUntrustedContent` /
-`MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`), **D8** (content hash emitted at
+the cap requires an explicit operator-owned second knob
+(`MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`, Action
+`tracing-export-untrusted-content`, trusted YAML, or the
+`pull_request_target` base snapshot — not fork HEAD YAML), **D8** (content hash emitted at
 every level above `off`). Also pins: bodies capped with a `.truncated` marker,
 original size reported before truncation, invalid level falls back to the
 default (fail safe, never open to `full`).

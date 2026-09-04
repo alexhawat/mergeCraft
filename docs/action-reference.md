@@ -37,7 +37,7 @@ The full input list:
 | `token` | `${{ github.token }}` | GitHub-provided token with job-scoped permissions. |
 | `tracing` | _(empty)_ | Tracing enablement (W8.5 / W7.7): true / false. Wins over the .mergecraft/config.yaml `tracing.enabled` block when set. Unset defers to the config (default off). |
 | `tracing-content` | _(empty)_ | Model-payload capture level: off, metadata, redacted, or full. Wins over MERGECRAFT_TRACING_CONTENT and tracing.content when set. Untrusted runs still cap at metadata unless tracing-export-untrusted-content is also true. Unset defers to config (default redacted). |
-| `tracing-export-untrusted-content` | _(empty)_ | Allow prompt and completion bodies on untrusted (fork-PR) runs when the capture level emits bodies. Required to ship fork-PR content to Logfire. Wins over MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT and tracing.exportUntrustedContent. Default false; content full alone does not lift the cap. |
+| `tracing-export-untrusted-content` | _(empty)_ | Allow prompt and completion bodies on untrusted (fork-PR) runs when the capture level emits bodies. Required to ship fork-PR content to Logfire. Fork-controlled repository config cannot lift this cap. Wins over MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT. Default false; content full alone does not lift the cap. |
 | `tracing-to` | _(empty)_ | Tracing shorthand (W8.5 / W7.7): `local_files` / `logfire` / `otel`. Wins over the config block. `logfire` requires the optional `[tracing]` extra plus a `LOGFIRE_TOKEN` secret wired via `logfire-token` below; `otel` requires an `otel-endpoint`. |
 <!-- END:action-inputs -->
 

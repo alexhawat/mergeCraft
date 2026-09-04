@@ -53,6 +53,19 @@ def load_run_findings_with_drops(
     """
     state = ctx.tool_state
     raw: list[Any] = list(state.agent_findings)
+    # Judge-confirmed rows live in ``confirmed_findings``, a list distinct from
+    # ``agent_findings`` (``mcp/tool_state.py``). ``verify_agent_findings`` ->
+    # ``record_finding_verdict`` appends the confirmed row there and nowhere
+    # else, so reading only ``agent_findings`` made a confirmed agent blocker
+    # invisible to ``decide_approval`` — which is by contract "a pure function
+    # of typed findings". ``ToolState.iter_finding_rows`` already reads both,
+    # which is why such a finding still reached the review body a human reads
+    # while the packet and the gate recorded ``success``. Observed on PR #631:
+    # one queued finding, judge verdict ``confirm``, zero agent rows on the
+    # packet, ``verdict: success``. Deduplicated downstream by
+    # ``merge_findings`` on fingerprint, so a row present in both lanes is
+    # counted once.
+    raw.extend(state.confirmed_findings)
     run_state = state.analyzer_run
     if run_state is not None:
         raw.extend(list(run_state.findings))

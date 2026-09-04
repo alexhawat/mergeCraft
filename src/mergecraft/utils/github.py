@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 from typing import TYPE_CHECKING, Any, Final
 
@@ -185,15 +187,63 @@ class GitHubClient:
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        self._client = client or httpx.AsyncClient(
+        self._headers = headers
+        self._timeout = timeout
+        self._injected_client = client
+        # One transport per event loop. A single ``httpx.AsyncClient`` binds its
+        # connection-pool primitives (``asyncio.Event``/locks) to whichever loop
+        # first drives a request through it, so sharing one client across loops
+        # raises "bound to a different event loop" on the second loop. This run
+        # has two: the main loop and the MCP HTTP server's own loop in a daemon
+        # thread (``mcp/server.py::_serve_in_thread``). Binding lazily *per loop*
+        # keeps every caller on the same ``ScmProvider`` while giving each loop a
+        # transport it owns. See PR #628, where the publish path lost both
+        # check-runs — including ``mergecraft-approval`` — to exactly this.
+        self._clients: dict[asyncio.AbstractEventLoop, httpx.AsyncClient] = {}
+
+    def _new_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
             base_url=self.base_url,
-            headers=headers,
-            timeout=timeout,
+            headers=dict(self._headers),
+            timeout=self._timeout,
         )
 
+    def _active_client(self) -> httpx.AsyncClient:
+        """Return the transport bound to the running loop, creating it on first use.
+
+        An injected client is returned as-is: the caller owns its lifecycle and
+        its loop affinity, and test seams depend on getting back the exact
+        object they passed in.
+        """
+        if self._injected_client is not None:
+            return self._injected_client
+        loop = asyncio.get_running_loop()
+        transport = self._clients.get(loop)
+        if transport is None:
+            transport = self._new_client()
+            self._clients[loop] = transport
+        return transport
+
     async def aclose(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
+        """Close every per-loop transport this client created.
+
+        Only the transport belonging to the running loop can be closed cleanly;
+        the rest are closed best-effort, since awaiting another loop's pool
+        raises the very error this class exists to avoid. At most one such
+        transport is ever left over, and the process exits at the end of a run.
+        """
+        if not self._owns_client:
+            return
+        running = None
+        with contextlib.suppress(RuntimeError):
+            running = asyncio.get_running_loop()
+        for loop, transport in list(self._clients.items()):
+            if loop is running:
+                await transport.aclose()
+            else:
+                with contextlib.suppress(Exception):
+                    await transport.aclose()
+        self._clients.clear()
 
     async def __aenter__(self) -> GitHubClient:
         return self
@@ -221,7 +271,7 @@ class GitHubClient:
         if not self.token:
             msg = "GitHub token is missing; cannot call the GitHub API"
             raise ValueError(msg)
-        response = await self._client.request(
+        response = await self._active_client().request(
             method,
             path,
             params=params,
