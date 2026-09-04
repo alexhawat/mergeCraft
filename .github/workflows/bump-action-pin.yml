@@ -1,0 +1,182 @@
+# SPDX-License-Identifier: MIT
+# Two-commit Action pin bump (plan 19 / #562 / #603).
+#
+# action-slim-bootstrap in ci.yml is the only image publisher. It runs on a
+# pull_request whose base is pre-0.0.1. So the pin PR must target pre-0.0.1,
+# and the digest cannot exist until commit 1 (SHA bump) has been pushed and
+# that PR's bootstrap job has finished.
+#
+# Dispatch twice:
+#   1. stage=sha    — commit 1 on ci/bump-action-pin-<sha8>, based on pre-0.0.1.
+#                      Open the PR against pre-0.0.1. Wait for bootstrap.
+#   2. stage=digest — commit 2 on the same branch (action.yml digest).
+# Never merge after commit 1 alone.
+#
+# A human opens the PR: GITHUB_TOKEN-opened PRs do not trigger pull_request
+# workflows and would carry zero required checks. No PAT is used.
+name: Bump action pin
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_branch:
+        description: >-
+          Branch the sha-stage commit is based on and the pin PR targets.
+          Must stay pre-0.0.1 so action-slim-bootstrap can publish the image.
+        required: false
+        default: pre-0.0.1
+      sha:
+        description: >-
+          Full 40-hex commit SHA to pin. Leave blank to resolve base_branch's
+          current tip (the common case after syncing main into pre-0.0.1).
+        required: false
+        default: ""
+      stage:
+        description: >-
+          sha = commit 1 (workflow pin only). digest = commit 2 (action.yml
+          after action-slim-bootstrap has published the image).
+        required: false
+        default: sha
+        type: choice
+        options:
+          - sha
+          - digest
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve target SHA
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      short: ${{ steps.resolve.outputs.short }}
+      branch: ${{ steps.resolve.outputs.branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.base_branch }}
+          persist-credentials: false
+      - name: Resolve target SHA
+        id: resolve
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_SHA}" ]; then
+            SHA="${INPUT_SHA}"
+            git cat-file -e "${SHA}^{commit}" || {
+              echo "::error::sha input ${SHA} is not a commit reachable from this checkout" >&2
+              exit 1
+            }
+          else
+            SHA="$(git rev-parse HEAD)"
+          fi
+          SHORT="${SHA:0:8}"
+          BRANCH="ci/bump-action-pin-${SHORT}"
+          {
+            echo "sha=${SHA}"
+            echo "short=${SHORT}"
+            echo "branch=${BRANCH}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved target SHA: ${SHA} (base_branch=${BASE_BRANCH}, branch=${BRANCH})"
+
+  bump:
+    name: Bump pin, verify, push branch
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      UV_PROJECT_ENVIRONMENT: .venv-dev
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.stage == 'digest' && needs.resolve.outputs.branch || inputs.base_branch }}
+      - uses: ./.github/actions/bootstrap
+      - name: Bump the pin
+        id: bump
+        env:
+          SHA: ${{ needs.resolve.outputs.sha }}
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/bump_action_pin.py "${SHA}" --stage "${STAGE}" --ref HEAD
+      - name: Verify — action pin freshness
+        run: uv run python scripts/check_action_pin_freshness.py
+      - name: Verify — action image digest
+        if: inputs.stage == 'digest'
+        run: uv run python scripts/check_action_image_digest.py
+      - name: Create + push the bump branch
+        id: branch
+        env:
+          SHA: ${{ needs.resolve.outputs.sha }}
+          SHORT: ${{ needs.resolve.outputs.short }}
+          BRANCH: ${{ needs.resolve.outputs.branch }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "${STAGE}" = "sha" ]; then
+            PATHS=".github/workflows/mergecraft.yml .github/workflows/mergecraft-approve.yml"
+            SUBJECT="ci: bump the reviewer action pin to ${SHORT}"
+          else
+            PATHS="action.yml"
+            SUBJECT="ci: match action.yml runs.image to the GHCR digest for ${SHORT}"
+          fi
+          # shellcheck disable=SC2086
+          if git diff --quiet -- ${PATHS}; then
+            echo "::notice::No changes after ${STAGE} bump — already current. Nothing to push."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${STAGE}" = "sha" ]; then
+            git checkout -B "${BRANCH}"
+          fi
+          # shellcheck disable=SC2086
+          git add ${PATHS}
+          git commit \
+            -m "${SUBJECT}" \
+            -m "Bumped by the bump-action-pin workflow (stage=${STAGE}, base_branch=${BASE_BRANCH}, target sha=${SHA}). Never merge after the sha commit alone."
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          {
+            echo "branch=${BRANCH}"
+            echo "pushed=true"
+          } >> "$GITHUB_OUTPUT"
+      - name: Summary
+        if: always()
+        env:
+          BRANCH: ${{ needs.resolve.outputs.branch }}
+          PUSHED: ${{ steps.branch.outputs.pushed }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          STAGE: ${{ inputs.stage }}
+        run: |
+          {
+            echo "### Action pin bump (${STAGE})"
+            echo
+            if [ "${PUSHED}" = "true" ]; then
+              echo "Pushed \`${BRANCH}\` (target SHA \`${SHA}\`, stage \`${STAGE}\`)."
+              echo
+              if [ "${STAGE}" = "sha" ]; then
+                echo "**Open a PR from \`${BRANCH}\` against \`${BASE_BRANCH}\`** so"
+                echo "\`action-slim-bootstrap\` can publish the image. Then re-run this"
+                echo "workflow with \`stage=digest\`. Do not merge after commit 1 alone."
+              else
+                echo "Digest commit is on \`${BRANCH}\`. Merge the pin PR into \`${BASE_BRANCH}\`,"
+                echo "then open the promotion PR against \`main\`."
+              fi
+            else
+              echo "Nothing pushed for stage \`${STAGE}\` on \`${BASE_BRANCH}\`."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

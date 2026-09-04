@@ -14,10 +14,13 @@
 # (src/mergecraft/agents/gates.py) computes as a pure function of Finding
 # severities (W7.1/W7.2 of docs/dev/test-plans/security-structural-approval.md),
 # immune to whatever the agent's own narrative says — and, only when that
-# conclusion is "success", submits a PAT-backed APPROVE as @sevn-one (the
-# distinct CODEOWNER identity from PR #196/#200; the default GITHUB_TOKEN is
+# conclusion is "success", submits an APPROVE minted from the reviewer GitHub
+# App's own installation token (#550; a distinct identity from PR #196/#200's
+# original @sevn-one PAT, replaced entirely here — the default GITHUB_TOKEN is
 # silently downgraded to a comment on any approve attempt, a GitHub platform
-# restriction unrelated to PR authorship).
+# restriction unrelated to PR authorship, and a PAT cannot mint itself inside
+# this workflow's own credentials the way an App JWT can). See
+# docs/authentication.md "GitHub App reviewer identity" for what to register.
 #
 # Why workflow_run instead of a step inside mergecraft.yml's own
 # pull_request_target job: a `workflow_run` trigger's definition is ALWAYS read
@@ -32,10 +35,19 @@
 # mergecraft.yml itself to earn a "trusted" tier for same-repo PRs. That got a
 # same-day CHANGES_REQUESTED revert on PR #200: `pull_request` resolves the
 # workflow *definition* from the PR's own branch, so it would have handed
-# MERGECRAFT_REVIEWER_PAT, provider credentials, OIDC, and a write-scoped token
-# to PR-controlled code. See the "bootstrap pull_request trigger" comment near
-# the top of mergecraft.yml. Do not reintroduce that shape here either — this
-# file must stay workflow_run-only.
+# MERGECRAFT_REVIEWER_PAT (as it then was), provider credentials, OIDC, and a
+# write-scoped token to PR-controlled code. See the "bootstrap pull_request
+# trigger" comment near the top of mergecraft.yml. Do not reintroduce that
+# shape here either — this file must stay workflow_run-only.
+#
+# #550: MERGECRAFT_APP_ID / MERGECRAFT_APP_PRIVATE_KEY replace
+# MERGECRAFT_REVIEWER_PAT entirely — this workflow holds no PAT anymore, and
+# nothing in the repo references MERGECRAFT_REVIEWER_PAT any longer. When the
+# App is not registered (secrets unset), "Mint reviewer App installation
+# token" below is skipped, GH_TOKEN on the approve step is empty, and the
+# step no-ops exactly as it did when the PAT was unconfigured — a repo with no
+# App still gets a working review and a working gate, just without a
+# same-repo privileged APPROVE.
 name: mergecraft-approve
 
 on:
@@ -58,6 +70,12 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request_target' &&
       github.event.workflow_run.pull_requests[0] != null
+    env:
+      # The `secrets` context is not available in a step `if:` (actionlint:
+      # "context secrets is not allowed here"; matches mergecraft.yml's
+      # HAS_APP — same reason, same fix). Computed here, read as
+      # `env.HAS_APP` on the mint step below.
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' }}
     steps:
       - name: Check the structural mergecraft-approval verdict
         id: verdict
@@ -85,17 +103,41 @@ jobs:
           echo "mergecraft-approval conclusion for ${HEAD_SHA}: ${conclusion:-none}"
           echo "conclusion=${conclusion}" >> "${GITHUB_OUTPUT}"
 
+      # #550 — mints the same kind of App installation token mergecraft.yml's
+      # review steps prefer, from the same two secrets
+      # (MERGECRAFT_APP_ID / MERGECRAFT_APP_PRIVATE_KEY). Gated on the verdict
+      # step's own outcome so an unconfigured or failed mint never blocks the
+      # (skippable) approve step below — continue-on-error plus the empty-token
+      # guard in that step reproduce the old "PAT not configured" no-op path.
+      # Checkout is required so `uses: ./get-installation-token` resolves the
+      # composite from this workflow's default-branch copy (workflow_run always
+      # reads this file from the default branch). persist-credentials stays
+      # false: the mint uses App secrets, not the job token in .git/config.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        if: steps.verdict.outputs.conclusion == 'success' && env.HAS_APP == 'true'
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Mint reviewer App installation token
+        id: app_token
+        if: steps.verdict.outputs.conclusion == 'success' && env.HAS_APP == 'true'
+        continue-on-error: true
+        uses: ./get-installation-token
+        env:
+          GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+
       - name: Submit privileged APPROVE
         if: steps.verdict.outputs.conclusion == 'success'
         env:
-          GH_TOKEN: ${{ secrets.MERGECRAFT_REVIEWER_PAT }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN}" ]; then
-            echo "MERGECRAFT_REVIEWER_PAT not configured — nothing to submit with."
+            echo "reviewer App not configured (MERGECRAFT_APP_ID / MERGECRAFT_APP_PRIVATE_KEY unset, or the mint failed) — nothing to submit with."
             exit 0
           fi
           # commit_id pins the review to the exact reviewed SHA — GitHub rejects
@@ -105,6 +147,6 @@ jobs:
             -X POST \
             -f event=APPROVE \
             -f commit_id="${HEAD_SHA}" \
-            -f body="Approved by mergeCraft (@sevn-one) — clean structural verdict on ${HEAD_SHA}." \
+            -f body="Approved by mergeCraft — clean structural verdict on ${HEAD_SHA}." \
             >/dev/null
-          echo "Submitted PAT-backed APPROVE for PR #${PR_NUMBER} @ ${HEAD_SHA}."
+          echo "Submitted App-backed APPROVE for PR #${PR_NUMBER} @ ${HEAD_SHA}."

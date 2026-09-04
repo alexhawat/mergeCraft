@@ -24,6 +24,15 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # Composite actions have no post-job hook. A sequential "revoke" step here
+    # ran immediately after mint and handed callers a dead token (#578). Leave
+    # the token until GitHub expires it (~1 hour). Call main.py --post yourself
+    # if you need an earlier revoke after every consumer has finished.
+    - name: Install mint dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m pip install --user --quiet 'pyjwt[crypto]' httpx loguru
     - name: Mint installation token
       id: mint
       shell: bash
@@ -35,12 +44,3 @@ runs:
       run: |
         set -euo pipefail
         python3 "${{ github.action_path }}/main.py"
-    - name: Revoke on cleanup
-      if: always()
-      shell: bash
-      env:
-        STATE_token: ${{ steps.mint.outputs.token }}
-        MERGECRAFT_TOKEN_POST: "1"
-      run: |
-        set -euo pipefail
-        python3 "${{ github.action_path }}/main.py" --post

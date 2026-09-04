@@ -291,7 +291,59 @@ for fallback routing; the artifact is what survives after the runner is recycled
 If you pin the action SHA in more than one place, gate the copies against each
 other in CI — and read the workflow side from the **default branch**
 (`git show origin/main:.github/workflows/mergecraft.yml`), not the working tree.
-Bump order is default branch first, local pin second.
+Pin PRs target `pre-0.0.1` (so `action-slim-bootstrap` can publish); promotion
+to `main` is a separate PR.
+
+### Automated pin bump — two commits, pin PR against `pre-0.0.1`
+
+`action.yml`'s `runs.image` pins the published image **digest** for the same
+Action SHA. Two scripts enforce consistency: `scripts/check_action_pin_freshness.py`
+(self-consistency across the `uses:` rungs in `mergecraft.yml`, ancestry
+against the default branch, and a staleness ceiling — `MAX_PRODUCT_LAG`,
+default 5 — of `src/mergecraft/`-touching commits the pin may lag the default
+branch's tip) and `scripts/check_action_image_digest.py` (the digest must
+equal what GHCR actually serves for the pinned SHA, and that image must have
+been built with `--extra tracing`).
+
+**`action-slim-bootstrap` in `ci.yml` is the only image publisher.** It runs
+on a same-repo `pull_request` whose base is `pre-0.0.1`. `ci-cd.yml`'s
+`build-images` is gated on `e2e-gate`, which always skips, so no branch push
+publishes an image. A pin PR against `main` therefore cannot obtain a digest.
+
+The live procedure (plan 19 / pin 4):
+
+1. Sync `main` into `pre-0.0.1` if needed. The merge SHA is the SHA you pin to.
+2. **Pin PR, base `pre-0.0.1`, two commits** on `ci/bump-action-pin-<sha8>`:
+   - Commit 1: `env.MERGECRAFT_ACTION_SHA` and the three `uses:` rungs.
+     `action-slim-bootstrap` then builds the image. The digest **cannot** be
+     known before that finishes. Expected split-pin reds until commit 2
+     (`check_action_image_digest.py` / #562 / #603) — do not merge after
+     commit 1 alone.
+   - Commit 2: `action.yml`'s `runs.image` digest, tracing extra required.
+3. **Promotion PR, base `main`.** That is what makes `pull_request_target`
+   pick up the new reviewer.
+
+`scripts/bump_action_pin.py` encodes that split:
+
+```console
+$ uv run python scripts/bump_action_pin.py <sha> --stage sha
+bump-action-pin OK (sha): <old> -> <new>
+$ uv run python scripts/bump_action_pin.py <sha> --stage digest
+bump-action-pin OK (digest): <sha> (image digest sha256:<prefix>…)
+```
+
+`.github/workflows/bump-action-pin.yml` (`workflow_dispatch`) wraps it:
+`stage=sha` pushes commit 1; after bootstrap, `stage=digest` pushes commit 2
+on the same branch. **It stops at the push.** A PR opened with the default
+`GITHUB_TOKEN` does not trigger `pull_request` workflows, so a bot-opened PR
+would carry zero required checks. A human opens the PR from
+`ci/bump-action-pin-<sha8>` against `pre-0.0.1`. No PAT is used.
+
+`_PIN_RE` in `check_action_pin_freshness.py` also matches companion-action
+subpaths (`alexhawat/mergeCraft/<name>@<sha>`) so a leftover remote
+`get-installation-token@` pin cannot silently drift from the review rungs.
+The shipped mint steps use the local `./get-installation-token` composite
+instead, so they take effect on promotion without a further pin bump.
 
 Since [June 2026](https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/)
 `actions/checkout` refuses to check out fork PR code under `pull_request_target`

@@ -70,7 +70,7 @@ class TestGhcrDigestLookup:
         digest = "sha256:" + "a" * 64
         _stub_manifest_head(module, monkeypatch, digest=digest)
 
-        lookup = module._ghcr_digest_for_tag("b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5")
+        lookup = module.ghcr_digest_for_tag("b34e9f25c5d2dee0e638fa3c62f29733d0fc10c5")
 
         assert lookup.status == module.TagLookupStatus.FOUND
         assert lookup.digest == digest
@@ -81,7 +81,7 @@ class TestGhcrDigestLookup:
         _stub_manifest_head(module, monkeypatch, http_error=404)
         monkeypatch.setattr(module, "_MISSING_RETRIES", 0)
 
-        lookup = module._ghcr_digest_for_tag("0" * 40)
+        lookup = module.ghcr_digest_for_tag("0" * 40)
 
         assert lookup.status == module.TagLookupStatus.MISSING
 
@@ -89,7 +89,7 @@ class TestGhcrDigestLookup:
         module = _load_module()
         _stub_manifest_head(module, monkeypatch, http_error=500)
 
-        lookup = module._ghcr_digest_for_tag("0" * 40)
+        lookup = module.ghcr_digest_for_tag("0" * 40)
 
         assert lookup.status == module.TagLookupStatus.ERROR
 
@@ -108,7 +108,7 @@ class TestGhcrDigestLookup:
         monkeypatch.setattr(module, "_ghcr_digest_for_tag_once", _flaky)
         monkeypatch.setattr(module, "_MISSING_BACKOFF_SECONDS", 0)
 
-        lookup = module._ghcr_digest_for_tag("0" * 40)
+        lookup = module.ghcr_digest_for_tag("0" * 40)
 
         assert lookup.status == module.TagLookupStatus.FOUND
         assert lookup.digest == digest
@@ -129,7 +129,7 @@ class TestGhcrDigestLookup:
         monkeypatch.setattr(module, "_MISSING_RETRIES", 2)
         monkeypatch.setattr(module, "_MISSING_BACKOFF_SECONDS", 0)
 
-        lookup = module._ghcr_digest_for_tag("0" * 40)
+        lookup = module.ghcr_digest_for_tag("0" * 40)
 
         assert lookup.status == module.TagLookupStatus.MISSING
         assert len(calls) == 3
@@ -146,7 +146,7 @@ class TestGhcrDigestLookup:
         monkeypatch.setattr(module, "_ghcr_digest_for_tag_once", _always_error)
         monkeypatch.setattr(module, "_MISSING_BACKOFF_SECONDS", 0)
 
-        lookup = module._ghcr_digest_for_tag("0" * 40)
+        lookup = module.ghcr_digest_for_tag("0" * 40)
 
         assert lookup.status == module.TagLookupStatus.ERROR
         assert len(calls) == 1
@@ -155,7 +155,7 @@ class TestGhcrDigestLookup:
         module = _load_module()
         config = {"config": {"Env": ["PATH=/usr/bin"]}, "history": [{"created_by": "RUN uv sync"}]}
 
-        assert module._image_has_tracing_extra(config) is False
+        assert module.image_has_tracing_extra(config) is False
 
 
 class TestMain:

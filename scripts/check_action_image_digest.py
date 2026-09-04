@@ -17,6 +17,14 @@ Depends: json, re, sys, urllib.error, urllib.request, pathlib, yaml
 
 Exports:
     main — CLI entry; compares action.yml digest vs published GHCR slim image.
+    ghcr_digest_for_tag — resolve the published digest for a GHCR image tag
+        (retrying a not-yet-visible push). Reused by scripts/bump_action_pin.py
+        so the pin-bump script and this checker agree on one lookup.
+    fetch_oci_config_for_tag — fetch the OCI image config JSON for a published
+        tag. Also reused by scripts/bump_action_pin.py.
+    image_has_tracing_extra — whether an OCI image config's ``uv sync`` layer
+        was built with ``--extra tracing`` (#531). Also reused by
+        scripts/bump_action_pin.py.
 """
 
 from __future__ import annotations
@@ -116,7 +124,7 @@ _MISSING_RETRIES = int(os.environ.get("MERGECRAFT_GHCR_MISSING_RETRIES", "3"))
 _MISSING_BACKOFF_SECONDS = float(os.environ.get("MERGECRAFT_GHCR_MISSING_BACKOFF", "3"))
 
 
-def _ghcr_digest_for_tag(tag: str) -> TagLookupResult:
+def ghcr_digest_for_tag(tag: str) -> TagLookupResult:
     """Resolve the slim image digest for ``tag``, retrying a not-yet-visible push.
 
     ``MISSING`` is retried because it is the one status that is routinely
@@ -156,7 +164,7 @@ def _ghcr_digest_for_tag_once(tag: str) -> TagLookupResult:
     return TagLookupResult(status=TagLookupStatus.FOUND, digest=digest)
 
 
-def _fetch_oci_config_for_tag(tag: str) -> dict[str, Any] | None:
+def fetch_oci_config_for_tag(tag: str) -> dict[str, Any] | None:
     """Return the OCI image config JSON for a published slim image tag."""
     token = _ghcr_pull_token()
     if token is None:
@@ -213,7 +221,7 @@ def _fetch_oci_config_for_tag(tag: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _image_has_tracing_extra(config: dict[str, Any]) -> bool:
+def image_has_tracing_extra(config: dict[str, Any]) -> bool:
     """Return whether the slim image ``uv sync`` layer includes ``--extra tracing``."""
     history = config.get("history")
     if not isinstance(history, list):
@@ -298,7 +306,7 @@ def main() -> int:
         )
         return 0
 
-    lookup = _ghcr_digest_for_tag(action_sha)
+    lookup = ghcr_digest_for_tag(action_sha)
     if lookup.status is TagLookupStatus.ERROR:
         print(
             "action-image-digest-check: skipped GHCR parity — registry error while "
@@ -340,7 +348,7 @@ def main() -> int:
         )
         return 1
 
-    published_config = _fetch_oci_config_for_tag(action_sha)
+    published_config = fetch_oci_config_for_tag(action_sha)
     if published_config is None:
         print(
             "action-image-digest-check FAILED: could not read OCI config for "
@@ -349,7 +357,7 @@ def main() -> int:
         )
         return 1
 
-    if not _image_has_tracing_extra(published_config):
+    if not image_has_tracing_extra(published_config):
         print(
             "action-image-digest-check FAILED: published slim image was built without "
             "`uv sync --extra tracing` — Logfire/OTEL sinks degrade to NullSink (#531). "

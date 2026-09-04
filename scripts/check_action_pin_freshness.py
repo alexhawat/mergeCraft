@@ -48,8 +48,14 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = REPO / ".github" / "workflows"
 
-# The action pins itself here; a consumer's own pin is their business.
-_PIN_RE = re.compile(r"uses:\s*alexhawat/mergeCraft@(?P<sha>[0-9a-f]{40})")
+# The action pins itself here; a consumer's own pin is their business. The
+# optional `(?:/[\w.-]+)*` subpath covers companion actions published from the
+# same repo/SHA (e.g. `alexhawat/mergeCraft/get-installation-token@<sha>`,
+# #550) — those must stay in lockstep with the review rungs exactly like the
+# rungs must stay in lockstep with each other; a merge that only advances the
+# bare `mergeCraft@` pin silently split them once (see the mergecraft.yml /
+# mergecraft-approve.yml `get-installation-token` steps' history).
+_PIN_RE = re.compile(r"uses:\s*alexhawat/mergeCraft(?:/[\w.-]+)*@(?P<sha>[0-9a-f]{40})")
 _ENV_SHA_RE = re.compile(
     r"^\s*MERGECRAFT_ACTION_SHA:\s*[\"']?(?P<sha>[0-9a-f]{40})[\"']?\s*$",
     re.MULTILINE,
