@@ -46,7 +46,7 @@ def persist_analyzer_output(raw: str, *, tmpdir: Path, tool_id: str) -> Path:
     return path
 
 
-def read_output_file(path: Path) -> str:
+def _read_output_file(path: Path) -> str:
     """Read analyzer output from disk without an 8 KB cap."""
     return path.read_text(encoding="utf-8")
 
@@ -58,9 +58,9 @@ def parse_output_file(
     repo_root: Path,
 ) -> list[Finding]:
     """Parse normalized findings from a persisted analyzer output file."""
-    raw = read_output_file(path)
+    raw = _read_output_file(path)
     findings = parse_output(raw, manifest=manifest, repo_root=repo_root)
     return _redact_findings(findings, tool_id=manifest.id)
 
 
-__all__ = ["parse_output_file", "persist_analyzer_output", "read_output_file"]
+__all__ = ["parse_output_file", "persist_analyzer_output"]

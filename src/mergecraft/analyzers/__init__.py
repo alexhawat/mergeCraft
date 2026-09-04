@@ -1,5 +1,7 @@
 """Analyzer platform — manifests, registry, resolution, and execution."""
 
+from __future__ import annotations
+
 from mergecraft.analyzers.finding import Finding, FindingValidationError, make_finding
 from mergecraft.analyzers.manifest import (
     AnalyzerManifest,

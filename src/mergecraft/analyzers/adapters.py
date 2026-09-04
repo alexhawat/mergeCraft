@@ -61,14 +61,12 @@ def _scan_agentsec_in_process(
     *,
     repo_root: Path,
     scoped: list[str],
-    tier: TrustTier,
 ) -> _NativeScanOutcome:
     from mergecraft.analyzers.agentsec import scan_manifests
 
     agentsec_result = scan_manifests(
         repo_root=repo_root,
         changed_files=scoped,
-        tier=tier,
     )
     return _NativeScanOutcome(
         findings=agentsec_result.findings,
@@ -81,9 +79,7 @@ def _scan_antislop_in_process(
     *,
     repo_root: Path,
     scoped: list[str],
-    tier: TrustTier,
 ) -> _NativeScanOutcome:
-    _ = tier
     from mergecraft.analyzers.antislop import scan_changed_files
 
     antislop_result = scan_changed_files(repo_root=repo_root, changed_files=scoped)
@@ -105,13 +101,12 @@ def _run_in_process_scan(
     *,
     repo_root: Path,
     scoped: list[str],
-    tier: TrustTier,
 ) -> _NativeScanOutcome:
     scanner = _IN_PROCESS_SCANNERS.get(tool_id)
     if scanner is None:
         msg = f"unsupported in-process analyzer {tool_id!r}"
         raise ValueError(msg)
-    return scanner(repo_root=repo_root, scoped=scoped, tier=tier)
+    return scanner(repo_root=repo_root, scoped=scoped)
 
 
 def _run_in_process_native_adapter(
@@ -132,7 +127,6 @@ def _run_in_process_native_adapter(
         tool_id,
         repo_root=repo_root,
         scoped=scoped_files,
-        tier=tier,
     )
     version_note = IN_PROCESS_VERSION_NOTES[tool_id]
     if outcome.skipped:
@@ -366,7 +360,6 @@ def run_adapter(
         resolved_base = resolve_analyzer_base_ref(
             repo_root,
             base_ref=base_ref,
-            offline=offline,
             changed_files=changed_files,
         )
         return run_differential_adapter(
@@ -384,7 +377,6 @@ def run_adapter(
         resolved_base = resolve_analyzer_base_ref(
             repo_root,
             base_ref=base_ref,
-            offline=offline,
             changed_files=changed_files,
         )
         return run_supply_chain_adapter(

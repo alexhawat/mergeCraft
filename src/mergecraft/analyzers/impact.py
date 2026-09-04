@@ -133,7 +133,7 @@ def _run_ast_grep(
         msg = sandbox_decision.skip_reason or f"ast-grep sandbox unavailable ({rule_path.name})"
         raise _ExtractionFailed(msg)
 
-    env = build_analyzer_env(tier=tier, event=None)
+    env = build_analyzer_env(tier=tier)
     plan = AnalyzerPlan(
         manifest_id="ast-grep-impact",
         mode="managed",

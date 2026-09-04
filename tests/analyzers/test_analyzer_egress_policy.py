@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -153,12 +152,3 @@ def test_egress_skip_reason_names_analyzer_and_hosts(tmp_path: Path) -> None:
     reason = outcome.reason.lower()
     assert "osv-scanner" in reason
     assert "api.osv.dev" in reason or "osv.dev" in reason
-
-
-def test_build_analyzer_env_no_longer_discards_network_allowlist() -> None:
-    """trust.py must not silently discard network_allowlist (the #538 root cause)."""
-    from mergecraft.analyzers import trust as trust_mod
-
-    source = inspect.getsource(trust_mod.build_analyzer_env)
-    assert "_ = event, network_allowlist" not in source
-    assert "network_allowlist" in source

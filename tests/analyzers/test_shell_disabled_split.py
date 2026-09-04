@@ -430,7 +430,6 @@ def test_analyzer_env_still_scrubbed_on_untrusted_runs(
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_shell_split_canary")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk_shell_split_canary")
     env = build_analyzer_env(
-        event=fork_pr_event,
         tier="untrusted",
         repo_env={
             "GITHUB_TOKEN": "ghp_shell_split_canary",

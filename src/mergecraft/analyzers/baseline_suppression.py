@@ -121,7 +121,6 @@ def collect_base_analyzer_findings(
     resolved = resolve_analyzer_base_ref(
         repo_root,
         base_ref=base_ref,
-        offline=offline,
         changed_files=changed_files,
     )
     if not resolved:
