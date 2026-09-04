@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Convert mypy JSON-lines or Bandit JSON into a SARIF 2.1.0 document.
+"""Convert mypy JSON-lines, Bandit JSON, or TruffleHog JSONL into SARIF 2.1.0.
 
-CI uploads ruff's native SARIF; mypy and Bandit do not emit SARIF in the
-pinned versions, so this adapter produces artifacts named ``mypy-sarif`` /
-``bandit-sarif`` for #464 first-wave ingest.
+CI uploads ruff's native SARIF; mypy, Bandit, and TruffleHog do not emit
+SARIF in the pinned versions, so this adapter produces artifacts named
+``mypy-sarif`` / ``bandit-sarif`` / ``trufflehog-sarif`` for CI evidence ingest.
 
 Malformed or missing native input is a converter failure — not an empty
-clean SARIF document.
+clean SARIF document. TruffleHog is the exception for *empty* stdout: a
+clean scan writes no findings, so empty JSONL becomes a valid
+empty-results SARIF with tool metadata (never a 0-byte file).
 """
 
 from __future__ import annotations
@@ -22,6 +24,11 @@ from mergecraft.analyzers.parsers.bandit_json import (
     bandit_native_severity,
     bandit_row_span,
     iter_bandit_result_rows,
+)
+from mergecraft.analyzers.parsers.trufflehog_jsonl import (
+    _detector_name,
+    _line_from_metadata,
+    _path_from_metadata,
 )
 
 _BANDIT_LEVEL = {"high": "error", "medium": "warning", "low": "note", "undefined": "note"}
@@ -210,11 +217,68 @@ def bandit_to_sarif(raw: str) -> SarifLog:
     return _sarif(tool="bandit", results=results)
 
 
+def _is_trufflehog_log_line(item: dict[str, object]) -> bool:
+    """Return True for TruffleHog progress logs (not findings)."""
+    return bool(item.get("level") and item.get("msg"))
+
+
+def trufflehog_to_sarif(raw: str) -> SarifLog:
+    """Convert TruffleHog ``-j`` JSONL into SARIF.
+
+    Empty stdout (or only progress logs) is a real clean scan: emit a valid
+    empty-results document with tool metadata. Truncated or invalid JSON is
+    a converter failure. Finding ``Raw`` / ``RawV2`` values never enter the
+    SARIF message — only detector name, path, and line.
+    """
+    results: list[SarifResult] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            msg = "trufflehog native output contains invalid or truncated JSON"
+            raise ConverterError(msg) from exc
+        if not isinstance(parsed, dict):
+            continue
+        if _is_trufflehog_log_line(parsed):
+            continue
+        metadata = parsed.get("SourceMetadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        path = _path_from_metadata(metadata, repo_root=None)
+        try:
+            start = require_line(_line_from_metadata(metadata), default=1)
+        except ValueError as exc:
+            raise ConverterError(str(exc)) from exc
+        detector = _detector_name(parsed)
+        verified = bool(parsed.get("Verified"))
+        results.append(
+            _result(
+                rule_id=detector,
+                level="error" if verified else "warning",
+                message=f"{detector} secret detected at {path}:{start}",
+                uri=path,
+                start_line=start,
+                end_line=start,
+            )
+        )
+    return _sarif(tool="trufflehog", results=results)
+
+
+_CONVERTERS = {
+    "mypy": mypy_to_sarif,
+    "bandit": bandit_to_sarif,
+    "trufflehog": trufflehog_to_sarif,
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     """Convert ``INPUT`` to SARIF at ``OUTPUT``. Return process status."""
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 3 or args[0] not in {"mypy", "bandit"}:
-        sys.stderr.write("usage: native_output_to_sarif.py mypy|bandit INPUT OUTPUT\n")
+    if len(args) != 3 or args[0] not in _CONVERTERS:
+        sys.stderr.write("usage: native_output_to_sarif.py mypy|bandit|trufflehog INPUT OUTPUT\n")
         return 2
     kind, src, dest = args
     src_path = Path(src)
@@ -223,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     raw = src_path.read_text(encoding="utf-8")
     try:
-        document = mypy_to_sarif(raw) if kind == "mypy" else bandit_to_sarif(raw)
+        document = _CONVERTERS[kind](raw)
     except ConverterError as exc:
         sys.stderr.write(f"native_output_to_sarif: {exc}\n")
         return 1

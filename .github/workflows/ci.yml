@@ -227,8 +227,9 @@ jobs:
           path: .sarif/mypy.sarif
           if-no-files-found: warn
       # W5 extended SARIF (lane D / #600): actionlint + zizmor for sandbox-blocked
-      # workflow analyzers. trufflehog omitted — JSONL-only, no SARIF emitter (D12).
-      # SARIF uploads run on Python 3.14 only — one canonical artifact set per PR.
+      # workflow analyzers. trufflehog SARIF is emitted from the security job
+      # (JSONL converted to SARIF). Uploads run on Python 3.14 only — one
+      # canonical artifact set per PR.
       - name: Emit actionlint and zizmor SARIF
         if: always() && matrix.python == '3.14'
         env:
@@ -306,6 +307,20 @@ jobs:
         with:
           name: semgrep-sarif
           path: .sarif/semgrep.sarif
+          if-no-files-found: warn
+      # Catalog parser is JSONL; convert to SARIF so ingest stays one path.
+      # A clean scan still uploads a valid empty-results document, not a 0-byte file.
+      - name: Emit trufflehog SARIF
+        if: always() && matrix.python == '3.14'
+        env:
+          UV_PROJECT_ENVIRONMENT: .venv-dev
+        run: uv run python scripts/ci_extended_sarif.py trufflehog .sarif/trufflehog.sarif
+      - name: Upload trufflehog SARIF
+        if: always() && matrix.python == '3.14'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: trufflehog-sarif
+          path: .sarif/trufflehog.sarif
           if-no-files-found: warn
 
   integration:

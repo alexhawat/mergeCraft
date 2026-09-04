@@ -23,6 +23,7 @@ ConverterError = _MOD.ConverterError
 bandit_to_sarif = _MOD.bandit_to_sarif
 main = _MOD.main
 mypy_to_sarif = _MOD.mypy_to_sarif
+trufflehog_to_sarif = _MOD.trufflehog_to_sarif
 
 
 def test_valid_empty_bandit_results_is_clean_sarif() -> None:
@@ -222,3 +223,82 @@ def test_sarif_converters_use_require_line_not_as_line() -> None:
             '{"results": [{"test_id": "B101", "issue_severity": "HIGH",'
             ' "issue_text": "assert", "filename": "a.py", "line_number": "nope"}]}'
         )
+
+
+def test_empty_trufflehog_jsonl_is_clean_sarif_with_tool_metadata() -> None:
+    """A clean trufflehog scan writes no findings — still a valid empty-results SARIF."""
+    doc = trufflehog_to_sarif("")
+    assert doc["version"] == "2.1.0"
+    assert doc["runs"][0]["tool"]["driver"]["name"] == "trufflehog"
+    assert doc["runs"][0]["results"] == []
+
+
+def test_trufflehog_progress_logs_are_not_findings() -> None:
+    raw = (
+        '{"level":"info-0","ts":"2026-08-22T10:02:00Z","logger":"trufflehog",'
+        '"msg":"finished scanning"}\n'
+    )
+    doc = trufflehog_to_sarif(raw)
+    assert doc["runs"][0]["results"] == []
+    assert doc["runs"][0]["tool"]["driver"]["name"] == "trufflehog"
+
+
+def test_trufflehog_fixture_finding_writes_sarif() -> None:
+    fixture = _ROOT / "tests" / "analyzers" / "fixtures" / "native" / "trufflehog-minimal.jsonl"
+    doc = trufflehog_to_sarif(fixture.read_text(encoding="utf-8"))
+    results = doc["runs"][0]["results"]
+    assert results
+    assert results[0]["ruleId"] == "AWS"
+    assert results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == (
+        "config/.env"
+    )
+
+
+def test_trufflehog_raw_secret_never_enters_sarif() -> None:
+    """Planted-secret fixture field must not appear in the converted SARIF."""
+    planted = "AKIA_PLANTED_FIXTURE_DO_NOT_ROTATE_IN_TESTS"
+    raw = json.dumps(
+        {
+            "SourceMetadata": {
+                "Data": {"Filesystem": {"file": "config/planted-secret.env", "line": 1}}
+            },
+            "DetectorName": "AWSAccessKey",
+            "Verified": False,
+            "Raw": planted,
+            "RawV2": planted,
+        }
+    )
+    doc = trufflehog_to_sarif(raw + "\n")
+    dumped = json.dumps(doc)
+    assert planted not in dumped
+    assert doc["runs"][0]["results"][0]["ruleId"] == "AWSAccessKey"
+
+
+def test_truncated_trufflehog_jsonl_is_converter_failure() -> None:
+    good = (
+        '{"SourceMetadata":{"Data":{"Filesystem":{"file":"a.env","line":1}}},'
+        '"DetectorName":"AWS","Verified":false}\n'
+    )
+    truncated = '{"SourceMetadata":{"Data":'
+    with pytest.raises(ConverterError, match=r"truncated|invalid"):
+        trufflehog_to_sarif(good + truncated)
+
+
+def test_empty_trufflehog_file_writes_non_empty_sarif(tmp_path: Path) -> None:
+    src = tmp_path / "trufflehog.jsonl"
+    dest = tmp_path / "trufflehog.sarif"
+    src.write_text("", encoding="utf-8")
+    assert main(["trufflehog", str(src), str(dest)]) == 0
+    assert dest.is_file()
+    assert dest.stat().st_size > 0
+    doc = json.loads(dest.read_text(encoding="utf-8"))
+    assert doc["runs"][0]["results"] == []
+    assert doc["runs"][0]["tool"]["driver"]["name"] == "trufflehog"
+
+
+def test_truncated_trufflehog_file_does_not_write_clean_sarif(tmp_path: Path) -> None:
+    src = tmp_path / "trufflehog.jsonl"
+    dest = tmp_path / "trufflehog.sarif"
+    src.write_text('{"SourceMetadata":{"Data":', encoding="utf-8")
+    assert main(["trufflehog", str(src), str(dest)]) == 1
+    assert not dest.exists()
