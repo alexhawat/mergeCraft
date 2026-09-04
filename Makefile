@@ -256,7 +256,7 @@ reference-docs: docs ## Regenerate the README action + CLI reference tables (ali
 
 reference-docs-check: docs-check ## Fail when README reference tables drift (alias)
 
-ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check ## Static/build tier
+ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check mcp-server-json-check ## Static/build tier
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).

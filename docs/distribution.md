@@ -97,7 +97,6 @@ install is required.
 
 ## Prototype residue removed for 0.1.0
 
-- `docs/meat-spike.md` — spike write-up (issue #60 exploration).
 - `meat_python_plus/` — experimental Python port of [meat](https://github.com/boldsoftware/meat);
   not imported by shipped `mergecraft`. Optional Meat reading-diff lens uses the
   `meat` Go binary (`go install meat.dev/cmd/meat@latest`) via `meat_harness`.

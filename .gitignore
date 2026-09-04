@@ -92,11 +92,7 @@ evals/results/structural-replay-convergence-*.json
 
 /.agents
 
-# Local wave agent kit (operator tooling; pack/unpack via scripts/wave_agents_kit.sh)
+# Local wave agent kit (operator tooling)
 /.github/agents/wave-plan-executor.md
 /.github/agents/test-creator.md
 /docs/_standards/invariants.md
-/scripts/wave_close.py
-/scripts/sync_agent_prompts.py
-/scripts/wave_agents_kit.sh
-/tests/scripts/test_wave_close.py
