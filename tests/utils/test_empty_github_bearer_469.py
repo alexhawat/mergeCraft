@@ -28,7 +28,7 @@ _EMPTY_TOKENS = ("", "   ", "\t", "\n")
 
 
 def _authorization(client: GitHubClient) -> str | None:
-    return client._client.headers.get("Authorization")
+    return client._active_client().headers.get("Authorization")
 
 
 def _result_text(result: ToolResult) -> str:
@@ -81,7 +81,7 @@ async def test_get_commit_info_without_token_reports_unavailable_naming_token(
         msg = "GitHub HTTP must not run without a token"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(github._client, "request", _spy)
+    monkeypatch.setattr(github._active_client(), "request", _spy)
     try:
         ctx = _tool_context(tmp_path, github)
         result = await get_commit_info_tool(ctx).execute({"sha": "abc1234deadbeef"})
@@ -111,7 +111,7 @@ async def test_download_artifact_zip_fail_closed_without_token(
         msg = "GitHub HTTP must not run without a token"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(github._client, "request", _spy)
+    monkeypatch.setattr(github._active_client(), "request", _spy)
     try:
         with pytest.raises(ValueError, match="token"):
             await github.download_artifact_zip("acme", "demo", 1)
@@ -132,7 +132,7 @@ async def test_download_workflow_run_logs_fail_closed_without_token(
         msg = "GitHub HTTP must not run without a token"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(github._client, "request", _spy)
+    monkeypatch.setattr(github._active_client(), "request", _spy)
     try:
         with pytest.raises(ValueError, match="token"):
             await github.download_workflow_run_logs("acme", "demo", 1)
