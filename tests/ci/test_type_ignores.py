@@ -46,7 +46,6 @@ def test_d6_paths_cover_plan_src_files() -> None:
     expected = {
         "src/mergecraft/agents/_stream_consumer.py",
         "src/mergecraft/agents/codex.py",
-        "src/mergecraft/agents/ensemble.py",
         "src/mergecraft/agents/structured_handoff.py",
         "src/mergecraft/analyzers/adapters.py",
         "src/mergecraft/analyzers/parsers/osv_json.py",

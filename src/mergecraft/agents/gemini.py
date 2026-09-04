@@ -213,40 +213,6 @@ def _parse_gemini_payload(data: dict[str, Any]) -> tuple[str, AgentUsage | None]
     return output, usage
 
 
-def _parse_gemini_stdout(stdout: str) -> tuple[str, AgentUsage | None]:
-    text = stdout.strip()
-    if not text:
-        return "", None
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return _parse_gemini_payload(data)
-    except json.JSONDecodeError:
-        pass
-
-    usage: AgentUsage | None = None
-    output = text
-    for line in reversed(text.splitlines()):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            event = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict):
-            continue
-        parsed_output, parsed_usage = _parse_gemini_payload(event)
-        if parsed_output:
-            output = parsed_output
-        if parsed_usage is not None:
-            usage = parsed_usage
-        if event.get("type") in {"result", "turn.completed", "agent-turn-complete"}:
-            break
-    return output, usage
-
-
 def _run_gemini_once(
     *,
     cli: str,

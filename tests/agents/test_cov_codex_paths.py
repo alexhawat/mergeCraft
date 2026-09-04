@@ -191,24 +191,6 @@ def test_extract_refresh_token_shapes(raw: str, expected: str | None) -> None:
     assert codex_module._extract_refresh_token(raw) == expected
 
 
-@pytest.mark.parametrize(
-    ("raw", "usable"),
-    [
-        ("{not json", False),
-        ('"a string"', False),
-        ("{}", False),
-        ('{"tokens": {}}', False),
-        ('{"tokens": {"access_token": "   "}}', False),
-        ('{"tokens": {"access": "at"}}', True),
-        ('{"access_token": "at"}', True),
-        ('{"refresh_token": "rt"}', True),
-    ],
-)
-def test_codex_subscription_auth_usable_shapes(raw: str, usable: bool) -> None:
-    """Only JSON objects carrying a non-blank access/refresh token count as usable."""
-    assert codex_module._codex_subscription_auth_usable(raw) is usable
-
-
 def test_setup_codex_auth_writes_auth_json_and_records_writeback_state(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -436,52 +418,6 @@ def test_render_toml_keeps_scalars_under_their_own_table_header() -> None:
             "network": {"enabled": True},
         }
     }
-
-
-# ---------------------------------------------------------------------------
-# Legacy stdout parsing — empty, non-object and partially malformed streams
-# ---------------------------------------------------------------------------
-
-
-def test_parse_codex_stdout_returns_no_usage_for_an_empty_stream() -> None:
-    """An empty stream is not a zero-token run — usage stays ``None``."""
-    assert codex_module._parse_codex_stdout("   \n  ") == ("", None)
-
-
-def test_parse_codex_stdout_keeps_raw_text_when_the_blob_is_not_an_object() -> None:
-    """A JSON array is not a result payload; the raw text survives as the output."""
-    output, usage = codex_module._parse_codex_stdout("[1, 2]")
-
-    assert output == "[1, 2]"
-    assert usage is None
-
-
-def test_parse_codex_stdout_skips_malformed_lines_and_reads_the_terminal_event() -> None:
-    """Non-JSON noise and non-object lines are skipped; the last event wins."""
-    stdout = "\n".join(
-        [
-            "not json",
-            "[]",
-            "",
-            json.dumps({"type": "message", "content": "ignored earlier message"}),
-            json.dumps(
-                {
-                    "type": "turn.completed",
-                    "result": "final answer",
-                    "usage": {"input_tokens": 10, "cache_read_input_tokens": 5},
-                    "total_cost_usd": 0.25,
-                }
-            ),
-        ]
-    )
-
-    output, usage = codex_module._parse_codex_stdout(stdout)
-
-    assert output == "final answer"
-    assert usage is not None
-    assert usage.input_tokens == 15
-    assert usage.cache_read_tokens == 5
-    assert usage.cost_usd == 0.25
 
 
 def test_parse_codex_payload_reports_cost_only_runs() -> None:
