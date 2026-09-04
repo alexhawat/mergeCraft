@@ -56,6 +56,8 @@ tests/analyzers/fixtures/repo/.mergecraft/
 # TS5 adversarial corpus (built via tests/security/fixtures/build_hostile_repo.sh)
 tests/security/fixtures/hostile-repo/
 tests/security/fixtures/outside-target/
+tests/security/fixtures/evil-diff.sh
+tests/security/fixtures/evil-fsmonitor.sh
 
 # Docker agent CLI installs (local npm deps for image build)
 docker/agent-clis/node_modules/

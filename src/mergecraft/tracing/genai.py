@@ -333,6 +333,36 @@ def thinking_attrs(
     return attrs
 
 
+def _yaml_export_untrusted_for_capture(trust_tier: str, live_yaml: bool) -> bool | None:
+    """Return YAML ``exportUntrustedContent`` only from operator-owned sources.
+
+    Fork HEAD ``.mergecraft/config.yaml`` cannot lift D7. Trusted runs honor
+    live YAML. An untrusted run honors the run-scope settings snapshot only
+    when that snapshot's own ``operator_owned`` provenance says it was read
+    from a checkout a fork cannot control (in practice: the base ref on a
+    ``pull_request_target`` run, captured before ``checkout_pr`` ever runs —
+    see :class:`mergecraft.config.settings_snapshot.RepoSettingsSnapshot`).
+    That provenance is decided once, by the caller that captured the
+    snapshot, from the same event name that drove ``trust_tier`` itself —
+    never re-derived here from the ambient environment. Reading
+    ``GITHUB_EVENT_NAME`` a second time, independently of whatever produced
+    ``trust_tier``, is exactly the bug class ``e656debc`` fixed for trust-tier
+    derivation: two readings of the same env var can disagree. Every other
+    untrusted case (no snapshot, or a snapshot whose provenance is not
+    operator-owned — including a rebaseline with no prior snapshot, which
+    falls back to a live load off a checkout that may already be the fork's
+    own HEAD) returns ``None`` so only env / Action can lift the cap.
+    """
+    if trust_tier == "trusted":
+        return live_yaml
+    from mergecraft.config.settings_snapshot import run_scope_settings_snapshot
+
+    snapshot = run_scope_settings_snapshot()
+    if snapshot is None or not snapshot.operator_owned:
+        return None
+    return snapshot.settings.tracing.export_untrusted_content
+
+
 def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
     """Resolve the content-capture policy for a driver wiring site.
 
@@ -345,9 +375,12 @@ def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
     closed to the capped path. The configured level comes from the repo
     settings' ``tracing.content``; ``MERGECRAFT_TRACING_CONTENT`` still
     overrides it inside :func:`resolve_content_capture` (env → configured →
-    default). The D7 cap applies last unless
-    ``tracing.exportUntrustedContent`` /
-    ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`` is set.
+    default). The D7 cap applies last unless an **operator-owned**
+    ``exportUntrustedContent`` source is set (env / Action, trusted YAML, or
+    the run-scope settings snapshot when its own ``operator_owned``
+    provenance says so — see
+    :func:`_yaml_export_untrusted_for_capture`). Live fork HEAD YAML cannot
+    lift the cap.
 
     Args:
         trust_tier (str | None): The run's derived trust tier.
@@ -356,16 +389,17 @@ def resolve_capture_policy(trust_tier: str | None) -> ContentCapture:
         ContentCapture: The effective, cap-applied capture level.
     """
     configured: str | None = None
-    export_untrusted: bool | None = None
+    live_yaml_export: bool = False
     try:
         from mergecraft.config import load_repo_settings
 
         tracing = load_repo_settings(load_learnings_files=False).tracing
         configured = tracing.content
-        export_untrusted = tracing.export_untrusted_content
+        live_yaml_export = tracing.export_untrusted_content
     except Exception as exc:
         logger.debug("tracing content config load failed (using default): {}", exc)
     tier = trust_tier if trust_tier in ("trusted", "untrusted") else "untrusted"
+    export_untrusted = _yaml_export_untrusted_for_capture(tier, live_yaml_export)
     return resolve_content_capture(configured, tier, export_untrusted=export_untrusted)
 
 

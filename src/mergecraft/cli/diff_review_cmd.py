@@ -460,8 +460,8 @@ def run(
         help=(
             "Allow prompt/completion bodies on untrusted runs when the capture "
             "level emits bodies. Required to ship fork-PR content to Logfire. "
-            "Wins over MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT and "
-            "tracing.exportUntrustedContent."
+            "Fork-controlled repository config cannot lift this cap. "
+            "Wins over MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT."
         ),
         rich_help_panel=_PANEL_TRACING,
     ),
