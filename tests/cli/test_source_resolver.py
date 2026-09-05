@@ -19,7 +19,6 @@ import pytest
 from tests.analyzers.support import import_module
 from typer.testing import CliRunner
 
-from mergecraft.cli.app import app
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff
 
 runner = CliRunner()
