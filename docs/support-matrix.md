@@ -21,7 +21,7 @@ notes stay in [compatibility-matrix.md](compatibility-matrix.md).
 | SCM | Role | Status |
 |------|------|------|
 | `github` | Webhook + review ingress | Supported |
-| `gitlab` | Webhook + review ingress | Supported |
+| `gitlab` | Webhook + review ingress | Not supported yet |
 | `bitbucket` | Webhook ingress | Not supported |
 
 ## Languages
