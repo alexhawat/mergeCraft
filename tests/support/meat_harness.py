@@ -1,7 +1,7 @@
-"""Subprocess boundary for the optional Meat reading-diff lens (#60 spike).
+"""Test-only subprocess boundary for the optional Meat reading-diff lens (#60 spike).
 
-This module is a pure boundary pinned by
-``tests/utils/test_meat_harness.py``: a single function
+This module lives under ``tests/support/`` — it has no production callers.
+It is a pure boundary pinned by ``tests/utils/test_meat_harness.py``: a single function
 :func:`run_meat_harness` that takes a unified diff, invokes
 ``meat -json`` as a subprocess with a bounded timeout, parses the
 result, and returns a typed record. The raw diff is **always** retained
@@ -50,7 +50,7 @@ Exports:
 
 Examples:
     >>> from pathlib import Path
-    >>> from mergecraft.utils.meat_harness import run_meat_harness
+    >>> from tests.support.meat_harness import run_meat_harness
     >>> diff = "diff --git a/x b/x\\n--- a/x\\n+++ b/x\\n@@ -1 +1 @@\\n-old\\n+new\\n"
     >>> result = run_meat_harness(
     ...     raw_diff=diff,

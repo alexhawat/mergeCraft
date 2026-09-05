@@ -6,12 +6,8 @@ Exports:
     controls: Nested ``enterprise:`` settings block.
     diagnostics: Operational diagnostics.
     health: Machine-readable health endpoint.
-    memory_distribution: Org memory binding without a dashboard.
-    offline: Offline / self-hosted install plan (D14).
-    policy_distribution: Org policy distribution without a dashboard.
     proxy: Enterprise HTTP(S) proxy configuration.
     residency: Data-residency enforcement.
-    retention: Trace-retention and privacy-log policies.
     runtime: Bind settings into process enforcement (proxy, CA, telemetry).
     support_bundle: Support bundles with secret redaction.
     telemetry: Configurable telemetry with opt-out and off modes.
@@ -25,12 +21,8 @@ __all__ = [
     "controls",
     "diagnostics",
     "health",
-    "memory_distribution",
-    "offline",
-    "policy_distribution",
     "proxy",
     "residency",
-    "retention",
     "runtime",
     "support_bundle",
     "telemetry",
