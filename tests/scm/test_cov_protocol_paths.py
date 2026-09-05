@@ -174,9 +174,8 @@ def test_generic_mcp_tools_are_never_declared_as_protocol_operations() -> None:
     """Generic-tool names must stay out of the operation set.
 
     ``mcp_generic_tool_names`` lists MCP tools implemented with generic REST /
-    GraphQL calls. ``GitLabScmAdapter`` grows one stub method per name in
-    ``protocol_operation_names()``; adding a generic tool there would give every
-    adapter a namesake method that nothing implements or dispatches to.
+    GraphQL calls. Adding a generic tool to ``protocol_operation_names()`` would
+    give every adapter a namesake method that nothing implements or dispatches to.
     """
     generic = mcp_generic_tool_names()
 
@@ -224,21 +223,13 @@ async def test_adapters_do_not_inherit_the_protocol_stubs() -> None:
 
     ``validate_provider`` cannot tell an inherited empty stub from a real method,
     so a subclassing adapter would pass validation while returning ``None`` from
-    every unimplemented operation. ``GitLabScmAdapter`` avoids that by raising
-    ``UnsupportedScmCapability`` from generated stubs instead.
+    every unimplemented operation.
     """
-    from mergecraft.scm.errors import UnsupportedScmCapability
     from mergecraft.scm.github import GitHubScmAdapter
-    from mergecraft.scm.gitlab import GitLabScmAdapter
 
     inert = type("_InertProvider", (ScmProvider,), {})()
     assert validate_provider(inert).complete is True, (
         "inherited stubs validate as complete — adapters must not subclass ScmProvider"
     )
 
-    assert ScmProvider not in GitLabScmAdapter.__mro__
     assert ScmProvider not in GitHubScmAdapter.__mro__
-
-    adapter = GitLabScmAdapter(token="test-token", base_url="https://gitlab.example/api/v4")
-    with pytest.raises(UnsupportedScmCapability):
-        await adapter.get_pull("acme", "demo", 7)
