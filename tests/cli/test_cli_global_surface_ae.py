@@ -289,7 +289,6 @@ def test_global_format_json_inherited_by_eval_list(tmp_path: Path) -> None:
     assert payload["cases"][0]["id"] == "synthetic-001"
 
 
-
 def test_review_is_documented_in_root_help() -> None:
     """D13 — ``review`` is visible in root help."""
     result = runner.invoke(app, ["--help"], env=_DUMB_ENV)

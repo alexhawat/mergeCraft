@@ -338,9 +338,9 @@ def test_write_env_value_derives_quoting_from_the_value(tmp_path: Path) -> None:
     json_path = tmp_path / "json.env"
     payload = '{"tokens": {"access_token": "x"}}'
     assert module._write_env_value(json_path, "MERGECRAFT_QUOTE_JSON", payload) is True
-    assert [line for line in json_path.read_text(encoding="utf-8").splitlines() if line.strip()] == [
-        f"MERGECRAFT_QUOTE_JSON='{payload}'"
-    ]
+    assert [
+        line for line in json_path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ] == [f"MERGECRAFT_QUOTE_JSON='{payload}'"]
 
 
 def _mode(path: Path) -> int:

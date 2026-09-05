@@ -473,7 +473,6 @@ def test_auth_precedence_order(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resolve_auth().source == "anonymous"
 
 
-
 def test_downstream_pipeline_unchanged(tmp_path: Path) -> None:
     """Resolver produces the same ``DiffMaterialization`` shape as ``materialize_diff``."""
     repo = _init_repo(tmp_path)
