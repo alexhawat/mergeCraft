@@ -397,9 +397,6 @@ class ToolState:
     # ``main.py`` can wire it into the agent prompt at both call sites and
     # into the outcome resolution path. Empty string = no failure.
     setup_hook_failure: str = ""
-    # Former askpass path retained for bookkeeping only — ``setup_git`` shreds
-    # the on-disk helper immediately (auth is MCP ``http.extraHeader``; W2.2).
-    git_askpass_path: str | None = None
     xrepo_learnings_file_path: str | None = None
     xrepo_learnings_seed: str | None = None
     xrepo_learnings_persist_attempted: bool = False
