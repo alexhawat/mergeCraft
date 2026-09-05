@@ -127,14 +127,8 @@ async def test_get_check_suite_logs_no_failures_message(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_get_check_suite_logs_skips_when_github_client_unavailable(tmp_path: Path) -> None:
-    from mergecraft.scm.gitlab import GitLabScmAdapter
-
     ctx = _ctx(tmp_path)
-    object.__setattr__(
-        ctx,
-        "scm",
-        GitLabScmAdapter(token="test-token", base_url="https://gitlab.example/api/v4"),
-    )
+    object.__setattr__(ctx, "scm", type("_NonGitHubScm", (), {})())
     payload = json.loads(
         (await get_check_suite_logs_tool(ctx).execute({"check_suite_id": 42})).content[0]["text"]
     )
