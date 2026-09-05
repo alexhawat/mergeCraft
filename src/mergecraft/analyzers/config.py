@@ -23,7 +23,6 @@ def trufflehog_verify_enabled(
     *,
     repo_root: Path,
     tier: TrustTier,
-    event: dict[str, Any] | None = None,
 ) -> bool:
     """Return whether TruffleHog live verification may run (C2 / D7).
 
@@ -31,7 +30,6 @@ def trufflehog_verify_enabled(
     pull_request_target). Trusted repos must opt in via
     ``analyzers.trufflehog.verify: true``.
     """
-    _ = event
     if tier != "trusted":
         return False
     trufflehog = raw_analyzers_block(repo_root).get("trufflehog")

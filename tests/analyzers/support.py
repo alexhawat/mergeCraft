@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +30,6 @@ def finding_path_matches(expected: str, actual: str) -> bool:
 
 # W0.2 measured inline cap (D14).
 INLINE_BUDGET = 8
-
-# W6 adapter ids — redaction parametrisation is structurally valid before W6 (W1.12).
-W6_ANALYZER_IDS: tuple[str, ...] = ("actionlint", "zizmor", "shellcheck", "hadolint")
 
 # Catalog expansion (C1-C6) - representative ids checked by test_catalog_docs (C0.7).
 CATALOG_ANALYZER_IDS: tuple[str, ...] = (
@@ -217,7 +213,3 @@ FORK_PULL_REQUEST_EVENT: dict[str, Any] = {
 def import_module(dotted: str) -> Any:
     """Lazy import so collection succeeds before W2 lands ``src/mergecraft/analyzers/``."""
     return importlib.import_module(dotted)
-
-
-def load_json_fixture(name: str) -> Any:
-    return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))

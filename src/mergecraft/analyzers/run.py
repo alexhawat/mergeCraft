@@ -47,7 +47,7 @@ so a new status cannot be added without deciding here whether it passes.
 
 Two readers disagreed before this existed: ``AnalyzerOutcome.passed`` accepted
 ``satisfied-by-ci`` while the approval gate's own allowlist did not, so a repo
-whose ``ciEvidence`` proved a gate green had its terminal approve rejected. The
+whose ``ciEvidence`` proved a gate green had its terminal approve rejected.
 If a new status is added to ``CheckStatus``, decide here whether it passes and
 both readers follow.
 """

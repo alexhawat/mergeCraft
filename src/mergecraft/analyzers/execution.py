@@ -72,7 +72,7 @@ def finalize_plan(
     argv = list(expand_analyzer_argv(plan.argv, repo_root=repo_root, changed_files=scoped_files))
     if manifest.id == "trufflehog":
         argv = _trufflehog_argv(argv, repo_root=repo_root, tier=tier, event=event)
-    env = build_analyzer_env(tier=tier, event=event, repo_env=None)
+    env = build_analyzer_env(tier=tier, repo_env=None)
     if plan.env:
         env = {**env, **plan.env}
     return replace(plan, argv=tuple(argv), cwd=repo_root, env=env)
@@ -98,7 +98,7 @@ def _trufflehog_argv(
     # from MCP callers that assemble their own arguments (see ``run_argv``).
     if TRUFFLEHOG_NO_UPDATE_FLAG not in filtered:
         filtered.append(TRUFFLEHOG_NO_UPDATE_FLAG)
-    if trufflehog_verify_enabled(repo_root=repo_root, tier=tier, event=event):
+    if trufflehog_verify_enabled(repo_root=repo_root, tier=tier):
         if "--verification" not in filtered:
             filtered.append("--verification")
     elif "--no-verification" not in filtered:
