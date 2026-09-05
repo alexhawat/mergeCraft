@@ -8,10 +8,10 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from mergecraft.agents.ensemble import finding_key
 from mergecraft.agents.registry import AgentRole
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.mcp.verdict import SubmitReviewVerdictParams, register_review_scope
+from mergecraft.review.finding_key import finding_key
 from mergecraft.review.terminal_submission import (
     _group_findings_by_reviewer,
     merge_reviewer_findings,

@@ -17,14 +17,14 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
-from mergecraft.cli.trace_jsonl import (
-    default_trace_dir,
-    load_trace_jsonl_events,
-    session_ids_in_trace_order,
-)
 from mergecraft.review.completed import (
     completed_review_exists,
     load_completed_review_trace_events,
+)
+from mergecraft.tracing.trace_jsonl import (
+    default_trace_dir,
+    load_trace_jsonl_events,
+    session_ids_in_trace_order,
 )
 
 

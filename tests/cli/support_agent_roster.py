@@ -23,7 +23,7 @@ from tests.cli.support_provider_registry import (
 AGENT_ROSTER_MODULE = "mergecraft.config.agent_roster"
 AGENT_CMD_MODULE = "mergecraft.cli.agent_cmd"
 AGENT_LOCAL_CMD_MODULE = "mergecraft.cli.agent_local_cmd"
-REVIEWER_MERGE_MODULE = "mergecraft.agents.reviewer_merge"
+REVIEWER_TERMINAL_MODULE = "mergecraft.review.terminal_submission"
 AUTH_MANIFEST_MODULE = "mergecraft.cli.workflow_cmd"
 
 LOCAL_CONFIG_REL = ".mergecraft/config.local.yaml"
@@ -99,7 +99,7 @@ def import_agent_local_cmd() -> Any:
 
 
 def import_reviewer_merge() -> Any:
-    return import_module_or_fail(REVIEWER_MERGE_MODULE)
+    return import_module_or_fail(REVIEWER_TERMINAL_MODULE)
 
 
 def require_parse_auth_manifest() -> Any:
@@ -243,7 +243,7 @@ __all__ = [
     "LOCAL_CONFIG_GITIGNORE_LINE",
     "LOCAL_CONFIG_REL",
     "MALFORMED_SLOTS",
-    "REVIEWER_MERGE_MODULE",
+    "REVIEWER_TERMINAL_MODULE",
     "W2_XFAIL",
     "W4_XFAIL",
     "W5_XFAIL",

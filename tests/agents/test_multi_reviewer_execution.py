@@ -12,8 +12,9 @@ from tests.cli.support_agent_roster import (
 
 from mergecraft.agents.harness_render import default_subagent_selection
 from mergecraft.agents.registry import load_registry
-from mergecraft.agents.reviewer_merge import reviewer_dispatch_batches
 from mergecraft.config.settings import load_repo_settings
+from mergecraft.review.roster_dispatch import reviewer_dispatch_batches
+from mergecraft.review.terminal_submission import prepare_terminal_submission
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -159,7 +160,6 @@ agents:
 
 def test_prepare_terminal_submission_enforces_strictest_verdict() -> None:
     from mergecraft.agents.registry import AgentBinding, AgentRole, Registry
-    from mergecraft.agents.reviewer_merge import prepare_terminal_submission
 
     binding = AgentBinding(
         agent_id="mergecraft-reviewer",
@@ -184,7 +184,6 @@ def test_prepare_terminal_submission_enforces_strictest_verdict() -> None:
 
 def test_prepare_terminal_submission_groups_by_raised_by() -> None:
     from mergecraft.agents.registry import AgentBinding, AgentRole, Registry
-    from mergecraft.agents.reviewer_merge import prepare_terminal_submission
 
     primary = AgentBinding(
         agent_id="mergecraft-reviewer",
