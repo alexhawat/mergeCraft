@@ -14,11 +14,8 @@ WEBHOOK_MODULE = "mergecraft.scm.webhooks"
 EGRESS_MODULE = "mergecraft.security.egress"
 PUBLIC_COMMENT_MODULE = "mergecraft.security.public_comments"
 ADVERSARIAL_CORPORA_MODULE = "mergecraft.evals.adversarial_corpora"
-SLO_MODULE = "mergecraft.reliability.slo"
-CHAOS_MODULE = "mergecraft.reliability.chaos"
 RECOVERY_MODULE = "mergecraft.reliability.recovery"
 BUNDLE_MODULE = "mergecraft.reliability.diagnostic_bundle"
-PERF_MODULE = "mergecraft.perf.budgets"
 
 SUPPORTED_WEBHOOK_PROVIDERS = frozenset({"github", "gitlab"})
 ADVERSARIAL_CORPUS_KINDS = frozenset(
@@ -26,14 +23,6 @@ ADVERSARIAL_CORPUS_KINDS = frozenset(
         "prompt_injection",
         "malicious_repository",
         "malicious_ticket_comment",
-    }
-)
-PRODUCTION_SLO_NAMES = frozenset(
-    {
-        "successful_review_completion",
-        "time_to_first_finding",
-        "total_review_latency",
-        "publication_success",
     }
 )
 ISSUE_140_GATE_METRICS = frozenset(
@@ -84,15 +73,11 @@ __all__ = [
     "ADVERSARIAL_CORPORA_MODULE",
     "ADVERSARIAL_CORPUS_KINDS",
     "BUNDLE_MODULE",
-    "CHAOS_MODULE",
     "CLEANUP_FAILURE_MODES",
     "EGRESS_MODULE",
     "ISSUE_140_GATE_METRICS",
-    "PERF_MODULE",
-    "PRODUCTION_SLO_NAMES",
     "PUBLIC_COMMENT_MODULE",
     "RECOVERY_MODULE",
-    "SLO_MODULE",
     "SUPPORTED_WEBHOOK_PROVIDERS",
     "WEBHOOK_MODULE",
     "d10_root_callback_owns_globals",
