@@ -3,7 +3,7 @@
 
 Module: scripts.gen_support_matrix
 Depends: argparse, difflib, pathlib, sys,
-    mergecraft.analyzers.registry, mergecraft.models, mergecraft.scm.webhooks
+    mergecraft.analyzers.registry, mergecraft.models
 
 Builds OS, SCM, language, analyzer, provider, and model tables from live
 catalogs so ``make docs-check`` fails when those sources drift. File 8 RV4
@@ -24,7 +24,6 @@ from pathlib import Path
 
 from mergecraft.analyzers.registry import load_catalog
 from mergecraft.models import PROVIDERS
-from mergecraft.scm.webhooks import SUPPORTED_WEBHOOK_PROVIDERS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATH = REPO_ROOT / "docs" / "support-matrix.md"
@@ -80,11 +79,13 @@ def gen_support_matrix() -> str:
             notes = "preferred" if defn.preferred else "—"
             model_rows.append((f"`{provider_key}/{model_id}`", f"`{provider_key}`", notes))
 
+    # 0.1.0 review ingress is GitHub-only; GitLabScmAdapter raises
+    # UnsupportedScmCapability for all review operations (DG9 stub).
     scm_rows = [
-        (f"`{name}`", "Webhook + review ingress", "Supported")
-        for name in sorted(SUPPORTED_WEBHOOK_PROVIDERS)
+        ("`github`", "Webhook + review ingress", "Supported"),
+        ("`gitlab`", "Webhook + review ingress", "Not supported yet"),
+        ("`bitbucket`", "Webhook ingress", "Not supported"),
     ]
-    scm_rows.append(("`bitbucket`", "Webhook ingress", "Not supported"))
 
     language_rows = [(lang, "Analyzer catalog `languages:`") for lang in languages]
 
