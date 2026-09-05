@@ -10,7 +10,7 @@ Contributor setup, make targets, and PR expectations for mergeCraft itself.
 make setup
 ```
 
-Requires Python 3.14 and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/) ([`docs/dev/python-version-floor.md`](docs/dev/python-version-floor.md)).
 
 `make setup` and all Makefile targets use a dedicated project virtualenv at
 `.venv-dev` (via `UV_PROJECT_ENVIRONMENT` in the Makefile). This keeps the dev

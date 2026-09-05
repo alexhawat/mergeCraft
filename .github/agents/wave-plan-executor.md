@@ -96,7 +96,7 @@ ask whether to skip.
   `src/mergecraft/analyzers/pipeline.py`.
 
 ## Step 4 — Execute to project standards
-- Stack is Python 3.14+, package under `src/mergecraft/`, repo config in
+- Stack is Python 3.11+ (CI matrix includes 3.14), package under `src/mergecraft/`, repo config in
   `.mergecraft/config.yaml`, Action inputs in `action.yml`.
 - Loguru only; mypy strict; Pyright; Conventional Commits.
 - **Always use uv**: every Python tool invocation goes through `uv run` / `uv sync`. Never raw
