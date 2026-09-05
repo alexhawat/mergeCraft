@@ -372,7 +372,6 @@ def setup_git(
     # surface for root-UID MCP ``shell=restricted`` (Thermos Final). Auth is
     # brokered per-op via MCP git ``http.extraHeader`` — never ``GIT_ASKPASS``.
     askpass = write_askpass_script(temp, git_token)
-    tool_state.git_askpass_path = askpass
     askpass_path = Path(askpass)
     if askpass_path.is_file():
         _secure_overwrite_file(askpass_path)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mergecraft.mcp.process_state import reset_mcp_process_state
+from mergecraft.mcp.shared import reset_mcp_process_state
 
 
 @pytest.fixture(autouse=True)

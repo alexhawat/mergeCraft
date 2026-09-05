@@ -71,7 +71,7 @@ def _tool_ctx(tmp_path: Path) -> ToolContext:
 
 def _find_reset_mcp_process_state() -> Callable[[], object] | None:
     for module_name in (
-        "mergecraft.mcp.process_state",
+        "mergecraft.mcp.shared",
         "mergecraft.mcp.isolation",
         "mergecraft.mcp.server",
     ):
@@ -117,7 +117,7 @@ def test_reset_mcp_process_state_is_public_api() -> None:
     """D4 — module-level MCP caches must expose a process reset hook."""
     reset = _find_reset_mcp_process_state()
     assert reset is not None, (
-        "export reset_mcp_process_state() from mergecraft.mcp.{process_state,isolation,server}"
+        "export reset_mcp_process_state() from mergecraft.mcp.{shared,isolation,server}"
     )
     reset()
 
