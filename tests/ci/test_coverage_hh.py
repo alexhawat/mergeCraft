@@ -67,7 +67,7 @@ def _coverage_json(tmp_path: Path, percent: float) -> Path:
         files[f"src/mergecraft/{suffix}"] = {"summary": dict(summary)}
     prefix_paths = (
         "src/mergecraft/mcp/server.py",
-        "src/mergecraft/action/post.py",
+        "src/mergecraft/action/inputs.py",
         "src/mergecraft/security/gate.py",
         "src/mergecraft/analyzers/pipeline.py",
         "src/mergecraft/agents/reviewer.py",

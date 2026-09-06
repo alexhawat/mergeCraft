@@ -245,7 +245,7 @@ bearer; the real key never enters the agent environment or `$CODEX_HOME/auth.jso
 Clearing `CODEX_AUTH_JSON` and running Codex on `OPENAI_API_KEY` **enables**
 broker coverage. The cost is billing: per-token API usage instead of ChatGPT
 subscription pricing. The broker does not broker subscription auth — deleting
-`auth.json` would also break Codex writeback for subscription sessions.
+`auth.json` ends the subscription session for that run.
 
 ### What this lane does not build
 
