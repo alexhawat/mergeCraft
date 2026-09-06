@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.analyzers.redact import _entropy_threshold, _shannon_entropy, redact_secrets
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from tests.analyzers.support import FIXTURES_DIR, REDACTION_ANALYZER_IDS
 
@@ -31,8 +31,22 @@ class RedactionHit:
 
 
 def _high_entropy_secret(length: int = 32) -> str:
+    """Draw a token that actually clears the redactor's own entropy floor.
+
+    A single ``secrets.choice`` draw occasionally lands below
+    ``_entropy_threshold`` by chance (character repeats collapse the measured
+    Shannon entropy), which flakes this fail-closed guard on a token the
+    redactor was never guaranteed to treat as high-entropy. Resample until the
+    draw actually satisfies the precondition the test means to exercise.
+    """
     alphabet = string.ascii_letters + string.digits + "+/=_-"
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+    threshold = _entropy_threshold(length)
+    for _ in range(100):
+        candidate = "".join(secrets.choice(alphabet) for _ in range(length))
+        if _shannon_entropy(candidate) >= threshold:
+            return candidate
+    msg = f"could not draw a token clearing the entropy threshold ({threshold}) in 100 attempts"
+    raise AssertionError(msg)
 
 
 def _fixture_paths_for_analyzer(analyzer_id: str) -> list[Path]:
