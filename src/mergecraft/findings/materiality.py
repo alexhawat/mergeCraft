@@ -10,7 +10,6 @@ Depends: dataclasses
 Exports:
     Classes:
         DismissalRecord — Structured dismissal with a closed reason code.
-        BlockerPrecisionReport — Corpus gate for production blocker precision.
     Functions:
         score_materiality — Rank a finding by impact (security over style).
         prioritize_findings — Order findings by materiality, highest first.
@@ -21,7 +20,6 @@ Exports:
         record_dismissal — Store a reason-coded dismissal for evaluation.
         dismissal_eval_records — Serialize dismissals as eval signals.
         dismissal_to_memory — Persist only with repeated evidence (#360).
-        evaluate_blocker_precision_corpus — CI smoke check that blocker scoring runs.
 """
 
 from __future__ import annotations
@@ -59,7 +57,6 @@ _CATEGORY_WEIGHT: Final[dict[str, int]] = {
 
 _HIT_RATE_CERTAIN: Final[float] = 0.95
 _HIT_RATE_LIKELY: Final[float] = 0.70
-_BLOCKER_PRECISION_TARGET: Final[float] = 0.95
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,19 +65,6 @@ class DismissalRecord:
 
     fingerprint: str
     reason_code: str
-
-
-@dataclass(frozen=True, slots=True)
-class BlockerPrecisionReport:
-    """Precision of blocker-band findings on the validated corpus.
-
-    ``wired_into_releases`` is True because this gate runs in the unit suite
-    that ``make ci`` / release CI already execute — it is not a second merge
-    verdict (D14).
-    """
-
-    blocker_precision: float
-    wired_into_releases: bool = True
 
 
 def _severity_rank(severity: str) -> int:
@@ -305,77 +289,13 @@ def dismissal_to_memory(
         raise PermissionError(msg)
 
 
-def evaluate_blocker_precision_corpus() -> BlockerPrecisionReport:
-    """Smoke-check that blocker scoring is callable on a synthetic corpus.
-
-    The unit suite (``make ci``) invokes this so a regression in the scoring
-    path fails CI. The corpus is constructed in-process to be one-for-one; this
-    is not a labeled eval-bank precision measurement.
-
-    Returns:
-        Report with ``blocker_precision`` and ``wired_into_releases``.
-    """
-    from mergecraft.analyzers.finding import make_finding
-    from mergecraft.evals.scoring import BaselineIssue, ReportedFinding, score_findings
-
-    issues = [
-        BaselineIssue(
-            id=f"blk-{index:03d}",
-            path="src/bench/module.py",
-            start_line=index * 10 + 1,
-            end_line=index * 10 + 2,
-            severity="Critical",
-            category="Security & Privacy",
-        )
-        for index in range(20)
-    ]
-    findings = [
-        make_finding(
-            tool="agent",
-            rule_id=f"agent:blk-{index:03d}",
-            category="Security & Privacy",
-            severity="Critical",
-            confidence="likely",
-            message=f"Blocker {index} introduced by this change",
-            path="src/bench/module.py",
-            start_line=index * 10 + 1,
-            end_line=index * 10 + 2,
-            source="agent",
-            introduced_by_pr="true",
-        )
-        for index in range(20)
-    ]
-    reported = [
-        ReportedFinding(
-            path=finding.path,
-            start_line=finding.start_line or 1,
-            end_line=finding.end_line or finding.start_line or 1,
-            message=finding.message,
-            severity=finding.severity,
-            category=finding.category,
-        )
-        for finding in findings
-    ]
-    scored = score_findings(issues, reported)
-    precision = scored.blocker_precision
-    if precision is None or precision <= _BLOCKER_PRECISION_TARGET:
-        msg = (
-            f"blocker precision {precision!r} is not above "
-            f"{_BLOCKER_PRECISION_TARGET} on the validated corpus"
-        )
-        raise RuntimeError(msg)
-    return BlockerPrecisionReport(blocker_precision=precision, wired_into_releases=True)
-
-
 __all__ = [
     "DISMISSAL_REASON_CODES",
-    "BlockerPrecisionReport",
     "DismissalRecord",
     "apply_finding_budgets",
     "calibrate_confidence",
     "dismissal_eval_records",
     "dismissal_to_memory",
-    "evaluate_blocker_precision_corpus",
     "meets_blocking_threshold",
     "meets_publication_threshold",
     "prioritize_findings",
