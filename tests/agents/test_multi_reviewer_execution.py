@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from tests.cli.support_agent_roster import (
-    import_reviewer_merge,
+    import_terminal_submission,
     two_reviewer_config,
     write_config,
 )
@@ -51,7 +51,7 @@ def test_default_subagent_selection_returns_every_reviewer_plus_verifier(
 
 
 def test_merge_dedupes_identical_path_body_line() -> None:
-    mod = import_reviewer_merge()
+    mod = import_terminal_submission()
     left = [_finding(path="a.py", body="bug", line=10)]
     right = [_finding(path="a.py", body="bug", line=10)]
     merged = mod.merge_reviewer_findings([("reviewer", left), ("reviewer2", right)])
@@ -60,7 +60,7 @@ def test_merge_dedupes_identical_path_body_line() -> None:
 
 
 def test_merge_preserves_critical_findings_at_different_lines() -> None:
-    mod = import_reviewer_merge()
+    mod = import_terminal_submission()
     left = [_finding(path="a.py", body="bug one", line=10)]
     right = [_finding(path="a.py", body="bug two", line=20)]
     merged = mod.merge_reviewer_findings([("reviewer", left), ("reviewer2", right)])
@@ -69,7 +69,7 @@ def test_merge_preserves_critical_findings_at_different_lines() -> None:
 
 
 def test_merged_findings_yield_one_verdict_and_one_terminal_submission() -> None:
-    mod = import_reviewer_merge()
+    mod = import_terminal_submission()
     findings = mod.merge_reviewer_findings(
         [
             ("reviewer", [_finding(path="a.py", body="warn", line=1, severity="warning")]),
@@ -88,7 +88,7 @@ def test_merged_findings_yield_one_verdict_and_one_terminal_submission() -> None
 
 
 def test_critical_from_reviewer2_blocks_when_reviewer_approves() -> None:
-    mod = import_reviewer_merge()
+    mod = import_terminal_submission()
     findings = mod.merge_reviewer_findings(
         [
             ("reviewer", []),
@@ -100,7 +100,7 @@ def test_critical_from_reviewer2_blocks_when_reviewer_approves() -> None:
 
 
 def test_one_reviewer_failing_does_not_void_other_findings() -> None:
-    mod = import_reviewer_merge()
+    mod = import_terminal_submission()
     surviving = [_finding(path="a.py", body="still here", line=3)]
     merged = mod.merge_reviewer_findings(
         [
