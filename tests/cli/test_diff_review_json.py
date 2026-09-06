@@ -1,4 +1,4 @@
-"""RED tests for ``mergecraft diff-review --json`` structured findings (issue #30, Batch A W1)."""
+"""RED tests for ``mergecraft review --json`` structured findings (issue #30, Batch A W1)."""
 
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def test_cli_diff_review_json_dry_run_does_not_write_file(tmp_path: Path) -> Non
     result = runner.invoke(
         app,
         [
-            "diff-review",
+            "review",
             "--diff",
             str(patch),
             "--cwd",
@@ -120,7 +120,7 @@ def test_cli_diff_review_json_empty_diff_writes_empty_findings(tmp_path: Path) -
     result = runner.invoke(
         app,
         [
-            "diff-review",
+            "review",
             "--diff",
             str(patch),
             "--cwd",
@@ -188,7 +188,7 @@ def test_cli_diff_review_json_validates_findings(
     result = runner.invoke(
         app,
         [
-            "diff-review",
+            "review",
             "--diff",
             str(patch),
             "--cwd",
@@ -218,6 +218,6 @@ def test_cli_diff_review_json_validates_findings(
 
 
 def test_cli_diff_review_help_lists_json() -> None:
-    result = runner.invoke(app, ["diff-review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
+    result = runner.invoke(app, ["review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
     assert "--json" in _plain(result.stdout)

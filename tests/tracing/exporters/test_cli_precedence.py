@@ -41,7 +41,7 @@ def test_default_is_off() -> None:
 
     # The ``diff-review --help`` output lists the new tracing flags — a
     # surface assertion that the CLI was wired up.
-    result = _RUNNER.invoke(app, ["diff-review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
+    result = _RUNNER.invoke(app, ["review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0, result.stdout + result.stderr
     out = _plain(result.stdout)
     for flag in (
@@ -87,7 +87,7 @@ def test_cli_env_config_precedence(
     patch = tmp_path / "in.diff"
     patch.write_text("diff --git a/x b/x\n+1\n", encoding="utf-8")
 
-    args = ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"]
+    args = ["review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"]
     if layer == "cli_only":
         args.extend(["--tracing"])
     if layer == "config_only":
@@ -124,12 +124,12 @@ def test_cli_flag_overrides_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     result = _RUNNER.invoke(
         app,
-        ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run", "--no-tracing"],
+        ["review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run", "--no-tracing"],
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_CONFIG": str(config)},
     )
     assert result.exit_code == 0, result.stdout + result.stderr
     resolved = _resolve_tracing_for_args(
-        ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run", "--no-tracing"],
+        ["review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run", "--no-tracing"],
         env=_env_from(monkeypatch, config),
         cwd=tmp_path,
     )
@@ -157,7 +157,7 @@ def test_cli_logfire_token_flag_wins_over_env(
     result = _RUNNER.invoke(
         app,
         [
-            "diff-review",
+            "review",
             "--diff",
             str(patch),
             "--cwd",
@@ -176,7 +176,7 @@ def test_cli_logfire_token_flag_wins_over_env(
     assert result.exit_code == 0, result.stdout + result.stderr
     resolved = _resolve_tracing_for_args(
         [
-            "diff-review",
+            "review",
             "--diff",
             str(patch),
             "--cwd",
@@ -204,7 +204,7 @@ def test_otel_endpoint_env_var_overrides_config(
     monkeypatch.setenv("MERGECRAFT_OTEL_ENDPOINT", "http://env-host:4318/")
 
     resolved = _resolve_tracing_for_args(
-        ["diff-review", "--diff", str(tmp_path / "x.diff"), "--cwd", str(tmp_path), "--dry-run"],
+        ["review", "--diff", str(tmp_path / "x.diff"), "--cwd", str(tmp_path), "--dry-run"],
         env=_env_from(monkeypatch, config),
         cwd=tmp_path,
     )
@@ -225,7 +225,7 @@ def test_trace_dir_flag_overrides_yaml(monkeypatch: pytest.MonkeyPatch, tmp_path
     custom_dir = tmp_path / "cli-traces"
     resolved = _resolve_tracing_for_args(
         [
-            "diff-review",
+            "review",
             "--diff",
             str(tmp_path / "x.diff"),
             "--cwd",
@@ -264,7 +264,7 @@ def test_tracing_project_env_var_is_surfaced(
     patch.write_text("diff --git a/x b/x\n+1\n", encoding="utf-8")
 
     resolved = _resolve_tracing_for_args(
-        ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
+        ["review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
         env=_env_from(monkeypatch, config),
         cwd=tmp_path,
     )
@@ -291,7 +291,7 @@ def test_tracing_project_env_var_overrides_yaml(
     monkeypatch.setenv("MERGECRAFT_TRACING_PROJECT", "env-project")
 
     resolved = _resolve_tracing_for_args(
-        ["diff-review", "--diff", str(tmp_path / "x.diff"), "--cwd", str(tmp_path), "--dry-run"],
+        ["review", "--diff", str(tmp_path / "x.diff"), "--cwd", str(tmp_path), "--dry-run"],
         env=_env_from(monkeypatch, config),
         cwd=tmp_path,
     )
@@ -310,7 +310,7 @@ def test_tracing_project_blank_env_value_is_dropped(
     monkeypatch.setenv("MERGECRAFT_TRACING_PROJECT", "   ")
 
     resolved = _resolve_tracing_for_args(
-        ["diff-review", "--diff", str(tmp_path / "x.diff"), "--cwd", str(tmp_path), "--dry-run"],
+        ["review", "--diff", str(tmp_path / "x.diff"), "--cwd", str(tmp_path), "--dry-run"],
         env=_env_from(monkeypatch, config),
         cwd=tmp_path,
     )
@@ -332,7 +332,7 @@ def test_tracing_project_unset_does_not_appear(
     monkeypatch.delenv("MERGECRAFT_TRACING_PROJECT", raising=False)
 
     resolved = _resolve_tracing_for_args(
-        ["diff-review", "--diff", str(tmp_path / "x.diff"), "--cwd", str(tmp_path), "--dry-run"],
+        ["review", "--diff", str(tmp_path / "x.diff"), "--cwd", str(tmp_path), "--dry-run"],
         env=_env_from(monkeypatch, config),
         cwd=tmp_path,
     )

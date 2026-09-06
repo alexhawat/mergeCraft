@@ -75,14 +75,11 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def test_agents_md_exists_and_teaches_review_not_diff_review_as_primary() -> None:
+def test_agents_md_exists_and_teaches_review() -> None:
     text = _read(AGENTS_MD)
     assert "mergecraft review" in text, "AGENTS.md must teach mergecraft review as primary (D10)"
     assert "mergecraft init" in text, "AGENTS.md must document mergecraft init for consumer setup"
-    if "diff-review" in text:
-        assert "alias" in text.lower(), (
-            "AGENTS.md must describe diff-review as a deprecated alias when mentioned (D10)"
-        )
+    assert "diff-review" not in text, "AGENTS.md must not document removed diff-review alias"
 
 
 def test_agents_md_stops_on_interactive_auth() -> None:

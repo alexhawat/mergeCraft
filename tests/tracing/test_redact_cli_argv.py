@@ -38,7 +38,7 @@ def test_flagged_value_is_not_doubled() -> None:
     """MCB-02: ``--api-key sk-…`` must not emit the secret after the placeholder."""
     from mergecraft.tracing.redaction import redact_cli_argv
 
-    argv = ["mergecraft", "diff-review", "--api-key", _SK_API_KEY]
+    argv = ["mergecraft", "review", "--api-key", _SK_API_KEY]
     redacted = redact_cli_argv(argv)
     assert _SK_API_KEY not in redacted
     assert redacted.count("<redacted>") == 1

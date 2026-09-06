@@ -30,8 +30,8 @@ Use this when asked to add AI PR review to another repository.
    to run exactly one of:
 
    ```bash
-   mergecraft auth claude   # Claude Pro/Max subscription
-   mergecraft auth codex    # ChatGPT Plus/Pro/Team/Enterprise
+   mergecraft provider auth anthropic   # Claude Pro/Max subscription
+   mergecraft provider auth openai    # ChatGPT Plus/Pro/Team/Enterprise
    ```
 
    Other providers: [`docs/authentication.md`](docs/authentication.md). **Never**
@@ -42,8 +42,7 @@ Use this when asked to add AI PR review to another repository.
    on a new branch. Do not commit secrets.
 6. **Trigger a review** — open a pull request, comment `@mergecraft review`, or
    run the workflow via `workflow_dispatch`. Local/offline review uses
-   **`mergecraft review`** (not `diff-review`, which is a deprecated alias that
-   emits one stderr warning per invocation).
+   **`mergecraft review`** for local/offline review.
 
 ## Setup with Grok Bot
 

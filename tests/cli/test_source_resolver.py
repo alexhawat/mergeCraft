@@ -1,6 +1,6 @@
 """TS4 — CLI source resolver (`.ignorelocal/02-cli-sources-trust-wave-plan.md`).
 
-Pins D8 (``review`` verb; ``diff-review`` hidden alias), D9 (worktrees via
+Pins D8 (``review`` verb), D9 (worktrees via
 ``--git-common-dir``), D10 (auth precedence), and integration with trust tier
 (TS1) plus unchanged ``DiffMaterialization`` downstream.
 
@@ -474,8 +474,8 @@ def test_auth_precedence_order(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resolve_auth().source == "anonymous"
 
 
-def test_review_alias_diff_review_still_works(tmp_path: Path) -> None:
-    """D8 — ``diff-review`` remains a working entry point (Harbor pin)."""
+def test_review_command_dry_run(tmp_path: Path) -> None:
+    """D8 — ``review`` is the canonical offline entry point."""
     patch = tmp_path / "change.diff"
     patch.write_text(
         "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n",
@@ -483,7 +483,7 @@ def test_review_alias_diff_review_still_works(tmp_path: Path) -> None:
     )
     result = runner.invoke(
         app,
-        ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
+        ["review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"],
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
     assert result.exit_code == 0, result.stdout + result.stderr

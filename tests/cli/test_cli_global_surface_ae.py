@@ -9,7 +9,7 @@ Pins (D12 / D13):
 - ``--quiet`` / ``--verbose`` / ``--log-level`` / ``MERGECRAFT_LOG_LEVEL`` adjust Loguru.
 - ``--color {auto,always,never}`` plus ``NO_COLOR`` (any non-empty), ``FORCE_COLOR``,
   and non-TTY behaviour.
-- ``review`` is the documented command; ``diff-review`` stays hidden and emits one stderr
+- ``review`` is the documented command; deprecated aliases are removed (D13).
   deprecation line when invoked.
 """
 
@@ -290,27 +290,8 @@ def test_global_format_json_inherited_by_eval_list(tmp_path: Path) -> None:
     assert payload["cases"][0]["id"] == "synthetic-001"
 
 
-def test_diff_review_hidden_alias_emits_one_stderr_deprecation_line(
-    tmp_path: Path,
-) -> None:
-    """D13 — hidden ``diff-review`` prints exactly one stderr deprecation line per invocation."""
-    result = runner.invoke(
-        app,
-        _review_dry_run_argv(tmp_path, command="diff-review"),
-        env=_DUMB_ENV,
-    )
-    stderr = _plain(result.stderr)
-    assert result.exit_code == 0, stderr
-    deprecation_lines = [
-        line
-        for line in stderr.splitlines()
-        if "deprecated" in line.lower() and "diff-review" in line.lower()
-    ]
-    assert len(deprecation_lines) == 1, stderr
-
-
-def test_review_is_documented_and_diff_review_hidden_in_root_help() -> None:
-    """D13 — ``review`` is visible in root help; ``diff-review`` stays hidden."""
+def test_review_is_documented_in_root_help() -> None:
+    """D13 — ``review`` is visible in root help."""
     result = runner.invoke(app, ["--help"], env=_DUMB_ENV)
     help_text = _plain(result.stdout + result.stderr).lower()
     assert result.exit_code == 0, help_text

@@ -83,7 +83,7 @@ def test_agent_attempt_attrs(memory_sink: Any) -> None:
         span.set_attribute("model.id", "anthropic/claude-sonnet")
         span.set_attribute("agent.provider", "anthropic")
         span.set_attribute("gen_ai.system", "anthropic")
-        span.set_attribute("agent.cli_argv", "mergecraft diff-review --no-trace")
+        span.set_attribute("agent.cli_argv", "mergecraft review --no-trace")
 
     events = _events_by_kind(memory_sink["sink"]).get("agent.attempt", [])
     assert len(events) == 1
@@ -98,14 +98,14 @@ def test_cli_argv_redacted() -> None:
     """``redact_cli_argv`` masks a token-like value."""
     from mergecraft.tracing.redaction import redact_cli_argv
 
-    argv = ["mergecraft", "diff-review", "--api-key", "sk-secretvalue123", "GH_TOKEN=ghp_abc"]
+    argv = ["mergecraft", "review", "--api-key", "sk-secretvalue123", "GH_TOKEN=ghp_abc"]
     redacted = redact_cli_argv(argv)
     assert "sk-secretvalue123" not in redacted
     assert "ghp_abc" not in redacted
     assert "<redacted>" in redacted
     # The command shape survives.
     assert "mergecraft" in redacted
-    assert "diff-review" in redacted
+    assert "review" in redacted
 
 
 def test_span_duration_nonzero(memory_sink: Any) -> None:

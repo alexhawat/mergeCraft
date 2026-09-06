@@ -20,7 +20,7 @@ documented otherwise below.
 
 ## Review outcomes (`mergecraft review`)
 
-These codes apply to `mergecraft review` and the hidden `diff-review` alias.
+These codes apply to `mergecraft review`.
 
 | Code | Constant / helper | `RunOutcome` | When |
 |------|-------------------|--------------|------|

@@ -8,5 +8,3 @@ Run **`mergecraft review`** against the current uncommitted and branch changes
 
 If I only want to inspect the prompt without an LLM call, use
 `mergecraft review --dry-run`.
-
-Do not use `diff-review` — it is a deprecated alias for `mergecraft review`.

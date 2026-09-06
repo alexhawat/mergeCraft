@@ -53,7 +53,6 @@ a read-only verifier; typed findings drive inline comments and the
 | `mergecraft mcp serve` | Start MCP HTTP server (Bearer token required) |
 | `mergecraft mcp list` | List MCP tool surface for a role |
 
-`diff-review` is a **deprecated alias** for `mergecraft review` (one stderr
 warning per invocation) — teach `mergecraft review` instead.
 
 ## MCP

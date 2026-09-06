@@ -71,8 +71,6 @@ Process exit codes: `0` clean pass; `10` non-blocking findings; `11` blocking se
 `12` review failed (no findings); `20` inconclusive; `30` configuration error; `40` infra error;
 `50` timed out; `2` usage / invalid CLI input. Full table: [`docs/EXIT-CODES.md`](EXIT-CODES.md).
 
-`diff-review` remains a hidden deprecated alias of `review` (one stderr warning per invocation).
-
 **Auth precedence for private clones:** `--token` → `GH_TOKEN` / `GITHUB_TOKEN` →
 `gh auth token` → anonymous (public repos only). Cloned third-party repositories
 review at **untrusted** tier unless you pass an explicit `--trust trusted` override.

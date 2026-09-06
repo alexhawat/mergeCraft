@@ -1183,27 +1183,6 @@ def migrate_cmd(
     _print_migration_plan(plan, env_path)
 
 
-def persist_legacy_indexed_auth(
-    label: str,
-    scope: str,
-    credential_map: Mapping[str, str],
-) -> bool:
-    """Write *credential_map* via the indexed provider path when *label* is registered."""
-    config_path = _config_path(Path.cwd())
-    registry = load_provider_registry(config_path)
-    entry = registry.lookup(label)
-    if entry is None:
-        return False
-    mapped = dict(credential_map)
-    if "API_KEY" in mapped and len(mapped) == 1:
-        auth_kind = _entry_auth_kind(entry)
-        suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
-        if suffix != "API_KEY":
-            mapped = {suffix: mapped["API_KEY"]}
-    run_provider_auth(entry, scope, credential_map=mapped)
-    return True
-
-
 @app.command("auth")
 def provider_auth_cmd(
     label: str | None = typer.Argument(
@@ -1282,7 +1261,6 @@ __all__ = [
     "load_provider_registry",
     "migrate_cmd",
     "migration_secret_fingerprint",
-    "persist_legacy_indexed_auth",
     "plan_provider_migration",
     "provider_auth_cmd",
     "resolve_auth_strategy",

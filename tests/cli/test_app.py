@@ -42,8 +42,7 @@ def test_cli_init_help() -> None:
 def test_cli_auth_help() -> None:
     result = runner.invoke(app, ["auth", "--help"])
     assert result.exit_code == 0
-    assert "codex" in result.stdout
-    assert "claude" in result.stdout
+    assert "logfire" in result.stdout
 
 
 def test_cli_gha_help() -> None:

@@ -4,8 +4,7 @@ Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan
 Authoring wave: **W2**. Implementation: **W6** (xfail markers removed after W6).
 
 CLI (``review``), Action (``mergecraft.main`` / ``gha``), and SCM
-(``conforming_review_request``) enter one engine over one snapshot. Hidden
-``diff-review`` must remain.
+(``conforming_review_request``) enter one engine over one snapshot.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ def _plain(text: str) -> str:
 
 
 def test_review_is_the_documented_command() -> None:
-    """Happy: ``review`` is listed; ``diff-review`` stays hidden (W6 must keep the alias)."""
+    """Happy: ``review`` is listed in root help."""
     result = runner.invoke(app, ["--help"], env=_DUMB_ENV)
     help_text = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
@@ -41,16 +40,13 @@ def test_review_is_the_documented_command() -> None:
     assert "diff-review" not in help_text
 
 
-def test_hidden_diff_review_alias_remains_invocable() -> None:
-    """Edge: hidden ``diff-review`` still serves ``--help`` (do not delete the alias)."""
-    result = runner.invoke(app, ["diff-review", "--help"], env=_DUMB_ENV)
+def test_review_serves_help() -> None:
+    """Edge: ``review --help`` remains invocable."""
+    result = runner.invoke(app, ["review", "--help"], env=_DUMB_ENV)
     combined = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
     names = {cmd.name for cmd in app.registered_commands if cmd.name}
-    assert "diff-review" in names
-    hidden = [cmd for cmd in app.registered_commands if cmd.name == "diff-review"]
-    assert hidden
-    assert hidden[0].hidden is True
+    assert "review" in names
 
 
 def test_review_snapshot_type_exists() -> None:

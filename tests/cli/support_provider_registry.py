@@ -33,16 +33,6 @@ AUTH_KIND_OAUTH = "oauth"
 AUTH_KIND_DEVICE_CODE = "device_code"
 AUTH_KIND_CLOUD_CHAIN = "cloud_chain"
 
-LEGACY_AUTH_SUBCOMMANDS: tuple[str, ...] = (
-    "codex",
-    "claude",
-    "gemini",
-    "cursor",
-    "nous",
-    "tokenhub",
-    "minimax",
-)
-
 AUTH_KIND_PRIMARY_SUFFIX: dict[str, str] = {
     AUTH_KIND_API_KEY: "API_KEY",
     AUTH_KIND_OAUTH: "CLAUDE_CODE_OAUTH_TOKEN",

@@ -27,10 +27,8 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft agent-local remove-model <name> <token>` | Remove a model slot and compact the chain. |
 | `mergecraft agent-local set-after <name> <after>` | Change dispatch ordering after agent creation (D15). |
 | `mergecraft agent-local show <name>` | Show one agent's chain, resolved model, and effective limits. |
-| `mergecraft agents addbackupmodel` | Append a registered model to an agent's backup chain. |
 | `mergecraft agents list` | List agent bindings with model chain, prompt id, and tool count. |
 | `mergecraft agents set <role>` | Write a single agent binding override into `.mergecraft/config.yaml`. |
-| `mergecraft agents setmodel` | Replace the primary model for an agent role; backups are preserved (D8). |
 | `mergecraft agents show <role>` | Show resolved prompt text and MCP tool names for one role. |
 | `mergecraft analyzers detect` | Show analyzers that would run for changed paths in this repo. |
 | `mergecraft analyzers docs` | Regenerate `ANALYZERS.md` from manifests. |
@@ -42,14 +40,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft ask` | Show a file-line excerpt or canned text; does not call a model. |
 | `mergecraft audit export` | Export the audit log as a JSON array. |
 | `mergecraft audit verify` | Verify the audit hash chain and print any broken line numbers. |
-| `mergecraft auth claude` | Save a Claude Code OAuth token as CLAUDE_CODE_OAUTH_TOKEN. |
-| `mergecraft auth codex` | Mint a Codex subscription credential and save it as CODEX_AUTH_JSON. |
-| `mergecraft auth cursor` | Save a Cursor API key as CURSOR_API_KEY. |
-| `mergecraft auth gemini` | Save a Gemini API key as GEMINI_API_KEY. |
 | `mergecraft auth logfire` | Save a Logfire write token + project for the `logfire` tracing sink. |
-| `mergecraft auth minimax` | Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY. |
-| `mergecraft auth nous` | Save a Nous Portal API key as NOUS_API_KEY. |
-| `mergecraft auth tokenhub` | Save a Tencent TokenHub API key as TOKENHUB_API_KEY. |
 | `mergecraft cache clear` | Remove every entry from the run cache. |
 | `mergecraft cache info` | Show cache location, byte ceiling, and current usage. |
 | `mergecraft cache prune` | Evict oldest entries until usage is within the byte ceiling. |
