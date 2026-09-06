@@ -98,7 +98,7 @@ def import_agent_local_cmd() -> Any:
     return import_module_or_fail(AGENT_LOCAL_CMD_MODULE)
 
 
-def import_reviewer_merge() -> Any:
+def import_terminal_submission() -> Any:
     return import_module_or_fail(REVIEWER_TERMINAL_MODULE)
 
 
@@ -258,7 +258,7 @@ __all__ = [
     "import_agent_cmd",
     "import_agent_local_cmd",
     "import_agent_roster",
-    "import_reviewer_merge",
+    "import_terminal_submission",
     "init_git_repo",
     "local_config_path",
     "local_config_text",

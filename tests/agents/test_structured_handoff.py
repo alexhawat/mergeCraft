@@ -80,13 +80,9 @@ def test_specialist_returns_typed_findings(tmp_path: Path) -> None:
 
 def test_free_form_discovery_is_not_constrained(tmp_path: Path) -> None:
     """Discovery dispatch must not pre-shape output with a finding schema (D6)."""
-    from mergecraft.agents.registry import AgentRole
     from mergecraft.agents.structured_handoff import build_specialist_dispatch_prompt
 
-    _write_config(tmp_path, _DEFAULT_MODELS_YAML)
-    registry = _load_registry(tmp_path)
-    reviewer = registry.resolve_role(AgentRole.reviewer)
-    prompt = build_specialist_dispatch_prompt(reviewer)
+    prompt = build_specialist_dispatch_prompt()
     lowered = prompt.casefold()
     assert "json schema" not in lowered
     assert "output_schema" not in lowered
