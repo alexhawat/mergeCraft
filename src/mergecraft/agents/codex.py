@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import shutil
@@ -214,39 +213,6 @@ def _render_toml(table: TomlTable, path: tuple[str, ...] = ()) -> list[str]:
     return lines
 
 
-def _extract_refresh_token(auth_json: str) -> str | None:
-    try:
-        data = json.loads(auth_json)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    tokens = data.get("tokens") if isinstance(data.get("tokens"), dict) else data
-    if isinstance(tokens, dict):
-        refresh = tokens.get("refresh_token") or tokens.get("refresh")
-        if isinstance(refresh, str) and refresh:
-            return refresh
-    refresh = data.get("refresh_token") or data.get("refresh")
-    return refresh if isinstance(refresh, str) and refresh else None
-
-
-def _save_codex_writeback_state(*, auth_path: Path, auth_json: str) -> None:
-    refresh = _extract_refresh_token(auth_json)
-    if not refresh:
-        return
-    payload = json.dumps(
-        {
-            "authPath": str(auth_path),
-            "originalRefresh": refresh,
-        }
-    )
-    state_file = os.environ.get("GITHUB_STATE")
-    if state_file:
-        with open(state_file, "a", encoding="utf-8") as fh:
-            fh.write(f"codex_writeback={payload}\n")
-    os.environ["STATE_codex_writeback"] = payload  # noqa: SIM112 — matches action/post.py _get_state("codex_writeback")
-
-
 def _has_openai_api_key() -> bool:
     return bool(os.environ.get(OPENAI_API_KEY_ENV, "").strip())
 
@@ -261,7 +227,6 @@ def _setup_codex_auth(
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
         auth_path.write_text(raw, encoding="utf-8")
-        _save_codex_writeback_state(auth_path=auth_path, auth_json=raw)
         return
     if raw:
         logger.warning(

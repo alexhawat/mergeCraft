@@ -173,35 +173,13 @@ def test_codex_home_parent_falls_back_to_xdg_cache_when_no_override_is_set(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("not json at all", None),
-        ('["refresh_token"]', None),
-        ('{"tokens": {"refresh_token": "rt-nested"}}', "rt-nested"),
-        ('{"tokens": {"refresh": "rt-alias"}}', "rt-alias"),
-        ('{"tokens": {"refresh_token": ""}, "refresh": "rt-top"}', "rt-top"),
-        ('{"refresh_token": "rt-flat"}', "rt-flat"),
-        ('{"tokens": {"access_token": "at"}}', None),
-        ('{"refresh_token": 12345}', None),
-    ],
-)
-def test_extract_refresh_token_shapes(raw: str, expected: str | None) -> None:
-    """Refresh extraction reads nested tokens, top-level aliases, and rejects non-strings."""
-    assert codex_module._extract_refresh_token(raw) == expected
-
-
-def test_setup_codex_auth_writes_auth_json_and_records_writeback_state(
+def test_setup_codex_auth_writes_auth_json_for_usable_subscription(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Usable subscription JSON is persisted and its refresh token recorded for post-run."""
-    state_file = tmp_path / "github-state"
-    state_file.write_text("", encoding="utf-8")
+    """Usable subscription JSON is persisted to ``auth.json`` for the Codex CLI."""
     raw = json.dumps({"tokens": {"refresh_token": "rt-1", "access_token": "at-1"}})
     monkeypatch.setenv(codex_module.CODEX_AUTH_ENV, raw)
-    monkeypatch.setenv("GITHUB_STATE", str(state_file))
-    monkeypatch.setenv("STATE_codex_writeback", "")
 
     codex_home = tmp_path / "home"
     codex_module._setup_codex_auth(
@@ -209,27 +187,14 @@ def test_setup_codex_auth_writes_auth_json_and_records_writeback_state(
     )
 
     assert json.loads((codex_home / "auth.json").read_text(encoding="utf-8")) == json.loads(raw)
-    line = state_file.read_text(encoding="utf-8").strip()
-    assert line.startswith("codex_writeback=")
-    payload = json.loads(line.removeprefix("codex_writeback="))
-    assert payload == {
-        "authPath": str(codex_home / "auth.json"),
-        "originalRefresh": "rt-1",
-    }
-    import os
-
-    assert json.loads(os.environ["STATE_codex_writeback"]) == payload  # noqa: SIM112
 
 
-def test_setup_codex_auth_skips_writeback_when_auth_has_no_refresh_token(
+def test_setup_codex_auth_writes_access_token_only_auth(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Access-token-only auth is written, but nothing is staged for the post-run writeback."""
-    state_file = tmp_path / "github-state"
-    state_file.write_text("", encoding="utf-8")
+    """Access-token-only auth is written when subscription JSON has no refresh token."""
     monkeypatch.setenv(codex_module.CODEX_AUTH_ENV, '{"access_token": "at-only"}')
-    monkeypatch.setenv("GITHUB_STATE", str(state_file))
 
     codex_home = tmp_path / "home"
     codex_module._setup_codex_auth(
@@ -237,7 +202,6 @@ def test_setup_codex_auth_skips_writeback_when_auth_has_no_refresh_token(
     )
 
     assert (codex_home / "auth.json").read_text(encoding="utf-8") == '{"access_token": "at-only"}'
-    assert state_file.read_text(encoding="utf-8") == ""
 
 
 def test_setup_codex_auth_warns_and_writes_nothing_for_unusable_auth_json(
