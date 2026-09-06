@@ -5,8 +5,10 @@ mergeCraft to **review**, **consumes findings**, **decides** what to change
 next, and reviews the new **diff**. This is not a Fix/write loop — mergeCraft
 stays review-only.
 
-Do not put this workflow under `skills/` (harness packages ship later via the
-README v2 program). The machine surface is `mergecraft review --agent`.
+Do not put this workflow under `skills/` — this page is contributor reference,
+not an Agent Skills package. Per-harness packages live under
+`skills/<harness>/mergecraft/` per [`skills/harnesses.yaml`](../skills/harnesses.yaml).
+The machine surface is `mergecraft review --agent`.
 
 ## The five steps
 
@@ -39,9 +41,9 @@ Named exits the loop should handle: `0` (pass), `10` (findings), `11`
 See also: [`docs/cli.md`](cli.md) (`review --agent`),
 [`docs/workflows.md`](workflows.md) (local review examples).
 
-Harness packages for Codex, Gemini CLI, and OpenCode are not authored here.
-Once README v2 RV3 lands, `skills/harnesses.yaml` is the authority this page
-should cite for install paths. Until then, create nothing under `skills/`.
+Per-harness Agent Skills packages ship under `skills/<harness>/mergecraft/`.
+Install paths and alt paths are authoritative in
+[`skills/harnesses.yaml`](../skills/harnesses.yaml).
 
 ## Public MCP (same engine, different wire)
 

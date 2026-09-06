@@ -17,7 +17,9 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [EXIT-CODES](EXIT-CODES.md) | consumer | Named CLI exit codes and when mergecraft returns each status. |
 | [docs README](README.md) | contributor | Generated map of every manifest row with audience and purpose. |
 | [REVIEW-DOCTRINE](REVIEW-DOCTRINE.md) | contributor | Review philosophy, lenses, grading, and verifier doctrine for maintainers. |
+| [THREAT-MODEL](THREAT-MODEL.md) | contributor | Threat model — egress allow-list, SSRF guards, and vulnerability gate regression surface (#362). |
 | [TRACING](TRACING.md) | contributor | Tracing sinks, retention, and Logfire/OTLP wiring for operators. |
+| [coding-standards](_standards/coding-standards.md) | contributor | Normative repo-wide coding conventions — style, types, async, testing, security, Git. |
 | [action-reference](action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
 | [agent-loop](agent-loop.md) | consumer | Reference workflow for an external coding agent looping with mergecraft review --agent. |
 | [agent-roster](agent-roster.md) | consumer | Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot (D9). |
