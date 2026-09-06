@@ -230,7 +230,7 @@ runs:
   # Slim image published by ci-cd.yml (SHA tag + digest retag). Pin by digest, never
   # :latest / :rc. Bump with scripts/check_action_image_digest.py after each
   # build-images push for the workflow Action SHA (#526).
-  image: "docker://ghcr.io/alexhawat/mergecraft@sha256:8afe41b9946c740e8d0fa03dc4c99476bb80f79e13c579013f05a8b751030782"
+  image: "docker://ghcr.io/alexhawat/mergecraft@sha256:d7ed9a04f22072934ca7adb07e0b53b243c931c36a5bdd797ed1484960193cfa"
   entrypoint: "/entrypoint.sh"
   args:
     - "gha"
