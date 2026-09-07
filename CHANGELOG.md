@@ -85,7 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Logfire `llm.call` rows now include the prompt mergeCraft sent and the model
+- CLI startup ``.env`` loading now resolves the same git-root path as
+  ``mergecraft auth``, ``provider``, and ``tracing logfire`` writers, so
+  credentials written from a subdirectory are visible on the next invocation
   output, with a real duration instead of an empty ~2µs span
 - Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on
   the same Logfire trace as the review run
