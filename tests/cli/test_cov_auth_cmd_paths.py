@@ -195,7 +195,9 @@ def test_local_scope_never_touches_gh_or_git(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(auth_cmd, "_get_gh_token", _raiser(AssertionError("gh probed")))
     monkeypatch.setattr(auth_cmd, "_parse_git_remote", _raiser(AssertionError("git probed")))
     target = auth_cmd._resolve_auth_target("local")
-    assert target == auth_cmd.AuthTarget(local=True, github=None)
+    assert target.local is True
+    assert target.github is None
+    assert target.env_path is not None
 
 
 def test_github_and_both_scopes_resolve_the_repo_slug(monkeypatch: MonkeyPatch) -> None:

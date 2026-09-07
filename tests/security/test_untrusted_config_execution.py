@@ -321,7 +321,8 @@ async def test_untrusted_offline_review_withholds_makefile_static_checks(
 
     monkeypatch.setattr(offline_agent, "start_mcp_http_server", fake_start_mcp)
     monkeypatch.setattr(offline_agent, "resolve_runtime_agent", lambda **_: FakeAgent())
-    monkeypatch.setattr(offline_agent, "resolve_model", lambda slug: slug or "claude")
+    monkeypatch.setenv("MERGECRAFT_MODEL", "anthropic/claude-sonnet")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-test-key")
     monkeypatch.setattr(offline_agent, "install_bundled_skills", lambda **_: None)
 
     diff_file = tmp_path / "diff.patch"

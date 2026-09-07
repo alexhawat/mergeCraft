@@ -103,12 +103,16 @@ def _get_gh_token() -> str:
     return token
 
 
-def _parse_git_remote() -> tuple[str, str]:
+def _parse_git_remote(cwd: Path | None = None) -> tuple[str, str]:
     try:
         url = subprocess.check_output(
-            git_argv(["remote", "get-url", "origin"]), text=True, stderr=subprocess.DEVNULL
+            git_argv(["remote", "get-url", "origin"]),
+            text=True,
+            stderr=subprocess.DEVNULL,
+            cwd=cwd,
+            timeout=30,
         ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):  # fmt: skip
         cli_bail("not a git repository or no 'origin' remote found.")
     match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:
@@ -163,25 +167,72 @@ class AuthTarget:
 
     local: bool
     github: GitHubSecretTarget | None
+    env_path: Path | None = None
 
 
-def _resolve_auth_target(scope: str) -> AuthTarget:
-    """Normalise ``--scope`` and resolve whatever ``gh`` context it needs.
+def _resolve_auth_target(
+    scope: str, *, cwd: Path | None = None, preflight: bool = False
+) -> AuthTarget:
+    """Resolve the destination before collecting credentials.
 
-    ``--scope local`` must work on a machine with no ``gh`` auth and no
-    network, so the ``gh``/``git`` probes only run for the scopes that
-    actually write an Actions secret.
+    Local scope never invokes GitHub. Provider authentication requests the
+    permission preflight; legacy internal collectors retain their existing API.
     """
+    from mergecraft.cli.provider_cmd import _env_path
+
     normalised = _normalise_scope(scope)
+    env_path = _env_path(cwd) if normalised != "github" else None
     if normalised == "local":
-        return AuthTarget(local=True, github=None)
+        console.print(f"credential destination: local file [cyan]{env_path}[/cyan]")
+        return AuthTarget(local=True, github=None, env_path=env_path)
     _get_gh_token()
-    owner, repo = _parse_git_remote()
+    owner, repo = _parse_git_remote(cwd=cwd) if cwd is not None else _parse_git_remote()
     repo_slug = f"{owner}/{repo}"
-    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    console.print(f"credential destination: GitHub Actions secrets in [cyan]{repo_slug}[/cyan]")
+    console.print("For local evaluation, use --scope local; no GitHub secrets will be changed.")
+    if preflight:
+        try:
+            repository = subprocess.run(
+                ["gh", "api", f"repos/{repo_slug}"],
+                cwd=cwd,
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            repository_data = json.loads(repository.stdout)
+            permissions = (
+                repository_data.get("permissions") if isinstance(repository_data, dict) else None
+            )
+            if not isinstance(permissions, dict) or permissions.get("admin") is not True:
+                raise ValueError("repository administration permission is required")
+            response = subprocess.run(
+                ["gh", "api", f"repos/{repo_slug}/actions/secrets/public-key"],
+                cwd=cwd,
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            public_key = json.loads(response.stdout)
+            if (
+                not isinstance(public_key, dict)
+                or not public_key.get("key_id")
+                or not public_key.get("key")
+            ):
+                raise ValueError("missing repository public key")
+        except (subprocess.SubprocessError, OSError, ValueError):
+            cli_bail(
+                f"cannot verify access to Actions secrets for {repo_slug}; no credentials "
+                "were collected or written. Check repository secret-management permissions "
+                "or use --scope local."
+            )
+    if env_path is not None:
+        console.print(f"credential destination: local file [cyan]{env_path}[/cyan]")
     return AuthTarget(
         local=normalised == "both",
         github=GitHubSecretTarget(repo_slug=repo_slug),
+        env_path=env_path,
     )
 
 

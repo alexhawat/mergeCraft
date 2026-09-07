@@ -11,7 +11,7 @@ import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -35,6 +35,9 @@ from mergecraft.config.runtime_provider_registry import SEED_PROVIDER_URLS
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import PROVIDERS
 from mergecraft.utils.workspace import git_repo_root
+
+if TYPE_CHECKING:
+    from mergecraft.cli.auth_cmd import AuthTarget
 
 AUTH_KIND_API_KEY = "api_key"
 AUTH_KIND_OAUTH = "oauth"
@@ -450,6 +453,7 @@ def _persist_indexed_credentials(
     credential_map: Mapping[str, str],
     *,
     cwd: Path | None = None,
+    target: AuthTarget | None = None,
 ) -> None:
     """Write ``LLM_PROVIDER_<N>`` label plus indexed credential suffixes."""
     from mergecraft.cli.auth_cmd import (
@@ -462,9 +466,9 @@ def _persist_indexed_credentials(
 
     env_index = int(entry["envIndex"])
     label = str(entry["label"])
-    target = _resolve_auth_target(scope)
+    target = target or _resolve_auth_target(scope, cwd=cwd, preflight=True)
 
-    env_path = _env_path(cwd)
+    env_path = target.env_path or _env_path(cwd)
     label_key = _indexed_label_key(env_index)
     any_local_written = False
 
@@ -563,6 +567,7 @@ def _run_api_key_strategy(
     scope: str,
     *,
     cwd: Path | None = None,
+    target: AuthTarget | None = None,
 ) -> None:
     label = str(entry["label"])
     url = entry.get("url")
@@ -578,6 +583,7 @@ def _run_api_key_strategy(
         scope,
         {AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_API_KEY]: api_key},
         cwd=cwd,
+        target=target,
     )
 
 
@@ -586,6 +592,7 @@ def _run_oauth_strategy(
     scope: str,
     *,
     cwd: Path | None = None,
+    target: AuthTarget | None = None,
 ) -> None:
     from mergecraft.cli.auth_cmd import CLAUDE_OAUTH_TOKEN_PREFIX
 
@@ -602,7 +609,7 @@ def _run_oauth_strategy(
             f"(expected {CLAUDE_OAUTH_TOKEN_PREFIX}…). saving it anyway."
         )
     suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_OAUTH]
-    _persist_indexed_credentials(entry, scope, {suffix: oauth_token}, cwd=cwd)
+    _persist_indexed_credentials(entry, scope, {suffix: oauth_token}, cwd=cwd, target=target)
 
 
 def _run_device_code_strategy(
@@ -610,6 +617,7 @@ def _run_device_code_strategy(
     scope: str,
     *,
     cwd: Path | None = None,
+    target: AuthTarget | None = None,
 ) -> None:
     if not shutil.which("codex"):
         cli_bail(
@@ -636,7 +644,7 @@ def _run_device_code_strategy(
         value = auth_path.read_text(encoding="utf-8")
 
     suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_DEVICE_CODE]
-    _persist_indexed_credentials(entry, scope, {suffix: value}, cwd=cwd)
+    _persist_indexed_credentials(entry, scope, {suffix: value}, cwd=cwd, target=target)
 
 
 def _run_cloud_chain_strategy(
@@ -644,6 +652,7 @@ def _run_cloud_chain_strategy(
     scope: str,
     *,
     cwd: Path | None = None,
+    target: AuthTarget | None = None,
 ) -> None:
     label = str(entry.get("label", "")).lower()
     if label == "bedrock":
@@ -654,7 +663,7 @@ def _run_cloud_chain_strategy(
             if value is None:
                 return
             credentials[suffix] = value
-        _persist_indexed_credentials(entry, scope, credentials, cwd=cwd)
+        _persist_indexed_credentials(entry, scope, credentials, cwd=cwd, target=target)
         return
 
     if label == "vertex":
@@ -669,6 +678,7 @@ def _run_cloud_chain_strategy(
                 scope,
                 {VERTEX_CLOUD_SUFFIXES[0]: path_or_empty},
                 cwd=cwd,
+                target=target,
             )
             return
 
@@ -682,7 +692,7 @@ def _run_cloud_chain_strategy(
                 "use --scope github, or store base64 in a GitHub secret."
             )
         suffix = VERTEX_CLOUD_SUFFIXES[0]
-        _persist_indexed_credentials(entry, scope, {suffix: pasted}, cwd=cwd)
+        _persist_indexed_credentials(entry, scope, {suffix: pasted}, cwd=cwd, target=target)
         return
 
     cli_bail(f"cloud_chain auth is not configured for provider {label!r}")
@@ -724,8 +734,11 @@ def run_provider_auth(
     api_key: str | None = None,
 ) -> None:
     """Execute unified provider auth for one registry row (#478)."""
+    from mergecraft.cli.auth_cmd import _resolve_auth_target
+
+    target = _resolve_auth_target(scope, cwd=cwd, preflight=True)
     if credential_map is not None:
-        _persist_indexed_credentials(entry, scope, credential_map, cwd=cwd)
+        _persist_indexed_credentials(entry, scope, credential_map, cwd=cwd, target=target)
         return
     if api_key is not None:
         auth_kind = _entry_auth_kind(entry)
@@ -741,11 +754,11 @@ def run_provider_auth(
         if not _validate_api_key_for_label(label, api_key, url_str):
             cli_bail(f"{label} API key validation failed (401/403). Check the key and retry.")
         suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_API_KEY]
-        _persist_indexed_credentials(entry, scope, {suffix: api_key}, cwd=cwd)
+        _persist_indexed_credentials(entry, scope, {suffix: api_key}, cwd=cwd, target=target)
         return
     auth_kind = _entry_auth_kind(entry)
     strategy = resolve_auth_strategy(auth_kind)
-    strategy.run(entry, scope, cwd=cwd)
+    strategy.run(entry, scope, cwd=cwd, target=target)
 
 
 @dataclass(frozen=True, slots=True)

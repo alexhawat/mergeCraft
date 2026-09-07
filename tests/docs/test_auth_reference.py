@@ -143,7 +143,15 @@ def test_every_auth_subcommand_has_a_row() -> None:
     assert readme_region is not None
     auth_doc_region = _auth_table_region(AUTH_DOC.read_text(encoding="utf-8"))
     documented = (readme_region + "\n" + (auth_doc_region or "")).lower()
+    labels = {"claude": "anthropic", "codex": "openai", "gemini": "google"}
     missing = sorted(
-        name for name in _auth_subcommands() if f"mergecraft auth {name}" not in documented
+        name
+        for name in _auth_subcommands()
+        if (
+            f"mergecraft auth {name}"
+            if name == "logfire"
+            else f"mergecraft provider auth {labels.get(name, name)}"
+        )
+        not in documented
     )
     assert not missing, f"auth tables missing rows for auth subcommands: {missing}"
