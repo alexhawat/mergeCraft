@@ -16,9 +16,12 @@ Locked decisions: **convention 3** (review-only — no writes to the reviewed tr
 | `tests/pr/test_todo_detection.py` | 1 | `green after DG8.2` | RED |
 | `tests/pr/test_effort_band.py` | 1 | `green after DG8.2` | RED |
 | `tests/pr/test_label_suggestions.py` | 1 | `green after DG8.2` | RED |
-| `tests/mcp/test_comment_router.py` | 4 | `green after DG8.2` | RED |
 
-**Acceptance (DG8.1):** 11 collected; 0 pass; 11 xfail. `make lint` + `make typecheck` clean.
+**Acceptance (DG8.1):** 7 collected; 0 pass; 7 xfail. `make lint` + `make typecheck` clean.
+
+> **D1 cleanup (2026-09-07):** `comment_router` was removed — unwired staged library with no
+> production importers. Slash-command routing will be reintroduced when DG7/DG8 dispatch wiring
+> lands.
 
 ## Target API DG8.2 must satisfy
 
@@ -54,26 +57,14 @@ Locked decisions: **convention 3** (review-only — no writes to the reviewed tr
 |--------|----------|
 | `suggest_labels(..., github=...)` | Async; returns `suggested: list[str]`, `applied=False`; never calls `add_labels` / `create_label` |
 
-### `src/mergecraft/mcp/comment_router.py` (new)
-
-| Symbol | Contract |
-|--------|----------|
-| `route_comment(body, author_association, allowlist, repo_settings, payload_permissions)` | Maps `/mergecraft review|ask|explain|verify|describe` → modes; refuses untrusted authors; `effective_permissions` cannot widen payload |
-| `route_finding_challenge(...)` | Routes fingerprint challenges to verifier (`target="verifier"`), not mutating modes |
-
 ## Staging contract (DG8.2 vs dispatch wiring)
 
-DG8.2 delivers **library extraction only** — pure functions under `src/mergecraft/pr/*` and
-`src/mergecraft/mcp/comment_router.py` with unit-test coverage. They are **not** imported by
-the Action dispatch path (`mergecraft.main`, `select_mode`, comment-trigger handlers) in this PR.
+DG8.2 delivers **library extraction only** — pure functions under `src/mergecraft/pr/*` with
+unit-test coverage. They are **not** imported by the Action dispatch path (`mergecraft.main`,
+`select_mode`, comment-trigger handlers) in this PR.
 
-Follow-on work (DG7/DG8 pairing in the wave plan) wires:
-
-- `route_comment` / `route_finding_challenge` → comment-trigger dispatch and `select_mode`
-- `build_describe_output`, `generate_pr_suggestions`, etc. → their respective slash-command modes
-
-Until that wiring lands, only `/mergecraft review` maps to a built-in mode; ask/explain/verify/describe
-correctly refuse with `mode_not_implemented`. Tests assert this staged status — no fake dispatch hooks.
+Follow-on work (DG7/DG8 pairing in the wave plan) wires slash-command routing and
+`build_describe_output`, `generate_pr_suggestions`, etc. → their respective modes.
 
 ## Contract → coverage matrix
 
@@ -86,9 +77,5 @@ correctly refuse with `mode_not_implemented`. Tests assert this staged status �
 | 5 | `test_risky_todo_additions_are_flagged` | unit | TODO scan |
 | 6 | `test_emits_a_band_not_a_fake_minute_estimate` | unit | Effort band, not minutes |
 | 7 | `test_labels_are_suggested_not_applied` | integration | Advisory labels |
-| 8 | `test_slash_commands_route_to_the_right_mode` | unit | Slash routing |
-| 9 | `test_commenter_permissions_gate_the_capability` | unit | Author association gate |
-| 10 | `test_chat_cannot_widen_push_or_shell_permission` | unit | Permission escalation guard |
-| 11 | `test_finding_challenge_routes_to_the_verifier` | integration | Verifier routing (DG7 pair) |
 
 Shared fixtures: `tests/pr/conftest.py` (`sample_diff`, `sample_pr_metadata`).
