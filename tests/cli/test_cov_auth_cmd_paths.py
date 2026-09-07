@@ -215,18 +215,22 @@ def test_github_and_both_scopes_resolve_the_repo_slug(monkeypatch: MonkeyPatch) 
 def test_env_path_prefers_the_override_then_the_repo_root(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
+    from mergecraft.cli import local_env
+
     monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / "custom.env"))
     assert auth_cmd._local_env_path() == (tmp_path / "custom.env").resolve()
     monkeypatch.delenv("MERGECRAFT_ENV")
-    monkeypatch.setattr(auth_cmd, "git_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(local_env, "git_repo_root", lambda _start=None: tmp_path)
     assert auth_cmd._local_env_path() == tmp_path / ".env"
 
 
 def test_env_path_bails_outside_a_repository(
     monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
 ) -> None:
+    from mergecraft.cli import local_env
+
     monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
-    monkeypatch.setattr(auth_cmd, "git_repo_root", lambda: None)
+    monkeypatch.setattr(local_env, "git_repo_root", lambda _start=None: None)
     with pytest.raises(typer.Exit):
         auth_cmd._local_env_path()
     assert "could not locate the repository root" in capsys.readouterr().err

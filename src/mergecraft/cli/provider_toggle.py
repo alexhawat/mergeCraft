@@ -40,6 +40,7 @@ import typer
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
+from mergecraft.cli.local_env import resolve_local_env_path
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -204,38 +205,6 @@ def _delete_github(secrets: ProviderSecrets, repo_slug: str) -> tuple[list[str],
         else:
             failed.append(name)
     return deleted, failed
-
-
-def resolve_local_env_path(cwd: Path) -> Path:
-    """Return the ``.env`` this invocation may blank, anchored on *cwd*.
-
-    ``--cwd`` selects which repository the command acts on, so the destructive
-    local target must follow it. Anchoring on the *process* working directory
-    instead would read the registry from one repository and blank the ``.env``
-    of another — the operator would be told a provider was disabled in a repo
-    the command never touched.
-
-    ``MERGECRAFT_ENV`` still wins, matching
-    :func:`mergecraft.cli.auth_cmd._local_env_path`: an operator who has pinned
-    an explicit env file has named the target unambiguously.
-    """
-    import os
-
-    from mergecraft.utils.workspace import git_repo_root
-
-    configured = os.environ.get("MERGECRAFT_ENV")
-    if configured:
-        return Path(configured).resolve()
-
-    resolved = cwd.resolve()
-    root = git_repo_root(str(resolved))
-    if root is None:
-        cli_bail(
-            f"could not locate a git repository root at {resolved} — run from "
-            "inside the repository, pass --cwd, or point MERGECRAFT_ENV at the "
-            ".env you want cleared."
-        )
-    return root / ".env"
 
 
 def resolve_repo_slug(cwd: Path) -> str:

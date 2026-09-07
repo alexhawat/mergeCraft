@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 
 import typer
 from dotenv import load_dotenv
@@ -67,6 +66,7 @@ from mergecraft.cli.global_surface import (
     emit_cli_json,
     validate_log_level_option,
 )
+from mergecraft.cli.local_env import resolve_local_env_path
 from mergecraft.cli.typer_group import MergecraftTyperGroup
 
 
@@ -222,19 +222,6 @@ def version_cmd(
     typer.echo(format_version_display(__version__, mergecraft.__commit__))
 
 
-def _local_env_path() -> Path:
-    """Return the .env path the CLI loads at startup.
-
-    Mirrors :func:`mergecraft.cli.auth_cmd._local_env_path` so the loader and
-    the writer agree on the same file: ``$MERGECRAFT_ENV`` if set (tests pin a
-    temp file), otherwise ``./.env`` relative to the current working directory.
-    """
-    configured = os.environ.get("MERGECRAFT_ENV")
-    if configured:
-        return Path(configured).resolve()
-    return Path.cwd() / ".env"
-
-
 def _load_local_env() -> None:
     """Populate ``os.environ`` from the local ``.env`` (no override).
 
@@ -250,7 +237,7 @@ def _load_local_env() -> None:
     from the file. The file is silent-on-missing so CI sandboxes and global
     invocations from outside a checkout are unaffected.
     """
-    env_path = _local_env_path()
+    env_path = resolve_local_env_path(require_repo=False)
     if not env_path.is_file():
         return
     load_dotenv(env_path, override=False, encoding="utf-8")
