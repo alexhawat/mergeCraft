@@ -5,7 +5,7 @@ Operator runbook for the agent-owned and operator-owned boxes in
 (E2E on publish SHA, blocking Trivy on promoting refs, live-provider matrix) is
 documented in [`docs/supply-chain.md`](supply-chain.md) and the linked wave plan.
 
-## Already shipped in CI (no operator publish step)
+## CI delivery configuration (verify live execution before release)
 
 | Item | Evidence |
 |------|----------|
@@ -16,6 +16,10 @@ documented in [`docs/supply-chain.md`](supply-chain.md) and the linked wave plan
 | SLSA build-provenance attestations | `actions/attest-build-provenance` steps |
 | SPDX SBOM + SBOM attestations | `sbom-scan` + `actions/attest-sbom` |
 | Python sdist/wheel artifact | `build-dist` → `artifact-python-dist` |
+
+For Action references, follow the separate source → manifest → consumer pin
+[lifecycle](release-process.md#action-manifest-and-consumer-pin-lifecycle).
+Workflow configuration alone is not evidence that the jobs ran.
 
 Verify a published digest locally (see [CONTRIBUTING.md](../CONTRIBUTING.md#verify-a-published-image)).
 

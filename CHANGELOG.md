@@ -85,6 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Release verification uses compatible GitHub CLI policy flags, validates deployment
+  candidates automatically, and publishes canonical image tags only after signed
+  staging digests verify. Pin preparation safely supports repeat invocations and
+  environment-only references; Docker source validation survives optimized Python.
+
+- Release E2E now runs for reusable workflow callers, and image promotion
+  requires verified signatures, source provenance, and SBOM attestations.
+  Action pin preparation separates the built source from the manifest commit
+  consumers execute, preventing deployment of the previous image (#579, #641).
 - Logfire `llm.call` rows now include the prompt mergeCraft sent and the model
   output, with a real duration instead of an empty ~2µs span
 - Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on

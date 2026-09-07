@@ -12,7 +12,9 @@ ARG SOURCE_DATE_EPOCH=1700000000
 FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 
 ARG SOURCE_DATE_EPOCH
+ARG SOURCE_REVISION=""
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.29@sha256:eb2843a1e56fd9e30c7276ce1a52cba86e64c7b385f5e3279a0e08e02dd058fc \
     /uv /usr/local/bin/uv
@@ -107,6 +109,21 @@ RUN uv sync --frozen --no-dev --extra tracing \
         /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/RECORD \
     && rm -rf /root/.cache/uv /tmp/* \
     && { command -v setpriv >/dev/null && getent passwd mergecraft >/dev/null || { echo "FATAL: privilege drop unavailable (setpriv or mergecraft user missing)"; exit 1; }; }
+
+# The container build has no .git directory. Stamp only the source S, never
+# the future manifest commit C or this image's own digest D.
+RUN SOURCE_REVISION="${SOURCE_REVISION}" python - <<'PYTHON'
+import os
+import pathlib
+import re
+
+value = os.environ["SOURCE_REVISION"]
+if value and not re.fullmatch("[0-9a-f]{40}", value):
+    raise ValueError("invalid source revision")
+pathlib.Path("src/mergecraft/_build_metadata.py").write_text(
+    "__commit__: str | None = " + repr(value or None) + "\n"
+)
+PYTHON
 
 COPY docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -51,9 +51,9 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 | **W1.8** `ci.yml` non-zero on stale pin | W8 | `test_w18_action_pin_gate.py::test_ci_yml_fails_on_stale_pin_instead_of_warning_only` |
 | **W1.8** single pin, three rungs | W8 | `test_w18_action_pin_gate.py::test_mergecraft_workflow_three_rungs_share_one_pin_value` |
 | **W1.8** partial bump fails | W8 | `test_w18_action_pin_gate.py::test_partial_pin_bump_fails_action_pin_check` |
-| **W8 / #535** digest guard script | W8 | `test_action_image_digest_check.py` (pre-tracing case stubs workflow SHA when current pin lacks GHCR tag) |
+| **W8 / #535** digest guard script | W8 | `test_action_image_digest_check.py` (real Git histories and digest-bound provenance policy regressions) |
 | **W8 / #535** digest pin in `action.yml` | W8 | `test_action_image_digest_sync.py`, `test_action_yml_contract.py::test_docker_action_pulls_digest_pinned_slim_image` |
-| **W8 / #535** `action-image-digest-check` in `make lint` | W8 | `test_action_image_digest_sync.py::test_action_image_digest_check_runs_via_make_lint` |
+| **W8 / #535** source syntax in `make lint`; strict deployment candidate and promotion gates | W8 | `test_action_image_digest_sync.py::test_action_image_structure_check_runs_via_make_lint` and `test_signed_image_verification_is_required_before_promotion` |
 | **W2** `Finding.scope` on CI evidence path | W2 | `test_evidence.py::test_no_new_finding_fields_introduced` |
 | **cd6ff87c** cached packet re-finalizes on outcome | — | `test_run_packet.py::test_resolve_prepared_run_packet_refinalizes_on_outcome_change` |
 
