@@ -34,6 +34,11 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 
+# setup-uv may install Python under runner-owned mode-0700 directories. The
+# capability-free child deliberately cannot bypass those DAC permissions.
+_PROBE_PYTHON = "/usr/bin/python3" if sys.platform == "linux" else sys.executable
+
+
 def _echo_backend() -> tuple[socket.socket, int]:
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -266,7 +271,7 @@ class _FakeWanTarget:
             subprocess.run(argv, check=True, capture_output=True, timeout=5)
         script = _ECHO_SERVER_SCRIPT.format(port=port)
         self._server = subprocess.Popen(
-            ["ip", "netns", "exec", self.ns, sys.executable, "-c", script]
+            ["ip", "netns", "exec", self.ns, _PROBE_PYTHON, "-c", script]
         )
         time.sleep(0.3)
 
@@ -297,7 +302,7 @@ def _connect_from_netns(ns_name: str, dest_ip: str, port: int) -> str:
             "--ambient-caps=-all",
             "--no-new-privs",
             "--",
-            sys.executable,
+            _PROBE_PYTHON,
             "-c",
             _CLIENT_CONNECT_SCRIPT,
             dest_ip,
@@ -373,7 +378,7 @@ def test_filtered_boundary_host_ipv6_concurrency_and_cleanup(monkeypatch: Monkey
         assert allowed._cidr != denied._cidr
         assert _connect_from_netns(allowed.ns_name, target.peer_ip, port).startswith("connected:")
         assert _connect_from_netns(denied.ns_name, target.peer_ip, port).startswith("blocked:")
-        host = subprocess.Popen([sys.executable, "-c", _ECHO_SERVER_SCRIPT.format(port=port)])
+        host = subprocess.Popen([_PROBE_PYTHON, "-c", _ECHO_SERVER_SCRIPT.format(port=port)])
         try:
             time.sleep(0.3)
             assert _connect_from_netns(allowed.ns_name, allowed._host_ip, port).startswith(
@@ -383,7 +388,7 @@ def test_filtered_boundary_host_ipv6_concurrency_and_cleanup(monkeypatch: Monkey
             v6 = subprocess.run(
                 allowed.wrap_argv(
                     [
-                        sys.executable,
+                        _PROBE_PYTHON,
                         "-c",
                         "import socket; s=socket.socket(socket.AF_INET6); s.settimeout(1); s.connect(('::1', 39218))",
                     ]
@@ -534,7 +539,7 @@ def test_actual_analyzer_wrapper_prevents_namespace_and_ipv6_escape(tmp_path: Pa
             )
             plan = AnalyzerPlan(
                 manifest_id="probe",
-                argv=(sys.executable, "-c", script, target.ns, str(marker)),
+                argv=(_PROBE_PYTHON, "-c", script, target.ns, str(marker)),
                 cwd=tmp_path,
                 mode="native",
             )
