@@ -115,7 +115,12 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   and `build_analyzer_sandbox_argv_for_run()`.
   Analyzer capabilities are dropped after mount setup, preventing
   namespace switching or enabling IPv6 again. The isolated runtime must
-  provision tools and libraries readable without DAC override; private
+  use direct `unshare`; sudo-based backends are refused because sudo
+  cannot safely carry the private payload-environment descriptor.
+  Namespace helpers receive a minimal trusted environment. Payload
+  environment values travel through a private descriptor and are
+  restored only after capabilities are dropped, never in process argv.
+  The runtime must provision tools and libraries readable without DAC override; private
   installs owned by another user are intentionally inaccessible.
   Host INPUT destinations
   are always denied, IPv6 is disabled, and

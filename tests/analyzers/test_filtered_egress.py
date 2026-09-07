@@ -435,11 +435,19 @@ def test_filtered_boundary_host_ipv6_concurrency_and_cleanup(monkeypatch: Monkey
 
 def _firewall_rules(raw: str) -> list[str]:
     """Ignore counters and generated timestamps when comparing firewall ownership."""
-    return [
-        " ".join(line.split()[:2]) if line.startswith(":") else line
-        for line in raw.splitlines()
-        if line.startswith(("-A ", "*", ":"))
-    ]
+    rows = []
+    table = ""
+    builtins = {"INPUT", "OUTPUT", "FORWARD", "PREROUTING", "POSTROUTING"}
+    for line in raw.splitlines():
+        if line.startswith("*"):
+            table = line
+        elif line.startswith("-A "):
+            rows.append(f"{table} {line}")
+        elif line.startswith(":"):
+            name, policy = line.split()[:2]
+            if name[1:] not in builtins or policy != "ACCEPT":
+                rows.append(f"{table} {name} {policy}")
+    return rows
 
 
 def test_wrapper_preserves_analyzer_net_argument() -> None:
@@ -509,60 +517,80 @@ def test_actual_analyzer_wrapper_prevents_namespace_and_ipv6_escape(tmp_path: Pa
     if os.environ.get("MERGECRAFT_DISPOSABLE_LINUX") != "1":
         pytest.skip("requires make test-filtered-egress in disposable Linux")
     from mergecraft.analyzers.resolve import AnalyzerPlan
-    from mergecraft.analyzers.run import _sandboxed_argv
+    from mergecraft.analyzers.run import run_plan
     from mergecraft.analyzers.sandbox import SandboxLimits, build_sandbox_context
 
     target = _FakeWanTarget()
     target.start(39219)
     try:
-        with FilteredNetnsSession([target.peer_ip], dns_resolvers=()) as session:
-            scratch = tmp_path / "scratch"
-            scratch.mkdir()
-            marker = tmp_path / "must-not-write"
-            script = (
-                "import pathlib, subprocess, sys\n"
-                "status = pathlib.Path('/proc/self/status').read_text()\n"
-                "for name in ('CapEff', 'CapPrm', 'CapBnd', 'CapAmb'):\n"
-                "    value = next(line.split()[1] for line in status.splitlines() if line.startswith(name+':'))\n"
-                "    assert int(value, 16) == 0, (name, value)\n"
-                "assert subprocess.call(['ip', 'netns', 'exec', sys.argv[1], 'true']) != 0\n"
-                "assert pathlib.Path('/proc/sys/net/ipv6/conf/all/disable_ipv6').read_text().strip() == '1'\n"
-                "assert subprocess.call(['sysctl', '-w', 'net.ipv6.conf.all.disable_ipv6=0']) != 0\n"
-                "assert pathlib.Path('/proc/sys/net/ipv6/conf/all/disable_ipv6').read_text().strip() == '1'\n"
-                "try:\n"
-                "    pathlib.Path(sys.argv[2]).write_text('escaped')\n"
-                "except OSError:\n"
-                "    pass\n"
-                "else:\n"
-                "    raise AssertionError('repository became writable')\n"
-                "print('escape attempts blocked')\n"
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        marker = tmp_path / "must-not-write"
+        bootstrap_marker = tmp_path.parent / "bootstrap-must-not-run"
+        malicious_bin = tmp_path / "bin"
+        malicious_bin.mkdir()
+        startup = tmp_path / "bash-startup"
+        startup.write_text(f"/bin/cat /proc/self/status >> {bootstrap_marker}\n")
+        for helper in ("ip", "unshare", "mount", "umount", "setpriv"):
+            fake = malicious_bin / helper
+            fake.write_text(
+                f"#!/bin/sh\n/bin/cat /proc/self/status >> {bootstrap_marker}\nexit 77\n"
             )
-            plan = AnalyzerPlan(
-                manifest_id="probe",
-                argv=(_PROBE_PYTHON, "-c", script, target.ns, str(marker)),
-                cwd=tmp_path,
-                mode="native",
-            )
-            context = build_sandbox_context(
-                repo_root=tmp_path,
-                scratch_dir=scratch,
-                limits=SandboxLimits(timeout_s=15, memory_mb=512, max_processes=16),
-                network_allowlist=[target.peer_ip],
-                read_only_source=True,
-            )
-            argv, preexec = _sandboxed_argv(
-                plan,
-                context,
-                event_name="pull_request_target",
-                event={"pull_request": {}},
-                netns_name=session.ns_name,
-            )
-            result = subprocess.run(
-                argv, capture_output=True, text=True, timeout=20, preexec_fn=preexec
-            )
-            assert result.returncode == 0, result.stdout + result.stderr
-            assert "escape attempts blocked" in result.stdout
-            assert not marker.exists()
+            fake.chmod(0o755)
+        payload_env = {
+            **os.environ,
+            "PATH": f"{malicious_bin}:/usr/sbin:/usr/bin:/sbin:/bin",
+            "BASH_ENV": str(startup),
+            "ENV": str(startup),
+            "LD_PRELOAD": "/nonexistent/mergecraft-test-loader.so",
+        }
+        script = (
+            "import pathlib, subprocess, sys\n"
+            "status = pathlib.Path('/proc/self/status').read_text()\n"
+            "for name in ('CapEff', 'CapPrm', 'CapBnd', 'CapAmb'):\n"
+            "    value = next(line.split()[1] for line in status.splitlines() if line.startswith(name+':'))\n"
+            "    assert int(value, 16) == 0, (name, value)\n"
+            "assert subprocess.call(['/usr/sbin/ip', 'netns', 'exec', sys.argv[1], 'true']) != 0\n"
+            "assert pathlib.Path('/proc/sys/net/ipv6/conf/all/disable_ipv6').read_text().strip() == '1'\n"
+            "try:\n"
+            "    pathlib.Path('/proc/sys/net/ipv6/conf/all/disable_ipv6').write_text('0')\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    raise AssertionError('IPv6 sysctl became writable')\n"
+            "assert pathlib.Path('/proc/sys/net/ipv6/conf/all/disable_ipv6').read_text().strip() == '1'\n"
+            "try:\n"
+            "    pathlib.Path(sys.argv[2]).write_text('escaped')\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    raise AssertionError('repository became writable')\n"
+            "print('escape attempts blocked')\n"
+        )
+        plan = AnalyzerPlan(
+            manifest_id="probe",
+            argv=(_PROBE_PYTHON, "-c", script, target.ns, str(marker)),
+            env=payload_env,
+            cwd=tmp_path,
+            mode="native",
+        )
+        context = build_sandbox_context(
+            repo_root=tmp_path,
+            scratch_dir=scratch,
+            limits=SandboxLimits(timeout_s=15, memory_mb=512, max_processes=16),
+            network_allowlist=[target.peer_ip],
+            read_only_source=True,
+        )
+        result = run_plan(
+            plan,
+            sandbox_context=context,
+            event_name="pull_request_target",
+            event={"pull_request": {}},
+        )
+        assert result.exit_code == 0, result.output
+        assert "escape attempts blocked" in result.output
+        assert not marker.exists()
+        assert not bootstrap_marker.exists()
     finally:
         target.close()
 

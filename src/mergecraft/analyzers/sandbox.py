@@ -258,6 +258,8 @@ def _required_for_untrusted(caps: SandboxCapabilities) -> list[str]:
     missing: list[str] = []
     if not caps.pid_namespace:
         missing.append("pid namespace")
+    if getattr(caps, "pid_namespace_method", "none") == "sudo-unshare":
+        missing.append("direct unshare (sudo cannot preserve private payload environment)")
     if not caps.network_namespace:
         missing.append("network namespace")
     if not caps.read_only_bind:
@@ -591,9 +593,19 @@ def build_analyzer_sandbox_argv(
     # ``evaluate_analyzer_egress_policy`` named-skips (D5b/D6).
     unshare_argv = _analyzer_unshare_argv(isolate_network=isolate_network)
     if method == "sudo-unshare":
+        if context.read_only_source:
+            from mergecraft.analyzers.egress import FilteredEgressSetupError
+
+            raise FilteredEgressSetupError(
+                "untrusted analyzer requires direct unshare; sudo closes private environment descriptors"
+            )
         return ["sudo", *unshare_argv, "bash", "-c", wrapped]
     if method == "unshare":
         return [*unshare_argv, "bash", "-c", wrapped]
+    if context.read_only_source:
+        from mergecraft.analyzers.egress import FilteredEgressSetupError
+
+        raise FilteredEgressSetupError("untrusted analyzer requires a working namespace backend")
     return list(argv)
 
 
