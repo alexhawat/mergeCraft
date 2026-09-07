@@ -1,8 +1,8 @@
-"""Pipeline provider protocol and registry (K1.1)."""
+"""Pipeline provider protocol (K1.1)."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from mergecraft.ci.types import ProviderContext, RawFailure
@@ -12,8 +12,7 @@ class PipelineProvider(Protocol):
     """Read-only CI pipeline adapter (K-table K1).
 
     ``detect`` decides whether this provider applies to the current context.
-    ``fetch_failures`` returns raw failures for a pull request; stub providers
-    return an empty list and expose a non-empty ``skip_reason``.
+    ``fetch_failures`` returns raw failures for a pull request.
     """
 
     supports_retry_state: bool
@@ -24,45 +23,10 @@ class PipelineProvider(Protocol):
         ...
 
     def fetch_failures(self, pr: dict[str, object]) -> list[RawFailure]:
-        """Fetch raw failures for a PR; stubs return ``[]`` with ``skip_reason`` set."""
+        """Fetch raw failures for a PR."""
         ...
-
-
-def _build_registry() -> dict[str, PipelineProvider]:
-    from mergecraft.ci.providers.azure import AzurePipelinesProvider
-    from mergecraft.ci.providers.circleci import CircleCIProvider
-    from mergecraft.ci.providers.github_actions import GitHubActionsProvider
-    from mergecraft.ci.providers.gitlab import GitLabCIProvider
-
-    return {
-        "github_actions": cast(  # concrete provider implements PipelineProvider; cast removes subclass widening
-            "PipelineProvider", GitHubActionsProvider()
-        ),
-        "circleci": cast(  # concrete provider implements PipelineProvider; cast removes subclass widening
-            "PipelineProvider", CircleCIProvider()
-        ),
-        "gitlab": cast(  # concrete provider implements PipelineProvider; cast removes subclass widening
-            "PipelineProvider", GitLabCIProvider()
-        ),
-        "azure": cast(  # concrete provider implements PipelineProvider; cast removes subclass widening
-            "PipelineProvider", AzurePipelinesProvider()
-        ),
-    }
-
-
-_PROVIDER_REGISTRY = _build_registry()
-
-
-def get_provider(provider_id: str) -> PipelineProvider:
-    """Return a registered provider by id."""
-    try:
-        return _PROVIDER_REGISTRY[provider_id]
-    except KeyError as err:
-        msg = f"unknown CI provider: {provider_id}"
-        raise KeyError(msg) from err
 
 
 __all__ = [
     "PipelineProvider",
-    "get_provider",
 ]
