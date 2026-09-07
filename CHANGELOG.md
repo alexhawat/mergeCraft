@@ -85,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Credential broker stream failures now close the connection without inserting a
+  second HTTP response, and client disconnects release upstream responses (#595)
+- Brokered Codex runs preserve configured proxy bypass entries and always bypass
+  proxies for the loopback broker, without changing parent proxy settings (#597)
+- Removed an obsolete Codex broker auth branch that suppressed the API-key
+  authentication diagnostic; subscription authentication is unchanged (#596)
+
 - Logfire `llm.call` rows now include the prompt mergeCraft sent and the model
   output, with a real duration instead of an empty ~2µs span
 - Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on
