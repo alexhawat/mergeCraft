@@ -12,7 +12,23 @@ from typing import Any
 
 import pytest
 
-from tests.ci.workflow_support import REPO_ROOT
+from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
+
+
+def test_integration_job_runs_supported_python_matrix() -> None:
+    """The minimum supported Python must execute the non-live integration suite."""
+    integration = job(load_workflow("ci.yml"), "integration")
+    matrix = integration["strategy"]["matrix"]
+    assert {"3.11", "3.14"} <= set(matrix["python"])
+    assert not matrix.get("exclude"), "supported integration runtimes must not be excluded"
+    assert not integration.get("if"), "integration must run on every CI event"
+    steps = integration["steps"]
+    bootstrap = next(step for step in steps if step.get("uses") == "./.github/actions/bootstrap")
+    assert bootstrap["with"]["python-version"] == "${{ matrix.python }}"
+    execution = next(step for step in steps if step.get("run") == "make test-integration")
+    assert not execution.get("if"), "every matrix entry must run the integration suite"
+    assert not execution.get("continue-on-error"), "integration failures must block CI"
+    assert not integration.get("continue-on-error")
 
 
 def _load_count_executed() -> Any:

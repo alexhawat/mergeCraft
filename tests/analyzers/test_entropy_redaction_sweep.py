@@ -131,3 +131,32 @@ def test_real_secret_shapes_remain_redacted_fail_closed() -> None:
     redacted = redact_secrets(secret)
     assert secret not in redacted
     assert REDACTION_SENTINEL in redacted or "<redacted>" in redacted
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("AbCdEfGhIjKlMnOpQrStUvWxYz012345", id="mixed-case-entropy"),
+        pytest.param("0123456789ABCDEFghijklmnop+/=XYZ", id="base64-shaped-entropy"),
+        pytest.param("sk-public-synthetic-example", id="provider-key-pattern"),
+        pytest.param("password=public-fixture-value", id="credential-assignment"),
+    ],
+)
+def test_fixed_secret_examples_redact_without_sampling(value: str) -> None:
+    """Public synthetic positives exercise correctness independently of fixture selection."""
+    assert redact_secrets(value) == REDACTION_SENTINEL
+    assert redact_secrets(f"found {value} here") == f"found {REDACTION_SENTINEL} here"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("0123456789abcdef0123456789abcdef01234567", id="git-sha"),
+        pytest.param("fetchUserProfile", id="camel-case-identifier"),
+        pytest.param("status=skipped", id="status-metadata"),
+    ],
+)
+def test_fixed_benign_examples_preserve_analyzer_context(value: str) -> None:
+    """Known public metadata must remain readable alongside secret redaction."""
+    assert redact_secrets(value) == value
+    assert redact_secrets(f"found [{value}] here") == f"found [{value}] here"
