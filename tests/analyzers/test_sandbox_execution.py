@@ -103,8 +103,8 @@ def test_sandboxed_execution_blocks_repo_write_and_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     caps = sandbox_mod.probe_capabilities()
-    if not caps.pid_namespace or caps.pid_namespace_method == "none":
-        pytest.skip("PID namespace isolation unavailable on this host")
+    if not caps.pid_namespace or caps.pid_namespace_method != "unshare":
+        pytest.skip("direct unshare unavailable; sudo cannot carry the private payload environment")
 
     scratch = tmp_path / "scratch"
     scratch.mkdir()
