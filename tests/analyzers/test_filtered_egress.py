@@ -17,7 +17,6 @@ from mergecraft.analyzers.egress import (
     FilteredEgressSetupError,
     FilteredNetnsSession,
     _parse_resolv_conf,
-    _pid_alive,
     allowlist_hosts,
     default_dns_resolvers,
     filtered_egress_available,
@@ -25,7 +24,6 @@ from mergecraft.analyzers.egress import (
     probe_filtered_egress,
     reset_filtered_egress_cache,
     resolve_allowlist_ips,
-    sweep_orphaned_filtered_egress,
     wrap_argv_for_filtered_netns,
 )
 from tests.analyzers.support_allowlist_proxy import AllowlistConnectProxy
@@ -120,23 +118,6 @@ def test_default_dns_resolvers_falls_back_to_public_resolver_when_host_has_none(
     assert default_dns_resolvers() == ("1.1.1.1",)
 
 
-def test_pid_alive_true_for_current_process() -> None:
-    assert _pid_alive(os.getpid()) is True
-
-
-def test_pid_alive_false_for_a_pid_that_does_not_exist() -> None:
-    # Linux pid_max tops out well below 2**30; this pid cannot be real.
-    assert _pid_alive(2**30) is False
-
-
-def test_sweep_orphaned_filtered_egress_is_a_noop_without_iptables(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """(#606 finding 6) — must never raise, even when iptables is unavailable."""
-    monkeypatch.setattr("mergecraft.analyzers.egress.shutil.which", lambda _name: None)
-    sweep_orphaned_filtered_egress()  # must not raise
-
-
 def test_session_dns_resolvers_default_matches_default_dns_resolvers() -> None:
     session = FilteredNetnsSession(["127.0.0.1"])
     assert session.dns_resolvers == default_dns_resolvers()
@@ -206,11 +187,12 @@ _ECHO_SERVER_SCRIPT = (
     "s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
     "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
     "s.bind(('0.0.0.0', {port}))\n"
-    "s.listen(1)\n"
-    "conn, _ = s.accept()\n"
-    "data = conn.recv(1024)\n"
-    "conn.sendall(data)\n"
-    "conn.close()\n"
+    "s.listen(8)\n"
+    "while True:\n"
+    "    conn, _ = s.accept()\n"
+    "    data = conn.recv(1024)\n"
+    "    conn.sendall(data)\n"
+    "    conn.close()\n"
 )
 
 _CLIENT_CONNECT_SCRIPT = (
@@ -309,6 +291,12 @@ def _connect_from_netns(ns_name: str, dest_ip: str, port: int) -> str:
             "netns",
             "exec",
             ns_name,
+            "setpriv",
+            "--bounding-set=-all",
+            "--inh-caps=-all",
+            "--ambient-caps=-all",
+            "--no-new-privs",
+            "--",
             sys.executable,
             "-c",
             _CLIENT_CONNECT_SCRIPT,
@@ -328,9 +316,10 @@ def test_filtered_netns_session_allows_allowlisted_and_drops_the_rest() -> None:
     """The real ``FilteredNetnsSession`` path — not ``AllowlistConnectProxy`` — must
     connect to an allowlisted destination and drop the identical, reachable
     destination when it is not allowlisted (#606 findings 1 and 2)."""
+    if os.environ.get("MERGECRAFT_DISPOSABLE_LINUX") != "1":
+        pytest.skip("requires make test-filtered-egress in disposable Linux")
     reset_filtered_egress_cache()
-    if not filtered_egress_available():
-        pytest.skip(f"filtered egress unavailable on this host: {probe_filtered_egress().reason}")
+    assert filtered_egress_available(), probe_filtered_egress().reason
 
     port = 39217
     target = _FakeWanTarget()
@@ -356,3 +345,241 @@ def test_filtered_netns_session_allows_allowlisted_and_drops_the_rest() -> None:
             blocked.close()
     finally:
         target.close()
+
+
+@pytest.mark.integration
+def test_filtered_boundary_host_ipv6_concurrency_and_cleanup(monkeypatch: MonkeyPatch) -> None:
+    """Exercise kernel INPUT/FORWARD policy and independent session ownership."""
+    if os.environ.get("MERGECRAFT_DISPOSABLE_LINUX") != "1":
+        pytest.skip("requires make test-filtered-egress in disposable Linux")
+    assert filtered_egress_available(), probe_filtered_egress().reason
+    target = _FakeWanTarget()
+    port = 39218
+    sessions: list[FilteredNetnsSession] = []
+    subprocess.run(["iptables", "-S"], check=True, capture_output=True)
+    subprocess.run(["iptables", "-t", "nat", "-S"], check=True, capture_output=True)
+    before = subprocess.run(["iptables-save"], capture_output=True, text=True, check=True).stdout
+    target.start(port)
+    try:
+        # These rules would bypass an appended filter. Session rules must win.
+        for chain in ("INPUT", "FORWARD"):
+            subprocess.run(["iptables", "-I", chain, "1", "-j", "ACCEPT"], check=True)
+        allowed = FilteredNetnsSession([target.peer_ip], dns_resolvers=())
+        denied = FilteredNetnsSession(["192.0.2.1"], dns_resolvers=())
+        sessions.extend([allowed, denied])
+        allowed.start()
+        denied.start()
+        assert allowed.ns_name != denied.ns_name
+        assert allowed._cidr != denied._cidr
+        assert _connect_from_netns(allowed.ns_name, target.peer_ip, port).startswith("connected:")
+        assert _connect_from_netns(denied.ns_name, target.peer_ip, port).startswith("blocked:")
+        host = subprocess.Popen([sys.executable, "-c", _ECHO_SERVER_SCRIPT.format(port=port)])
+        try:
+            time.sleep(0.3)
+            assert _connect_from_netns(allowed.ns_name, allowed._host_ip, port).startswith(
+                "blocked:"
+            )
+            assert _connect_from_netns(allowed.ns_name, "127.0.0.1", port).startswith("blocked:")
+            v6 = subprocess.run(
+                allowed.wrap_argv(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import socket; s=socket.socket(socket.AF_INET6); s.settimeout(1); s.connect(('::1', 39218))",
+                    ]
+                ),
+                capture_output=True,
+                timeout=5,
+            )
+            assert v6.returncode != 0
+        finally:
+            host.terminate()
+            host.wait(timeout=5)
+        # Timing out an analyzer and closing its session must not harm its peer.
+        with pytest.raises(subprocess.TimeoutExpired):
+            subprocess.run(denied.wrap_argv(["sleep", "5"]), timeout=0.1, check=True)
+        denied.close()
+        assert _connect_from_netns(allowed.ns_name, target.peer_ip, port).startswith("connected:")
+        snapshot = subprocess.run(
+            ["iptables-save"], capture_output=True, text=True, check=True
+        ).stdout
+        failed = FilteredNetnsSession([target.peer_ip], dns_resolvers=())
+        original = FilteredNetnsSession._apply_filter
+
+        def partial_failure(self: FilteredNetnsSession, ips: frozenset[str]) -> None:
+            original(self, ips)
+            raise FilteredEgressSetupError("injected setup failure after firewall installation")
+
+        monkeypatch.setattr(FilteredNetnsSession, "_apply_filter", partial_failure)
+        with pytest.raises(FilteredEgressSetupError, match="injected setup failure"):
+            failed.start()
+        after_failure = subprocess.run(
+            ["iptables-save"], capture_output=True, text=True, check=True
+        ).stdout
+        assert _firewall_rules(after_failure) == _firewall_rules(snapshot)
+        assert _connect_from_netns(allowed.ns_name, target.peer_ip, port).startswith("connected:")
+    finally:
+        for session in sessions:
+            session.close()
+        for chain in ("INPUT", "FORWARD"):
+            subprocess.run(["iptables", "-D", chain, "-j", "ACCEPT"], check=False)
+        target.close()
+    after = subprocess.run(["iptables-save"], capture_output=True, text=True, check=True).stdout
+    assert _firewall_rules(after) == _firewall_rules(before)
+
+
+def _firewall_rules(raw: str) -> list[str]:
+    """Ignore counters and generated timestamps when comparing firewall ownership."""
+    return [
+        " ".join(line.split()[:2]) if line.startswith(":") else line
+        for line in raw.splitlines()
+        if line.startswith(("-A ", "*", ":"))
+    ]
+
+
+def test_wrapper_preserves_analyzer_net_argument() -> None:
+    assert wrap_argv_for_filtered_netns(
+        ["unshare", "--pid", "--net", "bash", "--net"], "example"
+    ) == ["ip", "netns", "exec", "example", "unshare", "--pid", "bash", "--net"]
+    assert wrap_argv_for_filtered_netns(["analyzer", "--net"], "example")[-2:] == [
+        "analyzer",
+        "--net",
+    ]
+
+
+def test_sessions_have_independent_names_in_one_process() -> None:
+    first = FilteredNetnsSession(["192.0.2.1"])
+    second = FilteredNetnsSession(["192.0.2.1"])
+    assert first.ns_name != second.ns_name
+    assert first._host_veth != second._host_veth
+
+
+def test_route_inspection_failure_refuses_allocation(monkeypatch: MonkeyPatch) -> None:
+    def fail(*a: object, **k: object) -> object:
+        raise subprocess.CalledProcessError(1, "ip")
+
+    monkeypatch.setattr("mergecraft.analyzers.egress.subprocess.run", fail)
+    with pytest.raises(FilteredEgressSetupError, match="cannot safely inspect"):
+        FilteredNetnsSession(["192.0.2.1"])._select_subnet()
+
+
+def test_route_overlap_excludes_entire_existing_network(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "mergecraft.analyzers.egress.subprocess.run",
+        lambda *a, **k: subprocess.CompletedProcess([], 0, '[{"dst": "10.255.0.0/16"}]', ""),
+    )
+    with pytest.raises(FilteredEgressSetupError, match="no free"):
+        FilteredNetnsSession(["192.0.2.1"])._select_subnet()
+
+
+def test_cleanup_never_touches_uncreated_objects(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "mergecraft.analyzers.egress.subprocess.run",
+        lambda *a, **k: pytest.fail("unowned resource deletion"),
+    )
+    FilteredNetnsSession(["192.0.2.1"]).close()
+
+
+def test_cleanup_retains_failed_command_for_retry(monkeypatch: MonkeyPatch) -> None:
+    session = FilteredNetnsSession(["192.0.2.1"])
+    command = ["iptables", "-X", session._chain]
+    session._cleanup_commands = [command]
+    monkeypatch.setattr(
+        "mergecraft.analyzers.egress.subprocess.run",
+        lambda *a, **k: subprocess.CompletedProcess([], 1, "", "busy"),
+    )
+    session.close()
+    assert session._cleanup_commands == [command]
+    monkeypatch.setattr(
+        "mergecraft.analyzers.egress.subprocess.run",
+        lambda *a, **k: subprocess.CompletedProcess([], 0, "", ""),
+    )
+    session.close()
+    assert session._cleanup_commands == []
+
+
+@pytest.mark.integration
+def test_actual_analyzer_wrapper_prevents_namespace_and_ipv6_escape(tmp_path: Path) -> None:
+    """Mount setup must finish before dropping privilege for untrusted argv."""
+    if os.environ.get("MERGECRAFT_DISPOSABLE_LINUX") != "1":
+        pytest.skip("requires make test-filtered-egress in disposable Linux")
+    from mergecraft.analyzers.resolve import AnalyzerPlan
+    from mergecraft.analyzers.run import _sandboxed_argv
+    from mergecraft.analyzers.sandbox import SandboxLimits, build_sandbox_context
+
+    target = _FakeWanTarget()
+    target.start(39219)
+    try:
+        with FilteredNetnsSession([target.peer_ip], dns_resolvers=()) as session:
+            scratch = tmp_path / "scratch"
+            scratch.mkdir()
+            marker = tmp_path / "must-not-write"
+            script = (
+                "import pathlib, subprocess, sys\n"
+                "status = pathlib.Path('/proc/self/status').read_text()\n"
+                "for name in ('CapEff', 'CapPrm', 'CapBnd', 'CapAmb'):\n"
+                "    value = next(line.split()[1] for line in status.splitlines() if line.startswith(name+':'))\n"
+                "    assert int(value, 16) == 0, (name, value)\n"
+                "assert subprocess.call(['ip', 'netns', 'exec', sys.argv[1], 'true']) != 0\n"
+                "assert pathlib.Path('/proc/sys/net/ipv6/conf/all/disable_ipv6').read_text().strip() == '1'\n"
+                "assert subprocess.call(['sysctl', '-w', 'net.ipv6.conf.all.disable_ipv6=0']) != 0\n"
+                "assert pathlib.Path('/proc/sys/net/ipv6/conf/all/disable_ipv6').read_text().strip() == '1'\n"
+                "try:\n"
+                "    pathlib.Path(sys.argv[2]).write_text('escaped')\n"
+                "except OSError:\n"
+                "    pass\n"
+                "else:\n"
+                "    raise AssertionError('repository became writable')\n"
+                "print('escape attempts blocked')\n"
+            )
+            plan = AnalyzerPlan(
+                manifest_id="probe",
+                argv=(sys.executable, "-c", script, target.ns, str(marker)),
+                cwd=tmp_path,
+                mode="native",
+            )
+            context = build_sandbox_context(
+                repo_root=tmp_path,
+                scratch_dir=scratch,
+                limits=SandboxLimits(timeout_s=15, memory_mb=512, max_processes=16),
+                network_allowlist=[target.peer_ip],
+                read_only_source=True,
+            )
+            argv, preexec = _sandboxed_argv(
+                plan,
+                context,
+                event_name="pull_request_target",
+                event={"pull_request": {}},
+                netns_name=session.ns_name,
+            )
+            result = subprocess.run(
+                argv, capture_output=True, text=True, timeout=20, preexec_fn=preexec
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "escape attempts blocked" in result.stdout
+            assert not marker.exists()
+    finally:
+        target.close()
+
+
+def test_capable_host_still_requires_operator_isolated_runtime_opt_in(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME", raising=False)
+    monkeypatch.setattr(
+        "mergecraft.analyzers.egress._can_unshare_net",
+        lambda: pytest.fail("probe ran without opt-in"),
+    )
+    reset_filtered_egress_cache()
+    probe = probe_filtered_egress()
+    assert not probe.available
+    assert "operator-owned isolated runtime" in probe.reason
+
+
+def test_operator_opt_in_does_not_replace_required_capabilities(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME", "1")
+    monkeypatch.setattr("mergecraft.analyzers.egress._can_unshare_net", lambda: False)
+    reset_filtered_egress_cache()
+    probe = probe_filtered_egress()
+    assert not probe.available
+    assert "unshare" in probe.reason

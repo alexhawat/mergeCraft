@@ -7,6 +7,7 @@ import os
 import re
 import resource
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -152,6 +153,8 @@ def _run_isolation_probe() -> dict[str, str]:
         and os.environ.get("MERGECRAFT_PROBE_TEST_DOUBLE") == "1"
     ):
         return dict(_PROBE_TEST_DOUBLE)
+    if sys.platform != "linux":
+        return {}
     try:
         result = subprocess.run(
             ["bash", "-c", _ISOLATION_PROBE_SCRIPT],
@@ -159,7 +162,7 @@ def _run_isolation_probe() -> dict[str, str]:
             capture_output=True,
             check=False,
         )
-    except (OSError, ValueError):
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return {}
     if result.returncode != 0:
         return {}
@@ -167,7 +170,7 @@ def _run_isolation_probe() -> dict[str, str]:
 
 
 def _probe_cgroup_memory() -> tuple[bool, str | None]:
-    return False, "cgroup memory limits unavailable in Action container (W0.4 probe)"
+    return False, "cgroup memory enforcement is not implemented by this sandbox backend"
 
 
 def _probe_rlimit_nproc() -> tuple[bool, str | None]:
@@ -207,6 +210,11 @@ def probe_capabilities() -> SandboxCapabilities:
     tmpfs_ok = probe.get("tmpfs") == "1"
     if not tmpfs_ok:
         reasons.append("tmpfs scratch unavailable (mount tmpfs failed)")
+    if not probe and sys.platform != "linux":
+        reasons = [
+            f"Linux PID/network namespace/mount sandbox unavailable on {sys.platform}; "
+            "no native sandbox backend is implemented"
+        ]
     cgroup_ok, cgroup_reason = _probe_cgroup_memory()
     if cgroup_reason:
         reasons.append(cgroup_reason)
@@ -360,6 +368,12 @@ def plan_sandbox(
                 skip_reason=reason,
                 skip_finding=skip_finding,
             )
+
+    if effective_tier == "trusted" and _required_for_untrusted(caps):
+        logger.warning(
+            "trusted analyzer execution has no complete namespace/mount isolation; "
+            "shell permission is an execution opt-in, not a sandbox guarantee"
+        )
 
     network_allowlist = manifest.network_allowlist if manifest is not None else []
     context = build_sandbox_context(
@@ -546,7 +560,13 @@ def build_analyzer_sandbox_command(argv: tuple[str, ...], *, context: SandboxCon
     mounts = analyzer_isolation_mount_fragment(context)
     sockets = analyzer_socket_mask_fragment()
     inner = shlex.join(argv)
-    return f"{_PROC_PREP_FRAGMENT}{sockets}{mounts}exec {inner}"
+    return (
+        f"{_PROC_PREP_FRAGMENT}{sockets}{mounts}"
+        "mount --bind /proc/sys /proc/sys || exit 1; "
+        "mount -o remount,bind,ro /proc/sys || exit 1; "
+        "exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all "
+        f"--no-new-privs -- {inner}"
+    )
 
 
 def build_analyzer_sandbox_argv(

@@ -85,6 +85,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Analyzer isolation reports unsupported macOS accurately and warns when trusted
+  execution lacks isolation. Filtered Linux egress denies host INPUT access,
+  separates concurrent sessions, and cleans only owned resources; a disposable
+  Linux integration harness exercises the production firewall boundary.
+
 - Release verification uses compatible GitHub CLI policy flags, validates deployment
   candidates automatically, and publishes canonical image tags only after signed
   staging digests verify. Pin preparation safely supports repeat invocations and

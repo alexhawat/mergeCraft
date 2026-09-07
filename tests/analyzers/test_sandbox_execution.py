@@ -68,7 +68,10 @@ def test_sandboxed_argv_wires_net_ro_bind_and_tmpfs(
     assert "tmpfs" in joined
     assert str(tmp_path) in joined
     assert "bash" in argv
-    assert "exec echo probe" in joined
+    assert (
+        "exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs -- echo probe"
+        in joined
+    )
 
 
 def test_sandboxed_argv_uses_sudo_unshare_when_detected(
