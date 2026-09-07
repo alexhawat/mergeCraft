@@ -6,8 +6,6 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from loguru import logger
-
 from mergecraft.analyzers.detect import (
     detect_js_linter_intent,
     has_basedpyright_config,
@@ -332,16 +330,6 @@ def known_analyzer_ids() -> frozenset[str]:
     return frozenset(m.id for m in load_catalog())
 
 
-def warn_unknown_analyzer_overrides(settings: dict[str, Any]) -> None:
-    """Log a warning for override keys that do not match a catalog id."""
-    analyzers = settings.get("analyzers") or {}
-    overrides = analyzers.get("overrides") or {}
-    known = known_analyzer_ids()
-    for analyzer_id in overrides:
-        if analyzer_id not in known:
-            logger.warning("unknown analyzer id in config overrides: {}", analyzer_id)
-
-
 __all__ = [
     "detect_enabled",
     "filter_changed_files_for_manifest",
@@ -350,5 +338,4 @@ __all__ = [
     "known_analyzer_ids",
     "load_catalog",
     "select_enabled_analyzers",
-    "warn_unknown_analyzer_overrides",
 ]
