@@ -220,6 +220,7 @@ def _shell_trust_matrix_lines() -> list[str]:
         "  Namespace helpers receive a minimal trusted environment. Payload",
         "  environment values travel through a private descriptor and are",
         "  restored only after capabilities are dropped, never in process argv.",
+        "  Analyzer timeouts kill the namespace init process and its descendants.",
         "  The runtime must provision tools and libraries readable without DAC override; private",
         "  installs owned by another user are intentionally inaccessible.",
         "  Host INPUT destinations",

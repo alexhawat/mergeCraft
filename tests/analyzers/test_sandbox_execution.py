@@ -65,6 +65,7 @@ def test_sandboxed_argv_wires_net_ro_bind_and_tmpfs(
     joined = " ".join(argv)
     assert argv[:4] == ["unshare", "--pid", "--fork", "--mount-proc"]
     assert "--net" in argv
+    assert "--kill-child=KILL" in argv
     assert "remount,bind,ro" in joined
     assert "tmpfs" in joined
     assert str(tmp_path) in joined

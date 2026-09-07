@@ -549,7 +549,9 @@ def analyzer_egress_skip_reason(
 
 def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
-    argv: list[str] = ["unshare", "--pid", "--fork", "--mount-proc"]
+    # Killing only the waiting unshare parent otherwise leaves PID 1 and its
+    # descendants alive after a subprocess timeout.
+    argv: list[str] = ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=KILL"]
     if isolate_network and caps.network_namespace:
         argv.append("--net")
     return argv
