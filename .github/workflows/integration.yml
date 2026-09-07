@@ -58,6 +58,72 @@ jobs:
           GITHUB_WORKSPACE: ${{ github.workspace }}
         run: bash scripts/ci_coverage_delta_gate.sh
 
+  filtered-egress:
+    name: Integration (filtered egress / privileged)
+    # The netns + veth + iptables enforcement in
+    # ``mergecraft.analyzers.egress`` needs CAP_NET_ADMIN and CAP_SYS_ADMIN,
+    # which ``integration-pr`` does not have — its run of this test self-skips.
+    # Without this job the only evidence for the filter would be
+    # ``AllowlistConnectProxy``, a userspace stand-in production never uses
+    # (#606 finding 2).
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          # #432 / D6 — score the merge result, not the PR head branch alone.
+          ref: >-
+            ${{ github.event_name == 'pull_request'
+                && format('refs/pull/{0}/merge', github.event.pull_request.number)
+                || github.ref }}
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+      # Fail loudly when the runner cannot enforce, instead of letting the
+      # test self-skip and the job report green on no evidence at all.
+      - name: Assert this runner can enforce filtered egress
+        run: |
+          sudo .venv-dev/bin/python -c "
+          import sys
+          from mergecraft.analyzers.egress import probe_filtered_egress
+          probe = probe_filtered_egress()
+          print(f'probe: {probe}')
+          if not probe.available:
+              sys.stderr.write(
+                  'privileged runner cannot enforce filtered egress: '
+                  f'{probe.reason}\n'
+                  'This job exists to execute the netns/veth/iptables path; a '
+                  'skip here is a failure, not a pass.\n'
+              )
+              sys.exit(1)
+          "
+      # Run as root: ``ip netns add`` and veth creation need CAP_NET_ADMIN /
+      # CAP_SYS_ADMIN. The venv interpreter is invoked directly so uv does not
+      # re-sync (and chown) the environment as root.
+      - name: Filtered egress enforcement test
+        run: |
+          log=$(mktemp)
+          # ``set +e`` around the pipeline: the default shell is ``bash -e``,
+          # so a failing pytest would abort the step before the meta-check
+          # below ever runs. PIPESTATUS keeps the real pytest status.
+          set +e
+          sudo -E .venv-dev/bin/python -m pytest \
+            tests/analyzers/test_filtered_egress.py \
+            -v --tb=short --strict-markers -p no:cacheprovider \
+            -m integration 2>&1 | tee "$log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          # A self-skip must not satisfy this gate — the same meta-check the
+          # integration suite uses so capability skips cannot report success.
+          .venv-dev/bin/python scripts/check_integration_ran.py --log "$log"
+          exit "$rc"
+
   security-scope:
     name: npm audit + workflow lint
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
