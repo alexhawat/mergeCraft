@@ -462,6 +462,7 @@ def credential_broker(
             )
 
             upstream_path = _upstream_request_path(upstream_path)
+            response_committed = False
             try:
                 with shared_upstream_client.stream(
                     method,
@@ -487,6 +488,9 @@ def credential_broker(
                             continue
                         self.send_header(header, redact_broker_output(value))
                     self.send_header("Connection", "close")
+                    # Once headers start leaving the process, another status would
+                    # corrupt the response body. A failed stream must end at EOF.
+                    response_committed = True
                     self.end_headers()
 
                     for chunk in upstream_response.iter_bytes():
@@ -495,10 +499,12 @@ def credential_broker(
                         self.wfile.write(_redact_stream_chunk(chunk))
             except httpx.HTTPError as exc:
                 _broker_log("warning", "broker upstream request failed: {}", exc)
-                self._reject(HTTPStatus.BAD_GATEWAY, "upstream request failed")
-                return
-
-            self.close_connection = True
+                if not response_committed:
+                    self._reject(HTTPStatus.BAD_GATEWAY, "upstream request failed")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                _broker_log("debug", "broker client disconnected during response")
+            finally:
+                self.close_connection = True
 
         def do_GET(self) -> None:
             self._proxy("GET")
