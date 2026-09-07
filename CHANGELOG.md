@@ -85,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Release E2E now runs for reusable workflow callers, and image promotion
+  requires verified signatures, source provenance, and SBOM attestations.
+  Action pin preparation separates the built source from the manifest commit
+  consumers execute, preventing deployment of the previous image (#579, #641).
 - Logfire `llm.call` rows now include the prompt mergeCraft sent and the model
   output, with a real duration instead of an empty ~2µs span
 - Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on
