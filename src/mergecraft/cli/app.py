@@ -66,7 +66,7 @@ from mergecraft.cli.global_surface import (
     emit_cli_json,
     validate_log_level_option,
 )
-from mergecraft.cli.local_env import resolve_local_env_path
+from mergecraft.cli.local_env import local_env_path_for_process_cwd
 from mergecraft.cli.typer_group import MergecraftTyperGroup
 
 
@@ -237,7 +237,7 @@ def _load_local_env() -> None:
     from the file. The file is silent-on-missing so CI sandboxes and global
     invocations from outside a checkout are unaffected.
     """
-    env_path = resolve_local_env_path(require_repo=False)
+    env_path = local_env_path_for_process_cwd(on_missing_repo="use-process-cwd")
     if not env_path.is_file():
         return
     load_dotenv(env_path, override=False, encoding="utf-8")

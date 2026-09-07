@@ -18,6 +18,10 @@ import typer
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.cli.local_env import (
+    local_env_path_for_cwd,
+    local_env_path_for_process_cwd,
+)
 from mergecraft.config.io import load_config_dict as _load_config_dict_raw
 from mergecraft.config.io import patch_config_dict
 from mergecraft.config.io import write_config_dict as _write_config_dict
@@ -129,21 +133,22 @@ def _config_path(cwd: Path) -> Path:
 
 
 def _env_path(cwd: Path | None = None) -> Path:
-    """Return the ``.env`` this invocation writes/reads, anchored on *cwd*.
+    """Return the ``.env`` paired with :func:`_config_path` for *cwd*.
 
-    Every call site here passes an explicit ``--cwd`` (Typer defaults it to
-    ``Path(".")``, never ``None``), so this trusts *cwd* directly rather than
-    walking to a git repository root the way :func:`resolve_local_env_path`
-    does for the no-``--cwd`` writers (``auth``, ``tracing logfire``) — that
-    walk would make ``provider add`` require a git repo it never has before
-    (#654 regression: 35 tests exercise this in a non-repo tmp dir).
+    A ``--cwd`` is taken literally, exactly as ``_config_path`` takes it, so
+    the registry a command reads and the ``.env`` it writes always name the
+    same directory. Walking to the git root for the ``.env`` alone would both
+    split that pair and make ``provider add`` require a repository it never
+    needed before (#654: 35 tests exercise a plain non-repo tmp dir).
+
+    Typer defaults ``--cwd`` to ``Path(".")``, so the ``cwd=None`` branch is
+    reached only by the internal helpers that have nothing but the process
+    working directory; those keep the git-root walk-up the no-``--cwd`` writers
+    use.
     """
-    configured = os.environ.get("MERGECRAFT_ENV")
-    if configured:
-        return Path(configured).resolve()
     if cwd is not None:
-        return cwd.resolve() / ".env"
-    return Path.cwd() / ".env"
+        return local_env_path_for_cwd(cwd)
+    return local_env_path_for_process_cwd()
 
 
 def _load_config_dict(path: Path) -> dict[str, Any]:

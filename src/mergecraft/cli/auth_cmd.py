@@ -24,7 +24,7 @@ from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
     CLI_USAGE_EXIT_CODE,
 )
-from mergecraft.cli.local_env import resolve_local_env_path
+from mergecraft.cli.local_env import local_env_path_for_process_cwd
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
@@ -232,7 +232,7 @@ def _persist_credential(
     entries = dict(local_entries) if local_entries is not None else {name: value}
     any_local_written = False
     if target.local:
-        env_path = resolve_local_env_path()
+        env_path = local_env_path_for_process_cwd()
         # Not short-circuited: every entry is attempted so a partial failure
         # still leaves the entries that could be written (#437).
         succeeded_keys: list[str] = []
@@ -744,8 +744,12 @@ def _write_env_value(env_path: Path, key: str, value: str) -> bool:
 
 
 def _local_env_path() -> Path:
-    """Backward-compatible alias for :func:`resolve_local_env_path`."""
-    return resolve_local_env_path()
+    """Alias for :func:`local_env_path_for_process_cwd`.
+
+    ``auth`` takes no ``--cwd``, so the process working directory is the only
+    anchor it has; the shared helper walks up to the git root from there.
+    """
+    return local_env_path_for_process_cwd()
 
 
 def _normalise_scope(value: str) -> CredentialScope:
