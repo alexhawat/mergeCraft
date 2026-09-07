@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
+from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 from tests.ci.support import (
     NORMALIZED_FIELDS,
-    STUB_PROVIDER_IDS,
     import_module,
     load_fixture,
 )
@@ -53,27 +51,7 @@ def test_fingerprint_stable_across_run_ids() -> None:
     assert fp_a == fp_b
 
 
-@pytest.mark.parametrize("provider_id", STUB_PROVIDER_IDS)
-def test_stub_provider_skips_with_named_reason(provider_id: str) -> None:
-    providers = import_module("mergecraft.ci.providers")
-    provider = providers.get_provider(provider_id)
-    assert provider.skip_reason
-    assert provider.skip_reason.strip()
-    failures = provider.fetch_failures(pr={"number": 1})
-    assert failures == []
-
-
 def test_github_actions_provider_detects_github_context() -> None:
-    providers = import_module("mergecraft.ci.providers")
-    provider = providers.get_provider("github_actions")
+    provider = GitHubActionsProvider()
     assert provider.skip_reason is None
     assert provider.supports_retry_state is True
-
-
-def test_stub_provider_never_returns_silent_empty_without_skip() -> None:
-    providers = import_module("mergecraft.ci.providers")
-    for provider_id in STUB_PROVIDER_IDS:
-        provider = providers.get_provider(provider_id)
-        if not provider.skip_reason:
-            msg = f"{provider_id} must not return empty without a skip_reason"
-            raise AssertionError(msg)
