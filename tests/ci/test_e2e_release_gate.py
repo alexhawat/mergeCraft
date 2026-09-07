@@ -184,7 +184,15 @@ def test_release_graph_executes_required_e2e_for_allowed_events(event: str, ref:
 @pytest.mark.parametrize("failure", ["failure", "cancelled", "skipped"])
 @pytest.mark.parametrize(
     "failed_job",
-    ["verify", "e2e-gate", "build-images", "sbom-scan", "sign-attest", "verify-images"],
+    [
+        "verify",
+        "e2e-gate",
+        "build-images",
+        "sbom-scan",
+        "sign-attest",
+        "verify-images",
+        "publish-canonical",
+    ],
 )
 def test_release_graph_never_promotes_after_unsuccessful_prerequisite(
     failure: str, failed_job: str
@@ -200,6 +208,7 @@ def test_release_graph_never_promotes_after_unsuccessful_prerequisite(
         "sbom-scan",
         "sign-attest",
         "verify-images",
+        "publish-canonical",
         "promote",
     ):
         spec = job(ci, name)
@@ -213,3 +222,34 @@ def test_release_graph_never_promotes_after_unsuccessful_prerequisite(
         eligible = _condition(spec["if"], context) if spec.get("if") else True
         results[name] = "success" if success and eligible else "skipped"
     assert results["promote"] == "skipped"
+
+
+def test_canonical_publication_serializes_both_images_after_verification() -> None:
+    ci = load_workflow("ci-cd.yml")
+    publication = job(ci, "publish-canonical")
+    assert publication["concurrency"] == {
+        "group": "image-source-${{ github.sha }}",
+        "cancel-in-progress": False,
+    }
+    assert "verify-images" in as_list(publication["needs"])
+    assert any(
+        step.get("run") == "make action-images-publish-canonical" for step in publication["steps"]
+    )
+    build = job(ci, "build-images")
+    tags = [
+        step["with"]["tags"]
+        for step in build["steps"]
+        if step.get("id") in {"build-slim", "build-analyzers"}
+    ]
+    assert len(tags) == 2
+    assert all("staging-${{ github.run_id }}-${{ github.run_attempt }}-" in tag for tag in tags)
+
+
+def test_deployment_candidate_gate_is_read_only_and_required_in_both_workflows() -> None:
+    for filename, name in (("ci.yml", "deployment-candidate"), ("ci-cd.yml", "verify")):
+        gate = job(load_workflow(filename), name)
+        assert all(value == "read" for value in gate["permissions"].values())
+        steps = [step for step in gate["steps"] if step.get("run") == "make action-candidate-check"]
+        assert len(steps) == 1
+        assert "if" not in steps[0]
+        assert {"CANDIDATE_BASE", "CANDIDATE_HEAD"} <= steps[0]["env"].keys()

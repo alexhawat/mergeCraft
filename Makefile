@@ -24,7 +24,7 @@ SHELL := /bin/bash
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-image-digest-check action-image-structure-check action-images-resolve action-images-verify action-manifest-prepare action-pin-prepare
+	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
@@ -105,11 +105,17 @@ action-image-structure-check: ## Validate source syntax without asserting deploy
 action-image-digest-check: ## Verify the deployed pinned manifest against signed image provenance
 	$(UV) run python scripts/check_action_image_digest.py
 
+action-candidate-check: ## Verify changed image and consumer pins at immutable base/head commits
+	$(UV) run python scripts/check_action_image_digest.py --candidate
+
 action-images-resolve: ## Resolve verified immutable images for release reuse
 	$(UV) run python scripts/bump_action_pin.py resolve-images
 
 action-images-verify: ## Verify both signed release digests before promotion
 	$(UV) run python scripts/bump_action_pin.py verify-images
+
+action-images-publish-canonical: ## Publish verified source tags under release job serialization
+	$(UV) run python scripts/bump_action_pin.py publish-canonical
 
 action-manifest-prepare: ## Prepare manifest C from SOURCE_REVISION and IMAGE_DIGEST
 	$(UV) run python scripts/bump_action_pin.py manifest

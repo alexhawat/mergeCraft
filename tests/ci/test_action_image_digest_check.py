@@ -286,10 +286,7 @@ def test_attestation_commands_bind_digest_source_and_trusted_identity(
         assert argv[:4] == ["gh", "attestation", "verify", f"oci://{module.SLIM_IMAGE}@{digest}"]
         assert argv[argv.index("--source-digest") + 1] == source
         assert argv[argv.index("--signer-digest") + 1] == source
-        assert (
-            argv[argv.index("--signer-workflow") + 1]
-            == "alexhawat/mergeCraft/.github/workflows/ci-cd.yml"
-        )
+        assert "--signer-workflow" not in argv
         assert argv[argv.index("--repo") + 1] == "alexhawat/mergeCraft"
         assert "--deny-self-hosted-runners" in argv
         identity = argv[argv.index("--cert-identity-regex") + 1]
@@ -371,3 +368,103 @@ def test_registry_config_is_bound_to_immutable_descriptor_hashes(
     )
     result = module._fetch_oci_config_for_tag(index)
     assert result == (None if tamper else config)
+
+
+def test_real_gh_accepts_attestation_policy_before_offline_bundle_failure(tmp_path: Path) -> None:
+    """Exercise gh's real argument parser without registry access or mocked execution."""
+    import os
+    import shutil
+
+    gh = shutil.which("gh")
+    if gh is None:
+        pytest.skip("gh CLI required for real attestation argument compatibility")
+    module = _load_module()
+    artifact = tmp_path / "artifact"
+    artifact.write_text("public parser fixture\n")
+    missing = tmp_path / "missing-bundle.jsonl"
+    result = subprocess.run(
+        [
+            gh,
+            "attestation",
+            "verify",
+            str(artifact),
+            "--bundle",
+            str(missing),
+            *module._attestation_policy("a" * 40),
+        ],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "GH_TOKEN": "public-parser-fixture",
+            "HTTPS_PROXY": "http://127.0.0.1:1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode != 0
+    downstream_error = (
+        "missing-bundle.jsonl" in result.stderr
+        and "no such file or directory" in result.stderr.lower()
+    ) or "no valid Sigstore verifiers could be initialized" in result.stderr
+    assert downstream_error, result.stderr
+    assert "were all set" not in result.stderr
+    assert "unknown flag" not in result.stderr
+
+
+def test_candidate_image_change_verifies_full_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+    result = module.verify_candidate(repo, source, manifest)
+    assert result["manifests"][0]["manifest_commit"] == manifest
+    action = repo / "action.yml"
+    action.write_text(action.read_text() + "  entrypoint: malicious\n")
+    _git(repo, "commit", "-am", "test: incompatible manifest")
+    with pytest.raises(module.VerificationError, match="behavior"):
+        module.verify_candidate(repo, source, _git(repo, "rev-parse", "HEAD"))
+
+
+def test_source_metadata_can_build_but_cannot_be_pinned_without_matching_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+    action = repo / "action.yml"
+    action.write_text(action.read_text() + "  args: [changed]\n")
+    _git(repo, "commit", "-am", "test: source metadata")
+    changed = _git(repo, "rev-parse", "HEAD")
+    assert module.verify_candidate(repo, manifest, changed)["state"] == "source-only-change"
+    workflow = repo / ".github/workflows/review.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(f"jobs:\n  review:\n    uses: alexhawat/mergeCraft@{changed}\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "test: deploy incompatible candidate")
+    with pytest.raises(module.VerificationError, match="behavior"):
+        module.verify_candidate(repo, changed, _git(repo, "rev-parse", "HEAD"))
+
+
+def test_candidate_rejects_mutable_new_pin_but_allows_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+    workflow = repo / ".github/workflows/review.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("jobs:\n  review:\n    uses: alexhawat/mergeCraft@main\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "test: mutable reference")
+    mutable = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(module.VerificationError):
+        module.verify_candidate(repo, manifest, mutable)
+    workflow.write_text(f"env:\n  MERGECRAFT_ACTION_SHA: {manifest}\n")
+    _git(repo, "commit", "-am", "test: repair mutable reference")
+    result = module.verify_candidate(repo, mutable, _git(repo, "rev-parse", "HEAD"))
+    assert result["manifests"][0]["manifest_commit"] == manifest
+    with pytest.raises(module.VerificationError):
+        module.verify_candidate(repo, "main", manifest)

@@ -65,7 +65,9 @@ after its image builds still runs the older digest already stored at S.
 CI/CD explicitly requests its required security E2E slice on push and manual
 runs. Only approved main, pre-release, release-branch, or version-tag refs can
 publish. Images are scanned by digest, signed and attested, then independently
-verified before mutable-tag promotion. Existing source tags are reused only
+verified before canonical source-tag and mutable-tag promotion. New builds use
+run/attempt-specific staging tags, so failed scanning or signing leaves no
+unsigned canonical tag that blocks a fresh attempt. Existing source tags are reused only
 when the same source and trusted provenance verify; an unsigned collision or
 registry outage fails rather than overwriting an immutable tag.
 
@@ -87,13 +89,24 @@ After an approved CI/CD run completes, prepare **two separate reviewed changes**
 
 Preparation never commits, pushes, creates a PR, or claims checks ran. Repeating
 an already satisfied phase reports that state without creating new changes.
+An exact, unstaged preparation patch can be repeated; staged files, unexpected
+untracked files, and unrelated changes are rejected. An uncommitted manifest
+reports `manifest_commit: null`; an already committed manifest reports its actual C.
+Consumer preparation supports both literal `uses` references and
+`MERGECRAFT_ACTION_SHA` markers, including marker-only workflows.
 C may differ from S only in `action.yml`'s `runs.image`; changing entrypoint,
 arguments, source, dependencies or build files requires a new built source.
 Do not combine C and P into a squash-merged change that discards the referenced C.
 
 `make lint` performs a source image-syntax check and explicitly reports its
 provenance as **UNVERIFIED**. It does not depend on publishing the code being
-validated. The separate strict deployment checker fails on missing registry
+validated. Both CI and CI/CD run a read-only candidate gate over immutable base
+and head Git objects: changing `runs.image` verifies the complete new manifest;
+changing consumer references verifies every resulting C. Source-only Action
+metadata changes can build with the existing image field, but do not endorse
+that commit as a deployment manifest. Pinning such a commit still requires its
+complete runtime behavior to match the verified built source.
+The strict deployment checker fails on missing registry
 content, missing tools, invalid signatures, absent tracing, or an unverified
 source mapping. Optional offline inspection exits with an unverified status;
 it never reports cryptographic verification. Verification requires authenticated
@@ -109,12 +122,19 @@ an observed consumer Action run resolving C to D.
 
 ### Recovery and pending pin automation
 
-An existing unsigned or partially attested source-S tag deliberately fails
-immutable-image reuse. After a failure in scan/sign/attest/verify, rerun the
-failed downstream jobs of the original run so they retain its captured digest
-outputs. Do not rerun publication to overwrite the source tag. If the original
-run cannot be recovered, prepare a new source revision and build a new tag;
-retain the failed run and digest for diagnosis.
+Canonical publication serializes both image kinds by source revision, verifies
+both before writing either tag, and checks that registry readback preserves D.
+Concurrent runs producing different digests for one S fail instead of overwriting
+it. If only one tag was published before a transient failure, retrying accepts
+that identical digest and completes the other. The release tooling currently
+requires both image kinds in `ghcr.io/alexhawat/mergecraft`; differing
+`IMAGE_SLIM` or `IMAGE_ANALYZERS` repositories are explicitly rejected.
+
+For ordinary failed staging builds, rerun all jobs or the failed downstream jobs;
+canonical tags have not been written before successful scan/sign/verification.
+A legacy unsigned or partially attested canonical source-S tag still deliberately
+fails reuse. Recover its original downstream jobs with the captured digest, or
+prepare a new source revision; never overwrite it or trust its revision label.
 
 Pending PR #578 combines App identity with older pin automation. Its pin
 portion must be reconciled with this two-phase C/P lifecycle before enabling

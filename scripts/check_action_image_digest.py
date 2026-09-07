@@ -83,7 +83,7 @@ def _ghcr_pull_token() -> str | None:
     return token if isinstance(token, str) and token else None
 
 
-# Retry a briefly missing source tag before deciding it is safe to build.
+# Retry post-publication tag visibility before accepting canonical readback.
 # Registry errors remain fatal; an unsigned existing tag is never overwritten.
 _MISSING_RETRIES = int(os.environ.get("MERGECRAFT_GHCR_MISSING_RETRIES", "3"))
 _MISSING_BACKOFF_SECONDS = float(os.environ.get("MERGECRAFT_GHCR_MISSING_BACKOFF", "3"))
@@ -278,14 +278,11 @@ _RELEASE_IDENTITY = (
 )
 
 
-def _verify_attestations(repo: Path, digest: str, source: str) -> None:
-    """Cryptographically bind D to S and the approved GitHub-hosted release workflow."""
-    image = f"{SLIM_IMAGE}@{digest}"
-    common = [
+def _attestation_policy(source: str) -> list[str]:
+    """Return compatible gh policy flags; the identity regex includes workflow and ref."""
+    return [
         "--repo",
         "alexhawat/mergeCraft",
-        "--signer-workflow",
-        "alexhawat/mergeCraft/.github/workflows/ci-cd.yml",
         "--source-digest",
         _commit(source),
         "--signer-digest",
@@ -296,6 +293,12 @@ def _verify_attestations(repo: Path, digest: str, source: str) -> None:
         "https://token.actions.githubusercontent.com",
         "--deny-self-hosted-runners",
     ]
+
+
+def _verify_attestations(repo: Path, digest: str, source: str) -> None:
+    """Cryptographically bind D to S and the approved GitHub-hosted release workflow."""
+    image = f"{SLIM_IMAGE}@{digest}"
+    common = _attestation_policy(source)
     _run(repo, ["gh", "attestation", "verify", f"oci://{image}", *common])
     _run(
         repo,
@@ -363,14 +366,84 @@ def verify_manifest(repo: Path, manifest_commit: str) -> VerifiedManifest:
     return VerifiedManifest(manifest_commit, source, digest)
 
 
+def _workflow_pins(text: str, *, strict: bool = True) -> set[str]:
+    """Parse literal Action references and exported pin markers, rejecting mutable refs."""
+    pins: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if (
+                    key == "uses"
+                    and isinstance(child, str)
+                    and child.lower().startswith("alexhawat/mergecraft@")
+                ):
+                    reference = child.split("@", 1)[1]
+                    pins.add(_commit(reference) if strict else reference)
+                elif key == "MERGECRAFT_ACTION_SHA":
+                    pins.add(_commit(str(child)) if strict else str(child))
+                else:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(yaml.safe_load(text))
+    return pins
+
+
+def verify_candidate(repo: Path, base: str, head: str) -> dict[str, Any]:
+    """Verify deployment boundary changes without requiring source S to be published."""
+    base, head = _commit(base), _commit(head)
+    if base == "0" * 40:
+        base = _commit(_git(repo, "rev-parse", f"{head}^").strip())
+    changed = set(_git(repo, "diff", "--name-only", base, head, "--").splitlines())
+    manifests: set[str] = set()
+    if "action.yml" in changed:
+        before, after = _action_at(repo, base), _action_at(repo, head)
+        if before["runs"].get("image") != after["runs"].get("image"):
+            manifests.add(head)
+    base_paths = set(
+        _git(repo, "ls-tree", "-r", "--name-only", base, "--", ".github/workflows").splitlines()
+    )
+    head_paths = set(
+        _git(repo, "ls-tree", "-r", "--name-only", head, "--", ".github/workflows").splitlines()
+    )
+    for path in sorted(changed & (base_paths | head_paths)):
+        if not path.endswith((".yml", ".yaml")):
+            continue
+        old = (
+            _workflow_pins(_git(repo, "show", f"{base}:{path}"), strict=False)
+            if path in base_paths
+            else set()
+        )
+        new = _workflow_pins(_git(repo, "show", f"{head}:{path}")) if path in head_paths else set()
+        if old != new:
+            manifests.update(new)
+    records = [verify_manifest(repo, commit).__dict__ for commit in sorted(manifests)]
+    return {
+        "state": "deployment-candidates-verified" if records else "source-only-change",
+        "base_commit": base,
+        "head_commit": head,
+        "manifests": records,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Check deployed pins strictly, or explicitly report unverified source structure."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest-commit")
+    parser.add_argument("--candidate", action="store_true")
     parser.add_argument("--structure-only", action="store_true")
     parser.add_argument("--offline", action="store_true")
     args = parser.parse_args(argv or [])
     try:
+        if args.candidate:
+            result = verify_candidate(
+                REPO, os.environ.get("CANDIDATE_BASE", ""), os.environ.get("CANDIDATE_HEAD", "")
+            )
+            print(json.dumps(result, sort_keys=True))
+            return 0
         if args.structure_only:
             data = yaml.safe_load(ACTION_YML.read_text(encoding="utf-8"))
             _digest_from_action(data)

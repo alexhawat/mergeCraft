@@ -112,7 +112,18 @@ RUN uv sync --frozen --no-dev --extra tracing \
 
 # The container build has no .git directory. Stamp only the source S, never
 # the future manifest commit C or this image's own digest D.
-RUN SOURCE_REVISION="${SOURCE_REVISION}" python -c 'import os, pathlib, re; value = os.environ["SOURCE_REVISION"]; assert not value or re.fullmatch("[0-9a-f]{40}", value), "invalid source revision"; pathlib.Path("src/mergecraft/_build_metadata.py").write_text("__commit__: str | None = " + repr(value or None) + "\n")'
+RUN SOURCE_REVISION="${SOURCE_REVISION}" python - <<'PYTHON'
+import os
+import pathlib
+import re
+
+value = os.environ["SOURCE_REVISION"]
+if value and not re.fullmatch("[0-9a-f]{40}", value):
+    raise ValueError("invalid source revision")
+pathlib.Path("src/mergecraft/_build_metadata.py").write_text(
+    "__commit__: str | None = " + repr(value or None) + "\n"
+)
+PYTHON
 
 COPY docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
