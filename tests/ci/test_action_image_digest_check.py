@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import urllib.error
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
 
 from tests.ci.workflow_support import REPO_ROOT
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def _load_module() -> Any:
@@ -158,44 +158,216 @@ class TestGhcrDigestLookup:
         assert module._image_has_tracing_extra(config) is False
 
 
-class TestMain:
-    def test_fails_when_image_is_dockerfile(self, tmp_path: Path) -> None:
-        module = _load_module()
-        action = tmp_path / "action.yml"
-        action.write_text("runs:\n  using: docker\n  image: Dockerfile\n", encoding="utf-8")
-        module.ACTION_YML = action
-        assert module.main() != 0
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True, timeout=30, check=True
+    )
+    return result.stdout.strip()
 
-    def test_fails_on_mutable_tag(self, tmp_path: Path) -> None:
-        module = _load_module()
-        action = tmp_path / "action.yml"
-        action.write_text(
-            "runs:\n  using: docker\n  image: docker://ghcr.io/alexhawat/mergecraft:latest\n",
-            encoding="utf-8",
-        )
-        module.ACTION_YML = action
-        assert module.main() != 0
 
-    def test_fails_on_pre_tracing_digest(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Pinned pre-#531 digests must not pass the tracing-extra contract."""
-        module = _load_module()
-        action = tmp_path / "action.yml"
-        action.write_text(
-            "runs:\n  using: docker\n  image: "
-            "docker://ghcr.io/alexhawat/mergecraft@"
-            "sha256:955510ad23e1aa23d564475c2220ec0988236838a914a2a7472ea38220cb1f90\n",
-            encoding="utf-8",
-        )
-        module.ACTION_YML = action
-        monkeypatch.setattr(
-            module,
-            "_self_review_action_sha",
-            lambda: "cfdf38dcd062779aac3e141c51f134213d395b67",
-        )
-        assert module.main() != 0
+def _history(tmp_path: Path) -> tuple[Path, str, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "fixture@example.invalid")
+    _git(repo, "config", "user.name", "Release Fixture")
+    action = repo / "action.yml"
+    action.write_text(
+        "runs:\n  using: docker\n  image: docker://ghcr.io/alexhawat/mergecraft@sha256:"
+        + "a" * 64
+        + "\n"
+    )
+    (repo / "runtime.py").write_text("VALUE = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "test: source fixture")
+    source = _git(repo, "rev-parse", "HEAD")
+    action.write_text(action.read_text().replace("a" * 64, "b" * 64))
+    _git(repo, "commit", "-am", "test: manifest fixture")
+    return repo, source, _git(repo, "rev-parse", "HEAD")
 
-    def test_passes_on_repo_action_yml(self) -> None:
-        module = _load_module()
-        assert module.main() == 0
+
+def _config(source: str) -> dict[str, Any]:
+    return {
+        "config": {"Labels": {"org.opencontainers.image.revision": source}},
+        "history": [{"created_by": "RUN uv sync --extra tracing"}],
+    }
+
+
+def test_manifest_only_commit_verifies_actual_pinned_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    seen: list[str] = []
+    monkeypatch.setattr(
+        module, "_fetch_oci_config_for_tag", lambda digest: seen.append(digest) or _config(source)
+    )
+    monkeypatch.setattr(module, "_verify_attestations", lambda *args: None)
+    # Uncommitted working-tree bytes must never change what uses@C executes.
+    (repo / "action.yml").write_text("runs:\n  image: Dockerfile\n")
+    result = module.verify_manifest(repo, manifest)
+    assert result.source_revision == source
+    assert result.manifest_commit == manifest
+    assert result.image_digest == "sha256:" + "b" * 64
+    assert seen == [result.image_digest]
+
+
+def test_correct_worktree_cannot_rescue_old_pinned_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+    repo, source, _manifest = _history(tmp_path)
+    monkeypatch.setattr(
+        module,
+        "_fetch_oci_config_for_tag",
+        lambda digest: _config(source) if digest.endswith("b" * 64) else None,
+    )
+    with pytest.raises(module.VerificationError, match="registry"):
+        module.verify_manifest(repo, source)
+
+
+@pytest.mark.parametrize("change", ["runtime", "entrypoint", "args", "workflow"])
+def test_manifest_must_not_change_runtime_or_build_behavior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    module = _load_module()
+    repo, source, _manifest = _history(tmp_path)
+    if change == "runtime":
+        (repo / "runtime.py").write_text("VALUE = 2\n")
+    elif change == "workflow":
+        (repo / "release.yml").write_text("unreviewed workflow\n")
+    else:
+        with (repo / "action.yml").open("a") as stream:
+            stream.write(f"  {change}: changed\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "test: changed behavior")
+    monkeypatch.setattr(module, "_fetch_oci_config_for_tag", lambda _: _config(source))
+    monkeypatch.setattr(module, "_verify_attestations", lambda *args: None)
+    with pytest.raises(module.VerificationError, match="changes"):
+        module.verify_manifest(repo, _git(repo, "rev-parse", "HEAD"))
+
+
+@pytest.mark.parametrize(
+    "failure", ["missing-revision", "wrong-revision", "missing-tracing", "registry", "attestation"]
+)
+def test_image_claims_do_not_bypass_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    module = _load_module()
+    config = _config("a" * 40)
+    if failure == "missing-revision":
+        config["config"]["Labels"] = {}
+    elif failure == "wrong-revision":
+        config["config"]["Labels"][module.OCI_REVISION_LABEL] = "b" * 40
+    elif failure == "missing-tracing":
+        config["history"] = [{"created_by": "RUN uv sync"}]
+    monkeypatch.setattr(
+        module, "_fetch_oci_config_for_tag", lambda _: None if failure == "registry" else config
+    )
+
+    def deny(*args: object) -> None:
+        raise module.VerificationError("attestation rejected")
+
+    monkeypatch.setattr(module, "_verify_attestations", deny)
+    with pytest.raises(module.VerificationError):
+        module.verify_image(tmp_path, "sha256:" + "d" * 64, "a" * 40)
+
+
+def test_attestation_commands_bind_digest_source_and_trusted_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_module()
+    calls: list[list[str]] = []
+    monkeypatch.setattr(module, "_run", lambda repo, argv: calls.append(argv) or "")
+    digest, source = "sha256:" + "b" * 64, "a" * 40
+    module._verify_attestations(tmp_path, digest, source)
+    assert len(calls) == 3
+    for argv in calls[:2]:
+        assert argv[:4] == ["gh", "attestation", "verify", f"oci://{module.SLIM_IMAGE}@{digest}"]
+        assert argv[argv.index("--source-digest") + 1] == source
+        assert argv[argv.index("--signer-digest") + 1] == source
+        assert (
+            argv[argv.index("--signer-workflow") + 1]
+            == "alexhawat/mergeCraft/.github/workflows/ci-cd.yml"
+        )
+        assert argv[argv.index("--repo") + 1] == "alexhawat/mergeCraft"
+        assert "--deny-self-hosted-runners" in argv
+        identity = argv[argv.index("--cert-identity-regex") + 1]
+        assert module.re.fullmatch(
+            identity,
+            "https://github.com/alexhawat/mergeCraft/.github/workflows/ci-cd.yml@refs/heads/main",
+        )
+        assert not module.re.fullmatch(
+            identity,
+            "https://github.com/alexhawat/mergeCraft/.github/workflows/ci-cd.yml@refs/pull/42/merge",
+        )
+    assert calls[1][-2:] == ["--predicate-type", "https://spdx.dev/Document"]
+    assert calls[2][-1] == f"{module.SLIM_IMAGE}@{digest}"
+    assert "--certificate-oidc-issuer" in calls[2]
+
+
+def test_offline_is_explicitly_unverified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _load_module()
+    repo, _source, manifest = _history(tmp_path)
+    monkeypatch.setattr(module, "REPO", repo)
+    assert module.main(["--offline", "--manifest-commit", manifest]) == 2
+    assert "UNVERIFIED" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("image", ["Dockerfile", "docker://ghcr.io/alexhawat/mergecraft:latest"])
+def test_source_structure_rejects_unpinned_image(tmp_path: Path, image: str) -> None:
+    module = _load_module()
+    action = tmp_path / "action.yml"
+    action.write_text(f"runs:\n  image: {image}\n")
+    module.ACTION_YML = action
+    assert module.main(["--structure-only"]) == 1
+
+
+@pytest.mark.parametrize("tamper", [False, True])
+def test_registry_config_is_bound_to_immutable_descriptor_hashes(
+    monkeypatch: pytest.MonkeyPatch, tamper: bool
+) -> None:
+    import hashlib
+    import json
+
+    module = _load_module()
+    objects: dict[str, bytes] = {}
+
+    def store(value: dict[str, Any]) -> str:
+        raw = json.dumps(value).encode()
+        digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+        objects[digest] = raw
+        return digest
+
+    config = _config("a" * 40)
+    config_digest = store(config)
+    manifest = store({"config": {"digest": config_digest}})
+    index = store(
+        {"manifests": [{"digest": manifest, "platform": {"os": "linux", "architecture": "amd64"}}]}
+    )
+    if tamper:
+        objects[config_digest] = json.dumps(_config("b" * 40)).encode()
+    monkeypatch.setattr(module, "_ghcr_pull_token", lambda: "public-fixture")
+
+    class Response:
+        def __init__(self, data: bytes) -> None:
+            self.data = data
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return self.data
+
+    monkeypatch.setattr(
+        module.urllib.request,
+        "urlopen",
+        lambda request, timeout: Response(objects[request.full_url.rsplit("/", 1)[1]]),
+    )
+    result = module._fetch_oci_config_for_tag(index)
+    assert result == (None if tamper else config)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from tests.ci.workflow_support import REPO_ROOT, read_text
+from tests.ci.workflow_support import REPO_ROOT, as_list, job, load_workflow, read_text
 from tests.docs.support import ci_steps
 
 _TARGET = "action-image-digest-check"
@@ -37,14 +37,33 @@ def test_make_action_image_digest_check_target_exists() -> None:
     assert re.search(rf"^{re.escape(_TARGET)}:", makefile, re.MULTILINE)
 
 
-def test_action_image_digest_check_runs_via_make_lint() -> None:
+def test_action_image_structure_check_runs_via_make_lint() -> None:
+    """Source validation must not require publishing the source under validation."""
     makefile = read_text("Makefile")
     lint_body = makefile.split("lint:", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
-    assert f"$(MAKE) {_TARGET}" in lint_body, (
-        "make lint must invoke action-image-digest-check (#526)"
+    assert "$(MAKE) action-image-structure-check" in lint_body
+    structure_body = makefile.split("action-image-structure-check:", maxsplit=1)[1].split(
+        "\n\n", maxsplit=1
+    )[0]
+    assert "check_action_image_digest.py --structure-only" in structure_body
+
+
+def test_signed_image_verification_is_required_before_promotion() -> None:
+    """Separating source lint preserves the strict release verification gate."""
+    workflow = load_workflow("ci-cd.yml")
+    verify = job(workflow, "verify-images")
+    assert set(as_list(verify.get("needs"))) == {"build-images", "sign-attest"}
+    assert not verify.get("if")
+    assert not verify.get("continue-on-error")
+    execution = next(
+        step for step in verify["steps"] if step.get("run") == "make action-images-verify"
     )
+    assert not execution.get("if")
+    assert not execution.get("continue-on-error")
+    assert "verify-images" in as_list(job(workflow, "promote").get("needs"))
+    assert "always(" not in str(job(workflow, "promote").get("if", ""))
 
 
 def test_action_image_digest_check_not_in_ci_steps_as_duplicate() -> None:
-    """Covered by the lint step — avoid a second CI_STEPS entry that re-runs it."""
+    """Remote deployment verification belongs in the release graph, not source CI."""
     assert _TARGET not in ci_steps()

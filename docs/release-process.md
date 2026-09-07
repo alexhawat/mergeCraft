@@ -53,3 +53,71 @@ second schema-migration system on this page.
 - [CHANGELOG.md](../CHANGELOG.md)
 - [support-matrix.md](support-matrix.md) — generated support matrix
 - [SECURITY.md](../SECURITY.md) — security-response and disclosure
+
+## Action manifest and consumer pin lifecycle
+
+A source revision and an Action reference have different roles. Let **S** be
+built source, **D** its signed image digest, **C** the later commit whose
+`action.yml` names D, and **P** the consumer workflow update that pins C.
+The deployed path is `uses@C → action.yml@C → D → S`. Pinning S immediately
+after its image builds still runs the older digest already stored at S.
+
+CI/CD explicitly requests its required security E2E slice on push and manual
+runs. Only approved main, pre-release, release-branch, or version-tag refs can
+publish. Images are scanned by digest, signed and attested, then independently
+verified before mutable-tag promotion. Existing source tags are reused only
+when the same source and trusted provenance verify; an unsigned collision or
+registry outage fails rather than overwriting an immutable tag.
+
+After an approved CI/CD run completes, prepare **two separate reviewed changes**:
+
+1. In a clean isolated worktree checked out at S, set `SOURCE_REVISION` to that
+   full commit and `IMAGE_DIGEST` to the verified slim digest, then run
+   `make action-manifest-prepare`. This verifies provenance and changes only
+   `action.yml`. Review, commit and merge this change. Record its resulting
+   manifest commit C; if squash merging, record the actual merged commit.
+2. Fetch the target branch. In a clean isolated worktree based on that branch,
+   set `MANIFEST_COMMIT` to C and `RELEASE_BASE_BRANCH` to `main` or `pre-0.0.1`,
+   then run `make action-pin-prepare`. This requires C to be in the fetched
+   target branch, verifies C's image, and updates consumer references to C.
+   Review and merge this second change P.
+3. Run `make action-image-digest-check` against the updated consumer checkout.
+   Successful output records the manifest commit, image digest and built source.
+   Observe an actual Action run at C before declaring deployment verified.
+
+Preparation never commits, pushes, creates a PR, or claims checks ran. Repeating
+an already satisfied phase reports that state without creating new changes.
+C may differ from S only in `action.yml`'s `runs.image`; changing entrypoint,
+arguments, source, dependencies or build files requires a new built source.
+Do not combine C and P into a squash-merged change that discards the referenced C.
+
+`make lint` performs a source image-syntax check and explicitly reports its
+provenance as **UNVERIFIED**. It does not depend on publishing the code being
+validated. The separate strict deployment checker fails on missing registry
+content, missing tools, invalid signatures, absent tracing, or an unverified
+source mapping. Optional offline inspection exits with an unverified status;
+it never reports cryptographic verification. Verification requires authenticated
+`gh` registry access and `cosign`, with repository, workflow, source revision,
+GitHub-hosted runner and issuer constraints.
+
+The image records S in its build metadata. C and D are reported by the external
+verifier after publication; they cannot be baked into the image that creates D.
+Local contract tests do not establish that production images have been signed
+or deployed. Required live acceptance remains a successful release run with
+E2E, build, scan, signing, attestation, verification and promotion, followed by
+an observed consumer Action run resolving C to D.
+
+### Recovery and pending pin automation
+
+An existing unsigned or partially attested source-S tag deliberately fails
+immutable-image reuse. After a failure in scan/sign/attest/verify, rerun the
+failed downstream jobs of the original run so they retain its captured digest
+outputs. Do not rerun publication to overwrite the source tag. If the original
+run cannot be recovered, prepare a new source revision and build a new tag;
+retain the failed run and digest for diagnosis.
+
+Pending PR #578 combines App identity with older pin automation. Its pin
+portion must be reconciled with this two-phase C/P lifecycle before enabling
+it: automation that pins the built source S directly would reintroduce the
+previous-image defect. App identity remains separate work; this release change
+does not register an App, install credentials, or enable that pending workflow.

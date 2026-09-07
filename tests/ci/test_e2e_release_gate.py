@@ -35,18 +35,11 @@ def test_ci_cd_has_e2e_gate_job() -> None:
     assert uses == "./.github/workflows/e2e.yml", f"e2e-gate uses: {uses!r}"
 
 
-def test_e2e_gate_passes_secrets_not_as_inputs() -> None:
-    """Convention 3 — secrets travel via ``secrets:``, never ``with:`` / inputs."""
+def test_required_e2e_gate_has_no_live_provider_credentials() -> None:
+    """The release gate uses fake providers and never inherits live provider keys."""
     gate = job(load_workflow("ci-cd.yml"), "e2e-gate")
-    secrets = gate.get("secrets")
-    assert secrets == "inherit" or isinstance(secrets, dict), (
-        f"e2e-gate must set secrets: inherit or named secrets:, got {secrets!r}"
-    )
-    with_block = gate.get("with") or {}
-    secretish = [
-        key for key in with_block if "secret" in str(key).lower() or "key" in str(key).lower()
-    ]
-    assert not secretish, f"secrets must not appear as workflow inputs: {secretish}"
+    assert "secrets" not in gate
+    assert gate["with"] == {"required-security": True}
 
 
 def test_build_images_needs_e2e_gate() -> None:
@@ -74,3 +67,149 @@ def test_build_dist_does_not_need_e2e_gate() -> None:
 def test_touched_workflows_third_party_uses_are_sha_pinned(workflow: str) -> None:
     """Convention 2 — every third-party ``uses:`` stays 40-hex SHA-pinned."""
     assert_third_party_uses_sha_pinned(workflow)
+
+
+def _condition(expression: str, context: dict[str, object]) -> bool:
+    """Interpret the small Actions expression subset used by these release jobs.
+
+    No Python eval: unsupported syntax fails the test instead of becoming true.
+    """
+    import re
+
+    text = expression.removeprefix("${{").removesuffix("}}").strip()
+    token_re = re.compile(r"\s*(\|\||&&|==|!=|!|\(|\)|,|'[^']*'|[A-Za-z_][A-Za-z0-9_.-]*)")
+    tokens: list[str] = []
+    while text:
+        match = token_re.match(text)
+        assert match is not None, f"unsupported release expression: {text!r}"
+        tokens.append(match[1])
+        text = text[match.end() :]
+    index = 0
+
+    def atom() -> object:
+        nonlocal index
+        token = tokens[index]
+        index += 1
+        if token == "!":
+            return not atom()
+        if token == "(":
+            result = disjunction()
+            assert tokens[index] == ")"
+            index += 1
+            return result
+        if token == "startsWith":
+            assert tokens[index] == "("
+            index += 1
+            value = atom()
+            assert tokens[index] == ","
+            index += 1
+            prefix = atom()
+            assert tokens[index] == ")"
+            index += 1
+            return str(value).startswith(str(prefix))
+        if token.startswith("'"):
+            return token[1:-1]
+        if token in ("true", "false"):
+            return token == "true"
+        assert token in context, f"unrecognized release expression identifier {token}"
+        return context[token]
+
+    def equality() -> object:
+        nonlocal index
+        left = atom()
+        if index < len(tokens) and tokens[index] in ("==", "!="):
+            op = tokens[index]
+            index += 1
+            right = atom()
+            return left == right if op == "==" else left != right
+        return left
+
+    def conjunction() -> bool:
+        nonlocal index
+        result = bool(equality())
+        while index < len(tokens) and tokens[index] == "&&":
+            index += 1
+            right = bool(equality())
+            result = result and right
+        return result
+
+    def disjunction() -> bool:
+        nonlocal index
+        result = conjunction()
+        while index < len(tokens) and tokens[index] == "||":
+            index += 1
+            right = conjunction()
+            result = result or right
+        return result
+
+    result = disjunction()
+    assert index == len(tokens)
+    return result
+
+
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "pull_request"])
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "refs/heads/main",
+        "refs/heads/pre-0.0.1",
+        "refs/heads/release/1.0",
+        "refs/tags/v1.0",
+        "refs/heads/feature",
+        "refs/pull/42/merge",
+    ],
+)
+def test_release_graph_executes_required_e2e_for_allowed_events(event: str, ref: str) -> None:
+    """Evaluate actual workflow predicates with the caller's event retained."""
+    ci = load_workflow("ci-cd.yml")
+    gate = job(ci, "e2e-gate")
+    context: dict[str, object] = {
+        "github.event_name": event,
+        "github.ref": ref,
+        "inputs.required-security": gate["with"]["required-security"],
+    }
+    e2e = job(load_workflow("e2e.yml"), "e2e-pr")
+    assert _condition(e2e["if"], context)
+    build = job(ci, "build-images")
+    expected = event in ("push", "workflow_dispatch") and ref in (
+        "refs/heads/main",
+        "refs/heads/pre-0.0.1",
+        "refs/heads/release/1.0",
+        "refs/tags/v1.0",
+    )
+    assert _condition(build["if"], context) == expected
+    assert not _condition(job(load_workflow("e2e.yml"), "e2e-nightly")["if"], context)
+
+
+@pytest.mark.parametrize("failure", ["failure", "cancelled", "skipped"])
+@pytest.mark.parametrize(
+    "failed_job",
+    ["verify", "e2e-gate", "build-images", "sbom-scan", "sign-attest", "verify-images"],
+)
+def test_release_graph_never_promotes_after_unsuccessful_prerequisite(
+    failure: str, failed_job: str
+) -> None:
+    """Simulate Actions' implicit success gate across the real needs DAG."""
+    ci = load_workflow("ci-cd.yml")
+    context: dict[str, object] = {"github.event_name": "push", "github.ref": "refs/heads/main"}
+    results: dict[str, str] = {}
+    for name in (
+        "verify",
+        "e2e-gate",
+        "build-images",
+        "sbom-scan",
+        "sign-attest",
+        "verify-images",
+        "promote",
+    ):
+        spec = job(ci, name)
+        if name == failed_job:
+            results[name] = failure
+            continue
+        assert "always(" not in str(spec.get("if", "")), (
+            "publishing cannot bypass failed dependencies"
+        )
+        success = all(results[parent] == "success" for parent in as_list(spec.get("needs")))
+        eligible = _condition(spec["if"], context) if spec.get("if") else True
+        results[name] = "success" if success and eligible else "skipped"
+    assert results["promote"] == "skipped"
