@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from mergecraft.analyzers.redact import _entropy_threshold, _shannon_entropy, redact_secrets
+from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from tests.analyzers.support import FIXTURES_DIR, REDACTION_ANALYZER_IDS
 
@@ -31,21 +31,24 @@ class RedactionHit:
 
 
 def _high_entropy_secret(length: int = 32) -> str:
-    """Draw a token that actually clears the redactor's own entropy floor.
+    """Draw a token the redactor actually treats as a real secret.
 
-    A single ``secrets.choice`` draw occasionally lands below
-    ``_entropy_threshold`` by chance (character repeats collapse the measured
-    Shannon entropy), which flakes this fail-closed guard on a token the
-    redactor was never guaranteed to treat as high-entropy. Resample until the
-    draw actually satisfies the precondition the test means to exercise.
+    A single ``secrets.choice`` draw occasionally satisfies one of
+    ``redact_secrets``'s benign-shape exemptions by chance — most often the
+    camelCase identifier allowlist (``_BENIGN_IDENTIFIER_RE``), which any
+    random alphanumeric draw that starts lowercase and avoids the separator
+    characters can trivially match regardless of entropy — or lands below the
+    entropy floor outright. Checking only the entropy formula (an earlier,
+    insufficient fix) still flaked on the identifier exemption. Resample
+    against the real function so the precondition can't drift from production
+    behaviour.
     """
     alphabet = string.ascii_letters + string.digits + "+/=_-"
-    threshold = _entropy_threshold(length)
     for _ in range(100):
         candidate = "".join(secrets.choice(alphabet) for _ in range(length))
-        if _shannon_entropy(candidate) >= threshold:
+        if candidate not in redact_secrets(candidate):
             return candidate
-    msg = f"could not draw a token clearing the entropy threshold ({threshold}) in 100 attempts"
+    msg = "could not draw a token the redactor treats as a real secret in 100 attempts"
     raise AssertionError(msg)
 
 
