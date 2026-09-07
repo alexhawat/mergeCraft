@@ -29,9 +29,6 @@ if TYPE_CHECKING:
 
 TrustTier = Literal["trusted", "untrusted"]
 
-DIFFERENTIAL_CONTRACT_TOOLS: frozenset[str] = frozenset({"oasdiff", "squawk", "buf"})
-SUPPLY_CHAIN_DIFF_TOOLS: frozenset[str] = frozenset({"osv-scanner", "trivy"})
-
 
 @dataclass(frozen=True, slots=True)
 class AdapterRunResult:
@@ -354,7 +351,11 @@ def run_adapter(
         logger.info("{}", egress_reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=egress_reason)
 
-    from mergecraft.analyzers.contracts import resolve_analyzer_base_ref, run_differential_adapter
+    from mergecraft.analyzers.contracts import (
+        DIFFERENTIAL_CONTRACT_TOOLS,
+        resolve_analyzer_base_ref,
+        run_differential_adapter,
+    )
 
     if tool_id in DIFFERENTIAL_CONTRACT_TOOLS:
         resolved_base = resolve_analyzer_base_ref(
@@ -371,9 +372,12 @@ def run_adapter(
             allow_repo_binaries=allow_repo_binaries,
         )
 
-    if tool_id in SUPPLY_CHAIN_DIFF_TOOLS:
-        from mergecraft.analyzers.supply_chain import run_supply_chain_adapter
+    from mergecraft.analyzers.supply_chain import (
+        SUPPLY_CHAIN_DIFF_TOOLS,
+        run_supply_chain_adapter,
+    )
 
+    if tool_id in SUPPLY_CHAIN_DIFF_TOOLS:
         resolved_base = resolve_analyzer_base_ref(
             repo_root,
             base_ref=base_ref,
@@ -587,8 +591,6 @@ def run_adapter(
 
 
 __all__ = [
-    "DIFFERENTIAL_CONTRACT_TOOLS",
-    "SUPPLY_CHAIN_DIFF_TOOLS",
     "AdapterRunResult",
     "run_adapter",
 ]
