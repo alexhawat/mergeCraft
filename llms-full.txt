@@ -1202,11 +1202,16 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   `osv-scanner`, `trivy`, `govulncheck`, and `bundler-audit` can reach
   their upstreams. On runners where `ip netns`, veth, and iptables are
   available, untrusted allowlisted analyzers run inside an isolated
-  netns whose host-side FORWARD filter permits only the declared
-  hosts (sandbox enforcement, not `HTTP_PROXY`). A CONNECT proxy
-  encodes the same hostname allowlist in tests. The GitHub Action
-  image typically lacks `CAP_NET_ADMIN` / `CAP_SYS_ADMIN`, so that
-  path stays a named skip. Enforced by
+  netns whose host-side FORWARD filter permits only the *IP addresses*
+  the declared hosts resolved to at setup time (sandbox enforcement,
+  not `HTTP_PROXY`) — not the hostnames themselves. Enforcement is by
+  IP, so a CDN-hosted allowlist entry admits every other domain that
+  shares its IP, and setup-time resolution can drift from what the
+  analyzer resolves inside the netns for a load-balanced upstream. A
+  loopback CONNECT proxy in `tests/analyzers/support_allowlist_proxy.py`
+  encodes the same hostname allowlist for tests only; it never runs in
+  production. The GitHub Action image typically lacks `CAP_NET_ADMIN` /
+  `CAP_SYS_ADMIN`, so that path stays a named skip. Enforced by
   `evaluate_analyzer_egress_policy()`, `filtered_egress_available()`,
   and `build_analyzer_sandbox_argv_for_run()`.
 - **mode** (`analyzers:` in the workflow) — `off | auto | full |
