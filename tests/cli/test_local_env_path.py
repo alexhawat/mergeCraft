@@ -38,7 +38,20 @@ def test_resolve_local_env_path_uses_repo_root_from_subdirectory(
     monkeypatch.chdir(root / "src" / "deep")
 
     assert resolve_local_env_path() == (root / ".env").resolve()
-    assert _env_path(root / "src" / "deep") == (root / ".env").resolve()
+
+
+def test_env_path_trusts_an_explicit_cwd_without_requiring_a_repo(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``provider`` commands take ``--cwd`` explicitly; unlike the no-``--cwd``
+    writers, they must not require *cwd* to be (inside) a git repository —
+    that would break ``provider add`` in a plain config directory.
+    """
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    target = tmp_path / "not-a-repo"
+    target.mkdir()
+
+    assert _env_path(target) == (target / ".env").resolve()
 
 
 def test_cli_loader_reads_repo_root_env_from_subdirectory(
