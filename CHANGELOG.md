@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Untrusted reviews can export prompt bodies to Logfire when `tracing.content`
+  is `full` **and** an operator-owned export flag is true (Action
+  `tracing-export-untrusted-content`, `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`,
+  `--tracing-export-untrusted-content`, trusted YAML, or the
+  `pull_request_target` base snapshot); fork HEAD YAML cannot lift the cap;
+  `content: full` alone still caps fork-PR bodies at metadata
+- `mergecraft review --tracing-content` and Action `tracing-content` set the
+  capture level without editing YAML
 - `mergecraft provider status` shows what CI will run — each reviewer agent's
   `pN` slots, credential and workflow-wiring state, dispatch level, and skipped
   slots — with `--json` for scripting and optional `--github` to report repo
@@ -66,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
+  tracing-content cap; export of prompt bodies on fork PRs requires the Action
+  input, env, or trusted base settings
 - Codex API-key runs proxy model calls through a loopback credential broker — a
   stolen per-run bearer is worthless outside the container and after the run, but
   outbound egress stays open and ChatGPT subscription auth (`CODEX_AUTH_JSON`) is
@@ -74,6 +85,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CLI startup `.env` loading walks up to the git root, like the writers in
+  `mergecraft auth` and `tracing logfire` already did, so a credential written
+  from a subdirectory is visible on the next invocation instead of landing in
+  a nested `.env` nothing reads (#654)
+- Logfire `llm.call` rows now include the prompt mergeCraft sent and the model
+  output, with a real duration instead of an empty ~2µs span
+- Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on
+  the same Logfire trace as the review run
+- Authentication quick start uses registry labels (`anthropic`, `openai`,
+  `google`) instead of harness names that `provider auth` rejects (#590)
+- GitHub Action Logfire tracing honors `MERGECRAFT_TRACING_REGION`, so an EU
+  write token is no longer posted to the US ingest host (#607)
 - Anchor-422 recovery no longer spins on an out-of-range comment index — it
   demotes all inline comments and posts once (#570)
 - The published GitHub review body always matches the terminal submission;
@@ -214,6 +237,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The self-review Action pin on all three review rungs moves to `93a7897c`,
+  pin 5 — GitHub Action Logfire honors `MERGECRAFT_TRACING_REGION` (#607)
+- Self-review Codex fallback uses `openai/gpt-terra` (GPT 5.6 Terra) instead of
+  `openai/gpt-codex`
 - The self-review Action pin on all three review rungs moves to `e5f9ed5f`,
   the lane D sync on `pre-0.0.1` (#601). Reviews run the selfReview catalog,
   Claude backstop, green-CI SARIF ingest, and `agentSandbox: same-repo`

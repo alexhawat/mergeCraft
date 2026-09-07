@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.agents.ensemble import finding_key
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.findings.severity import normalized_severity_rank
+from mergecraft.review.finding_key import finding_key
 
 if TYPE_CHECKING:
     from mergecraft.agents.registry import Registry

@@ -3,7 +3,7 @@
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP3.1 File 4,
 VP3.2 impl; xfail markers cleared after VP3.2).
 
-The eight closed values (snake_case ``StrEnum`` members) must each appear
+The closed values (snake_case ``StrEnum`` members) must each appear
 as a span attribute and/or check-run summary **through**
 ``tracing/redaction.py``. A submission summary that looks like a token
 must not survive onto the span — deleting the redaction call must fail
@@ -18,6 +18,9 @@ from typing import Any
 # Plan VP3.1: provider failure · provider success w/o submission ·
 # schema-invalid · semantic-invalid · policy rejection ·
 # agent-approved-but-blocked · approved · fallback-triggered.
+# #619 Task 3b adds a ninth: terminal_submission_unpublished — a recorded
+# terminal verdict whose review never reached GitHub (every 422 recovery
+# attempt failed).
 _CLOSED_DIAGNOSTICS: tuple[str, ...] = (
     "provider_failure",
     "provider_success_without_submission",
@@ -27,6 +30,7 @@ _CLOSED_DIAGNOSTICS: tuple[str, ...] = (
     "agent_approved_but_blocked",
     "approved",
     "fallback_triggered",
+    "terminal_submission_unpublished",
 )
 
 _TOKEN = "sk-abcdefghijklmnopqrstuvwxyz"
@@ -70,7 +74,7 @@ def _attrs_from_helper(diagnostic: Any, *, summary: str) -> dict[str, Any]:
 
 
 def test_each_diagnostic_reaches_the_span() -> None:
-    """Each of the eight closed ``VerdictDiagnostic`` values reaches the span.
+    """Each closed ``VerdictDiagnostic`` value reaches the span.
 
     Iterated in one collected test so VP3.1 acceptance stays 9 collected.
     """

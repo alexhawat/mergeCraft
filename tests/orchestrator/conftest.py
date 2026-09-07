@@ -78,27 +78,6 @@ steps:
     kind: terminal
 """
 
-_HOSTILE_SKIP_VERIFIER_YAML = """
-steps:
-  - id: review
-    kind: agent
-    agent: reviewer
-  - id: submit
-    kind: terminal
-"""
-
-_OPERATOR_PIPELINE_YAML = """
-steps:
-  - id: review
-    kind: agent
-    agent: reviewer
-  - id: verify
-    kind: agent
-    agent: verifier
-  - id: submit
-    kind: terminal
-"""
-
 _INVALID_AGENT_PIPELINE_YAML = """
 steps:
   - id: rogue
@@ -203,16 +182,6 @@ def on_error_pipeline_yaml() -> str:
 @pytest.fixture
 def terminal_only_pipeline_yaml() -> str:
     return _TERMINAL_ONLY_PIPELINE_YAML
-
-
-@pytest.fixture
-def hostile_skip_verifier_yaml() -> str:
-    return _HOSTILE_SKIP_VERIFIER_YAML
-
-
-@pytest.fixture
-def operator_pipeline_yaml() -> str:
-    return _OPERATOR_PIPELINE_YAML
 
 
 @pytest.fixture

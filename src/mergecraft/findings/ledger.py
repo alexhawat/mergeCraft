@@ -622,7 +622,10 @@ def render_deterministic_review_block(
     token_summary: str | None = None,
     publication_entrypoint: str | None = None,
     inline_comments_demoted: bool = False,
+    comment_fallback_applied: bool = False,
+    review_body_truncated: bool = False,
     credential_degradations: Sequence[str] | None = None,
+    agent_sandbox_decision: Any | None = None,
 ) -> str:
     """Render the authoritative deterministic review record (D6/D7).
 
@@ -688,6 +691,15 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Publication path:** `{publication_entrypoint}`")
     if inline_comments_demoted:
         header_lines.append("- **Inline recovery:** demoted inline comments into the review body")
+    if comment_fallback_applied:
+        header_lines.append(
+            "- **Publication recovery:** normal 422 recovery was exhausted; the review "
+            "landed as a last-resort bare COMMENT with no inline comments"
+        )
+    if review_body_truncated:
+        header_lines.append(
+            "- **Body truncated:** review body exceeded GitHub's 65536-character cap"
+        )
 
     pre_merge_lines = ["", "### Pre-merge checks", ""]
     if analyzer_summary:
@@ -712,6 +724,20 @@ def render_deterministic_review_block(
 
     pre_merge_lines.append("- **CI intelligence:** see packet findings")
     pre_merge_lines.append(f"- **Trust tier:** `{trust_tier or 'unknown'}`")
+    if agent_sandbox_decision is not None:
+        # #619 Task 7 — the resolved sandbox decision (lane B D1/D2,
+        # ``config/trust_policy.py::resolve_agent_sandbox_decision``) already
+        # reaches the manifest via ``agent_sandbox_manifest_fields`` but never
+        # the sticky progress comment a human actually reads. Duck-typed
+        # (``getattr``) like the rest of this function's inputs — a plain
+        # ``AgentSandboxDecision`` or an equivalent shim both render.
+        configured_tier = getattr(agent_sandbox_decision, "configured_tier", "") or "unknown"
+        head_status = getattr(agent_sandbox_decision, "head_status", "") or "unknown"
+        override = "granted" if getattr(agent_sandbox_decision, "honour", False) else "refused"
+        pre_merge_lines.append(
+            f"- **Agent sandbox:** `{configured_tier}` tier, head `{head_status}` — "
+            f"override {override}"
+        )
     if credential_degradations:
         for line in credential_degradations:
             stripped = line.strip()

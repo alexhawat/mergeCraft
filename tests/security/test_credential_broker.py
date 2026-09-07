@@ -334,7 +334,8 @@ async def test_concurrent_requests_with_same_bearer() -> None:
                 client.post(MODEL_PATH, json=payload, headers=headers),
                 client.post(MODEL_PATH, json=payload, headers=headers),
             )
-        assert all(response.status_code == 200 for response in responses)
+        codes = [response.status_code for response in responses]
+        assert codes == [200, 200], codes
 
 
 def test_resolve_codex_broker_posture_no_credentials(

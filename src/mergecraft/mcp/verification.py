@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.findings.agent_adapter import (
+    agent_finding_to_finding,
     finding_for_publication_validation,
     normalize_agent_findings_via_pipeline,
 )
@@ -345,12 +346,35 @@ def verify_agent_findings_tool(ctx: ToolContext):
             if isinstance(fingerprint, str) and fingerprint:
                 stored[fingerprint] = item
         for finding in normalized_findings:
-            row = finding.model_dump(mode="json")
+            # Store the ``Finding``-shaped row, not the bare ``AgentFinding``
+            # draft (#619 root cause). ``load_run_findings`` — the one loader
+            # the approval gate and the merge-evidence packet both read —
+            # validates every ``agent_findings`` row against ``Finding``
+            # (``extra="forbid"``, requires ``message``/``tool``/``rule_id``/
+            # ``confidence``/…). ``AgentFinding.model_dump()`` carries
+            # ``body`` and no ``tool``/``rule_id``, so it always fails that
+            # validation and is silently dropped at debug level — meaning an
+            # agent-drafted finding could never reach the packet no matter
+            # how thoroughly it was verified. ``agent_finding_to_finding``
+            # converts to the real shape; the fingerprint is still the
+            # draft's own identity so verification and downgrade lookups
+            # keyed on it keep working unchanged.
+            typed = agent_finding_to_finding(finding, rule_id="agent:draft")
+            row = typed.model_dump(mode="json")
             row["fingerprint"] = finding.identity()
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())
         _emit_finding_stage(
-            ctx, [AgentFindingLike(**row) for row in stored.values()], stage="proposed"
+            ctx,
+            [
+                AgentFindingLike(
+                    fingerprint=str(row.get("fingerprint", "") or ""),
+                    severity=str(row.get("severity", "") or ""),
+                    body=str(row.get("message", row.get("body", "")) or ""),
+                )
+                for row in stored.values()
+            ],
+            stage="proposed",
         )
         plan = plan_agent_verifications(
             normalized_findings,

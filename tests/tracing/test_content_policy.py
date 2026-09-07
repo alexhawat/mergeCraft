@@ -25,7 +25,10 @@ that shipped no body).
 The env override var is pinned here as ``MERGECRAFT_TRACING_CONTENT``,
 following the existing ``MERGECRAFT_TRACING*`` family in
 ``mergecraft/cli/tracing_precedence.py``; env beats YAML config (normal
-precedence) but never beats the D7 untrusted cap.
+precedence) but never beats the D7 untrusted cap **by itself**. An explicit
+second knob (``exportUntrustedContent`` /
+``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT``) is required to ship bodies
+on an untrusted run.
 
 The ``content`` module import is lazy (fixture below), which kept collection
 clean at RED-suite time. All 13 tests carried non-strict ``xfail`` markers
@@ -52,6 +55,7 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 _ENV_VAR = "MERGECRAFT_TRACING_CONTENT"
+_EXPORT_ENV_VAR = "MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"
 _PREFIX = "gen_ai.input"
 
 
@@ -147,6 +151,7 @@ def test_untrusted_tier_is_capped_at_metadata(
     """D7 — an untrusted tier is capped at ``metadata``; the cap never raises a level."""
     content = content_module
     monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
     resolve = content.resolve_content_capture
 
     assert resolve("full", "untrusted") == content.ContentCapture.METADATA
@@ -165,6 +170,7 @@ def test_untrusted_cap_cannot_be_overridden_by_config(
 
     content = content_module
     monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
 
     settings = TracingSettings.model_validate({"content": "full"})
     assert settings.content == "full", "the tracing block must accept the content field"
@@ -180,6 +186,7 @@ def test_untrusted_cap_cannot_be_overridden_by_env(
     """D7 — ``MERGECRAFT_TRACING_CONTENT=full`` yields ``metadata`` at an untrusted tier."""
     content = content_module
     monkeypatch.setenv(_ENV_VAR, "full")
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
 
     assert content.resolve_content_capture(None, "untrusted") == content.ContentCapture.METADATA
     assert content.resolve_content_capture("off", "untrusted") == content.ContentCapture.METADATA
@@ -270,3 +277,239 @@ def test_invalid_level_falls_back_to_default_not_full(
 
     monkeypatch.setenv(_ENV_VAR, "bogus")
     assert content.resolve_content_capture(None, "trusted") == redacted
+
+
+def test_untrusted_export_flag_lifts_cap(monkeypatch: MonkeyPatch, content_module: Any) -> None:
+    """``export_untrusted=True`` lets a body-emitting level through on untrusted."""
+    content = content_module
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+
+    assert (
+        content.resolve_content_capture("full", "untrusted", export_untrusted=True)
+        == content.ContentCapture.FULL
+    )
+    assert (
+        content.resolve_content_capture("redacted", "untrusted", export_untrusted=True)
+        == content.ContentCapture.REDACTED
+    )
+
+
+def test_untrusted_export_env_lifts_cap(monkeypatch: MonkeyPatch, content_module: Any) -> None:
+    """``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT=true`` lifts D7."""
+    content = content_module
+    monkeypatch.setenv(_ENV_VAR, "full")
+    monkeypatch.setenv(_EXPORT_ENV_VAR, "true")
+
+    assert content.resolve_content_capture(None, "untrusted") == content.ContentCapture.FULL
+
+
+def test_export_env_false_beats_yaml_true(monkeypatch: MonkeyPatch, content_module: Any) -> None:
+    """Env ``false`` keeps the cap even when YAML ``exportUntrustedContent`` is true."""
+    content = content_module
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.setenv(_EXPORT_ENV_VAR, "false")
+
+    assert (
+        content.resolve_content_capture("full", "untrusted", export_untrusted=True)
+        == content.ContentCapture.METADATA
+    )
+
+
+def test_yaml_export_untrusted_content_field() -> None:
+    """``TracingSettings`` accepts ``exportUntrustedContent`` and omits the default."""
+    from mergecraft.config.settings import TracingSettings
+
+    settings = TracingSettings.model_validate({"exportUntrustedContent": True, "content": "full"})
+    assert settings.export_untrusted_content is True
+    dumped = settings.model_dump(by_alias=True)
+    assert dumped["exportUntrustedContent"] is True
+    defaulted = TracingSettings()
+    assert defaulted.export_untrusted_content is False
+    assert "exportUntrustedContent" not in defaulted.model_dump(by_alias=True)
+
+
+class _ForkHeadSettings:
+    """Stand-in for `.mergecraft/config.yaml` on a fork PR head."""
+
+    def __init__(self) -> None:
+        from mergecraft.config.settings import TracingSettings
+
+        self.tracing = TracingSettings.model_validate(
+            {"content": "full", "exportUntrustedContent": True}
+        )
+
+
+def test_fork_head_yaml_cannot_lift_untrusted_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """D7 — fork HEAD ``exportUntrustedContent: true`` does not lift the cap.
+
+    ``resolve_capture_policy`` loads live repo settings from the checked-out
+    tree. On a fork PR that tree is attacker-controlled, so YAML must not
+    be treated as the operator knob.
+    """
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.METADATA
+
+
+def test_fork_head_yaml_env_export_still_lifts_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Operator env still lifts D7 even when fork YAML also sets the flag."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.setenv(_EXPORT_ENV_VAR, "true")
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.FULL
+
+
+def test_trusted_yaml_export_still_lifts_cap(monkeypatch: MonkeyPatch) -> None:
+    """Same-repo trusted runs still honor YAML ``exportUntrustedContent``."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("trusted") == ContentCapture.FULL
+
+
+def test_prt_base_snapshot_yaml_lifts_untrusted_cap(monkeypatch: MonkeyPatch) -> None:
+    """An ``operator_owned`` run-scope snapshot honors ``exportUntrustedContent``.
+
+    This is what a real ``pull_request_target`` run produces: the run-start
+    snapshot captured before ``checkout_pr`` ever runs is stamped
+    ``operator_owned=True`` (see ``main.py:_resolve_credentials``).
+    """
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
+        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings(), "operator_owned": True})(),
+    )
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.FULL
+
+
+def test_fork_pull_request_snapshot_yaml_cannot_lift_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A non-operator-owned snapshot (a plain ``pull_request`` fork run) cannot lift D7.
+
+    For a plain fork ``pull_request`` run the checkout at capture time is
+    already the fork HEAD, so ``main.py`` never stamps ``operator_owned=True``
+    on it. The cap must hold even though the mocked snapshot carries YAML
+    that asks to lift it.
+    """
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
+        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings(), "operator_owned": False})(),
+    )
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.METADATA
+
+
+def test_ambient_github_event_name_does_not_influence_the_cap(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The ambient ``GITHUB_EVENT_NAME`` must never be consulted directly (review finding).
+
+    Set it to ``pull_request_target`` — the one value that used to bypass the
+    cap outright — while the snapshot (the actual authority, stamped from
+    whatever event really drove ``trust_tier``) says this run is NOT
+    operator-owned. The cap must still hold: only ``snapshot.operator_owned``
+    may lift it, never a second, independent read of the event name.
+    """
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    # The lie: ambient env claims pull_request_target even though the
+    # authoritative event (reflected in the snapshot's provenance) was not.
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
+        lambda: type("Snapshot", (), {"settings": _ForkHeadSettings(), "operator_owned": False})(),
+    )
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.METADATA
+
+
+def test_no_run_scope_snapshot_fails_closed(monkeypatch: MonkeyPatch) -> None:
+    """No installed run-scope snapshot at all ⇒ ``None`` ⇒ cap holds (fail closed)."""
+    from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
+    from mergecraft.tracing.content import ContentCapture
+    from mergecraft.tracing.genai import resolve_capture_policy
+
+    monkeypatch.delenv(_ENV_VAR, raising=False)
+    monkeypatch.delenv(_EXPORT_ENV_VAR, raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    reset_gateway_settings_cache()
+    monkeypatch.setattr(
+        "mergecraft.config.settings_snapshot.run_scope_settings_snapshot",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "mergecraft.config.load_repo_settings",
+        lambda **_kwargs: _ForkHeadSettings(),
+    )
+
+    assert resolve_capture_policy("untrusted") == ContentCapture.METADATA

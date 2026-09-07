@@ -30,9 +30,9 @@ Pinned workflow: `.github/workflows/mergecraft.yml` steps `fallback`, `claude_fa
 
 | Contract | Tests | Layer |
 | --- | --- | --- |
-| Committed `.mergecraft/config.yaml` has quoted `trust.selfReview: "analyzers"` | `tests/config/test_self_review_trust_config_w2.py::test_committed_config_has_self_review_analyzers_quoted` | config |
-| Same-repo `pull_request_target` → execution=trusted, authority=untrusted | `…::test_committed_config_resolves_execution_trusted_on_same_repo_prt` | config |
-| Fork PR stays untrusted on both axes | `…::test_fork_pr_stays_untrusted_on_both_axes_with_analyzers` | unit (guard) |
+| Committed `.mergecraft/config.yaml` has quoted `trust.selfReview: "full"` | `tests/config/test_self_review_trust_config_w2.py::test_committed_config_has_self_review_full_quoted` | config |
+| Same-repo `pull_request_target` → execution=trusted, authority=trusted | `…::test_committed_config_resolves_execution_trusted_on_same_repo_prt` | config |
+| Fork PR stays untrusted on both axes | `…::test_fork_pr_stays_untrusted_on_both_axes_with_analyzers`, `…::test_committed_config_fork_pr_stays_untrusted` | unit (guard) |
 
 Pinned API: `mergecraft.config.trust_policy.resolve_trust_policy`.
 

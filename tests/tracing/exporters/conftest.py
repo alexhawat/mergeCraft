@@ -255,6 +255,8 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "MERGECRAFT_CONFIG",
         "INPUT_TRACING",
         "INPUT_TRACING_TO",
+        "INPUT_TRACING_CONTENT",
+        "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT",
         "INPUT_LOGFIRE_TOKEN",
         "INPUT_OTEL_ENDPOINT",
         "GITHUB_WORKSPACE",

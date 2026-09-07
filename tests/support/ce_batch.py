@@ -11,7 +11,6 @@ from tests.support.cd_batch import (
 from tests.support.dead_package_wiring import SRC_ROOT
 
 CONFIG_COMPAT_MODULE = "mergecraft.config.compat"
-SPECIALIST_ECONOMICS_MODULE = "mergecraft.agents.economics"
 PROVIDER_HEALTH_MODULE = "mergecraft.agents.provider_health"
 
 CONFIG_SCHEMA_VERSION_ATTR = "CONFIG_SCHEMA_VERSION"
@@ -65,7 +64,6 @@ __all__ = [
     "CONFIG_COMPAT_MODULE",
     "CONFIG_SCHEMA_VERSION_ATTR",
     "PROVIDER_HEALTH_MODULE",
-    "SPECIALIST_ECONOMICS_MODULE",
     "TRACING_EXPORTERS",
     "USAGE_ATTRS",
     "d10_root_callback_owns_globals",

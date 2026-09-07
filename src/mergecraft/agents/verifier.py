@@ -594,8 +594,3 @@ def record_verifier_verdict(
         escalated_to_human=False,
         reason=verdict.reason,
     )
-
-
-def withdrawn_fingerprint_for_reason(reason: str) -> str:
-    """Stable fingerprint input for a withdrawn-finding bullet."""
-    return finding_fingerprint(path="", body=reason)

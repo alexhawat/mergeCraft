@@ -153,14 +153,14 @@ jobs:
           echo "exit_code=1" >> "$GITHUB_OUTPUT"
           echo "severity=CRITICAL,HIGH" >> "$GITHUB_OUTPUT"
       - name: SBOM slim (syft via anchore/sbom-action)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: ${{ needs.build-images.outputs.slim_ref }}
           format: spdx-json
           output-file: sbom-slim.spdx.json
           upload-artifact: false
       - name: SBOM analyzers (syft via anchore/sbom-action)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: ${{ needs.build-images.outputs.analyzers_ref }}
           format: spdx-json

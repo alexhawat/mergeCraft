@@ -1,0 +1,17 @@
+# Emails allowed to author or commit code pushed to this repository.
+#
+# Gates scripts/check_push_authors.py, the client-side pre-push guard: it
+# refuses to push a branch carrying a commit whose author or committer email
+# is not listed here. This exists to catch the same mistake as
+# trust.sandboxTrustedAuthors (src/mergecraft/config/trust_policy.py,
+# docs/trust-policy.md) — a fork PR checked out onto a local branch and
+# pushed to origin — client-side, before the branch ever reaches origin.
+#
+# One email per line. Comparison is case-insensitive. Lines starting with
+# `#` are comments. MERGECRAFT_TRUSTED_AUTHORS (comma-separated) overrides
+# this file entirely when set.
+
+alexhawat@gmail.com
+noreply@github.com
+cursoragent@cursor.com
+49699333+dependabot[bot]@users.noreply.github.com

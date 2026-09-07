@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from mergecraft.cli.auth_cmd import app as auth_app
+from mergecraft.models import PROVIDERS
 from tests.ci.workflow_support import REPO_ROOT, read_text
 
 README = REPO_ROOT / "README.md"
@@ -116,6 +117,25 @@ def test_custom_openai_compatible_row_present() -> None:
         "docs/authentication.md must include an OpenAI-compatible custom provider row (A3)"
     )
     assert "docs/authentication.md" in read_text("README.md")
+
+
+def test_quickstart_provider_auth_uses_catalog_labels() -> None:
+    """#590 — ``provider auth`` takes catalog labels, not harness names."""
+    text = _auth_doc_table_text()
+    match = re.search(r"```bash\n(.*?)```", text, re.DOTALL)
+    assert match is not None, "docs/authentication.md missing a bash example"
+    fence = match.group(1)
+    labels = re.findall(r"mergecraft provider auth ([a-z0-9-]+)", fence)
+    or_comment = re.search(r"# or ([^\n]+)", fence)
+    if or_comment is not None:
+        labels.extend(
+            part.strip(" .…") for part in or_comment.group(1).split(",") if part.strip(" .…")
+        )
+    assert labels, "quick start must show mergecraft provider auth <label>"
+    unknown = [label for label in labels if label not in PROVIDERS]
+    assert not unknown, "provider auth takes catalog labels (anthropic, not claude): " + ", ".join(
+        unknown
+    )
 
 
 def test_every_auth_subcommand_has_a_row() -> None:

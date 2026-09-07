@@ -120,12 +120,33 @@ def test_derived_gateway_cache_reloads_after_config_changes(
     assert "tokenhub" in tokenhub
 
 
+_GATEWAY_CALLERS = frozenset({"build_custom_provider", "_custom_provider_ids"})
+
+
+def _gateway_caller_signatures(source: str) -> dict[str, str]:
+    """Return ``name -> unparsed args`` for gateway-resolution helpers."""
+    import ast
+
+    tree = ast.parse(source)
+    out: dict[str, str] = {}
+    for node in tree.body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in _GATEWAY_CALLERS
+        ):
+            out[node.name] = ast.unparse(node.args)
+    return out
+
+
 def test_no_caller_signature_changed() -> None:
-    """AST guard for D22 — opencode call sites unchanged on trunk until AG9.
+    """AST guard for D22 — opencode gateway callers unchanged until AG9.
 
     ``codex.py`` is exempt: lane B (#553) edits it for ``trust.agentSandbox`` and
     lane E (plan 18) rewires Codex for the credential broker; broker behavior is
-    pinned in ``test_codex_credential_broker.py``. Only ``opencode.py`` stays frozen here.
+    pinned in ``test_codex_credential_broker.py``. Whole-file freeze of
+    ``opencode.py`` is too blunt: prompt-body stamping on the HTTP return path
+    is allowed; only ``build_custom_provider`` / ``_custom_provider_ids``
+    signatures stay pinned to ``origin/pre-0.0.1``.
     """
     rel = "src/mergecraft/agents/opencode.py"
     proc = subprocess.run(
@@ -137,4 +158,5 @@ def test_no_caller_signature_changed() -> None:
     )
     trunk = proc.stdout
     current = (_REPO_ROOT / rel).read_text(encoding="utf-8")
-    assert current == trunk
+    assert _gateway_caller_signatures(current) == _gateway_caller_signatures(trunk)
+    assert set(_gateway_caller_signatures(current)) >= _GATEWAY_CALLERS

@@ -32,7 +32,14 @@ def test_action_yml_declares_tracing_inputs() -> None:
 
     payload = yaml.safe_load(Path("action.yml").read_text(encoding="utf-8"))
     inputs: dict[str, Any] = payload["inputs"]
-    for name in ("tracing", "tracing-to", "logfire-token", "otel-endpoint"):
+    for name in (
+        "tracing",
+        "tracing-to",
+        "logfire-token",
+        "otel-endpoint",
+        "tracing-content",
+        "tracing-export-untrusted-content",
+    ):
         assert name in inputs, f"action.yml missing input {name!r}"
         assert "description" in inputs[name]
 
@@ -192,3 +199,134 @@ def test_action_inputs_are_dropped_into_github_workspace(
         settings["sinks"][0]["path"].endswith("traces")
         or ".mergecraft" in settings["sinks"][0]["path"]
     )
+
+
+def _clear_action_tracing_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in (
+        "INPUT_TRACING",
+        "INPUT_TRACING_TO",
+        "INPUT_TRACING_REGION",
+        "INPUT_TRACING_CONTENT",
+        "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT",
+        "INPUT_LOGFIRE_TOKEN",
+        "INPUT_OTEL_ENDPOINT",
+        "MERGECRAFT_TRACING",
+        "MERGECRAFT_TRACING_REGION",
+        "GITHUB_WORKSPACE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_action_logfire_shorthand_honors_tracing_region_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``MERGECRAFT_TRACING_REGION=eu`` lands on the Action logfire sink."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+    monkeypatch.setenv("MERGECRAFT_TRACING_REGION", "eu")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["sinks"][0]["type"] == "logfire"
+    assert resolved["sinks"][0]["region"] == "eu"
+    assert resolved["settings"].sinks[0].region == "eu"
+
+
+def test_action_logfire_shorthand_honors_tracing_region_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``INPUT_TRACING_REGION`` wins over ``MERGECRAFT_TRACING_REGION``."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+    monkeypatch.setenv("INPUT_TRACING_REGION", "eu")
+    monkeypatch.setenv("MERGECRAFT_TRACING_REGION", "us")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["settings"].sinks[0].region == "eu"
+
+
+def test_action_logfire_region_defaults_us_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset region env keeps the US OTLP host default for other consumers."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["settings"].sinks[0].region == "us"
+
+
+def test_action_tracing_content_input_maps_to_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``INPUT_TRACING_CONTENT`` lands on ``TracingSettings.content``."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING_CONTENT", "full")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["content"] == "full"
+    assert resolved["settings"].content == "full"
+
+
+def test_action_export_untrusted_content_input_maps_to_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT`` lands on the YAML field."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT", "true")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["export_untrusted_content"] is True
+    assert resolved["settings"].export_untrusted_content is True
+
+
+def test_export_tracing_env_forwards_content_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Action content inputs become ``MERGECRAFT_TRACING_*`` so capture policy sees them."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING_CONTENT", "full")
+    monkeypatch.setenv("INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT", "true")
+    monkeypatch.delenv("MERGECRAFT_TRACING_CONTENT", raising=False)
+    monkeypatch.delenv("MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT", raising=False)
+
+    from mergecraft.action.inputs import export_tracing_env_from_action_inputs
+
+    export_tracing_env_from_action_inputs()
+    import os
+
+    assert os.environ["MERGECRAFT_TRACING_CONTENT"] == "full"
+    assert os.environ["MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"] == "true"
+
+
+def test_apply_tracing_overrides_content_without_enablement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Content-only Action inputs overlay YAML even when ``tracing`` enablement is unset."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING_CONTENT", "full")
+    monkeypatch.setenv("INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT", "true")
+    monkeypatch.delenv("MERGECRAFT_TRACING", raising=False)
+
+    from mergecraft.action.inputs import apply_tracing_overrides
+    from mergecraft.config.settings import RepoSettings, TracingSettings
+
+    settings = RepoSettings(
+        tracing=TracingSettings.model_validate({"enabled": True, "content": "metadata"})
+    )
+    out = apply_tracing_overrides(settings)
+    assert out.tracing.enabled is True
+    assert out.tracing.content == "full"
+    assert out.tracing.export_untrusted_content is True

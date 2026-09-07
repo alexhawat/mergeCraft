@@ -228,16 +228,10 @@ def derive_trust_tier(
 
 def build_analyzer_env(
     *,
-    event: dict[str, Any] | None,
     tier: TrustTier,
     repo_env: dict[str, str] | None = None,
-    network_allowlist: list[str] | None = None,
 ) -> dict[str, str]:
     """Build analyzer subprocess env; untrusted tier strips secrets (D7)."""
-    _ = event
-    # ``network_allowlist`` is enforced in ``sandbox.py`` (egress policy / argv
-    # construction) — not applied to subprocess env (D5/D6).
-    _ = network_allowlist
     base = dict(repo_env or os.environ)
     if tier == "trusted":
         return filter_env(base)

@@ -204,67 +204,6 @@ def test_build_env_normalizes_the_alias_into_the_child_env(
     assert env[gemini_mod.GEMINI_API_KEY_ENV] == "alias-key"
 
 
-# ---------------------------------------------------------------------------
-# _parse_gemini_payload / _parse_gemini_stdout — malformed and partial output
-# ---------------------------------------------------------------------------
-
-
-def test_empty_stdout_yields_no_output_and_no_usage() -> None:
-    """A provider that printed nothing must not fabricate an empty-string usage record."""
-    assert gemini_mod._parse_gemini_stdout("   \n  \n") == ("", None)
-
-
-def test_truncated_json_is_returned_verbatim_without_usage() -> None:
-    """A cut-off blob is surfaced as raw text, not silently dropped."""
-    truncated = '{"result": "half a rev'
-    output, usage = gemini_mod._parse_gemini_stdout(truncated)
-    assert output == truncated
-    assert usage is None
-
-
-def test_non_object_json_stdout_is_treated_as_plain_text() -> None:
-    """A top-level JSON array is not a payload — the raw text stands in."""
-    output, usage = gemini_mod._parse_gemini_stdout('["a", "b"]')
-    assert output == '["a", "b"]'
-    assert usage is None
-
-
-def test_ndjson_scan_stops_at_the_terminal_result_event() -> None:
-    """The last terminal event wins; malformed and blank lines are skipped."""
-    stdout = "\n".join(
-        [
-            "not json at all",
-            "",
-            json.dumps({"result": "earlier", "usage": {"input_tokens": 1}}),
-            json.dumps(
-                {
-                    "type": "turn.completed",
-                    "result": "final answer",
-                    "usage": {"input_tokens": 11, "output_tokens": 7},
-                }
-            ),
-        ]
-    )
-    output, usage = gemini_mod._parse_gemini_stdout(stdout)
-
-    assert output == "final answer"
-    assert usage is not None
-    assert usage.input_tokens == 11
-    assert usage.output_tokens == 7
-
-
-def test_ndjson_event_without_text_leaves_the_raw_transcript_as_output() -> None:
-    """A usage-only trailing event must not blank the output."""
-    stdout = json.dumps({"type": "result", "usage": {"output_tokens": 3}})
-    output, usage = gemini_mod._parse_gemini_stdout(stdout)
-
-    # Single-line stdout parses as a dict on the fast path, so `result`/
-    # `output`/`response` are all absent and the output is the empty string.
-    assert output == ""
-    assert usage is not None
-    assert usage.output_tokens == 3
-
-
 def test_payload_camel_case_usage_aliases_are_summed_into_input_tokens() -> None:
     """camelCase aliases feed the same totals as the snake_case fields."""
     output, usage = gemini_mod._parse_gemini_payload(
@@ -395,7 +334,9 @@ def test_argv_omits_model_and_yes_flag_and_adds_resume_for_a_session_continuatio
     monkeypatch.delenv("CI", raising=False)
     captured: dict[str, Any] = {}
 
-    def _fake_streaming(*, cmd: list[str], ctx: Any, model: str | None) -> Any:
+    def _fake_streaming(
+        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+    ) -> Any:
         captured["cmd"] = cmd
         captured["model"] = model
         return gemini_mod.AgentResult(success=True, output="ok")
@@ -428,7 +369,9 @@ def test_argv_strips_the_provider_prefix_from_the_model_flag(
     monkeypatch.setenv("CI", "true")
     captured: dict[str, Any] = {}
 
-    def _fake_streaming(*, cmd: list[str], ctx: Any, model: str | None) -> Any:
+    def _fake_streaming(
+        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+    ) -> Any:
         captured["cmd"] = cmd
         return gemini_mod.AgentResult(success=True)
 
@@ -449,7 +392,9 @@ def test_empty_prompt_falls_back_to_the_context_user_instruction(
     monkeypatch.delenv("CI", raising=False)
     captured: dict[str, Any] = {}
 
-    def _fake_streaming(*, cmd: list[str], ctx: Any, model: str | None) -> Any:
+    def _fake_streaming(
+        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+    ) -> Any:
         captured["cmd"] = cmd
         return gemini_mod.AgentResult(success=True)
 

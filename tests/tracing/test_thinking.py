@@ -94,6 +94,7 @@ def test_reasoning_never_bypasses_the_gate(monkeypatch: MonkeyPatch, genai_modul
     """
     genai = genai_module
     monkeypatch.setenv("MERGECRAFT_TRACING_CONTENT", "full")
+    monkeypatch.delenv("MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT", raising=False)
     text = "step-by-step reasoning quoting the reviewed diff verbatim"
 
     untrusted_policy = resolve_content_capture("full", "untrusted")

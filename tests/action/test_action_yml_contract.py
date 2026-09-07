@@ -66,6 +66,8 @@ class TestDeclaredDefaultsParse:
             ("tracing-to", "INPUT_TRACING_TO"),
             ("logfire-token", "INPUT_LOGFIRE_TOKEN"),
             ("otel-endpoint", "INPUT_OTEL_ENDPOINT"),
+            ("tracing-content", "INPUT_TRACING_CONTENT"),
+            ("tracing-export-untrusted-content", "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT"),
         ],
         ids=[
             "model_pin",
@@ -76,6 +78,8 @@ class TestDeclaredDefaultsParse:
             "tracing-to",
             "logfire-token",
             "otel-endpoint",
+            "tracing-content",
+            "tracing-export-untrusted-content",
         ],
     )
     def test_default_string_is_accepted(
@@ -89,7 +93,14 @@ class TestDeclaredDefaultsParse:
         defaults = _plain_string_defaults(action_yml)
         assert input_name in defaults, f"{input_name}: no plain-string default in action.yml"
         monkeypatch.setenv(env_var, defaults[input_name])
-        if input_name in {"tracing", "tracing-to", "logfire-token", "otel-endpoint"}:
+        if input_name in {
+            "tracing",
+            "tracing-to",
+            "logfire-token",
+            "otel-endpoint",
+            "tracing-content",
+            "tracing-export-untrusted-content",
+        }:
             from mergecraft.action.inputs import resolve_tracing_from_action_inputs
 
             resolved = resolve_tracing_from_action_inputs()

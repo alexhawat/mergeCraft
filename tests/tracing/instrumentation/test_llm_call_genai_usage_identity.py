@@ -293,11 +293,42 @@ def test_model_chain_llm_call_marks_usage_unavailable_when_no_usage(
     )
 
 
+def test_model_chain_llm_call_stamps_prompt_and_output_messages(
+    captured_sink: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chain-level ``llm.call`` captures the CLI prompt and model output (trusted/full)."""
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.tracing.content import ContentCapture
+
+    monkeypatch.setenv("MERGECRAFT_TRACING_CONTENT", "full")
+    monkeypatch.setattr(
+        "mergecraft.utils.agent_resolve.resolve_capture_policy",
+        lambda _tier: ContentCapture.FULL,
+    )
+
+    settings = _build_tracing_settings()
+    prompt = "review this diff for bugs"
+    output = "no blockers found"
+    _drive_chain(
+        settings,
+        [AgentResult(success=True, prompt=prompt, output=output)],
+    )
+
+    captured_sink.record()
+    llm_calls = captured_sink.by_kind.get("llm.call", [])
+    assert llm_calls, "chain must emit llm.call"
+    attrs = llm_calls[0].attrs
+    assert prompt in str(attrs.get("gen_ai.input.messages")), attrs
+    assert output in str(attrs.get("gen_ai.output.messages")), attrs
+
+
 __all__ = [
     "USAGE_UNAVAILABLE_ATTR",
     "test_claude_streaming_llm_call_stamps_gen_ai_system_on_llm_span",
     "test_model_chain_llm_call_marks_usage_unavailable_when_no_usage",
     "test_model_chain_llm_call_stamps_gen_ai_system_when_usage_reported",
+    "test_model_chain_llm_call_stamps_prompt_and_output_messages",
     "test_opencode_llm_call_marks_usage_unavailable_when_provider_reports_none",
     "test_opencode_llm_call_stamps_gen_ai_identity_when_usage_reported",
 ]

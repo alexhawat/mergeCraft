@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from tests.publication_attribution.support import RecordingGitHub
+from tests.publication_attribution.support import RecordingGitHub, anchor_422_error
 from tests.support.tool_context import bind_github_client
 
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
@@ -104,10 +104,14 @@ async def test_unparseable_422_index_still_demotes_all_inline_comments(
 
 
 @pytest.mark.asyncio
-async def test_unchanged_payload_between_attempts_raises_instead_of_looping(
+async def test_unchanged_payload_recovers_via_last_resort_comment_fallback(
     tmp_path: Path,
 ) -> None:
-    """D1 — a no-op mutator must hard-stop, not ``continue`` forever."""
+    """D1 / #619 Task 4b — a no-op mutator hard-stops the demotion loop, but the
+
+    last-resort bare-COMMENT retry (dropping every inline comment) still lands
+    the review instead of the whole review being lost.
+    """
     github = RecordingGitHub(comment_422_index=0, loop_guard=20)
     ctx = _ctx(tmp_path, github)
     payload = {
@@ -120,21 +124,34 @@ async def test_unchanged_payload_between_attempts_raises_instead_of_looping(
         del index
         return current
 
-    with (
-        patch(
-            "mergecraft.mcp.review._demote_inline_comment_from_payload", side_effect=_noop_demote
-        ),
-        pytest.raises(httpx.HTTPStatusError) as exc_info,
+    with patch(
+        "mergecraft.mcp.review._demote_inline_comment_from_payload", side_effect=_noop_demote
     ):
-        await _create_github_review_with_anchor_recovery(ctx, pull_number=7, payload=payload)
-    assert exc_info.value.response.status_code == 422
-    assert github.create_review_calls <= ANCHOR_RECOVERY_RETRY_CEILING + 1
+        result, _approve_fallback = await _create_github_review_with_anchor_recovery(
+            ctx, pull_number=7, payload=payload
+        )
+    assert result["id"] == github.create_review_calls
+    assert github.create_review_calls <= ANCHOR_RECOVERY_RETRY_CEILING + 2
+    final = github.review_payloads[-1]
+    assert "comments" not in final
+    assert final["event"] == "COMMENT"
+    assert ctx.tool_state.review_comment_fallback_applied is True
 
 
 @pytest.mark.asyncio
-async def test_retry_ceiling_raises_last_http_status_error(tmp_path: Path) -> None:
-    """D2 — exhausting the retry ceiling re-raises the last 422, not partial success."""
-    github = RecordingGitHub(comment_422_index=0, loop_guard=20)
+async def test_last_resort_fallback_also_failing_still_raises(tmp_path: Path) -> None:
+    """#619 Task 4b — if the COMMENT fallback itself 422s, the caller still raises."""
+
+    class _AlwaysRejectingGitHub(RecordingGitHub):
+        async def create_review(
+            self, owner: str, repo: str, pull_number: int, **payload: Any
+        ) -> dict[str, Any]:
+            del owner, repo, pull_number
+            self.create_review_calls += 1
+            self.review_payloads.append(dict(payload))
+            raise anchor_422_error(index=0)
+
+    github = _AlwaysRejectingGitHub(loop_guard=20)
     ctx = _ctx(tmp_path, github)
     payload = {
         "event": "COMMENT",
@@ -154,8 +171,9 @@ async def test_retry_ceiling_raises_last_http_status_error(tmp_path: Path) -> No
     ):
         await _create_github_review_with_anchor_recovery(ctx, pull_number=7, payload=payload)
     assert exc_info.value.response.status_code == 422
-    # D1 hard-stops on unchanged signature before D2's retry ceiling is exhausted.
-    assert github.create_review_calls == 1
+    # Bounded: normal recovery's hard-stop, plus exactly one last-resort attempt.
+    assert github.create_review_calls <= ANCHOR_RECOVERY_RETRY_CEILING + 2
+    assert ctx.tool_state.review_comment_fallback_applied is True
 
 
 @pytest.mark.asyncio

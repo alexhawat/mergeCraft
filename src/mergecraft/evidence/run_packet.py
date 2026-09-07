@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, cast
 from loguru import logger
 from pydantic import ValidationError
 
+from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.emit import write_packet
@@ -38,7 +39,6 @@ from mergecraft.utils.diff_paths import changed_paths_from_diff
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from mergecraft.analyzers.finding import Finding
     from mergecraft.classify import BlastRadiusClassification
     from mergecraft.evidence.gate_policy import GateActionPolicy
     from mergecraft.mcp.context import ToolContext
@@ -206,6 +206,59 @@ def _mode_prompt_versions(modes: Sequence[Mode]) -> list[ModePromptVersion]:
     return rows
 
 
+def _dropped_findings_health(dropped: int) -> Finding | None:
+    """Run-health finding recording rows discarded before the approval gate (#623).
+
+    :func:`mergecraft.evidence.findings.load_run_findings_with_drops` discards
+    any stored finding row (agent-authored or analyzer) that fails ``Finding``
+    validation — the #623 bug let an ``AgentFinding``-shaped row do exactly
+    that, invisibly, because a dropped row and "nothing was found" looked
+    identical from the packet's side. This makes the loss visible in the
+    packet itself instead. ``scope="run"`` keeps it advisory-only:
+    ``agents/gates._packet_has_blockers`` excludes run-scoped findings from
+    the approval gate by design, so this can never fail a review on its own —
+    it can only ever tell a human the evidence undercounted.
+
+    Args:
+        dropped (int): Count of rows discarded by ``typed_findings_from_rows_with_drops``.
+
+    Returns:
+        Finding | None: A single ``Major``, run-scoped finding naming the
+        count, or ``None`` when nothing was dropped.
+
+    Examples:
+        >>> _dropped_findings_health(0) is None
+        True
+        >>> _dropped_findings_health(2).severity
+        'Major'
+    """
+    if dropped <= 0:
+        return None
+    return make_finding(
+        tool="findings-loader",
+        rule_id="dropped-finding-rows",
+        category="Data Integrity & Atomicity",
+        severity="Major",
+        confidence="certain",
+        message=(
+            f"{dropped} finding row(s) failed Finding validation and were discarded "
+            "before reaching the approval gate — they never contributed to this "
+            "packet's decision"
+        ),
+        path="",
+        start_line=1,
+        end_line=1,
+        source="trajectory",
+        scope="run",
+        evidence=[f"dropped_rows={dropped}"],
+        remediation=(
+            "Check the run log for 'findings loader: dropping malformed finding row' "
+            "warnings and fix whatever wrote the row in a shape Finding cannot validate."
+        ),
+        introduced_by_pr="false",
+    )
+
+
 def _self_assessment(state: ToolState) -> dict[str, Any] | None:
     """Translate the legacy ``ApprovalRecord`` into the packet's input shape.
 
@@ -285,6 +338,9 @@ def _assemble_packet_core(
         trajectory=trajectory,
         mode_prompt_versions=_mode_prompt_versions(_selected_modes(state, ctx)),
         dispatched_lens_ids=list(state.dispatched_lens_ids),
+        agent_terminal_verdict=(
+            state.terminal_submission.verdict if state.terminal_submission is not None else None
+        ),
     )
 
 
@@ -303,7 +359,7 @@ def build_run_packet(
     evidence actually recorded, rather than of a parallel set of inputs.
     ``change_id`` defaults to the PR-derived identifier on ``ctx``.
     """
-    from mergecraft.evidence.findings import load_run_findings
+    from mergecraft.evidence.findings import load_run_findings_with_drops
     from mergecraft.mcp.tool_state import primary_repo_state
 
     resolved_change_id = change_id or _change_id(ctx)
@@ -327,11 +383,15 @@ def build_run_packet(
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
     trajectory_findings = audit_trajectory(trajectory)
 
+    loaded_findings, dropped_finding_rows = load_run_findings_with_drops(ctx, extra=extra_findings)
+    health_finding = _dropped_findings_health(dropped_finding_rows)
+    run_health_findings = [health_finding] if health_finding is not None else []
+
     packet = _assemble_packet_core(
         ctx,
         change_id=resolved_change_id,
         files_changed=changed_paths,
-        findings=[*load_run_findings(ctx, extra=extra_findings), *trajectory_findings],
+        findings=[*loaded_findings, *run_health_findings, *trajectory_findings],
         deterministic_checks=_deterministic_checks(state),
         blast_radius=blast_radius,
         trajectory=trajectory.model_dump(mode="json"),

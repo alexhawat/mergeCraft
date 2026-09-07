@@ -51,8 +51,24 @@ def test_health_cmd_emits_json_status() -> None:
     assert str(payload.get("status", "")).casefold() in {"ok", "healthy"}
 
 
-def test_audit_cmd_export_empty_json_array() -> None:
-    """Functional: ``audit export`` with no records prints ``[]``."""
+def test_audit_cmd_export_empty_json_array(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Functional: ``audit export`` with no records prints ``[]``.
+
+    ``audit_cmd.export`` takes no path argument — it always calls
+    ``load_audit_events()`` with no ``root``, which merges two sources: the
+    primary sink (``MERGECRAFT_AUDIT_ROOT``, else
+    ``~/.local/share/mergecraft/audit/<workspace-hash>``) and legacy
+    ``<cwd>/.mergecraft/audit.jsonl`` history. Both are resolved relative to
+    the process's real environment/cwd, so this test previously read this
+    very checkout's own ``.mergecraft/audit.jsonl`` — which is never empty
+    once ``mergecraft audit`` has run here — and failed on any such machine.
+    Isolating both sources to a fresh ``tmp_path`` (an env override for the
+    primary sink, a chdir for the legacy lookup) exercises the real
+    ``load_audit_events`` code path against genuinely-absent files, rather
+    than mocking the result, so the ``== []`` assertion still means something.
+    """
+    monkeypatch.setenv("MERGECRAFT_AUDIT_ROOT", str(tmp_path / "audit-root"))
+    monkeypatch.chdir(tmp_path)
     module = _load_cmd("mergecraft.cli.audit_cmd")
     result = runner.invoke(module.app, ["export"], env=_DUMB_ENV)
     assert result.exit_code == 0, result.stdout + result.stderr

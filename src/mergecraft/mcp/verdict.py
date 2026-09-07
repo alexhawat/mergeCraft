@@ -81,6 +81,12 @@ class VerdictDiagnostic(StrEnum):
     agent_approved_but_blocked = "agent_approved_but_blocked"
     approved = "approved"
     fallback_triggered = "fallback_triggered"
+    # #619 Task 3b — the terminal submission was recorded but the review that
+    # carries it never published to GitHub (every 422 recovery attempt,
+    # including the last-resort COMMENT retry, failed). Distinct from
+    # ``provider_success_without_submission``: here a verdict *was* recorded,
+    # it just never reached the Reviews tab.
+    terminal_submission_unpublished = "terminal_submission_unpublished"
 
 
 def span_attrs_for_verdict_diagnostic(
@@ -797,6 +803,81 @@ def recorded_submission_payload(submission: Any) -> dict[str, Any]:
     }
 
 
+def _backfill_agent_findings_from_terminal_submission(
+    tool_state: ToolState,
+    findings: Iterable[Any],
+) -> list[str]:
+    """Merge terminal-submission findings into ``agent_findings`` by fingerprint (#619).
+
+    :func:`mergecraft.evidence.findings.load_run_findings` — the one loader the
+    approval gate and the merge-evidence packet both call — reads only
+    ``ToolState.agent_findings`` and ``ToolState.analyzer_run.findings``. It
+    never reads ``TerminalSubmission.findings`` directly. Before this merge, a
+    finding that reached ``submit_review_verdict`` — confirmed by a verifier,
+    a blocking analyzer row, or newly authored by the agent — but was never
+    drafted through ``verify_agent_findings`` (or was drafted with body text
+    that no longer matches byte-for-byte, since ``AgentFinding.identity()``
+    falls back to hashing ``path`` + ``body``) was simply invisible to
+    ``decide_approval``: the run would auto-approve over a finding its own
+    terminal payload carried. This is the #619 leak.
+
+    A fingerprint already present in ``agent_findings`` is left untouched — a
+    ``record_finding_verdict`` downgrade (or any other write) to that row
+    must win over a stale draft the terminal payload happens to repeat, and
+    this merge must never duplicate a row that already exists.
+
+    Args:
+        tool_state (ToolState): The run's mutable tool state.
+        findings (Iterable[Any]): Normalized terminal-submission findings —
+            ``AgentFinding`` instances or dict rows.
+
+    Returns:
+        list[str]: Fingerprints that had to be back-filled, in submission
+        order. A non-empty result is the leak signal callers log.
+
+    Examples:
+        >>> from mergecraft.mcp.tool_state import init_tool_state
+        >>> state = init_tool_state(owner="acme", name="demo", dir=".")
+        >>> _backfill_agent_findings_from_terminal_submission(state, [])
+        []
+    """
+    from mergecraft.findings.agent_adapter import agent_finding_to_finding
+
+    existing: set[str] = set()
+    for row in tool_state.agent_findings:
+        fingerprint = row.get("fingerprint") if isinstance(row, dict) else None
+        if isinstance(fingerprint, str) and fingerprint:
+            existing.add(fingerprint)
+
+    backfilled: list[str] = []
+    for item in findings:
+        fingerprint = (
+            str(item.identity()) if hasattr(item, "identity") else _finding_fingerprint(item)
+        )
+        if not fingerprint or fingerprint in existing:
+            continue
+        # Store the ``Finding``-shaped row ``load_run_findings`` can actually
+        # parse — mirrors ``verify_agent_findings_tool``'s storage (VF1.mcp/
+        # verification.py). A bare ``AgentFinding`` dump (``body``, no
+        # ``tool``/``rule_id``/``message``) always fails
+        # ``Finding.model_validate`` (``extra="forbid"``) and is silently
+        # dropped by ``typed_findings_from_rows`` — that mismatch, not a
+        # missing merge alone, is why a confirmed agent finding could vanish
+        # from the packet even when this backfill runs (#619).
+        if hasattr(item, "identity"):
+            typed = agent_finding_to_finding(item, rule_id="agent:terminal")
+            row = typed.model_dump(mode="json")
+        elif hasattr(item, "model_dump"):
+            row = item.model_dump(mode="json")
+        else:
+            row = dict(item)
+        row["fingerprint"] = fingerprint
+        tool_state.agent_findings.append(row)
+        existing.add(fingerprint)
+        backfilled.append(fingerprint)
+    return backfilled
+
+
 def revalidate_recorded_submission(ctx: ToolContext) -> None:
     """Reject a stored verdict that current evidence has made unusable."""
     submission = ctx.tool_state.terminal_submission
@@ -891,6 +972,17 @@ def submit_review_verdict_tool(ctx: ToolContext):
                 for item in normalized_findings
             ],
         }
+        backfilled = _backfill_agent_findings_from_terminal_submission(
+            ctx.tool_state, normalized_findings
+        )
+        if backfilled:
+            logger.warning(
+                "submit_review_verdict: back-filled {} finding(s) into agent_findings "
+                "that were missing from prior draft state — these would have been "
+                "invisible to load_run_findings and decide_approval (fingerprints: {})",
+                len(backfilled),
+                ", ".join(backfilled),
+            )
         existing = ctx.tool_state.terminal_submission
         existing_id = existing.id if existing is not None else None
         recorded = record_validated_terminal_submission(

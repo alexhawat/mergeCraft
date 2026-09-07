@@ -29,6 +29,12 @@ def test_workflow_lint_script_uses_catalog_actionlint_sarif_template() -> None:
     assert _ACTIONLINT_TEMPLATE.is_file()
 
 
+def test_workflow_lint_script_retries_github_release_downloads() -> None:
+    """CI SARIF emit must retry GitHub-releases curl (exit 35 RST is otherwise fatal)."""
+    script = (REPO_ROOT / "scripts" / "workflow_lint.sh").read_text(encoding="utf-8")
+    assert script.count("curl --retry 5 --retry-delay 2 --retry-all-errors") == 2
+
+
 @pytest.mark.skipif(
     sys.platform != "linux", reason="actionlint bootstrap is linux-only in workflow_lint.sh"
 )

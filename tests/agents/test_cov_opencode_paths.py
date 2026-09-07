@@ -471,6 +471,19 @@ class _FakeBytesStream:
     def read(self) -> bytes:
         return self._data
 
+    def readline(self) -> bytes:
+        """Terminate ``opencode._drain`` instead of raising in its thread.
+
+        ``_drain`` consumes this stream with ``iter(stream.readline, b"")`` on a
+        background thread. Without ``readline`` that thread died with an
+        ``AttributeError`` *after* the owning test had finished, and the
+        traceback was printed to whatever ``sys.stderr`` happened to be current
+        — inside another test's Click ``CliRunner`` capture, where it broke an
+        unrelated assertion (``tests/cli/test_doctor.py``). Returning ``b""``
+        ends the drain loop cleanly.
+        """
+        return b""
+
 
 class _FakeClock:
     """Deterministic stand-in for the ``time`` module inside opencode."""

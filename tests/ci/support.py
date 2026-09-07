@@ -34,8 +34,6 @@ INLINE_BUDGET = 8
 
 CI_SECTION_HEADING = "### 🚨 CI failures"
 
-STUB_PROVIDER_IDS: tuple[str, ...] = ("circleci", "gitlab", "azure")
-
 
 def import_module(dotted: str) -> Any:
     """Lazy import so collection succeeds before K1 creates ``src/mergecraft/ci/``."""

@@ -119,3 +119,64 @@ def test_pr_config_edit_in_diff_publishes_with_pinned_settings(tmp_path: Path) -
     publish_gate = repo_settings_from_context(ctx).gates.gate_action
     assert publish_gate == "enforce"
     assert publish_gate != "shadow"
+
+
+def test_rebaseline_carries_operator_owned_provenance_forward(tmp_path: Path) -> None:
+    """A rebaseline with a prior snapshot carries ``operator_owned`` forward unchanged.
+
+    Mirrors the production ``pull_request_target`` path: ``main.py`` stamps
+    the run-start snapshot ``operator_owned=True`` before ``checkout_pr``
+    ever runs; the rebaseline after checkout must not silently drop that
+    provenance even though it re-derives ``config_hash``/``repo_root`` from
+    the (now PR-head) checkout.
+    """
+    _write_gate_config(tmp_path, "enforce")
+    snapshot = capture_repo_settings_snapshot(
+        root=tmp_path, load_learnings_files=False, operator_owned=True
+    )
+    assert snapshot.operator_owned is True
+
+    ctx = _tool_context(tmp_path, snapshot=snapshot)
+    rebaselined = rebaseline_repo_settings_snapshot(ctx)
+
+    assert rebaselined.operator_owned is True
+    assert ctx.repo_settings_snapshot is not None
+    assert ctx.repo_settings_snapshot.operator_owned is True
+
+
+def test_rebaseline_with_no_prior_snapshot_is_never_operator_owned(tmp_path: Path) -> None:
+    """D7 (#622 Task 2) — a rebaseline with no prior snapshot fails closed.
+
+    Some callers (e.g. local ``mcp serve``) never install a run-scope
+    snapshot before invoking ``checkout_pr``. When that happens,
+    ``rebaseline_repo_settings_snapshot`` falls back to a live load off
+    whatever is on disk — which, post-checkout, may already be a fork's own
+    HEAD. Even if that on-disk YAML claims ``exportUntrustedContent: true``,
+    the resulting snapshot must never be marked operator-owned: only a
+    snapshot carried forward from a genuine pre-checkout capture may lift
+    the D7 cap.
+    """
+    config_dir = tmp_path / ".mergecraft"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.yaml").write_text(
+        "tracing:\n  exportUntrustedContent: true\n",
+        encoding="utf-8",
+    )
+
+    ctx = _tool_context(tmp_path, snapshot=None)
+    assert ctx.repo_settings_snapshot is None
+
+    rebaselined = rebaseline_repo_settings_snapshot(ctx)
+
+    assert rebaselined.settings.tracing.export_untrusted_content is True
+    assert rebaselined.operator_owned is False
+    assert ctx.repo_settings_snapshot is not None
+    assert ctx.repo_settings_snapshot.operator_owned is False
+
+
+def test_capture_repo_settings_snapshot_defaults_to_not_operator_owned(
+    tmp_path: Path,
+) -> None:
+    """Fail closed by default — a caller that doesn't reason about provenance gets ``False``."""
+    snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
+    assert snapshot.operator_owned is False

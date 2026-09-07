@@ -39,6 +39,16 @@ class VerdictProtocolPublish(NamedTuple):
 _REVIEW_MODE_NAMES = frozenset({"Review", "IncrementalReview"})
 _INCREMENTAL_REVIEW_NAMES = frozenset({"IncrementalReview"})
 _MISSING_TERMINAL_VERDICT_REASON = "no terminal review verdict was submitted for this attempt"
+# #619 Task 3a — a distinct reason from the one above: the agent *did* record
+# a terminal verdict, but the review that carries it never reached GitHub
+# (every 422 recovery attempt failed; see
+# ``mcp/review.py::_create_github_review_with_anchor_recovery``). #619 hit
+# exactly this: ``create_pull_request_review`` 422'd three times and the run
+# still reported ``RunOutcome.passed`` because nothing downstream of the
+# publish call distinguished "never tried" from "tried and lost the review".
+_UNPUBLISHED_TERMINAL_VERDICT_REASON = (
+    "terminal review verdict was recorded but never published to GitHub"
+)
 
 
 def _is_review_mode(mode: str | Mode | None) -> bool:
@@ -77,19 +87,24 @@ def _classify_outcome(
     mode: str | Mode | None = None,
     verdict_protocol: Literal["shadow", "enforce"] | None = None,
     final_summary_written: bool = False,
+    terminal_publication_failed: bool = False,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
 
     Mirrors the inline resolver that lived at the bottom of :func:`main`.
-    Returns ``(outcome, failure_reason)``. The four branches are:
+    Returns ``(outcome, failure_reason)``. The branches are:
     ``result.success is False`` -> ``RunOutcome.failed``; trusted-tier
     ``setup_script`` failure under ``setup_failure_policy == "fail"`` ->
     ``RunOutcome.configuration_error``; same under
     ``setup_failure_policy == "inconclusive"`` -> ``RunOutcome.inconclusive``;
     review-relevant dependency-prep failure -> ``RunOutcome.inconclusive``;
-    otherwise (the closed ``SetupFailurePolicy`` value ``"warn"`` or no
-    failure surface) -> ``RunOutcome.passed``. Each non-pass branch logs a
-    warning here so the call site only needs the tuple.
+    a review-mode run whose terminal submission never reached GitHub
+    (``terminal_publication_failed``) -> ``RunOutcome.inconclusive`` (#619
+    Task 3a — a *recorded* verdict that never published must not read as a
+    clean run); a review-mode run with no terminal submission at all ->
+    ``RunOutcome.inconclusive``; otherwise (the closed ``SetupFailurePolicy``
+    value ``"warn"`` or no failure surface) -> ``RunOutcome.passed``. Each
+    non-pass branch logs a warning here so the call site only needs the tuple.
     """
     if not result.success:
         return RunOutcome.failed, result.error
@@ -107,6 +122,9 @@ def _classify_outcome(
     if prep_reason:
         logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
         return RunOutcome.inconclusive, prep_reason
+    if _is_review_mode(mode) and terminal_publication_failed and verdict_protocol != "shadow":
+        logger.warning("» {}", _UNPUBLISHED_TERMINAL_VERDICT_REASON)
+        return RunOutcome.inconclusive, _UNPUBLISHED_TERMINAL_VERDICT_REASON
     if (
         _is_review_mode(mode)
         and not result.terminal_submission_received
@@ -132,6 +150,7 @@ def _verdict_protocol_publish(
     prep_reason: str | None,
     final_summary_written: bool,
     terminal_verdict: str,
+    terminal_publication_failed: bool = False,
 ) -> VerdictProtocolPublish:
     """Predict the enforce-path verdict protocol and build publish span attrs.
 
@@ -150,6 +169,7 @@ def _verdict_protocol_publish(
         setup_policy=str(setup_policy),
         prep_reason=prep_reason,
         final_summary_written=final_summary_written,
+        terminal_publication_failed=terminal_publication_failed,
     )
     diagnostic = VerdictDiagnostic(prediction.diagnostic)
     attrs = span_attrs_for_verdict_diagnostic(diagnostic, summary=result.output or "")

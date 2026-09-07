@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -249,12 +248,3 @@ def test_skip_reason_none_when_filter_and_unshare(monkeypatch: MonkeyPatch) -> N
         self_review_level="off",
     )
     assert reason is None
-
-
-def test_build_analyzer_env_no_longer_discards_network_allowlist() -> None:
-    """trust.py must not silently discard network_allowlist (the #538 root cause)."""
-    from mergecraft.analyzers import trust as trust_mod
-
-    source = inspect.getsource(trust_mod.build_analyzer_env)
-    assert "_ = event, network_allowlist" not in source
-    assert "network_allowlist" in source

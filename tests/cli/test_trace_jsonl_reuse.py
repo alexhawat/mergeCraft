@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
-from mergecraft.cli.trace_jsonl import (
+from mergecraft.tracing.trace_jsonl import (
     default_trace_dir,
     load_trace_jsonl_events,
     session_ids_in_trace_order,
@@ -33,7 +33,7 @@ def test_replay_and_run_cmd_use_shared_jsonl_loader(
         calls.append(trace_dir)
         return events
 
-    monkeypatch.setattr("mergecraft.cli.trace_jsonl.load_trace_jsonl_events", _load)
+    monkeypatch.setattr("mergecraft.tracing.trace_jsonl.load_trace_jsonl_events", _load)
     monkeypatch.setattr("mergecraft.cli.replay_cmd.load_trace_jsonl_events", _load)
     monkeypatch.setattr("mergecraft.cli.run_cmd.load_trace_jsonl_events", _load)
     replay = runner.invoke(app, ["replay", "--trace-dir", str(tmp_path / "traces")], env=_DUMB_ENV)

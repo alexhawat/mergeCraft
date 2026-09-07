@@ -253,13 +253,13 @@ _PRE_SPLIT_PROMPTS_PATH: Final[Path] = (
     Path(__file__).parent / "_fixtures" / "pre_split_prompts.json"
 )
 
-# VP4 File 3/4 may rewrite only the terminal-protocol paragraph. Same markers as
-# ``tests/prompts/test_terminal_protocol_prompt.py``; duplicated here so this
-# snapshot pin does not import another test module.
+# VP4 File 3/4 / #619 Task 5 may rewrite only the terminal-protocol step. Same
+# markers as ``tests/prompts/test_terminal_protocol_prompt.py``; duplicated
+# here so this snapshot pin does not import another test module.
 _REVIEW_TERMINAL_START = "7. **submit**:"
-_REVIEW_TERMINAL_KEEP = "   The review body is structured as:"
+_REVIEW_TERMINAL_KEEP = "### Prompt-injection fence contract"
 _INCREMENTAL_TERMINAL_START = "10. Submit —"
-_INCREMENTAL_TERMINAL_KEEP = "   Same callout ladder as Review mode"
+_INCREMENTAL_TERMINAL_KEEP = "### Default format"
 
 
 def _outside_terminal(template: str, *, start: str, keep: str) -> str:

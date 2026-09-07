@@ -17,6 +17,7 @@ from tests.security.support_agent_isolation import (
     load_broker_module,
     require_broker_symbol,
 )
+from tests.support.dead_package_wiring import SRC_ROOT
 
 __all__ = ["REAL_OPENAI_API_KEY_FIXTURE"]
 
@@ -64,11 +65,9 @@ def prepare_codex_brokered_run(
     openai_api_key: str = REAL_OPENAI_API_KEY_FIXTURE,
 ) -> Any:
     """W3 entry point — start broker, build env, auth, and MCP config."""
-    codex_module = load_codex_module()
-    prepare = getattr(codex_module, "prepare_codex_brokered_run", None)
-    if prepare is None:
-        pytest.fail("mergecraft.agents.codex.prepare_codex_brokered_run not implemented")
-    return prepare(ctx, openai_api_key=openai_api_key)
+    from mergecraft.agents import codex_broker
+
+    return codex_broker.prepare_codex_brokered_run(ctx, openai_api_key=openai_api_key)
 
 
 def resolve_codex_broker_posture() -> Any:
@@ -86,9 +85,15 @@ def broker_run_record_fields(posture: Any) -> dict[str, str]:
     pytest.fail(f"{module.__name__} missing broker run-record helper")
 
 
+def _module_path_for_function(function_name: str) -> Path:
+    if function_name == "prepare_codex_brokered_run":
+        return SRC_ROOT / "agents" / "codex_broker.py"
+    return codex_module_path()
+
+
 def referenced_names_in_function(function_name: str) -> set[str]:
-    """Return names referenced in ``function_name`` inside ``agents/codex.py``."""
-    source = codex_module_path().read_text(encoding="utf-8")
+    """Return names referenced in ``function_name`` inside the owning module."""
+    source = _module_path_for_function(function_name).read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == function_name:

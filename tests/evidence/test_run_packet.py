@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from mergecraft.analyzers.finding import make_finding
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION
@@ -644,6 +645,97 @@ def test_load_run_findings_keeps_ci_blocker_over_agent_minor(tmp_path: Path) -> 
     assert len(matching) == 1
     assert matching[0].severity == "Critical"
     assert matching[0].source == "ci"
+
+
+def _capture_logs() -> tuple[list[tuple[str, str]], int]:
+    """Loguru sink capture — ``caplog`` does not bridge to loguru in this repo
+    without a project-wide interceptor (see ``tests/agents/test_cov_codex_paths.py``).
+    """
+    records: list[tuple[str, str]] = []
+
+    def _sink(record: Any) -> None:
+        entry = record.record
+        records.append((entry["level"].name, entry["message"]))
+
+    return records, logger.add(_sink, level="DEBUG")
+
+
+async def test_verified_agent_finding_survives_load_run_findings(tmp_path: Path) -> None:
+    """The #623 regression: a verified agent finding must reach the packet.
+
+    Builds the stored row the way ``verify_agent_findings_tool`` actually
+    builds it in production — through ``normalize_agent_findings_via_pipeline``
+    / ``agent_finding_to_finding`` — rather than hand-writing a dict that
+    happens to already be ``Finding``-shaped, which is why the earlier test
+    (``test_load_run_findings_skips_malformed_agent_row``) never caught the
+    #623 bug: it only ever fed ``load_run_findings`` a correctly-shaped row.
+    """
+    from mergecraft.evidence.findings import load_run_findings
+    from mergecraft.mcp.verification import verify_agent_findings_tool
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    ctx = _make_ctx(tmp_path, findings=[])
+
+    result = await verify_agent_findings_tool(ctx).execute(
+        {
+            "findings": [
+                {
+                    "path": "src/app.py",
+                    "line": 1,
+                    "severity": "Critical",
+                    "body": "this token is logged in plaintext",
+                }
+            ]
+        }
+    )
+    payload = json.loads(result.content[0]["text"])
+    assert payload["ready"] is True
+    assert len(payload["dispatch"]) == 1, "the drafted finding never reached the verifier queue"
+    dispatch_fingerprint = payload["dispatch"][0]["fingerprint"]
+
+    loaded = load_run_findings(ctx)
+    matching = [item for item in loaded if item.fingerprint == dispatch_fingerprint]
+    assert len(matching) == 1, (
+        "the verified agent finding never reached load_run_findings — the #623 leak"
+    )
+    assert matching[0].message == "this token is logged in plaintext"
+
+
+def test_dropped_finding_rows_warn_and_produce_run_health_finding(tmp_path: Path) -> None:
+    """Task 1/2 together: a discarded row is loud (warning) and visible in the packet."""
+    ctx = _make_ctx(tmp_path, findings=[])
+    ctx.tool_state.agent_findings = [{"tool": "bad", "path": "src/app.py"}]
+
+    records, sink_id = _capture_logs()
+    try:
+        written = _emit(ctx, run_succeeded=True)
+    finally:
+        logger.remove(sink_id)
+
+    warnings = [
+        message
+        for level, message in records
+        if level == "WARNING" and "malformed finding row" in message
+    ]
+    assert warnings, "a dropped finding row must log at warning, not swallow the failure"
+    assert "src/app.py" in warnings[0], "identifying info (path) must reach the log line"
+
+    assert written is not None
+    packet = json.loads(written.read_text(encoding="utf-8"))
+    run_health = packet.get("run_health")
+    assert run_health is not None, "a dropped row must produce a run_health section"
+    assert run_health["conclusion"] == "advisory"
+    findings = run_health["findings"]
+    assert any("1 finding row" in item["message"] for item in findings)
+    assert all(item["scope"] == "run" for item in findings), (
+        "a dropped-row finding must be run-scoped so it can never block approval"
+    )
+
+    decision = packet["decision"]
+    assert decision["verdict"] != "failure", (
+        "a run-scoped health finding must never block approval on its own"
+    )
 
 
 def test_emit_run_packet_skips_without_rebuild_when_packet_omitted(

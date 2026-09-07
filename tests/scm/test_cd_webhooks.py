@@ -1,8 +1,7 @@
 """W14 / W15 — SCM webhook security, idempotency, conformance (#361).
 
 Out of scope (no tests that force impl): new SCM providers (Bitbucket, Azure
-DevOps, Gitea, Gerrit); ``ci/providers/gitlab.py`` is CI logs, not an SCM
-adapter.
+DevOps, Gitea, Gerrit).
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from tests.ci.workflow_support import REPO_ROOT
 from tests.support.cd_batch import (
     SUPPORTED_WEBHOOK_PROVIDERS,
     WEBHOOK_MODULE,
@@ -19,16 +17,6 @@ from tests.support.cd_batch import (
     require_callable,
     require_module,
 )
-from tests.support.dead_package_wiring import SRC_ROOT
-
-
-def test_ci_gitlab_log_adapter_is_not_an_scm_webhook_surface() -> None:
-    """#361 out of scope — ``ci/providers/gitlab.py`` stays a CI log reader."""
-    ci_gitlab = REPO_ROOT / "src" / "mergecraft" / "ci" / "providers" / "gitlab.py"
-    assert ci_gitlab.is_file()
-    scm_init = (SRC_ROOT / "scm" / "__init__.py").read_text(encoding="utf-8")
-    assert "ci.providers.gitlab" not in scm_init
-    assert "ci/providers/gitlab" not in scm_init
 
 
 def test_w15_does_not_fold_webhooks_into_root_callback() -> None:

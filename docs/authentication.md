@@ -7,7 +7,7 @@ editing:
 
 ```bash
 mergecraft init
-mergecraft provider auth claude    # or codex, gemini, nous, …
+mergecraft provider auth anthropic    # or openai, google, nous, …
 mergecraft review                  # local review works now
 ```
 
@@ -22,6 +22,9 @@ To override models for local runs only — without changing what CI sees — use
 Commit `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml` after
 auth. Run `mergecraft workflow sync --check` before pushing if you assign roster
 models whose providers are not yet wired in the workflow.
+
+This repository's workflow does not listen for `@mergecraft review` — reviews
+run on `pull_request_target` (opened / synchronize).
 
 ## Provider reference
 
@@ -91,6 +94,22 @@ whose secret is missing.
 > ([issue #70](https://github.com/alexhawat/mergeCraft/issues/70)).
 > Whether the override is honoured is decided by `trust.agentSandbox` — see
 > [`docs/trust-policy.md`](trust-policy.md).
+
+### Where the local `.env` is resolved
+
+Every command that reads or writes a local credential resolves one of two
+anchors, and `MERGECRAFT_ENV` overrides both:
+
+| Command shape | Anchor |
+|---------------|--------|
+| Takes `--cwd` (`provider`, `model`, `agents`, `trust`) | `<cwd>/.env`, taken literally — the same directory `<cwd>/.mergecraft/config.yaml` is read from, so the registry and the credentials always name one repository |
+| Takes no `--cwd` (`auth`, `tracing logfire`, and the CLI startup load) | `<git-repo-root>/.env`, walking up from the process working directory |
+
+The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
+the next invocation actually loads. Outside a git checkout the writers fail
+with the directory they consulted named in the error; the startup load falls
+back to `./.env` and stays silent when it is missing, so global invocations and
+CI sandboxes are unaffected.
 
 ### Credential detection (`credential_status_for_slug`)
 

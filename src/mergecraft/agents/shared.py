@@ -163,6 +163,13 @@ class AgentResult:
     terminal_submission_received: bool = False
     terminal_submission_id: str | None = None
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    prompt: str | None = None
+
+
+def with_prompt(result: AgentResult, prompt: str | None) -> AgentResult:
+    """Attach the prompt this harness sent; used by chain-level ``llm.call`` capture."""
+    result.prompt = prompt
+    return result
 
 
 @dataclass(slots=True)

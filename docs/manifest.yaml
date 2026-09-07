@@ -139,6 +139,18 @@ pages:
     generator: null
     purpose: Tracing sinks, retention, and Logfire/OTLP wiring for operators.
 
+  - path: docs/THREAT-MODEL.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Threat model — egress allow-list, SSRF guards, and vulnerability gate regression surface (#362).
+
+  - path: docs/_standards/coding-standards.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Normative repo-wide coding conventions — style, types, async, testing, security, Git.
+
   - path: docs/CONTRIBUTING-ANALYZERS.md
     audience: contributor
     template: contributor

@@ -73,7 +73,7 @@ class TestRetryBehavior:
         """W9.3 — a retryable GET is retried, but bounded (never a hot loop)."""
         client = GitHubClient(token="x")
         flaky = _FlakyTransport(500)
-        monkeypatch.setattr(client._client, "request", flaky)
+        monkeypatch.setattr(client._active_client(), "request", flaky)
         with pytest.raises(httpx.HTTPStatusError):
             await client.get("/repos/acme/demo")
         assert 2 <= flaky.calls <= 5, f"GET attempts unbounded or absent: {flaky.calls}"
@@ -84,7 +84,7 @@ class TestRetryBehavior:
         """W9.3 — a 422 is not retried (classification, not blanket retry)."""
         client = GitHubClient(token="x")
         flaky = _FlakyTransport(422)
-        monkeypatch.setattr(client._client, "request", flaky)
+        monkeypatch.setattr(client._active_client(), "request", flaky)
         with pytest.raises(httpx.HTTPStatusError):
             await client.get("/repos/acme/demo")
         assert flaky.calls == 1
@@ -97,7 +97,7 @@ class TestRetryBehavior:
         """
         client = GitHubClient(token="x")
         flaky = _FlakyTransport(500)
-        monkeypatch.setattr(client._client, "request", flaky)
+        monkeypatch.setattr(client._active_client(), "request", flaky)
         with pytest.raises(httpx.HTTPStatusError):
             await client.post("/repos/acme/demo/issues", json={"title": "x"})
         assert flaky.calls == 1, f"mutation retried {flaky.calls - 1} extra time(s)"

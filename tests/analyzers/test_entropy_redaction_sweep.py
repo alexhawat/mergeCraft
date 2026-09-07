@@ -31,8 +31,25 @@ class RedactionHit:
 
 
 def _high_entropy_secret(length: int = 32) -> str:
+    """Draw a token the redactor actually treats as a real secret.
+
+    A single ``secrets.choice`` draw occasionally satisfies one of
+    ``redact_secrets``'s benign-shape exemptions by chance — most often the
+    camelCase identifier allowlist (``_BENIGN_IDENTIFIER_RE``), which any
+    random alphanumeric draw that starts lowercase and avoids the separator
+    characters can trivially match regardless of entropy — or lands below the
+    entropy floor outright. Checking only the entropy formula (an earlier,
+    insufficient fix) still flaked on the identifier exemption. Resample
+    against the real function so the precondition can't drift from production
+    behaviour.
+    """
     alphabet = string.ascii_letters + string.digits + "+/=_-"
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+    for _ in range(100):
+        candidate = "".join(secrets.choice(alphabet) for _ in range(length))
+        if candidate not in redact_secrets(candidate):
+            return candidate
+    msg = "could not draw a token the redactor treats as a real secret in 100 attempts"
+    raise AssertionError(msg)
 
 
 def _fixture_paths_for_analyzer(analyzer_id: str) -> list[Path]:
