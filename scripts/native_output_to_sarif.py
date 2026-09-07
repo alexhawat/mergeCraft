@@ -26,9 +26,9 @@ from mergecraft.analyzers.parsers.bandit_json import (
     iter_bandit_result_rows,
 )
 from mergecraft.analyzers.parsers.trufflehog_jsonl import (
-    _detector_name,
-    _line_from_metadata,
-    _path_from_metadata,
+    detector_name,
+    line_from_metadata,
+    path_from_metadata,
 )
 
 _BANDIT_LEVEL = {"high": "error", "medium": "warning", "low": "note", "undefined": "note"}
@@ -217,9 +217,31 @@ def bandit_to_sarif(raw: str) -> SarifLog:
     return _sarif(tool="bandit", results=results)
 
 
+_TRUFFLEHOG_FATAL_LEVELS = frozenset({"error", "fatal", "panic"})
+
+
 def _is_trufflehog_log_line(item: dict[str, object]) -> bool:
     """Return True for TruffleHog progress logs (not findings)."""
     return bool(item.get("level") and item.get("msg"))
+
+
+def _reject_trufflehog_scan_error(item: dict[str, object]) -> None:
+    """Fail the conversion on an error-level log line.
+
+    TruffleHog logs per-file failures (unreadable file, a decoder erroring on
+    one blob) and still exits 0, so the exit-code guard in
+    ``ci_extended_sarif.emit_trufflehog_sarif`` does not catch them. Skipping
+    those lines would emit a clean SARIF for files that were never scanned —
+    the same "looks like a clean scan" failure that empty output was made to
+    avoid, one level down. Only ``info``/``warn``/``debug`` progress lines are
+    dropped.
+    """
+    level = str(item.get("level", "")).strip().casefold()
+    if level not in _TRUFFLEHOG_FATAL_LEVELS:
+        return
+    detail = str(item.get("msg", "")).strip() or level
+    msg = f"trufflehog reported a scan error, so the scan is not clean: {detail}"
+    raise ConverterError(msg)
 
 
 def trufflehog_to_sarif(raw: str) -> SarifLog:
@@ -227,7 +249,9 @@ def trufflehog_to_sarif(raw: str) -> SarifLog:
 
     Empty stdout (or only progress logs) is a real clean scan: emit a valid
     empty-results document with tool metadata. Truncated or invalid JSON is
-    a converter failure. Finding ``Raw`` / ``RawV2`` values never enter the
+    a converter failure, and so is an ``error``-level log line — TruffleHog
+    exits 0 after a per-file scan failure, so a skipped file would otherwise
+    be reported clean. Finding ``Raw`` / ``RawV2`` values never enter the
     SARIF message — only detector name, path, and line.
     """
     results: list[SarifResult] = []
@@ -243,16 +267,17 @@ def trufflehog_to_sarif(raw: str) -> SarifLog:
         if not isinstance(parsed, dict):
             continue
         if _is_trufflehog_log_line(parsed):
+            _reject_trufflehog_scan_error(parsed)
             continue
         metadata = parsed.get("SourceMetadata") or {}
         if not isinstance(metadata, dict):
             metadata = {}
-        path = _path_from_metadata(metadata, repo_root=None)
+        path = path_from_metadata(metadata, repo_root=None)
         try:
-            start = require_line(_line_from_metadata(metadata), default=1)
+            start = require_line(line_from_metadata(metadata), default=1)
         except ValueError as exc:
             raise ConverterError(str(exc)) from exc
-        detector = _detector_name(parsed)
+        detector = detector_name(parsed)
         verified = bool(parsed.get("Verified"))
         results.append(
             _result(

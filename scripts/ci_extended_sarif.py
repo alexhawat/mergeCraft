@@ -9,7 +9,6 @@ never a 0-byte file.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -28,14 +27,13 @@ _SCAN_PATHS = ("src", "tests", "scripts", "action.yml")
 # not ``--exclude-globs`` (git-only). See trufflesecurity/trufflehog#4289.
 _TRUFFLEHOG_EXCLUDE_REGEXES = (
     r"\.git/",
-    r"\.venv",
+    r"(^|/)\.venv/",
     r"\.mergecraft/analyzer-cache/",
     r"node_modules/",
     r"graphify-out/",
     r"\.mypy_cache/",
     r"\.ruff_cache/",
 )
-_NATIVE_CONVERTER = Path(__file__).with_name("native_output_to_sarif.py")
 
 
 def _semgrep_catalog_version() -> str:
@@ -53,15 +51,20 @@ def _repo_root() -> Path:
 
 
 def _trufflehog_to_sarif(raw: str) -> object:
-    spec = importlib.util.spec_from_file_location("native_output_to_sarif", _NATIVE_CONVERTER)
-    if spec is None or spec.loader is None:
-        msg = "could not load native_output_to_sarif.py"
-        raise EmitError(msg)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    converter = module.trufflehog_to_sarif
+    """Convert JSONL via the sibling converter, surfacing failures as EmitError.
+
+    ``ConverterError`` subclasses ``ValueError``, so truncated JSONL and an
+    error-level scan log both arrive here and become a named emit failure
+    rather than a traceback.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
-        return converter(raw)
+        from native_output_to_sarif import trufflehog_to_sarif
+    except ImportError as exc:
+        msg = f"could not load native_output_to_sarif.py: {exc}"
+        raise EmitError(msg) from exc
+    try:
+        return trufflehog_to_sarif(raw)
     except ValueError as exc:
         msg = f"trufflehog JSONL could not be converted to SARIF: {exc}"
         raise EmitError(msg) from exc
@@ -139,7 +142,7 @@ def _trufflehog_scan_argv(
     *,
     manifest: AnalyzerManifest,
     repo_root: Path,
-    exclude_paths: Path | None = None,
+    exclude_paths: Path,
 ) -> list[str]:
     from mergecraft.analyzers.execution import provision_managed_argv
     from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv
@@ -156,10 +159,9 @@ def _trufflehog_scan_argv(
         raise EmitError(msg)
     argv = list(provisioned.argv)
     if "--exclude-paths" not in argv and "-x" not in argv:
-        path = exclude_paths or write_trufflehog_exclude_paths(
-            repo_root / ".mergecraft" / "analyzer-scratch"
-        )
-        argv.extend(["--exclude-paths", str(path)])
+        # Required, not defaulted: falling back to a path under ``repo_root``
+        # would drop the exclude file inside the tree being scanned.
+        argv.extend(["--exclude-paths", str(exclude_paths)])
     return argv
 
 

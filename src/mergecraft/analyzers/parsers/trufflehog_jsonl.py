@@ -1,4 +1,10 @@
-"""TruffleHog JSONL output parser."""
+"""TruffleHog JSONL output parser.
+
+The field-extraction helpers are public because the SARIF converter in
+``scripts/native_output_to_sarif.py`` shares them: the in-Action parser and
+the CI evidence artifact must agree on the path, line, and detector name for
+the same finding, or the two ingest paths report the same secret differently.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +30,7 @@ _ROTATION_FIRST_REMEDIATION = (
 )
 
 
-def _line_from_metadata(metadata: dict[str, Any]) -> int:
+def line_from_metadata(metadata: dict[str, Any]) -> int:
     data = metadata.get("Data") or metadata
     if isinstance(data, dict):
         filesystem = data.get("Filesystem") or {}
@@ -33,7 +39,7 @@ def _line_from_metadata(metadata: dict[str, Any]) -> int:
     return 1
 
 
-def _path_from_metadata(metadata: dict[str, Any], *, repo_root: Path | None) -> str:
+def path_from_metadata(metadata: dict[str, Any], *, repo_root: Path | None) -> str:
     data = metadata.get("Data") or metadata
     if isinstance(data, dict):
         filesystem = data.get("Filesystem") or {}
@@ -47,7 +53,7 @@ def _path_from_metadata(metadata: dict[str, Any], *, repo_root: Path | None) -> 
     return "unknown"
 
 
-def _detector_name(item: dict[str, Any]) -> str:
+def detector_name(item: dict[str, Any]) -> str:
     if item.get("DetectorName"):
         return str(item["DetectorName"])
     if item.get("DetectorType") is not None:
@@ -75,11 +81,11 @@ def parse_trufflehog_jsonl(
         metadata = item.get("SourceMetadata") or {}
         if not isinstance(metadata, dict):
             metadata = {}
-        path = _path_from_metadata(metadata, repo_root=repo_root)
-        start_line = _line_from_metadata(metadata)
+        path = path_from_metadata(metadata, repo_root=repo_root)
+        start_line = line_from_metadata(metadata)
         verified = bool(item.get("Verified"))
         native_level = "verified" if verified else "unverified"
-        detector = _detector_name(item)
+        detector = detector_name(item)
         findings.append(
             make_finding(
                 tool=manifest.id,
@@ -99,4 +105,9 @@ def parse_trufflehog_jsonl(
     return findings
 
 
-__all__ = ["parse_trufflehog_jsonl"]
+__all__ = [
+    "detector_name",
+    "line_from_metadata",
+    "parse_trufflehog_jsonl",
+    "path_from_metadata",
+]

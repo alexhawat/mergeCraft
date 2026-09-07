@@ -243,6 +243,31 @@ def test_trufflehog_progress_logs_are_not_findings() -> None:
     assert doc["runs"][0]["tool"]["driver"]["name"] == "trufflehog"
 
 
+def test_trufflehog_error_log_is_a_converter_failure() -> None:
+    """A file TruffleHog could not scan must not be reported as clean.
+
+    TruffleHog logs per-file failures and still exits 0, so the exit-code
+    guard never sees them. Dropping the line would emit a clean SARIF for a
+    file that was never scanned.
+    """
+    raw = (
+        '{"level":"error","ts":"2026-08-22T10:02:00Z","logger":"trufflehog",'
+        '"msg":"error scanning chunk","error":"permission denied"}\n'
+    )
+    with pytest.raises(ConverterError, match="scan error"):
+        trufflehog_to_sarif(raw)
+
+
+def test_trufflehog_info_and_warn_logs_are_still_skipped() -> None:
+    """Only error-level lines fail; ordinary progress logs stay non-findings."""
+    raw = (
+        '{"level":"info","ts":"2026-08-22T10:02:00Z","msg":"scanning"}\n'
+        '{"level":"warn","ts":"2026-08-22T10:02:01Z","msg":"skipping large file"}\n'
+    )
+    doc = trufflehog_to_sarif(raw)
+    assert doc["runs"][0]["results"] == []
+
+
 def test_trufflehog_fixture_finding_writes_sarif() -> None:
     fixture = _ROOT / "tests" / "analyzers" / "fixtures" / "native" / "trufflehog-minimal.jsonl"
     doc = trufflehog_to_sarif(fixture.read_text(encoding="utf-8"))
