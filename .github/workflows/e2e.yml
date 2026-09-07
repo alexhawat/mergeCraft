@@ -19,6 +19,11 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
+      required-security:
+        description: Run the required image security slice for a release caller
+        required: false
+        default: false
+        type: boolean
       ref:
         description: Git ref under test (defaults to the caller ref)
         required: false
@@ -52,7 +57,7 @@ env:
 jobs:
   e2e-pr:
     name: Action-image E2E (PR / security slice)
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call'
+    if: inputs.required-security || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -119,7 +124,7 @@ jobs:
 
   e2e-nightly:
     name: Action-image E2E (nightly / broad + live)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: ${{ !inputs.required-security && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
