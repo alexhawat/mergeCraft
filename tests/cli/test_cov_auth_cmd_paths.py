@@ -215,21 +215,35 @@ def test_github_and_both_scopes_resolve_the_repo_slug(monkeypatch: MonkeyPatch) 
 def test_env_path_prefers_the_override_then_the_repo_root(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
+    from mergecraft.cli import local_env
+
     monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / "custom.env"))
     assert auth_cmd._local_env_path() == (tmp_path / "custom.env").resolve()
     monkeypatch.delenv("MERGECRAFT_ENV")
-    monkeypatch.setattr(auth_cmd, "git_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(local_env, "git_repo_root", lambda _start=None: tmp_path)
     assert auth_cmd._local_env_path() == tmp_path / ".env"
 
 
 def test_env_path_bails_outside_a_repository(
-    monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+    monkeypatch: MonkeyPatch, tmp_path: Path, capsys: CaptureFixture[str]
 ) -> None:
+    from mergecraft.cli import local_env
+
     monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
-    monkeypatch.setattr(auth_cmd, "git_repo_root", lambda: None)
+    monkeypatch.setattr(local_env, "git_repo_root", lambda _start=None: None)
+    monkeypatch.chdir(tmp_path)
     with pytest.raises(typer.Exit):
         auth_cmd._local_env_path()
-    assert "could not locate the repository root" in capsys.readouterr().err
+
+    err = capsys.readouterr().err
+    assert "could not locate a git repository root" in err
+    # The message names the directory that was consulted: ``auth`` takes no
+    # ``--cwd``, so the operator has no other way to see which one failed.
+    # Rich folds long paths, so compare with whitespace removed.
+    flat = "".join(err.split())
+    assert "".join(str(tmp_path.resolve()).split()) in flat
+    # ...and does not tell the operator to pass a flag this command lacks.
+    assert "--cwd" not in err
 
 
 def test_env_writer_quotes_only_values_that_need_it(tmp_path: Path) -> None:

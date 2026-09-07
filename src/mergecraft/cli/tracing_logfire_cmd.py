@@ -23,7 +23,6 @@ from mergecraft.cli.auth_cmd import (
     LOGFIRE_PROJECT_ENV,
     LOGFIRE_RUNTIME_TOKEN_ENV,
     LOGFIRE_TOKEN_SECRET,
-    _local_env_path,
     _set_gh_secret,
     _validate_logfire_token,
     _write_env_value,
@@ -33,6 +32,7 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
 )
+from mergecraft.cli.local_env import local_env_path_for_process_cwd
 from mergecraft.cli.tracing_logfire_wf_yaml import (
     DEFAULT_WORKFLOW_RELATIVE_PATH,
     LogfireWorkflowError,
@@ -243,7 +243,7 @@ def logfire_enable(
 
     wrote_local = False
     if target in {"local", "both"}:
-        env_path = _local_env_path()
+        env_path = local_env_path_for_process_cwd()
         env_token_ok = _write_env_value(env_path, LOGFIRE_RUNTIME_TOKEN_ENV, token)
         env_project_ok = _write_env_value(env_path, LOGFIRE_PROJECT_ENV, project)
         # ``--region`` (when given) is persisted so ``config tracing`` and the
@@ -320,7 +320,7 @@ def logfire_disable(
 
     wrote_local = False
     if target in {"local", "both"}:
-        env_path = _local_env_path()
+        env_path = local_env_path_for_process_cwd()
         # ``set_key`` with an empty value still rewrites the line, so the key
         # is present (for re-enable) but blank.
         env_token_ok = _write_env_value(env_path, LOGFIRE_RUNTIME_TOKEN_ENV, "")
