@@ -51,7 +51,8 @@ Conclusion = Literal["success", "failure", "neutral"]
 def _run_url(ctx: ToolContext) -> str | None:
     if not ctx.run_id:
         return None
-    return f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{ctx.run_id}"
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    return f"{server}/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{ctx.run_id}"
 
 
 def _reviewed_sha(
@@ -207,9 +208,7 @@ async def _create_check_run(
     }
     if ctx.run_id:
         body["external_id"] = f"{ctx.run_id}:{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
-        body["details_url"] = (
-            f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{ctx.run_id}"
-        )
+        body["details_url"] = _run_url(ctx)
     await ctx.scm.post(f"/repos/{ctx.repo.owner}/{ctx.repo.name}/check-runs", json=body)
     logger.info(
         "» posted {} check ({}) on {}",

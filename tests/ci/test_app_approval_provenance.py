@@ -47,6 +47,7 @@ def execute(
     checks: list[dict[str, Any]] | None = None,
     heads: list[dict[str, Any]] | None = None,
     app_id: str = "42",
+    server: str = "https://github.com",
 ) -> tuple[bool, list[dict[str, Any]]]:
     posted: list[dict[str, Any]] = []
     snapshots = iter(heads if heads is not None else [PR, PR])
@@ -61,7 +62,7 @@ def execute(
         assert path == f"/repos/acme/demo/commits/{HEAD}/check-runs?per_page=100"
         return {"check_runs": checks if checks is not None else [CHECK]}
 
-    result = approve(api, repo=REPO, run=run or RUN, app_id=app_id, server="https://github.com")
+    result = approve(api, repo=REPO, run=run or RUN, app_id=app_id, server=server)
     return result, posted
 
 
@@ -163,3 +164,15 @@ def test_app_approval_pending_newer_verdict_cannot_reuse_success() -> None:
             {**CHECK, "id": 11, "status": "in_progress", "conclusion": None, "completed_at": None},
         ]
     ) == (False, [])
+
+
+def test_enterprise_run_url_is_required_and_accepted() -> None:
+    server = "https://github.example.test"
+    accepted, posted = execute(server=server)
+    assert not accepted
+    assert not posted
+    check = deepcopy(CHECK)
+    check["details_url"] = f"{server}/acme/demo/actions/runs/123"
+    accepted, posted = execute(server=server, checks=[check])
+    assert accepted
+    assert len(posted) == 1
