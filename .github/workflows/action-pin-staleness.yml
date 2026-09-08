@@ -21,9 +21,15 @@
 name: Action pin staleness
 
 on:
+  push:
+    # Debt lands on main at merge time, so measure then rather than leaving the
+    # queue un-flagged until the next cron. This also closes the tracking issue
+    # as soon as a pin bump lands, instead of up to a day later.
+    branches: [main]
   schedule:
-    # Daily, after the usual merge window, so a filed issue reports the day's
-    # settled lag rather than a mid-merge snapshot.
+    # Backstop for the push path: catches a pin that goes stale because main
+    # moved under it. GitHub's cron is best-effort — routinely late and skipped
+    # under load — so it is the safety net, not the primary trigger.
     - cron: "0 7 * * *"
   workflow_dispatch:
 
@@ -41,6 +47,13 @@ env:
 
 jobs:
   staleness:
+    # workflow_dispatch accepts any branch, and this job reads the pin from the
+    # tree it checks out. Dispatched from a pin-bump branch, that pin is ahead
+    # of main rather than behind it, `_check_staleness` returns clean for the
+    # "bumped here, not yet promoted" case, and the close step would resolve the
+    # tracking issue while main is still stale — silently retiring a live alert.
+    # This job only ever speaks for main, so it only ever runs on main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read

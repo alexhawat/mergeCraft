@@ -98,11 +98,57 @@ def test_the_staleness_workflow_does_not_shallow_fetch_the_default_branch() -> N
         assert "--shallow-since" not in line, f"shallow fetch defeats the staleness guard: {line}"
 
 
-def test_ci_yml_fails_on_stale_pin_instead_of_warning_only() -> None:
+def test_ci_yml_fails_on_pin_defects_instead_of_warning_only() -> None:
+    """The PR gate must break the build, not emit a ``::warning`` nobody reads.
+
+    Renamed from ``..._on_stale_pin_...``: ci.yml no longer runs the staleness
+    rule at all (#669), so a name promising that was a lie about coverage. The
+    property being guarded is unchanged and still real — the rules ci.yml *does*
+    run are hard failures. Staleness gets the same treatment one test down, in
+    the job that now owns it.
+    """
     ci_yml = read_text(".github/workflows/ci.yml")
     assert 'echo "::warning title=mergecraft action pin drift::' not in ci_yml
     assert "make action-pin-check" in ci_yml
     assert "exit 1" in ci_yml or "exit $?" in ci_yml
+
+
+def test_the_staleness_workflow_reports_a_stale_pin_instead_of_warning_only() -> None:
+    """Moving the rule must not downgrade it to a log line in a job nobody opens."""
+    text = read_text(f".github/workflows/{_STALENESS_WORKFLOW}")
+    assert "::warning" not in text, "a scheduled job's warning annotation reaches nobody"
+
+    steps = job(load_workflow(_STALENESS_WORKFLOW), "staleness")["steps"]
+    filing = [step for step in steps if "gh issue create" in str(step.get("run", ""))]
+    assert filing, "a stale pin produces no durable report"
+    assert "stale == 'true'" in str(filing[0].get("if", "")), (
+        "the reporting step must be gated on the measurement, not run unconditionally"
+    )
+
+
+def test_the_staleness_job_only_ever_speaks_for_main() -> None:
+    """``workflow_dispatch`` accepts any branch; this job must not believe one.
+
+    It reads the pin from the tree it checks out. Dispatched from a pin-bump
+    branch, that pin is *ahead* of main, ``_check_staleness`` returns clean for
+    the "bumped here, not yet promoted" case, and the close step would resolve
+    the tracking issue while main is still stale — silently retiring a live
+    alert.
+    """
+    staleness = job(load_workflow(_STALENESS_WORKFLOW), "staleness")
+    assert staleness.get("if") == "github.ref == 'refs/heads/main'"
+
+
+def test_staleness_is_measured_when_debt_lands_not_only_once_a_day() -> None:
+    """Cron alone leaves the queue un-flagged for up to a day after a merge.
+
+    GitHub's scheduler is best-effort — routinely late, skipped entirely under
+    load — so a push trigger on main is what makes this timely; the cron is the
+    backstop for a pin that goes stale because main moved under it.
+    """
+    triggers = workflow_on(load_workflow(_STALENESS_WORKFLOW))
+    assert "push" in triggers, "debt is not reported until the next cron"
+    assert triggers["push"]["branches"] == ["main"]
 
 
 def test_mergecraft_workflow_three_rungs_share_one_pin_value() -> None:
