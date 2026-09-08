@@ -80,6 +80,9 @@ def _build_stub_agent(monkeypatch: MonkeyPatch, capture_path: Path) -> None:
     """
     from mergecraft.agents.shared import AgentResult, agent
 
+    monkeypatch.setenv("MERGECRAFT_MODEL", "anthropic/claude-sonnet")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-test-key")
+
     async def _install(_token: str | None = None) -> str:
         return "opencode"
 
@@ -93,6 +96,7 @@ def _build_stub_agent(monkeypatch: MonkeyPatch, capture_path: Path) -> None:
             success=True,
             output="",
             metadata={},
+            terminal_submission_received=True,
         )
 
     stub = agent(name="opencode", install=_install, run=_run)

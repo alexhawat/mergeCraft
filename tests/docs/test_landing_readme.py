@@ -149,7 +149,7 @@ def test_landing_has_numbered_install() -> None:
     assert "uses:" in lowered or "alexhawat/mergecraft@" in lowered, (
         "Install steps must document the GitHub Action path"
     )
-    assert "mergecraft auth" in lowered, "Install steps must document provider auth"
+    assert "mergecraft provider auth" in lowered, "Install steps must document provider auth"
     assert any(
         token in lowered for token in ("pull request", "@mergecraft review", "workflow_dispatch")
     ), "Install steps must document how to trigger a review"

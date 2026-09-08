@@ -15,7 +15,7 @@ Set up mergeCraft in this repo by following the skill's setup checklist:
    ```
 
 3. **STOP before authentication.** Ask me to run the interactive
-   `mergecraft auth <provider>` step (`claude`, `codex`, or another provider from
+   `mergecraft provider auth <provider> --scope github` step (a configured label or id from `mergecraft provider list`; see
    [`docs/authentication.md`](../docs/authentication.md)). Never invent or commit
    credentials or secrets.
 4. Commit only `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`

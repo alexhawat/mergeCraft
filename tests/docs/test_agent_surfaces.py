@@ -87,7 +87,7 @@ def test_agents_md_exists_and_teaches_review_not_diff_review_as_primary() -> Non
 
 def test_agents_md_stops_on_interactive_auth() -> None:
     text = _read(AGENTS_MD).lower()
-    assert "mergecraft auth" in text, "AGENTS.md must document mergecraft auth"
+    assert "mergecraft provider auth" in text, "AGENTS.md must document mergecraft provider auth"
     assert "never" in text, "AGENTS.md must tell agents never to invent credentials"
     assert any(token in text for token in ("credential", "secret", "token")), (
         "AGENTS.md must warn about credential/secret handling before interactive auth"
