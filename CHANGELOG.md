@@ -90,6 +90,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separates concurrent sessions, kills analyzer children on timeout, and cleans
   only owned resources; a disposable
   Linux integration harness exercises the production firewall boundary.
+- Credential broker stream failures now close the connection without inserting a
+  second HTTP response, and client disconnects release upstream responses (#595)
+- Brokered Codex runs preserve configured proxy bypass entries and always bypass
+  proxies for the loopback broker, without changing parent proxy settings (#597)
+- Removed an obsolete Codex broker auth branch that suppressed the API-key
+  authentication diagnostic; subscription authentication is unchanged (#596)
 
 - Release verification uses compatible GitHub CLI policy flags, validates deployment
   candidates automatically, and publishes canonical image tags only after signed
