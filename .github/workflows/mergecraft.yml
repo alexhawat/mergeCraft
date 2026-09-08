@@ -629,6 +629,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || 'github-actions[bot]' }}
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
@@ -778,6 +779,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_codex.outputs.app-slug && format('{0}[bot]', steps.app_token_codex.outputs.app-slug) || 'github-actions[bot]' }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
@@ -902,6 +904,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_claude.outputs.app-slug && format('{0}[bot]', steps.app_token_claude.outputs.app-slug) || 'github-actions[bot]' }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev

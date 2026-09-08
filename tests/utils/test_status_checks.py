@@ -236,3 +236,19 @@ async def test_report_status_checks_posts_neutral_without_rebuilding_failed_pack
     assert COMPLETION_CHECK in names
     assert APPROVAL_CHECK in names
     assert _approval_checks(github)[0]["conclusion"] == "neutral"
+
+
+async def test_check_provenance_identifies_exact_run_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
+    ctx.run_id = 123
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    await _report(ctx, run_succeeded=True)
+    assert github.check_runs
+    assert all(check["external_id"] == "123:2" for check in github.check_runs)
+    assert all(
+        check["details_url"] == "https://github.com/acme/demo/actions/runs/123"
+        for check in github.check_runs
+    )

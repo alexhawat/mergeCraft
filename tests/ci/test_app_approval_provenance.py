@@ -132,6 +132,10 @@ def test_app_tokens_are_refreshed_per_attempt_and_fallback_is_preserved() -> Non
         assert steps.index(mint) + 1 == steps.index(review)
         assert "env.HAS_APP == 'true'" in mint["if"]
         assert " ".join(review["if"].split()) in " ".join(mint["if"].split())
+        assert (
+            f"steps.app_token_{provider}.outputs.app-slug"
+            in review["env"]["MERGECRAFT_REVIEWER_BOT_LOGIN"]
+        )
         assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"
         assert not mint["with"].get("skip-token-revoke")
         assert mint["continue-on-error"] is True
