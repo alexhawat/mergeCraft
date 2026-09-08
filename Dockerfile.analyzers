@@ -110,6 +110,7 @@ WORKDIR /opt/mergecraft
 
 COPY pyproject.toml uv.lock README.md hatch_build.py ./
 COPY src/mergecraft ./src/mergecraft
+COPY evals/corpora/recall_pass_corpus.json ./evals/corpora/recall_pass_corpus.json
 
 RUN uv sync --frozen --no-dev \
     && useradd -m -u 10001 -s /bin/bash mergecraft \

@@ -95,6 +95,7 @@ WORKDIR /opt/mergecraft
 
 COPY pyproject.toml uv.lock README.md hatch_build.py ./
 COPY src/mergecraft ./src/mergecraft
+COPY evals/corpora/recall_pass_corpus.json ./evals/corpora/recall_pass_corpus.json
 
 # ``--extra tracing`` installs logfire + the OpenTelemetry SDK/exporter. Without
 # it the sink factory degrades a ``logfire`` / ``otel`` sink to ``NullSink``
