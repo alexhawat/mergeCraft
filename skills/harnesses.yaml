@@ -55,7 +55,7 @@ harnesses:
       hermes skills install https://github.com/alexhawat/mergeCraft/tree/<ref>/skills/hermes
       ```
 
-      mergeCraft ships a Nous provider (``mergecraft auth nous``,
+      mergeCraft ships a Nous provider (``mergecraft provider auth nous --scope github``,
       ``nous/deepseek/deepseek-v4-flash``) — a Hermes user can run reviews entirely on
       Nous credentials when configured.
     skip_validate: true

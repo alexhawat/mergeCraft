@@ -58,7 +58,9 @@ def clone_local_repo(tmp_path: Path) -> Path:
     """Clone the checkout under test into an isolated scratch repo."""
     dest = tmp_path / "scratch"
     subprocess.run(
-        ["git", "clone", "--local", str(REPO_ROOT), str(dest)],
+        # Protected source worktrees may forbid incrementing object hard-link
+        # counts. Copy objects while preserving the real Git clone semantics.
+        ["git", "clone", "--local", "--no-hardlinks", str(REPO_ROOT), str(dest)],
         check=True,
         capture_output=True,
         text=True,

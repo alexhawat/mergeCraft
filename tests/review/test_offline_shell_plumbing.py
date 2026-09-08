@@ -155,6 +155,10 @@ async def test_agent_review_puts_shell_on_resolved_payload(
         lambda **_: _FakeAgent(),
     )
     monkeypatch.setattr("mergecraft.review.offline_agent.resolve_model", lambda **_: "test-model")
+    monkeypatch.setattr(
+        "mergecraft.review.offline_agent.effective_model_chain",
+        lambda *_, **kw: ["anthropic/claude-sonnet"],
+    )
 
     def _stop_after_payload(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("stop after payload construction")

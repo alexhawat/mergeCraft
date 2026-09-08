@@ -57,15 +57,17 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
 
 4. STOP and hand the credential step back to me. Do not read, generate, guess,
    echo, or commit any API key, token, or .env file. Print the single command
-   you want me to run, picking the provider from this list and asking me which
-   one I have:
-     mergecraft auth claude     # Claude Pro/Max subscription
-     mergecraft auth codex      # ChatGPT Plus/Pro/Team/Enterprise
-     mergecraft auth gemini     # Google AI Studio key
-     mergecraft auth cursor     # Cursor Cloud key
-     mergecraft auth nous       # Nous Portal key
-     mergecraft auth tokenhub   # Tencent TokenHub key
-     mergecraft auth minimax    # MiniMax key
+   you want me to run. Inspect `mergecraft provider list` first; use the label
+   or id configured by init (add the provider first if missing). Examples
+   below assume those labels exist; use
+   --scope local instead for local evaluation:
+     mergecraft provider auth anthropic --scope github     # Claude Pro/Max subscription
+     mergecraft provider auth openai --scope github      # ChatGPT Plus/Pro/Team/Enterprise
+     mergecraft provider auth google --scope github     # Google AI Studio key
+     mergecraft provider auth cursor --scope github     # Cursor Cloud key
+     mergecraft provider auth nous --scope github       # Nous Portal key
+     mergecraft provider auth tokenhub --scope github   # Tencent TokenHub key
+     mergecraft provider auth minimax --scope github    # MiniMax key
    Any other OpenAI-compatible endpoint also works — if I say "something else",
    read docs/authentication.md and set up the custom-provider env pair instead.
    Each command stores a GitHub Actions secret for me via `gh secret set`.
@@ -151,7 +153,7 @@ Then: `/mergecraft-setup` to scaffold, `/mergecraft-review` to review a local di
 Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md and set
 mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python —
 do not install Python), run `mergecraft init`, wire .mergecraft/config.yaml, and
-open a PR with the workflow. Print the `mergecraft auth <provider>` command for
+open a PR with the workflow. Print the `mergecraft provider auth <provider> --scope github` command for
 me to run myself — never touch credentials. Then copy
 skills/cursor/mergecraft/ into .agents/skills/mergecraft/ so you keep the
 knowledge.
@@ -166,7 +168,7 @@ Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md and set
 mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python —
 do not install Python), run `mergecraft init` in the consumer repo (never in the
 mergeCraft source tree), wire .mergecraft/config.yaml, and open a PR with the
-workflow. Print the `mergecraft auth <provider>` command for me to run myself —
+workflow. Print the `mergecraft provider auth <provider> --scope github` command for me to run myself —
 never touch credentials. After I confirm the secret is stored, run
 `mergecraft doctor` as needed. Install the generated skill from
 skills/grok-bot/mergecraft/ as a Grok Bot user skill (Settings → Plugins → Yours;
@@ -208,7 +210,7 @@ Set up mergeCraft in this repo. Follow
 https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md. Install with uv
 (do not install Python), run `mergecraft init`, set `models:` to
 ["google/gemini-3.1-pro-preview"] in .mergecraft/config.yaml, and open a PR
-with the workflow. Print `mergecraft auth gemini` for me to run — do not
+with the workflow. Print `mergecraft provider auth google --scope github` for me to run — do not
 handle the API key.
 ```
 
@@ -219,7 +221,7 @@ points at `AGENTS.md`:
 ```text
 Following AGENTS.md, add mergeCraft PR review to this repo: uv tool install the
 CLI, `mergecraft init`, commit the config + workflow on a branch, open a PR, and
-print the `mergecraft auth` command for me. Do not commit secrets.
+print the `mergecraft provider auth` command for me. Do not commit secrets.
 ```
 
 **OpenClaw / Hermes / any autonomous shell agent** — these have no mergeCraft
@@ -234,7 +236,7 @@ repo in the current working directory.
 Constraints:
   - `uv` is your only prerequisite; it provisions Python itself.
   - `mergecraft init` is non-interactive and safe to run unattended.
-  - `mergecraft auth *` is interactive and MUST be escalated to a human.
+  - `mergecraft provider auth * --scope github` is interactive and MUST be escalated to a human.
     Never fabricate, log, or commit a credential.
   - `mergecraft review --agent` streams versioned JSONL on stdout — use that,
     not screen-scraping, if you want to consume review results.
@@ -251,8 +253,8 @@ Produce a plan, execute it, then open a PR and report the escalation you need.
 
 | | Why | How long |
 |---|---|---|
-| **One provider credential** | `mergecraft auth …` is an interactive login (or a key paste). A well-behaved agent stops here rather than touching your secrets. | ~1 minute, once |
-| **`gh` logged in** *(optional)* | Lets `mergecraft auth` store the secret for you via `gh secret set`. Without it, you get the secret name to paste into GitHub Settings. | ~1 minute, once |
+| **One provider credential** | `mergecraft provider auth … --scope github` is an interactive login (or a key paste). A well-behaved agent stops here rather than touching your secrets. | ~1 minute, once |
+| **`gh` logged in** *(optional)* | Lets `mergecraft provider auth` store the secret for you via `gh secret set`. Without it, use explicit `--scope local` for local evaluation. | ~1 minute, once |
 
 Everything else — install, scaffold, config, commit, PR — is unattended.
 `mergecraft init` writes no secrets and needs no network.
@@ -336,7 +338,7 @@ code](docs/EXIT-CODES.md) your scripts can branch on. Operator trust knobs
 | --- | --- |
 | 1. Pick a source | Current worktree, `--base`/`--head`, `--range`, or `--diff patch.diff` |
 | 2. Dry-run first | `mergecraft review --dry-run` prints the Review prompt without calling a model |
-| 3. Review for real | Drop `--dry-run` after `mergecraft auth …` |
+| 3. Review for real | Drop `--dry-run` after `mergecraft provider auth <label-or-id> --scope local` |
 | 4. Automate | `mergecraft review --agent` streams JSONL on stdout for orchestrators |
 
 **Runnable trees** (full worktree content, not snippets) live under
@@ -362,7 +364,7 @@ For the GitHub Action path, see [How it works in GitHub Action](#how-it-works-in
 > **Requirements:** [uv](https://docs.astral.sh/uv/) and one provider credential.
 > uv provisions its own Python (3.11+) — you do not need a system Python.
 > An authenticated [GitHub CLI](https://cli.github.com) is optional, and only
-> makes `mergecraft auth` store the secret for you.
+> makes `mergecraft provider auth` store the secret for you.
 > Other paths (Docker-only, no local install at all): [`docs/install.md`](docs/install.md).
 
 1. **Install the CLI and scaffold the repo:**
@@ -375,8 +377,8 @@ mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraf
 2. **Authenticate** a provider (subscription recommended — no metered API billing):
 
 ```bash
-mergecraft auth claude   # Claude Pro/Max
-# or: codex · gemini · cursor · nous · tokenhub · minimax
+mergecraft provider auth anthropic --scope github   # Claude Pro/Max
+# use the configured label or id from: mergecraft provider list
 ```
 
 The credential is stored as a GitHub Actions secret via `gh secret set`. Add
@@ -442,13 +444,13 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 
 | Provider | Subscription (recommended) | API key | Recommended model |
 |----------|-----------------------------|---------|-------------------|
-| Anthropic Claude | `mergecraft auth claude` → `CLAUDE_CODE_OAUTH_TOKEN` | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` |
-| OpenAI Codex | `mergecraft auth codex` → `CODEX_AUTH_JSON` | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
-| Google Gemini | `mergecraft auth gemini` → `GEMINI_API_KEY` | `GEMINI_API_KEY` | `google/gemini-3.1-pro-preview` |
-| Nous Portal | — | `mergecraft auth nous` → `NOUS_API_KEY` | `nous/deepseek/deepseek-v4-flash` |
-| Tencent TokenHub | — | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` | `tokenhub/hy3` |
-| MiniMax | — | `mergecraft auth minimax` → `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `minimax/MiniMax-M3` |
-| Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` | `cursor/cloud-agent` |
+| Anthropic Claude | `mergecraft provider auth anthropic --scope github` → indexed credentials | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` |
+| OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
+| Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials | `GEMINI_API_KEY` | `google/gemini-3.1-pro-preview` |
+| Nous Portal | — | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` |
+| Tencent TokenHub | — | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` |
+| MiniMax | — | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` |
+| Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` |
 | OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `<your-prefix>/<your-model>` |
 | Logfire tracing | `mergecraft auth logfire` | see [`docs/TRACING.md`](docs/TRACING.md) | — |
 

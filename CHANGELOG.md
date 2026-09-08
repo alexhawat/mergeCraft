@@ -89,9 +89,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remove unused vulnerable pip bootstrap copies. Both images are scanned before
   merge; release scans retain attributable JSON alongside SARIF without relaxing
   the HIGH/CRITICAL gate. Python installation in the images uses uv.
-
-
-
+- Local review honors configured model chains, explicit/environment precedence,
+  fallback restrictions, and cumulative budgets; a process without a terminal
+  verdict is inconclusive (#592).
+- Provider authentication preflights the exact `--cwd` GitHub destination before
+  collecting credentials in both canonical commands and legacy aliases, rejects
+  unverified secret-management access, and
+  keeps explicit local scope independent of GitHub (#591).
+- Installed skills use a verified documentation commit containing every linked
+  target and teach canonical, explicitly scoped provider authentication (#589).
 - Analyzer isolation reports unsupported macOS accurately and warns when trusted
   execution lacks isolation. Filtered Linux egress denies host INPUT access,
   separates concurrent sessions, kills analyzer children on timeout, and cleans

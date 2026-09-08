@@ -103,12 +103,16 @@ def _get_gh_token() -> str:
     return token
 
 
-def _parse_git_remote() -> tuple[str, str]:
+def _parse_git_remote(cwd: Path | None = None) -> tuple[str, str]:
     try:
         url = subprocess.check_output(
-            git_argv(["remote", "get-url", "origin"]), text=True, stderr=subprocess.DEVNULL
+            git_argv(["remote", "get-url", "origin"]),
+            text=True,
+            stderr=subprocess.DEVNULL,
+            cwd=cwd,
+            timeout=30,
         ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):  # fmt: skip
         cli_bail("not a git repository or no 'origin' remote found.")
     match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:
@@ -163,26 +167,80 @@ class AuthTarget:
 
     local: bool
     github: GitHubSecretTarget | None
+    env_path: Path | None = None
 
 
-def _resolve_auth_target(scope: str) -> AuthTarget:
-    """Normalise ``--scope`` and resolve whatever ``gh`` context it needs.
+def _resolve_auth_target(scope: str, *, cwd: Path | None = None) -> AuthTarget:
+    """Resolve the destination before collecting credentials.
 
-    ``--scope local`` must work on a machine with no ``gh`` auth and no
-    network, so the ``gh``/``git`` probes only run for the scopes that
-    actually write an Actions secret.
+    Local scope never invokes GitHub. Every GitHub-writing command, including
+    legacy aliases, must pass the same preflight before collecting credentials.
     """
+    from mergecraft.cli.provider_cmd import _env_path
+
     normalised = _normalise_scope(scope)
+    env_path = _env_path(cwd) if normalised != "github" else None
     if normalised == "local":
-        return AuthTarget(local=True, github=None)
+        console.print(f"credential destination: local file [cyan]{env_path}[/cyan]")
+        return AuthTarget(local=True, github=None, env_path=env_path)
     _get_gh_token()
-    owner, repo = _parse_git_remote()
+    owner, repo = _parse_git_remote(cwd=cwd) if cwd is not None else _parse_git_remote()
     repo_slug = f"{owner}/{repo}"
-    console.print(f"detected repo [cyan]{repo_slug}[/cyan]")
+    console.print(f"credential destination: GitHub Actions secrets in [cyan]{repo_slug}[/cyan]")
+    console.print("For local evaluation, use --scope local; no GitHub secrets will be changed.")
+    _verify_github_secret_access(repo_slug, cwd=cwd)
+    if env_path is not None:
+        console.print(f"credential destination: local file [cyan]{env_path}[/cyan]")
     return AuthTarget(
         local=normalised == "both",
         github=GitHubSecretTarget(repo_slug=repo_slug),
+        env_path=env_path,
     )
+
+
+def _verify_github_secret_access(repo_slug: str, *, cwd: Path | None = None) -> None:
+    """Require verified administration and secret-key access before collection.
+
+    Args:
+        repo_slug (str): Exact destination repository selected by the operator.
+        cwd (Path | None): Working directory for GitHub CLI context.
+    """
+    try:
+        repository = subprocess.run(
+            ["gh", "api", f"repos/{repo_slug}"],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        repository_data = json.loads(repository.stdout)
+        permissions = (
+            repository_data.get("permissions") if isinstance(repository_data, dict) else None
+        )
+        if not isinstance(permissions, dict) or permissions.get("admin") is not True:
+            raise ValueError("repository administration permission is required")
+        response = subprocess.run(
+            ["gh", "api", f"repos/{repo_slug}/actions/secrets/public-key"],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        public_key = json.loads(response.stdout)
+        if (
+            not isinstance(public_key, dict)
+            or not public_key.get("key_id")
+            or not public_key.get("key")
+        ):
+            raise ValueError("missing repository public key")
+    except (subprocess.SubprocessError, OSError, ValueError):
+        cli_bail(
+            f"cannot verify access to Actions secrets for {repo_slug}; no credentials "
+            "were collected or written. Check repository secret-management permissions "
+            "or use --scope local."
+        )
 
 
 def _single_line_credential(*, name: str, value: str) -> str:
@@ -232,7 +290,7 @@ def _persist_credential(
     entries = dict(local_entries) if local_entries is not None else {name: value}
     any_local_written = False
     if target.local:
-        env_path = _local_env_path()
+        env_path = target.env_path or _local_env_path()
         # Not short-circuited: every entry is attempted so a partial failure
         # still leaves the entries that could be written (#437).
         succeeded_keys: list[str] = []
@@ -320,7 +378,7 @@ def auth_codex(scope: str = _SCOPE_OPTION) -> None:
         # anything to persist (#221).
         value = auth_path.read_text(encoding="utf-8")
 
-    if _legacy_auth_shim("codex", scope, {"API_KEY": value}):
+    if _legacy_auth_shim("codex", scope, {"API_KEY": value}, target=target):
         return
 
     _persist_credential(target=target, name=CODEX_AUTH_SECRET, value=value)
@@ -349,7 +407,7 @@ def auth_claude(scope: str = _SCOPE_OPTION) -> None:
             f"(expected {CLAUDE_OAUTH_TOKEN_PREFIX}…). saving it anyway."
         )
 
-    if _legacy_auth_shim("claude", scope, {"API_KEY": oauth_token}):
+    if _legacy_auth_shim("claude", scope, {"API_KEY": oauth_token}, target=target):
         return
 
     _persist_credential(target=target, name=CLAUDE_OAUTH_SECRET, value=oauth_token)
@@ -394,7 +452,7 @@ def auth_gemini(scope: str = _SCOPE_OPTION) -> None:
     if not _validate_gemini_api_key(api_key):
         cli_bail("Gemini API key validation failed (401/403). Check the key and retry.")
 
-    if _legacy_auth_shim("gemini", scope, {"API_KEY": api_key}):
+    if _legacy_auth_shim("gemini", scope, {"API_KEY": api_key}, target=target):
         return
 
     _persist_credential(target=target, name=GEMINI_API_SECRET, value=api_key)
@@ -447,7 +505,7 @@ def auth_cursor(scope: str = _SCOPE_OPTION) -> None:
     if not _validate_cursor_api_key(api_key):
         cli_bail("Cursor API key validation failed (401/403). Check the key and retry.")
 
-    if _legacy_auth_shim("cursor", scope, {"API_KEY": api_key}):
+    if _legacy_auth_shim("cursor", scope, {"API_KEY": api_key}, target=target):
         return
 
     _persist_credential(target=target, name=CURSOR_API_SECRET, value=api_key)
@@ -532,7 +590,7 @@ def auth_nous(scope: str = _SCOPE_OPTION) -> None:
     if not _validate_nous_api_key(api_key):
         cli_bail("Nous API key validation failed (401/403). Check the key and retry.")
 
-    if _legacy_auth_shim("nous", scope, {"API_KEY": api_key}):
+    if _legacy_auth_shim("nous", scope, {"API_KEY": api_key}, target=target):
         return
 
     _persist_credential(target=target, name=NOUS_API_SECRET, value=api_key)
@@ -565,7 +623,7 @@ def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
     ):
         cli_bail("TokenHub API key validation failed (401/403). Check the key and retry.")
 
-    if _legacy_auth_shim("tokenhub", scope, {"API_KEY": api_key}):
+    if _legacy_auth_shim("tokenhub", scope, {"API_KEY": api_key}, target=target):
         return
 
     _persist_credential(target=target, name=TOKENHUB_API_SECRET, value=api_key)
@@ -814,11 +872,13 @@ def _legacy_auth_hint(label: str) -> None:
         console.print(message, markup=False)
 
 
-def _legacy_auth_shim(label: str, scope: str, credential_map: Mapping[str, str]) -> bool:
+def _legacy_auth_shim(
+    label: str, scope: str, credential_map: Mapping[str, str], *, target: AuthTarget
+) -> bool:
     """Try indexed provider auth; return whether delegation succeeded."""
     from mergecraft.cli.provider_cmd import persist_legacy_indexed_auth
 
-    return persist_legacy_indexed_auth(label, scope, credential_map)
+    return persist_legacy_indexed_auth(label, scope, credential_map, target=target)
 
 
 @app.command("logfire")
@@ -998,7 +1058,7 @@ def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
     if not _validate_minimax_api_key(api_key):
         cli_bail("MiniMax API key validation failed (401/403). Check the key and retry.")
 
-    if _legacy_auth_shim("minimax", scope, {"API_KEY": api_key}):
+    if _legacy_auth_shim("minimax", scope, {"API_KEY": api_key}, target=target):
         return
 
     _persist_credential(target=target, name=MINIMAX_API_SECRET, value=api_key)
