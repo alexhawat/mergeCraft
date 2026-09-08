@@ -10,14 +10,19 @@
 # by that same red check. #669 deadlocked exactly this way, and the two greens
 # left in the queue were stale results from before the debt landed.
 #
-# So the rule moved here. It runs against main on a schedule and files a single
-# tracking issue that it keeps current and closes itself once the pin is bumped.
-# The PR gate keeps the rules a PR author can actually act on: rung
-# self-consistency, env parity, and freshness (`make action-pin-check`).
+# So the rule moved here. It measures on every push to main — debt is reported
+# when it lands, and the tracking issue closes when a pin bump lands — with a
+# daily cron as the backstop for a pin that goes stale because main moved under
+# it. One tracking issue, kept current rather than re-filed. The PR gate keeps
+# the rules a PR author can actually act on: rung self-consistency, env parity,
+# and freshness (`make action-pin-check`).
 #
-# Safety: this workflow never checks out or executes PR code — it runs on
-# `main` from `schedule` / `workflow_dispatch` only, and its sole write scope
-# is `issues`.
+# Safety: this workflow never checks out or executes PR code. It is reachable
+# from `push` (main only), `schedule`, and `workflow_dispatch`; the last of
+# those accepts any branch, so the job carries an explicit
+# `if: github.ref == 'refs/heads/main'` guard — see the comment on the job for
+# why a dispatch from another branch would otherwise close a live alert. Its
+# sole write scope is `issues`.
 name: Action pin staleness
 
 on:
