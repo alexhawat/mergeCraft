@@ -1200,12 +1200,57 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   events (`workflow_dispatch`, same-repo `pull_request`) keep today's
   behaviour: a declared allowlist drops network isolation so
   `osv-scanner`, `trivy`, `govulncheck`, and `bundler-audit` can reach
-  their upstreams. Filtered egress to the declared hosts is not implemented
-  yet — the untrusted path fails closed. Enforced by
-  `evaluate_analyzer_egress_policy()` and `build_analyzer_sandbox_argv_for_run()`.
+  their upstreams. On runners where `ip netns`, veth, and iptables are
+  available, an operator may opt into the experimental backend only in
+  a disposable credential-free isolated runtime by setting
+  `MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME=1` in its parent environment.
+  It is not a repo config field or an Action input; default execution
+  still skips. This opt-in asserts external filesystem isolation; the
+  network backend does not provide host filesystem confidentiality.
+  Within that runtime, untrusted allowlisted analyzers run inside an isolated
+  netns whose host-side FORWARD filter permits only the *IP addresses*
+  the declared hosts resolved to at setup time (sandbox enforcement,
+  not `HTTP_PROXY`) — not the hostnames themselves. Enforcement is by
+  IP, so a CDN-hosted allowlist entry admits every other domain that
+  shares its IP, and setup-time resolution can drift from what the
+  analyzer resolves inside the netns for a load-balanced upstream. A
+  loopback CONNECT proxy in `tests/analyzers/support_allowlist_proxy.py`
+  encodes the same hostname allowlist for tests only; it never runs in
+  production. The GitHub Action image typically lacks `CAP_NET_ADMIN` /
+  `CAP_SYS_ADMIN`, so that path stays a named skip. Enforced by
+  `evaluate_analyzer_egress_policy()`, `filtered_egress_available()`,
+  and `build_analyzer_sandbox_argv_for_run()`.
+  Analyzer capabilities are dropped after mount setup, preventing
+  namespace switching or enabling IPv6 again. The isolated runtime must
+  use direct `unshare`; sudo-based backends are refused because sudo
+  cannot safely carry the private payload-environment descriptor.
+  Namespace helpers receive a minimal trusted environment. Payload
+  environment values travel through a private descriptor and are
+  restored only after capabilities are dropped, never in process argv.
+  Analyzer timeouts kill the namespace init process and its descendants.
+  The runtime must provision tools and libraries readable without DAC override; private
+  installs owned by another user are intentionally inaccessible.
+  Host INPUT destinations
+  are always denied, IPv6 is disabled, and
+  allowed IPv4 destinations admit every port/protocol. DNS permits
+  arbitrary query names to configured external IPv4 resolvers (TCP/UDP
+  port 53); DNS tunneling and shared-IP domains remain limitations.
+  Loopback-only host resolvers cannot serve a namespace; configure an
+  external resolver explicitly. Sessions require operator-enabled IPv4
+  forwarding and never change the host's forwarding setting. Cleanup
+  only removes owned state; forced termination may require operator
+  cleanup of named resources, rather than a sweep of other sessions.
 - **mode** (`analyzers:` in the workflow) — `off | auto | full |
   untrusted-only`. Enforced by `evaluate_manifest_for_mode()` plus
   `resolve_selection_tier()`.
+
+On macOS no native analyzer isolation backend exists. Linux capability
+probes are skipped, and untrusted analyzers are refused before launch.
+Trusted local shell execution is an explicit execution permission, not
+an isolation guarantee; incomplete isolation produces a warning.
+Use `MERGECRAFT_DISPOSABLE_LINUX=1 make test-filtered-egress` as root
+only on a disposable Linux runner to exercise the real kernel boundary.
+This test cannot prove the standard Docker Action supports that boundary.
 
 Under `shell: disabled`, eligible runtimes are `managed` and `container`.
 Their argv is copied verbatim out of a manifest mergeCraft ships, and a binary

@@ -337,3 +337,11 @@ image-toolchain-check: ## Exercise installed runtime tools and reject vulnerable
 
 image-scan-sarif: ## Preserve SARIF alongside the attributable Trivy JSON report
 	$(TRIVY) convert --format sarif --output "$(IMAGE_SCAN_REPORT).sarif" "$(IMAGE_SCAN_REPORT).json"
+
+.PHONY: test-filtered-egress
+test-filtered-egress: ## Real production firewall tests, disposable Linux only
+	@test "$(MERGECRAFT_DISPOSABLE_LINUX)" = 1 || { echo 'Requires explicit MERGECRAFT_DISPOSABLE_LINUX=1 on a disposable Linux runner'; exit 1; }
+	@test "$$(uname -s)" = Linux || { echo 'Filtered egress integration requires Linux'; exit 1; }
+	@test -x /usr/bin/python3 || { echo "Integration probes require readable system Python"; exit 1; }
+	/usr/bin/python3 --version
+	unshare --mount --net --pid --fork --mount-proc bash -ec 'mount --make-rprivate /; sysctl -q -w net.ipv4.ip_forward=1; export MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME=1; exec "$(CURDIR)/.venv-dev/bin/python" -m pytest tests/analyzers/test_filtered_egress.py -v --tb=short --strict-markers -m integration -p no:cacheprovider'
