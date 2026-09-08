@@ -186,6 +186,7 @@ jobs:
           # provider failure or timeout fails the step; --help is not acceptance.
           docker run --rm --user 10001:10001 \
             --entrypoint /opt/mergecraft/.venv/bin/python \
+            -e HOME=/home/mergecraft -e XDG_CACHE_HOME=/home/mergecraft/.cache \
             -e MERGECRAFT_E2E_LIVE_MODEL -e ANTHROPIC_API_KEY -e OPENAI_API_KEY -e GEMINI_API_KEY \
             -v "$PWD/scripts/live_image_smoke.py:/smoke.py:ro" \
             "${E2E_IMAGE}" /smoke.py
