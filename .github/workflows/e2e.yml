@@ -182,11 +182,21 @@ jobs:
             echo "skipped: set MERGECRAFT_E2E_LIVE_MODEL to enable the bounded real-harness smoke"
             exit 0
           fi
+          case "${MERGECRAFT_E2E_LIVE_MODEL}" in
+            openai/*) credential_name=OPENAI_API_KEY ;;
+            anthropic/*) credential_name=ANTHROPIC_API_KEY ;;
+            google/*|gemini/*) credential_name=GEMINI_API_KEY ;;
+            *) echo "unsupported live-smoke provider" >&2; exit 2 ;;
+          esac
+          if [[ -z "${!credential_name:-}" ]]; then
+            echo "missing credential for the selected live-smoke provider" >&2
+            exit 2
+          fi
           # The helper requires a real accepted terminal review. Missing credentials,
           # provider failure or timeout fails the step; --help is not acceptance.
           docker run --rm --user 10001:10001 \
             --entrypoint /opt/mergecraft/.venv/bin/python \
             -e HOME=/home/mergecraft -e XDG_CACHE_HOME=/home/mergecraft/.cache \
-            -e MERGECRAFT_E2E_LIVE_MODEL -e ANTHROPIC_API_KEY -e OPENAI_API_KEY -e GEMINI_API_KEY \
+            -e MERGECRAFT_E2E_LIVE_MODEL -e "${credential_name}" \
             -v "$PWD/scripts/live_image_smoke.py:/smoke.py:ro" \
             "${E2E_IMAGE}" /smoke.py

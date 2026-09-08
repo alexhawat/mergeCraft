@@ -116,3 +116,7 @@ It contains one seeded boundary defect and one clean documentation change.
 These are agent-seeded labels, not independent ground truth; independent
 adjudication and model/rubric pins remain prerequisites for comparison claims.
 No provider, spend authorization, or measured result is implied by this manifest.
+
+The live image smoke accepts `openai/`, `anthropic/`, `google/` or `gemini/`
+model prefixes and passes only the selected provider credential into the container.
+Unknown providers or a missing selected credential fail before starting Docker.
