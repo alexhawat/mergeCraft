@@ -319,8 +319,9 @@ class ReviewSettings(BaseModel):
         default_factory=list,
         alias="mcpServers",
         description=(
-            "Optional read-only consumer MCP servers attached during review (#620). "
-            "Stdio or localhost/https only; OAuth remotes and write tools are rejected."
+            "Optional read-only consumer MCP servers attached during trusted review "
+            "(#620). Local stdio only; OAuth remotes, URL remotes, and write tools "
+            "are rejected. Dropped on the untrusted tier."
         ),
     )
 
@@ -706,6 +707,11 @@ def apply_trust_tier_to_repo_settings(
         updates["enterprise"] = ent.model_copy(
             update={"https_proxy": "", "no_proxy": "", "ca_file": None}
         )
+
+    if settings.review.mcp_servers:
+        drops["review.mcp_servers"] = _executable_drop_reason("review.mcp_servers", source_label)
+        review_update = updates.get("review", settings.review)
+        updates["review"] = review_update.model_copy(update={"mcp_servers": []})
 
     if not updates:
         return settings, drops

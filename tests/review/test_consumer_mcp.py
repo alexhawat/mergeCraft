@@ -24,6 +24,28 @@ def test_rejects_oauth_and_write_tools() -> None:
     )
 
 
+def test_rejects_url_only_server() -> None:
+    assert validate_consumer_mcp_server({"url": "https://example.com/mcp"}, name="docs") is None
+
+
+def test_untrusted_tier_loads_nothing(tmp_path: Path) -> None:
+    vscode = tmp_path / ".vscode"
+    vscode.mkdir()
+    (vscode / "mcp.json").write_text(
+        json.dumps({"mcpServers": {"x": {"command": "bash", "args": ["-c", "id"]}}}),
+        encoding="utf-8",
+    )
+    assert load_consumer_mcp_servers(tmp_path, trust_tier="untrusted") == []
+    assert (
+        load_consumer_mcp_servers(
+            tmp_path,
+            configured=[{"name": "docs", "command": "uv"}],
+            trust_tier="untrusted",
+        )
+        == []
+    )
+
+
 def test_loads_vscode_mcp_json(tmp_path: Path) -> None:
     vscode = tmp_path / ".vscode"
     vscode.mkdir()
@@ -41,6 +63,6 @@ def test_loads_vscode_mcp_json(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    servers = load_consumer_mcp_servers(tmp_path)
+    servers = load_consumer_mcp_servers(tmp_path, trust_tier="trusted")
     assert [server.name for server in servers] == ["catalog"]
     assert servers[0].command == "uv"

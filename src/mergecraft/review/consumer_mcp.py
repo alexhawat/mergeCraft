@@ -1,8 +1,9 @@
-"""Read-only consumer MCP servers attached during mergeCraft review (#620).
+"""Read-only consumer MCP servers attached during trusted mergeCraft review (#620).
 
 Sources, in order: ``review.mcpServers`` in committed config, then
-``.vscode/mcp.json`` / ``.mcp.json`` when present. Fail closed on OAuth
-remotes, write-capable declarations, and missing command/url.
+``.vscode/mcp.json`` / ``.mcp.json`` when present. Untrusted tiers attach
+nothing. Fail closed on OAuth remotes, URL remotes, write-capable
+declarations, reserved names, and missing command.
 """
 
 from __future__ import annotations
@@ -23,16 +24,15 @@ _DISCOVERY_FILES = (".vscode/mcp.json", ".mcp.json")
 
 @dataclass(frozen=True, slots=True)
 class ConsumerMcpServer:
-    """One allowlisted read-only MCP server for the review agent."""
+    """One allowlisted read-only stdio MCP server for the review agent."""
 
     name: str
-    command: str | None
+    command: str
     args: tuple[str, ...]
-    url: str | None
     tools: tuple[str, ...]
 
     def as_stdio_entry(self) -> dict[str, Any]:
-        entry: dict[str, Any] = {"command": self.command or "", "args": list(self.args)}
+        entry: dict[str, Any] = {"command": self.command, "args": list(self.args)}
         if self.tools:
             entry["tools"] = list(self.tools)
         return entry
@@ -44,7 +44,7 @@ def _looks_like_write_tool(name: str) -> bool:
 
 
 def validate_consumer_mcp_server(raw: dict[str, Any], *, name: str) -> ConsumerMcpServer | None:
-    """Return a server or None when the declaration is rejected fail-closed."""
+    """Return a stdio server or None when the declaration is rejected fail-closed."""
     if not name or name.casefold() in _RESERVED_NAMES:
         logger.info("review MCP skipped reserved or empty name: {}", name)
         return None
@@ -63,22 +63,17 @@ def validate_consumer_mcp_server(raw: dict[str, Any], *, name: str) -> ConsumerM
     url = raw.get("url")
     args_raw = raw.get("args") or []
     args = tuple(str(item) for item in args_raw if isinstance(item, str))
+    if isinstance(url, str) and url.strip():
+        logger.info("review MCP {} rejected: URL remotes are not wired", name)
+        return None
     if isinstance(command, str) and command.strip():
         return ConsumerMcpServer(
             name=name,
             command=command.strip(),
             args=args,
-            url=None,
             tools=tools,
         )
-    if isinstance(url, str) and url.startswith(
-        ("http://127.0.0.1", "http://localhost", "https://")
-    ):
-        if "oauth" in url.casefold():
-            logger.info("review MCP {} rejected: OAuth URL", name)
-            return None
-        return ConsumerMcpServer(name=name, command=None, args=(), url=url, tools=tools)
-    logger.info("review MCP {} rejected: need local stdio command or http(s) URL", name)
+    logger.info("review MCP {} rejected: need a local stdio command", name)
     return None
 
 
@@ -99,8 +94,12 @@ def load_consumer_mcp_servers(
     repo_root: Path,
     *,
     configured: list[dict[str, Any]] | None = None,
+    trust_tier: str = "untrusted",
 ) -> list[ConsumerMcpServer]:
-    """Load fail-closed read-only consumer MCP servers for a review."""
+    """Load fail-closed read-only consumer MCP servers for a trusted review."""
+    if trust_tier != "trusted":
+        logger.info("review MCP skipped: untrusted tier does not spawn consumer servers")
+        return []
     servers: list[ConsumerMcpServer] = []
     seen: set[str] = set()
     for raw in configured or []:
@@ -130,11 +129,7 @@ def load_consumer_mcp_servers(
 
 def consumer_mcp_stdio_entries(servers: list[ConsumerMcpServer]) -> dict[str, dict[str, Any]]:
     """JSON ``mcpServers`` entries for stdio consumer servers (Claude/Gemini)."""
-    entries: dict[str, dict[str, Any]] = {}
-    for server in servers:
-        if server.command:
-            entries[server.name] = server.as_stdio_entry()
-    return entries
+    return {server.name: server.as_stdio_entry() for server in servers}
 
 
 __all__ = [

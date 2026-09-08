@@ -276,10 +276,11 @@ def reset_filtered_egress_cache() -> None:
     probe_filtered_egress.cache_clear()
 
 
-def resolve_allowlist_ips(entries: Iterable[str]) -> frozenset[str]:
-    """Resolve allowlist hostnames to IPv4 addresses (fail-closed if none)."""
-    ips: set[str] = set()
+def resolve_allowlist_host_ips(entries: Iterable[str]) -> dict[str, frozenset[str]]:
+    """Resolve each allowlist hostname to its IPv4 addresses (fail-closed per host)."""
+    mapping: dict[str, frozenset[str]] = {}
     for host in allowlist_hosts(entries):
+        ips: set[str] = set()
         try:
             infos = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
         except OSError:
@@ -288,6 +289,16 @@ def resolve_allowlist_ips(entries: Iterable[str]) -> frozenset[str]:
             ip = info[4][0]
             if isinstance(ip, str) and ip:
                 ips.add(ip)
+        if ips:
+            mapping[host] = frozenset(ips)
+    return mapping
+
+
+def resolve_allowlist_ips(entries: Iterable[str]) -> frozenset[str]:
+    """Resolve allowlist hostnames to the union of their IPv4 addresses."""
+    ips: set[str] = set()
+    for host_ips in resolve_allowlist_host_ips(entries).values():
+        ips.update(host_ips)
     return frozenset(ips)
 
 
@@ -706,6 +717,7 @@ __all__ = [
     "host_is_allowlisted",
     "probe_filtered_egress",
     "reset_filtered_egress_cache",
+    "resolve_allowlist_host_ips",
     "resolve_allowlist_ips",
     "start_filtered_egress_session",
     "wrap_argv_for_filtered_netns",

@@ -1275,6 +1275,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     consumer_mcp = load_consumer_mcp_servers(
         repo_root,
         configured=list(settings.review.mcp_servers),
+        trust_tier=trust_tier,
     )
     tool_state.review_mcp_names = tuple(server.name for server in consumer_mcp)
     instructions = resolve_instructions(

@@ -32,11 +32,11 @@ from mergecraft.analyzers.egress import (
     FilteredEgressSetupError,
     allowlist_hosts,
     host_is_allowlisted,
-    resolve_allowlist_ips,
+    resolve_allowlist_host_ips,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
 _RELAY_OK = b"OK\n"
 _RELAY_NO = b"NO\n"
@@ -100,10 +100,16 @@ def wrap_argv_for_userspace_relay(
     socket_path: str,
     allowed_hosts: Iterable[str],
     allowed_ips: Iterable[str],
+    host_ips: Mapping[str, Iterable[str]] | None = None,
 ) -> list[str]:
     """Prefix argv with the userspace bridge (parent stays on the container net)."""
     hosts = ",".join(sorted(allowlist_hosts(allowed_hosts)))
     ips = ",".join(sorted(allowed_ips))
+    mapping = host_ips or {}
+    encoded = json.dumps(
+        {host: sorted(set(values)) for host, values in mapping.items()},
+        separators=(",", ":"),
+    )
     return [
         sys.executable,
         "-m",
@@ -114,6 +120,8 @@ def wrap_argv_for_userspace_relay(
         hosts,
         "--ips",
         ips,
+        "--map",
+        encoded,
         "--",
         *argv,
     ]
@@ -125,7 +133,9 @@ class UserspaceEgressSession:
 
     allowed_hosts: list[str]
     socket_path: str = ""
+    _socket_dir: str = field(default="", init=False)
     _allowed_ips: frozenset[str] = field(default_factory=frozenset, init=False)
+    _host_ips: dict[str, frozenset[str]] = field(default_factory=dict, init=False)
     _server: socket.socket | None = field(default=None, init=False)
     _thread: threading.Thread | None = field(default=None, init=False)
     _stop: threading.Event = field(default_factory=threading.Event, init=False)
@@ -136,13 +146,16 @@ class UserspaceEgressSession:
         probe = probe_userspace_egress()
         if not probe.available:
             raise FilteredEgressSetupError(probe.reason)
-        ips = resolve_allowlist_ips(self.allowed_hosts)
+        host_ips = resolve_allowlist_host_ips(self.allowed_hosts)
+        ips = frozenset(ip for values in host_ips.values() for ip in values)
         if not ips:
             raise FilteredEgressSetupError("allowlist resolved to no addresses")
+        self._host_ips = host_ips
         self._allowed_ips = ips
-        tmp_dir = Path(tempfile.gettempdir())
-        self.socket_path = str(tmp_dir / f"mc-eg-us-{os.getpid()}-{id(self)}.sock")
-        Path(self.socket_path).unlink(missing_ok=True)
+        socket_dir = Path(tempfile.mkdtemp(prefix=f"mc-eg-us-{os.getpid()}-"))
+        os.chmod(socket_dir, 0o700)
+        self._socket_dir = str(socket_dir)
+        self.socket_path = str(socket_dir / "relay.sock")
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(self.socket_path)
         server.listen(16)
@@ -159,14 +172,15 @@ class UserspaceEgressSession:
         server = self._server
         self._server = None
         if server is not None:
-            with context_close(server):
+            with contextlib.closing(server):
                 pass
         if self._thread is not None:
             self._thread.join(timeout=2)
             self._thread = None
-        if self.socket_path:
-            Path(self.socket_path).unlink(missing_ok=True)
-            self.socket_path = ""
+        if self._socket_dir:
+            shutil.rmtree(self._socket_dir, ignore_errors=True)
+            self._socket_dir = ""
+        self.socket_path = ""
         self._started = False
 
     def __enter__(self) -> UserspaceEgressSession:
@@ -185,6 +199,7 @@ class UserspaceEgressSession:
             socket_path=self.socket_path,
             allowed_hosts=self.allowed_hosts,
             allowed_ips=self._allowed_ips,
+            host_ips=self._host_ips,
         )
 
     def destination_allowed(self, host: str, ip: str) -> bool:
@@ -233,8 +248,11 @@ class UserspaceEgressSession:
             with contextlib.suppress(OSError):
                 client.sendall(_RELAY_NO)
         finally:
-            with context_close(client), context_close(remote):
+            with contextlib.closing(client):
                 pass
+            if remote is not None:
+                with contextlib.closing(remote):
+                    pass
 
 
 def _read_line(sock: socket.socket) -> str:
@@ -265,8 +283,8 @@ def _splice(left: socket.socket, right: socket.socket) -> None:
             pass
         finally:
             done.set()
-            with contextlib_shutdown(dest):
-                pass
+            with contextlib.suppress(OSError):
+                dest.shutdown(socket.SHUT_WR)
 
     first = threading.Thread(target=_copy, args=(left, right), daemon=True)
     second = threading.Thread(target=_copy, args=(right, left), daemon=True)
@@ -274,31 +292,6 @@ def _splice(left: socket.socket, right: socket.socket) -> None:
     second.start()
     first.join()
     second.join()
-
-
-class context_close:
-    def __init__(self, sock: socket.socket | None) -> None:
-        self._sock = sock
-
-    def __enter__(self) -> socket.socket | None:
-        return self._sock
-
-    def __exit__(self, *exc: object) -> None:
-        if self._sock is not None:
-            with contextlib.suppress(OSError):
-                self._sock.close()
-
-
-class contextlib_shutdown:
-    def __init__(self, sock: socket.socket) -> None:
-        self._sock = sock
-
-    def __enter__(self) -> socket.socket:
-        return self._sock
-
-    def __exit__(self, *exc: object) -> None:
-        with contextlib.suppress(OSError):
-            self._sock.shutdown(socket.SHUT_WR)
 
 
 def relay_request_allowed(

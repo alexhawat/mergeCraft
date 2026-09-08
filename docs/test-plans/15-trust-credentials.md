@@ -42,7 +42,7 @@ Pinned API (W2): `mergecraft.config.trust_policy.resolve_agent_sandbox_decision`
 | `init` scaffolds default + comment | `…::test_init_scaffolds_agent_sandbox_default_with_tier_comment` | E2E |
 | Commented config refusal (`config_has_yaml_comments`) | `tests/config/test_config_io_comments.py` | unit |
 | `set-agent-sandbox` refuses commented fixture | `tests/cli/test_trust_agent_sandbox_cmd.py::test_set_agent_sandbox_refuses_commented_config_and_leaves_file_intact` | E2E |
-| `set-self-review` refuses commented fixture | `…::test_set_self_review_refuses_commented_config_and_leaves_file_intact` | E2E |
+| `set-self-review` patches commented fixture | `…::test_set_self_review_patches_commented_config_in_place` | E2E |
 
 **W2 reconcile notes (2026-08-31):** `resolve_agent_sandbox_decision` stubs git fetch/merge-base for
 `merged-only` by default (`simulate_merged_only_git=True`); the unfetched-default refuse test passes

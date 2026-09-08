@@ -551,9 +551,20 @@ def analyzer_egress_skip_reason(
     )
     if outcome.status == "skipped":
         return outcome.reason
-    if outcome.status == "filtered":
-        return None
     from mergecraft.mcp.shell import detect_sandbox_method
+
+    if outcome.status == "filtered":
+        from mergecraft.analyzers.egress import probe_filtered_egress
+
+        if detect_sandbox_method() == "none" and probe_filtered_egress().backend != "userspace":
+            tier_label = _egress_tier_label(resolved_name, event_payload)
+            hosts = ", ".join(network_allowlist)
+            return (
+                f"Skipped: egress policy — {analyzer_id} declares network hosts "
+                f"({hosts}) but {tier_label} cannot enforce filtered egress "
+                "(sandbox isolation unavailable on this runner)"
+            )
+        return None
 
     if (
         not egress_trusted_for_host_networking(event_name=resolved_name, event=event_payload)

@@ -100,12 +100,17 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     from mergecraft.config.io import load_config_dict
     from mergecraft.review.consumer_mcp import consumer_mcp_stdio_entries, load_consumer_mcp_servers
 
-    repo_root = Path.cwd()
-    configured: list[dict[str, object]] = []
-    review_block = load_config_dict(repo_root / ".mergecraft" / "config.yaml").get("review")
-    if isinstance(review_block, dict) and isinstance(review_block.get("mcpServers"), list):
-        configured = [row for row in review_block["mcpServers"] if isinstance(row, dict)]
-    extra = consumer_mcp_stdio_entries(load_consumer_mcp_servers(repo_root, configured=configured))
+    trust_tier = str(getattr(ctx.tool_state, "trust_tier", None) or "untrusted")
+    extra: dict[str, dict[str, object]] = {}
+    if trust_tier == "trusted":
+        repo_root = Path.cwd()
+        configured: list[dict[str, object]] = []
+        review_block = load_config_dict(repo_root / ".mergecraft" / "config.yaml").get("review")
+        if isinstance(review_block, dict) and isinstance(review_block.get("mcpServers"), list):
+            configured = [row for row in review_block["mcpServers"] if isinstance(row, dict)]
+        extra = consumer_mcp_stdio_entries(
+            load_consumer_mcp_servers(repo_root, configured=configured, trust_tier=trust_tier)
+        )
     config_path.write_text(
         json.dumps(
             {

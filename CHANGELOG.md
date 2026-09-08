@@ -15,12 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.github/agents/mergecraft.agent.md` (#621)
 - mergeCraft review prefers Copilot-style `.github/skills/code-review/`
   (and other `.github/skills/*/SKILL.md`) over generic standing skills,
-  keeps the trust fence, can attach read-only consumer MCP servers from
-  `review.mcpServers` / `.vscode/mcp.json`, and attributes them on the
-  run record (#620)
+  keeps the trust fence, and on the trusted tier can attach read-only
+  stdio consumer MCP servers from `review.mcpServers` / `.vscode/mcp.json`
+  (untrusted runs drop both) (#620)
 - `mergecraft trust set-self-review --gh-apply` opens a default-branch PR
   so `pull_request_target` picks up `trust.selfReview` without a hand-edit
-  on main; comment-heavy configs are patched in place (#616)
+  on main; comment-heavy configs are patched in place with or without
+  the flag, and a second `--gh-apply` reuses the existing branch/PR (#616)
 
 - Untrusted reviews can export prompt bodies to Logfire when `tracing.content`
   is `full` **and** an operator-owned export flag is true (Action
@@ -103,8 +104,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without reading Action logs (#641)
 - Untrusted allowlisted analyzers in the Action image can use a userspace
   filtered-egress backend (user+net namespace plus parent TCP relay) when
-  host `CAP_NET_ADMIN` / `CAP_SYS_ADMIN` are absent, so declared hosts
-  remain reachable and undeclared hosts stay blocked (#538)
+  host `CAP_NET_ADMIN` / `CAP_SYS_ADMIN` are absent; the analyzer is forked
+  so the relay stays alive, and each hostname maps to its own resolved IPs
+  (#538)
 
 - Consolidated integration CI retains Python 3.11 and 3.14 coverage after
   prerelease/main reconciliation; the coverage ratchet runs once on 3.14.
