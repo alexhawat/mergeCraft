@@ -17,17 +17,19 @@ from mergecraft.redaction_structured import redact_structured_value
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+_ASSIGNMENT_SECRET_PATTERN: Pattern[str] = re.compile(
+    r"\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*"
+    r"""(?:"(?:\\.|[^"\\]){8,}"|'(?:\\.|[^'\\]){8,}'|"""
+    r"(?P<unquoted>[^\s'\"]{8,}))",
+    re.I,
+)
+
 _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\b(?:xox[baprs]-)[A-Za-z0-9-]{10,}\b"),
-    re.compile(
-        r"\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*"
-        r"""(?:"(?:\\.|[^"\\]){8,}"|'(?:\\.|[^'\\]){8,}'|"""
-        r"[^\s'\"]{8,}?(?=[\]})]*(?:\s|$)))",
-        re.I,
-    ),
+    _ASSIGNMENT_SECRET_PATTERN,
     re.compile(r"Basic [A-Za-z0-9+/=]{16,}"),
 )
 
@@ -201,10 +203,20 @@ def _entropy_redact(text: str) -> str:
     return _ENTROPY_TOKEN_RE.sub(replacer, text)
 
 
+def _redact_assignment(match: re.Match[str]) -> str:
+    """Preserve trailing delimiters after matching the complete assignment value."""
+    value = match.group("unquoted") or ""
+    suffix_start = len(value.rstrip("]})"))
+    return REDACTION_SENTINEL + value[suffix_start:]
+
+
 def _pattern_redact(text: str) -> str:
     redacted = text
     for pattern in _SECRET_PATTERNS:
-        redacted = pattern.sub(REDACTION_SENTINEL, redacted)
+        replacement = (
+            _redact_assignment if pattern is _ASSIGNMENT_SECRET_PATTERN else REDACTION_SENTINEL
+        )
+        redacted = pattern.sub(replacement, redacted)
     return redacted
 
 
