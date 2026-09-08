@@ -24,7 +24,7 @@ SHELL := /bin/bash
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare
+	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
@@ -96,8 +96,11 @@ action-yml-hygiene-check: ## Fail when an action.yml description embeds a litera
 hook-pins-check: ## Fail when .pre-commit-config.yaml hook revs drift from pyproject.toml pins
 	$(UV) run python scripts/check_hook_pins.py
 
-action-pin-check: ## Fail when the default branch's self-review Action pin drifts too far behind (#450)
-	$(UV) run python scripts/check_action_pin_freshness.py
+action-pin-check: ## Fail on Action-pin defects a PR can fix: rung disagreement, env drift, freshness (#450)
+	$(UV) run python scripts/check_action_pin_freshness.py --scope pr
+
+action-pin-staleness-check: ## Fail when main's own pin lags main; scheduled, never a required PR check (#450)
+	$(UV) run python scripts/check_action_pin_freshness.py --scope all
 
 action-image-structure-check: ## Validate source syntax without asserting deployed provenance
 	$(UV) run python scripts/check_action_image_digest.py --structure-only
