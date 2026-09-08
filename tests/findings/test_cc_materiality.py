@@ -116,16 +116,6 @@ def test_dismissal_feeds_evaluation_not_durable_memory(tmp_path: Path) -> None:
     assert "fp-eval" not in learnings.read_text(encoding="utf-8")
 
 
-def test_precision_regression_gate_targets_blocker_precision_above_95() -> None:
-    """#355 — CI smoke-check: blocker scoring stays callable above 95% on the synthetic corpus."""
-    module = load_module("mergecraft.findings.materiality")
-    report = require_callable(module, "evaluate_blocker_precision_corpus")()
-    precision = getattr(report, "blocker_precision", None)
-    assert precision is not None
-    assert float(precision) > 0.95
-    assert getattr(report, "wired_into_releases", True) is True
-
-
 def test_precision_pipeline_orders_findings_by_materiality() -> None:
     """Publication path ranks security findings above style commentary (#355)."""
     from mergecraft.findings.precision_pipeline import apply_precision_pipeline

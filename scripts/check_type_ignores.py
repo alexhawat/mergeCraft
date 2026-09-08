@@ -37,7 +37,6 @@ D6_SRC_PATHS: frozenset[str] = frozenset(
     {
         "src/mergecraft/agents/_stream_consumer.py",
         "src/mergecraft/agents/codex.py",
-        "src/mergecraft/agents/ensemble.py",
         "src/mergecraft/agents/structured_handoff.py",
         "src/mergecraft/analyzers/adapters.py",
         "src/mergecraft/analyzers/parsers/osv_json.py",

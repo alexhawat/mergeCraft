@@ -929,7 +929,7 @@ def _raised_by_lookup_key(row: dict[str, Any]) -> str | None:
     fingerprint = str(row.get("fingerprint") or "").strip()
     if fingerprint:
         return fingerprint
-    from mergecraft.agents.ensemble import finding_key
+    from mergecraft.review.finding_key import finding_key
 
     path, body, line = finding_key(row)
     if not path and not body:

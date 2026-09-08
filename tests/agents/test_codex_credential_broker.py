@@ -219,9 +219,9 @@ def test_broker_start_failure_does_not_silently_reinject_openai_key(
     monkeypatch.setattr(broker_module, "credential_broker", _boom)
 
     ctx = brokered_codex_context(tmp_path)
-    codex_module = load_codex_module()
-    prepare = getattr(codex_module, "prepare_codex_brokered_run", None)
-    assert prepare is not None
+    from mergecraft.agents import codex_broker
+
+    prepare = codex_broker.prepare_codex_brokered_run
 
     # Implementation may refuse (exception) or return an explicit unbrokered record.
     outcome: Any
@@ -255,10 +255,6 @@ def test_build_env_does_not_reference_lane_b_sandbox_symbols() -> None:
 
 def test_prepare_codex_brokered_run_does_not_reference_lane_b_sandbox_symbols() -> None:
     """D8 — dedicated broker prep must stay clear of lane-B sandbox gate symbols."""
-    codex_module = load_codex_module()
-    if not hasattr(codex_module, "prepare_codex_brokered_run"):
-        pytest.fail("mergecraft.agents.codex.prepare_codex_brokered_run not implemented")
-
     referenced = referenced_names_in_function("prepare_codex_brokered_run")
     overlap = referenced & set(LANE_B_SANDBOX_SYMBOLS)
     assert not overlap, (

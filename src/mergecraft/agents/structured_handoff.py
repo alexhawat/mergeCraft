@@ -18,8 +18,6 @@ from mergecraft.agents.verifier import AgentFinding, plan_agent_verifications
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from mergecraft.agents.registry import AgentBinding
-
 _TYPED_FINDINGS_MARKER: Final[str] = "---typed-findings---"
 # Matched against the original text so the offsets stay byte-for-byte valid:
 # ``casefold()`` is not length-preserving (``ß`` → ``ss``), and the reasoning
@@ -79,9 +77,8 @@ def parse_specialist_handoff(raw: str) -> SpecialistHandoff:
     return SpecialistHandoff(reasoning=reasoning, findings=tuple(findings))
 
 
-def build_specialist_dispatch_prompt(binding: AgentBinding) -> str:
+def build_specialist_dispatch_prompt() -> str:
     """Discovery dispatch brief — no finding schema pre-shapes output (D6)."""
-    del binding
     return (
         "Review the dispatched scope using read-only tools. Reason in free-form "
         "prose while you investigate — do not pre-format findings as JSON during "

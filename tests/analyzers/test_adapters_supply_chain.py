@@ -157,6 +157,5 @@ def test_trufflehog_verification_off_on_fork(
     verify_enabled = config.trufflehog_verify_enabled(
         repo_root=adapter_fixture_repo,
         tier=tier,
-        event=FORK_PULL_REQUEST_EVENT,
     )
     assert verify_enabled is False, "TruffleHog verification must be off on fork PRs (C2)"

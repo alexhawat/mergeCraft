@@ -4,7 +4,7 @@ Wave plan: `.ignorelocal/waves/issues-meat-reading-diff-wave-plan.md`
 Worktree: `mergecraft-meat-a-spike` @ `wave/meat-a-spike`
 
 W1 authored the RED suite (commit ``834ce19``); W2 produced the green
-implementation in ``src/mergecraft/utils/meat_harness.py`` and this
+implementation in ``tests/support/meat_harness.py`` and this
 file reconciles the suite per the W1.10 reconciliation plan. Every
 ``@pytest.mark.xfail(reason="green after W2: …", strict=False)`` marker
 on a contract the harness now satisfies has been removed. The
@@ -42,8 +42,8 @@ from typing import Any
 import pytest
 
 from mergecraft.analyzers.trust import derive_trust_tier
-from mergecraft.utils import meat_harness as _harness_mod
-from mergecraft.utils.meat_harness import MeatHarnessResult, run_meat_harness
+from tests.support import meat_harness as _harness_mod
+from tests.support.meat_harness import MeatHarnessResult, run_meat_harness
 
 # ── shared fixtures ────────────────────────────────────────────────────────
 

@@ -26,6 +26,7 @@ from mergecraft.agents import opencode as opencode_mod
 from mergecraft.security.broker import CODEX_BROKER_BEARER_ENV
 from mergecraft.utils.git_setup import (
     register_created_path,
+    reviewer_askpass_credentials_dir,
     setup_git,
     wipe_runner_leak_surface,
     write_askpass_script,
@@ -224,8 +225,8 @@ def test_agent_cannot_locate_askpass_script(
         shell="restricted",
         tmpdir=str(tmp_path),
     )
-    askpass_path = state.git_askpass_path
-    assert askpass_path is not None
+    askpass_path = str(reviewer_askpass_credentials_dir(str(tmp_path)) / "git-askpass.sh")
+    assert not Path(askpass_path).exists(), "askpass helper must be shredded after setup_git"
     env = claude._build_env(make_agent_run_ctx())
     assert "GIT_ASKPASS" not in env
     assert askpass_path not in env.values()

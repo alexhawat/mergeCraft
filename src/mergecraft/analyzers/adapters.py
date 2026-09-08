@@ -29,9 +29,6 @@ if TYPE_CHECKING:
 
 TrustTier = Literal["trusted", "untrusted"]
 
-DIFFERENTIAL_CONTRACT_TOOLS: frozenset[str] = frozenset({"oasdiff", "squawk", "buf"})
-SUPPLY_CHAIN_DIFF_TOOLS: frozenset[str] = frozenset({"osv-scanner", "trivy"})
-
 
 @dataclass(frozen=True, slots=True)
 class AdapterRunResult:
@@ -61,14 +58,12 @@ def _scan_agentsec_in_process(
     *,
     repo_root: Path,
     scoped: list[str],
-    tier: TrustTier,
 ) -> _NativeScanOutcome:
     from mergecraft.analyzers.agentsec import scan_manifests
 
     agentsec_result = scan_manifests(
         repo_root=repo_root,
         changed_files=scoped,
-        tier=tier,
     )
     return _NativeScanOutcome(
         findings=agentsec_result.findings,
@@ -81,9 +76,7 @@ def _scan_antislop_in_process(
     *,
     repo_root: Path,
     scoped: list[str],
-    tier: TrustTier,
 ) -> _NativeScanOutcome:
-    _ = tier
     from mergecraft.analyzers.antislop import scan_changed_files
 
     antislop_result = scan_changed_files(repo_root=repo_root, changed_files=scoped)
@@ -105,13 +98,12 @@ def _run_in_process_scan(
     *,
     repo_root: Path,
     scoped: list[str],
-    tier: TrustTier,
 ) -> _NativeScanOutcome:
     scanner = _IN_PROCESS_SCANNERS.get(tool_id)
     if scanner is None:
         msg = f"unsupported in-process analyzer {tool_id!r}"
         raise ValueError(msg)
-    return scanner(repo_root=repo_root, scoped=scoped, tier=tier)
+    return scanner(repo_root=repo_root, scoped=scoped)
 
 
 def _run_in_process_native_adapter(
@@ -132,7 +124,6 @@ def _run_in_process_native_adapter(
         tool_id,
         repo_root=repo_root,
         scoped=scoped_files,
-        tier=tier,
     )
     version_note = IN_PROCESS_VERSION_NOTES[tool_id]
     if outcome.skipped:
@@ -360,13 +351,16 @@ def run_adapter(
         logger.info("{}", egress_reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=egress_reason)
 
-    from mergecraft.analyzers.contracts import resolve_analyzer_base_ref, run_differential_adapter
+    from mergecraft.analyzers.contracts import (
+        DIFFERENTIAL_CONTRACT_TOOLS,
+        resolve_analyzer_base_ref,
+        run_differential_adapter,
+    )
 
     if tool_id in DIFFERENTIAL_CONTRACT_TOOLS:
         resolved_base = resolve_analyzer_base_ref(
             repo_root,
             base_ref=base_ref,
-            offline=offline,
             changed_files=changed_files,
         )
         return run_differential_adapter(
@@ -378,13 +372,15 @@ def run_adapter(
             allow_repo_binaries=allow_repo_binaries,
         )
 
-    if tool_id in SUPPLY_CHAIN_DIFF_TOOLS:
-        from mergecraft.analyzers.supply_chain import run_supply_chain_adapter
+    from mergecraft.analyzers.supply_chain import (
+        SUPPLY_CHAIN_DIFF_TOOLS,
+        run_supply_chain_adapter,
+    )
 
+    if tool_id in SUPPLY_CHAIN_DIFF_TOOLS:
         resolved_base = resolve_analyzer_base_ref(
             repo_root,
             base_ref=base_ref,
-            offline=offline,
             changed_files=changed_files,
         )
         return run_supply_chain_adapter(
@@ -595,8 +591,6 @@ def run_adapter(
 
 
 __all__ = [
-    "DIFFERENTIAL_CONTRACT_TOOLS",
-    "SUPPLY_CHAIN_DIFF_TOOLS",
     "AdapterRunResult",
     "run_adapter",
 ]

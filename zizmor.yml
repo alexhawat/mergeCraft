@@ -34,3 +34,11 @@ rules:
       # security job analyzer-cache: step runs only on push (not pull_request);
       # caches dev-tooling under .mergecraft/, not release artifacts.
       - ci.yml
+      # security-scope job (npm audit + workflow lint): the flagged
+      # actions/setup-node step's job-level `if:` restricts it to
+      # pull_request/workflow_dispatch only; it never runs on the `push`
+      # trigger this workflow's sibling integration-pr job needs (#647).
+      # zizmor's audit reads the workflow-level `on:` block, not per-job
+      # `if:` guards. Caches agent-clis/tools npm lockfiles, not release
+      # artifacts.
+      - integration.yml

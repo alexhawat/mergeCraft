@@ -19,12 +19,18 @@ its own file and is attached to the existing ``provider`` Typer app by
 
 Every destructive target is resolved from ``--cwd``, not from the process
 working directory, so the repository whose registry is read is the same one
-whose ``.env`` is blanked and whose Actions secrets are deleted.
+whose ``.env`` is blanked and whose Actions secrets are deleted. Resolving the
+local target from the process cwd instead read the registry from one
+repository and blanked the ``.env`` of another --- the operator was told a
+provider was disabled in a repo the command never touched (#520). The ``.env``
+half of that guarantee lives in
+:func:`mergecraft.cli.local_env.local_env_path_for_cwd`, which takes ``--cwd``
+literally for exactly this reason; the ``owner/repo`` half is
+:func:`resolve_repo_slug` below.
 
 Exports:
     ProviderSecrets -- the Actions-secret and ``.env`` key names for one label.
     resolve_provider_secrets -- map a provider label to those names.
-    resolve_local_env_path -- the ``.env`` a given ``--cwd`` may blank.
     resolve_repo_slug -- the ``owner/repo`` a given ``--cwd`` may delete from.
     register -- attach ``enable``/``disable`` to the ``provider`` Typer app.
 """
@@ -40,6 +46,7 @@ import typer
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
+from mergecraft.cli.local_env import local_env_path_for_cwd
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -206,42 +213,11 @@ def _delete_github(secrets: ProviderSecrets, repo_slug: str) -> tuple[list[str],
     return deleted, failed
 
 
-def resolve_local_env_path(cwd: Path) -> Path:
-    """Return the ``.env`` this invocation may blank, anchored on *cwd*.
-
-    ``--cwd`` selects which repository the command acts on, so the destructive
-    local target must follow it. Anchoring on the *process* working directory
-    instead would read the registry from one repository and blank the ``.env``
-    of another — the operator would be told a provider was disabled in a repo
-    the command never touched.
-
-    ``MERGECRAFT_ENV`` still wins, matching
-    :func:`mergecraft.cli.auth_cmd._local_env_path`: an operator who has pinned
-    an explicit env file has named the target unambiguously.
-    """
-    import os
-
-    from mergecraft.utils.workspace import git_repo_root
-
-    configured = os.environ.get("MERGECRAFT_ENV")
-    if configured:
-        return Path(configured).resolve()
-
-    resolved = cwd.resolve()
-    root = git_repo_root(str(resolved))
-    if root is None:
-        cli_bail(
-            f"could not locate a git repository root at {resolved} — run from "
-            "inside the repository, pass --cwd, or point MERGECRAFT_ENV at the "
-            ".env you want cleared."
-        )
-    return root / ".env"
-
-
 def resolve_repo_slug(cwd: Path) -> str:
     """Return ``owner/repo`` for the origin remote of the repository at *cwd*.
 
-    The GitHub half of the same problem as :func:`resolve_local_env_path`:
+    The GitHub half of the same problem as
+    :func:`mergecraft.cli.local_env.local_env_path_for_cwd`:
     ``gh secret delete`` must target the repository ``--cwd`` names, not
     whichever repository the operator happens to be standing in.
     """
@@ -337,7 +313,7 @@ def provider_disable_cmd(
     unresolved: list[str] = []
 
     if target in {"local", "both"}:
-        env_path = resolve_local_env_path(cwd)
+        env_path = local_env_path_for_cwd(cwd)
         cleared_local, failed_local = _clear_local(secrets, env_path)
         if cleared_local:
             console.print(f"[green]cleared[/green] {', '.join(cleared_local)} in {env_path}")
@@ -428,7 +404,6 @@ __all__ = [
     "provider_disable_cmd",
     "provider_enable_cmd",
     "register",
-    "resolve_local_env_path",
     "resolve_provider_secrets",
     "resolve_repo_slug",
 ]

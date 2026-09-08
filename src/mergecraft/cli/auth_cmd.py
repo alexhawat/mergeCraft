@@ -24,8 +24,8 @@ from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
     CLI_USAGE_EXIT_CODE,
 )
+from mergecraft.cli.local_env import local_env_path_for_process_cwd
 from mergecraft.utils.git_hardening import git_argv
-from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -801,33 +801,13 @@ def _write_env_value(env_path: Path, key: str, value: str) -> bool:
     return True
 
 
-def _repo_root() -> Path:
-    """Return the git repository root, bailing when there is none to anchor to."""
-    top = git_repo_root()
-    if top is None:
-        cli_bail(
-            "could not locate the repository root for the local .env — run "
-            "mergecraft auth from inside the repository, or point "
-            "MERGECRAFT_ENV at the .env you want written."
-        )
-    return top
-
-
 def _local_env_path() -> Path:
-    """Return the local ``.env`` path the auth command writes to.
+    """Alias for :func:`local_env_path_for_process_cwd`.
 
-    Resolution order: ``$MERGECRAFT_ENV`` if set (lets tests pin a temp file),
-    otherwise ``.env`` at the **repository root**. Anchoring on ``Path.cwd()``
-    silently wrote a nested ``.env`` that nothing reads whenever the operator
-    ran ``auth`` from a subdirectory, and still reported success. The
-    ``.env.example`` template at the repo root is the documented starting
-    point — operators who haven't initialised run ``cp .env.example .env``
-    first; the auth command writes into whatever ``.env`` they already have.
+    ``auth`` takes no ``--cwd``, so the process working directory is the only
+    anchor it has; the shared helper walks up to the git root from there.
     """
-    configured = os.environ.get("MERGECRAFT_ENV")
-    if configured:
-        return Path(configured).resolve()
-    return _repo_root() / ".env"
+    return local_env_path_for_process_cwd()
 
 
 def _normalise_scope(value: str) -> CredentialScope:

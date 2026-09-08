@@ -10,6 +10,8 @@ name: Integration
 on:
   pull_request:
     branches: [main, pre-0.0.1]
+  push:
+    branches: [main, pre-0.0.1, "release/**"]
   schedule:
     - cron: "47 5 * * *"
   workflow_dispatch:
@@ -24,7 +26,10 @@ concurrency:
 jobs:
   integration-pr:
     name: Integration (PR / mocked + self-skip)
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -12,7 +12,6 @@ def _run_agentsec(repo_root: Path, changed_files: list[str]):
     return agentsec.scan_manifests(
         repo_root=repo_root,
         changed_files=changed_files,
-        tier="trusted",
     )
 
 

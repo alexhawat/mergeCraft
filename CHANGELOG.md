@@ -137,6 +137,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requires verified signatures, source provenance, and SBOM attestations.
   Action pin preparation separates the built source from the manifest commit
   consumers execute, preventing deployment of the previous image (#579, #641).
+- CLI startup `.env` loading walks up to the git root, like the writers in
+  `mergecraft auth` and `tracing logfire` already did, so a credential written
+  from a subdirectory is visible on the next invocation instead of landing in
+  a nested `.env` nothing reads (#654)
 - Logfire `llm.call` rows now include the prompt mergeCraft sent and the model
   output, with a real duration instead of an empty ~2µs span
 - Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on

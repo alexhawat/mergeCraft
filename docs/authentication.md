@@ -95,6 +95,22 @@ whose secret is missing.
 > Whether the override is honoured is decided by `trust.agentSandbox` — see
 > [`docs/trust-policy.md`](trust-policy.md).
 
+### Where the local `.env` is resolved
+
+Every command that reads or writes a local credential resolves one of two
+anchors, and `MERGECRAFT_ENV` overrides both:
+
+| Command shape | Anchor |
+|---------------|--------|
+| Takes `--cwd` (`provider`, `model`, `agents`, `trust`) | `<cwd>/.env`, taken literally — the same directory `<cwd>/.mergecraft/config.yaml` is read from, so the registry and the credentials always name one repository |
+| Takes no `--cwd` (`auth`, `tracing logfire`, and the CLI startup load) | `<git-repo-root>/.env`, walking up from the process working directory |
+
+The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
+the next invocation actually loads. Outside a git checkout the writers fail
+with the directory they consulted named in the error; the startup load falls
+back to `./.env` and stays silent when it is missing, so global invocations and
+CI sandboxes are unaffected.
+
 ### Credential detection (`credential_status_for_slug`)
 
 `has_credentials_for_slug` and `mergecraft provider status` delegate to a

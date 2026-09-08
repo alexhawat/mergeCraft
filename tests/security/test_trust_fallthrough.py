@@ -242,7 +242,7 @@ def test_every_caller_tolerates_untrusted_default(
     # Analyzer env builder must scrub secrets on the untrusted tier
     # (build_analyzer_env is a pure function: it returns a dict, never raises
     # on the untrusted branch).
-    env = build_analyzer_env(event={"some": "payload"}, tier=tier, repo_env={})
+    env = build_analyzer_env(tier=tier, repo_env={})
     assert isinstance(env, dict)
     assert "GITHUB_TOKEN" not in env
     assert "ANTHROPIC_API_KEY" not in env

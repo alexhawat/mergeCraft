@@ -18,6 +18,10 @@ import typer
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.cli.local_env import (
+    local_env_path_for_cwd,
+    local_env_path_for_process_cwd,
+)
 from mergecraft.config.io import load_config_dict as _load_config_dict_raw
 from mergecraft.config.io import patch_config_dict
 from mergecraft.config.io import write_config_dict as _write_config_dict
@@ -34,7 +38,6 @@ from mergecraft.config.provider_registry import (
 from mergecraft.config.runtime_provider_registry import SEED_PROVIDER_URLS
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import PROVIDERS
-from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
     from mergecraft.cli.auth_cmd import AuthTarget
@@ -133,16 +136,22 @@ def _config_path(cwd: Path) -> Path:
 
 
 def _env_path(cwd: Path | None = None) -> Path:
-    configured = os.environ.get("MERGECRAFT_ENV")
-    if configured:
-        return Path(configured).resolve()
-    if cwd is not None:
-        return cwd.resolve() / ".env"
+    """Return the ``.env`` paired with :func:`_config_path` for *cwd*.
 
-    top = git_repo_root()
-    if top is None:
-        cli_bail("not inside a git repository (or pass --cwd)")
-    return top / ".env"
+    A ``--cwd`` is taken literally, exactly as ``_config_path`` takes it, so
+    the registry a command reads and the ``.env`` it writes always name the
+    same directory. Walking to the git root for the ``.env`` alone would both
+    split that pair and make ``provider add`` require a repository it never
+    needed before (#654: 35 tests exercise a plain non-repo tmp dir).
+
+    Typer defaults ``--cwd`` to ``Path(".")``, so the ``cwd=None`` branch is
+    reached only by the internal helpers that have nothing but the process
+    working directory; those keep the git-root walk-up the no-``--cwd`` writers
+    use.
+    """
+    if cwd is not None:
+        return local_env_path_for_cwd(cwd)
+    return local_env_path_for_process_cwd()
 
 
 def _load_config_dict(path: Path) -> dict[str, Any]:

@@ -234,32 +234,6 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     return build_agent_env("claude", extras, model=ctx.resolved_model)
 
 
-def _build_claude_streaming_usage(payload: dict[str, Any]) -> AgentUsage:
-    """Render one ``usage`` payload as an ``AgentUsage``.
-
-    Mirrors the legacy blob-parser output so the post-migration
-    ``AgentResult.usage`` matches what the W5.7 equivalence test pins.
-    """
-    usage_raw = payload.get("usage") or {}
-    input_tokens = int(usage_raw.get("input_tokens") or usage_raw.get("inputTokens") or 0)
-    output_tokens = int(usage_raw.get("output_tokens") or usage_raw.get("outputTokens") or 0)
-    cache_read = int(
-        usage_raw.get("cache_read_input_tokens") or usage_raw.get("cacheReadTokens") or 0
-    )
-    cache_write = int(
-        usage_raw.get("cache_creation_input_tokens") or usage_raw.get("cacheWriteTokens") or 0
-    )
-    cost = payload.get("total_cost_usd")
-    return AgentUsage(
-        agent="claude",
-        input_tokens=input_tokens + cache_read + cache_write,
-        output_tokens=output_tokens,
-        cache_read_tokens=cache_read or None,
-        cache_write_tokens=cache_write or None,
-        cost_usd=float(cost) if cost is not None else None,
-    )
-
-
 def _capture_claude_assistant_message(
     event: dict[str, Any],
     open_pairs: dict[str, ProviderLLMPair | None],

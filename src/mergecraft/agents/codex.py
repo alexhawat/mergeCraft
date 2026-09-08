@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 import shutil
@@ -16,7 +15,6 @@ from loguru import logger
 
 from mergecraft.agents.codex_broker import (
     OPENAI_API_KEY_ENV,
-    CodexBrokeredRun,
     active_broker_handle,
     add_broker_openai_config,
     begin_broker_session,
@@ -28,7 +26,6 @@ from mergecraft.agents.codex_broker import (
 from mergecraft.agents.codex_stream import (
     CODEX_MODEL_REASONING_EFFORT,
     codex_stream_event_handler,
-    parse_codex_payload,
 )
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
@@ -42,7 +39,6 @@ from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROM
 from mergecraft.agents.shared import (
     AgentResult,
     AgentRunContext,
-    AgentUsage,
     agent,
     payload_shell_mode,
     spawn_agent_cli,
@@ -216,45 +212,8 @@ def _render_toml(table: TomlTable, path: tuple[str, ...] = ()) -> list[str]:
     return lines
 
 
-def _extract_refresh_token(auth_json: str) -> str | None:
-    try:
-        data = json.loads(auth_json)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    tokens = data.get("tokens") if isinstance(data.get("tokens"), dict) else data
-    if isinstance(tokens, dict):
-        refresh = tokens.get("refresh_token") or tokens.get("refresh")
-        if isinstance(refresh, str) and refresh:
-            return refresh
-    refresh = data.get("refresh_token") or data.get("refresh")
-    return refresh if isinstance(refresh, str) and refresh else None
-
-
-def _save_codex_writeback_state(*, auth_path: Path, auth_json: str) -> None:
-    refresh = _extract_refresh_token(auth_json)
-    if not refresh:
-        return
-    payload = json.dumps(
-        {
-            "authPath": str(auth_path),
-            "originalRefresh": refresh,
-        }
-    )
-    state_file = os.environ.get("GITHUB_STATE")
-    if state_file:
-        with open(state_file, "a", encoding="utf-8") as fh:
-            fh.write(f"codex_writeback={payload}\n")
-    os.environ["STATE_codex_writeback"] = payload  # noqa: SIM112 — matches action/post.py _get_state("codex_writeback")
-
-
 def _has_openai_api_key() -> bool:
     return bool(os.environ.get(OPENAI_API_KEY_ENV, "").strip())
-
-
-def _codex_subscription_auth_usable(raw: str) -> bool:
-    return subscription_auth_usable(raw)
 
 
 def _setup_codex_auth(
@@ -267,7 +226,6 @@ def _setup_codex_auth(
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
         auth_path.write_text(raw, encoding="utf-8")
-        _save_codex_writeback_state(auth_path=auth_path, auth_json=raw)
         return
     if raw:
         logger.warning(
@@ -639,42 +597,6 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     return env
 
 
-def _parse_codex_stdout(stdout: str) -> tuple[str, AgentUsage | None]:
-    text = stdout.strip()
-    if not text:
-        return "", None
-
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return parse_codex_payload(data)
-    except json.JSONDecodeError:
-        pass
-
-    usage: AgentUsage | None = None
-    output = text
-    for line in reversed(text.splitlines()):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            event = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict):
-            continue
-        if event.get("type") == "message" and isinstance(event.get("content"), str):
-            output = str(event["content"])
-        parsed_output, parsed_usage = parse_codex_payload(event)
-        if parsed_output:
-            output = parsed_output
-        if parsed_usage is not None:
-            usage = parsed_usage
-        if event.get("type") in {"turn.completed", "agent-turn-complete", "result"}:
-            break
-    return output, usage
-
-
 def _run_codex_once(
     *,
     cli: str,
@@ -908,17 +830,6 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     finally:
         stop_broker_session(broker_session)
         set_broker_session(None)
-
-
-def prepare_codex_brokered_run(
-    ctx: AgentRunContext,
-    *,
-    openai_api_key: str = "",
-) -> CodexBrokeredRun:
-    """Start broker, build env, and MCP config (plan 18 W3)."""
-    from mergecraft.agents import codex_broker
-
-    return codex_broker.prepare_codex_brokered_run(ctx, openai_api_key=openai_api_key)
 
 
 codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)

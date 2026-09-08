@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.agentsec.mcp_manifest import discover_mcp_documents
 from mergecraft.analyzers.agentsec.policy import (
@@ -20,7 +20,6 @@ from mergecraft.analyzers.finding import Finding, make_finding
 if TYPE_CHECKING:
     from pathlib import Path
 
-TrustTier = Literal["trusted", "untrusted"]
 _TOOL = "agentsec"
 _CATEGORY = "Security & Privacy"
 
@@ -38,10 +37,8 @@ def scan_manifests(
     *,
     repo_root: Path,
     changed_files: list[str],
-    tier: TrustTier = "trusted",
 ) -> AgentSecScanResult:
     """Scan changed MCP and skill manifests with native YAML rules."""
-    _ = tier
     repo_root = repo_root.resolve()
     scoped = [path for path in changed_files if path.strip()]
     if not scoped:
