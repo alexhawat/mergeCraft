@@ -466,7 +466,7 @@ def _persist_indexed_credentials(
 
     env_index = int(entry["envIndex"])
     label = str(entry["label"])
-    target = target or _resolve_auth_target(scope, cwd=cwd, preflight=True)
+    target = target or _resolve_auth_target(scope, cwd=cwd)
 
     env_path = target.env_path or _env_path(cwd)
     label_key = _indexed_label_key(env_index)
@@ -736,7 +736,7 @@ def run_provider_auth(
     """Execute unified provider auth for one registry row (#478)."""
     from mergecraft.cli.auth_cmd import _resolve_auth_target
 
-    target = _resolve_auth_target(scope, cwd=cwd, preflight=True)
+    target = _resolve_auth_target(scope, cwd=cwd)
     if credential_map is not None:
         _persist_indexed_credentials(entry, scope, credential_map, cwd=cwd, target=target)
         return
@@ -1200,6 +1200,8 @@ def persist_legacy_indexed_auth(
     label: str,
     scope: str,
     credential_map: Mapping[str, str],
+    *,
+    target: AuthTarget | None = None,
 ) -> bool:
     """Write *credential_map* via the indexed provider path when *label* is registered."""
     config_path = _config_path(Path.cwd())
@@ -1213,7 +1215,7 @@ def persist_legacy_indexed_auth(
         suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
         if suffix != "API_KEY":
             mapped = {suffix: mapped["API_KEY"]}
-    run_provider_auth(entry, scope, credential_map=mapped)
+    _persist_indexed_credentials(entry, scope, mapped, target=target)
     return True
 
 

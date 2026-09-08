@@ -89,10 +89,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fallback restrictions, and cumulative budgets; a process without a terminal
   verdict is inconclusive (#592).
 - Provider authentication preflights the exact `--cwd` GitHub destination before
-  collecting credentials, rejects unverified secret-management access, and
+  collecting credentials in both canonical commands and legacy aliases, rejects
+  unverified secret-management access, and
   keeps explicit local scope independent of GitHub (#591).
 - Installed skills use a verified documentation commit containing every linked
   target and teach canonical, explicitly scoped provider authentication (#589).
+- Credential broker stream failures now close the connection without inserting a
+  second HTTP response, and client disconnects release upstream responses (#595)
+- Brokered Codex runs preserve configured proxy bypass entries and always bypass
+  proxies for the loopback broker, without changing parent proxy settings (#597)
+- Removed an obsolete Codex broker auth branch that suppressed the API-key
+  authentication diagnostic; subscription authentication is unchanged (#596)
 
 - Release verification uses compatible GitHub CLI policy flags, validates deployment
   candidates automatically, and publishes canonical image tags only after signed

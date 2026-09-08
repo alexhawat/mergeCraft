@@ -202,6 +202,7 @@ def test_local_scope_never_touches_gh_or_git(monkeypatch: MonkeyPatch) -> None:
 
 def test_github_and_both_scopes_resolve_the_repo_slug(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(auth_cmd, "_get_gh_token", lambda: "ghp_abc")
+    monkeypatch.setattr(auth_cmd, "_verify_github_secret_access", lambda *a, **kw: None)
     monkeypatch.setattr(auth_cmd, "_parse_git_remote", lambda: ("acme", "widgets"))
     github_only = auth_cmd._resolve_auth_target("github")
     assert github_only.local is False

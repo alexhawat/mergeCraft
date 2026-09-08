@@ -145,6 +145,7 @@ class GhRecorder:
     def __init__(self) -> None:
         self.token_calls = 0
         self.remote_calls = 0
+        self.permission_calls = 0
         self.secrets: list[dict[str, str]] = []
         self.secret_result = True
 
@@ -163,6 +164,10 @@ class GhRecorder:
             self.secrets.append({"name": name, "value": value, "repo_slug": repo_slug})
             return self.secret_result
 
+        def _permission(*_args: object, **_kwargs: object) -> None:
+            self.permission_calls += 1
+
+        monkeypatch.setattr(module, "_verify_github_secret_access", _permission)
         monkeypatch.setattr(module, "_get_gh_token", _token)
         monkeypatch.setattr(module, "_parse_git_remote", _remote)
         monkeypatch.setattr(module, "_set_gh_secret", _secret)
@@ -170,7 +175,7 @@ class GhRecorder:
     @property
     def touched_gh(self) -> bool:
         """True when any gh-facing helper ran."""
-        return bool(self.token_calls or self.remote_calls or self.secrets)
+        return bool(self.token_calls or self.remote_calls or self.permission_calls or self.secrets)
 
 
 class CodexLoginStub:

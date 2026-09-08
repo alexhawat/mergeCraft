@@ -523,3 +523,125 @@ def test_broker_does_not_forward_hop_by_hop_headers(
         assert smuggle_marker not in (forwarded_value or ""), (
             f"smuggled marker {smuggle_marker!r} must not appear in forwarded {header_name!r}"
         )
+
+
+class _InterruptedBrokerStream(httpx.SyncByteStream):
+    """Deliver an SSE event, then fail; record deterministic response cleanup."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield b'data: {"delta":"first"}\n\n'
+        raise httpx.ReadError(f"upstream interrupted: {REAL_OPENAI_API_KEY_FIXTURE}")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _raw_broker_request(handle: Any) -> bytes:
+    """Read the actual HTTP wire to EOF with a bounded socket timeout."""
+    import socket
+
+    with socket.create_connection((handle.host, handle.port), timeout=2) as connection:
+        connection.sendall(
+            f"GET /v1/models HTTP/1.1\r\nHost: {handle.host}\r\n"
+            f"Authorization: Bearer {handle.token}\r\n\r\n".encode()
+        )
+        chunks: list[bytes] = []
+        while chunk := connection.recv(65536):
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@pytest.mark.parametrize("before_headers", [False, True])
+def test_credential_broker_failure_emits_one_status_and_closes_responses(
+    monkeypatch: pytest.MonkeyPatch,
+    before_headers: bool,
+) -> None:
+    """A stream failure is EOF, never another HTTP response inside SSE (#595)."""
+    module = load_broker_module()
+    streams: list[_InterruptedBrokerStream] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if before_headers:
+            raise httpx.ConnectError(f"connect failed: {REAL_OPENAI_API_KEY_FIXTURE}")
+        stream = _InterruptedBrokerStream()
+        streams.append(stream)
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, stream=stream)
+
+    client = httpx.Client(base_url="https://api.openai.com", transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(module, "_upstream_client", lambda config: client)
+    config = module.CredentialBrokerConfig(
+        upstream_base_url="https://api.openai.com",
+        api_key=REAL_OPENAI_API_KEY_FIXTURE,
+        run_upstream_hosts=frozenset({"api.openai.com"}),
+    )
+    start = time.monotonic()
+    with capture_loguru_messages() as logs, module.credential_broker(config) as handle:
+        for _ in range(3):
+            wire = _raw_broker_request(handle)
+            assert wire.count(b"HTTP/1.1 ") == 1
+            if before_headers:
+                assert wire.startswith(b"HTTP/1.1 502 ")
+                assert b'"error": "upstream request failed"' in wire
+            else:
+                assert wire.startswith(b"HTTP/1.1 200 ")
+                assert wire.split(b"\r\n\r\n", 1)[1] == b'data: {"delta":"first"}\n\n'
+                assert all(stream.closed for stream in streams)
+            assert not client.is_closed, "one failed request must not close the shared client"
+            assert_credential_absent(wire.decode())
+    assert client.is_closed
+    assert time.monotonic() - start < 5
+    assert any("upstream request failed" in line for line in logs)
+    assert_credential_absent("\n".join(logs))
+
+
+def test_credential_broker_client_disconnect_closes_upstream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client reset during streaming releases the upstream response promptly."""
+    import socket
+    import struct
+    import threading
+
+    module = load_broker_module()
+    continue_stream = threading.Event()
+    closed = threading.Event()
+
+    class DisconnectStream(httpx.SyncByteStream):
+        def __iter__(self) -> Iterator[bytes]:
+            yield b"data: first\n\n"
+            assert continue_stream.wait(2), "client never released upstream"
+            for _ in range(128):
+                yield b"x" * 65536
+
+        def close(self) -> None:
+            closed.set()
+
+    client = httpx.Client(
+        base_url="https://api.openai.com",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, stream=DisconnectStream())
+        ),
+    )
+    monkeypatch.setattr(module, "_upstream_client", lambda config: client)
+    config = module.CredentialBrokerConfig(
+        upstream_base_url="https://api.openai.com",
+        api_key=REAL_OPENAI_API_KEY_FIXTURE,
+        run_upstream_hosts=frozenset({"api.openai.com"}),
+    )
+    with capture_loguru_messages() as logs, module.credential_broker(config) as handle:
+        with socket.create_connection((handle.host, handle.port), timeout=2) as connection:
+            connection.sendall(
+                f"GET /v1/models HTTP/1.1\r\nHost: {handle.host}\r\n"
+                f"Authorization: Bearer {handle.token}\r\n\r\n".encode()
+            )
+            assert connection.recv(65536).startswith(b"HTTP/1.1 200 ")
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        continue_stream.set()
+        assert closed.wait(2), "upstream response leaked after downstream disconnect"
+        assert not client.is_closed
+    assert client.is_closed
+    assert any("client disconnected" in line for line in logs)
+    assert_credential_absent("\n".join(logs))
