@@ -90,7 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local base-only reviews retain working-tree changes; remote comparisons deepen
   bounded shared history and fail explicitly rather than substitute endpoint diffs.
   Untracked text additions produce valid patches, including special filenames
-  and missing final newlines.
+  and missing final newlines. Binary and non-UTF-8 untracked files are skipped
+  with a diagnostic rather than producing a lossy patch or crashing.
 - Installed convergence evaluations include their recall corpus. Example drift
   checks run in disposable copies and no longer rewrite tracked outputs.
 - Redaction preserves closing assignment brackets and ordinary source paths while

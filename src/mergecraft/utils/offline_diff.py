@@ -172,6 +172,11 @@ def git_unstaged_diff(*, cwd: Path) -> str:
             if b"\0" in raw:
                 logger.info("skipped binary untracked file in unstaged diff: {}", rel)
                 continue
+            try:
+                raw.decode("utf-8")
+            except UnicodeDecodeError:
+                logger.info("skipped non-UTF-8 untracked file in unstaged diff: {}", rel)
+                continue
             patch = _run_git(["diff", "--no-index", "--", "/dev/null", rel], cwd=cwd)
             if patch.returncode not in (0, 1):
                 msg = f"failed to compute untracked diff for {rel!r}: {patch.stderr.strip()}"

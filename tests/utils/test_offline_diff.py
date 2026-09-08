@@ -103,3 +103,9 @@ def test_missing_common_history_never_substitutes_endpoint_diff(git_repo: Path) 
     _git(git_repo, "commit", "-m", "unrelated root")
     with pytest.raises(RuntimeError, match="shared history"):
         git_ref_diff(cwd=git_repo, base="main", head="HEAD")
+
+
+def test_untracked_non_utf8_does_not_crash_or_emit_a_lossy_patch(git_repo: Path) -> None:
+    (git_repo / "legacy.txt").write_bytes(b"caf\xe9\n")
+    text = git_unstaged_diff(cwd=git_repo)
+    assert "legacy.txt" not in text
