@@ -90,6 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PR head; missing App configuration retains review fallback without PAT approval.
 
 
+- Action images use patched, checksum-pinned npm and GitHub CLI tooling and
+  remove unused vulnerable pip bootstrap copies. Both images are scanned before
+  merge; release scans retain attributable JSON alongside SARIF without relaxing
+  the HIGH/CRITICAL gate. Python installation in the images uses uv.
 - Local review honors configured model chains, explicit/environment precedence,
   fallback restrictions, and cumulative budgets; a process without a terminal
   verdict is inconclusive (#592).
