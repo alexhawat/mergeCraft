@@ -1,10 +1,9 @@
 name: "Get Installation Token"
-description: "Get a GitHub App installation token for the current repository"
+description: "Get a repository-scoped GitHub App token, revoked after the caller job"
 author: "Alex Hawat"
-
 inputs:
   repos:
-    description: "Comma-separated list of additional repo names to grant access to (e.g., 'repo1,repo2'). Current repo is always included."
+    description: "Comma-separated additional repository names; current repository is always included."
     required: false
   app_id:
     description: "GitHub App ID (defaults to GITHUB_APP_ID env)."
@@ -13,34 +12,39 @@ inputs:
     description: "GitHub App private key PEM (defaults to GITHUB_APP_PRIVATE_KEY env)."
     required: false
   installation_id:
-    description: "Installation ID (defaults to GITHUB_APP_INSTALLATION_ID or repo lookup)."
+    description: "Optional expected installation ID; a mismatch fails the action."
     required: false
-
 outputs:
   token:
     description: "GitHub App installation token"
-    value: ${{ steps.mint.outputs.token }}
-
+    value: ${{ steps.validate.outputs.token }}
 runs:
   using: "composite"
   steps:
-    - name: Mint installation token
+    - name: Create repository-scoped token
       id: mint
+      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+      with:
+        app-id: ${{ inputs.app_id || env.GITHUB_APP_ID }}
+        private-key: ${{ inputs.private_key || env.GITHUB_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ format('{0},{1}', github.event.repository.name, inputs.repos) }}
+        permission-contents: read
+        permission-actions: read
+        permission-checks: write
+        permission-pull-requests: write
+        permission-issues: write
+    - name: Validate installation before exposing token
+      id: validate
       shell: bash
       env:
-        INPUT_REPOS: ${{ inputs.repos }}
-        GITHUB_APP_ID: ${{ inputs.app_id || env.GITHUB_APP_ID }}
-        GITHUB_APP_PRIVATE_KEY: ${{ inputs.private_key || env.GITHUB_APP_PRIVATE_KEY }}
-        GITHUB_APP_INSTALLATION_ID: ${{ inputs.installation_id || env.GITHUB_APP_INSTALLATION_ID }}
+        EXPECTED_ID: ${{ inputs.installation_id || env.GITHUB_APP_INSTALLATION_ID }}
+        ACTUAL_ID: ${{ steps.mint.outputs.installation-id }}
+        APP_TOKEN: ${{ steps.mint.outputs.token }}
       run: |
         set -euo pipefail
-        python3 "${{ github.action_path }}/main.py"
-    - name: Revoke on cleanup
-      if: always()
-      shell: bash
-      env:
-        STATE_token: ${{ steps.mint.outputs.token }}
-        MERGECRAFT_TOKEN_POST: "1"
-      run: |
-        set -euo pipefail
-        python3 "${{ github.action_path }}/main.py" --post
+        if [[ -n "$EXPECTED_ID" && "$EXPECTED_ID" != "$ACTUAL_ID" ]]; then
+          echo '::error::GitHub App installation does not match the requested installation.'
+          exit 1
+        fi
+        printf 'token=%s\n' "$APP_TOKEN" >> "$GITHUB_OUTPUT"

@@ -350,6 +350,51 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
 
 **See also:** [`docs/action-reference.md`](action-reference.md) · [`README.md`](../README.md)
 
+## Repository self-review App identity
+
+The repository's self-review workflows support `MERGECRAFT_APP_ID` and
+`MERGECRAFT_APP_PRIVATE_KEY` as GitHub Actions secrets. Install the App only on
+repositories it should review. Its installation needs contents and Actions read,
+and checks, pull requests and issues write. The workflow requests a token scoped
+to the current repository, with a fresh token before each provider attempt;
+the official token action revokes each token after the job.
+
+If the reviewer App is absent or minting fails, review attempts retain the
+job-token fallback. `prApproveEnabled: false` makes normal publication COMMENT,
+but this is not a security boundary: GitHub pull-request write permission also
+allows APPROVE, and a compromised review action can forge its own checks.
+
+Privileged approval uses a **different App**, configured through
+`MERGECRAFT_APPROVAL_APP_ID` and `MERGECRAFT_APPROVAL_APP_PRIVATE_KEY`. Install it
+only on the intended repository with Actions/checks read and pull requests write.
+The two App IDs must differ; missing or identical identities disable approval.
+Its credentials never enter the review action. Do not treat a review from the
+reviewer App as privileged approval in repository policy.
+
+A maintainer must explicitly dispatch `mergecraft-approve` on the default branch
+with `review-run-id` and the full `reviewed-head` SHA after inspecting the changes.
+There is no automatic `workflow_run` approval trigger. Reviewer tokens have no
+Actions write permission and cannot dispatch this workflow. Run/head/App checks
+then reject stale or unrelated evidence; they do not independently prove that
+reviewer-produced findings are honest. The explicit maintainer decision is the
+approval authorization boundary; a green reviewer check alone cannot trigger it.
+
+App registration, installation and secret entry are operator steps. Merging
+workflow code does not configure the App or prove branch-protection acceptance.
+Validate checks and review authorship on a benign same-repository PR after the
+workflow reaches the default branch. Configure the repository's stale-approval
+rules as appropriate: GitHub's review API has no atomic “approve only if head
+is unchanged” operation. An approval is submitted for the explicit reviewed
+commit; a later push requires the repository's ruleset to dismiss stale reviews
+or require approval of the latest push. An App review is not automatically an
+eligible CODEOWNER approval. Do not retire the old PAT secret until all users of
+it have been checked; this change does not delete secrets.
+
+The structural check also carries `external_id=<run ID>:<run attempt>`.
+The approval helper requires that exact attempt identity, so an older image
+that does not emit it cannot authorize approval. Deploy the updated image and
+workflow together; a matching run URL alone is insufficient after a rerun.
+
 ## Authentication target preflight
 
 Run `mergecraft init`, then `mergecraft provider list` to identify your configured
