@@ -89,9 +89,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request. `action-pin-check`'s staleness rule compared `main`'s pin against
   `main`'s own tip, so it read nothing from the PR under review — one commit of
   debt on `main` froze the whole queue, including the manifest PR that was the
-  only way to clear it (#669). The rule moved to a daily
-  `action-pin-staleness.yml` run against `main` that files one tracking issue,
-  keeps it current, and closes it once the pin is bumped. The required PR check
+  only way to clear it (#669). The rule moved to `action-pin-staleness.yml`,
+  which runs on every push to `main` (with a daily cron backstop) and files one
+  tracking issue, keeps it current, and closes it once the pin is bumped. The required PR check
   keeps every rule a branch can act on: rung self-consistency, drift from
   `env.MERGECRAFT_ACTION_SHA`, and freshness against the default branch's pin.
   `make action-pin-staleness-check` runs the full set locally.
