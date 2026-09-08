@@ -303,3 +303,27 @@ scope.
 
 Full rationale in the collapsible sections of
 [documentation index](README.md).
+
+### Self-review App token and approval lifecycle
+
+Each Nous, Codex or Claude attempt mints its own repository-scoped App token
+when both App secrets are configured and the review is for the same repository.
+A failed mint preserves the existing job-token review path. Per-attempt minting
+avoids reusing a one-hour token throughout the 95-minute fallback cascade.
+Tokens have real post-job revocation through the pinned official token action.
+
+The separate `mergecraft-approve` workflow executes its helper only from the
+trusted default branch, never from the reviewed PR or a downloaded artifact.
+It requires an App-authenticated `mergecraft-approval` check with a matching
+workflow run URL, a completion time from the current run attempt, and the
+current same-repository PR head. The pull-request head in the event/API is
+used; `workflow_run.head_sha` is not assumed to be that head. Missing App
+configuration, API failures, moved heads and unrelated checks do not approve.
+The helper checks the head again before posting with an explicit `commit_id`;
+repository stale-approval rules remain necessary for pushes racing or following
+the API request. See [App setup and acceptance](authentication.md#repository-self-review-app-identity).
+
+The structural check also carries `external_id=<run ID>:<run attempt>`.
+The approval helper requires that exact attempt identity, so an older image
+that does not emit it cannot authorize approval. Deploy the updated image and
+workflow together; a matching run URL alone is insufficient after a rerun.

@@ -28,6 +28,7 @@ that only have the boolean (pre-W5 call sites, tests) keep working unchanged —
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -205,6 +206,7 @@ async def _create_check_run(
         "output": {"title": title, "summary": summary},
     }
     if ctx.run_id:
+        body["external_id"] = f"{ctx.run_id}:{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
         body["details_url"] = (
             f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{ctx.run_id}"
         )
