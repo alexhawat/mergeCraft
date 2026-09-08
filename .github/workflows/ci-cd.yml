@@ -195,22 +195,33 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ needs.build-images.outputs.slim_ref }}
-          format: sarif
-          output: trivy-slim.sarif
+          version: v0.74.0
+          format: json
+          output: trivy-slim.json
           severity: ${{ steps.gate.outputs.severity }}
           exit-code: ${{ steps.gate.outputs.exit_code }}
           ignore-unfixed: true
           trivyignores: .trivyignore
       - name: Trivy scan analyzers
+        if: success() || failure()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ needs.build-images.outputs.analyzers_ref }}
-          format: sarif
-          output: trivy-analyzers.sarif
+          version: v0.74.0
+          format: json
+          output: trivy-analyzers.json
           severity: ${{ steps.gate.outputs.severity }}
           exit-code: ${{ steps.gate.outputs.exit_code }}
           ignore-unfixed: true
           trivyignores: .trivyignore
+      - name: Convert available scan reports to SARIF
+        if: always()
+        run: |
+          for report in trivy-slim trivy-analyzers; do
+            if [ -f "$report.json" ]; then
+              make image-scan-sarif IMAGE_SCAN_REPORT="$report"
+            fi
+          done
       - name: Upload SBOM + scan reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -219,7 +230,9 @@ jobs:
           path: |
             sbom-slim.spdx.json
             sbom-analyzers.spdx.json
+            trivy-slim.json
             trivy-slim.sarif
+            trivy-analyzers.json
             trivy-analyzers.sarif
           if-no-files-found: warn
 

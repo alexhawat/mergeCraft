@@ -327,6 +327,17 @@ docker-build: ## Build action Docker image
 clean: ## Remove caches and build artifacts
 	rm -rf .venv dist build .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml .cache
 
+# Image validation runs on disposable CI runners, without release credentials.
+IMAGE_SCAN_REF ?= mergecraft:scan
+IMAGE_SCAN_REPORT ?= trivy-image
+TRIVY ?= trivy
+.PHONY: image-toolchain-check image-scan-sarif
+image-toolchain-check: ## Exercise installed runtime tools and reject vulnerable pip bootstrap copies
+	docker run --rm --entrypoint /bin/sh "$(IMAGE_SCAN_REF)" -ec 'gh --version; gh attestation verify --help >/dev/null; test "$$(npm --version)" = "11.19.1"; uv pip --help >/dev/null; /usr/local/bin/python -c "import importlib.util,sys; sys.exit(any(importlib.util.find_spec(name) is not None for name in (\"pip\", \"ensurepip\")))"; mergecraft --version; if test -x /usr/local/analyzers/actionlint; then /usr/local/analyzers/actionlint -version; fi'
+
+image-scan-sarif: ## Preserve SARIF alongside the attributable Trivy JSON report
+	$(TRIVY) convert --format sarif --output "$(IMAGE_SCAN_REPORT).sarif" "$(IMAGE_SCAN_REPORT).json"
+
 .PHONY: test-filtered-egress
 test-filtered-egress: ## Real production firewall tests, disposable Linux only
 	@test "$(MERGECRAFT_DISPOSABLE_LINUX)" = 1 || { echo 'Requires explicit MERGECRAFT_DISPOSABLE_LINUX=1 on a disposable Linux runner'; exit 1; }
