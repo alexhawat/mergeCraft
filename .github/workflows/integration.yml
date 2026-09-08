@@ -25,13 +25,17 @@ concurrency:
 
 jobs:
   integration-pr:
-    name: Integration (PR / mocked + self-skip)
+    name: Integration (PR / mocked + self-skip / py${{ matrix.python }})
     if: >-
       github.event_name == 'pull_request' ||
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,12 +50,15 @@ jobs:
                 && format('refs/pull/{0}/merge', github.event.pull_request.number)
                 || github.ref }}
       - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
         env:
           # Exporter unit tests run in coverage-measure (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
       - name: Integration suite
         run: make test-integration
       - name: Coverage ratchet
+        if: matrix.python == '3.14'
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_BASE_REF: ${{ github.base_ref }}

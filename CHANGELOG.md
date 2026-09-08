@@ -85,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Consolidated integration CI retains Python 3.11 and 3.14 coverage after
+  prerelease/main reconciliation; the coverage ratchet runs once on 3.14.
+
 - Bring the GitLab review-support matrix correction from main to the prerelease branch.
 
 - Local base-only reviews retain working-tree changes; remote comparisons deepen

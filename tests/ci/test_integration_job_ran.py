@@ -17,11 +17,16 @@ from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
 
 def test_integration_job_runs_supported_python_matrix() -> None:
     """The minimum supported Python must execute the non-live integration suite."""
-    integration = job(load_workflow("ci.yml"), "integration")
+    integration = job(load_workflow("integration.yml"), "integration-pr")
     matrix = integration["strategy"]["matrix"]
     assert {"3.11", "3.14"} <= set(matrix["python"])
     assert not matrix.get("exclude"), "supported integration runtimes must not be excluded"
-    assert not integration.get("if"), "integration must run on every CI event"
+    for event in ("pull_request", "push", "workflow_dispatch"):
+        assert f"github.event_name == '{event}'" in integration["if"]
+    doc = load_workflow("integration.yml")
+    triggers = doc.get("on", doc.get(True))
+    assert {"main", "pre-0.0.1", "release/**"} <= set(triggers["push"]["branches"])
+    assert {"main", "pre-0.0.1"} <= set(triggers["pull_request"]["branches"])
     steps = integration["steps"]
     bootstrap = next(step for step in steps if step.get("uses") == "./.github/actions/bootstrap")
     assert bootstrap["with"]["python-version"] == "${{ matrix.python }}"
