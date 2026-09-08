@@ -81,10 +81,9 @@ def _overlay_logfire_region(
 ) -> list[TraceSinkEntry]:
     """Apply the resolved ``region`` onto adopted logfire sinks, if present.
 
-    ``merged["region"]`` already encodes CLI ``--region`` over the env layer,
-    and the env layer already prefers ``INPUT_TRACING_REGION`` over
-    ``MERGECRAFT_TRACING_REGION``. Re-reading the Action input here would
-    invert that stack when ``cli_args`` set ``--region``.
+    ``merged["region"]`` already encodes CLI ``--region`` over
+    ``MERGECRAFT_TRACING_REGION``. Re-reading env here would invert that
+    stack when ``cli_args`` set ``--region``.
     """
     raw_region = merged.get("region")
     if raw_region not in ("us", "eu"):
@@ -161,8 +160,7 @@ def resolve_active_tracing(
         # so ``MERGECRAFT_TRACING`` is often unset even when tracing is on.
         # Overlay the resolved region onto logfire sinks so an EU write
         # token is not posted to the US OTLP host. ``merged["region"]``
-        # already prefers ``INPUT_TRACING_REGION`` over job env, and CLI
-        # ``--region`` over both.
+        # already prefers CLI ``--region`` over ``MERGECRAFT_TRACING_REGION``.
         return TracingSettings(
             enabled=bool(config.enabled),
             sinks=_overlay_logfire_region(list(config.sinks), merged),
