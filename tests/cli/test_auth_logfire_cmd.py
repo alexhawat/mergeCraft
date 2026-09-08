@@ -92,6 +92,8 @@ def _stub_gh_token(monkeypatch: MonkeyPatch, token: str | None = "gh-token") -> 
     """Stub ``_get_gh_token`` so the subcommand never shells out to ``gh``."""
     module = _load_auth_cmd()
     monkeypatch.setattr(module, "_get_gh_token", lambda: token or "")
+    # These fixtures model an authenticated repository administrator.
+    monkeypatch.setattr(module, "_verify_github_secret_access", lambda *a, **kw: None)
 
 
 def _stub_git_remote(monkeypatch: MonkeyPatch, owner: str = "acme", repo: str = "widgets") -> None:

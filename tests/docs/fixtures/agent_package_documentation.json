@@ -1,0 +1,11 @@
+{
+  "ref": "bb865d5c8e03d97269cb5100656bf047fcd22c65",
+  "blobs": {
+    "README.md": "8b6c6d1c51c4a0701cfc8e24104bd6b2a5b517d9",
+    "AGENTS.md": "81385aabf547f1eee549fd4b8bc8110ac990ccb9",
+    "REVIEW-CHECKS.md": "26a7019c0bc2357d23bc57d5cac427ff003ba146",
+    "docs/README.md": "1da1254ba1c74ca170eca1e66f25e38ca602a731",
+    "docs/install.md": "e5b79a5a90ee36d147d2a0ca3207dc4000f377e8",
+    "docs/mcp.md": "17187a4f9eebd2c3bc4a8a26ef76ce40a258f5c0"
+  }
+}

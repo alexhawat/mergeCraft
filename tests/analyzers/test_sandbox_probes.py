@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from mergecraft.analyzers import sandbox as sandbox_mod
@@ -10,6 +12,7 @@ from mergecraft.mcp import shell as shell_mod
 
 @pytest.fixture(autouse=True)
 def _reset_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sandbox_mod, "sys", SimpleNamespace(platform="linux"))
     shell_mod.reset_detection_cache()
     if hasattr(sandbox_mod, "reset_detection_cache"):
         sandbox_mod.reset_detection_cache()

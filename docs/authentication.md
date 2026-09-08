@@ -30,13 +30,13 @@ run on `pull_request_target` (opened / synchronize).
 
 | Provider | Subscription (recommended) | API key | Recommended model | Inferred harness |
 |----------|-----------------------------|---------|-------------------|------------------|
-| Anthropic Claude | `mergecraft auth claude` → `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` | `claude` |
-| OpenAI Codex | `mergecraft auth codex` → `CODEX_AUTH_JSON` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
-| Google Gemini | `mergecraft auth gemini` → `GEMINI_API_KEY` (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
-| Nous Portal | — (API key) | `mergecraft auth nous` → `NOUS_API_KEY` | `nous/deepseek/deepseek-v4-flash` | `opencode` |
-| Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` | `tokenhub/hy3` | `opencode` |
-| MiniMax | — (API key) | `mergecraft auth minimax` → `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `minimax/MiniMax-M3` | `opencode` |
-| Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
+| Anthropic Claude | `mergecraft provider auth anthropic --scope github` → indexed credentials (Claude Pro/Max) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` | `claude` |
+| OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
+| Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
+| Nous Portal | — (API key) | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` | `opencode` |
+| Tencent TokenHub | — (API key) | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` | `opencode` |
+| MiniMax | — (API key) | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` | `opencode` |
+| Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
 | OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (indexed `_1`/`_2` …) | `<your-prefix>/<your-model>` — see [Custom OpenAI-compatible provider](#custom-openai-compatible-provider) | `opencode` |
 | Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](TRACING.md) | — | — |
 
@@ -380,3 +380,25 @@ The structural check also carries `external_id=<run ID>:<run attempt>`.
 The approval helper requires that exact attempt identity, so an older image
 that does not emit it cannot authorize approval. Deploy the updated image and
 workflow together; a matching run URL alone is insufficient after a rerun.
+
+## Authentication target preflight
+
+Run `mergecraft init`, then `mergecraft provider list` to identify your configured
+provider label or id. For local evaluation, use
+`mergecraft provider auth <label-or-id> --scope local`; this needs no GitHub login
+or network access to GitHub. Provider validation may contact the provider.
+For Actions adoption, use `--scope github` (the interactive default), or `--scope
+both` to write both destinations. `--cwd` selects the repository whose origin
+and local credential file are used. The CLI displays the destinations before
+requesting a credential.
+
+GitHub preflight conservatively requires repository administration permission
+and access to its Actions secret public key. Push access alone is insufficient;
+unknown or denied access stops before credential collection. A token can still
+lack secret write permission even after the read preflight; the write reports
+that failure, including partial success for `--scope both`. Local evaluation of
+an upstream clone should always use explicit `--scope local`.
+
+Provider auth writes indexed `LLM_PROVIDER_<N>` credentials for the configured
+entry. Legacy environment names in the provider compatibility table describe
+legacy inputs, not the names written by `provider auth`.
