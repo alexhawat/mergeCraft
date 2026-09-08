@@ -333,7 +333,7 @@ IMAGE_SCAN_REPORT ?= trivy-image
 TRIVY ?= trivy
 .PHONY: image-toolchain-check image-scan-sarif
 image-toolchain-check: ## Exercise installed runtime tools and reject vulnerable pip bootstrap copies
-	docker run --rm --entrypoint /bin/sh "$(IMAGE_SCAN_REF)" -ec 'gh --version; gh attestation verify --help >/dev/null; test "$$(npm --version)" = "11.19.1"; uv pip --help >/dev/null; /usr/local/bin/python -c "import importlib.util,sys; sys.exit(any(importlib.util.find_spec(name) is not None for name in (\"pip\", \"ensurepip\")))"; mergecraft --version'
+	docker run --rm --entrypoint /bin/sh "$(IMAGE_SCAN_REF)" -ec 'gh --version; gh attestation verify --help >/dev/null; test "$$(npm --version)" = "11.19.1"; uv pip --help >/dev/null; /usr/local/bin/python -c "import importlib.util,sys; sys.exit(any(importlib.util.find_spec(name) is not None for name in (\"pip\", \"ensurepip\")))"; mergecraft --version; if test -x /usr/local/analyzers/actionlint; then /usr/local/analyzers/actionlint -version; fi'
 
 image-scan-sarif: ## Preserve SARIF alongside the attributable Trivy JSON report
 	$(TRIVY) convert --format sarif --output "$(IMAGE_SCAN_REPORT).sarif" "$(IMAGE_SCAN_REPORT).json"

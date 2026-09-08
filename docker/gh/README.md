@@ -32,3 +32,15 @@ Release validation retains both Trivy JSON (package/layer attribution) and
 SARIF; HIGH/CRITICAL fixed findings still fail the job. Both images are
 scanned even when the first image has findings. A passing PR scan does not
 prove release signing, attestation, promotion, or consumer-pin acceptance.
+
+## Analyzer image: actionlint runtime
+
+The actual PR image scan additionally found Go stdlib HIGH vulnerabilities in
+the official actionlint 1.7.12 binary (Go 1.26.1). The latest upstream release
+was still 1.7.12 on 2026-09-08. Dockerfile.analyzers rebuilds unchanged source
+`914e7df21a07ef503a81201c76d2b11c789d3fca` with the same pinned Go 1.26.8
+toolchain as gh. Its source archive SHA256 is
+`30a9b942aa2a9c5246d8434d3ad9ff010969d1d4510281c4d395e18665192e6e`.
+The upstream go.mod/go.sum remain unchanged and the build uses `-mod=readonly`.
+This affects the shipped analyzer image; the independent CI bootstrap binary
+remains separately pinned by scripts/workflow_lint.sh.

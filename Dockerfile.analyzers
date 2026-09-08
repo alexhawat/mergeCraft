@@ -24,6 +24,18 @@ RUN tar -xzf /tmp/gh-source.tar.gz --strip-components=1 -C /src/gh \
         -ldflags="-s -w -X github.com/cli/cli/v2/internal/build.Version=2.100.0-mergecraft.1" \
         -o /out/gh ./cmd/gh
 
+# Preserve actionlint 1.7.12 source/dependencies, replacing its vulnerable Go runtime.
+FROM --platform=$BUILDPLATFORM golang:1.26.8-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS actionlint-builder
+ARG TARGETARCH
+ENV GOTOOLCHAIN=local CGO_ENABLED=0
+ADD --checksum=sha256:30a9b942aa2a9c5246d8434d3ad9ff010969d1d4510281c4d395e18665192e6e \
+    https://codeload.github.com/rhysd/actionlint/tar.gz/914e7df21a07ef503a81201c76d2b11c789d3fca /tmp/actionlint-source.tar.gz
+WORKDIR /src/actionlint
+RUN tar -xzf /tmp/actionlint-source.tar.gz --strip-components=1 -C /src/actionlint \
+    && GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -buildvcs=false \
+        -ldflags="-s -w -X github.com/rhysd/actionlint.version=1.7.12" \
+        -o /out/actionlint ./cmd/actionlint
+
 FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 
 ARG SOURCE_DATE_EPOCH
@@ -66,8 +78,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ENV IS_SANDBOX=1
 
 # Pinned artifact checksums (W0.6 / W3.6).
-ARG ACTIONLINT_VERSION=1.7.12
-ARG ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 ARG SHELLCHECK_VERSION=0.10.0
 ARG SHELLCHECK_SHA256=6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
 ARG HADOLINT_VERSION=2.12.0
@@ -99,11 +109,10 @@ RUN cd /opt/agent-clis \
     && rm -rf /tmp/npm-cache /root/.npm /root/.codex /root/.gemini \
         /tmp/node-compile-cache /tmp/* /var/cache/ldconfig
 
+COPY --from=actionlint-builder /out/actionlint /usr/local/analyzers/actionlint
+COPY --from=actionlint-builder /src/actionlint/LICENSE.txt /usr/share/doc/actionlint/LICENSE.txt
+
 RUN mkdir -p /usr/local/analyzers /tmp/analyzer-dl \
-    && curl -fsSL -o /tmp/analyzer-dl/actionlint.tar.gz \
-        "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-    && echo "${ACTIONLINT_SHA256}  /tmp/analyzer-dl/actionlint.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/analyzer-dl/actionlint.tar.gz -C /usr/local/analyzers actionlint \
     && curl -fsSL -o /tmp/analyzer-dl/shellcheck.tar.xz \
         "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
     && echo "${SHELLCHECK_SHA256}  /tmp/analyzer-dl/shellcheck.tar.xz" | sha256sum -c - \
