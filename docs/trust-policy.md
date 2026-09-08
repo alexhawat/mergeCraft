@@ -201,6 +201,8 @@ Inspect the live posture:
 ```bash
 mergecraft trust show              # effective policy + resolution source + hash
 mergecraft trust set-self-review analyzers   # writes committed config
+mergecraft trust set-self-review full --i-understand-this-grants-approval-authority --gh-apply
+# --gh-apply opens a default-branch PR so pull_request_target sees the change
 ```
 
 `--cwd` selects every target — both the `.mergecraft/` path and git resolution

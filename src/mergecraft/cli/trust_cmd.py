@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
+import re
+import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import typer
 
@@ -12,7 +16,7 @@ from mergecraft.agents.codex import CODEX_SANDBOX_ENV, CODEX_SANDBOX_UNSANDBOXED
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
-from mergecraft.config.io import write_config_dict
+from mergecraft.config.io import config_has_yaml_comments, write_config_dict
 from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
 from mergecraft.config.trust_policy import (
     AGENT_SANDBOX_LEVELS,
@@ -31,6 +35,142 @@ app = typer.Typer(
 _SELF_REVIEW_LEVELS: frozenset[str] = frozenset({"off", "analyzers", "full"})
 _APPROVAL_AUTHORITY_FLAG = "--i-understand-this-grants-approval-authority"
 _SAME_REPO_SANDBOX_FLAG = "--i-understand-same-repo-sandbox"
+_SELF_REVIEW_LINE = re.compile(
+    r"^([ \t]*selfReview:[ \t]*)(['\"]?)[A-Za-z0-9_-]+\2([ \t]*(?:#.*)?)?\s*$",
+    re.MULTILINE,
+)
+_CONFIG_REL = ".mergecraft/config.yaml"
+
+
+class GhRunner(Protocol):
+    def __call__(self, args: list[str], *, input_text: str | None = None) -> str: ...
+
+
+def _default_gh_runner(args: list[str], *, input_text: str | None = None) -> str:
+    try:
+        completed = subprocess.run(
+            ["gh", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            input=input_text,
+        )
+    except OSError as exc:
+        cli_bail(f"gh is required for --gh-apply: {exc}")
+    if completed.returncode != 0:
+        err = (completed.stderr or completed.stdout or "").strip()
+        cli_bail(f"gh {' '.join(args)} failed: {err}")
+    return completed.stdout
+
+
+def patch_self_review_yaml(text: str, level: str) -> str:
+    """Set ``trust.selfReview`` while preserving comment lines (#616)."""
+    if _SELF_REVIEW_LINE.search(text):
+        return _SELF_REVIEW_LINE.sub(rf'\1"{level}"\3', text, count=1)
+    if re.search(r"^trust:\s*$", text, flags=re.MULTILINE):
+        return re.sub(
+            r"^(trust:\s*)$",
+            rf'\1\n  selfReview: "{level}"',
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    suffix = "" if text.endswith("\n") or not text else "\n"
+    return f'{text}{suffix}trust:\n  selfReview: "{level}"\n'
+
+
+def _gh_json(run: GhRunner, args: list[str], *, input_text: str | None = None) -> Any:
+    raw = run(args, input_text=input_text)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        cli_bail(f"gh {' '.join(args)} returned non-JSON: {exc}")
+
+
+def apply_self_review_on_default_branch(
+    level: str,
+    *,
+    runner: GhRunner | None = None,
+) -> str:
+    """Open a default-branch PR that sets ``trust.selfReview`` for Actions (#616)."""
+    run = runner or _default_gh_runner
+    repo_info = _gh_json(run, ["repo", "view", "--json", "nameWithOwner,defaultBranchRef"])
+    if not isinstance(repo_info, dict):
+        cli_bail("gh repo view returned an unexpected payload")
+    repo = str(repo_info.get("nameWithOwner") or "")
+    default_ref = repo_info.get("defaultBranchRef")
+    default_branch = ""
+    if isinstance(default_ref, dict):
+        default_branch = str(default_ref.get("name") or "")
+    if not repo or not default_branch:
+        cli_bail("could not resolve the repository default branch via gh")
+    payload = _gh_json(run, ["api", f"repos/{repo}/contents/{_CONFIG_REL}?ref={default_branch}"])
+    if not isinstance(payload, dict):
+        cli_bail(f"could not read default-branch {_CONFIG_REL}")
+    content_b64 = str(payload.get("content") or "").replace("\n", "")
+    blob_sha = str(payload.get("sha") or "")
+    try:
+        current = base64.b64decode(content_b64).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as exc:
+        cli_bail(f"could not decode default-branch {_CONFIG_REL}: {exc}")
+    updated = patch_self_review_yaml(current, level)
+    if updated == current:
+        cli_bail(f"default-branch {_CONFIG_REL} already has trust.selfReview={level}")
+    branch = f"mergecraft/trust-self-review-{level}"
+    ref = _gh_json(run, ["api", f"repos/{repo}/git/ref/heads/{default_branch}"])
+    head_sha = ""
+    if isinstance(ref, dict):
+        obj = ref.get("object")
+        if isinstance(obj, dict):
+            head_sha = str(obj.get("sha") or "")
+    if not head_sha:
+        cli_bail(f"could not resolve {default_branch} tip SHA")
+    _gh_json(
+        run,
+        [
+            "api",
+            "-X",
+            "POST",
+            f"repos/{repo}/git/refs",
+            "--input",
+            "-",
+        ],
+        input_text=json.dumps({"ref": f"refs/heads/{branch}", "sha": head_sha}),
+    )
+    message = f"chore(trust): set selfReview={level} on {default_branch} for Actions"
+    _gh_json(
+        run,
+        ["api", "-X", "PUT", f"repos/{repo}/contents/{_CONFIG_REL}", "--input", "-"],
+        input_text=json.dumps(
+            {
+                "message": message,
+                "content": base64.b64encode(updated.encode("utf-8")).decode("ascii"),
+                "branch": branch,
+                "sha": blob_sha,
+            }
+        ),
+    )
+    pr_url = run(
+        [
+            "pr",
+            "create",
+            "--repo",
+            repo,
+            "--base",
+            default_branch,
+            "--head",
+            branch,
+            "--title",
+            message,
+            "--body",
+            (
+                "Updates default-branch `.mergecraft/config.yaml` so the next "
+                f"`pull_request_target` run sees `trust.selfReview: {level}`.\n\n"
+                "Fork floors are unchanged. This PR only writes the committed config."
+            ),
+        ]
+    ).strip()
+    return pr_url or branch
 
 
 def _effective_event_for_cli() -> dict[str, Any]:
@@ -88,6 +228,11 @@ def set_self_review_cmd(
         _APPROVAL_AUTHORITY_FLAG,
         help="Required when setting full — grants approval authority on same-repo PRT.",
     ),
+    gh_apply: bool = typer.Option(
+        False,
+        "--gh-apply",
+        help="Also open a PR against the default branch so Actions/PRT see the change.",
+    ),
 ) -> None:
     """Write ``trust.selfReview`` to the committed config at ``--cwd``."""
     normalized = level.strip().lower()
@@ -111,16 +256,23 @@ def set_self_review_cmd(
             "flows through mergecraft-approve.yml when configured."
         )
 
-    trust_block = data.get("trust")
-    if not isinstance(trust_block, dict):
-        trust_block = {}
-    trust_block["selfReview"] = normalized
-    data["trust"] = trust_block
-    try:
-        write_config_dict(config_path, data)
-    except ValueError as exc:
-        cli_bail(str(exc))
+    if gh_apply and config_has_yaml_comments(config_path) and config_path.is_file():
+        patched = patch_self_review_yaml(config_path.read_text(encoding="utf-8"), normalized)
+        config_path.write_text(patched, encoding="utf-8")
+    else:
+        trust_block = data.get("trust")
+        if not isinstance(trust_block, dict):
+            trust_block = {}
+        trust_block["selfReview"] = normalized
+        data["trust"] = trust_block
+        try:
+            write_config_dict(config_path, data)
+        except ValueError as exc:
+            cli_bail(str(exc))
     console.print(f"updated {config_path}: trust.selfReview={normalized}")
+    if gh_apply:
+        pr_url = apply_self_review_on_default_branch(normalized)
+        console.print(f"opened default-branch PR for Actions: {pr_url}")
 
 
 @app.command("set-agent-sandbox")
@@ -168,4 +320,4 @@ def set_agent_sandbox_cmd(
     console.print(f"updated {config_path}: trust.agentSandbox={normalized}")
 
 
-__all__ = ["app"]
+__all__ = ["app", "apply_self_review_on_default_branch", "patch_self_review_yaml"]
