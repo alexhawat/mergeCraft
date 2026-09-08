@@ -315,6 +315,14 @@ class ReviewSettings(BaseModel):
         default_factory=RoundBudgetsSettings,
         alias="roundBudgets",
     )
+    mcp_servers: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="mcpServers",
+        description=(
+            "Optional read-only consumer MCP servers attached during review (#620). "
+            "Stdio or localhost/https only; OAuth remotes and write tools are rejected."
+        ),
+    )
 
 
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.

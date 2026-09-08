@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitHub Copilot is a first-class Agent Skills harness: generated
+  `skills/copilot/mergecraft/`, install path `.github/skills/mergecraft/`,
+  a Copilot repo-MCP snippet with the six public tools, and a thin
+  `.github/agents/mergecraft.agent.md` (#621)
+- mergeCraft review prefers Copilot-style `.github/skills/code-review/`
+  (and other `.github/skills/*/SKILL.md`) over generic standing skills,
+  keeps the trust fence, can attach read-only consumer MCP servers from
+  `review.mcpServers` / `.vscode/mcp.json`, and attributes them on the
+  run record (#620)
+- `mergecraft trust set-self-review --gh-apply` opens a default-branch PR
+  so `pull_request_target` picks up `trust.selfReview` without a hand-edit
+  on main; comment-heavy configs are patched in place (#616)
+
 - Untrusted reviews can export prompt bodies to Logfire when `tracing.content`
   is `full` **and** an operator-owned export flag is true (Action
   `tracing-export-untrusted-content`, `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`,
@@ -84,6 +97,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matters (#553)
 
 ### Fixed
+
+- The sticky run record lists Action pin (manifest C) next to baked image
+  source (S) so pin-lag (pinning S deploys the previous digest) is visible
+  without reading Action logs (#641)
+- Untrusted allowlisted analyzers in the Action image can use a userspace
+  filtered-egress backend (user+net namespace plus parent TCP relay) when
+  host `CAP_NET_ADMIN` / `CAP_SYS_ADMIN` are absent, so declared hosts
+  remain reachable and undeclared hosts stay blocked (#538)
 
 - Consolidated integration CI retains Python 3.11 and 3.14 coverage after
   prerelease/main reconciliation; the coverage ratchet runs once on 3.14.

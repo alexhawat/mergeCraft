@@ -97,12 +97,22 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     # the server can attribute the primary reviewer's tool.call spans.
     reviewer_entry = mcp_http_server_entry(ctx, "claude")
     verifier_entry = mcp_http_server_entry(ctx, VERIFIER_AGENT_NAME)
+    from mergecraft.config.io import load_config_dict
+    from mergecraft.review.consumer_mcp import consumer_mcp_stdio_entries, load_consumer_mcp_servers
+
+    repo_root = Path.cwd()
+    configured: list[dict[str, object]] = []
+    review_block = load_config_dict(repo_root / ".mergecraft" / "config.yaml").get("review")
+    if isinstance(review_block, dict) and isinstance(review_block.get("mcpServers"), list):
+        configured = [row for row in review_block["mcpServers"] if isinstance(row, dict)]
+    extra = consumer_mcp_stdio_entries(load_consumer_mcp_servers(repo_root, configured=configured))
     config_path.write_text(
         json.dumps(
             {
                 "mcpServers": {
                     MERGECRAFT_MCP_NAME: reviewer_entry,
                     MERGECRAFT_VERIFIER_MCP_NAME: verifier_entry,
+                    **extra,
                 }
             }
         ),
