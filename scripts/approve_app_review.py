@@ -1,13 +1,15 @@
 """Approve only an App-authenticated structural verdict for a current PR head.
 
 Run from the trusted default-branch checkout in the isolated approval job.
-Exports: approve — validate provenance and submit; main — workflow entry point.
+Exports: approve — validate provenance; approve_dispatch — bind operator selection;
+main — workflow entry point.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -17,14 +19,23 @@ from urllib.parse import urlsplit
 Api = Callable[[str, dict[str, Any] | None], Any]
 
 
-def approve(api: Api, *, repo: str, run: dict[str, Any], app_id: str, server: str) -> bool:
+def approve(
+    api: Api,
+    *,
+    repo: str,
+    run: dict[str, Any],
+    app_id: str,
+    approval_app_id: str,
+    server: str,
+) -> bool:
     """Validate the event, App, run, and current PR head before submitting.
 
     Args:
         api: Authenticated REST operation; None body means GET.
         repo: Trusted repository owner/name.
-        run: workflow_run from the trusted GitHub event envelope.
-        app_id: Configured App's numeric identity, never a PR-provided value.
+        run: Workflow run fetched from the trusted GitHub API.
+        app_id: Reviewer App identity, never a PR-provided value.
+        approval_app_id: Separate approval App identity; must differ from reviewer.
         server: Trusted GitHub server URL used in check-run provenance.
 
     Returns:
@@ -33,6 +44,10 @@ def approve(api: Api, *, repo: str, run: dict[str, Any], app_id: str, server: st
     pulls = run.get("pull_requests") or []
     if (
         not app_id.isdecimal()
+        or not approval_app_id.isdecimal()
+        or int(app_id) <= 0
+        or int(approval_app_id) <= 0
+        or int(app_id) == int(approval_app_id)
         or run.get("event") != "pull_request_target"
         or run.get("conclusion") != "success"
         or run.get("repository", {}).get("full_name") != repo
@@ -121,14 +136,54 @@ def _api(path: str, body: dict[str, Any] | None) -> Any:
     return json.loads(result.stdout)
 
 
+def approve_dispatch(
+    api: Api, *, event: dict[str, Any], repo: str, app_id: str, approval_app_id: str, server: str
+) -> bool:
+    """Require an explicit maintainer-selected run and head before approval.
+
+    Args:
+        api: Authenticated REST operation with the isolated approval token.
+        event: Trusted workflow_dispatch envelope, not reviewer-produced data.
+        repo: Current repository owner/name.
+        app_id: Expected reviewer App identity.
+        approval_app_id: Separate approval App identity.
+        server: Trusted GitHub server URL.
+
+    Returns:
+        Whether the explicitly accepted current head was approved.
+    """
+    inputs = event.get("inputs") or {}
+    run_id = inputs.get("review-run-id", "")
+    head = inputs.get("reviewed-head", "")
+    if not isinstance(run_id, str) or not re.fullmatch(r"[1-9][0-9]*", run_id):
+        return False
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        return False
+    run = api(f"/repos/{repo}/actions/runs/{run_id}", None)
+    pulls = run.get("pull_requests") or []
+    if (
+        str(run.get("id")) != run_id
+        or run.get("path") != ".github/workflows/mergecraft.yml"
+        or len(pulls) != 1
+        or pulls[0].get("head", {}).get("sha") != head
+    ):
+        return False
+    return approve(
+        api, repo=repo, run=run, app_id=app_id, approval_app_id=approval_app_id, server=server
+    )
+
+
 def main() -> None:
     """Read trusted workflow context and fail closed on API/validation errors."""
+    if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+        return
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-    approve(
+    approve_dispatch(
         _api,
         repo=os.environ["GITHUB_REPOSITORY"],
-        run=event["workflow_run"],
+        event=event,
         app_id=os.environ["EXPECTED_APP_ID"],
+        approval_app_id=os.environ["APPROVAL_APP_ID"],
         server=os.environ["GITHUB_SERVER_URL"],
     )
 

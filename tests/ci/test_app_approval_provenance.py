@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 import yaml
-from scripts.approve_app_review import approve
+from scripts.approve_app_review import approve, approve_dispatch
 
 REPO = "acme/demo"
 HEAD = "a" * 40
@@ -47,6 +47,7 @@ def execute(
     checks: list[dict[str, Any]] | None = None,
     heads: list[dict[str, Any]] | None = None,
     app_id: str = "42",
+    approval_app_id: str = "84",
     server: str = "https://github.com",
 ) -> tuple[bool, list[dict[str, Any]]]:
     posted: list[dict[str, Any]] = []
@@ -62,7 +63,14 @@ def execute(
         assert path == f"/repos/acme/demo/commits/{HEAD}/check-runs?per_page=100"
         return {"check_runs": checks if checks is not None else [CHECK]}
 
-    result = approve(api, repo=REPO, run=run or RUN, app_id=app_id, server=server)
+    result = approve(
+        api,
+        repo=REPO,
+        run=run or RUN,
+        app_id=app_id,
+        approval_app_id=approval_app_id,
+        server=server,
+    )
     return result, posted
 
 
@@ -209,3 +217,110 @@ def test_api_does_not_fall_back_to_cached_auth(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.delenv("GH_TOKEN", raising=False)
     with pytest.raises(ValueError, match="explicit App token"):
         helper._api("/repos/acme/demo", None)
+
+
+@pytest.mark.parametrize("approval_app_id", ["", "42", "042", "0", "invalid"])
+def test_approval_requires_distinct_configured_identity(approval_app_id: str) -> None:
+    assert execute(approval_app_id=approval_app_id) == (False, [])
+
+
+def test_reviewer_cannot_dispatch_or_access_approval_credentials() -> None:
+    root = Path(__file__).resolve().parents[2]
+    review_text = (root / ".github/workflows/mergecraft.yml").read_text()
+    assert "secrets.MERGECRAFT_APPROVAL_" not in review_text
+    review = yaml.safe_load(review_text)
+    assert review["permissions"].get("actions") != "write"
+    for job in review["jobs"].values():
+        assert job.get("permissions", {}).get("actions") != "write"
+        for step in job.get("steps", []):
+            assert step.get("with", {}).get("permission-actions") != "write"
+    approval = yaml.safe_load((root / ".github/workflows/mergecraft-approve.yml").read_text())
+    assert set(approval.get("on", approval.get(True))) == {"workflow_dispatch"}
+    job = approval["jobs"]["approve"]
+    assert "github.event.repository.default_branch" in job["if"]
+    assert (
+        "secrets.MERGECRAFT_APP_ID != secrets.MERGECRAFT_APPROVAL_APP_ID" in job["env"]["HAS_APP"]
+    )
+    mint = next(step for step in job["steps"] if step.get("id") == "app_token")
+    assert mint["with"]["app-id"] == "${{ secrets.MERGECRAFT_APPROVAL_APP_ID }}"
+    assert mint["with"]["private-key"] == "${{ secrets.MERGECRAFT_APPROVAL_APP_PRIVATE_KEY }}"
+    assert mint["with"]["permission-checks"] == "read"
+    assert mint["with"]["permission-actions"] == "read"
+
+
+@pytest.mark.parametrize("head", [HEAD, "c" * 40])
+def test_dispatch_binds_explicit_head_and_review_workflow(head: str) -> None:
+    calls: list[str] = []
+    posted: list[dict[str, Any]] = []
+
+    def api(path: str, body: dict[str, Any] | None) -> Any:
+        calls.append(path)
+        if path.endswith("/actions/runs/123"):
+            return {**RUN, "path": ".github/workflows/mergecraft.yml"}
+        if body is not None:
+            posted.append(body)
+            return {}
+        if path.endswith("/pulls/7"):
+            return PR
+        return {"check_runs": [CHECK]}
+
+    result = approve_dispatch(
+        api,
+        event={"inputs": {"review-run-id": "123", "reviewed-head": head}},
+        repo=REPO,
+        app_id="42",
+        approval_app_id="84",
+        server="https://github.com",
+    )
+    assert result is (head == HEAD)
+    assert bool(posted) is (head == HEAD)
+    assert calls[0] == "/repos/acme/demo/actions/runs/123"
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        {},
+        {"review-run-id": "../secrets", "reviewed-head": HEAD},
+        {"review-run-id": "123", "reviewed-head": "short"},
+    ],
+)
+def test_missing_or_invalid_dispatch_does_not_call_api(inputs: dict[str, str]) -> None:
+    def api(path: str, body: dict[str, Any] | None) -> Any:
+        pytest.fail("invalid dispatch must not invoke GitHub")
+
+    assert not approve_dispatch(
+        api,
+        event={"inputs": inputs},
+        repo=REPO,
+        app_id="42",
+        approval_app_id="84",
+        server="https://github.com",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [("path", ".github/workflows/unrelated.yml"), ("id", 999)]
+)
+def test_dispatch_rejects_other_workflow_or_run(field: str, value: Any) -> None:
+    def api(path: str, body: dict[str, Any] | None) -> Any:
+        assert path.endswith("/actions/runs/123")
+        assert body is None
+        return {**RUN, "path": ".github/workflows/mergecraft.yml", field: value}
+
+    assert not approve_dispatch(
+        api,
+        event={"inputs": {"review-run-id": "123", "reviewed-head": HEAD}},
+        repo=REPO,
+        app_id="42",
+        approval_app_id="84",
+        server="https://github.com",
+    )
+
+
+def test_workflow_run_event_cannot_invoke_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import approve_app_review as helper
+
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_run")
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    helper.main()

@@ -1,3 +1,5 @@
+# Reviewer credentials can publish PR reviews/checks; they are not an approval boundary.
+# Distinct approval credentials live only in the maintainer-dispatched approval workflow.
 # mergeCraft PR review (BYOK; https://github.com/alexhawat/mergeCraft).
 #
 # === THIS IS THE mergeCraft REPO'S OWN CONSUMER WORKFLOW ===

@@ -359,17 +359,25 @@ and checks, pull requests and issues write. The workflow requests a token scoped
 to the current repository, with a fresh token before each provider attempt;
 the official token action revokes each token after the job.
 
-If the App is absent or minting fails, review attempts retain the job-token
-fallback. Privileged approval requires the App; it does not fall back to a PAT.
-This repository sets `prApproveEnabled: false`, so the parent review publisher
-posts COMMENT even when the model requests approval; the isolated approval job
-submits APPROVE after the structural check passes. GitHub does not offer a
-COMMENT-only pull-request token permission. The App token stays in the trusted
-parent publisher and is stripped from agent subprocess environments; keeping
-that process/tool boundary intact remains a release requirement.
-The approval job checks the structural verdict's App ID, workflow run URL and
-reviewed PR head, then rechecks the current head immediately before posting.
-Unattributable, stale or fork verdicts cannot unlock that path.
+If the reviewer App is absent or minting fails, review attempts retain the
+job-token fallback. `prApproveEnabled: false` makes normal publication COMMENT,
+but this is not a security boundary: GitHub pull-request write permission also
+allows APPROVE, and a compromised review action can forge its own checks.
+
+Privileged approval uses a **different App**, configured through
+`MERGECRAFT_APPROVAL_APP_ID` and `MERGECRAFT_APPROVAL_APP_PRIVATE_KEY`. Install it
+only on the intended repository with Actions/checks read and pull requests write.
+The two App IDs must differ; missing or identical identities disable approval.
+Its credentials never enter the review action. Do not treat a review from the
+reviewer App as privileged approval in repository policy.
+
+A maintainer must explicitly dispatch `mergecraft-approve` on the default branch
+with `review-run-id` and the full `reviewed-head` SHA after inspecting the changes.
+There is no automatic `workflow_run` approval trigger. Reviewer tokens have no
+Actions write permission and cannot dispatch this workflow. Run/head/App checks
+then reject stale or unrelated evidence; they do not independently prove that
+reviewer-produced findings are honest. The explicit maintainer decision is the
+approval authorization boundary; a green reviewer check alone cannot trigger it.
 
 App registration, installation and secret entry are operator steps. Merging
 workflow code does not configure the App or prove branch-protection acceptance.

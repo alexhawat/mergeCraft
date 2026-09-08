@@ -86,8 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Self-review App tokens now refresh per provider attempt and revoke after the
-  job. Privileged approval requires the expected App, workflow run and current
-  PR head; missing App configuration retains review fallback without PAT approval.
+  job. Privileged approval uses a distinct App outside the reviewer action and
+  requires explicit maintainer dispatch for an exact run/head; reviewer checks
+  cannot automatically trigger approval. Missing App configuration fails closed.
 
 
 - Action images use patched, checksum-pinned npm and GitHub CLI tooling and

@@ -177,9 +177,10 @@ issues-showcase-readiness wave plan (PR G5 / D7). -->
 - **The approval check is structural** — `success` requires a completed trusted
   run with no Critical/Major findings; `failure` on any blocker; `neutral` for
   crashes, timeouts, and untrusted tiers. The agent's narrative approval is
-  advisory only. Real PAT-backed APPROVE on self-review flows through
+  advisory only. This check cannot independently authorize privileged approval.
+  A maintainer explicitly dispatches
   [`mergecraft-approve.yml`](../../.github/workflows/mergecraft-approve.yml)
-  when the `mergecraft-approval` check passes — see
+  with the accepted run/head and a distinct approval App — see
   [trust policy](trust-policy.md).
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
@@ -312,16 +313,22 @@ A failed mint preserves the existing job-token review path. Per-attempt minting
 avoids reusing a one-hour token throughout the 95-minute fallback cascade.
 Tokens have real post-job revocation through the pinned official token action.
 
-The separate `mergecraft-approve` workflow executes its helper only from the
-trusted default branch, never from the reviewed PR or a downloaded artifact.
-It requires an App-authenticated `mergecraft-approval` check with a matching
-workflow run URL, a completion time from the current run attempt, and the
-current same-repository PR head. The pull-request head in the event/API is
-used; `workflow_run.head_sha` is not assumed to be that head. Missing App
-configuration, API failures, moved heads and unrelated checks do not approve.
-The helper checks the head again before posting with an explicit `commit_id`;
-repository stale-approval rules remain necessary for pushes racing or following
-the API request. See [App setup and acceptance](authentication.md#repository-self-review-app-identity).
+The separate `mergecraft-approve` workflow runs only when a maintainer explicitly
+dispatches it on the default branch with a reviewed run ID and full PR head SHA.
+It uses a distinct approval App; its credentials never enter the reviewer action.
+Identical or missing App IDs disable approval. The reviewer can publish reviews
+and checks, so COMMENT-only configuration and check provenance are not an
+independent approval boundary. A forged reviewer check cannot trigger this
+workflow: automatic `workflow_run` approval is removed and reviewer tokens have
+no Actions write permission.
+
+The helper executes only trusted default-branch code, fetches the selected
+mergecraft run from GitHub, and verifies its workflow path, App-authenticated
+check, run/attempt and explicitly accepted current PR head. Missing configuration,
+API failures, unrelated checks and moved heads do not approve. It rechecks the
+head before posting an explicit `commit_id`; stale-approval repository rules
+remain necessary for racing or later pushes. See
+[App setup and acceptance](authentication.md#repository-self-review-app-identity).
 
 The structural check also carries `external_id=<run ID>:<run attempt>`.
 The approval helper requires that exact attempt identity, so an older image

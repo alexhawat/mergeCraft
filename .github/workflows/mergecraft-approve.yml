@@ -1,10 +1,17 @@
-# Privileged approval reads only trusted default-branch code and API metadata.
-# The reviewer job never receives this approval job's token or private key.
+# Approval is an explicit maintainer decision, never a reviewer-triggered event.
+# Its separate App credentials never enter the review action.
 name: mergecraft-approve
 on:
-  workflow_run:
-    workflows: [mergecraft]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      review-run-id:
+        description: Successful mergecraft run explicitly accepted by the maintainer
+        required: true
+        type: string
+      reviewed-head:
+        description: Full PR head SHA explicitly approved by the maintainer
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -12,12 +19,9 @@ jobs:
     name: mergecraft privileged approve
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request_target' &&
-      github.event.workflow_run.pull_requests[0] != null
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     env:
-      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' }}
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APPROVAL_APP_ID != '' && secrets.MERGECRAFT_APPROVAL_APP_PRIVATE_KEY != '' && secrets.MERGECRAFT_APP_ID != secrets.MERGECRAFT_APPROVAL_APP_ID }}
     steps:
       - name: Check out trusted approval helper
         if: env.HAS_APP == 'true'
@@ -25,20 +29,22 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - name: Mint approval App token
+      - name: Mint distinct approval App token
         if: env.HAS_APP == 'true'
         id: app_token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
-          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
-          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.MERGECRAFT_APPROVAL_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APPROVAL_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          permission-actions: read
           permission-checks: read
           permission-pull-requests: write
-      - name: Verify provenance and submit privileged APPROVE
+      - name: Verify accepted run and submit privileged APPROVE
         if: env.HAS_APP == 'true'
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           EXPECTED_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
+          APPROVAL_APP_ID: ${{ secrets.MERGECRAFT_APPROVAL_APP_ID }}
         run: python3 scripts/approve_app_review.py
