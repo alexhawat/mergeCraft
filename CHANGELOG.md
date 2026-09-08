@@ -97,6 +97,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Redaction preserves closing assignment brackets and ordinary source paths while
   retaining secret-pattern and high-entropy controls.
 - Optional image live checks require an actual terminal review rather than CLI help.
+- Self-review App tokens now refresh per provider attempt and revoke after the
+  job. Privileged approval uses a distinct App outside the reviewer action and
+  requires explicit maintainer dispatch for an exact run/head; reviewer checks
+  cannot automatically trigger approval. Missing App configuration fails closed.
+
 
 - Action images use patched, checksum-pinned npm and GitHub CLI tooling and
   remove unused vulnerable pip bootstrap copies. Both images are scanned before

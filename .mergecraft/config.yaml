@@ -1,6 +1,8 @@
 # mergeCraft repo-config for this repo's self-review consumer workflow.
 # See docs/trust-policy.md for trust knobs and docs/REVIEW-DOCTRINE.md for review posture.
-prApproveEnabled: true
+# Review publication remains COMMENT; the isolated App approval job is the
+# only self-review path that should submit APPROVE.
+prApproveEnabled: false
 
 runBounds:
   tokenBudget: 5000000
