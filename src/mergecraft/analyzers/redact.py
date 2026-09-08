@@ -22,7 +22,7 @@ _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\b(?:xox[baprs]-)[A-Za-z0-9-]{10,}\b"),
-    re.compile(r"\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?([^\s'\"]{8,})", re.I),
+    re.compile(r"\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?([^\s'\"\]})]{8,})", re.I),
     re.compile(r"Basic [A-Za-z0-9+/=]{16,}"),
 )
 
@@ -158,6 +158,15 @@ def _looks_like_repo_path_token(token: str) -> bool:
 def _entropy_redact(text: str) -> str:
     def replacer(match: re.Match[str]) -> str:
         token = match.group(0)
+        # The entropy alphabet excludes dots, so inspect a bounded filename
+        # suffix before classifying a normal path prefix as a dense token.
+        suffix = re.match(
+            r"\.(?:py|js|ts|md|json|yaml|yml|toml|sh|txt)(?![\w.])", text[match.end() :]
+        )
+        if suffix and "/" in token:
+            segments = token.split("/")
+            if all(re.fullmatch(r"[a-z_][a-z0-9_-]{0,14}", part) for part in segments):
+                return token
         if _looks_like_repo_path_token(token):
             return token
         if len(token) < _MIN_ENTROPY_LENGTH:

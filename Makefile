@@ -312,14 +312,15 @@ bench-review: ## Run ReviewBench via Harbor (set REVIEWBENCH_DIR to an external 
 eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
 	$(UV) run mergecraft eval gate
 
-eval-replay: ## Replay eval bank; write versioned result set (operator-triggered; needs live keys for F1)
+eval-replay: ## Replay structural eval-bank integrity; keyless, not live detection scores
 	$(UV) run mergecraft eval replay-bank
 
 eval-convergence: ## Score multi-round convergence metric; write result set (RC6)
 	$(UV) run mergecraft eval convergence
 
+BENCH_DETECT_ARGS ?=
 bench-detect: ## Join structural replay + live finding-location detection (#140, B3; needs live keys)
-	$(UV) run mergecraft eval bench
+	$(UV) run mergecraft eval bench $(BENCH_DETECT_ARGS)
 
 docker-build: ## Build action Docker image
 	docker build -t mergeCraft:local -f Dockerfile .
@@ -334,3 +335,7 @@ test-filtered-egress: ## Real production firewall tests, disposable Linux only
 	@test -x /usr/bin/python3 || { echo "Integration probes require readable system Python"; exit 1; }
 	/usr/bin/python3 --version
 	unshare --mount --net --pid --fork --mount-proc bash -ec 'mount --make-rprivate /; sysctl -q -w net.ipv4.ip_forward=1; export MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME=1; exec "$(CURDIR)/.venv-dev/bin/python" -m pytest tests/analyzers/test_filtered_egress.py -v --tb=short --strict-markers -m integration -p no:cacheprovider'
+
+.PHONY: test-wheel-corpus
+test-wheel-corpus: build ## Verify installed convergence corpus outside the checkout
+	UV="$(UV)" $(UV) run python scripts/check_wheel_corpus.py dist/merge_craft-*.whl

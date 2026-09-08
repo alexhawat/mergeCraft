@@ -2,7 +2,11 @@
 # Resolve the mergeCraft repo root from any examples/cli/<name>/ run.sh.
 mergecraft_repo_root() {
   local here="${1:?}"
-  (cd "${here}/../../.." && pwd)
+  if [[ -n "${MERGECRAFT_EXAMPLE_PROJECT_ROOT:-}" ]]; then
+    printf '%s\n' "$MERGECRAFT_EXAMPLE_PROJECT_ROOT"
+  else
+    (cd "${here}/../../.." && pwd)
+  fi
 }
 
 mergecraft_invoke() {

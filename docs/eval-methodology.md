@@ -80,3 +80,39 @@ run", not "no contribution".
 - Put scores on `README.md`.
 - Claim a ranking against other tools without a number on the same line as
   the claim, backed by a recorded result set.
+
+## Reproducible live campaign
+
+`make eval-gate` and `make eval-replay` check structural case integrity and
+replay expected decisions without a provider. They do not measure live detection.
+Use `make bench-detect BENCH_DETECT_ARGS='--model PROVIDER/MODEL --detection-corpus PATH --results-dir PATH --json'`
+once per chosen model against the same frozen, patch-bearing corpus. Record its
+Git tree SHA, exact model, rubric/source pins, expected case count, executed
+case count, errors, latency and cost alongside each result. A missing detection
+section or zero executed cases is not benchmark acceptance. Failures must remain
+visible, not be scored as clean reviews.
+
+Start with a small corpus containing a labelled defect and a clean case. Obtain
+a spend ceiling and provider/model choices before expanding to the full bank.
+`MERGECRAFT_RUN_TIMEOUT_S`, `MERGECRAFT_COST_BUDGET_USD`, and
+`MERGECRAFT_TOKEN_BUDGET` bound each review; the operator must also cap total
+campaign size. Preserve raw case results for adjudication. Unmatched findings
+remain unadjudicated when the reference labels are incomplete. Publish measured
+results here or under `evals/results`, with a README link rather than unsupported
+landing-page scores; reconcile #140's publication contract before closure.
+
+`make test-wheel-corpus` installs the built wheel in a temporary target and
+runs convergence outside the source checkout. This verifies packaging only.
+The E2E workflow's optional real-harness smoke requires the trusted repository
+variable `MERGECRAFT_E2E_LIVE_MODEL` and that model's credential. It permits one
+180-second review with a 12,000-token, 30-tool-call and $1 reported-cost budget.
+It runs the actual installed image harness and requires a terminal verdict;
+it is not a quality score or a substitute for the two-provider campaign.
+
+The initial two-case smoke selection is frozen in
+`evals/bench/smoke-manifest.json` with SHA-256 hashes of each patch and label file.
+Copy only those named case directories into the campaign corpus directory.
+It contains one seeded boundary defect and one clean documentation change.
+These are agent-seeded labels, not independent ground truth; independent
+adjudication and model/rubric pins remain prerequisites for comparison claims.
+No provider, spend authorization, or measured result is implied by this manifest.

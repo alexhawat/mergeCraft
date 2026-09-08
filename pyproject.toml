@@ -95,8 +95,11 @@ artifacts = [
     "src/mergecraft/data/**/*.yaml",
 ]
 
+[tool.hatch.build.targets.wheel.force-include]
+"evals/corpora/recall_pass_corpus.json" = "mergecraft/evals/fixtures/recall_pass_corpus.json"
+
 [tool.hatch.build.targets.sdist]
-include = ["src/mergecraft", "tests", "README.md", "pyproject.toml", "hatch_build.py"]
+include = ["src/mergecraft", "tests", "README.md", "pyproject.toml", "hatch_build.py", "evals/corpora/recall_pass_corpus.json"]
 
 [tool.ruff]
 target-version = "py311"

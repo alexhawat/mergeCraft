@@ -57,3 +57,49 @@ def test_unstaged_diff_skips_binary_untracked_files(git_repo: Path) -> None:
     (git_repo / "binary.bin").write_bytes(b"\x00\x01\x02")
     text = git_unstaged_diff(cwd=git_repo)
     assert "binary.bin" not in text
+
+
+@pytest.mark.parametrize("name", ["new.txt", "with space.txt", "with\ttab.txt"])
+@pytest.mark.parametrize("contents", ["first\nsecond\n", "no newline", ""])
+def test_untracked_patch_is_accepted_by_git(git_repo: Path, name: str, contents: str) -> None:
+    path = git_repo / name
+    path.write_text(contents)
+    patch = git_unstaged_diff(cwd=git_repo)
+    path.unlink()
+    _git(git_repo, "checkout", "--", "a.txt")
+    result = subprocess.run(
+        ["git", "apply", "-"], cwd=git_repo, input=patch, text=True, capture_output=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert path.read_text() == contents
+
+
+def test_explicit_local_base_preserves_staged_and_unstaged_changes(
+    git_repo: Path, tmp_path: Path
+) -> None:
+    from mergecraft.utils.source_resolve import (
+        ResolvedWorkspace,
+        SourceResolverSpec,
+        materialize_resolved_diff,
+    )
+
+    (git_repo / "a.txt").write_text("staged\n")
+    _git(git_repo, "add", "a.txt")
+    (git_repo / "a.txt").write_text("staged\nunstaged\n")
+    result = materialize_resolved_diff(
+        ResolvedWorkspace(cwd=git_repo, git_common_dir=None, cloned=False),
+        spec=SourceResolverSpec(cwd=git_repo, base="main"),
+        out_dir=tmp_path / "result",
+    )
+    assert "+staged" in result.path.read_text()
+    assert "+unstaged" in result.path.read_text()
+
+
+def test_missing_common_history_never_substitutes_endpoint_diff(git_repo: Path) -> None:
+    from mergecraft.utils.offline_diff import git_ref_diff
+
+    _git(git_repo, "checkout", "--orphan", "unrelated")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-m", "unrelated root")
+    with pytest.raises(RuntimeError, match="shared history"):
+        git_ref_diff(cwd=git_repo, base="main", head="HEAD")

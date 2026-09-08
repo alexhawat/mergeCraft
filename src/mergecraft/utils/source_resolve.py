@@ -447,6 +447,22 @@ def _fetch_remote_ref(
     )
 
 
+def _ensure_shared_history(*, cwd: Path, head_ref: str, base_ref: str, env: dict[str, str]) -> None:
+    """Deepen both tips within a fixed budget; never substitute endpoint semantics."""
+    for depth in (0, 50, 200):
+        if depth:
+            _fetch_remote_ref(ref=head_ref, cwd=cwd, env=env, depth=depth)
+            _fetch_remote_ref(ref=base_ref, cwd=cwd, env=env, depth=depth)
+            _enforce_limits(cwd, max_bytes=DEFAULT_MAX_BYTES, max_files=DEFAULT_MAX_FILES)
+        try:
+            _run_git(["merge-base", "HEAD", f"origin/{base_ref}"], cwd=str(cwd))
+            return
+        except RuntimeError:
+            continue
+    msg = "shared history unavailable within the 200-commit acquisition budget; provide a local checkout with sufficient history"
+    raise SourceResolveError(msg)
+
+
 def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
     """Resolve ``--repo`` / ``--cwd`` into a review workspace."""
     if spec.repo is None:
@@ -468,17 +484,28 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
             dest=temp_dir,
         )
         auth_env = _credential_env(auth.token)
+        comparison_base: str | None = None
         if spec.base and spec.base != ref:
             _fetch_remote_ref(ref=spec.base, cwd=acquired.path, env=auth_env)
+            comparison_base = spec.base
         elif spec.head and spec.base is None and ref not in {"main", "master"}:
             for candidate in ("main", "master"):
                 if candidate == ref:
                     continue
                 try:
                     _fetch_remote_ref(ref=candidate, cwd=acquired.path, env=auth_env)
+                    comparison_base = candidate
                     break
                 except RuntimeError:
                     continue
+        if comparison_base:
+            try:
+                _ensure_shared_history(
+                    cwd=acquired.path, head_ref=ref, base_ref=comparison_base, env=auth_env
+                )
+            except (RuntimeError, SourceResolveError):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                raise
         return ResolvedWorkspace(
             cwd=acquired.path,
             git_common_dir=resolve_git_common_dir(acquired.path),
@@ -534,6 +561,10 @@ def materialize_resolved_diff(
         parse_commit_range(spec.commit_range)
         text = git_range_diff(cwd=workspace.cwd, range_spec=spec.commit_range)
         base_ref = spec.commit_range
+    elif spec.base and not spec.head and not workspace.cloned:
+        return materialize_diff(
+            cwd=workspace.cwd, out_dir=out_dir, base=spec.base, git_dir=workspace.git_common_dir
+        )
     elif spec.head or spec.base:
         if spec.base:
             base_ref = spec.base

@@ -104,14 +104,6 @@ def git_merge_base_diff(
 
     result = _run_git(["diff", "--merge-base", base], cwd=cwd)
     if result.returncode != 0:
-        # Fallback: three-dot committed-only range.
-        logger.warning(
-            "git diff --merge-base {} failed ({}); trying three-dot range",
-            base,
-            result.stderr.strip() or result.returncode,
-        )
-        result = _run_git(["diff", f"{base}...HEAD"], cwd=cwd)
-    if result.returncode != 0:
         msg = f"failed to compute diff against {base!r}: {result.stderr.strip()}"
         raise RuntimeError(msg)
     return result.stdout
@@ -134,10 +126,11 @@ def git_ref_diff(
         if origin_probe.returncode == 0:
             resolved_base = candidate
     result = _run_git(["diff", f"{resolved_base}...{head}"], cwd=cwd)
-    if result.returncode != 0 and "no merge base" in (result.stderr or "").lower():
-        result = _run_git(["diff", f"{resolved_base}..{head}"], cwd=cwd)
     if result.returncode != 0:
-        msg = f"failed to compute diff {base!r}...{head!r}: {result.stderr.strip()}"
+        msg = (
+            f"failed to compute diff {base!r}...{head!r}: {result.stderr.strip()}. "
+            "Fetch sufficient shared history before retrying; endpoint comparison is not equivalent."
+        )
         raise RuntimeError(msg)
     return result.stdout
 
@@ -167,7 +160,7 @@ def git_unstaged_diff(*, cwd: Path) -> str:
             if not rel:
                 continue
             path = cwd / rel
-            if not path.is_file():
+            if path.is_symlink() or not path.is_file():
                 continue
             try:
                 raw = path.read_bytes()
@@ -179,14 +172,11 @@ def git_unstaged_diff(*, cwd: Path) -> str:
             if b"\0" in raw:
                 logger.info("skipped binary untracked file in unstaged diff: {}", rel)
                 continue
-            contents = raw.decode("utf-8", errors="replace")
-            text += (
-                f"diff --git a/{rel} b/{rel}\nnew file mode 100644\n--- /dev/null\n+++ b/{rel}\n"
-            )
-            for line in contents.splitlines():
-                text += f"+{line}\n"
-            if contents and not contents.endswith("\n"):
-                text += "\n"
+            patch = _run_git(["diff", "--no-index", "--", "/dev/null", rel], cwd=cwd)
+            if patch.returncode not in (0, 1):
+                msg = f"failed to compute untracked diff for {rel!r}: {patch.stderr.strip()}"
+                raise RuntimeError(msg)
+            text += patch.stdout
     return text
 
 
