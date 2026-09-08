@@ -38,10 +38,12 @@ exfiltrate data by encoding it into DNS labels resolved through an allowed
 resolver. Nothing here inspects DNS payloads or restricts query names; only
 non-DNS egress to non-allowlisted destinations is blocked (#606).
 
-The Action image typically lacks ``CAP_NET_ADMIN`` / ``CAP_SYS_ADMIN``, so
-``filtered_egress_available()`` is False there and the untrusted path stays
-fail-closed (named skip). Capable Linux runners (``ip netns`` plus veth plus
-iptables) run isolated-to-allowlist instead.
+The kernel backend typically lacks ``CAP_NET_ADMIN`` / ``CAP_SYS_ADMIN`` in
+the GitHub Action image, so that path stays fail-closed unless an operator
+opts into ``MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME``. The Action image
+instead uses the userspace backend (user+net namespace + parent TCP relay)
+when ``unshare --user --map-root-user --net`` and ``iptables`` work — Go
+scanners cannot bypass it by ignoring ``HTTP_PROXY``.
 """
 
 from __future__ import annotations
@@ -58,13 +60,26 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Protocol
 from urllib.parse import urlparse
 
 from loguru import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+EgressBackend = Literal["none", "kernel", "userspace"]
+
+
+class EgressSession(Protocol):
+    """Kernel or userspace filtered-egress session."""
+
+    def start(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    def wrap_argv(self, argv: list[str]) -> list[str]: ...
+
 
 _VETH_PROBE_PREFIX = "mcfg"
 _FALLBACK_DNS_RESOLVERS: tuple[str, ...] = ("1.1.1.1",)
@@ -83,6 +98,8 @@ class FilteredEgressProbe:
     iptables: bool
     available: bool
     reason: str
+    backend: EgressBackend = "none"
+    user_namespace: bool = False
 
 
 class FilteredEgressSetupError(Exception):
@@ -179,18 +196,8 @@ def _can_iptables() -> bool:
     return shutil.which("iptables") is not None and shutil.which("setpriv") is not None
 
 
-@functools.lru_cache(maxsize=1)
-def probe_filtered_egress() -> FilteredEgressProbe:
-    """Probe netns + veth + iptables. Nothing is faked when a primitive is missing."""
-    if os.environ.get("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME") != "1":
-        return FilteredEgressProbe(
-            network_namespace=False,
-            veth=False,
-            ip_netns=False,
-            iptables=False,
-            available=False,
-            reason="filtered egress unavailable: experimental backend requires an operator-owned isolated runtime",
-        )
+def _probe_kernel_filtered_egress() -> FilteredEgressProbe:
+    """Probe host netns + veth + iptables. Requires the isolated-runtime opt-in."""
     net = _can_unshare_net()
     veth = _can_create_veth() if net else False
     ip_netns = _can_ip_netns() if veth else False
@@ -203,6 +210,7 @@ def probe_filtered_egress() -> FilteredEgressProbe:
             iptables=True,
             available=True,
             reason="",
+            backend="kernel",
         )
     missing: list[str] = []
     if not net:
@@ -222,6 +230,39 @@ def probe_filtered_egress() -> FilteredEgressProbe:
         iptables=iptables,
         available=False,
         reason=reason,
+        backend="none",
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def probe_filtered_egress() -> FilteredEgressProbe:
+    """Probe userspace first, then the opt-in kernel backend."""
+    from mergecraft.analyzers.egress_userspace import probe_userspace_egress
+
+    userspace = probe_userspace_egress()
+    want_kernel = os.environ.get("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME") == "1"
+    if want_kernel:
+        kernel = _probe_kernel_filtered_egress()
+        if kernel.available:
+            return kernel
+        if userspace.available:
+            return userspace
+        return kernel
+    if userspace.available:
+        return userspace
+    reason = (
+        "filtered egress unavailable: kernel backend requires an operator-owned "
+        f"isolated runtime; {userspace.reason}"
+    )
+    return FilteredEgressProbe(
+        network_namespace=userspace.network_namespace,
+        veth=False,
+        ip_netns=False,
+        iptables=userspace.iptables,
+        available=False,
+        reason=reason,
+        backend="none",
+        user_namespace=userspace.user_namespace,
     )
 
 
@@ -377,8 +418,11 @@ class FilteredNetnsSession:
         The lock is host-owned, never supplied by repository contents. Each
         session still has independent rules and cleanup after setup completes.
         """
-        if not filtered_egress_available():
-            raise FilteredEgressSetupError(probe_filtered_egress().reason)
+        probe = probe_filtered_egress()
+        if probe.backend != "kernel":
+            raise FilteredEgressSetupError(
+                probe.reason or "kernel filtered egress is not the active backend"
+            )
 
         import fcntl
 
@@ -413,8 +457,11 @@ class FilteredNetnsSession:
     def _start_locked(self) -> None:
         """Create the namespace while holding the allocation lock."""
         try:
-            if not filtered_egress_available():
-                raise FilteredEgressSetupError(probe_filtered_egress().reason)
+            probe = probe_filtered_egress()
+            if probe.backend != "kernel":
+                raise FilteredEgressSetupError(
+                    probe.reason or "kernel filtered egress is not the active backend"
+                )
             # Never sweep other sessions: PID reuse is not proof of ownership.
             self._enable_forward()
             ips = resolve_allowlist_ips(self.allowed_hosts)
@@ -632,7 +679,24 @@ class FilteredNetnsSession:
         self._chain_created = bool(failed)
 
 
+def start_filtered_egress_session(allowed_hosts: list[str]) -> EgressSession:
+    """Start the kernel or userspace backend selected by ``probe_filtered_egress``."""
+    probe = probe_filtered_egress()
+    if probe.backend == "kernel":
+        kernel = FilteredNetnsSession(allowed_hosts)
+        kernel.start()
+        return kernel
+    if probe.backend == "userspace":
+        from mergecraft.analyzers.egress_userspace import UserspaceEgressSession
+
+        userspace = UserspaceEgressSession(allowed_hosts)
+        userspace.start()
+        return userspace
+    raise FilteredEgressSetupError(probe.reason)
+
+
 __all__ = [
+    "EgressSession",
     "FilteredEgressProbe",
     "FilteredEgressSetupError",
     "FilteredNetnsSession",
@@ -643,5 +707,6 @@ __all__ = [
     "probe_filtered_egress",
     "reset_filtered_egress_cache",
     "resolve_allowlist_ips",
+    "start_filtered_egress_session",
     "wrap_argv_for_filtered_netns",
 ]

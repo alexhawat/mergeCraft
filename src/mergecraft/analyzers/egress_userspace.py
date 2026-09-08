@@ -1,0 +1,323 @@
+"""Userspace filtered egress for runtimes without host CAP_NET_ADMIN (#538).
+
+The GitHub Action image typically cannot create a host veth or mutate
+``FORWARD``. This backend keeps the analyzer in a user+net namespace whose
+only outbound path is a parent-side TCP relay. Go scanners cannot bypass it
+by ignoring ``HTTP_PROXY`` — they have no other route.
+
+The kernel netns + FORWARD path in ``egress.py`` stays behind
+``MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME`` because it changes shared
+host firewall state. This backend does not.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from loguru import logger
+
+from mergecraft.analyzers.egress import (
+    FilteredEgressProbe,
+    FilteredEgressSetupError,
+    allowlist_hosts,
+    host_is_allowlisted,
+    resolve_allowlist_ips,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+_RELAY_OK = b"OK\n"
+_RELAY_NO = b"NO\n"
+
+
+def _can_unshare_user_net() -> bool:
+    if shutil.which("unshare") is None:
+        return False
+    try:
+        completed = subprocess.run(
+            ["unshare", "--user", "--map-root-user", "--net", "true"],
+            check=False,
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
+def probe_userspace_egress() -> FilteredEgressProbe:
+    """Probe user-namespace net + iptables without touching host FORWARD."""
+    net = _can_unshare_user_net()
+    iptables = shutil.which("iptables") is not None
+    if net and iptables:
+        return FilteredEgressProbe(
+            network_namespace=True,
+            veth=False,
+            ip_netns=False,
+            iptables=True,
+            available=True,
+            reason="",
+            backend="userspace",
+            user_namespace=True,
+        )
+    missing: list[str] = []
+    if not net:
+        missing.append("unshare --user --map-root-user --net")
+    if not iptables:
+        missing.append("iptables")
+    return FilteredEgressProbe(
+        network_namespace=net,
+        veth=False,
+        ip_netns=False,
+        iptables=iptables,
+        available=False,
+        reason="userspace filtered egress unavailable: " + ", ".join(missing),
+        backend="none",
+        user_namespace=net,
+    )
+
+
+def userspace_egress_available() -> bool:
+    """True when the Action-image backend can enforce an allowlist."""
+    return probe_userspace_egress().available
+
+
+def wrap_argv_for_userspace_relay(
+    argv: list[str],
+    *,
+    socket_path: str,
+    allowed_hosts: Iterable[str],
+    allowed_ips: Iterable[str],
+) -> list[str]:
+    """Prefix argv with the userspace bridge (parent stays on the container net)."""
+    hosts = ",".join(sorted(allowlist_hosts(allowed_hosts)))
+    ips = ",".join(sorted(allowed_ips))
+    return [
+        sys.executable,
+        "-m",
+        "mergecraft.analyzers.egress_bridge",
+        "--socket",
+        socket_path,
+        "--hosts",
+        hosts,
+        "--ips",
+        ips,
+        "--",
+        *argv,
+    ]
+
+
+@dataclass(slots=True)
+class UserspaceEgressSession:
+    """Parent-side TCP relay plus child user+net namespace (#538)."""
+
+    allowed_hosts: list[str]
+    socket_path: str = ""
+    _allowed_ips: frozenset[str] = field(default_factory=frozenset, init=False)
+    _server: socket.socket | None = field(default=None, init=False)
+    _thread: threading.Thread | None = field(default=None, init=False)
+    _stop: threading.Event = field(default_factory=threading.Event, init=False)
+    _started: bool = field(default=False, init=False)
+
+    def start(self) -> None:
+        """Bind the Unix relay; fail closed when the userspace probe is false."""
+        probe = probe_userspace_egress()
+        if not probe.available:
+            raise FilteredEgressSetupError(probe.reason)
+        ips = resolve_allowlist_ips(self.allowed_hosts)
+        if not ips:
+            raise FilteredEgressSetupError("allowlist resolved to no addresses")
+        self._allowed_ips = ips
+        tmp_dir = Path(tempfile.gettempdir())
+        self.socket_path = str(tmp_dir / f"mc-eg-us-{os.getpid()}-{id(self)}.sock")
+        Path(self.socket_path).unlink(missing_ok=True)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(self.socket_path)
+        server.listen(16)
+        server.settimeout(0.5)
+        self._server = server
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._serve, name="mc-egress-relay", daemon=True)
+        self._thread.start()
+        self._started = True
+
+    def close(self) -> None:
+        """Stop the relay and remove the socket."""
+        self._stop.set()
+        server = self._server
+        self._server = None
+        if server is not None:
+            with context_close(server):
+                pass
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
+        if self.socket_path:
+            Path(self.socket_path).unlink(missing_ok=True)
+            self.socket_path = ""
+        self._started = False
+
+    def __enter__(self) -> UserspaceEgressSession:
+        self.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def wrap_argv(self, argv: list[str]) -> list[str]:
+        """Wrap analyzer argv so it can only leave via this session's relay."""
+        if not self._started or not self.socket_path:
+            raise FilteredEgressSetupError("userspace egress session is not started")
+        return wrap_argv_for_userspace_relay(
+            argv,
+            socket_path=self.socket_path,
+            allowed_hosts=self.allowed_hosts,
+            allowed_ips=self._allowed_ips,
+        )
+
+    def destination_allowed(self, host: str, ip: str) -> bool:
+        """Return True when *ip* or *host* matches the session allowlist."""
+        if ip in self._allowed_ips:
+            return True
+        return host_is_allowlisted(host, allowlist_hosts(self.allowed_hosts))
+
+    def _serve(self) -> None:
+        assert self._server is not None
+        while not self._stop.is_set():
+            try:
+                client, _unused = self._server.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            thread = threading.Thread(
+                target=self._handle_client,
+                args=(client,),
+                name="mc-egress-relay-client",
+                daemon=True,
+            )
+            thread.start()
+
+    def _handle_client(self, client: socket.socket) -> None:
+        remote: socket.socket | None = None
+        try:
+            client.settimeout(10)
+            raw = _read_line(client)
+            request = json.loads(raw)
+            if not isinstance(request, dict):
+                client.sendall(_RELAY_NO)
+                return
+            host = str(request.get("host") or "")
+            ip = str(request.get("ip") or "")
+            port = int(request.get("port") or 0)
+            if port <= 0 or port > 65535 or not self.destination_allowed(host, ip):
+                client.sendall(_RELAY_NO)
+                return
+            remote = socket.create_connection((ip, port), timeout=10)
+            client.sendall(_RELAY_OK)
+            _splice(client, remote)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            logger.info("userspace egress relay rejected a stream: {}", exc)
+            with contextlib.suppress(OSError):
+                client.sendall(_RELAY_NO)
+        finally:
+            with context_close(client), context_close(remote):
+                pass
+
+
+def _read_line(sock: socket.socket) -> str:
+    chunks: list[bytes] = []
+    while True:
+        piece = sock.recv(1)
+        if not piece:
+            break
+        if piece == b"\n":
+            break
+        chunks.append(piece)
+        if sum(len(item) for item in chunks) > 4096:
+            raise ValueError("relay request too long")
+    return b"".join(chunks).decode("utf-8")
+
+
+def _splice(left: socket.socket, right: socket.socket) -> None:
+    done = threading.Event()
+
+    def _copy(source: socket.socket, dest: socket.socket) -> None:
+        try:
+            while not done.is_set():
+                data = source.recv(65536)
+                if not data:
+                    break
+                dest.sendall(data)
+        except OSError:
+            pass
+        finally:
+            done.set()
+            with contextlib_shutdown(dest):
+                pass
+
+    first = threading.Thread(target=_copy, args=(left, right), daemon=True)
+    second = threading.Thread(target=_copy, args=(right, left), daemon=True)
+    first.start()
+    second.start()
+    first.join()
+    second.join()
+
+
+class context_close:
+    def __init__(self, sock: socket.socket | None) -> None:
+        self._sock = sock
+
+    def __enter__(self) -> socket.socket | None:
+        return self._sock
+
+    def __exit__(self, *exc: object) -> None:
+        if self._sock is not None:
+            with contextlib.suppress(OSError):
+                self._sock.close()
+
+
+class contextlib_shutdown:
+    def __init__(self, sock: socket.socket) -> None:
+        self._sock = sock
+
+    def __enter__(self) -> socket.socket:
+        return self._sock
+
+    def __exit__(self, *exc: object) -> None:
+        with contextlib.suppress(OSError):
+            self._sock.shutdown(socket.SHUT_WR)
+
+
+def relay_request_allowed(
+    *,
+    host: str,
+    ip: str,
+    allowed_hosts: Iterable[str],
+    allowed_ips: Iterable[str],
+) -> bool:
+    """Pure allowlist check used by the child bridge and tests."""
+    if ip in set(allowed_ips):
+        return True
+    return host_is_allowlisted(host, allowlist_hosts(allowed_hosts))
+
+
+__all__ = [
+    "UserspaceEgressSession",
+    "probe_userspace_egress",
+    "relay_request_allowed",
+    "userspace_egress_available",
+    "wrap_argv_for_userspace_relay",
+]

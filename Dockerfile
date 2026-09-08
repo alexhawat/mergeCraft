@@ -75,8 +75,11 @@ RUN apt-get update -qq \
         ca-certificates \
         curl \
         git \
+        iproute2 \
+        iptables \
         jq \
         openssh-client \
+        procps \
         sudo \
         unzip \
     && rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log \
