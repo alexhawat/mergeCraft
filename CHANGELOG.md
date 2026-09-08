@@ -85,6 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Action images use patched, checksum-pinned npm and GitHub CLI tooling and
+  remove unused vulnerable pip bootstrap copies. Both images are scanned before
+  merge; release scans retain attributable JSON alongside SARIF without relaxing
+  the HIGH/CRITICAL gate. Python installation in the images uses uv.
+
+
 - Credential broker stream failures now close the connection without inserting a
   second HTTP response, and client disconnects release upstream responses (#595)
 - Brokered Codex runs preserve configured proxy bypass entries and always bypass

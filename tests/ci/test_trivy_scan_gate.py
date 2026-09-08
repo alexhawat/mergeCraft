@@ -233,3 +233,38 @@ def test_waiver_docs_exist() -> None:
         )
         return
     assert re.search(r"trivyignore|waiv", text, re.IGNORECASE)
+
+
+def test_release_scans_both_images_and_retains_attribution_after_findings() -> None:
+    """A slim failure must not hide the analyzer scan or its package/layer evidence."""
+    scan = job(load_workflow("ci-cd.yml"), "sbom-scan")
+    for image in ("slim", "analyzers"):
+        step = _step(scan, f"Trivy scan {image}")
+        assert not step.get("continue-on-error", False)
+        assert step["with"]["format"] == "json"
+        assert step["with"]["output"] == f"trivy-{image}.json"
+        assert step["with"]["exit-code"] == "${{ steps.gate.outputs.exit_code }}"
+    assert _step(scan, "Trivy scan analyzers")["if"] == "success() || failure()"
+    upload = _step(scan, "Upload SBOM + scan reports")
+    assert upload["if"] == "always()"
+    for image in ("slim", "analyzers"):
+        for extension in ("json", "sarif"):
+            assert f"trivy-{image}.{extension}" in upload["with"]["path"]
+
+
+def test_pr_image_scan_has_no_release_authority_and_is_blocking() -> None:
+    """Untrusted PR image builds cannot publish; both matrix legs retain a hard gate."""
+    doc = load_workflow("image-security.yml")
+    assert doc["permissions"] == {"contents": "read"}
+    scan = job(doc, "scan")
+    assert scan["permissions"] == {"contents": "read"}
+    assert scan["strategy"]["fail-fast"] is False
+    assert {row["image"] for row in scan["strategy"]["matrix"]["include"]} == {"slim", "analyzers"}
+    build = _step(scan, "Build without publishing")
+    assert build["with"].get("push", False) is False
+    assert "ghcr.io" not in build["with"]["tags"]
+    check = _step(scan, "Scan built image")
+    assert str(check["with"]["exit-code"]) == "1"
+    assert check["with"]["severity"] == "CRITICAL,HIGH"
+    assert not check.get("continue-on-error", False)
+    assert not any("login-action" in step.get("uses", "") for step in scan["steps"])

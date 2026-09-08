@@ -9,6 +9,21 @@
 #     --output type=docker,dest=out.tar,rewrite-timestamp=true ...
 ARG SOURCE_DATE_EPOCH=1700000000
 
+# Build the upstream gh release with its remaining vulnerable Go module patched.
+# The archive, Go toolchain and dependency checksums are immutable inputs.
+FROM --platform=$BUILDPLATFORM golang:1.26.8-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS gh-builder
+ARG TARGETARCH
+ENV GOTOOLCHAIN=local CGO_ENABLED=0
+ADD --checksum=sha256:e16749bc0d99dc0633a3d5ebadf48ffff1c24beb1ce83e8f6a71bb64ce477e9a \
+    https://codeload.github.com/cli/cli/tar.gz/45437bc7eeeb3359bbfddd1742f79de7652fd3e2 /tmp/gh-source.tar.gz
+WORKDIR /src/gh
+COPY docker/gh/dependencies.patch /tmp/dependencies.patch
+RUN tar -xzf /tmp/gh-source.tar.gz --strip-components=1 -C /src/gh \
+    && patch -p1 < /tmp/dependencies.patch \
+    && GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -buildvcs=false \
+        -ldflags="-s -w -X github.com/cli/cli/v2/internal/build.Version=2.100.0-mergecraft.1" \
+        -o /out/gh ./cmd/gh
+
 FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 
 ARG SOURCE_DATE_EPOCH
@@ -19,10 +34,24 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.29@sha256:eb2843a1e56fd9e30c7276ce1a52cba8
 
 COPY --from=node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 \
     /usr/local/bin/node /usr/local/bin/node
-COPY --from=node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 \
-    /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+# npm's bundled dependencies are independently pinned; Node 22 still ships
+# the vulnerable npm 10 bundle. No floating global installation is used.
+ADD --checksum=sha256:9f58bff01604cb1b14008fef14dceb14d836a49225e45c6c2e37de3be3e707f0 \
+    https://registry.npmjs.org/npm/-/npm-11.19.1.tgz /tmp/npm.tgz
+RUN mkdir -p /usr/local/lib/node_modules/npm \
+    && tar -xzf /tmp/npm.tgz --strip-components=1 -C /usr/local/lib/node_modules/npm \
+    && ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && rm /tmp/npm.tgz
+
+# uv is the supported Python package installer in this image. Even pip's
+# latest release vendors vulnerable msgpack/setuptools; remove that unused
+# installer and its ensurepip bootstrap copy rather than suppress the scan.
+RUN uv pip uninstall --python /usr/local/bin/python pip \
+    && rm -rf /usr/local/lib/python3.14/ensurepip
+
+COPY --from=gh-builder /out/gh /usr/bin/gh
+COPY --from=gh-builder /src/gh/LICENSE /usr/share/doc/gh/LICENSE
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -46,11 +75,6 @@ ARG HADOLINT_SHA256=56de6d5e5ec427e17b74fa48d51271c7fc0d61244bf5c90e828aab8362d5
 ARG ZIZMOR_VERSION=1.28.0
 ARG ZIZMOR_SHA256=e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09
 
-# gh CLI — pinned .deb URL + SHA256 (no floating vendor apt repo).
-ARG GH_VERSION=2.97.0
-ARG GH_SHA256_AMD64=7c7fa3bb890db0934baf65910d97b8c0fa437b2e590f7f7daf6bdf82c5c486d7
-ARG GH_SHA256_ARM64=0ba7a76739c865d82ebde24667d875d9b8caa55db47c7597c24accdd4defd2bb
-
 RUN apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
         ca-certificates \
@@ -61,17 +85,6 @@ RUN apt-get update -qq \
         sudo \
         unzip \
         xz-utils \
-    && arch="$(dpkg --print-architecture)" \
-    && case "$arch" in \
-         amd64) gh_sha="${GH_SHA256_AMD64}" ;; \
-         arm64) gh_sha="${GH_SHA256_ARM64}" ;; \
-         *) echo "unsupported arch for gh: $arch" >&2; exit 1 ;; \
-       esac \
-    && curl -fsSL -o /tmp/gh.deb \
-        "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.deb" \
-    && echo "${gh_sha}  /tmp/gh.deb" | sha256sum -c - \
-    && apt-get install -qq -y /tmp/gh.deb \
-    && rm -f /tmp/gh.deb \
     && rm -rf /var/lib/apt/lists/* /var/log/apt /var/log/dpkg.log \
         /var/log/alternatives.log /var/cache/ldconfig /var/cache/apt /tmp/*
 
