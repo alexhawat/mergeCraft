@@ -108,13 +108,11 @@ def test_doctor_rejects_unknown_schema_version_via_migrate_config(
 
     output = _plain(result.stdout + result.stderr)
     assert result.exit_code != 0, output
-    if output.strip():
-        assert "schema" in output.lower() or "validation" in output.lower()
-    else:
-        from mergecraft.cli.doctor_cmd import _config_probe
-
-        detail = _config_probe(tmp_path).detail.lower()
-        assert "schema" in detail or "validation" in detail, detail
+    # Startup config validation may raise before the doctor command renders.
+    # Assert the diagnostic from this invocation, not a second direct probe;
+    # unrelated background stderr must not decide which assertion runs.
+    diagnostic = f"{output}\n{result.exception or ''}".lower()
+    assert "schema" in diagnostic or "validation" in diagnostic, diagnostic
 
 
 def test_never_prints_a_credential_value(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

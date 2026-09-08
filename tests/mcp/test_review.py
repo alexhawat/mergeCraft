@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
+import yaml
 from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 from mergecraft.mcp.context import (
@@ -24,9 +26,6 @@ from mergecraft.review_taxonomy import (
     stamp_finding_fingerprint,
 )
 from mergecraft.utils.github import GitHubClient
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class _RecordingGitHub(GitHubClient):
@@ -534,3 +533,28 @@ async def test_suggestion_is_fenced_before_fingerprinting(ctx: ToolContext) -> N
     body = inline[0]["body"]
     assert "```suggestion\n    pass\n```" in body
     assert body.index("```suggestion") < body.index(FINDING_MARKER_PREFIX)
+
+
+@pytest.fixture
+def self_review_approval_enabled() -> bool:
+    config = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / ".mergecraft/config.yaml").read_text()
+    )
+    enabled = config["prApproveEnabled"]
+    assert isinstance(enabled, bool)
+    return enabled
+
+
+@pytest.mark.parametrize("approval", [{"approved": True}, {"event": "APPROVE"}])
+async def test_self_review_config_publishes_comments_before_isolated_approval(
+    ctx: ToolContext, approval: dict[str, object], self_review_approval_enabled: bool
+) -> None:
+    assert self_review_approval_enabled is False
+    ctx.pr_approve_enabled = self_review_approval_enabled
+    result = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Review complete.", **approval}
+    )
+    assert result.is_error is False
+    github = github_client_from_ctx(ctx)
+    assert isinstance(github, _RecordingGitHub)
+    assert [body["event"] for body in github.review_payloads] == ["COMMENT"]

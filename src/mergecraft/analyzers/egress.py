@@ -49,11 +49,15 @@ from __future__ import annotations
 import contextlib
 import functools
 import ipaddress
+import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -67,8 +71,10 @@ if TYPE_CHECKING:
 _VETH_PROBE_PREFIX = "mcfg"
 _FALLBACK_DNS_RESOLVERS: tuple[str, ...] = ("1.1.1.1",)
 _RESOLV_CONF_PATH = Path("/etc/resolv.conf")
-_SESSION_ID_RE = re.compile(r"mc-eg-(\d+)-(\d+)")
+# Tag parsed by the orphan sweeper: pid for liveness, random tail for identity.
+_SESSION_ID_RE = re.compile(r"mc-eg-(\d+)-([0-9a-f]+)")
 _SUBNET_OCTET_MAX = 250
+_SETUP_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,12 +180,21 @@ def _can_ip_netns() -> bool:
 
 
 def _can_iptables() -> bool:
-    return shutil.which("iptables") is not None
+    return shutil.which("iptables") is not None and shutil.which("setpriv") is not None
 
 
 @functools.lru_cache(maxsize=1)
 def probe_filtered_egress() -> FilteredEgressProbe:
     """Probe netns + veth + iptables. Nothing is faked when a primitive is missing."""
+    if os.environ.get("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME") != "1":
+        return FilteredEgressProbe(
+            network_namespace=False,
+            veth=False,
+            ip_netns=False,
+            iptables=False,
+            available=False,
+            reason="filtered egress unavailable: experimental backend requires an operator-owned isolated runtime",
+        )
     net = _can_unshare_net()
     veth = _can_create_veth() if net else False
     ip_netns = _can_ip_netns() if veth else False
@@ -201,7 +216,7 @@ def probe_filtered_egress() -> FilteredEgressProbe:
     if veth and not ip_netns:
         missing.append("ip netns (CAP_SYS_ADMIN)")
     if ip_netns and not iptables:
-        missing.append("iptables")
+        missing.append("iptables / setpriv")
     reason = "filtered egress unavailable: " + ", ".join(missing)
     logger.info("{}", reason)
     return FilteredEgressProbe(
@@ -241,7 +256,19 @@ def resolve_allowlist_ips(entries: Iterable[str]) -> frozenset[str]:
 
 def wrap_argv_for_filtered_netns(argv: list[str], ns_name: str) -> list[str]:
     """Join a named netns and drop ``--net`` so unshare does not replace it."""
-    cleaned = [part for part in argv if part != "--net"]
+    cleaned = list(argv)
+    offset = 1 if cleaned and cleaned[0] == "sudo" else 0
+    if len(cleaned) > offset and cleaned[offset] == "unshare":
+        # Only strip our wrapper option; an analyzer may itself accept --net.
+        end = next(
+            (i for i in range(offset + 1, len(cleaned)) if not cleaned[i].startswith("-")),
+            len(cleaned),
+        )
+        cleaned = (
+            cleaned[: offset + 1]
+            + [part for part in cleaned[offset + 1 : end] if part != "--net"]
+            + cleaned[end:]
+        )
     return ["ip", "netns", "exec", ns_name, *cleaned]
 
 
@@ -366,7 +393,9 @@ def _sweep_session(session_id: str) -> None:
     )
     match = _SESSION_ID_RE.match(session_id)
     if match is not None:
-        veth_suffix = int(match.group(2))
+        # The veth pair is named from the random tail, not the pid (see
+        # __post_init__), so carry the tail through as-is rather than int().
+        veth_suffix = match.group(2)
         with contextlib.suppress(OSError):
             subprocess.run(
                 ["ip", "link", "delete", f"mcfh{veth_suffix}"],
@@ -426,17 +455,19 @@ class FilteredNetnsSession:
     _comment: str = field(init=False)
     _chain: str = field(init=False)
     _chain_created: bool = field(default=False, init=False)
-    _forward_was: str | None = field(default=None, init=False)
+    _cleanup_commands: list[list[str]] = field(default_factory=list, init=False)
+    _netns_created: bool = field(default=False, init=False)
+    _veth_created: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        suffix = os.getpid() % 10_000
+        suffix = secrets.token_hex(4)
+        # pid makes a dead session detectable by sweep_orphaned_filtered_egress;
+        # the random tail keeps identity unique, so this does not reintroduce the
+        # 1-in-250 collision that a bare `pid % 10_000` identity caused.
         session_id = f"mc-eg-{os.getpid()}-{suffix}"
         self.ns_name = session_id
         self._comment = session_id
-        # A dedicated iptables chain (finding 1). ``session_id`` is at most
-        # ~18 chars (pid up to 7 digits, suffix 4), well under the 28-char
-        # iptables chain-name limit, and doubles as the comment tag so a
-        # sweep can find both from one string.
+        # Random session identity separates overlapping sessions in one process.
         self._chain = session_id
         self._host_veth = f"mcfh{suffix}"
         self._peer_veth = f"mcfp{suffix}"
@@ -448,7 +479,46 @@ class FilteredNetnsSession:
         self._cidr = ""
 
     def start(self) -> None:
-        """Create the netns and apply the FORWARD allowlist."""
+        """Serialize subnet allocation and create only this session's state.
+
+        The lock is host-owned, never supplied by repository contents. Each
+        session still has independent rules and cleanup after setup completes.
+        """
+        if not filtered_egress_available():
+            raise FilteredEgressSetupError(probe_filtered_egress().reason)
+
+        import fcntl
+
+        if self._netns_created:
+            raise FilteredEgressSetupError("session is already started")
+        if not _SETUP_LOCK.acquire(timeout=10):
+            raise FilteredEgressSetupError("timed out waiting for session allocation")
+        try:
+            try:
+                fd = os.open(
+                    "/run/mergecraft-egress.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
+                )
+                with os.fdopen(fd, "w") as lock:
+                    deadline = time.monotonic() + 10
+                    while True:
+                        try:
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            break
+                        except BlockingIOError:
+                            if time.monotonic() >= deadline:
+                                raise FilteredEgressSetupError(
+                                    "timed out waiting for host session allocation"
+                                ) from None
+                            time.sleep(0.05)
+                    self._start_locked()
+            finally:
+                _SETUP_LOCK.release()
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self.close()
+            raise FilteredEgressSetupError(f"filtered egress setup failed: {exc}") from exc
+
+    def _start_locked(self) -> None:
+        """Create the namespace while holding the allocation lock."""
         try:
             if not filtered_egress_available():
                 raise FilteredEgressSetupError(probe_filtered_egress().reason)
@@ -456,11 +526,14 @@ class FilteredNetnsSession:
                 sweep_orphaned_filtered_egress()
             except Exception as exc:  # best-effort self-heal — must never block a new session
                 logger.warning("filtered-egress startup sweep failed (non-fatal): {}", exc)
+            # Never sweep other sessions: PID reuse is not proof of ownership.
+            self._enable_forward()
             ips = resolve_allowlist_ips(self.allowed_hosts)
             if not ips:
                 raise FilteredEgressSetupError("allowlist resolved to no addresses")
             self._select_subnet()
             self._cmd(["ip", "netns", "add", self.ns_name])
+            self._netns_created = True
             self._cmd(
                 [
                     "ip",
@@ -474,6 +547,7 @@ class FilteredNetnsSession:
                     self._peer_veth,
                 ]
             )
+            self._veth_created = True
             self._cmd(["ip", "link", "set", self._peer_veth, "netns", self.ns_name])
             self._cmd(["ip", "addr", "add", f"{self._host_ip}/30", "dev", self._host_veth])
             self._cmd(["ip", "link", "set", self._host_veth, "up"])
@@ -483,7 +557,6 @@ class FilteredNetnsSession:
             self._disable_ipv6()
             self._ns(["ip", "route", "add", "default", "via", self._host_ip])
             self._write_ns_resolv()
-            self._enable_forward()
             self._apply_filter(ips)
         except Exception:
             self.close()
@@ -492,20 +565,25 @@ class FilteredNetnsSession:
     def close(self) -> None:
         """Tear down iptables, veth, and the named netns."""
         self._flush_iptables()
-        for argv in (
-            ["ip", "link", "delete", self._host_veth],
-            ["ip", "netns", "delete", self.ns_name],
-        ):
-            with contextlib.suppress(OSError):
-                subprocess.run(argv, check=False, capture_output=True, timeout=5)
-        with contextlib.suppress(OSError):
-            shutil.rmtree(f"/etc/netns/{self.ns_name}", ignore_errors=True)
-        if self._forward_was is not None and self._forward_was != "1":
-            with contextlib.suppress(OSError):
-                Path("/proc/sys/net/ipv4/ip_forward").write_text(
-                    f"{self._forward_was}\n", encoding="utf-8"
-                )
-        self._forward_was = None
+        if self._veth_created and self._cleanup_command(["ip", "link", "delete", self._host_veth]):
+            self._veth_created = False
+        if self._netns_created and self._cleanup_command(["ip", "netns", "delete", self.ns_name]):
+            self._netns_created = False
+            try:
+                shutil.rmtree(f"/etc/netns/{self.ns_name}")
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logger.warning("filtered egress resolver cleanup failed: {}", exc)
+
+    def _cleanup_command(self, argv: list[str]) -> bool:
+        """Report failed cleanup and retain ownership for a later retry."""
+        try:
+            self._cmd(argv)
+        except (FilteredEgressSetupError, OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("filtered egress cleanup incomplete for {}: {}", self.ns_name, exc)
+            return False
+        return True
 
     def __enter__(self) -> FilteredNetnsSession:
         self.start()
@@ -519,6 +597,8 @@ class FilteredNetnsSession:
         return wrap_argv_for_filtered_netns(argv, self.ns_name)
 
     def _cmd(self, argv: list[str]) -> None:
+        if argv and argv[0] == "iptables":
+            argv = [argv[0], "-w", "5", *argv[1:]]
         completed = subprocess.run(argv, check=False, capture_output=True, text=True, timeout=10)
         if completed.returncode != 0:
             err = (completed.stderr or completed.stdout or "").strip()
@@ -550,23 +630,32 @@ class FilteredNetnsSession:
 
     @staticmethod
     def _used_third_octets() -> set[int]:
-        used: set[int] = set()
+        """Exclude connected and routed subnets; inspection failure is unsafe."""
         try:
             result = subprocess.run(
-                ["ip", "-4", "addr", "show"], capture_output=True, text=True, timeout=5, check=False
+                ["ip", "-j", "-4", "route", "show", "table", "all"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
             )
-        except OSError:
-            return used
-        for raw_line in result.stdout.splitlines():
-            line = raw_line.strip()
-            if not line.startswith("inet 10.255."):
-                continue
-            addr = line.split()[1].split("/")[0]
-            parts = addr.split(".")
-            if len(parts) == 4:
-                with contextlib.suppress(ValueError):
-                    used.add(int(parts[2]))
-        return used
+            routes = json.loads(result.stdout)
+            if not isinstance(routes, list):
+                raise ValueError("route output is not a list")
+            networks = []
+            for row in routes:
+                destination = row.get("dst", "default")
+                if destination != "default":
+                    networks.append(ipaddress.ip_network(destination, strict=False))
+            return {
+                octet
+                for octet in range(1, _SUBNET_OCTET_MAX + 1)
+                if any(
+                    ipaddress.ip_network(f"10.255.{octet}.0/30").overlaps(net) for net in networks
+                )
+            }
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError) as exc:
+            raise FilteredEgressSetupError(f"cannot safely inspect existing routes: {exc}") from exc
 
     def _disable_ipv6(self) -> None:
         """Disable IPv6 inside the netns (#606 finding 3).
@@ -588,13 +677,15 @@ class FilteredNetnsSession:
             raise FilteredEgressSetupError(f"cannot write netns resolv.conf: {exc}") from exc
 
     def _enable_forward(self) -> None:
-        path = Path("/proc/sys/net/ipv4/ip_forward")
+        """Require operator-enabled routing without changing shared host policy."""
         try:
-            self._forward_was = path.read_text(encoding="utf-8").strip()
-            if self._forward_was != "1":
-                path.write_text("1\n", encoding="utf-8")
+            enabled = Path("/proc/sys/net/ipv4/ip_forward").read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise FilteredEgressSetupError(f"cannot enable ip_forward: {exc}") from exc
+            raise FilteredEgressSetupError(f"cannot inspect ip_forward: {exc}") from exc
+        if enabled != "1":
+            raise FilteredEgressSetupError(
+                "filtered egress requires operator-enabled IPv4 forwarding"
+            )
 
     def _ipt_chain(self, spec: list[str]) -> None:
         self._cmd(["iptables", "-A", self._chain, *spec])
@@ -616,12 +707,17 @@ class FilteredNetnsSession:
         comment = ["-m", "comment", "--comment", self._comment]
         self._cmd(["iptables", "-N", self._chain])
         self._chain_created = True
-        self._cmd(
-            ["iptables", "-I", "FORWARD", "1", "-o", self._host_veth, *comment, "-j", self._chain]
+        self._cleanup_commands.extend(
+            [["iptables", "-X", self._chain], ["iptables", "-F", self._chain]]
         )
-        self._cmd(
-            ["iptables", "-I", "FORWARD", "1", "-i", self._host_veth, *comment, "-j", self._chain]
-        )
+        # INPUT is a different route from FORWARD: always deny host services.
+        input_rule = ["INPUT", "-i", self._host_veth, *comment, "-j", "DROP"]
+        self._cmd(["iptables", "-I", "INPUT", "1", *input_rule[1:]])
+        self._cleanup_commands.append(["iptables", "-D", *input_rule])
+        for direction in ("-o", "-i"):
+            rule = ["FORWARD", direction, self._host_veth, *comment, "-j", self._chain]
+            self._cmd(["iptables", "-I", "FORWARD", "1", *rule[1:]])
+            self._cleanup_commands.append(["iptables", "-D", *rule])
 
         self._ipt_chain(
             ["-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", *comment, "-j", "ACCEPT"]
@@ -633,65 +729,18 @@ class FilteredNetnsSession:
             self._ipt_chain(["-d", ip, *comment, "-j", "ACCEPT"])
         self._ipt_chain([*comment, "-j", "DROP"])
 
-        self._cmd(
-            [
-                "iptables",
-                "-t",
-                "nat",
-                "-A",
-                "POSTROUTING",
-                "-s",
-                self._cidr,
-                *comment,
-                "-j",
-                "MASQUERADE",
-            ]
-        )
+        nat_rule = ["POSTROUTING", "-s", self._cidr, *comment, "-j", "MASQUERADE"]
+        self._cmd(["iptables", "-t", "nat", "-A", *nat_rule])
+        self._cleanup_commands.append(["iptables", "-t", "nat", "-D", *nat_rule])
 
     def _flush_iptables(self) -> None:
-        if not self._chain_created:
-            return
-        comment = ["-m", "comment", "--comment", self._comment]
-        for direction in ("-o", "-i"):
-            argv = [
-                "iptables",
-                "-D",
-                "FORWARD",
-                direction,
-                self._host_veth,
-                *comment,
-                "-j",
-                self._chain,
-            ]
-            with contextlib.suppress(OSError):
-                subprocess.run(argv, check=False, capture_output=True, timeout=5)
-        with contextlib.suppress(OSError):
-            subprocess.run(
-                ["iptables", "-F", self._chain], check=False, capture_output=True, timeout=5
-            )
-        with contextlib.suppress(OSError):
-            subprocess.run(
-                ["iptables", "-X", self._chain], check=False, capture_output=True, timeout=5
-            )
-        with contextlib.suppress(OSError):
-            subprocess.run(
-                [
-                    "iptables",
-                    "-t",
-                    "nat",
-                    "-D",
-                    "POSTROUTING",
-                    "-s",
-                    self._cidr,
-                    *comment,
-                    "-j",
-                    "MASQUERADE",
-                ],
-                check=False,
-                capture_output=True,
-                timeout=5,
-            )
-        self._chain_created = False
+        """Remove only successfully created rules, preserving failed undo work."""
+        failed = []
+        for command in reversed(self._cleanup_commands):
+            if not self._cleanup_command(command):
+                failed.append(command)
+        self._cleanup_commands = list(reversed(failed))
+        self._chain_created = bool(failed)
 
 
 __all__ = [

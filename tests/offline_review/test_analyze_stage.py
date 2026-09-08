@@ -252,7 +252,7 @@ class _StubAgent:
         return "ok"
 
     async def run(self, _ctx: object) -> AgentResult:
-        return AgentResult(success=True, output="ok")
+        return AgentResult(success=True, output="ok", terminal_submission_received=True)
 
 
 class _FakeGithub:
@@ -270,7 +270,10 @@ async def test_run_offline_agent_review_stamps_analyzer_run_before_packet(
     """Happy: ``analyzer_run`` is on ``tool_state`` before ``_emit_offline_packet``."""
     state = _stub_pipeline_state()
     captured: list[object] = []
-    settings = RepoSettings(analyzers=AnalyzersSettings(enabled=True))
+    settings = RepoSettings(
+        models=["anthropic/claude-sonnet"], analyzers=AnalyzersSettings(enabled=True)
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-test-key")
 
     monkeypatch.setattr(
         "mergecraft.review.offline_agent.load_repo_settings",

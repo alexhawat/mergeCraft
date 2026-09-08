@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "purpose": "Offline-frozen smoke selection; not a measured quality result",
+  "source_commit": "d78dd487227b0fdd2f7f3854a1d94023a9da0893",
+  "corpus_directory": "evals/bench/mergecraft",
+  "expected_case_count": 2,
+  "expected_clean_case_count": 1,
+  "label_status": "Agent-seeded labels; independent adjudication required before a comparative campaign",
+  "model_configurations": [],
+  "campaign_budget_usd": null,
+  "publication_status": "Not run; operator model, budget, and publication decisions pending",
+  "cases": [
+    {
+      "case_id": "bench-adversarial-clean-diff",
+      "files": {
+        "task.patch": "3c84182357ba656547e665e125dbdeb2bc6bfd0b8fca0c605f3db63a0dbf1c00",
+        "baseline.json": "b352e2fe08c01cacdeae9b514755e48e28830f785726a3bf29e3fbabff47520d"
+      },
+      "expected_reference_issues": 0
+    },
+    {
+      "case_id": "bench-correctness-boundary",
+      "files": {
+        "task.patch": "ba398c8149c2f5815d768000773e3b59e4161573d88071ed44c14ed85556deba",
+        "baseline.json": "0e7aa77568bdc573e0b85e50fa6f0006f473938e5bb066c4f97b242628f1035e"
+      },
+      "expected_reference_issues": 1
+    }
+  ]
+}

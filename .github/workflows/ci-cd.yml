@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+      packages: read
+      attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,6 +43,19 @@ jobs:
         env:
           # Exporter unit tests run in coverage-measure (D14 / TH8) — match ci.yml.
           MERGECRAFT_UV_EXTRAS: tracing
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Verify changed image or consumer pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_BASE: ${{ github.event.before || github.sha }}
+          CANDIDATE_HEAD: ${{ github.sha }}
+        run: make action-candidate-check
       - name: make ci
         run: make ci
 
@@ -54,7 +69,8 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/e2e.yml
-    secrets: inherit
+    with:
+      required-security: true
 
   build-dist:
     name: Build Python dist
@@ -76,21 +92,22 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  # W8.3 — build once; push immutable SHA tags only; capture digests for promote.
+  # W8.3 — build once; push attempt-specific staging tags; capture digests for verification.
   build-images:
     name: Build GHCR images (once)
     needs: [verify, e2e-gate]
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/'))
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+      attestations: read
     outputs:
-      slim_digest: ${{ steps.build-slim.outputs.digest }}
-      analyzers_digest: ${{ steps.build-analyzers.outputs.digest }}
-      slim_ref: ${{ steps.meta.outputs.slim_ref }}
-      analyzers_ref: ${{ steps.meta.outputs.analyzers_ref }}
+      slim_digest: ${{ steps.resolve.outputs.slim_digest || steps.build-slim.outputs.digest }}
+      analyzers_digest: ${{ steps.resolve.outputs.analyzers_digest || steps.build-analyzers.outputs.digest }}
+      slim_ref: ${{ env.IMAGE_SLIM }}@${{ steps.resolve.outputs.slim_digest || steps.build-slim.outputs.digest }}
+      analyzers_ref: ${{ env.IMAGE_ANALYZERS }}@${{ steps.resolve.outputs.analyzers_digest || steps.build-analyzers.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -99,30 +116,38 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Image refs
-        id: meta
-        run: |
-          set -euo pipefail
-          echo "slim_ref=${IMAGE_SLIM}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "analyzers_ref=${IMAGE_ANALYZERS}:analyzers-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-      - name: Build and push slim (SHA tag only)
+      - uses: ./.github/actions/bootstrap
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+      - name: Reuse only verified immutable images
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: make action-images-resolve
+      - name: Build and push slim (attempt staging tag)
         id: build-slim
+        if: steps.resolve.outputs.slim_digest == ''
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           push: true
-          tags: ${{ env.IMAGE_SLIM }}:${{ github.sha }}
+          tags: ${{ env.IMAGE_SLIM }}:staging-${{ github.run_id }}-${{ github.run_attempt }}-slim
           cache-from: type=gha,scope=mergeCraft-slim
           cache-to: type=gha,mode=max,scope=mergeCraft-slim
-      - name: Build and push analyzers (SHA tag only)
+      - name: Build and push analyzers (attempt staging tag)
         id: build-analyzers
+        if: steps.resolve.outputs.analyzers_digest == ''
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile.analyzers
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           push: true
-          tags: ${{ env.IMAGE_ANALYZERS }}:analyzers-${{ github.sha }}
+          tags: ${{ env.IMAGE_ANALYZERS }}:staging-${{ github.run_id }}-${{ github.run_attempt }}-analyzers
           cache-from: type=gha,scope=mergeCraft-analyzers
           cache-to: type=gha,mode=max,scope=mergeCraft-analyzers
 
@@ -170,22 +195,33 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ needs.build-images.outputs.slim_ref }}
-          format: sarif
-          output: trivy-slim.sarif
+          version: v0.74.0
+          format: json
+          output: trivy-slim.json
           severity: ${{ steps.gate.outputs.severity }}
           exit-code: ${{ steps.gate.outputs.exit_code }}
           ignore-unfixed: true
           trivyignores: .trivyignore
       - name: Trivy scan analyzers
+        if: success() || failure()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ needs.build-images.outputs.analyzers_ref }}
-          format: sarif
-          output: trivy-analyzers.sarif
+          version: v0.74.0
+          format: json
+          output: trivy-analyzers.json
           severity: ${{ steps.gate.outputs.severity }}
           exit-code: ${{ steps.gate.outputs.exit_code }}
           ignore-unfixed: true
           trivyignores: .trivyignore
+      - name: Convert available scan reports to SARIF
+        if: always()
+        run: |
+          for report in trivy-slim trivy-analyzers; do
+            if [ -f "$report.json" ]; then
+              make image-scan-sarif IMAGE_SCAN_REPORT="$report"
+            fi
+          done
       - name: Upload SBOM + scan reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -194,7 +230,9 @@ jobs:
           path: |
             sbom-slim.spdx.json
             sbom-analyzers.spdx.json
+            trivy-slim.json
             trivy-slim.sarif
+            trivy-analyzers.json
             trivy-analyzers.sarif
           if-no-files-found: warn
 
@@ -248,7 +286,7 @@ jobs:
       - name: Attest build provenance (slim)
         id: attest-provenance-slim
         continue-on-error: true
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_SLIM }}
           subject-digest: ${{ needs.build-images.outputs.slim_digest }}
@@ -257,7 +295,7 @@ jobs:
         if: steps.attest-provenance-slim.outcome == 'failure'
         id: attest-provenance-slim-retry
         continue-on-error: true
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_SLIM }}
           subject-digest: ${{ needs.build-images.outputs.slim_digest }}
@@ -265,7 +303,7 @@ jobs:
       - name: Attest build provenance (analyzers)
         id: attest-provenance-analyzers
         continue-on-error: true
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_ANALYZERS }}
           subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
@@ -274,7 +312,7 @@ jobs:
         if: steps.attest-provenance-analyzers.outcome == 'failure'
         id: attest-provenance-analyzers-retry
         continue-on-error: true
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE_ANALYZERS }}
           subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
@@ -287,7 +325,7 @@ jobs:
       - name: Attest SBOM (slim)
         id: attest-sbom-slim
         continue-on-error: true
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE_SLIM }}
           subject-digest: ${{ needs.build-images.outputs.slim_digest }}
@@ -297,7 +335,7 @@ jobs:
         if: steps.attest-sbom-slim.outcome == 'failure'
         id: attest-sbom-slim-retry
         continue-on-error: true
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE_SLIM }}
           subject-digest: ${{ needs.build-images.outputs.slim_digest }}
@@ -306,7 +344,7 @@ jobs:
       - name: Attest SBOM (analyzers)
         id: attest-sbom-analyzers
         continue-on-error: true
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE_ANALYZERS }}
           subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
@@ -316,7 +354,7 @@ jobs:
         if: steps.attest-sbom-analyzers.outcome == 'failure'
         id: attest-sbom-analyzers-retry
         continue-on-error: true
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE_ANALYZERS }}
           subject-digest: ${{ needs.build-images.outputs.analyzers_digest }}
@@ -343,10 +381,68 @@ jobs:
             exit 1
           fi
 
+  verify-images:
+    name: Verify signed image provenance
+    needs: [build-images, sign-attest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify digest, source, signer, and SBOM
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REVISION: ${{ github.sha }}
+          SLIM_DIGEST: ${{ needs.build-images.outputs.slim_digest }}
+          ANALYZERS_DIGEST: ${{ needs.build-images.outputs.analyzers_digest }}
+        run: make action-images-verify
+
+  publish-canonical:
+    name: Publish verified source tags
+    needs: [build-images, verify-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: image-source-${{ github.sha }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/bootstrap
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reverify and publish both canonical source tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REVISION: ${{ github.sha }}
+          SLIM_DIGEST: ${{ needs.build-images.outputs.slim_digest }}
+          ANALYZERS_DIGEST: ${{ needs.build-images.outputs.analyzers_digest }}
+        run: make action-images-publish-canonical
+
   # W8.3 — promote mutable tags by retagging the signed digests (no rebuild).
   promote:
     name: Promote digests to mutable tags
-    needs: [build-images, sign-attest]
+    needs: [build-images, sign-attest, verify-images, publish-canonical]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -371,14 +467,14 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          docker buildx imagetools create \
+          docker buildx imagetools create --prefer-index=false \
             --tag "${IMAGE_SLIM}:latest" \
             "${IMAGE_SLIM}@${{ needs.build-images.outputs.slim_digest }}"
       - name: Retag analyzers digest → :analyzers
         if: github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          docker buildx imagetools create \
+          docker buildx imagetools create --prefer-index=false \
             --tag "${IMAGE_ANALYZERS}:analyzers" \
             "${IMAGE_ANALYZERS}@${{ needs.build-images.outputs.analyzers_digest }}"
       # pre-0.0.1 (the active pre-release/staging branch) gets its own mutable
@@ -388,14 +484,14 @@ jobs:
         if: github.ref == 'refs/heads/pre-0.0.1'
         run: |
           set -euo pipefail
-          docker buildx imagetools create \
+          docker buildx imagetools create --prefer-index=false \
             --tag "${IMAGE_SLIM}:rc" \
             "${IMAGE_SLIM}@${{ needs.build-images.outputs.slim_digest }}"
       - name: Retag analyzers digest → :analyzers-rc
         if: github.ref == 'refs/heads/pre-0.0.1'
         run: |
           set -euo pipefail
-          docker buildx imagetools create \
+          docker buildx imagetools create --prefer-index=false \
             --tag "${IMAGE_ANALYZERS}:analyzers-rc" \
             "${IMAGE_ANALYZERS}@${{ needs.build-images.outputs.analyzers_digest }}"
       - name: Record digests for Craft SHA→version retag

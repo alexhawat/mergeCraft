@@ -23,15 +23,31 @@ a read-only verifier; typed findings drive inline comments and the
    mergecraft init
    ```
 
-3. **Authentication — STOP and ask the user** to run one of:
-   - `mergecraft auth claude` (Claude Pro/Max)
-   - `mergecraft auth codex` (ChatGPT Plus/Pro/Team/Enterprise)
-   - `mergecraft auth cursor` / `mergecraft auth gemini` / API-key providers
+3. **Authentication — STOP and ask the user.** Use `mergecraft provider list`
+   to find the configured provider label or id from `init`. Authenticate that
+   entry with `mergecraft provider auth <label-or-id> --scope local` for local
+   evaluation, or `--scope github` to adopt GitHub Actions. Examples below assume
+   these provider labels are configured:
+   - `mergecraft provider auth anthropic --scope github` (Claude Pro/Max)
+   - `mergecraft provider auth openai --scope github` (ChatGPT Plus/Pro/Team/Enterprise)
+   - `mergecraft provider auth cursor --scope github` / `mergecraft provider auth google --scope github` / API-key providers
 
-   Never handle raw credentials; never commit secrets. Each auth command stores
-   a GitHub Actions secret via `gh secret set`.
+   Never handle raw credentials; never commit secrets. GitHub scope checks the exact
+   target repository before collecting credentials and stores Actions secrets.
+   Local scope writes only the displayed `.env` file and never calls GitHub.
 4. Commit only `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`,
    push, open a PR (or comment `@mergecraft review`).
+
+## Standalone installation links
+
+Install the generated `skills/<harness>/mergecraft/SKILL.md` package. The raw
+`skills/mergecraft/SKILL.md` is a generator template; replace a copied template
+with the generated package to repair relative links. Documentation currently
+uses verified commit `bb865d5c8e03d97269cb5100656bf047fcd22c65`, because Action tag
+`v0.1.0a1` predates the MCP documentation. Release maintainers can set
+`MERGECRAFT_AGENT_PACKAGES_REF` when generating packages for another verified ref.
+Fetch that ref first: an unresolved explicit override fails instead of silently
+substituting a branch.
 
 ## CLI quick reference
 
@@ -41,7 +57,7 @@ a read-only verifier; typed findings drive inline comments and the
 | `mergecraft review` | Review local diff / branch changes (primary local review command) |
 | `mergecraft review --dry-run` | Print prompt, no LLM call |
 | `mergecraft review --json out.json` | Machine-readable findings |
-| `mergecraft auth …` | Interactive provider login → `gh secret set` |
+| `mergecraft provider auth … --scope github` | Interactive provider login → `gh secret set` |
 | `mergecraft models list\|show\|set` | Inspect/configure model chains |
 | `mergecraft analyzers list\|detect\|run\|explain` | Deterministic analyzers |
 | `mergecraft learnings active\|staging` | Inspect learnings memory |

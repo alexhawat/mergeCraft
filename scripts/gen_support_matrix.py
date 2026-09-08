@@ -79,8 +79,8 @@ def gen_support_matrix() -> str:
             notes = "preferred" if defn.preferred else "—"
             model_rows.append((f"`{provider_key}/{model_id}`", f"`{provider_key}`", notes))
 
-    # 0.1.0 review ingress is GitHub-only; GitLabScmAdapter raises
-    # UnsupportedScmCapability for all review operations (DG9 stub).
+    # Review operations are GitHub-only. Webhook signature support alone
+    # does not implement a GitLab review adapter.
     scm_rows = [
         ("`github`", "Webhook + review ingress", "Supported"),
         ("`gitlab`", "Webhook + review ingress", "Not supported yet"),

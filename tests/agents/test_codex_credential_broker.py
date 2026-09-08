@@ -267,3 +267,197 @@ def test_lane_b_sandbox_symbols_remain_defined_in_codex_module() -> None:
     codex_module = load_codex_module()
     for symbol in LANE_B_SANDBOX_SYMBOLS:
         assert hasattr(codex_module, symbol), f"{symbol} must remain in agents/codex.py"
+
+
+@pytest.fixture
+def allow_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model the operator's explicit envAllowlist for proxy configuration."""
+    from mergecraft.utils import secrets as secret_utils
+
+    names = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
+    monkeypatch.setattr(secret_utils, "_user_allowlist", names | {name.lower() for name in names})
+
+
+@pytest.mark.parametrize(
+    ("upper", "lower", "expected"),
+    [
+        (None, None, "localhost,127.0.0.1"),
+        ("", "", "localhost,127.0.0.1"),
+        (
+            None,
+            ".internal.example,host.example:8443",
+            ".internal.example,host.example:8443,localhost,127.0.0.1",
+        ),
+        (
+            "CORP.example,localhost",
+            "corp.example,other.example",
+            "CORP.example,localhost,other.example,127.0.0.1",
+        ),
+        ("127.0.0.1, localhost,127.0.0.1", "localhost", "127.0.0.1,localhost"),
+        ("*", ".internal.example", "*,.internal.example,localhost,127.0.0.1"),
+    ],
+)
+def test_codex_credential_broker_unions_child_proxy_bypass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upper: str | None,
+    lower: str | None,
+    expected: str,
+    allow_proxy_env: None,
+) -> None:
+    """Broker bypass preserves both user spellings without changing the parent."""
+    import os
+
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    for name, value in (("NO_PROXY", upper), ("no_proxy", lower)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    for name in ("HTTP_PROXY", "HTTPS_PROXY"):
+        monkeypatch.setenv(name, "http://proxy.example:3128")
+    with prepare_codex_brokered_run(brokered_codex_context(tmp_path)) as prepared:
+        assert prepared.agent_env["NO_PROXY"] == expected
+        assert prepared.agent_env["no_proxy"] == expected
+        for name in ("HTTP_PROXY", "HTTPS_PROXY"):
+            assert prepared.agent_env[name] == "http://proxy.example:3128"
+    assert os.environ.get("NO_PROXY") == upper
+    assert os.environ.get("no_proxy") == lower
+
+
+def test_codex_credential_broker_inactive_keeps_proxy_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    allow_proxy_env: None,
+) -> None:
+    """Non-brokered runs retain the original case-sensitive proxy settings."""
+    from mergecraft.agents import codex
+
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("NO_PROXY", "upper.example")
+    monkeypatch.setenv("no_proxy", "lower.example")
+    monkeypatch.setattr(codex, "active_broker_handle", lambda: None)
+    env = codex._build_env(brokered_codex_context(tmp_path))
+    assert env["NO_PROXY"] == "upper.example"
+    assert env["no_proxy"] == "lower.example"
+    assert "OPENAI_API_KEY" not in env
+
+
+def test_codex_credential_broker_child_routes_loopback_direct_and_remote_via_proxy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    allow_proxy_env: None,
+) -> None:
+    """A real child process reaches its broker and retains non-loopback proxy routing."""
+    import subprocess
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    import httpx
+
+    from mergecraft.security import broker
+
+    paths: list[str] = []
+
+    class ProxyHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            paths.append(self.path)
+            body = b"via-proxy"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler)
+    thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    thread.start()
+    try:
+        proxy_url = f"http://127.0.0.1:{proxy.server_port}"
+        for name in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ):
+            monkeypatch.setenv(name, proxy_url)
+        for name in ("NO_PROXY", "no_proxy"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
+        monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+        monkeypatch.setattr(
+            broker,
+            "_upstream_client",
+            lambda config: httpx.Client(
+                base_url="https://api.openai.com",
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(200, text="via-broker")
+                ),
+            ),
+        )
+        with prepare_codex_brokered_run(brokered_codex_context(tmp_path)) as prepared:
+            script = (
+                "import os,sys,httpx; "
+                "client=httpx.Client(timeout=2); "
+                "local=client.get(sys.argv[1]+'/models',headers={'Authorization':'Bearer '+os.environ['OPENAI_API_KEY']}); "
+                "remote=client.get('http://remote.example.invalid/probe'); "
+                "print(local.text,remote.text); client.close()"
+            )
+            result = subprocess.run(
+                [sys.executable, "-I", "-c", script, prepared.broker_base_url],
+                env=prepared.agent_env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.strip() == "via-broker via-proxy"
+        assert paths == ["http://remote.example.invalid/probe"]
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_codex_credential_broker_auth_setup_keeps_api_key_diagnostic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Broker activity no longer suppresses the otherwise normal API-key auth path."""
+    from tests.security.support_agent_isolation import capture_loguru_messages
+
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    with (
+        capture_loguru_messages() as logs,
+        prepare_codex_brokered_run(brokered_codex_context(tmp_path)) as prepared,
+    ):
+        assert not (Path(prepared.agent_env["CODEX_HOME"]) / "auth.json").exists()
+    assert any("using OPENAI_API_KEY for Codex CLI authentication" in line for line in logs)
+    assert REAL_OPENAI_API_KEY_FIXTURE not in "\n".join(logs)
+
+
+def test_codex_credential_broker_does_not_restore_denied_parent_proxy_variables(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Loopback repair must not circumvent the child environment allowlist."""
+    from mergecraft.utils import secrets as secret_utils
+
+    monkeypatch.setattr(secret_utils, "_user_allowlist", None)
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_OPENAI_API_KEY_FIXTURE)
+    monkeypatch.delenv("CODEX_AUTH_JSON", raising=False)
+    monkeypatch.setenv("all_proxy", "http://denied.example:3128")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.setenv("no_proxy", "also-denied.example")
+    with prepare_codex_brokered_run(brokered_codex_context(tmp_path)) as prepared:
+        assert "all_proxy" not in prepared.agent_env
+        assert prepared.agent_env["NO_PROXY"] == "localhost,127.0.0.1"
+        assert prepared.agent_env["no_proxy"] == "localhost,127.0.0.1"

@@ -29,7 +29,6 @@ from typing import Any
 
 import yaml
 
-from mergecraft.pins import action_pin_minimal
 from mergecraft.utils.git_ref import git_ref_exists
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +40,7 @@ _RELATIVE_LINK = re.compile(r"\(\.\./\.\./([^)]+)\)")
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 DEFAULT_BLOB_REF = "pre-0.0.1"
+DOCUMENTATION_REF = "bb865d5c8e03d97269cb5100656bf047fcd22c65"
 
 
 def _blob_ref() -> str:
@@ -48,15 +48,14 @@ def _blob_ref() -> str:
     if env_ref:
         if git_ref_exists(env_ref, cwd=REPO_ROOT):
             return env_ref
-        return DEFAULT_BLOB_REF
-    # The pin is used unconditionally. These refs become github.com blob URLs,
-    # and the tag resolves there whether or not this clone fetched it. Gating on
-    # local git state made the generated packages differ by environment: a tag
-    # build (checkout has the tag) emitted the pin while a branch build
-    # (`fetch-depth: 1`, no tags) emitted DEFAULT_BLOB_REF, so no committed
-    # output could satisfy both and one of the two always failed the drift gate.
-    # The gate existed only to survive the window before the tag was cut (#404).
-    return action_pin_minimal()
+        raise ValueError(
+            f"documentation ref {env_ref!r} does not resolve; fetch it before generating packages"
+        )
+    # Documentation and Action releases have separate lifecycles. The old
+    # Action tag predates docs/mcp.md. This verified source commit contains all
+    # package targets and the canonical provider command. Keep this deterministic
+    # in shallow clones; a release may explicitly override it with its own ref.
+    return DOCUMENTATION_REF
 
 
 def _blob_url(rel_path: str, *, ref: str) -> str:
