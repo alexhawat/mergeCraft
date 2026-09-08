@@ -12,6 +12,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 Api = Callable[[str, dict[str, Any] | None], Any]
 
@@ -99,7 +100,11 @@ def approve(api: Api, *, repo: str, run: dict[str, Any], app_id: str, server: st
 
 
 def _api(path: str, body: dict[str, Any] | None) -> Any:
-    args = ["gh", "api", path]
+    server = urlsplit(os.environ["GITHUB_SERVER_URL"])
+    token = os.environ.get("GH_TOKEN", "")
+    if server.scheme != "https" or not server.netloc or not token.strip():
+        raise ValueError("trusted HTTPS server and an explicit App token are required")
+    args = ["gh", "api", "--hostname", server.netloc, path]
     if body is not None:
         args += ["--method", "POST", "--input", "-"]
     result = subprocess.run(
@@ -109,6 +114,9 @@ def _api(path: str, body: dict[str, Any] | None) -> Any:
         text=True,
         check=True,
         timeout=30,
+        # gh uses a separate variable for GHES hosts; never fall back to a
+        # cached operator credential when this workflow minted an App token.
+        env={**os.environ, "GH_ENTERPRISE_TOKEN": token},
     )
     return json.loads(result.stdout)
 

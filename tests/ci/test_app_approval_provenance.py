@@ -176,3 +176,36 @@ def test_enterprise_run_url_is_required_and_accepted() -> None:
     accepted, posted = execute(server=server, checks=[check])
     assert accepted
     assert len(posted) == 1
+
+
+@pytest.mark.parametrize("server", ["https://github.com", "https://github.example.test"])
+def test_api_uses_explicit_host_and_ephemeral_token(
+    monkeypatch: pytest.MonkeyPatch, server: str
+) -> None:
+    from scripts import approve_app_review as helper
+
+    monkeypatch.setenv("GITHUB_SERVER_URL", server)
+    monkeypatch.setenv("GH_TOKEN", "nonsecret-app-fixture")
+    monkeypatch.setenv("GH_ENTERPRISE_TOKEN", "wrong-cached-fixture")
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **kwargs: Any) -> Any:
+        calls.append(args)
+        assert kwargs["env"]["GH_ENTERPRISE_TOKEN"] == "nonsecret-app-fixture"
+        assert kwargs["env"]["GH_TOKEN"] == "nonsecret-app-fixture"
+        return helper.subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(helper.subprocess, "run", run)
+    assert helper._api("/repos/acme/demo", None) == {}
+    assert calls == [
+        ["gh", "api", "--hostname", server.removeprefix("https://"), "/repos/acme/demo"]
+    ]
+
+
+def test_api_does_not_fall_back_to_cached_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import approve_app_review as helper
+
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.example.test")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    with pytest.raises(ValueError, match="explicit App token"):
+        helper._api("/repos/acme/demo", None)
