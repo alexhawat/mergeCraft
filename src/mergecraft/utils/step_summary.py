@@ -51,6 +51,9 @@ def render_step_summary(
         header_lines.append(f"| Diagnostic | `{diagnostic}` |")
     header_lines.append("")
 
+    from mergecraft.build_metadata import resolve_action_deployment_identity
+
+    action_pin_sha, image_source_sha = resolve_action_deployment_identity()
     record = render_deterministic_review_block(
         packet=packet,
         rejection_reason=rejection_reason,
@@ -61,6 +64,8 @@ def render_step_summary(
         agent_summary=agent_summary,
         trust_tier=trust_tier,
         token_summary=token_summary,
+        action_pin_sha=action_pin_sha,
+        image_source_sha=image_source_sha,
     )
     return _cap_step_summary("\n".join(header_lines) + record)
 

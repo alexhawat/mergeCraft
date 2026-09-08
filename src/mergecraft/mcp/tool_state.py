@@ -387,6 +387,10 @@ class ToolState:
     run_manifest_trust: dict[str, str] = field(default_factory=dict)
     # Lane B / #553 — resolved agent sandbox decision from the base snapshot.
     agent_sandbox_decision: AgentSandboxDecision | None = None
+    # #620 — Copilot-style review skills and read-only consumer MCP attached
+    # to this run (attribution in the sticky record).
+    review_skill_paths: tuple[str, ...] = ()
+    review_mcp_names: tuple[str, ...] = ()
     # Lane B / #552 — loud roster slots skipped for missing credentials (D10).
     credential_degradations: tuple[str, ...] = ()
     # When ``setup_script`` is skipped on an untrusted tier (W1.2), the reason

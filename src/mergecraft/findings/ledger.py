@@ -626,6 +626,10 @@ def render_deterministic_review_block(
     review_body_truncated: bool = False,
     credential_degradations: Sequence[str] | None = None,
     agent_sandbox_decision: Any | None = None,
+    action_pin_sha: str | None = None,
+    image_source_sha: str | None = None,
+    review_skills: Sequence[str] | None = None,
+    review_mcp_servers: Sequence[str] | None = None,
 ) -> str:
     """Render the authoritative deterministic review record (D6/D7).
 
@@ -687,6 +691,25 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Run:** {run_url}")
     if reviewed_sha:
         header_lines.append(f"- **Reviewed SHA:** `{reviewed_sha}`")
+    pin = (action_pin_sha or "").strip()
+    source = (image_source_sha or "").strip()
+    if pin:
+        header_lines.append(f"- **Action pin:** `{pin}`")
+    if source:
+        header_lines.append(f"- **Image source:** `{source}`")
+    if pin and source and pin == source:
+        header_lines.append(
+            "- **Pin lag:** action pin equals baked image source — pinning S "
+            "still deploys the digest already stored at S (#641)"
+        )
+    if review_skills:
+        header_lines.append(
+            "- **Review skills:** " + ", ".join(f"`{item}`" for item in review_skills)
+        )
+    if review_mcp_servers:
+        header_lines.append(
+            "- **Review MCP:** " + ", ".join(f"`{item}`" for item in review_mcp_servers)
+        )
     if publication_entrypoint:
         header_lines.append(f"- **Publication path:** `{publication_entrypoint}`")
     if inline_comments_demoted:
