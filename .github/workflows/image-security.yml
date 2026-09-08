@@ -3,16 +3,8 @@ name: Image security
 on:
   pull_request:
     branches: [main, pre-0.0.1]
-    paths:
-      - Dockerfile
-      - Dockerfile.analyzers
-      - docker/**
-      - pyproject.toml
-      - uv.lock
-      - Makefile
-      - .trivyignore
-      - .github/workflows/image-security.yml
-      - .github/workflows/ci-cd.yml
+    # Always evaluate PRs: source, entrypoint, build hooks and future COPY
+    # inputs all affect the shipped image, not just dependency manifests.
 permissions:
   contents: read
 concurrency:

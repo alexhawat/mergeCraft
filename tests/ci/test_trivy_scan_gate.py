@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from tests.ci.workflow_support import REPO_ROOT, job, load_workflow, read_text
+from tests.ci.workflow_support import REPO_ROOT, job, load_workflow, read_text, workflow_on
 
 _CVE = re.compile(r"^CVE-\d{4}-\d+\b", re.MULTILINE)
 _EXPIRY = re.compile(r"expir(?:y|es|ation)\s*[:=]\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
@@ -255,6 +255,11 @@ def test_release_scans_both_images_and_retains_attribution_after_findings() -> N
 def test_pr_image_scan_has_no_release_authority_and_is_blocking() -> None:
     """Untrusted PR image builds cannot publish; both matrix legs retain a hard gate."""
     doc = load_workflow("image-security.yml")
+    trigger = workflow_on(doc)["pull_request"]
+    assert set(trigger["branches"]) == {"main", "pre-0.0.1"}
+    assert not {"paths", "paths-ignore"}.intersection(trigger), (
+        "source-only or entrypoint PRs must not bypass the image gate"
+    )
     assert doc["permissions"] == {"contents": "read"}
     scan = job(doc, "scan")
     assert scan["permissions"] == {"contents": "read"}
