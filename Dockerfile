@@ -19,7 +19,7 @@ ADD --checksum=sha256:e16749bc0d99dc0633a3d5ebadf48ffff1c24beb1ce83e8f6a71bb64ce
 WORKDIR /src/gh
 COPY docker/gh/dependencies.patch /tmp/dependencies.patch
 RUN tar -xzf /tmp/gh-source.tar.gz --strip-components=1 -C /src/gh \
-    && patch -p1 < /tmp/dependencies.patch \
+    && git apply --no-index /tmp/dependencies.patch \
     && GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -buildvcs=false \
         -ldflags="-s -w -X github.com/cli/cli/v2/internal/build.Version=2.100.0-mergecraft.1" \
         -o /out/gh ./cmd/gh
