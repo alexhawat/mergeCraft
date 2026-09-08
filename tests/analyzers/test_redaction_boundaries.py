@@ -1,11 +1,21 @@
 """Independent punctuation and source-path redaction regressions."""
 
+import pytest
+
 from mergecraft.analyzers.redact import redact_secrets
 
 
 def test_assignment_preserves_closing_bracket() -> None:
     output = redact_secrets("found [password=public-fixture-value] here")
     assert "public-fixture-value" not in output
+    assert output.endswith("] here")
+
+
+@pytest.mark.parametrize("quote", ["", "'", '"'])
+def test_assignment_does_not_expose_secret_after_interior_bracket(quote: str) -> None:
+    output = redact_secrets(f"found [password={quote}abcdefgh]private_tail{quote}] here")
+    assert "abcdefgh" not in output
+    assert "private_tail" not in output
     assert output.endswith("] here")
 
 
