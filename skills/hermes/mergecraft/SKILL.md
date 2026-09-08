@@ -19,10 +19,10 @@ Hermes Agent reads skills from ``~/.hermes/skills/`` or a category-nested projec
 ``skills/`` tree. Install this package with:
 
 ```bash
-hermes skills install https://github.com/alexhawat/mergeCraft/tree/v0.1.0a1/skills/hermes
+hermes skills install https://github.com/alexhawat/mergeCraft/tree/bb865d5c8e03d97269cb5100656bf047fcd22c65/skills/hermes
 ```
 
-mergeCraft ships a Nous provider (``mergecraft auth nous``,
+mergeCraft ships a Nous provider (``mergecraft provider auth nous --scope github``,
 ``nous/deepseek/deepseek-v4-flash``) — a Hermes user can run reviews entirely on
 Nous credentials when configured.
 # mergeCraft
@@ -36,7 +36,7 @@ a read-only verifier; typed findings drive inline comments and the
 ## Setup checklist (new consumer repo)
 
 1. **Prereqs:** Python **3.11+**, uv, authenticated `gh` CLI. If no Python 3.11+
-   locally → use the Docker Action only ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a1/docs/install.md)).
+   locally → use the Docker Action only ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/bb865d5c8e03d97269cb5100656bf047fcd22c65/docs/install.md)).
 2. **Install:**
 
    ```bash
@@ -44,15 +44,31 @@ a read-only verifier; typed findings drive inline comments and the
    mergecraft init
    ```
 
-3. **Authentication — STOP and ask the user** to run one of:
-   - `mergecraft auth claude` (Claude Pro/Max)
-   - `mergecraft auth codex` (ChatGPT Plus/Pro/Team/Enterprise)
-   - `mergecraft auth cursor` / `mergecraft auth gemini` / API-key providers
+3. **Authentication — STOP and ask the user.** Use `mergecraft provider list`
+   to find the configured provider label or id from `init`. Authenticate that
+   entry with `mergecraft provider auth <label-or-id> --scope local` for local
+   evaluation, or `--scope github` to adopt GitHub Actions. Examples below assume
+   these provider labels are configured:
+   - `mergecraft provider auth anthropic --scope github` (Claude Pro/Max)
+   - `mergecraft provider auth openai --scope github` (ChatGPT Plus/Pro/Team/Enterprise)
+   - `mergecraft provider auth cursor --scope github` / `mergecraft provider auth google --scope github` / API-key providers
 
-   Never handle raw credentials; never commit secrets. Each auth command stores
-   a GitHub Actions secret via `gh secret set`.
+   Never handle raw credentials; never commit secrets. GitHub scope checks the exact
+   target repository before collecting credentials and stores Actions secrets.
+   Local scope writes only the displayed `.env` file and never calls GitHub.
 4. Commit only `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`,
    push, open a PR (or comment `@mergecraft review`).
+
+## Standalone installation links
+
+Install the generated `skills/<harness>/mergecraft/SKILL.md` package. The raw
+`skills/mergecraft/SKILL.md` is a generator template; replace a copied template
+with the generated package to repair relative links. Documentation currently
+uses verified commit `bb865d5c8e03d97269cb5100656bf047fcd22c65`, because Action tag
+`v0.1.0a1` predates the MCP documentation. Release maintainers can set
+`MERGECRAFT_AGENT_PACKAGES_REF` when generating packages for another verified ref.
+Fetch that ref first: an unresolved explicit override fails instead of silently
+substituting a branch.
 
 ## CLI quick reference
 
@@ -62,7 +78,7 @@ a read-only verifier; typed findings drive inline comments and the
 | `mergecraft review` | Review local diff / branch changes (primary local review command) |
 | `mergecraft review --dry-run` | Print prompt, no LLM call |
 | `mergecraft review --json out.json` | Machine-readable findings |
-| `mergecraft auth …` | Interactive provider login → `gh secret set` |
+| `mergecraft provider auth … --scope github` | Interactive provider login → `gh secret set` |
 | `mergecraft models list\|show\|set` | Inspect/configure model chains |
 | `mergecraft analyzers list\|detect\|run\|explain` | Deterministic analyzers |
 | `mergecraft learnings active\|staging` | Inspect learnings memory |
@@ -84,7 +100,7 @@ Two profiles — do not confuse them:
 | **Runtime harness** | `mergecraft mcp serve` (default `--role reviewer`) | HTTP on ephemeral port | Per-serve Bearer required |
 
 **Public install (Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode):** see
-[`docs/mcp.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a1/docs/mcp.md) for copy-paste `mcpServers` JSON. Six tools only
+[`docs/mcp.md`](https://github.com/alexhawat/mergeCraft/blob/bb865d5c8e03d97269cb5100656bf047fcd22c65/docs/mcp.md) for copy-paste `mcpServers` JSON. Six tools only
 (`review_change`, `get_review`, `inspect_finding`, `explain_finding`,
 `get_capabilities`, `get_policy`). Registry: `mcp-name: io.github.alexhawat/mergecraft`.
 
@@ -114,5 +130,5 @@ Optional HTTP public (`--role public` without `--transport stdio`) also requires
   commenters are authorized; authorization reads `author_association` from the
   event payload, never the comment body.
 - **Model skipped** — no credential for that provider; run `mergecraft models list`.
-- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a1/README.md), [`AGENTS.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a1/AGENTS.md),
-  [`REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a1/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a1/docs/README.md).
+- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/bb865d5c8e03d97269cb5100656bf047fcd22c65/README.md), [`AGENTS.md`](https://github.com/alexhawat/mergeCraft/blob/bb865d5c8e03d97269cb5100656bf047fcd22c65/AGENTS.md),
+  [`REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/bb865d5c8e03d97269cb5100656bf047fcd22c65/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/bb865d5c8e03d97269cb5100656bf047fcd22c65/docs/README.md).

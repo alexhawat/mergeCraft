@@ -1,3 +1,5 @@
+# Reviewer credentials can publish PR reviews/checks; they are not an approval boundary.
+# Distinct approval credentials live only in the maintainer-dispatched approval workflow.
 # mergeCraft PR review (BYOK; https://github.com/alexhawat/mergeCraft).
 #
 # === THIS IS THE mergeCraft REPO'S OWN CONSUMER WORKFLOW ===
@@ -318,6 +320,7 @@ jobs:
     # seconds rather than consuming its budget.
     timeout-minutes: 95
     env:
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
       # Nous/DeepSeek primary; Codex fallback when Nous auth is absent or the
       # Nous review does not post a mergecraft-approval verdict.
@@ -333,15 +336,9 @@ jobs:
       # `env` expression). Adding a provider here without updating that copy
       # fails the required gate OPEN — see the comment there.
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
-      # MERGECRAFT_REVIEWER_PAT is deliberately absent from this job. The
-      # default github.token cannot submit an "Approve" review — GitHub
-      # silently downgrades any attempt to a comment — and a PAT from a
-      # distinct account (sevn-one, a collaborator + CODEOWNERS entry) can.
-      # But a PAT also cannot create the check-run the approval gate reads, so
-      # handing it to the review steps disabled the gate and the approval both.
-      # The approve lane lives in mergecraft-approve.yml, which holds its own
-      # copy of the PAT and never re-reads PR content — see the review steps'
-      # `token:` comment and PR #200.
+      # Review attempts use App tokens when configured, otherwise the job token.
+      # Privileged approval has a separate job and authenticates the check's App,
+      # workflow run and current PR head before submitting any approval.
       # Forward wait-for-ci outputs for action-side SARIF ingest (D9). Dual
       # MERGECRAFT_* / CI_* aliases support older consumer templates that only set CI_*.
       MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
@@ -506,6 +503,23 @@ jobs:
           echo "baseline mergecraft-approval check-run: ${id:-none}"
           echo "id=${id}" >> "${GITHUB_OUTPUT}"
 
+      # Mint per attempt: the full cascade can outlive a one-hour token.
+      - name: Mint App token for Nous Tencent HY3
+        if: env.HAS_APP == 'true' && env.HAS_NOUS == 'true'
+        id: app_token_nous
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-actions: read
+          permission-checks: write
+          permission-pull-requests: write
+          permission-issues: write
+
       - name: mergeCraft PR review (Nous Tencent HY3)
         if: env.HAS_NOUS == 'true'
         id: mergecraft_nous
@@ -611,27 +625,13 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # The workflow job token, NOT MERGECRAFT_REVIEWER_PAT. mergeCraft
-          # posts the `mergecraft` / `mergecraft-approval` check-runs from this
-          # input, and `POST /repos/{owner}/{repo}/check-runs` answers any
-          # classic or OAuth user token with `403 You must authenticate via a
-          # GitHub App` — no scope unlocks it. GITHUB_TOKEN *is* an App
-          # installation token, and this job already grants checks: write.
-          #
-          # Under the PAT neither check-run had EVER posted (verified across
-          # #519, #524, #533, #534, #542, #545, #546, #548), so `mergecraft
-          # review` failed closed on every PR AND mergecraft-approve.yml, which
-          # gates on reading that conclusion, could never submit its approval.
-          # The PAT bought only the comment byline; it cost the whole gate.
-          #
-          # MERGECRAFT_REVIEWER_PAT stays where it works: mergecraft-approve.yml
-          # holds its own copy and submits the sevn-one APPROVE from there.
-          # Restoring a distinct byline here needs a GitHub App, not a PAT.
-          token: ${{ github.token }}
+          # Mint failure or absent App config preserves job-token review fallback.
+          token: ${{ steps.app_token_nous.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || 'github-actions[bot]' }}
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
@@ -682,6 +682,29 @@ jobs:
           NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
           NOUS_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
         run: ./scripts/decide_codex_fallback.sh
+
+      # Mint per attempt: the full cascade can outlive a one-hour token.
+      - name: Mint App token for Codex
+        if: >-
+          env.HAS_APP == 'true' &&
+          env.HAS_CODEX == 'true' &&
+          (
+            env.HAS_NOUS != 'true' ||
+            steps.fallback.outputs.need == 'true'
+          )
+        id: app_token_codex
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-actions: read
+          permission-checks: write
+          permission-pull-requests: write
+          permission-issues: write
 
       - name: mergeCraft PR review (Codex)
         if: >-
@@ -753,11 +776,12 @@ jobs:
           shell: disabled
           status_checks: enabled
           # Job token, not the PAT — see the matching comment on the Nous step.
-          token: ${{ github.token }}
+          token: ${{ steps.app_token_codex.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_codex.outputs.app-slug && format('{0}[bot]', steps.app_token_codex.outputs.app-slug) || 'github-actions[bot]' }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
@@ -827,6 +851,29 @@ jobs:
           CODEX_PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
         run: ./scripts/decide_claude_fallback.sh
 
+      # Mint per attempt: the full cascade can outlive a one-hour token.
+      - name: Mint App token for Claude
+        if: >-
+          env.HAS_APP == 'true' &&
+          env.HAS_CLAUDE == 'true' &&
+          (
+            steps.claude_fallback.outputs.need == 'true' ||
+            (env.HAS_NOUS != 'true' && env.HAS_CODEX != 'true')
+          )
+        id: app_token_claude
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-actions: read
+          permission-checks: write
+          permission-pull-requests: write
+          permission-issues: write
+
       - name: mergeCraft PR review (Claude)
         # Two ways in: as the backstop after a retryable provider failure, or as
         # the sole reviewer when Claude is the only credential this repo has.
@@ -854,11 +901,12 @@ jobs:
           shell: disabled
           status_checks: enabled
           # Job token, not the PAT — see the matching comment on the Nous step.
-          token: ${{ github.token }}
+          token: ${{ steps.app_token_claude.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_claude.outputs.app-slug && format('{0}[bot]', steps.app_token_claude.outputs.app-slug) || 'github-actions[bot]' }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev

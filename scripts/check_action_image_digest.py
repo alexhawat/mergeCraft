@@ -1,29 +1,18 @@
 #!/usr/bin/env python3
-"""Guard: ``action.yml`` slim image digest must match GHCR for the workflow Action SHA.
+"""Verify the manifest commit actually pinned by a consumer against signed image provenance.
 
-The published Docker action must pull a digest-pinned ``ghcr.io/alexhawat/mergecraft``
-image instead of rebuilding from ``Dockerfile`` on every run (#526). When CI/CD
-has published a slim image for the self-review workflow's Action SHA pin, this
-script compares that registry digest to ``action.yml``'s ``runs.image`` pin and
-verifies the image was built with ``--extra tracing`` (#531).
-
-Registry outcomes are handled separately:
-- reachable + tag present → digest must match ``action.yml``
-- reachable + tag missing → **fail** (chicken-and-egg blocks a stale digest)
-- unreachable → skip with a notice (offline / local ``make lint``)
-
-Module: scripts.check_action_image_digest
-Depends: json, re, sys, urllib.error, urllib.request, pathlib, yaml
-
-Exports:
-    main — CLI entry; compares action.yml digest vs published GHCR slim image.
+Source validation is deliberately separate from deployed C → D → S verification.
+Only strict verification produces a verified result; offline mode exits 2.
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -32,6 +21,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 ACTION_YML = REPO / "action.yml"
@@ -71,18 +62,6 @@ def _pins_in(text: str) -> list[str]:
     return [match.group("sha") for match in _ACTION_PIN_RE.finditer(text)]
 
 
-def _read_action_image() -> str | None:
-    if not ACTION_YML.is_file():
-        return None
-    payload = ACTION_YML.read_text(encoding="utf-8")
-    data = __import__("yaml").safe_load(payload)
-    runs = data.get("runs") if isinstance(data, dict) else None
-    if not isinstance(runs, dict):
-        return None
-    image = runs.get("image")
-    return image if isinstance(image, str) else None
-
-
 def _ghcr_pull_token() -> str | None:
     """Return a registry pull token (anonymous for public packages, or via env)."""
     auth_header: str | None = None
@@ -104,14 +83,8 @@ def _ghcr_pull_token() -> str | None:
     return token if isinstance(token, str) and token else None
 
 
-def _registry_reachable() -> bool:
-    return _ghcr_pull_token() is not None
-
-
-# A tag pushed by action-slim-bootstrap is not always visible on the very next
-# read: GHCR settles a moment behind the push, and the gates start seconds after
-# it. Retry only MISSING, and only a few times — a genuinely unpublished SHA
-# must still fail rather than stall the job.
+# Retry post-publication tag visibility before accepting canonical readback.
+# Registry errors remain fatal; an unsigned existing tag is never overwritten.
 _MISSING_RETRIES = int(os.environ.get("MERGECRAFT_GHCR_MISSING_RETRIES", "3"))
 _MISSING_BACKOFF_SECONDS = float(os.environ.get("MERGECRAFT_GHCR_MISSING_BACKOFF", "3"))
 
@@ -122,7 +95,7 @@ def _ghcr_digest_for_tag(tag: str) -> TagLookupResult:
     ``MISSING`` is retried because it is the one status that is routinely
     transient right after a push. ``ERROR`` is not: a registry fault or a bad
     token will not resolve itself inside a few seconds, and retrying it would
-    only delay a failure the caller already treats as non-fatal.
+    only delay the required failure.
     """
     result = _ghcr_digest_for_tag_once(tag)
     attempts = 0
@@ -157,60 +130,53 @@ def _ghcr_digest_for_tag_once(tag: str) -> TagLookupResult:
 
 
 def _fetch_oci_config_for_tag(tag: str) -> dict[str, Any] | None:
-    """Return the OCI image config JSON for a published slim image tag."""
+    """Read content-addressed registry objects and verify every returned byte hash."""
     token = _ghcr_pull_token()
-    if token is None:
+    if token is None or not re.fullmatch(r"sha256:[0-9a-f]{64}", tag):
         return None
-    request = urllib.request.Request(
-        f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/manifests/{tag}",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": GHCR_MANIFEST_ACCEPT,
-        },
-    )
-    try:
-        index = json.loads(urllib.request.urlopen(request, timeout=30).read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
-        return None
-    manifests = index.get("manifests")
-    if not isinstance(manifests, list) or not manifests:
-        return None
-    platform = manifests[0]
-    if not isinstance(platform, dict):
-        return None
-    manifest_digest = platform.get("digest")
-    if not isinstance(manifest_digest, str):
-        return None
-    request_manifest = urllib.request.Request(
-        f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/manifests/{manifest_digest}",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": GHCR_MANIFEST_ACCEPT,
-        },
-    )
-    try:
-        manifest = json.loads(
-            urllib.request.urlopen(request_manifest, timeout=30).read().decode("utf-8")
+
+    def fetch(kind: str, digest: str) -> dict[str, Any]:
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise ValueError("registry descriptor is not a SHA256 digest")
+        request = urllib.request.Request(
+            f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/{kind}/{digest}",
+            headers={"Authorization": f"Bearer {token}", "Accept": GHCR_MANIFEST_ACCEPT},
         )
-    except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
-        return None
-    config = manifest.get("config")
-    if not isinstance(config, dict):
-        return None
-    config_digest = config.get("digest")
-    if not isinstance(config_digest, str):
-        return None
-    request_config = urllib.request.Request(
-        f"https://ghcr.io/v2/{SLIM_IMAGE_REPO}/blobs/{config_digest}",
-        headers={"Authorization": f"Bearer {token}"},
-    )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read()
+        if "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
+            raise ValueError("registry object does not match its digest")
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError("registry object is not a mapping")
+        return value
+
     try:
-        payload = json.loads(
-            urllib.request.urlopen(request_config, timeout=30).read().decode("utf-8")
-        )
-    except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
+        root = fetch("manifests", tag)
+        descriptors = root.get("manifests")
+        if isinstance(descriptors, list):
+            # BuildKit adds unknown/unknown attestation descriptors. Verify every
+            # runnable platform, not whichever descriptor happens to be first.
+            manifests = [
+                fetch("manifests", item["digest"])
+                for item in descriptors
+                if item.get("platform", {}).get("os") != "unknown"
+            ]
+        else:
+            manifests = [root]
+        configs = [fetch("blobs", item["config"]["digest"]) for item in manifests]
+        if not configs:
+            return None
+        revision = _revision_from_config(configs[0])
+        if any(
+            _revision_from_config(c) != revision
+            or _image_has_tracing_extra(c) != _image_has_tracing_extra(configs[0])
+            for c in configs
+        ):
+            return None
+        return configs[0]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
-    return payload if isinstance(payload, dict) else None
 
 
 def _image_has_tracing_extra(config: dict[str, Any]) -> bool:
@@ -228,7 +194,10 @@ def _image_has_tracing_extra(config: dict[str, Any]) -> bool:
 
 
 def _revision_from_config(config: dict[str, Any]) -> str | None:
-    labels = config.get("config", {}).get("Labels")
+    image_config = config.get("config")
+    if not isinstance(image_config, dict):
+        return None
+    labels = image_config.get("Labels")
     if not isinstance(labels, dict):
         return None
     revision = labels.get(OCI_REVISION_LABEL)
@@ -239,144 +208,261 @@ def _self_review_action_sha() -> str | None:
     if not SELF_REVIEW_WORKFLOW.is_file():
         return None
     text = SELF_REVIEW_WORKFLOW.read_text(encoding="utf-8")
+    pins = set(_pins_in(text))
+    if len(pins) != 1:
+        return None
+    pin = next(iter(pins))
     env_match = _ENV_SHA_RE.search(text)
-    if env_match is not None:
-        return env_match.group("sha")
-    pins = _pins_in(text)
-    if not pins:
+    if env_match is not None and env_match.group("sha") != pin:
         return None
-    distinct = set(pins)
-    if len(distinct) != 1:
-        return None
-    return pins[0]
+    return pin
 
 
-def main() -> int:
-    """Validate action.yml image contract and GHCR parity."""
-    image = _read_action_image()
-    if image is None:
-        print("action-image-digest-check: action.yml missing runs.image", file=sys.stderr)
-        return 1
+class VerificationError(ValueError):
+    """The deployment cannot be proven against the trusted release policy."""
 
-    if image == "Dockerfile" or image.endswith("/Dockerfile"):
-        print(
-            "action-image-digest-check FAILED: action.yml still builds from Dockerfile — "
-            "pin docker://ghcr.io/alexhawat/mergecraft@sha256:<digest> (#526)",
-            file=sys.stderr,
+
+@dataclass(frozen=True)
+class VerifiedManifest:
+    manifest_commit: str
+    source_revision: str
+    image_digest: str
+    verified: bool = True
+
+
+def _run(repo: Path, argv: list[str]) -> str:
+    """Run a bounded verifier without shell interpolation or credential output."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1"})
+    try:
+        result = subprocess.run(
+            argv, cwd=repo, env=env, capture_output=True, text=True, timeout=120, check=False
         )
-        return 1
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise VerificationError(f"verification tool unavailable: {argv[0]}") from exc
+    if result.returncode:
+        raise VerificationError(f"{argv[0]} verification failed (exit {result.returncode})")
+    return result.stdout
 
-    match = _DIGEST_IMAGE_RE.match(image)
-    if match is None:
-        print(
-            f"action-image-digest-check FAILED: runs.image must be digest-pinned slim image "
-            f"docker://{SLIM_IMAGE}@sha256:<64-hex> — got {image!r}",
-            file=sys.stderr,
-        )
-        return 1
 
-    pinned = f"sha256:{match.group(1)}"
-    if "analyzers" in image:
-        print(
-            "action-image-digest-check FAILED: Action must use the slim image, not analyzers",
-            file=sys.stderr,
-        )
-        return 1
-
-    if not _registry_reachable():
-        print(
-            "action-image-digest-check: skipped GHCR parity — registry unreachable "
-            f"(action.yml pins {pinned[:19]}…)"
-        )
-        return 0
-
-    action_sha = _self_review_action_sha()
-    if action_sha is None:
-        print(
-            "action-image-digest-check OK: digest-pinned slim image "
-            f"({pinned[:19]}…) — no self-review Action SHA to compare"
-        )
-        return 0
-
-    lookup = _ghcr_digest_for_tag(action_sha)
-    if lookup.status is TagLookupStatus.ERROR:
-        print(
-            "action-image-digest-check: skipped GHCR parity — registry error while "
-            f"resolving {SLIM_IMAGE}:{action_sha[:12]} (action.yml pins {pinned[:19]}…)"
-        )
-        return 0
-
-    if lookup.status is TagLookupStatus.MISSING:
-        if not __import__("os").environ.get("GITHUB_ACTIONS"):
-            print(
-                "action-image-digest-check: skipped GHCR parity — slim image tag "
-                f"{SLIM_IMAGE}:{action_sha} not published yet (action.yml pins "
-                f"{pinned[:19]}…). The action-slim-bootstrap job or ci-cd "
-                "build-images must publish it first."
-            )
-            return 0
-        print("action-image-digest-check FAILED:", file=sys.stderr)
-        print(
-            f"  no published slim image for Action SHA {action_sha} "
-            f"(expected tag {SLIM_IMAGE}:{action_sha})",
-            file=sys.stderr,
-        )
-        print(
-            f"  action.yml pins {pinned} — run ci-cd build-images on pre-0.0.1, "
-            "then bump runs.image to that digest",
-            file=sys.stderr,
-        )
-        return 1
-
-    published = lookup.digest
-    assert published is not None
-    if published != pinned:
-        print("action-image-digest-check FAILED:", file=sys.stderr)
-        print(f"  action.yml pins {pinned}", file=sys.stderr)
-        print(f"  GHCR {SLIM_IMAGE}:{action_sha[:12]} publishes {published}", file=sys.stderr)
-        print(
-            "  Update action.yml runs.image to the published slim digest for this Action SHA.",
-            file=sys.stderr,
-        )
-        return 1
-
-    published_config = _fetch_oci_config_for_tag(action_sha)
-    if published_config is None:
-        print(
-            "action-image-digest-check FAILED: could not read OCI config for "
-            f"{SLIM_IMAGE}:{action_sha}",
-            file=sys.stderr,
-        )
-        return 1
-
-    if not _image_has_tracing_extra(published_config):
-        print(
-            "action-image-digest-check FAILED: published slim image was built without "
-            "`uv sync --extra tracing` — Logfire/OTEL sinks degrade to NullSink (#531). "
-            f"Do not pin pre-#531 digests such as {pinned[:19]}…",
-            file=sys.stderr,
-        )
-        return 1
-
-    published_revision = _revision_from_config(published_config)
-    if published_revision is not None and published_revision != action_sha:
-        print("action-image-digest-check FAILED:", file=sys.stderr)
-        print(
-            f"  GHCR tag {action_sha} ({OCI_REVISION_LABEL}={published_revision})",
-            file=sys.stderr,
-        )
-        print(
-            f"  mergecraft.yml Action SHA is {action_sha}",
-            file=sys.stderr,
-        )
-        return 1
-
-    print(
-        f"action-image-digest-check OK: action.yml matches GHCR slim digest for "
-        f"Action SHA {action_sha[:12]} (tracing extra present)"
+def _git(repo: Path, *args: str) -> str:
+    return _run(
+        repo, ["git", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args]
     )
-    return 0
+
+
+def _commit(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise VerificationError("expected an immutable 40-hex Git commit")
+    return value
+
+
+def _action_at(repo: Path, commit: str) -> dict[str, Any]:
+    data = yaml.safe_load(_git(repo, "show", f"{_commit(commit)}:action.yml"))
+    if not isinstance(data, dict) or not isinstance(data.get("runs"), dict):
+        raise VerificationError("pinned action.yml lacks a runs mapping")
+    return data
+
+
+def _digest_from_action(data: dict[str, Any]) -> str:
+    image = data["runs"].get("image", "")
+    match = _DIGEST_IMAGE_RE.fullmatch(image) if isinstance(image, str) else None
+    if match is None:
+        raise VerificationError("action must name the slim image by SHA256 digest")
+    return "sha256:" + match.group(1)
+
+
+_RELEASE_IDENTITY = (
+    r"^https://github\.com/alexhawat/mergeCraft/\.github/workflows/ci-cd\.yml@"
+    r"refs/(heads/(main|pre-0\.0\.1|release/[^ ]+)|tags/v[^ ]+)$"
+)
+
+
+def _attestation_policy(source: str) -> list[str]:
+    """Return compatible gh policy flags; the identity regex includes workflow and ref."""
+    return [
+        "--repo",
+        "alexhawat/mergeCraft",
+        "--source-digest",
+        _commit(source),
+        "--signer-digest",
+        source,
+        "--cert-identity-regex",
+        _RELEASE_IDENTITY,
+        "--cert-oidc-issuer",
+        "https://token.actions.githubusercontent.com",
+        "--deny-self-hosted-runners",
+    ]
+
+
+def _verify_attestations(repo: Path, digest: str, source: str) -> None:
+    """Cryptographically bind D to S and the approved GitHub-hosted release workflow."""
+    image = f"{SLIM_IMAGE}@{digest}"
+    common = _attestation_policy(source)
+    _run(repo, ["gh", "attestation", "verify", f"oci://{image}", *common])
+    _run(
+        repo,
+        [
+            "gh",
+            "attestation",
+            "verify",
+            f"oci://{image}",
+            *common,
+            "--predicate-type",
+            "https://spdx.dev/Document",
+        ],
+    )
+    _run(
+        repo,
+        [
+            "cosign",
+            "verify",
+            "--certificate-identity-regexp",
+            _RELEASE_IDENTITY,
+            "--certificate-oidc-issuer",
+            "https://token.actions.githubusercontent.com",
+            image,
+        ],
+    )
+
+
+def verify_image(
+    repo: Path, digest: str, expected_source: str | None = None, *, require_tracing: bool = True
+) -> str:
+    """Return S only after digest-addressed content and external attestations verify."""
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise VerificationError("expected an immutable image digest")
+    config = _fetch_oci_config_for_tag(digest)
+    if config is None:
+        raise VerificationError("registry content unavailable or invalid")
+    source = _revision_from_config(config)
+    if source is None:
+        raise VerificationError("image lacks its source revision")
+    _commit(source)
+    if expected_source is not None and source != _commit(expected_source):
+        raise VerificationError("image source differs from the requested source")
+    if require_tracing and not _image_has_tracing_extra(config):
+        raise VerificationError("image was built without the tracing extra")
+    _verify_attestations(repo, digest, source)
+    return source
+
+
+def verify_manifest(repo: Path, manifest_commit: str) -> VerifiedManifest:
+    """Verify C→D→S; C may differ from S only in the action's image field."""
+    manifest_commit = _commit(manifest_commit)
+    action = _action_at(repo, manifest_commit)
+    digest = _digest_from_action(action)
+    source = verify_image(repo, digest)
+    changed = _git(repo, "diff", "--name-only", source, manifest_commit, "--").splitlines()
+    if any(path != "action.yml" for path in changed):
+        raise VerificationError(
+            "manifest commit changes files beyond action.yml relative to image source"
+        )
+    source_action = _action_at(repo, source)
+    action["runs"].pop("image", None)
+    source_action["runs"].pop("image", None)
+    if action != source_action:
+        raise VerificationError("manifest commit changes Action behavior beyond runs.image")
+    return VerifiedManifest(manifest_commit, source, digest)
+
+
+def _workflow_pins(text: str, *, strict: bool = True) -> set[str]:
+    """Parse literal Action references and exported pin markers, rejecting mutable refs."""
+    pins: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if (
+                    key == "uses"
+                    and isinstance(child, str)
+                    and child.lower().startswith("alexhawat/mergecraft@")
+                ):
+                    reference = child.split("@", 1)[1]
+                    pins.add(_commit(reference) if strict else reference)
+                elif key == "MERGECRAFT_ACTION_SHA":
+                    pins.add(_commit(str(child)) if strict else str(child))
+                else:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(yaml.safe_load(text))
+    return pins
+
+
+def verify_candidate(repo: Path, base: str, head: str) -> dict[str, Any]:
+    """Verify deployment boundary changes without requiring source S to be published."""
+    base, head = _commit(base), _commit(head)
+    if base == "0" * 40:
+        base = _commit(_git(repo, "rev-parse", f"{head}^").strip())
+    changed = set(_git(repo, "diff", "--name-only", base, head, "--").splitlines())
+    manifests: set[str] = set()
+    if "action.yml" in changed:
+        before, after = _action_at(repo, base), _action_at(repo, head)
+        if before["runs"].get("image") != after["runs"].get("image"):
+            manifests.add(head)
+    base_paths = set(
+        _git(repo, "ls-tree", "-r", "--name-only", base, "--", ".github/workflows").splitlines()
+    )
+    head_paths = set(
+        _git(repo, "ls-tree", "-r", "--name-only", head, "--", ".github/workflows").splitlines()
+    )
+    for path in sorted(changed & (base_paths | head_paths)):
+        if not path.endswith((".yml", ".yaml")):
+            continue
+        old = (
+            _workflow_pins(_git(repo, "show", f"{base}:{path}"), strict=False)
+            if path in base_paths
+            else set()
+        )
+        new = _workflow_pins(_git(repo, "show", f"{head}:{path}")) if path in head_paths else set()
+        if old != new:
+            manifests.update(new)
+    records = [verify_manifest(repo, commit).__dict__ for commit in sorted(manifests)]
+    return {
+        "state": "deployment-candidates-verified" if records else "source-only-change",
+        "base_commit": base,
+        "head_commit": head,
+        "manifests": records,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Check deployed pins strictly, or explicitly report unverified source structure."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest-commit")
+    parser.add_argument("--candidate", action="store_true")
+    parser.add_argument("--structure-only", action="store_true")
+    parser.add_argument("--offline", action="store_true")
+    args = parser.parse_args(argv or [])
+    try:
+        if args.candidate:
+            result = verify_candidate(
+                REPO, os.environ.get("CANDIDATE_BASE", ""), os.environ.get("CANDIDATE_HEAD", "")
+            )
+            print(json.dumps(result, sort_keys=True))
+            return 0
+        if args.structure_only:
+            data = yaml.safe_load(ACTION_YML.read_text(encoding="utf-8"))
+            _digest_from_action(data)
+            print("UNVERIFIED: source Action image syntax valid; deployed provenance not checked")
+            return 0
+        commit = args.manifest_commit or _self_review_action_sha()
+        if commit is None:
+            raise VerificationError("self-review Action pin missing or ambiguous")
+        if args.offline:
+            _digest_from_action(_action_at(REPO, commit))
+            print("UNVERIFIED: pinned manifest syntax valid; offline verification requested")
+            return 2
+        result = verify_manifest(REPO, commit)
+        print(json.dumps(result.__dict__, sort_keys=True))
+        return 0
+    except (VerificationError, OSError, ValueError, TypeError, KeyError) as exc:
+        print(f"action-image-digest-check FAILED: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

@@ -8,7 +8,7 @@ minimal auto-review setup.
 
 - **Python 3.11+** when installing the CLI locally ([`docs/dev/python-version-floor.md`](dev/python-version-floor.md))
 - [uv](https://docs.astral.sh/uv/) for `uv tool install`
-- An authenticated [GitHub CLI](https://cli.github.com) (`gh auth login`) for `mergecraft init` and `mergecraft auth`
+- An authenticated [GitHub CLI](https://cli.github.com) (`gh auth login`) for `mergecraft init` and `mergecraft provider auth`
 - One provider credential (Claude Pro/Max, ChatGPT Plus/Pro, or an API key)
 
 mergeCraft **0.1.0** supports **GitHub** repositories only. GitLab support is

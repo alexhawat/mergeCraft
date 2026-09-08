@@ -27,16 +27,18 @@ Use this when asked to add AI PR review to another repository.
    ```
 
 4. **Authentication — STOP here.** Interactive login is required. Ask the human
-   to run exactly one of:
+   to run `mergecraft provider list` and authenticate a configured label or id.
+   For local evaluation use `--scope local`; for Actions adoption, examples
+   below assume these provider labels were configured by `init`:
 
    ```bash
-   mergecraft auth claude   # Claude Pro/Max subscription
-   mergecraft auth codex    # ChatGPT Plus/Pro/Team/Enterprise
+   mergecraft provider auth anthropic --scope github   # Claude Pro/Max subscription
+   mergecraft provider auth openai --scope github    # ChatGPT Plus/Pro/Team/Enterprise
    ```
 
    Other providers: [`docs/authentication.md`](docs/authentication.md). **Never**
    invent, paste, or commit credentials, tokens, secrets, or `.env` files. Each
-   `mergecraft auth …` stores a GitHub Actions secret via `gh secret set` — hand
+   `mergecraft provider auth … --scope github` stores a GitHub Actions secret via `gh secret set` — hand
    that step to the human when interactive auth is required.
 5. **Commit only** `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
    on a new branch. Do not commit secrets.
@@ -60,7 +62,7 @@ Follow the same consumer flow as other agents:
 2. In the **consumer repo root** (never in the mergeCraft source tree), run
    **`mergecraft init`**.
 3. **STOP for authentication.** Ask the human to run exactly one
-   `mergecraft auth …` command. **Never** invent, paste, or commit credentials,
+   `mergecraft provider auth … --scope github` command. **Never** invent, paste, or commit credentials,
    tokens, secrets, or `.env` files.
 4. After the human confirms the GitHub Actions secret is stored, you may run
    **`mergecraft doctor`** and **`mergecraft review`** as needed.

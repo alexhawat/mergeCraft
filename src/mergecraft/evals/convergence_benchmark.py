@@ -79,6 +79,9 @@ def _resolved_recall_pass_corpus_path() -> Path:
     checkout = _REPO_ROOT / RECALL_PASS_CORPUS_PATH
     if checkout.is_file():
         return checkout
+    packaged = Path(__file__).parent / "fixtures" / "recall_pass_corpus.json"
+    if packaged.is_file():
+        return packaged
     msg = f"recall pass corpus does not exist: {RECALL_PASS_CORPUS_PATH}"
     raise FileNotFoundError(msg)
 

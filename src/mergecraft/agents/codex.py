@@ -19,7 +19,6 @@ from mergecraft.agents.codex_broker import (
     add_broker_openai_config,
     begin_broker_session,
     broker_run_record_fields,
-    current_broker_session,
     resolve_codex_broker_posture,
     set_broker_session,
     stop_broker_session,
@@ -234,9 +233,6 @@ def _setup_codex_auth(
             CODEX_AUTH_ENV,
             OPENAI_API_KEY_ENV,
         )
-    session = current_broker_session()
-    if session is not None and session.active:
-        return
     if _has_openai_api_key():
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
 
@@ -577,6 +573,15 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
         # in build_agent_env so the real parent key never reaches the agent.
         extra[OPENAI_API_KEY_ENV] = handle.token
     env = build_agent_env("codex", extra, model=ctx.resolved_model)
+    if broker_active:
+        # Respect the filtered child env: never restore denied parent variables.
+        bypass: dict[str, str] = {}
+        for raw in (env.get("NO_PROXY", ""), env.get("no_proxy", ""), "localhost,127.0.0.1"):
+            for entry in raw.split(","):
+                entry = entry.strip()
+                if entry:
+                    bypass.setdefault(entry.casefold(), entry)
+        env["NO_PROXY"] = env["no_proxy"] = ",".join(bypass.values())
     _setup_codex_auth(ctx, codex_home=codex_home)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
     # (config.toml, mergecraft-instructions.md, auth.json) while this process

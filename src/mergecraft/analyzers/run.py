@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import contextlib
+import os
+import re
 import resource
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -22,6 +25,18 @@ if TYPE_CHECKING:
 
 CHECK_TIMEOUT_S = 300
 MAX_OUTPUT_CHARS = 8_000
+
+_SANDBOX_BOOTSTRAP_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"}
+_RESTORE_PAYLOAD_ENV = """set -eu
+readonly _MERGECRAFT_BOOTSTRAP_FD="$MERGECRAFT_PAYLOAD_ENV_FD"
+unset MERGECRAFT_PAYLOAD_ENV_FD
+while IFS= read -r -d '' _MERGECRAFT_BOOTSTRAP_ENTRY; do
+    export "$_MERGECRAFT_BOOTSTRAP_ENTRY"
+done <&"$_MERGECRAFT_BOOTSTRAP_FD"
+exec {_MERGECRAFT_BOOTSTRAP_FD}<&-
+exec "$@"
+"""
+
 
 CheckStatus = Literal[
     "passed",
@@ -166,23 +181,40 @@ def _sandboxed_argv(
     event: dict[str, Any] | None = None,
     self_review_level: str = "off",
     analyzer_id: str = "",
+    netns_name: str | None = None,
 ) -> tuple[list[str], Callable[[], None] | None]:
     """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it."""
     run_argv = list(plan.argv)
-    if sandbox_context is None or not sandbox_context.read_only_source or sys.platform == "win32":
+    if sandbox_context is None or not sandbox_context.read_only_source:
         return run_argv, None
+    if sys.platform == "win32":
+        from mergecraft.analyzers.egress import FilteredEgressSetupError
+
+        raise FilteredEgressSetupError("untrusted analyzer requires a Linux namespace backend")
     preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
     from mergecraft.analyzers.sandbox import build_analyzer_sandbox_argv_for_run
 
     event_payload = event if event is not None else {}
+    # Repository-provided PATH/loader/shell variables only reach the payload
+    # after namespace setup and capability removal. They cannot choose helpers.
+    payload_argv = (
+        "/bin/bash",
+        "--noprofile",
+        "--norc",
+        "-c",
+        _RESTORE_PAYLOAD_ENV,
+        "mergecraft-analyzer",
+        *plan.argv,
+    )
     return (
         build_analyzer_sandbox_argv_for_run(
-            plan.argv,
+            payload_argv,
             context=sandbox_context,
             event_name=event_name,
             event=event_payload,
             self_review_level=self_review_level,
             analyzer_id=analyzer_id or plan.manifest_id,
+            netns_name=netns_name,
         ),
         preexec_fn,
     )
@@ -196,19 +228,52 @@ def _run_subprocess(
     timeout_s: int,
     preexec_fn: Callable[[], None] | None,
     command: str,
+    sandboxed: bool = False,
 ) -> subprocess.CompletedProcess[str] | AnalyzerOutcome:
     """Run the analyzer subprocess; a caught timeout/OSError becomes a terminal outcome."""
     try:
-        return subprocess.run(
-            run_argv,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            check=False,
-            env=plan.env or None,
-            preexec_fn=preexec_fn,
-        )
+        with contextlib.ExitStack() as resources:
+            environment = plan.env or None
+            pass_fds: tuple[int, ...] = ()
+            if sandboxed:
+                payload_env = plan.env or dict(os.environ)
+                if any(
+                    not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+                    or key.startswith("_MERGECRAFT_BOOTSTRAP_")
+                    or key == "MERGECRAFT_PAYLOAD_ENV_FD"
+                    or "\0" in value
+                    for key, value in payload_env.items()
+                ):
+                    return AnalyzerOutcome(
+                        name=plan.manifest_id,
+                        command=command,
+                        status="unavailable",
+                        output="invalid analyzer payload environment",
+                    )
+                # Unlinked private file: values never enter argv, shell source,
+                # logs, or the privileged bootstrap environment.
+                payload_file = resources.enter_context(tempfile.TemporaryFile())
+                payload_file.write(
+                    b"".join(f"{key}={value}\0".encode() for key, value in payload_env.items())
+                )
+                payload_file.seek(0)
+                descriptor = payload_file.fileno()
+                pass_fds = (descriptor,)
+                environment = {
+                    **_SANDBOX_BOOTSTRAP_ENV,
+                    "MERGECRAFT_PAYLOAD_ENV_FD": str(descriptor),
+                }
+            return subprocess.run(
+                run_argv,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                check=False,
+                env=environment,
+                pass_fds=pass_fds,
+                preexec_fn=preexec_fn,
+            )
     except subprocess.TimeoutExpired:
         logger.warning("analyzer {} timed out after {}s", plan.manifest_id, timeout_s)
         return AnalyzerOutcome(
@@ -266,8 +331,6 @@ def run_plan(
     analyzer_id: str = "",
 ) -> AnalyzerOutcome:
     """Run one resolved plan. Never raises."""
-    import os
-
     from mergecraft.utils.payload import read_github_event
 
     resolved_event_name = event_name or os.environ.get("GITHUB_EVENT_NAME", "")
@@ -281,21 +344,68 @@ def run_plan(
     if sandbox_context is not None:
         timeout_s = min(timeout_s, sandbox_context.timeout_s)
     command = _command_string(plan.argv)
-    run_argv, preexec_fn = _sandboxed_argv(
-        plan,
-        sandbox_context,
-        event_name=resolved_event_name,
-        event=resolved_event,
-        self_review_level=self_review_level,
-        analyzer_id=analyzer_id or plan.manifest_id,
-    )
+    from mergecraft.analyzers.egress import FilteredEgressSetupError, FilteredNetnsSession
 
-    result = _run_subprocess(
-        run_argv, plan=plan, cwd=cwd, timeout_s=timeout_s, preexec_fn=preexec_fn, command=command
-    )
-    if isinstance(result, AnalyzerOutcome):
-        return result
-    return _outcome_from_completed(result, plan=plan, command=command)
+    session: FilteredNetnsSession | None = None
+    if sandbox_context is not None:
+        from mergecraft.analyzers.sandbox import evaluate_analyzer_egress_policy
+
+        event_payload = resolved_event if resolved_event is not None else {}
+        outcome = evaluate_analyzer_egress_policy(
+            analyzer_id=analyzer_id or plan.manifest_id,
+            network_allowlist=list(sandbox_context.network_allowlist),
+            event_name=resolved_event_name,
+            event=event_payload,
+            self_review_level=self_review_level,
+        )
+        if outcome.status == "filtered":
+            try:
+                session = FilteredNetnsSession(list(sandbox_context.network_allowlist))
+                session.start()
+            except FilteredEgressSetupError as exc:
+                reason = (
+                    f"Skipped: egress policy — {plan.manifest_id} declares network hosts "
+                    f"but filtered egress could not be applied ({exc})"
+                )
+                logger.info("{}", reason)
+                return AnalyzerOutcome(
+                    name=plan.manifest_id,
+                    command=command,
+                    status="unavailable",
+                    output=reason,
+                )
+    try:
+        run_argv, preexec_fn = _sandboxed_argv(
+            plan,
+            sandbox_context,
+            event_name=resolved_event_name,
+            event=resolved_event,
+            self_review_level=self_review_level,
+            analyzer_id=analyzer_id or plan.manifest_id,
+            netns_name=session.ns_name if session is not None else None,
+        )
+        result = _run_subprocess(
+            run_argv,
+            plan=plan,
+            cwd=cwd,
+            timeout_s=timeout_s,
+            preexec_fn=preexec_fn,
+            command=command,
+            sandboxed=bool(sandbox_context is not None and sandbox_context.read_only_source),
+        )
+        if isinstance(result, AnalyzerOutcome):
+            return result
+        return _outcome_from_completed(result, plan=plan, command=command)
+    except FilteredEgressSetupError as exc:
+        return AnalyzerOutcome(
+            name=plan.manifest_id,
+            command=command,
+            status="unavailable",
+            output=f"sandbox isolation unavailable: {exc}",
+        )
+    finally:
+        if session is not None:
+            session.close()
 
 
 def run_plans(

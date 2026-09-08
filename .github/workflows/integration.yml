@@ -25,13 +25,17 @@ concurrency:
 
 jobs:
   integration-pr:
-    name: Integration (PR / mocked + self-skip)
+    name: Integration (PR / mocked + self-skip / py${{ matrix.python }})
     if: >-
       github.event_name == 'pull_request' ||
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,17 +50,52 @@ jobs:
                 && format('refs/pull/{0}/merge', github.event.pull_request.number)
                 || github.ref }}
       - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
         env:
           # Exporter unit tests run in coverage-measure (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
       - name: Integration suite
         run: make test-integration
       - name: Coverage ratchet
+        if: matrix.python == '3.14'
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_BASE_REF: ${{ github.base_ref }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
         run: bash scripts/ci_coverage_delta_gate.sh
+
+  filtered-egress:
+    name: Integration (filtered egress / privileged)
+    # The netns + veth + iptables enforcement in
+    # ``mergecraft.analyzers.egress`` needs CAP_NET_ADMIN and CAP_SYS_ADMIN,
+    # which ``integration-pr`` does not have — its run of this test self-skips.
+    # Without this job the only evidence for the filter would be
+    # ``AllowlistConnectProxy``, a userspace stand-in production never uses
+    # (#606 finding 2).
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          # #432 / D6 — score the merge result, not the PR head branch alone.
+          ref: >-
+            ${{ github.event_name == 'pull_request'
+                && format('refs/pull/{0}/merge', github.event.pull_request.number)
+                || github.ref }}
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+      - name: Real firewall boundary in a disposable network namespace
+        # The hosted runner is disposable. The inner namespace additionally
+        # keeps forwarding and firewall changes off the runner's own network.
+        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-filtered-egress
 
   security-scope:
     name: npm audit + workflow lint
@@ -65,7 +104,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm

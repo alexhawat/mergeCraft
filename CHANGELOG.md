@@ -85,6 +85,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Consolidated integration CI retains Python 3.11 and 3.14 coverage after
+  prerelease/main reconciliation; the coverage ratchet runs once on 3.14.
+
+- Bring the GitLab review-support matrix correction from main to the prerelease branch.
+
+- Local base-only reviews retain working-tree changes; remote comparisons deepen
+  bounded shared history and fail explicitly rather than substitute endpoint diffs.
+  Untracked text additions produce valid patches, including special filenames
+  and missing final newlines. Binary and non-UTF-8 untracked files are skipped
+  with a diagnostic rather than producing a lossy patch or crashing.
+- Installed convergence evaluations include their recall corpus. Example drift
+  checks run in disposable copies and no longer rewrite tracked outputs.
+- Redaction preserves closing assignment brackets and ordinary source paths while
+  retaining secret-pattern and high-entropy controls.
+- Optional image live checks require an actual terminal review rather than CLI help.
+- Self-review App tokens now refresh per provider attempt and revoke after the
+  job. Privileged approval uses a distinct App outside the reviewer action and
+  requires explicit maintainer dispatch for an exact run/head; reviewer checks
+  cannot automatically trigger approval. Missing App configuration fails closed.
+
+
+- Action images use patched, checksum-pinned npm and GitHub CLI tooling and
+  remove unused vulnerable pip bootstrap copies. Both images are scanned before
+  merge; release scans retain attributable JSON alongside SARIF without relaxing
+  the HIGH/CRITICAL gate. Python installation in the images uses uv.
+- Local review honors configured model chains, explicit/environment precedence,
+  fallback restrictions, and cumulative budgets; a process without a terminal
+  verdict is inconclusive (#592).
+- Provider authentication preflights the exact `--cwd` GitHub destination before
+  collecting credentials in both canonical commands and legacy aliases, rejects
+  unverified secret-management access, and
+  keeps explicit local scope independent of GitHub (#591).
+- Installed skills use a verified documentation commit containing every linked
+  target and teach canonical, explicitly scoped provider authentication (#589).
+- Analyzer isolation reports unsupported macOS accurately and warns when trusted
+  execution lacks isolation. Filtered Linux egress denies host INPUT access,
+  separates concurrent sessions, kills analyzer children on timeout, and cleans
+  only owned resources; a disposable
+  Linux integration harness exercises the production firewall boundary.
+- Credential broker stream failures now close the connection without inserting a
+  second HTTP response, and client disconnects release upstream responses (#595)
+- Brokered Codex runs preserve configured proxy bypass entries and always bypass
+  proxies for the loopback broker, without changing parent proxy settings (#597)
+- Removed an obsolete Codex broker auth branch that suppressed the API-key
+  authentication diagnostic; subscription authentication is unchanged (#596)
+
+- Release verification uses compatible GitHub CLI policy flags, validates deployment
+  candidates automatically, and publishes canonical image tags only after signed
+  staging digests verify. Pin preparation safely supports repeat invocations and
+  environment-only references; Docker source validation survives optimized Python.
+
+- Release E2E now runs for reusable workflow callers, and image promotion
+  requires verified signatures, source provenance, and SBOM attestations.
+  Action pin preparation separates the built source from the manifest commit
+  consumers execute, preventing deployment of the previous image (#579, #641).
 - CLI startup `.env` loading walks up to the git root, like the writers in
   `mergecraft auth` and `tracing logfire` already did, so a credential written
   from a subdirectory is visible on the next invocation instead of landing in
@@ -168,7 +223,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Untrusted analyzer runs no longer grant host networking when a manifest
   declares a non-empty `network_allowlist` — dependency scanners that need
   upstream access are skipped with a named egress-policy outcome on untrusted
-  events; filtered egress to declared hosts is not implemented yet (#538)
+  events unless the runner can enforce a filtered netns (`ip netns`, veth,
+  iptables). The GitHub Action image typically cannot, so that path stays
+  fail-closed (#538)
 
 #### Added
 

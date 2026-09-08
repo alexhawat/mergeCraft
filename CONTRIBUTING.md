@@ -197,6 +197,13 @@ Skip entries with `#skip-changelog` or the `skip-changelog` label.
 
 ### Verify a published image
 
+For the exact consumer `uses:` pin, run `make action-image-digest-check`.
+It reads the pinned commit’s manifest and verifies its signed image against
+the built source, rather than comparing the working tree to a mutable tag.
+The two-phase preparation flow is documented in
+[Action manifest and consumer pin lifecycle](docs/release-process.md#action-manifest-and-consumer-pin-lifecycle).
+
+
 Replace `<digest>` with the digest from the CI/CD run (or `crane digest
 ghcr.io/alexhawat/mergecraft:<tag>`):
 

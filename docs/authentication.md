@@ -30,13 +30,13 @@ run on `pull_request_target` (opened / synchronize).
 
 | Provider | Subscription (recommended) | API key | Recommended model | Inferred harness |
 |----------|-----------------------------|---------|-------------------|------------------|
-| Anthropic Claude | `mergecraft auth claude` → `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` | `claude` |
-| OpenAI Codex | `mergecraft auth codex` → `CODEX_AUTH_JSON` (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
-| Google Gemini | `mergecraft auth gemini` → `GEMINI_API_KEY` (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
-| Nous Portal | — (API key) | `mergecraft auth nous` → `NOUS_API_KEY` | `nous/deepseek/deepseek-v4-flash` | `opencode` |
-| Tencent TokenHub | — (API key) | `mergecraft auth tokenhub` → `TOKENHUB_API_KEY` | `tokenhub/hy3` | `opencode` |
-| MiniMax | — (API key) | `mergecraft auth minimax` → `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `minimax/MiniMax-M3` | `opencode` |
-| Cursor Cloud | `mergecraft auth cursor` → `CURSOR_API_KEY` | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
+| Anthropic Claude | `mergecraft provider auth anthropic --scope github` → indexed credentials (Claude Pro/Max) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` | `claude` |
+| OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
+| Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
+| Nous Portal | — (API key) | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` | `opencode` |
+| Tencent TokenHub | — (API key) | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` | `opencode` |
+| MiniMax | — (API key) | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` | `opencode` |
+| Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
 | OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (indexed `_1`/`_2` …) | `<your-prefix>/<your-model>` — see [Custom OpenAI-compatible provider](#custom-openai-compatible-provider) | `opencode` |
 | Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](TRACING.md) | — | — |
 
@@ -365,3 +365,70 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
 
 
 **See also:** [`docs/action-reference.md`](action-reference.md) · [`README.md`](../README.md)
+
+## Repository self-review App identity
+
+The repository's self-review workflows support `MERGECRAFT_APP_ID` and
+`MERGECRAFT_APP_PRIVATE_KEY` as GitHub Actions secrets. Install the App only on
+repositories it should review. Its installation needs contents and Actions read,
+and checks, pull requests and issues write. The workflow requests a token scoped
+to the current repository, with a fresh token before each provider attempt;
+the official token action revokes each token after the job.
+
+If the reviewer App is absent or minting fails, review attempts retain the
+job-token fallback. `prApproveEnabled: false` makes normal publication COMMENT,
+but this is not a security boundary: GitHub pull-request write permission also
+allows APPROVE, and a compromised review action can forge its own checks.
+
+Privileged approval uses a **different App**, configured through
+`MERGECRAFT_APPROVAL_APP_ID` and `MERGECRAFT_APPROVAL_APP_PRIVATE_KEY`. Install it
+only on the intended repository with Actions/checks read and pull requests write.
+The two App IDs must differ; missing or identical identities disable approval.
+Its credentials never enter the review action. Do not treat a review from the
+reviewer App as privileged approval in repository policy.
+
+A maintainer must explicitly dispatch `mergecraft-approve` on the default branch
+with `review-run-id` and the full `reviewed-head` SHA after inspecting the changes.
+There is no automatic `workflow_run` approval trigger. Reviewer tokens have no
+Actions write permission and cannot dispatch this workflow. Run/head/App checks
+then reject stale or unrelated evidence; they do not independently prove that
+reviewer-produced findings are honest. The explicit maintainer decision is the
+approval authorization boundary; a green reviewer check alone cannot trigger it.
+
+App registration, installation and secret entry are operator steps. Merging
+workflow code does not configure the App or prove branch-protection acceptance.
+Validate checks and review authorship on a benign same-repository PR after the
+workflow reaches the default branch. Configure the repository's stale-approval
+rules as appropriate: GitHub's review API has no atomic “approve only if head
+is unchanged” operation. An approval is submitted for the explicit reviewed
+commit; a later push requires the repository's ruleset to dismiss stale reviews
+or require approval of the latest push. An App review is not automatically an
+eligible CODEOWNER approval. Do not retire the old PAT secret until all users of
+it have been checked; this change does not delete secrets.
+
+The structural check also carries `external_id=<run ID>:<run attempt>`.
+The approval helper requires that exact attempt identity, so an older image
+that does not emit it cannot authorize approval. Deploy the updated image and
+workflow together; a matching run URL alone is insufficient after a rerun.
+
+## Authentication target preflight
+
+Run `mergecraft init`, then `mergecraft provider list` to identify your configured
+provider label or id. For local evaluation, use
+`mergecraft provider auth <label-or-id> --scope local`; this needs no GitHub login
+or network access to GitHub. Provider validation may contact the provider.
+For Actions adoption, use `--scope github` (the interactive default), or `--scope
+both` to write both destinations. `--cwd` selects the repository whose origin
+and local credential file are used. The CLI displays the destinations before
+requesting a credential.
+
+GitHub preflight conservatively requires repository administration permission
+and access to its Actions secret public key. Push access alone is insufficient;
+unknown or denied access stops before credential collection. A token can still
+lack secret write permission even after the read preflight; the write reports
+that failure, including partial success for `--scope both`. Local evaluation of
+an upstream clone should always use explicit `--scope local`.
+
+Provider auth writes indexed `LLM_PROVIDER_<N>` credentials for the configured
+entry. Legacy environment names in the provider compatibility table describe
+legacy inputs, not the names written by `provider auth`.
