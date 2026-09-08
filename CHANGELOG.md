@@ -85,6 +85,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bring the GitLab review-support matrix correction from main to the prerelease branch.
+
+- Local base-only reviews retain working-tree changes; remote comparisons deepen
+  bounded shared history and fail explicitly rather than substitute endpoint diffs.
+  Untracked text additions produce valid patches, including special filenames
+  and missing final newlines. Binary and non-UTF-8 untracked files are skipped
+  with a diagnostic rather than producing a lossy patch or crashing.
+- Installed convergence evaluations include their recall corpus. Example drift
+  checks run in disposable copies and no longer rewrite tracked outputs.
+- Redaction preserves closing assignment brackets and ordinary source paths while
+  retaining secret-pattern and high-entropy controls.
+- Optional image live checks require an actual terminal review rather than CLI help.
 - Self-review App tokens now refresh per provider attempt and revoke after the
   job. Privileged approval uses a distinct App outside the reviewer action and
   requires explicit maintainer dispatch for an exact run/head; reviewer checks

@@ -170,19 +170,33 @@ jobs:
           docker/e2e/run_in_image_adversarial.sh "${E2E_IMAGE}"
           kill "${MOCK_PID}" 2>/dev/null || true
 
-      - name: Live-provider matrix (secrets-gated)
+      - name: Live installed-harness smoke (explicit model required)
         env:
+          MERGECRAFT_E2E_LIVE_MODEL: ${{ vars.MERGECRAFT_E2E_LIVE_MODEL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # D6 — live LLMs are scheduled-only and secrets-gated. Documented
-          # skip (not a silent pass) when no provider secret is present.
-          if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" ]]; then
-            echo "skipped: no live credential — nightly live-provider matrix requires ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY"
+          set -euo pipefail
+          if [[ -z "${MERGECRAFT_E2E_LIVE_MODEL:-}" ]]; then
+            echo "skipped: set MERGECRAFT_E2E_LIVE_MODEL to enable the bounded real-harness smoke"
             exit 0
           fi
-          echo "Live-provider matrix: at least one provider secret is present."
-          echo "Broad live cells are operator-expanded against docs/compatibility-matrix.md;"
-          echo "security slice above already proved the shipped image with D6 shims."
-          docker run --rm "${E2E_IMAGE}" --help
+          case "${MERGECRAFT_E2E_LIVE_MODEL}" in
+            openai/*) credential_name=OPENAI_API_KEY ;;
+            anthropic/*) credential_name=ANTHROPIC_API_KEY ;;
+            google/*|gemini/*) credential_name=GEMINI_API_KEY ;;
+            *) echo "unsupported live-smoke provider" >&2; exit 2 ;;
+          esac
+          if [[ -z "${!credential_name:-}" ]]; then
+            echo "missing credential for the selected live-smoke provider" >&2
+            exit 2
+          fi
+          # The helper requires a real accepted terminal review. Missing credentials,
+          # provider failure or timeout fails the step; --help is not acceptance.
+          docker run --rm --user 10001:10001 \
+            --entrypoint /opt/mergecraft/.venv/bin/python \
+            -e HOME=/home/mergecraft -e XDG_CACHE_HOME=/home/mergecraft/.cache \
+            -e MERGECRAFT_E2E_LIVE_MODEL -e "${credential_name}" \
+            -v "$PWD/scripts/live_image_smoke.py:/smoke.py:ro" \
+            "${E2E_IMAGE}" /smoke.py

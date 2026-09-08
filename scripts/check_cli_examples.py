@@ -11,9 +11,11 @@ Exports:
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -30,7 +32,9 @@ def example_dirs() -> list[Path]:
     )
 
 
-def run_example(example_dir: Path) -> subprocess.CompletedProcess[str]:
+def run_example(
+    example_dir: Path, *, project_root: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     run_sh = example_dir / "run.sh"
     if not run_sh.is_file():
         msg = f"missing {run_sh.relative_to(REPO)}"
@@ -38,6 +42,7 @@ def run_example(example_dir: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(run_sh)],
         cwd=example_dir,
+        env={**os.environ, "MERGECRAFT_EXAMPLE_PROJECT_ROOT": str(project_root or REPO)},
         capture_output=True,
         text=True,
         check=False,
@@ -66,8 +71,21 @@ def expected_fixtures(example_dir: Path) -> list[Path]:
 
 
 def check_example(example_dir: Path) -> list[str]:
+    """Run checks in a copied fixture tree, leaving tracked outputs untouched."""
+    with tempfile.TemporaryDirectory(prefix="mergecraft-examples-") as temporary:
+        root = Path(temporary)
+        copied = root / "examples" / "cli" / example_dir.name
+        shutil.copytree(example_dir, copied)
+        shutil.copytree(REPO / "scripts" / "cli_example_lib", root / "scripts" / "cli_example_lib")
+        # Delete prior outputs so a script that stops producing one cannot pass.
+        for fixture in expected_fixtures(copied):
+            (copied / fixture.name).unlink(missing_ok=True)
+        return _check_copied_example(copied)
+
+
+def _check_copied_example(example_dir: Path) -> list[str]:
     errors: list[str] = []
-    proc = run_example(example_dir)
+    proc = run_example(example_dir, project_root=REPO)
     if proc.returncode != 0:
         errors.append(
             f"{example_dir.name}/run.sh exited {proc.returncode}: {proc.stderr or proc.stdout}"

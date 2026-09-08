@@ -31,7 +31,7 @@ Standards and conventions for all code written in mergeCraft. Follow these consi
 
 ## Language & Runtime
 
-- **Python 3.14+** — use modern syntax (match/case, `X | Y` unions, PEP 695 type params where they help)
+- **Python 3.11+** — keep runtime syntax compatible with the supported floor; CI also tests Python 3.14
 - **Package manager:** uv (not pip directly)
 - **Build system:** hatchling
 - **Source layout:** `src/mergecraft/` (src layout, not flat)
