@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: MIT
+# Staleness of the self-review Action pin is a property of `main`, not of any
+# one pull request.
+#
+# `scripts/check_action_pin_freshness.py`'s staleness rule compares main's pin
+# against main's own tip; nothing in that computation reads a PR's diff. While
+# it ran as a required PR check, one commit of debt on main failed every open
+# PR at once — and the only change that could clear it (repointing the pin at a
+# manifest commit that does not exist until the manifest PR merges) was blocked
+# by that same red check. #669 deadlocked exactly this way, and the two greens
+# left in the queue were stale results from before the debt landed.
+#
+# So the rule moved here. It runs against main on a schedule and files a single
+# tracking issue that it keeps current and closes itself once the pin is bumped.
+# The PR gate keeps the rules a PR author can actually act on: rung
+# self-consistency, env parity, and freshness (`make action-pin-check`).
+#
+# Safety: this workflow never checks out or executes PR code — it runs on
+# `main` from `schedule` / `workflow_dispatch` only, and its sole write scope
+# is `issues`.
+name: Action pin staleness
+
+on:
+  push:
+    # Debt lands on main at merge time, so measure then rather than leaving the
+    # queue un-flagged until the next cron. This also closes the tracking issue
+    # as soon as a pin bump lands, instead of up to a day later.
+    branches: [main]
+  schedule:
+    # Backstop for the push path: catches a pin that goes stale because main
+    # moved under it. GitHub's cron is best-effort — routinely late and skipped
+    # under load — so it is the safety net, not the primary trigger.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: action-pin-staleness
+  cancel-in-progress: false
+
+env:
+  # One tracking issue, matched by exact title, edited in place rather than
+  # re-filed — a daily comment thread would train everyone to mute it.
+  ISSUE_TITLE: "Self-review Action pin on main is stale"
+
+jobs:
+  staleness:
+    # workflow_dispatch accepts any branch, and this job reads the pin from the
+    # tree it checks out. Dispatched from a pin-bump branch, that pin is ahead
+    # of main rather than behind it, `_check_staleness` returns clean for the
+    # "bumped here, not yet promoted" case, and the close step would resolve the
+    # tracking issue while main is still stale — silently retiring a live alert.
+    # This job only ever speaks for main, so it only ever runs on main.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+
+      - name: Measure pin staleness against main
+        id: measure
+        run: |
+          # No --depth. A depth-limited fetch marks origin/main as a shallow
+          # boundary, so rev-list stops at the graft and the lag under-reports
+          # (measured on this repo: 5 commits -> 1), silently defanging the only
+          # job that now enforces this rule. The checkout above is fetch-depth: 0,
+          # so the objects are already local and a full fetch is near-free.
+          git fetch --no-tags origin main:refs/remotes/origin/main || true
+          if make action-pin-staleness-check > staleness.log 2>&1; then
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          fi
+          cat staleness.log
+
+      - name: File or refresh the tracking issue
+        if: steps.measure.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "\`make action-pin-staleness-check\` is failing on \`main\`:"
+            echo
+            echo '```'
+            cat staleness.log
+            echo '```'
+            echo
+            echo "While this is open, the self-review Action is reviewing pull"
+            echo "requests with product code older than \`main\`. Reviews still run;"
+            echo "they just do not exercise anything merged after the pin."
+            echo
+            echo "### How to clear it"
+            echo
+            echo "The pin can only name a commit whose \`action.yml\` carries a"
+            echo "verified image digest, so this takes the documented two-commit"
+            echo "flow (S -> D -> C -> P, #641):"
+            echo
+            echo "1. Land manifest commit C — \`make action-manifest-prepare\`, which"
+            echo "   updates only \`action.yml\`'s \`runs.image\` digest."
+            echo "2. Land consumer pin P against the SHA C actually landed as:"
+            echo "   \`MANIFEST_COMMIT=<sha> RELEASE_BASE_BRANCH=main make action-pin-prepare\`."
+            echo
+            echo "Do not collapse the two into one PR — P has to reference a commit"
+            echo "that exists, and C's SHA is not known until it merges."
+            echo
+            echo "---"
+            echo "_Filed and kept current by [\`action-pin-staleness.yml\`]($RUN_URL). It closes"
+            echo "itself once the pin is back within budget._"
+          } > issue-body.md
+
+          existing=$(gh issue list --state open --search "$ISSUE_TITLE in:title" \
+            --json number,title \
+            --jq 'map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file issue-body.md
+            echo "refreshed issue #$existing"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body-file issue-body.md
+          fi
+
+      - name: Close the tracking issue once the pin is fresh
+        if: steps.measure.outputs.stale == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          existing=$(gh issue list --state open --search "$ISSUE_TITLE in:title" \
+            --json number,title \
+            --jq 'map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" \
+              --comment "Pin is back within the freshness budget ([run]($RUN_URL))."
+            echo "closed issue #$existing"
+          else
+            echo "pin is fresh and no tracking issue is open; nothing to do"
+          fi

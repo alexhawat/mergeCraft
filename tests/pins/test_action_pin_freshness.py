@@ -5,11 +5,14 @@ resolves its ``uses:`` pin from the default branch. When that pin lags, the
 reviewer executes old code while the branch under review holds the fix — the
 skew that made PR #443 time out on an already-fixed 600s ceiling.
 
-Covers the three guards in ``scripts/check_action_pin_freshness.py``: pins
-inside one workflow file must agree, the default branch's pin must stay within
-``MAX_DRIFT`` commits of this branch's, and the pin must not lag the default
-branch's own tip by more than ``MAX_PRODUCT_LAG`` commits touching
-``src/mergecraft/``.
+Covers the guards in ``scripts/check_action_pin_freshness.py``: pins inside one
+workflow file must agree, every rung must match ``env.MERGECRAFT_ACTION_SHA``,
+the default branch's pin must stay within ``MAX_DRIFT`` commits of this
+branch's, and the pin must not lag the default branch's own tip by more than
+``MAX_PRODUCT_LAG`` commits touching ``src/mergecraft/``.
+
+The last of those is scoped out of the PR gate — see ``_rules_for_scope`` and
+the scope tests at the foot of this module.
 """
 
 from __future__ import annotations
@@ -166,15 +169,14 @@ def test_the_live_workflow_pins_are_self_consistent() -> None:
 
 
 def test_the_pin_check_ci_step_does_not_shallow_fetch_the_default_branch() -> None:
-    """A depth-limited fetch silently defangs the staleness guard.
+    """The PR gate still needs ``origin/main`` present, or freshness skips.
 
-    ``--depth=1`` marks ``origin/main`` as a shallow boundary, so
-    ``_check_staleness``'s ``rev-list --count <pin>..origin/main`` stops at the
-    graft and under-reports the product lag — measured on this repo, 5 commits
-    read as 1. The guard exists for the #450 case freshness cannot see (both
-    branches pinning the same stale SHA), so a silent under-count is the one
-    failure that makes it useless while still reporting OK. The ``static`` job
-    checks out ``fetch-depth: 0``, so a full fetch costs nothing here.
+    ``_check_freshness`` reads the base workflow with ``git show
+    origin/main:<path>``; without the ref it prints a skip notice and returns
+    clean, so the rung-bump guard silently stops guarding. Staleness moved to
+    ``action-pin-staleness.yml`` (#669), which is where a shallow fetch would
+    now under-report the lag — asserted separately over there. The ``static``
+    job checks out ``fetch-depth: 0``, so a full fetch costs nothing here.
     """
     static = job(load_workflow("ci.yml"), "static")
     steps = [s for s in static["steps"] if "pin freshness" in str(s.get("name", "")).lower()]
@@ -281,3 +283,63 @@ def test_matching_pins_that_both_lag_the_tip_are_still_caught(
     # Staleness measures against the branch tip and catches it.
     failures = _staleness_with(module, monkeypatch, product_lag="8")
     assert len(failures) == 1
+
+
+def test_the_pr_scope_omits_the_rule_no_pull_request_can_fix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Staleness compares main's pin to main's tip and never reads the diff.
+
+    Left on the required PR check it failed every open PR at once over one
+    commit of debt on main, while the change that would clear it could not
+    merge through the same red check (#669).
+    """
+    module = _load()
+    monkeypatch.setattr(module, "_check_self_consistency", lambda *_a: [])
+    monkeypatch.setattr(module, "_check_env_parity", lambda *_a: [])
+    monkeypatch.setattr(module, "_check_freshness", lambda *_a: [])
+    monkeypatch.setattr(module, "_check_staleness", lambda *_a: ["stale pin"])
+
+    text = _workflow_text(_SHA_NEW)
+    pins = module._pins_in(text)
+
+    assert module._rules_for_scope(_WORKFLOW, text, pins, module.PR_SCOPE) == []
+    assert module._rules_for_scope(_WORKFLOW, text, pins, module.ALL_SCOPE) == ["stale pin"]
+
+
+def test_the_pr_scope_still_fails_a_defect_the_branch_owns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Narrowing the scope must not disarm the rules that are about the diff."""
+    module = _load()
+    monkeypatch.setattr(module, "_check_freshness", lambda *_a: [])
+
+    text = _workflow_text(_SHA_NEW, _SHA_OLD)
+    pins = module._pins_in(text)
+
+    failures = module._rules_for_scope(_WORKFLOW, text, pins, module.PR_SCOPE)
+    assert len(failures) == 1
+    assert "different Action pins" in failures[0]
+
+
+def test_the_default_scope_keeps_every_rule() -> None:
+    """`make lint` and the cron both want the whole picture; only CI narrows it."""
+    module = _load()
+    assert module._parse_args([]).scope == module.ALL_SCOPE
+    assert module._parse_args(["--scope", "pr"]).scope == module.PR_SCOPE
+    assert module._parse_args(["--scope", "all"]).scope == module.ALL_SCOPE
+
+
+def test_a_green_pr_scope_run_says_where_staleness_is_enforced(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A narrowed gate that does not say what it dropped invites the old bug back."""
+    module = _load()
+    monkeypatch.setattr(module, "_check_freshness", lambda *_a: [])
+    monkeypatch.setattr(module, "_check_staleness", lambda *_a: ["stale pin"])
+
+    assert module.main(["--scope", "pr"]) == 0
+    out = capsys.readouterr().out
+    assert module.STALENESS_WORKFLOW in out
+    assert (REPO_ROOT / module.STALENESS_WORKFLOW).is_file()

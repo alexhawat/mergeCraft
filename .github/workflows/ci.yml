@@ -146,12 +146,15 @@ jobs:
       - name: Action pin freshness
         if: matrix.python == '3.14'
         run: |
-          # No --depth here. A depth-limited fetch marks origin/main as a
-          # shallow boundary, so rev-list stops at the graft and the staleness
-          # check under-reports the product lag (measured on this repo: 5
-          # commits -> 1), silently defanging the guard in the only job that
-          # runs it. The checkout above is fetch-depth: 0, so the objects are
-          # already local and a full fetch is near-free.
+          # PR-scoped rules only: rung self-consistency, env parity, and
+          # freshness. Staleness (main's pin vs main's tip) reads nothing from
+          # this diff, so gating PRs on it froze the whole queue behind one
+          # commit of debt on main (#669); it now runs on a schedule in
+          # action-pin-staleness.yml. Freshness still needs origin/main present
+          # to read the base workflow's pin, or it skips with a notice — hence
+          # the fetch. No --depth: a depth-limited fetch marks origin/main as a
+          # shallow boundary and rev-list stops at the graft. The checkout above
+          # is fetch-depth: 0, so the objects are local and this is near-free.
           git fetch --no-tags origin main:refs/remotes/origin/main || true
           make action-pin-check
       # First-wave CI SARIF for mergeCraft ingest (#464 / D8). Upload even when

@@ -48,7 +48,10 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 | **W1.7** `evidence_packet` output | W7 | `test_w17_packet_artifact_summary.py::test_evidence_packet_output_nonempty_for_pr_run` |
 | **W1.7** workflow artifact via `env:` | W7 | `test_w17_packet_artifact_summary.py::test_mergecraft_workflow_persists_packet_via_env_not_inline_interpolation` |
 | **W1.8** `action-pin-check` in `ci-static` | W8 | `test_w18_action_pin_gate.py::test_make_ci_static_invokes_action_pin_check` |
-| **W1.8** `ci.yml` non-zero on stale pin | W8 | `test_w18_action_pin_gate.py::test_ci_yml_fails_on_stale_pin_instead_of_warning_only` |
+| **W1.8** `ci.yml` non-zero on pin defects | W8 | `test_w18_action_pin_gate.py::test_ci_yml_fails_on_pin_defects_instead_of_warning_only` |
+| **W1.8** stale pin reported, not warned | W8 | `test_w18_action_pin_gate.py::test_the_staleness_workflow_reports_a_stale_pin_instead_of_warning_only` |
+| **W1.8** staleness scoped off the PR gate (#669) | W8 | `test_w18_action_pin_gate.py::test_the_required_gate_carries_no_rule_a_pull_request_cannot_satisfy` |
+| **W1.8** staleness job is main-only | W8 | `test_w18_action_pin_gate.py::test_the_staleness_job_only_ever_speaks_for_main` |
 | **W1.8** single pin, three rungs | W8 | `test_w18_action_pin_gate.py::test_mergecraft_workflow_three_rungs_share_one_pin_value` |
 | **W1.8** partial bump fails | W8 | `test_w18_action_pin_gate.py::test_partial_pin_bump_fails_action_pin_check` |
 | **W8 / #535** digest guard script | W8 | `test_action_image_digest_check.py` (real Git histories and digest-bound provenance policy regressions) |
@@ -75,6 +78,7 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 | `render_step_summary` / `append_step_summary` | `utils/step_summary.py` | `test_w17_packet_artifact_summary.py` |
 | workflow packet `env:` artifact steps | `.github/workflows/mergecraft.yml` | `test_w17_packet_artifact_summary.py` |
 | `action-pin-check` in `ci-static` / `CI_STEPS` | `Makefile` | `test_w18_action_pin_gate.py` |
+| `action-pin-staleness-check` on a schedule | `Makefile`, `.github/workflows/action-pin-staleness.yml` | `test_w18_action_pin_gate.py` |
 | `action-image-digest-check` / `check_action_image_digest.py` | `scripts/`, `Makefile` | `test_action_image_digest_check.py`, `test_action_image_digest_sync.py` |
 
 ## Fixtures
