@@ -345,8 +345,37 @@ def test_a_green_pr_scope_run_says_where_staleness_is_enforced(
     assert (REPO_ROOT / module.STALENESS_WORKFLOW).is_file()
 
 
+def _lag_with(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    plain: str,
+    merges: str,
+    combined: dict[str, str],
+) -> int:
+    """Drive ``_product_lag`` with canned git output."""
+    seen: list[tuple[str, ...]] = []
+
+    def fake_git(*args: str) -> Any:
+        seen.append(args)
+        if args[0] == "rev-list" and "--count" in args:
+            return plain
+        if args[0] == "rev-list" and "--merges" in args:
+            return merges
+        if args[0] == "diff-tree":
+            return combined.get(args[3], "")
+        return ""
+
+    monkeypatch.setattr(module, "_git", fake_git)
+    lag = cast("int", module._product_lag(_SHA_OLD, "origin/main"))
+    counted = [args for args in seen if args and args[0] == "rev-list" and "--count" in args]
+    assert counted, "lag never counted commits"
+    assert "--no-merges" in counted[0], f"lag still counts plain merges: {counted[0]}"
+    return lag
+
+
 def test_staleness_counts_changes_not_landings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Merge commits must not count toward the lag budget.
+    """Plain merges must not count toward the lag budget.
 
     Without ``--no-merges`` a PR touching ``src/mergecraft/`` scored twice — its
     own commit plus the merge that landed it — so the documented budget of 5 was
@@ -354,19 +383,55 @@ def test_staleness_counts_changes_not_landings(monkeypatch: pytest.MonkeyPatch) 
     5 raw commits, 3 of them merges, 2 actual changes.
     """
     module = _load()
-    seen: list[tuple[str, ...]] = []
+    merge = "a" * 40
+    lag = _lag_with(
+        module,
+        monkeypatch,
+        plain="2",
+        merges=merge,
+        # Combined diff lists only the commit id: the merge took every file
+        # verbatim from one parent, so it resolved nothing.
+        combined={merge: merge},
+    )
+    assert lag == 2
 
-    def fake_git(*args: str) -> Any:
-        seen.append(args)
-        if args[0] == "rev-list":
-            return "2"
-        return ""
 
-    monkeypatch.setattr(module, "_git", fake_git)
-    monkeypatch.setattr(module, "MAX_PRODUCT_LAG", 5)
-    assert module._check_staleness(_WORKFLOW, _SHA_OLD) == []
+def test_a_merge_that_resolves_product_code_still_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skipping every merge would hide conflict-resolution edits entirely.
 
-    rev_list = [args for args in seen if args and args[0] == "rev-list"]
-    assert rev_list, "staleness never counted commits"
-    assert "--no-merges" in rev_list[0], f"lag still counts merge commits: {rev_list[0]}"
-    assert module.PRODUCT_PATH in rev_list[0], "lag is no longer scoped to the product tree"
+    A merge that edits product code while resolving conflicts introduces changes
+    present in *neither* parent, so ``--no-merges`` alone would leave the pin
+    able to miss them while this gate reported zero lag — the reviewer's finding
+    on #690. This repo has a real instance: the #606 resolution adapted the
+    orphan sweeper inside the merge commit.
+    """
+    module = _load()
+    merge = "b" * 40
+    lag = _lag_with(
+        module,
+        monkeypatch,
+        plain="1",
+        merges=merge,
+        combined={merge: f"{merge}\nsrc/mergecraft/analyzers/egress.py\n"},
+    )
+    assert lag == 2, "a conflict-resolution merge was not counted"
+
+
+def test_several_merges_count_only_the_resolving_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load()
+    plain_merge, evil_merge = "c" * 40, "d" * 40
+    lag = _lag_with(
+        module,
+        monkeypatch,
+        plain="0",
+        merges=f"{plain_merge}\n{evil_merge}",
+        combined={
+            plain_merge: plain_merge,
+            evil_merge: f"{evil_merge}\nsrc/mergecraft/main.py\n",
+        },
+    )
+    assert lag == 1

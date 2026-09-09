@@ -79,6 +79,9 @@ _ENV_SHA_RE = re.compile(
     re.MULTILINE,
 )
 
+# ``git diff-tree --cc`` prefixes its output with the commit id.
+_SHA_LINE = re.compile(r"[0-9a-f]{40}")
+
 DEFAULT_BRANCH = os.environ.get("MERGECRAFT_DEFAULT_BRANCH", "main")
 
 # Rule scopes. ``PR_SCOPE`` holds only assertions a PR author can act on from
@@ -101,11 +104,12 @@ MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "100"))
 # operator cannot act on. Small, because each one is a behaviour difference
 # between the reviewer and the branch it is reviewing.
 #
-# Merges are excluded (see ``--no-merges`` below), so this counts changes rather
-# than landings. Without that, a PR touching this tree scored twice — its own
-# commit plus the merge that landed it — and the budget of 5 was really a budget
-# of about 2. Measured on this repo at the 5-of-5 ceiling: 5 raw commits, 3 of
-# them merges, 2 actual changes.
+# Counted as changes rather than landings (see ``_product_lag``): plain merges
+# are skipped, because a PR touching this tree otherwise scored twice — its own
+# commit plus the merge that landed it — making the budget of 5 really a budget
+# of about 2. Measured at the 5-of-5 ceiling: 5 raw commits, 3 merges, 2 real
+# changes. Merges that *resolve* product code still count; those edits exist in
+# neither parent.
 MAX_PRODUCT_LAG = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG", "5"))
 
 # The tree whose changes alter reviewer behaviour.
@@ -218,6 +222,45 @@ def _check_freshness(rel_path: str, head_sha: str) -> list[str]:
     ]
 
 
+def _merge_resolves_product_code(sha: str) -> bool:
+    """Whether a merge introduced product changes present in neither parent.
+
+    ``git diff-tree --cc`` is git's combined diff: it lists only paths whose
+    content differs from *every* parent. An ordinary merge takes each file
+    verbatim from one side and lists nothing; a conflict resolution that edits
+    product code while merging lists it. Measured on this repo: the #686, #665
+    and #668 merges list zero files, while the #606 resolution that adapted the
+    orphan sweeper lists ``analyzers/egress.py``.
+    """
+    combined = _git("diff-tree", "--cc", "--name-only", sha, "--", PRODUCT_PATH)
+    if not combined:
+        return False
+    # The first line is the commit id; anything after it is a resolved path.
+    return any(
+        not _SHA_LINE.fullmatch(line.strip()) for line in combined.splitlines() if line.strip()
+    )
+
+
+def _product_lag(head_sha: str, ref: str) -> int:
+    """Count product-code *changes* the pin is missing, not commits that landed.
+
+    Plain merges are excluded: a merge is the same change arriving, not a
+    distinct behaviour difference, and counting both it and the commit it landed
+    inflated the lag by roughly 2.5x.
+
+    Merges that resolved product code are counted. Those edits exist in neither
+    parent, so skipping every merge would hide them from this gate entirely
+    while the reviewer runs without them.
+    """
+    plain = _git("rev-list", "--count", "--no-merges", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
+    lag = int(plain) if plain and plain.isdigit() else 0
+    merges = _git("rev-list", "--merges", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
+    for sha in (merges or "").split():
+        if _merge_resolves_product_code(sha):
+            lag += 1
+    return lag
+
+
 def _check_staleness(rel_path: str, head_sha: str) -> list[str]:
     """Compare the pin against the default branch's tip, not against another pin."""
     ref = f"origin/{DEFAULT_BRANCH}"
@@ -232,11 +275,7 @@ def _check_staleness(rel_path: str, head_sha: str) -> list[str]:
         # (bumped here, not yet promoted) or it points somewhere unrelated.
         # Neither is staleness, and check 2 already covers divergence.
         return []
-    # --no-merges: a merge commit is not a distinct behaviour difference, it is
-    # the same change arriving. Counting both inflated the lag by roughly 2.5x
-    # and made the budget fire on far fewer real changes than it claims to allow.
-    lag_raw = _git("rev-list", "--count", "--no-merges", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
-    lag = int(lag_raw) if lag_raw and lag_raw.isdigit() else 0
+    lag = _product_lag(head_sha, ref)
     if lag <= MAX_PRODUCT_LAG:
         return []
     return [
