@@ -232,7 +232,10 @@ def _merge_resolves_product_code(sha: str) -> bool:
     and #668 merges list zero files, while the #606 resolution that adapted the
     orphan sweeper lists ``analyzers/egress.py``.
     """
-    combined = _git("diff-tree", "--cc", "--name-only", sha, "--", PRODUCT_PATH)
+    # -r is redundant today — --cc already reports nested paths, verified against
+    # this repo's own conflict-resolution merge — but it states the intent and
+    # removes any dependence on that implication holding.
+    combined = _git("diff-tree", "-r", "--cc", "--name-only", sha, "--", PRODUCT_PATH)
     if not combined:
         return False
     # The first line is the commit id; anything after it is a resolved path.

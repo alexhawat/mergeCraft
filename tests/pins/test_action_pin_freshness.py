@@ -363,7 +363,10 @@ def _lag_with(
         if args[0] == "rev-list" and "--merges" in args:
             return merges
         if args[0] == "diff-tree":
-            return combined.get(args[3], "")
+            sha = next(
+                (a for a in args if len(a) == 40 and all(c in "0123456789abcdef" for c in a)), ""
+            )
+            return combined.get(sha, "")
         return ""
 
     monkeypatch.setattr(module, "_git", fake_git)
@@ -435,3 +438,45 @@ def test_several_merges_count_only_the_resolving_ones(
         },
     )
     assert lag == 1
+
+
+def test_the_combined_diff_command_recurses_and_scopes_to_the_product_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin the exact `diff-tree` invocation, per the #690 review.
+
+    `--cc` already reports nested paths — verified directly against this repo's
+    own conflict-resolution merge, where `src/mergecraft/analyzers/egress.py`
+    (two levels below the pathspec) is listed with and without `-r`. `-r` is
+    passed anyway so the recursion is explicit rather than implied, and this
+    test fails if either that flag or the pathspec is dropped.
+    """
+    module = _load()
+    merge = "e" * 40
+    seen: list[tuple[str, ...]] = []
+
+    def fake_git(*args: str) -> Any:
+        seen.append(args)
+        return f"{merge}\nsrc/mergecraft/analyzers/egress.py\n"
+
+    monkeypatch.setattr(module, "_git", fake_git)
+    assert module._merge_resolves_product_code(merge) is True
+
+    call = next(args for args in seen if args[0] == "diff-tree")
+    assert "-r" in call, f"combined diff no longer recurses explicitly: {call}"
+    assert "--cc" in call, f"not a combined diff: {call}"
+    assert "--name-only" in call, f"expected name-only output: {call}"
+    assert call[-1] == module.PRODUCT_PATH, f"pathspec lost: {call}"
+    assert merge in call, f"commit not passed: {call}"
+
+
+def test_a_nested_resolved_path_is_detected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The resolved file sits two levels under the pathspec, as in the real case."""
+    module = _load()
+    merge = "f" * 40
+    monkeypatch.setattr(
+        module,
+        "_git",
+        lambda *_a: f"{merge}\nsrc/mergecraft/analyzers/egress.py\n",
+    )
+    assert module._merge_resolves_product_code(merge) is True
