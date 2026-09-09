@@ -285,8 +285,8 @@ def test_a_toolchain_binary_still_resolves_from_path(
 def test_catalog_versions_are_pinned_for_installed_tools() -> None:
     """W20 pins must match these catalog ``version:`` fields."""
     expected = {
-        "vulture": "2.14",
-        "typos": "1.32.0",
+        "vulture": "2.16",
+        "typos": "1.50.1",
         "markdownlint": "0.37.4",
         "jscpd": "4.1.0",
     }
