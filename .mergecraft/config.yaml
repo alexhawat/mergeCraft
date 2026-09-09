@@ -16,6 +16,7 @@ ciEvidence:
     - actionlint-sarif
     - zizmor-sarif
     - semgrep-sarif
+    - trufflehog-sarif
 
 trust:
   selfReview: "full"

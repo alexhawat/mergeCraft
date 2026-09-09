@@ -99,6 +99,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Action-pin staleness budget counts changes rather than landings. Without
+  `--no-merges`, a PR touching `src/mergecraft/` scored twice — its own commit
+  plus the merge that landed it — so the documented budget of 5 was really a
+  budget of about 2. Measured at the ceiling: 5 raw commits, 3 of them merges,
+  2 actual changes. `MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG` is unchanged at 5;
+  it now means what it says.
+
+- A stale self-review Action pin on `main` no longer fails every open pull
+  request. `action-pin-check`'s staleness rule compared `main`'s pin against
+  `main`'s own tip, so it read nothing from the PR under review — one commit of
+  debt on `main` froze the whole queue, including the manifest PR that was the
+  only way to clear it (#669). The rule moved to `action-pin-staleness.yml`,
+  which runs on every push to `main` (with a daily cron backstop) and files one
+  tracking issue, keeps it current, and closes it once the pin is bumped. The required PR check
+  keeps every rule a branch can act on: rung self-consistency, drift from
+  `env.MERGECRAFT_ACTION_SHA`, and freshness against the default branch's pin.
+  `make action-pin-staleness-check` runs the full set locally.
+
 - The sticky run record lists Action pin (manifest C) next to baked image
   source (S) so pin-lag (pinning S deploys the previous digest) is visible
   without reading Action logs (#641)
@@ -307,9 +325,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Dogfood config sets `trust.agentSandbox: same-repo` so Codex
   `danger-full-access` is honoured on same-repo review runs (#553)
-- CI SARIF ingest covers actionlint, zizmor, and semgrep alongside ruff,
-  mypy, and bandit — matching `ci.yml` uploads and
+- CI SARIF ingest covers actionlint, zizmor, semgrep, and trufflehog
+  alongside ruff, mypy, and bandit — matching `ci.yml` uploads and
   `ciEvidence.sarifArtifacts` (#464)
+- TruffleHog CI evidence converts JSONL to SARIF so a clean scan uploads
+  a valid empty-results document with tool metadata, not a blank file
 - Hardened consumer template forwards wait-for-ci outputs and grants
   `actions: read` for ciEvidence SARIF ingest
 
