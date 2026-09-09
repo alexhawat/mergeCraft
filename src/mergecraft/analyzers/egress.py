@@ -368,7 +368,15 @@ def _stale_session_ids() -> set[str]:
 
 
 def _delete_rules_matching(show_argv: list[str], delete_prefix: list[str], needle: str) -> None:
-    """Convert each ``-A ...`` line containing ``needle`` to a ``-D`` and run it."""
+    """Convert each ``-A ...`` line containing ``needle`` to a ``-D`` and run it.
+
+    ``delete_prefix`` must stop before the chain name: ``iptables -S`` emits the
+    chain as the first token after ``-A``, so the rest of the line already
+    carries it. Repeating it in the prefix builds ``iptables -D FORWARD FORWARD
+    …``, which iptables rejects — and ``check=False`` swallows the rejection, so
+    the jump rules survive and the later ``-X`` cannot delete a chain that is
+    still referenced.
+    """
     result = subprocess.run(show_argv, capture_output=True, text=True, timeout=5, check=False)
     for line in result.stdout.splitlines():
         if needle not in line or not line.startswith("-A "):
@@ -381,14 +389,14 @@ def _delete_rules_matching(show_argv: list[str], delete_prefix: list[str], needl
 def _sweep_session(session_id: str) -> None:
     """Remove FORWARD jump rules, the dedicated chain, the NAT rule, and any
     leftover veth/netns tagged with one dead session id."""
-    _delete_rules_matching(["iptables", "-S", "FORWARD"], ["iptables", "-D", "FORWARD"], session_id)
+    _delete_rules_matching(["iptables", "-S", "FORWARD"], ["iptables", "-D"], session_id)
     with contextlib.suppress(OSError):
         subprocess.run(["iptables", "-F", session_id], check=False, capture_output=True, timeout=5)
     with contextlib.suppress(OSError):
         subprocess.run(["iptables", "-X", session_id], check=False, capture_output=True, timeout=5)
     _delete_rules_matching(
         ["iptables", "-t", "nat", "-S", "POSTROUTING"],
-        ["iptables", "-t", "nat", "-D", "POSTROUTING"],
+        ["iptables", "-t", "nat", "-D"],
         session_id,
     )
     match = _SESSION_ID_RE.match(session_id)
