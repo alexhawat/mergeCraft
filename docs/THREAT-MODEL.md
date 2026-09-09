@@ -38,9 +38,11 @@ metadata (`169.254.169.254`), and `file:` URLs before any fetch. Tests live in
 
 ## Public comments
 
-`redact_secrets_for_public_comment` strips secret-shaped tokens before a
-body is posted. Public comments must never include provider keys or similar
-material.
+Publication paths must call `mergecraft.analyzers.redact.redact_secrets`
+before a body is posted (publish-seam wiring is not yet centralized). Public
+comments must never include provider keys or similar material. Regression:
+`test_public_comments_never_include_secret_material` in
+`tests/security/test_cd_egress.py`.
 
 ## Git MCP containment (plan 13 W2)
 
