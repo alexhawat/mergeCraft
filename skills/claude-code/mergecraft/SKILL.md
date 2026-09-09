@@ -38,8 +38,10 @@ a read-only verifier; typed findings drive inline comments and the
    Never handle raw credentials; never commit secrets. GitHub scope checks the exact
    target repository before collecting credentials and stores Actions secrets.
    Local scope writes only the displayed `.env` file and never calls GitHub.
-4. Commit only `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`,
-   push, open a PR (or comment `@mergecraft review`).
+4. Commit `.mergecraft/config.yaml`, `.mergecraft/learnings.md`,
+   `.github/workflows/mergecraft.yml`, and any `.gitignore` lines `init` added;
+   push; open a PR or run `workflow_dispatch`. The default workflow does not
+   listen for `@mergecraft review` comments.
 
 ## Standalone installation links
 

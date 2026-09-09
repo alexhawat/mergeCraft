@@ -292,6 +292,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Landing README Example 1 matches the `mergecraft init` / `examples/workflows/`
+  scaffold (PR types, `status_checks`, `checks: write`); default trigger copy no
+  longer teaches `@mergecraft review` comments, which the scaffold omits
+- `evals/README.md` Harbor install pin is `v0.1.0a1`, and live detection is
+  documented as `mergecraft review` (Harbor still calls the hidden
+  `diff-review` alias)
+- AGENTS.md and the consumer skill match the default workflow triggers
+
 - The self-review Action pin on all three review rungs moves to `93a7897c`,
   pin 5 — GitHub Action Logfire honors `MERGECRAFT_TRACING_REGION` (#607)
 - Self-review Codex fallback uses `openai/gpt-terra` (GPT 5.6 Terra) instead of
