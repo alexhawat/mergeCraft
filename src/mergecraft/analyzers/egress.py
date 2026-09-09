@@ -46,10 +46,12 @@ iptables) run isolated-to-allowlist instead.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import ipaddress
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -69,6 +71,8 @@ if TYPE_CHECKING:
 _VETH_PROBE_PREFIX = "mcfg"
 _FALLBACK_DNS_RESOLVERS: tuple[str, ...] = ("1.1.1.1",)
 _RESOLV_CONF_PATH = Path("/etc/resolv.conf")
+# Tag parsed by the orphan sweeper: pid for liveness, random tail for identity.
+_SESSION_ID_RE = re.compile(r"mc-eg-(\d+)-([0-9a-f]+)")
 _SUBNET_OCTET_MAX = 250
 _SETUP_LOCK = threading.Lock()
 
@@ -332,6 +336,114 @@ def default_dns_resolvers() -> tuple[str, ...]:
     return _FALLBACK_DNS_RESOLVERS
 
 
+def _pid_alive(pid: int) -> bool:
+    """True when ``pid`` names a live process (or one we lack permission to see)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        # Any other errno (e.g. EPERM for a live-but-foreign pid) means the
+        # process exists; only ESRCH (ProcessLookupError) says it does not.
+        return True
+    return True
+
+
+def _stale_session_ids() -> set[str]:
+    """``mc-eg-<pid>-<suffix>`` ids tagged on rules whose pid is now dead."""
+    stale: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["iptables-save"], capture_output=True, text=True, timeout=5, check=False
+        )
+    except OSError:
+        return stale
+    for match in _SESSION_ID_RE.finditer(result.stdout):
+        session_id = match.group(0)
+        if session_id in stale:
+            continue
+        if not _pid_alive(int(match.group(1))):
+            stale.add(session_id)
+    return stale
+
+
+def _delete_rules_matching(show_argv: list[str], delete_prefix: list[str], needle: str) -> None:
+    """Convert each ``-A ...`` line containing ``needle`` to a ``-D`` and run it.
+
+    ``delete_prefix`` must stop before the chain name: ``iptables -S`` emits the
+    chain as the first token after ``-A``, so the rest of the line already
+    carries it. Repeating it in the prefix builds ``iptables -D FORWARD FORWARD
+    …``, which iptables rejects — and ``check=False`` swallows the rejection, so
+    the jump rules survive and the later ``-X`` cannot delete a chain that is
+    still referenced.
+    """
+    result = subprocess.run(show_argv, capture_output=True, text=True, timeout=5, check=False)
+    for line in result.stdout.splitlines():
+        if needle not in line or not line.startswith("-A "):
+            continue
+        argv = [*delete_prefix, *line[len("-A ") :].split()]
+        with contextlib.suppress(OSError):
+            subprocess.run(argv, check=False, capture_output=True, timeout=5)
+
+
+def _sweep_session(session_id: str) -> None:
+    """Remove FORWARD jump rules, the dedicated chain, the NAT rule, and any
+    leftover veth/netns tagged with one dead session id."""
+    _delete_rules_matching(["iptables", "-S", "FORWARD"], ["iptables", "-D"], session_id)
+    with contextlib.suppress(OSError):
+        subprocess.run(["iptables", "-F", session_id], check=False, capture_output=True, timeout=5)
+    with contextlib.suppress(OSError):
+        subprocess.run(["iptables", "-X", session_id], check=False, capture_output=True, timeout=5)
+    _delete_rules_matching(
+        ["iptables", "-t", "nat", "-S", "POSTROUTING"],
+        ["iptables", "-t", "nat", "-D"],
+        session_id,
+    )
+    match = _SESSION_ID_RE.match(session_id)
+    if match is not None:
+        # The veth pair is named from the random tail, not the pid (see
+        # __post_init__), so carry the tail through as-is rather than int().
+        veth_suffix = match.group(2)
+        with contextlib.suppress(OSError):
+            subprocess.run(
+                ["ip", "link", "delete", f"mcfh{veth_suffix}"],
+                check=False,
+                capture_output=True,
+                timeout=5,
+            )
+    with contextlib.suppress(OSError):
+        subprocess.run(
+            ["ip", "netns", "delete", session_id], check=False, capture_output=True, timeout=5
+        )
+    with contextlib.suppress(OSError):
+        shutil.rmtree(f"/etc/netns/{session_id}", ignore_errors=True)
+
+
+def sweep_orphaned_filtered_egress() -> None:
+    """Best-effort cleanup of state a killed ``FilteredNetnsSession`` left behind (#606 finding 6).
+
+    ``close()`` only runs on a clean exit; SIGKILL (CI cancellation, OOM, a
+    job timeout) skips it and leaves the FORWARD jump rules, the dedicated
+    chain, the NAT rule, and the veth/netns pair behind. Every rule this
+    module creates is tagged ``mc-eg-<pid>-<suffix>`` in an iptables
+    comment; this sweeps whatever still carries that tag for a pid that is
+    no longer alive. Called at the start of every new session so leftovers
+    self-heal instead of accumulating; failures here are logged and
+    swallowed rather than blocking the new session.
+
+    This does not restore host-global ``ip_forward`` to its pre-session
+    value — that value is only ever recorded in the dead process's own
+    memory, not on disk, so a killed session's original setting cannot be
+    recovered here. Leaving ``ip_forward`` enabled is not itself a hole:
+    once the orphaned FORWARD/NAT rules are removed, forwarding follows the
+    host's own default policy like any other traffic.
+    """
+    if shutil.which("iptables") is None:
+        return
+    for session_id in _stale_session_ids():
+        _sweep_session(session_id)
+
+
 @dataclass(slots=True)
 class FilteredNetnsSession:
     """Host-side veth + named netns + iptables FORWARD allowlist.
@@ -357,7 +469,10 @@ class FilteredNetnsSession:
 
     def __post_init__(self) -> None:
         suffix = secrets.token_hex(4)
-        session_id = f"mc-eg-{suffix}"
+        # pid makes a dead session detectable by sweep_orphaned_filtered_egress;
+        # the random tail keeps identity unique, so this does not reintroduce the
+        # 1-in-250 collision that a bare `pid % 10_000` identity caused.
+        session_id = f"mc-eg-{os.getpid()}-{suffix}"
         self.ns_name = session_id
         self._comment = session_id
         # Random session identity separates overlapping sessions in one process.
@@ -415,6 +530,10 @@ class FilteredNetnsSession:
         try:
             if not filtered_egress_available():
                 raise FilteredEgressSetupError(probe_filtered_egress().reason)
+            try:
+                sweep_orphaned_filtered_egress()
+            except Exception as exc:  # best-effort self-heal — must never block a new session
+                logger.warning("filtered-egress startup sweep failed (non-fatal): {}", exc)
             # Never sweep other sessions: PID reuse is not proof of ownership.
             self._enable_forward()
             ips = resolve_allowlist_ips(self.allowed_hosts)
@@ -643,5 +762,6 @@ __all__ = [
     "probe_filtered_egress",
     "reset_filtered_egress_cache",
     "resolve_allowlist_ips",
+    "sweep_orphaned_filtered_egress",
     "wrap_argv_for_filtered_netns",
 ]

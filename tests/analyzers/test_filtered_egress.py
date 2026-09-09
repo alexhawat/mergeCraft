@@ -16,7 +16,10 @@ import pytest
 from mergecraft.analyzers.egress import (
     FilteredEgressSetupError,
     FilteredNetnsSession,
+    _delete_rules_matching,
     _parse_resolv_conf,
+    _pid_alive,
+    _sweep_session,
     allowlist_hosts,
     default_dns_resolvers,
     filtered_egress_available,
@@ -24,6 +27,7 @@ from mergecraft.analyzers.egress import (
     probe_filtered_egress,
     reset_filtered_egress_cache,
     resolve_allowlist_ips,
+    sweep_orphaned_filtered_egress,
     wrap_argv_for_filtered_netns,
 )
 from tests.analyzers.support_allowlist_proxy import AllowlistConnectProxy
@@ -671,3 +675,155 @@ def test_actual_analyzer_timeout_reaps_namespace_child(tmp_path: Path) -> None:
     assert result.status == "timed_out", result.output
     time.sleep(3)
     assert not marker.exists(), "analyzer survived its timed-out unshare parent"
+
+
+def test_pid_alive_true_for_current_process() -> None:
+    assert _pid_alive(os.getpid()) is True
+
+
+def test_pid_alive_false_for_a_pid_that_does_not_exist() -> None:
+    # Linux pid_max tops out well below 2**30; this pid cannot be real.
+    assert _pid_alive(2**30) is False
+
+
+def test_sweep_orphaned_filtered_egress_is_a_noop_without_iptables(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """(#606 finding 6) — must never raise, even when iptables is unavailable."""
+    monkeypatch.setattr("mergecraft.analyzers.egress.shutil.which", lambda _name: None)
+    sweep_orphaned_filtered_egress()  # must not raise
+
+
+def test_a_live_session_id_carries_a_sweepable_pid() -> None:
+    """The sweeper keys on the pid in the tag; main's random-only id had none.
+
+    Regression guard for the #606/main merge: if the identity ever loses its
+    pid component again, _stale_session_ids stops matching and the sweeper
+    silently becomes a no-op while still reporting success.
+    """
+    from mergecraft.analyzers.egress import _SESSION_ID_RE
+
+    session = FilteredNetnsSession(allowed_hosts=["example.com"])
+    match = _SESSION_ID_RE.fullmatch(session.ns_name)
+    assert match is not None, f"{session.ns_name!r} is not sweepable"
+    assert int(match.group(1)) == os.getpid()
+
+
+def _canned_iptables(monkeypatch: MonkeyPatch, stdout: str) -> list[list[str]]:
+    """Capture every argv `_delete_rules_matching` builds from a canned -S blob."""
+    calls: list[list[str]] = []
+
+    class _Result:
+        def __init__(self, out: str) -> None:
+            self.stdout = out
+
+    def fake_run(argv: list[str], **kwargs: object) -> _Result:
+        calls.append(list(argv))
+        # Only the -S probe returns output; the -D invocations return nothing.
+        return _Result(stdout if "-S" in argv else "")
+
+    monkeypatch.setattr("mergecraft.analyzers.egress.subprocess.run", fake_run)
+    return calls
+
+
+_SESSION = "mc-eg-12345-1a2b3c4d"
+
+
+def test_forward_delete_argv_does_not_repeat_the_chain(monkeypatch: MonkeyPatch) -> None:
+    """`iptables -S FORWARD` already emits the chain, so the prefix must not.
+
+    Repeating it built `iptables -D FORWARD FORWARD -i … -j …`, which iptables
+    rejects. `check=False` swallowed the rejection, so the FORWARD jumps
+    survived, `-X` then could not remove a still-referenced chain, and the
+    sweeper reported success having cleaned nothing.
+    """
+    blob = f"-P FORWARD ACCEPT\n-A FORWARD -i mcfh1a2b3c4d -j {_SESSION}\n"
+    calls = _canned_iptables(monkeypatch, blob)
+
+    _delete_rules_matching(["iptables", "-S", "FORWARD"], ["iptables", "-D"], _SESSION)
+
+    deletes = [c for c in calls if "-D" in c]
+    assert deletes == [["iptables", "-D", "FORWARD", "-i", "mcfh1a2b3c4d", "-j", _SESSION]]
+    assert deletes[0].count("FORWARD") == 1, f"chain repeated: {deletes[0]}"
+
+
+def test_nat_delete_argv_keeps_the_table_flag_and_one_chain(monkeypatch: MonkeyPatch) -> None:
+    blob = f"-A POSTROUTING -s 10.77.3.0/30 -m comment --comment {_SESSION} -j MASQUERADE\n"
+    calls = _canned_iptables(monkeypatch, blob)
+
+    _delete_rules_matching(
+        ["iptables", "-t", "nat", "-S", "POSTROUTING"],
+        ["iptables", "-t", "nat", "-D"],
+        _SESSION,
+    )
+
+    deletes = [c for c in calls if "-D" in c]
+    assert deletes == [
+        [
+            "iptables",
+            "-t",
+            "nat",
+            "-D",
+            "POSTROUTING",
+            "-s",
+            "10.77.3.0/30",
+            "-m",
+            "comment",
+            "--comment",
+            _SESSION,
+            "-j",
+            "MASQUERADE",
+        ]
+    ]
+    assert deletes[0].count("POSTROUTING") == 1
+
+
+def test_rules_for_other_sessions_are_left_alone(monkeypatch: MonkeyPatch) -> None:
+    """The needle is the only thing separating a dead session from a live one."""
+    blob = (
+        f"-A FORWARD -i mcfh1a2b3c4d -j {_SESSION}\n"
+        "-A FORWARD -i mcfhdeadbeef -j mc-eg-99999-deadbeef\n"
+    )
+    calls = _canned_iptables(monkeypatch, blob)
+
+    _delete_rules_matching(["iptables", "-S", "FORWARD"], ["iptables", "-D"], _SESSION)
+
+    deletes = [c for c in calls if "-D" in c]
+    assert len(deletes) == 1
+    assert _SESSION in deletes[0]
+    assert "mc-eg-99999-deadbeef" not in " ".join(deletes[0])
+
+
+def test_sweep_session_builds_well_formed_delete_commands(monkeypatch: MonkeyPatch) -> None:
+    """Guards the real call sites, not just the helper.
+
+    The earlier tests pass a correct prefix in by hand, so they would stay green
+    if `_sweep_session` reintroduced `["iptables", "-D", "FORWARD"]`. This drives
+    `_sweep_session` itself and asserts no delete command names its chain twice.
+    """
+    blob_forward = f"-A FORWARD -i mcfh1a2b3c4d -j {_SESSION}\n"
+    blob_nat = f"-A POSTROUTING -s 10.77.3.0/30 -m comment --comment {_SESSION} -j MASQUERADE\n"
+    calls: list[list[str]] = []
+
+    class _Result:
+        def __init__(self, out: str) -> None:
+            self.stdout = out
+
+    def fake_run(argv: list[str], **kwargs: object) -> _Result:
+        calls.append(list(argv))
+        if "-S" not in argv:
+            return _Result("")
+        return _Result(blob_nat if "nat" in argv else blob_forward)
+
+    monkeypatch.setattr("mergecraft.analyzers.egress.subprocess.run", fake_run)
+    monkeypatch.setattr("mergecraft.analyzers.egress.shutil.rmtree", lambda *_a, **_k: None)
+
+    _sweep_session(_SESSION)
+
+    deletes = [c for c in calls if "-D" in c]
+    assert deletes, "sweep issued no delete commands"
+    for argv in deletes:
+        chain = "POSTROUTING" if "nat" in argv else "FORWARD"
+        assert argv.count(chain) == 1, f"chain repeated in {argv}"
+        # -D must be immediately followed by the chain, then the rule spec.
+        assert argv[argv.index("-D") + 1] == chain, f"malformed delete: {argv}"
