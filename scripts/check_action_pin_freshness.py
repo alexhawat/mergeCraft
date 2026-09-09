@@ -33,8 +33,8 @@ branch itself. Run on a schedule against ``main`` by
 ``.github/workflows/action-pin-staleness.yml``, never as a required PR check.
 
 4. **Staleness** (needs the default-branch ref). The pin must not lag the
-   default branch's own tip by more than ``MAX_PRODUCT_LAG`` commits touching
-   ``src/mergecraft/``. Rule 3 compares the two branches' pins only to each
+   default branch's own tip by more than ``MAX_PRODUCT_LAG`` non-merge commits
+   touching ``src/mergecraft/``. Rule 3 compares the two branches' pins only to each
    other, so it passes when *both* are equally stale: after PR #457 merged,
    both branches pinned the same SHA and the check reported OK while the
    reviewer ran none of the fixes that had just landed. Measuring against the
@@ -100,6 +100,12 @@ MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "100"))
 # what the reviewer executes, so counting them would fire for reasons an
 # operator cannot act on. Small, because each one is a behaviour difference
 # between the reviewer and the branch it is reviewing.
+#
+# Merges are excluded (see ``--no-merges`` below), so this counts changes rather
+# than landings. Without that, a PR touching this tree scored twice — its own
+# commit plus the merge that landed it — and the budget of 5 was really a budget
+# of about 2. Measured on this repo at the 5-of-5 ceiling: 5 raw commits, 3 of
+# them merges, 2 actual changes.
 MAX_PRODUCT_LAG = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG", "5"))
 
 # The tree whose changes alter reviewer behaviour.
@@ -226,7 +232,10 @@ def _check_staleness(rel_path: str, head_sha: str) -> list[str]:
         # (bumped here, not yet promoted) or it points somewhere unrelated.
         # Neither is staleness, and check 2 already covers divergence.
         return []
-    lag_raw = _git("rev-list", "--count", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
+    # --no-merges: a merge commit is not a distinct behaviour difference, it is
+    # the same change arriving. Counting both inflated the lag by roughly 2.5x
+    # and made the budget fire on far fewer real changes than it claims to allow.
+    lag_raw = _git("rev-list", "--count", "--no-merges", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
     lag = int(lag_raw) if lag_raw and lag_raw.isdigit() else 0
     if lag <= MAX_PRODUCT_LAG:
         return []

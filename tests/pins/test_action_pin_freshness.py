@@ -343,3 +343,30 @@ def test_a_green_pr_scope_run_says_where_staleness_is_enforced(
     out = capsys.readouterr().out
     assert module.STALENESS_WORKFLOW in out
     assert (REPO_ROOT / module.STALENESS_WORKFLOW).is_file()
+
+
+def test_staleness_counts_changes_not_landings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Merge commits must not count toward the lag budget.
+
+    Without ``--no-merges`` a PR touching ``src/mergecraft/`` scored twice — its
+    own commit plus the merge that landed it — so the documented budget of 5 was
+    really a budget of about 2. Measured on this repo when the ceiling was hit:
+    5 raw commits, 3 of them merges, 2 actual changes.
+    """
+    module = _load()
+    seen: list[tuple[str, ...]] = []
+
+    def fake_git(*args: str) -> Any:
+        seen.append(args)
+        if args[0] == "rev-list":
+            return "2"
+        return ""
+
+    monkeypatch.setattr(module, "_git", fake_git)
+    monkeypatch.setattr(module, "MAX_PRODUCT_LAG", 5)
+    assert module._check_staleness(_WORKFLOW, _SHA_OLD) == []
+
+    rev_list = [args for args in seen if args and args[0] == "rev-list"]
+    assert rev_list, "staleness never counted commits"
+    assert "--no-merges" in rev_list[0], f"lag still counts merge commits: {rev_list[0]}"
+    assert module.PRODUCT_PATH in rev_list[0], "lag is no longer scoped to the product tree"
