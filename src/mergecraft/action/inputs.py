@@ -60,21 +60,18 @@ def _read_input(name: str) -> str | None:
 
 
 def _read_logfire_region() -> Literal["us", "eu"] | None:
-    """Return a valid Logfire region from Action input or ``MERGECRAFT_TRACING_REGION``.
+    """Return a valid Logfire region from ``MERGECRAFT_TRACING_REGION``.
 
-    ``INPUT_TRACING_REGION`` (if a consumer sets it) beats
-    ``MERGECRAFT_TRACING_REGION``. Invalid or unset values return ``None`` so
-    the sink keeps the US default.
+    Invalid or unset values return ``None`` so the sink keeps the US default.
     """
-    for name in ("INPUT_TRACING_REGION", "MERGECRAFT_TRACING_REGION"):
-        raw = os.environ.get(name)
-        if raw is None or raw == "":
-            continue
-        region = raw.strip().lower()
-        if region == "us":
-            return "us"
-        if region == "eu":
-            return "eu"
+    raw = os.environ.get("MERGECRAFT_TRACING_REGION")
+    if raw is None or raw == "":
+        return None
+    region = raw.strip().lower()
+    if region == "us":
+        return "us"
+    if region == "eu":
+        return "eu"
     return None
 
 
