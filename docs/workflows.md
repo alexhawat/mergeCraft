@@ -267,7 +267,7 @@ edit, and two targets guard it (#532):
 | Target | Rules | Where it runs |
 | --- | --- | --- |
 | `make action-pin-check` | rungs disagree, a rung drifts from `env.MERGECRAFT_ACTION_SHA`, the pin diverges from the default branch's | `make ci-static` — a required PR check |
-| `make action-pin-staleness-check` | all of the above, plus the pin lagging the default branch's own tip by more than `MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG` commits under `src/mergecraft/` | `.github/workflows/action-pin-staleness.yml`, on every push to `main`, with a daily cron backstop |
+| `make action-pin-staleness-check` | all of the above, plus the pin lagging the default branch's own tip by more than `MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG` non-merge commits under `src/mergecraft/` | `.github/workflows/action-pin-staleness.yml`, on every push to `main`, with a daily cron backstop |
 
 The split is deliberate. Staleness compares `main`'s pin against `main`'s tip,
 so nothing in it reads the pull request under review. While it gated PRs, one

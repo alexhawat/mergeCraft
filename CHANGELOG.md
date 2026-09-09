@@ -85,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Action-pin staleness budget counts changes rather than landings. Without
+  `--no-merges`, a PR touching `src/mergecraft/` scored twice — its own commit
+  plus the merge that landed it — so the documented budget of 5 was really a
+  budget of about 2. Measured at the ceiling: 5 raw commits, 3 of them merges,
+  2 actual changes. `MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG` is unchanged at 5;
+  it now means what it says.
+
 - A stale self-review Action pin on `main` no longer fails every open pull
   request. `action-pin-check`'s staleness rule compared `main`'s pin against
   `main`'s own tip, so it read nothing from the PR under review — one commit of
