@@ -176,3 +176,52 @@ def test_init_seeds_builtin_provider_registry(tmp_path: Path, monkeypatch: Monke
     assert isinstance(providers, list)
     labels = {str(entry.get("label")) for entry in providers if isinstance(entry, dict)}
     assert labels == set(PROVIDERS.keys())
+
+
+def test_scaffolded_workflow_exports_the_action_pin(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A consumer install must record the pin it actually runs (#641).
+
+    `resolve_action_pin_sha()` reads `MERGECRAFT_ACTION_SHA` and nothing else,
+    and the container cannot see the workflow's `uses:` line. Before this, every
+    repo scaffolded by `mergecraft init` reported an empty Action pin and could
+    not surface a pin/image mismatch — the feature was inert for consumers while
+    the dogfood workflow, which sets the variable by hand, looked healthy.
+
+    Asserted against the *generated* workflow rather than by supplying the
+    environment variable directly, which is what let the gap ship.
+    """
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init", "--force"])
+    assert result.exit_code == 0, result.output
+    workflow = (tmp_path / ".github" / "workflows" / "mergecraft.yml").read_text(encoding="utf-8")
+
+    assert "MERGECRAFT_ACTION_SHA:" in workflow, "generated workflow does not export the pin"
+
+    uses_pins = re.findall(r"uses:\s*alexhawat/mergeCraft@(\S+)", workflow)
+    env_pins = re.findall(r"MERGECRAFT_ACTION_SHA:\s*(\S+)", workflow)
+    assert uses_pins, "no alexhawat/mergeCraft@ reference in the scaffold"
+    assert env_pins, "no MERGECRAFT_ACTION_SHA in the scaffold"
+    assert set(env_pins) == set(uses_pins), (
+        f"exported pin {env_pins} disagrees with the uses: pin {uses_pins}; "
+        "the recorded pin would not be the code that ran"
+    )
+
+
+def test_the_scaffolded_pin_is_what_resolve_action_pin_sha_reads(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Close the loop: the generated value is the one the runtime consumes."""
+    from mergecraft.build_metadata import resolve_action_pin_sha
+
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert runner.invoke(app, ["init", "--force"]).exit_code == 0
+    workflow = (tmp_path / ".github" / "workflows" / "mergecraft.yml").read_text(encoding="utf-8")
+    exported = re.search(r"MERGECRAFT_ACTION_SHA:\s*(\S+)", workflow)
+    assert exported is not None
+
+    monkeypatch.setenv("MERGECRAFT_ACTION_SHA", exported.group(1))
+    assert resolve_action_pin_sha() == exported.group(1)

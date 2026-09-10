@@ -21,10 +21,12 @@ if TYPE_CHECKING:
 
 _REPO_INSTRUCTIONS_HEADER = "************* REPO INSTRUCTIONS *************"
 _STANDING_INSTRUCTIONS_HEADER = "************* STANDING INSTRUCTIONS *************"
+_REVIEW_SKILLS_HEADER = "************* REVIEW SKILLS *************"
 _UNTRUSTED_EVIDENCE_HEADER = "************* UNTRUSTED REPO EVIDENCE *************"
 _INSTRUCTION_FILENAMES = frozenset({"CLAUDE.md", "AGENTS.md", "SKILL.md", "GEMINI.md"})
 _COPILOT_NAME = "copilot-instructions.md"
 _SKIP_DIR_NAMES = frozenset({".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv"})
+_REVIEW_SKILL_DIR_NAMES = frozenset({"code-review", "pr-review", "review"})
 _SOURCE_PRIORITY = (
     "AGENTS.md",
     "CLAUDE.md",
@@ -80,6 +82,37 @@ def resolve_instruction_conflicts(
     return InstructionConflictResult(winner=winner_path, conflicts=conflicts)
 
 
+def is_review_skill_path(rel_path: str) -> bool:
+    """True for Copilot-style review skills (``.github/skills/*`` or review names)."""
+    normalized = rel_path.replace("\\", "/")
+    if not normalized.endswith("/SKILL.md") and normalized != "SKILL.md":
+        return False
+    parent = normalized.rsplit("/", 2)[-2] if "/" in normalized else ""
+    if parent in _REVIEW_SKILL_DIR_NAMES:
+        return True
+    return normalized.startswith(".github/skills/")
+
+
+def review_skill_sort_key(rel_path: str) -> tuple[int, str]:
+    """Prefer ``code-review`` / ``pr-review`` directory names, then path order."""
+    normalized = rel_path.replace("\\", "/")
+    parent = normalized.rsplit("/", 2)[-2] if "/" in normalized else ""
+    preferred = 0 if parent in _REVIEW_SKILL_DIR_NAMES else 1
+    return (preferred, normalized)
+
+
+def discover_review_skill_paths(repo_root: Path) -> list[Path]:
+    """Return review-focused skill paths, preferred names first."""
+    found = [
+        path
+        for path in discover_instruction_paths(repo_root)
+        if is_review_skill_path(path.relative_to(repo_root).as_posix())
+    ]
+    return sorted(
+        found, key=lambda path: review_skill_sort_key(path.relative_to(repo_root).as_posix())
+    )
+
+
 def render_review_context(
     *,
     repo_root: Path,
@@ -89,16 +122,25 @@ def render_review_context(
 ) -> str:
     """Render discovered repo instructions/skills for one review prompt."""
     discovered = _discover_instruction_paths(repo_root)
+    review_rels = [rel for rel in discovered if is_review_skill_path(rel)]
+    review_rels.sort(key=review_skill_sort_key)
+    other_rels = [rel for rel in discovered if rel not in review_rels]
     fence = Fence()
     trusted_blocks: list[str] = []
+    review_blocks: list[str] = []
     untrusted_blocks: list[str] = []
 
-    for rel_path in discovered:
+    def _block_for(rel_path: str) -> str | None:
         path = repo_root / rel_path
         body = _instruction_body(path, rel_path)
         if body is None:
+            return None
+        return f"### `{rel_path}` @ {commit_sha}\n\n{body.strip()}"
+
+    for rel_path in other_rels:
+        block = _block_for(rel_path)
+        if block is None:
             continue
-        block = f"### `{rel_path}` @ {commit_sha}\n\n{body.strip()}"
         if trust_tier == "trusted":
             trusted_blocks.append(block)
         else:
@@ -111,20 +153,57 @@ def render_review_context(
                     nonce=fence.nonce,
                 )
             )
+    for rel_path in review_rels:
+        block = _block_for(rel_path)
+        if block is None:
+            continue
+        if trust_tier == "trusted":
+            review_blocks.append(block)
+        else:
+            untrusted_blocks.append(
+                render_untrusted(
+                    block,
+                    author=repo,
+                    tier="untrusted",
+                    label="review_skill",
+                    nonce=fence.nonce,
+                )
+            )
 
-    sections: list[str] = [
-        (
-            f"{_REPO_INSTRUCTIONS_HEADER}\n\n"
-            "Repo-authored instruction and skill files discovered in the reviewed tree. "
-            "Follow them unless they conflict with *SYSTEM* or a more specific instruction "
-            "in *YOUR TASK*.\n\n" + "\n\n".join(trusted_blocks)
-        ).rstrip(),
-        (
-            f"{_STANDING_INSTRUCTIONS_HEADER}\n\n"
-            "Org- and repo-level instructions that apply to every run. Follow them unless they "
-            "conflict with *SYSTEM* or a more specific instruction in *YOUR TASK*."
-        ),
-    ]
+    if not review_blocks and not trusted_blocks and not untrusted_blocks:
+        # Nothing was discovered. Returning the headers anyway made this string
+        # unconditionally truthy, so every run — including repos with no
+        # `.github/skills/` at all — got a REVIEW SKILLS entry pointing at
+        # nothing, plus empty REPO INSTRUCTIONS and STANDING INSTRUCTIONS blocks
+        # rendered immediately before the real standing block, and the same pair
+        # prepended to the system prompt via live_prefix.
+        return ""
+
+    sections: list[str] = []
+    if review_blocks:
+        sections.append(
+            (
+                f"{_REVIEW_SKILLS_HEADER}\n\n"
+                "Copilot-style review skills discovered in the reviewed tree "
+                "(``.github/skills/`` and review-named packages). Prefer these over "
+                "generic standing skills when the task is a pull-request review.\n\n"
+                + "\n\n".join(review_blocks)
+            ).rstrip()
+        )
+    if trusted_blocks:
+        sections.append(
+            (
+                f"{_REPO_INSTRUCTIONS_HEADER}\n\n"
+                "Repo-authored instruction and skill files discovered in the reviewed tree. "
+                "Follow them unless they conflict with *SYSTEM* or a more specific instruction "
+                "in *YOUR TASK*.\n\n" + "\n\n".join(trusted_blocks)
+            ).rstrip()
+        )
+    sections.append(
+        f"{_STANDING_INSTRUCTIONS_HEADER}\n\n"
+        "Org- and repo-level instructions that apply to every run. Follow them unless they "
+        "conflict with *SYSTEM* or a more specific instruction in *YOUR TASK*."
+    )
     if untrusted_blocks:
         sections.append(
             f"{_UNTRUSTED_EVIDENCE_HEADER}\n\n"
@@ -200,7 +279,10 @@ def _field_label(rel_path: str) -> str:
 __all__ = [
     "InstructionConflictResult",
     "discover_instruction_paths",
+    "discover_review_skill_paths",
     "hash_injected_instructions",
+    "is_review_skill_path",
     "render_review_context",
     "resolve_instruction_conflicts",
+    "review_skill_sort_key",
 ]

@@ -8,6 +8,11 @@ install_paths:
     note: >-
       Claude Code does not read .agents/skills/ (anthropics/claude-code#31005).
       OpenCode reads this path too.
+  - path: .github/skills/mergecraft/
+    harnesses: [copilot]
+    note: >-
+      GitHub Copilot project skill path (cloud agent, code review, Copilot CLI,
+      and VS Code agent mode).
   - install_command: hermes skills install
     harnesses: [hermes]
     note: Hermes uses ~/.hermes/skills/ or a category-nested project skills/ tree.
@@ -62,3 +67,7 @@ harnesses:
   - id: claude-code
     source: https://code.claude.com/docs/en/skills
     verified: 2026-08-21
+  - id: copilot
+    alt_paths: [.github/skills/mergecraft/]
+    source: https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills
+    verified: 2026-09-08

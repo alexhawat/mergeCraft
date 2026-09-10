@@ -166,3 +166,82 @@ def test_partial_pin_bump_fails_action_pin_check(tmp_path: Path) -> None:
     failures = module._check_self_consistency(_WORKFLOW, pins)
     assert failures
     assert "different Action pins" in failures[0]
+
+
+_BUMP_WORKFLOW = "bump-action-pin.yml"
+
+
+def test_the_pin_bump_workflow_has_both_cycle_stages() -> None:
+    """The cycle is two commits and cannot be one PR.
+
+    P must name manifest commit C, and C's SHA is unknown until it merges, so
+    the automation has to expose the stages separately rather than pretend the
+    cycle is atomic.
+    """
+    doc = load_workflow(_BUMP_WORKFLOW)
+    triggers = workflow_on(doc)
+    assert "workflow_dispatch" in triggers
+    stage = triggers["workflow_dispatch"]["inputs"]["stage"]
+    assert set(stage["options"]) == {"manifest", "pin"}
+
+
+def test_the_pin_bump_workflow_verifies_the_image_before_committing() -> None:
+    """A digest nobody checked must never reach action.yml."""
+    text = read_text(f".github/workflows/{_BUMP_WORKFLOW}")
+    assert "make action-images-resolve" in text, "digest is not verified against GHCR"
+    assert "make action-manifest-prepare" in text
+    assert "make action-pin-prepare" in text
+
+
+def test_the_pin_bump_workflow_does_not_open_its_own_pull_request() -> None:
+    """A GITHUB_TOKEN-opened PR triggers no `pull_request` workflows.
+
+    It would arrive with zero required checks — and the pin is precisely the
+    change that must not merge unchecked. The workflow pushes a branch and
+    leaves the PR to a human rather than introducing a PAT to route around it.
+    """
+    text = read_text(f".github/workflows/{_BUMP_WORKFLOW}")
+    mentions = [line.strip() for line in text.splitlines() if "gh pr create" in line]
+    assert mentions, "the workflow should still tell the operator what to run"
+    for line in mentions:
+        # Echoed into the job summary, or described in a comment — never run.
+        assert line.startswith(("echo ", "#")), (
+            f"workflow executes `gh pr create`; that PR would carry no required checks: {line}"
+        )
+
+
+def test_the_pin_bump_workflow_warns_against_squashing_the_manifest() -> None:
+    """Squashing C orphans it and leaves nothing for P to name (#684)."""
+    text = read_text(f".github/workflows/{_BUMP_WORKFLOW}")
+    assert "squash" in text.lower(), "no squash warning for the manifest stage"
+
+
+def test_the_pin_stage_does_not_resolve_the_image_from_mains_tip() -> None:
+    """By the pin stage, main's tip is never the source the image was built from.
+
+    The manifest PR's own merge advances main, so `stage=pin` resolving from
+    HEAD asked GHCR for a digest tagged with the merge commit and always got
+    nothing:
+
+        {"analyzers_digest": "", "slim_digest": ""}
+        no published slim image for e2da18fc… — wait for CI/CD to finish
+
+    It is redundant as well as wrong: `action-pin-prepare` runs
+    `verify_manifest(manifest_commit)` internally, which verifies the digest
+    against GHCR for the correct source.
+    """
+    steps = job(load_workflow(_BUMP_WORKFLOW), "prepare")["steps"]
+    resolve = [step for step in steps if "action-images-resolve" in str(step.get("run", ""))]
+    assert len(resolve) == 1, "expected exactly one image-resolve step"
+    guard = str(resolve[0].get("if", ""))
+    assert "manifest" in guard, (
+        f"image resolution is not restricted to the manifest stage: {guard!r}"
+    )
+
+
+def test_the_pin_stage_names_its_branch_from_the_manifest_commit() -> None:
+    """The pin branch must not depend on the skipped resolve step's outputs."""
+    text = read_text(f".github/workflows/{_BUMP_WORKFLOW}")
+    assert "chore/action-pin-${MANIFEST_COMMIT" in text, (
+        "pin branch name derives from a step that does not run in this stage"
+    )

@@ -12,7 +12,6 @@ from tests.support.dead_package_wiring import root_callback_source
 
 WEBHOOK_MODULE = "mergecraft.scm.webhooks"
 EGRESS_MODULE = "mergecraft.security.egress"
-PUBLIC_COMMENT_MODULE = "mergecraft.security.public_comments"
 ADVERSARIAL_CORPORA_MODULE = "mergecraft.evals.adversarial_corpora"
 RECOVERY_MODULE = "mergecraft.reliability.recovery"
 BUNDLE_MODULE = "mergecraft.reliability.diagnostic_bundle"
@@ -76,7 +75,6 @@ __all__ = [
     "CLEANUP_FAILURE_MODES",
     "EGRESS_MODULE",
     "ISSUE_140_GATE_METRICS",
-    "PUBLIC_COMMENT_MODULE",
     "RECOVERY_MODULE",
     "SUPPORTED_WEBHOOK_PROVIDERS",
     "WEBHOOK_MODULE",

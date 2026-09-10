@@ -420,8 +420,32 @@ async def publish_deterministic_record(
         ),
         credential_degradations=list(tool_state.credential_degradations),
         agent_sandbox_decision=tool_state.agent_sandbox_decision,
+        action_pin_sha=_action_pin_sha(),
+        image_source_sha=_image_source_sha(),
+        review_skills=_loaded_review_skills(tool_state),
+        review_mcp_servers=_loaded_review_mcp(tool_state),
     )
     await upsert_sticky_progress_comment(resolved_ctx, block)
+
+
+def _action_pin_sha() -> str | None:
+    from mergecraft.build_metadata import resolve_action_pin_sha
+
+    return resolve_action_pin_sha()
+
+
+def _image_source_sha() -> str | None:
+    from mergecraft.build_metadata import resolve_build_commit
+
+    return resolve_build_commit()
+
+
+def _loaded_review_skills(tool_state: ToolState) -> list[str]:
+    return list(tool_state.review_skill_paths)
+
+
+def _loaded_review_mcp(tool_state: ToolState) -> list[str]:
+    return list(tool_state.review_mcp_names)
 
 
 def _token_summary(
@@ -1244,6 +1268,17 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     except Exception as exc:
         logger.warning("» bundled skills install failed: {}", exc)
 
+    from mergecraft.review.consumer_mcp import load_consumer_mcp_servers
+
+    repo_root = Path.cwd()
+    trust_tier = str(tool_state.trust_tier or "untrusted")
+    consumer_mcp = load_consumer_mcp_servers(
+        repo_root,
+        configured=list(settings.review.mcp_servers),
+        trust_tier=trust_tier,
+    )
+    tool_state.review_mcp_names = tuple(server.name for server in consumer_mcp)
+    tool_state.review_mcp_servers = tuple(consumer_mcp)
     instructions = resolve_instructions(
         payload=payload,
         repo=run_context.repo,
@@ -1258,6 +1293,12 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         xrepo_brief=settings.xrepo_brief,
         xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
         xrepo_learnings_headings=settings.xrepo_learnings_headings,
+        repo_root=repo_root,
+        trust_tier=trust_tier,
+        review_mcp_names=list(tool_state.review_mcp_names),
+    )
+    tool_state.review_skill_paths = tuple(
+        str(item) for item in instructions.extra.get("review_skills") or []
     )
     ctx.instructions = instructions
     logger.info("Using agent={} model={}", ctx.agent_id, ctx.resolved_model or "(auto)")
@@ -1395,6 +1436,9 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 xrepo_brief=settings.xrepo_brief,
                 xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
                 xrepo_learnings_headings=settings.xrepo_learnings_headings,
+                repo_root=Path.cwd(),
+                trust_tier=str(tool_state.trust_tier or "untrusted"),
+                review_mcp_names=list(tool_state.review_mcp_names),
             )
             attempt_denied = subagent_denied_tool_names(
                 replace(tool_context, agent_id=attempt_agent_id),

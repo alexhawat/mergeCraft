@@ -117,6 +117,18 @@ def _rebuild_review_body_with_deterministic_preamble(
     )
 
 
+def _review_action_pin_sha() -> str | None:
+    from mergecraft.build_metadata import resolve_action_pin_sha
+
+    return resolve_action_pin_sha()
+
+
+def _review_image_source_sha() -> str | None:
+    from mergecraft.build_metadata import resolve_build_commit
+
+    return resolve_build_commit()
+
+
 def _deterministic_review_block(
     ctx: ToolContext,
     *,
@@ -156,6 +168,10 @@ def _deterministic_review_block(
         review_body_truncated=tool_state.review_body_truncated,
         credential_degradations=list(tool_state.credential_degradations),
         agent_sandbox_decision=tool_state.agent_sandbox_decision,
+        action_pin_sha=_review_action_pin_sha(),
+        image_source_sha=_review_image_source_sha(),
+        review_skills=list(tool_state.review_skill_paths),
+        review_mcp_servers=list(tool_state.review_mcp_names),
     )
 
 

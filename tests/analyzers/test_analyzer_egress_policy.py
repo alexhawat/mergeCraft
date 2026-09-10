@@ -221,9 +221,23 @@ def test_filtered_netns_wrap_drops_net_and_never_uses_host_net(tmp_path: Path) -
 def test_sandbox_none_named_skips_even_when_filter_available(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """GHA Action image: no sandbox → named skip, even if a probe were to claim filter."""
+    """No sandbox + non-userspace filter claim → named skip."""
+    from mergecraft.analyzers.egress import FilteredEgressProbe
+
     monkeypatch.setattr("mergecraft.mcp.shell.detect_sandbox_method", lambda: "none")
     monkeypatch.setattr("mergecraft.analyzers.egress.filtered_egress_available", lambda: True)
+    monkeypatch.setattr(
+        "mergecraft.analyzers.egress.probe_filtered_egress",
+        lambda: FilteredEgressProbe(
+            network_namespace=True,
+            veth=True,
+            ip_netns=True,
+            iptables=True,
+            available=True,
+            reason="",
+            backend="kernel",
+        ),
+    )
     skip = import_analyzer_egress_symbol("analyzer_egress_skip_reason")
     reason = skip(
         analyzer_id="osv-scanner",
@@ -234,6 +248,36 @@ def test_sandbox_none_named_skips_even_when_filter_available(
     )
     assert reason is not None
     assert "cannot enforce" in reason.lower() or "unavailable" in reason.lower()
+
+
+def test_sandbox_none_allows_userspace_backend(monkeypatch: MonkeyPatch) -> None:
+    """Action image: userspace backend can enforce without host-net sandbox."""
+    from mergecraft.analyzers.egress import FilteredEgressProbe
+
+    monkeypatch.setattr("mergecraft.mcp.shell.detect_sandbox_method", lambda: "none")
+    monkeypatch.setattr("mergecraft.analyzers.egress.filtered_egress_available", lambda: True)
+    monkeypatch.setattr(
+        "mergecraft.analyzers.egress.probe_filtered_egress",
+        lambda: FilteredEgressProbe(
+            network_namespace=True,
+            veth=False,
+            ip_netns=False,
+            iptables=True,
+            available=True,
+            reason="",
+            backend="userspace",
+            user_namespace=True,
+        ),
+    )
+    skip = import_analyzer_egress_symbol("analyzer_egress_skip_reason")
+    reason = skip(
+        analyzer_id="osv-scanner",
+        network_allowlist=_OSV_ALLOWLIST,
+        event_name="pull_request_target",
+        event=FORK_PULL_REQUEST_EVENT,
+        self_review_level="off",
+    )
+    assert reason is None
 
 
 def test_skip_reason_none_when_filter_and_unshare(monkeypatch: MonkeyPatch) -> None:

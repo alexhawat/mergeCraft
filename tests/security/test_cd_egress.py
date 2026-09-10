@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import pytest
 
+from mergecraft.analyzers.redact import redact_secrets
 from tests.ci.workflow_support import REPO_ROOT
 from tests.support.cc_batch import decide_approval_defining_files, require_callable
 from tests.support.cd_batch import (
     EGRESS_MODULE,
-    PUBLIC_COMMENT_MODULE,
     d10_root_callback_owns_globals,
     require_module,
 )
@@ -113,9 +113,7 @@ def test_threat_model_document_is_tied_to_executable_tests() -> None:
 
 def test_public_comments_never_include_secret_material() -> None:
     """Error: publication redacts tokens before they hit a public comment."""
-    module = require_module(PUBLIC_COMMENT_MODULE)
-    redact = require_callable(module, "redact_secrets_for_public_comment")
     secret = "sk-live-public-comment-leak-test-token"
-    body = redact(f"contact us with {secret} please")
+    body = redact_secrets(f"contact us with {secret} please")
     assert secret not in body
     assert "sk-live" not in body

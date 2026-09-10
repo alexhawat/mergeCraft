@@ -7,7 +7,6 @@ Exports:
     container_image_vulnerability_gate: Image scan distinct from make security.
     dependency_vulnerability_gate: Dependency advisory gate.
     guard_external_url: SSRF refusal for untrusted retrieval URLs.
-    redact_secrets_for_public_comment: Strip secret material before publish.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from mergecraft.security.egress import (
     dependency_vulnerability_gate,
     guard_external_url,
 )
-from mergecraft.security.public_comments import redact_secrets_for_public_comment
 
 __all__ = [
     "DEFAULT_EGRESS_ALLOWLIST",
@@ -29,5 +27,4 @@ __all__ = [
     "container_image_vulnerability_gate",
     "dependency_vulnerability_gate",
     "guard_external_url",
-    "redact_secrets_for_public_comment",
 ]
