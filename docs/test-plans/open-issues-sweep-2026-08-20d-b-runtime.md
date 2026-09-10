@@ -75,7 +75,7 @@ GREEN (no xfail) — must stay passing through impl:
 | `src/mergecraft/enterprise/offline.py` | `offline_install_plan`, `OfflineInstallError` |
 | `src/mergecraft/enterprise/telemetry.py` | `TelemetryMode`, `resolve_telemetry_mode`, `is_telemetry_export_enabled` |
 | `src/mergecraft/enterprise/residency.py` | `DataResidencyPolicy`, `enforce_data_residency` |
-| `src/mergecraft/enterprise/health.py` | `HEALTHZ_PATH` (`/healthz`), `health_payload`, `build_health_app` |
+| `src/mergecraft/enterprise/health.py` | `health_payload` (CLI JSON via `mergecraft health`) |
 | `src/mergecraft/enterprise/audit.py` | `export_audit_log`, `export_usage`, `explain_blocking_decision` |
 | `src/mergecraft/enterprise/support_bundle.py` | `write_support_bundle` |
 | `src/mergecraft/enterprise/policy_distribution.py` | `distribute_org_policy` (wraps `mergecraft.policy`) |
@@ -120,7 +120,7 @@ Do not hand-edit `docs/compatibility-matrix.md` into the six-axis matrix.
 | DB381c | Offline install | unit | happy/error | `test_offline_install_plan_uses_python_311_floor`, `test_offline_install_rejects_standalone_binary_request` |
 | DB381d | Telemetry on/opt-out/off | unit | happy/edge/error | `tests/enterprise/test_telemetry.py` |
 | DB381e | Data residency | unit | happy/edge/error | `tests/enterprise/test_residency.py` |
-| DB381f | `/healthz` JSON | unit + integration | happy/error | `tests/enterprise/test_health.py` |
+| DB381f | CLI health JSON (`health_payload`) | unit | happy | `tests/enterprise/test_health.py` |
 | DB381g | Audit + usage JSON | unit | happy/edge/error | `tests/enterprise/test_audit.py` |
 | DB381h | Support bundle redaction | unit | happy/edge/error | `tests/enterprise/test_support_bundle.py` |
 | DB381i | Policy/memory without dashboard | integration | happy/error | `tests/enterprise/test_policy_memory_distribution.py` |
