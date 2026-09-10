@@ -15,12 +15,14 @@ scope: diff
 parser: markdownlint_json
 supports_fix: false
 default_enabled: auto
-version: 0.37.4
+version: 0.41.1
 runtime: repo-native
 timeout_s: 60
 trust: trusted
 severity_map:
   error: Major
+  # 0.47.0 added warning support; unmapped natives raise, so both are declared.
+  warning: Minor
 provenance: {}
 network_allowlist: []
 exclusive_group: null

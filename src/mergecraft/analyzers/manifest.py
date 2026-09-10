@@ -49,7 +49,8 @@ _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
     "htmlhint_json": frozenset({"error", "warning"}),
     "stylelint_json": frozenset({"error", "warning"}),
     "yamllint_parsable": frozenset({"error", "warning"}),
-    "markdownlint_json": frozenset({"error"}),
+    # 0.47.0 added warning support; 0.49.1 emits a per-finding `severity`.
+    "markdownlint_json": frozenset({"error", "warning"}),
     "prisma_lint_json": frozenset({"error"}),
     "luacheck_text": frozenset({"error", "warning"}),
     "checkmake_text": frozenset({"warning"}),

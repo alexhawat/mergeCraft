@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- markdownlint follows the `markdownlint-cli` 0.49.1 bump: the catalog pin tracks
+  the engine, so it moves 0.37.4 → 0.41.1. A markdownlint `warning` now grades
+  **Minor** instead of Major — the parser reads the per-finding `severity` that
+  0.49.1 emits rather than hardcoding `error`, and an unrecognised severity
+  grades as `error` with a log line instead of failing the whole run. Repo-root
+  `.markdownlint.json` disables `MD060` (`table-column-style`), which the engine
+  bump enables by default and which fires 493 times on this repo's docs tables;
+  consumer repos without their own config still inherit it.
+
 ### Added
 
 - GitHub Copilot is a first-class Agent Skills harness: generated

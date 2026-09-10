@@ -4,6 +4,6 @@
   "description": "Pinned repo-native analyzer CLIs for local mergeCraft reviews (#427).",
   "devDependencies": {
     "jscpd": "4.1.0",
-    "markdownlint-cli": "0.44.0"
+    "markdownlint-cli": "0.49.1"
   }
 }

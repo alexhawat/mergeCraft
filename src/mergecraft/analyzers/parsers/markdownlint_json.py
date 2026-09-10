@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     coerce_line,
@@ -35,12 +37,27 @@ def parse_markdownlint_json(
             rule_id = str(names[0])
         start_line = coerce_line(item.get("lineNumber", 1))
         message = str(item.get("ruleDescription") or item.get("errorDetail") or rule_id)
+        # markdownlint 0.47.0 added warning support and 0.49.1 emits a per-finding
+        # `severity`. Older releases omit it, so fall back to "error" — hardcoding
+        # it meant a future `warning` would have been reported as a Major.
+        #
+        # An unmapped native raises, and adapters.py catches that as a parse
+        # failure for the whole run — so one unexpected severity would drop every
+        # finding, reported as "failed to parse analyzer output" with nothing
+        # pointing at the cause. Degrade the odd finding instead of the run.
+        native_severity = str(item.get("severity") or "error").strip().lower() or "error"
+        if native_severity not in manifest.severity_map:
+            logger.info(
+                "markdownlint reported unmapped severity {!r}; grading it as error",
+                native_severity,
+            )
+            native_severity = "error"
         findings.append(
             make_finding(
                 tool=manifest.id,
                 rule_id=rule_id,
                 category=category,
-                severity=map_native_severity(manifest, "error"),
+                severity=map_native_severity(manifest, native_severity),
                 confidence=map_confidence(None),
                 message=message,
                 path=resolve_repo_relative_path(

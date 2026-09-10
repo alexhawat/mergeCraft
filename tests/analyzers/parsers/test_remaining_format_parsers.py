@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -200,3 +201,72 @@ def test_phpstan_and_brakeman_commands_unchanged() -> None:
     assert brakeman.command[1:4] == ["-f", "sarif", "-o"]
     assert "-" in brakeman.command
     assert brakeman.parser == "sarif"
+
+
+def test_markdownlint_honours_a_per_finding_severity() -> None:
+    """0.49.1 emits `severity`; older releases omit it.
+
+    The parser hardcoded "error", so a `warning` finding would have been
+    reported as a Major once 0.47.0's warning support started being used.
+    Unmapped natives raise, so the catalog declares both levels.
+    """
+    raw = json.dumps(
+        [
+            {
+                "fileName": "README.md",
+                "lineNumber": 3,
+                "ruleNames": ["MD013", "line-length"],
+                "ruleDescription": "Line length",
+                "severity": "warning",
+            },
+            {
+                "fileName": "README.md",
+                "lineNumber": 9,
+                "ruleNames": ["MD012", "no-multiple-blanks"],
+                "ruleDescription": "Multiple consecutive blank lines",
+                "severity": "error",
+            },
+        ]
+    )
+    findings = _parse("markdownlint_json", raw, tool_id="markdownlint")
+    assert [f.severity for f in findings] == ["Minor", "Major"]
+
+
+def test_markdownlint_defaults_to_error_when_severity_is_absent() -> None:
+    """Releases before 0.49.1 omit the field entirely."""
+    raw = json.dumps(
+        [{"fileName": "README.md", "lineNumber": 1, "ruleNames": ["MD013"], "ruleDescription": "x"}]
+    )
+    findings = _parse("markdownlint_json", raw, tool_id="markdownlint")
+    assert [f.severity for f in findings] == ["Major"]
+
+
+def test_markdownlint_keeps_other_findings_when_one_severity_is_unknown() -> None:
+    """An unmapped native must not cost the whole run.
+
+    `map_native_severity` raises, and adapters.py catches that as a parse
+    failure for the entire analyzer output — so a single unexpected severity
+    would drop every finding, surfacing as "failed to parse analyzer output"
+    with nothing pointing at the cause.
+    """
+    raw = json.dumps(
+        [
+            {
+                "fileName": "README.md",
+                "lineNumber": 1,
+                "ruleNames": ["MD013"],
+                "ruleDescription": "Line length",
+                "severity": "catastrophe",
+            },
+            {
+                "fileName": "README.md",
+                "lineNumber": 2,
+                "ruleNames": ["MD012"],
+                "ruleDescription": "Multiple consecutive blank lines",
+                "severity": "warning",
+            },
+        ]
+    )
+    findings = _parse("markdownlint_json", raw, tool_id="markdownlint")
+    assert len(findings) == 2, "an unknown severity dropped the other findings"
+    assert [f.severity for f in findings] == ["Major", "Minor"]
