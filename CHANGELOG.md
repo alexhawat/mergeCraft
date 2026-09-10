@@ -95,51 +95,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Action image digest pin gate (`action-image-digest-check`) and halved
   `wait-for-ci` poll cadence (20s → 10s, #528)
 
-### Lane E — agent credential broker
-
-### Security
-
-- Critical and Major security findings are no longer demoted when incidental
-  maintainability or documentation words appear in the same message; the security
-  lane takes absolute precedence and capping rules are inapplicable when impact
-  evidence supports the asserted severity (N4, N20)
-- Security category inference now recognizes ``auth``/``unauth`` stems and named
-  vulnerability classes (RCE, deserialization, path traversal, SSRF, CSRF, XXE,
-  privilege escalation, prototype pollution, open redirect, hardcoded key) (N20)
-
 ### Fixed
 
-- Default local review now includes eligible untracked source files in the
-  materialized diff; gitignored, oversized, binary, and symlink skips are
-  reported as review-coverage limitations instead of silent omissions, and an
-  empty diff caused by exclusions no longer renders as a passed review with
-  "no changes to review" (N7)
-
-- Partial ``run_analyzers`` reruns retain findings from earlier covered scopes
-  instead of replacing the whole analyzer run, so a clean pass over an
-  uncovered file cannot erase a prior blocker (N2)
-- ``get_commit_info`` no longer registers review scope at PR head; single-commit
-  patches land in ``commit_inspection_diffs`` instead of overwriting
-  ``primary.diff_path`` (N3)
-
-- Cluster canonicalization and semantic dedupe now keep the strongest member's
-  severity when corroborating weaker duplicates collapse, so a Major blocker
-  cannot turn green at either pipeline collapse point (N5)
-- Incidental prose such as ``readme``, ``comment``, or ``style`` no longer caps
-  ``Critical``/``Major`` findings whose core impact is security or correctness;
-  genuine style nits are still deflated (N4)
-- Category inference no longer returns on the first maintainability pattern match
-  when security signals are present in the same message (N20)
-
-- Fork-head runs now reject every indexed provider credential spelling
-  (OAuth, device-code, cloud-chain) via a single registry-derived allowlist,
-  not only flat ``*_API_KEY`` names (N1)
+- Fork-head runs reject every indexed provider credential spelling (OAuth,
+  device-code, cloud-chain) via a single registry-derived allowlist, not only
+  flat ``*_API_KEY`` names (N1)
 - Indexed ``device_code`` Codex credentials reach ``auth.json`` through the
   resolved child environment instead of ambient ``os.environ``, and broker
   posture reports ``subscription`` for indexed-only setups (N19)
 - Fork-credential and agent-env strip sets both derive from
   ``provider_credential_env_names`` so ``GOOGLE_API_KEY``, ``AWS_SESSION_TOKEN``,
   and future provider names cannot drift between consumers (N21)
+- Critical and Major security findings are no longer demoted when incidental
+  maintainability or documentation words appear in the same message; the security
+  lane takes absolute precedence when impact evidence supports the asserted
+  severity (N4)
+- Category inference recognizes ``auth``/``unauth`` stems and named vulnerability
+  classes, and no longer returns on the first maintainability pattern match when
+  security signals are present in the same message (N20)
+- Cluster canonicalization and semantic dedupe keep the strongest member's
+  severity when corroborating weaker duplicates collapse, so a Major blocker
+  cannot turn green at either pipeline collapse point (N5)
+- Partial ``run_analyzers`` reruns retain findings from earlier covered scopes
+  instead of replacing the whole analyzer run, so a clean pass over an
+  uncovered file cannot erase a prior blocker (N2)
+- ``get_commit_info`` no longer registers review scope at PR head; single-commit
+  patches land in ``commit_inspection_diffs`` instead of overwriting
+  ``primary.diff_path`` (N3)
+- Default local review includes eligible untracked source files in the
+  materialized diff; gitignored, oversized, binary, and symlink skips are
+  reported as review-coverage limitations instead of silent omissions, and an
+  empty diff caused by exclusions no longer renders as a passed review with
+  "no changes to review" (N7)
 - Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
   tracing-content cap; export of prompt bodies on fork PRs requires the Action
   input, env, or trusted base settings

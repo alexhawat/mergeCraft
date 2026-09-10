@@ -35,7 +35,9 @@ def _merge_scope_retained_state(
     """Retain analyzer evidence per covered scope; supersede only that scope (D9)."""
     scope_key = _scope_key_from_state(incoming)
     tool_state.analyzer_scope_runs[scope_key] = incoming
-    scope_runs = tool_state.analyzer_scope_runs.values()
+    scope_runs = list(tool_state.analyzer_scope_runs.values())
+    if len(scope_runs) == 1:
+        return scope_runs[0]
     merged_findings: list[dict[str, Any]] = []
     merged_inline: list[dict[str, Any]] = []
     merged_deferred: list[dict[str, Any]] = []
