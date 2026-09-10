@@ -12,16 +12,11 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-import pytest
+import pytest  # noqa: TC002
 from tests.agents.conftest import make_agent_run_context
 from tests.cli.support_provider_registry import (
     scaffold_mergecraft_home,
     write_registry_provider_row,
-)
-
-_RA2_XFAIL = pytest.mark.xfail(
-    reason="green after RA2: resolved credential mapping reaches _setup_codex_auth",
-    strict=False,
 )
 
 _INDEXED_AUTH = json.dumps(
@@ -58,7 +53,6 @@ def _auth_path(codex: Any, ctx: Any) -> Any:
     return codex._codex_home(ctx) / "auth.json"
 
 
-@_RA2_XFAIL
 def test_indexed_codex_auth_json_writes_run_home_auth_file(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -92,7 +86,6 @@ def test_flat_codex_auth_json_still_writes_auth_file(
     assert auth_path.read_text(encoding="utf-8") == _FLAT_AUTH
 
 
-@_RA2_XFAIL
 def test_indexed_and_flat_conflict_resolves_to_the_registry_credential(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -110,7 +103,6 @@ def test_indexed_and_flat_conflict_resolves_to_the_registry_credential(
     assert auth_path.read_text(encoding="utf-8") == _INDEXED_AUTH
 
 
-@_RA2_XFAIL
 def test_setup_codex_auth_does_not_read_ambient_os_environ(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
