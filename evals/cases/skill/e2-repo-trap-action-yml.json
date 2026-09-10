@@ -1,0 +1,18 @@
+{
+  "id": "skill-e2-repo-trap-action-yml",
+  "title": "Repo trap: literal workflow expression in action.yml description",
+  "scenario": "e2",
+  "fixture_repo": "e2-action-yml-trap",
+  "skill_variants": {
+    "baseline": "baseline-pointer",
+    "tip": "tip-doctrine"
+  },
+  "review_assertions": {
+    "with_skill_must_mention": [
+      "check_action_yml_hygiene.py",
+      "literal `${{`"
+    ],
+    "without_skill_must_not_block_on_trap": false
+  },
+  "notes": "R16 Layer 2 — repo-traps.md cites scripts/check_action_yml_hygiene.py."
+}

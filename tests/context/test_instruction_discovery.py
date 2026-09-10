@@ -37,7 +37,7 @@ def _write_discovery_repo(root: Path) -> str:
     (root / "AGENTS.md").write_text(
         "Follow the service boundaries in `services/`.\n", encoding="utf-8"
     )
-    skill_dir = root / ".cursor" / "skills" / "demo"
+    skill_dir = root / "team-skills" / "demo"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
         f"---\nname: demo\n---\n\n{_SKILL_MARKER}\n",
