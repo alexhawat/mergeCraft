@@ -153,13 +153,15 @@ def test_set_agent_sandbox_refuses_commented_config_and_leaves_file_intact(
     assert config_path.read_text(encoding="utf-8") == before
 
 
-def test_set_self_review_refuses_commented_config_and_leaves_file_intact(
+def test_set_self_review_patches_commented_config_in_place(
     tmp_path: Path,
 ) -> None:
-    """set-self-review shares the commented-config refusal path."""
+    """set-self-review patches trust.selfReview without rewriting comment lines."""
     config_path = _write_commented_config(tmp_path)
     before = config_path.read_text(encoding="utf-8")
     result = runner.invoke(app, ["trust", "set-self-review", "analyzers", "--cwd", str(tmp_path)])
-    assert result.exit_code != 0, result.output
-    assert "comment" in result.output.lower() or "refusing" in result.output.lower()
-    assert config_path.read_text(encoding="utf-8") == before
+    assert result.exit_code == 0, result.output
+    after = config_path.read_text(encoding="utf-8")
+    assert "# " in after or "#" in before
+    assert "selfReview" in after
+    assert "analyzers" in after

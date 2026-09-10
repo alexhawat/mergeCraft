@@ -21,6 +21,7 @@ over each generated directory.
 | --- | --- | --- |
 | `.agents/skills/mergecraft/` | Codex, Cursor, OpenCode, Gemini CLI, **OpenClaw** | Cross-vendor Agent Skills path. Gemini CLI prefers it over `.gemini/skills/`. |
 | `.claude/skills/mergecraft/` | Claude Code, OpenCode | Claude Code does **not** read `.agents/skills/` ([anthropics/claude-code#31005](https://github.com/anthropics/claude-code/issues/31005)). |
+| `.github/skills/mergecraft/` | Copilot | Cloud agent, code review, Copilot CLI, and VS Code agent mode. |
 | `hermes skills install` | Hermes | Hermes uses `~/.hermes/skills/` or a category-nested project `skills/` tree. |
 
 **OpenClaw** reads `.agents/skills/` only — it does **not** read `.claude/skills/`.
@@ -44,6 +45,7 @@ provider credentials securely — never paste secrets into the skill body.
 | OpenClaw | https://docs.openclaw.ai/tools/skills | 2026-08-21 |
 | Hermes | https://hermes-agent.nousresearch.com/docs/developer-guide/creating-skills | 2026-08-21 |
 | Claude Code | https://code.claude.com/docs/en/skills | 2026-08-21 |
+| Copilot | https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills | 2026-09-08 |
 
 All targets implement the [Agent Skills](https://agentskills.io/specification) open
 standard (`name` + `description` frontmatter). Future harnesses must cite a primary source

@@ -15,7 +15,13 @@ from typing import Any
 
 import pytest
 
-from mergecraft.config.settings import RepoInfo, RepoSettings, load_repo_settings
+from mergecraft.config.settings import (
+    RepoInfo,
+    RepoSettings,
+    ReviewSettings,
+    apply_trust_tier_to_repo_settings,
+    load_repo_settings,
+)
 from mergecraft.main import RunContext, _run_setup_script_phase
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.utils.instructions import resolve_instructions
@@ -142,9 +148,16 @@ def test_untrusted_stop_script_is_not_executed(tmp_path: Path) -> None:
 
     assert filtered.stop_script is None
     assert "stop_script" in drops
-    if filtered.stop_script:
-        subprocess.run(filtered.stop_script, shell=True, check=False)
-    assert not sentinel.exists()
+
+
+def test_untrusted_review_mcp_servers_are_dropped() -> None:
+    """``review.mcpServers`` is executable config and must not survive untrusted."""
+    raw = RepoSettings(
+        review=ReviewSettings(mcp_servers=[{"name": "docs", "command": "bash"}]),
+    )
+    filtered, drops = apply_trust_tier_to_repo_settings(raw, "untrusted", source_label="fork PR")
+    assert filtered.review.mcp_servers == []
+    assert "review.mcp_servers" in drops
 
 
 def test_untrusted_static_check_commands_are_dropped(tmp_path: Path) -> None:

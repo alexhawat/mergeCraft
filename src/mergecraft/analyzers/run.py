@@ -182,6 +182,7 @@ def _sandboxed_argv(
     self_review_level: str = "off",
     analyzer_id: str = "",
     netns_name: str | None = None,
+    egress_session: Any | None = None,
 ) -> tuple[list[str], Callable[[], None] | None]:
     """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it."""
     run_argv = list(plan.argv)
@@ -215,6 +216,7 @@ def _sandboxed_argv(
             self_review_level=self_review_level,
             analyzer_id=analyzer_id or plan.manifest_id,
             netns_name=netns_name,
+            egress_session=egress_session,
         ),
         preexec_fn,
     )
@@ -344,9 +346,13 @@ def run_plan(
     if sandbox_context is not None:
         timeout_s = min(timeout_s, sandbox_context.timeout_s)
     command = _command_string(plan.argv)
-    from mergecraft.analyzers.egress import FilteredEgressSetupError, FilteredNetnsSession
+    from mergecraft.analyzers.egress import (
+        EgressSession,
+        FilteredEgressSetupError,
+        start_filtered_egress_session,
+    )
 
-    session: FilteredNetnsSession | None = None
+    session: EgressSession | None = None
     if sandbox_context is not None:
         from mergecraft.analyzers.sandbox import evaluate_analyzer_egress_policy
 
@@ -360,8 +366,7 @@ def run_plan(
         )
         if outcome.status == "filtered":
             try:
-                session = FilteredNetnsSession(list(sandbox_context.network_allowlist))
-                session.start()
+                session = start_filtered_egress_session(list(sandbox_context.network_allowlist))
             except FilteredEgressSetupError as exc:
                 reason = (
                     f"Skipped: egress policy — {plan.manifest_id} declares network hosts "
@@ -382,7 +387,7 @@ def run_plan(
             event=resolved_event,
             self_review_level=self_review_level,
             analyzer_id=analyzer_id or plan.manifest_id,
-            netns_name=session.ns_name if session is not None else None,
+            egress_session=session,
         )
         result = _run_subprocess(
             run_argv,

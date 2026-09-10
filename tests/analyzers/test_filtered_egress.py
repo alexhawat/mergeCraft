@@ -168,9 +168,12 @@ def test_probe_does_not_fake_availability_on_this_host() -> None:
         assert "unavailable" in probe.reason
     else:
         assert probe.network_namespace
-        assert probe.veth
-        assert probe.ip_netns
         assert probe.iptables
+        if probe.backend == "kernel":
+            assert probe.veth
+            assert probe.ip_netns
+        else:
+            assert probe.backend == "userspace"
 
 
 def test_session_start_fails_closed_when_unavailable() -> None:

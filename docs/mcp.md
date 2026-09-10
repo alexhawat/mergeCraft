@@ -131,6 +131,38 @@ Gemini CLI MCP settings (`settings.json` or project override):
 }
 ```
 
+### GitHub Copilot
+
+Repo MCP settings (Settings → Copilot → MCP servers). Shared by Copilot cloud
+agent **and** Copilot code review. Local stdio is the supported public profile.
+Allowlist the six public tools — Copilot calls MCP autonomously and will not
+ask. Do **not** point Copilot code review at the runtime harness
+(`/mcp/reviewer`). Cloud agent and code review need `mergecraft` on the runner
+(install uv + the CLI, for example via
+[`.github/workflows/copilot-setup-steps.yml`](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/configure-mcp-servers)).
+Secrets for Copilot MCP must use the `COPILOT_MCP_*` Agents secret prefix.
+Remote OAuth MCP is not supported.
+
+```json
+{
+  "mcpServers": {
+    "mergecraft": {
+      "type": "local",
+      "command": "mergecraft",
+      "args": ["mcp", "serve", "--role", "public", "--transport", "stdio"],
+      "tools": [
+        "review_change",
+        "get_review",
+        "inspect_finding",
+        "explain_finding",
+        "get_capabilities",
+        "get_policy"
+      ]
+    }
+  }
+}
+```
+
 ### OpenCode
 
 OpenCode `opencode.json` / `opencode.jsonc` (global or project). Local stdio servers
