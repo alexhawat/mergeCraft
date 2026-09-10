@@ -11,6 +11,17 @@ from mergecraft._build_metadata import __commit__ as _baked_commit
 from mergecraft.utils.git_hardening import git_argv
 
 
+def resolve_action_pin_sha() -> str | None:
+    """Return the consumer Action pin (manifest commit C), when the Action set it."""
+    pin = os.environ.get("MERGECRAFT_ACTION_SHA", "").strip()
+    return pin or None
+
+
+def resolve_action_deployment_identity() -> tuple[str | None, str | None]:
+    """Return ``(action_pin_sha, image_source_sha)`` for the run record (#641)."""
+    return resolve_action_pin_sha(), resolve_build_commit()
+
+
 @lru_cache(maxsize=1)
 def resolve_build_commit() -> str | None:
     """Return the full git SHA baked at build time, or from a source checkout."""
@@ -46,4 +57,8 @@ def _git_head_commit(root: Path) -> str | None:
     return commit or None
 
 
-__all__ = ["resolve_build_commit"]
+__all__ = [
+    "resolve_action_deployment_identity",
+    "resolve_action_pin_sha",
+    "resolve_build_commit",
+]

@@ -96,6 +96,12 @@ jobs:
           model: {_DEFAULT_MODEL}
           status_checks: enabled
         env:
+          # The pin the job actually runs (manifest commit C). The container can
+          # only learn it from here — `uses:` is not visible inside the image —
+          # and resolve_action_pin_sha() reads exactly this name. Without it a
+          # consumer install records an empty pin and cannot report a pin/image
+          # mismatch (#641). Keep it equal to the `uses:` SHA above.
+          MERGECRAFT_ACTION_SHA: {pin}
           CLAUDE_CODE_OAUTH_TOKEN: ${{{{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}}}
           # ANTHROPIC_API_KEY: ${{{{ secrets.ANTHROPIC_API_KEY }}}}
           # CODEX_AUTH_JSON: ${{{{ secrets.CODEX_AUTH_JSON }}}}

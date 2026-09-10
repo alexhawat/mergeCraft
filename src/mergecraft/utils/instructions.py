@@ -342,6 +342,9 @@ def resolve_instructions(
     xrepo_brief: str | None = None,
     xrepo_learnings_file_path: str | None = None,
     xrepo_learnings_headings: list[LearningsHeading] | None = None,
+    repo_root: Any | None = None,
+    trust_tier: str = "untrusted",
+    review_mcp_names: list[str] | None = None,
 ) -> ResolvedInstructions:
     """Assemble the full agent prompt from payload + modes + learnings."""
     headings = learnings_headings or []
@@ -661,9 +664,43 @@ Trust the tools — do not repeatedly verify after successful operations. Except
     )
     runtime_section = f"************* RUNTIME *************\n\n{runtime}"
 
+    review_context = ""
+    review_skill_paths: list[str] = []
+    if repo_root is not None:
+        from pathlib import Path as PathType
+
+        from mergecraft.context.instruction_discovery import (
+            discover_review_skill_paths,
+            render_review_context,
+        )
+
+        root = PathType(repo_root)
+        commit_sha = str(event.get("headSha") or event.get("head_sha") or "")
+        review_context = render_review_context(
+            repo_root=root,
+            trust_tier=trust_tier,
+            repo=f"{repo.owner}/{repo.name}",
+            commit_sha=commit_sha,
+        )
+        review_skill_paths = [
+            path.relative_to(root).as_posix() for path in discover_review_skill_paths(root)
+        ]
+    mcp_note = ""
+    if review_mcp_names:
+        listed = ", ".join(f"`{name}`" for name in review_mcp_names)
+        mcp_note = (
+            "************* REVIEW MCP *************\n\n"
+            "Read-only consumer MCP servers attached for this review "
+            f"(no OAuth remotes, no write tools): {listed}."
+        )
+
     toc_entries: list[tuple[str, str]] = []
     if task:
         toc_entries.append(("YOUR TASK", "what to accomplish"))
+    if review_context:
+        toc_entries.append(("REVIEW SKILLS", "Copilot-style review skills from the reviewed tree"))
+    if mcp_note:
+        toc_entries.append(("REVIEW MCP", "read-only consumer MCP servers attached to this run"))
     if standing:
         toc_entries.append(("STANDING INSTRUCTIONS", "org/repo defaults applied to every run"))
     if xrepo_section:
@@ -689,6 +726,8 @@ Trust the tools — do not repeatedly verify after successful operations. Except
         for part in (
             toc,
             task,
+            review_context,
+            mcp_note,
             standing,
             xrepo_section,
             setup_failure,
@@ -724,6 +763,9 @@ Trust the tools — do not repeatedly verify after successful operations. Except
     # them), but that path is structurally dead in production.
     setup_notice = setup_failure or setup_skip
     system_with_setup_notice = f"{setup_notice}\n\n{system}" if setup_notice else system
+    live_prefix = "\n\n".join(part for part in (review_context, mcp_note) if part)
+    if live_prefix:
+        system_with_setup_notice = f"{live_prefix}\n\n{system_with_setup_notice}"
 
     return ResolvedInstructions(
         full=raw_full.strip(),
@@ -739,6 +781,8 @@ Trust the tools — do not repeatedly verify after successful operations. Except
                 if setup_script_skip_reason
                 else {}
             ),
+            **({"review_skills": review_skill_paths} if review_skill_paths else {}),
+            **({"review_mcp": list(review_mcp_names or [])} if review_mcp_names else {}),
         },
     )
 
