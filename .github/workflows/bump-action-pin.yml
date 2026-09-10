@@ -1,0 +1,166 @@
+# SPDX-License-Identifier: MIT
+# Automates the mechanical half of the S -> D -> C -> P pin cycle (#641).
+#
+# The cycle is two commits and they cannot be one PR: the consumer pin P must
+# name manifest commit C, and C's SHA is not known until it merges. Each stage
+# here prepares one of them.
+#
+#   stage=manifest  Resolve main's tip as source S, verify the published image D
+#                   against GHCR, run `make action-manifest-prepare`, and push
+#                   the one-line action.yml change on a branch.
+#   stage=pin       Given the merged MANIFEST_COMMIT, run `make
+#                   action-pin-prepare` and push the four-reference change.
+#
+# This deliberately stops at pushing a branch. A PR opened with GITHUB_TOKEN
+# does not trigger `pull_request` workflows, so it would arrive carrying zero
+# required checks — the pin is exactly the change that must not merge unchecked.
+# The job summary prints the `gh pr create` command for a human to run, and no
+# PAT is introduced to work around it.
+#
+# What this removes is the error-prone part, not the judgement: resolving the
+# digest, keeping S/D/C consistent, and retyping 40-hex SHAs by hand. Merging
+# stays manual, and manifest PRs must be merged with a merge commit — a squash
+# orphans C and leaves nothing for P to name (#684).
+name: Bump action pin
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "manifest = commit C (action.yml digest); pin = commit P (consumer references)"
+        required: true
+        default: manifest
+        type: choice
+        options:
+          - manifest
+          - pin
+      manifest_commit:
+        description: >-
+          stage=pin only. The 40-hex SHA that manifest commit C actually landed
+          as on main — not the PR's merge commit, which differs from the image
+          source in more than action.yml and is rejected by verify_manifest.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-action-pin
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: true
+
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+
+      - name: Resolve and verify the published image
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          echo "source=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "short=${source_sha:0:8}" >> "$GITHUB_OUTPUT"
+          # Fails closed when the image for this source is missing or unsigned,
+          # so a stage that cannot produce a verifiable manifest stops here
+          # rather than committing a digest nobody checked.
+          resolved="$(SOURCE_REVISION="$source_sha" make action-images-resolve | tail -n 1)"
+          echo "$resolved"
+          digest="$(printf '%s' "$resolved" | python3 -c 'import json,sys; print(json.load(sys.stdin)["slim_digest"])')"
+          if [ -z "$digest" ]; then
+            echo "::error::no published slim image for $source_sha — wait for CI/CD to finish"
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare the change
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE: ${{ inputs.stage }}
+          MANIFEST_COMMIT: ${{ inputs.manifest_commit }}
+          SOURCE_REVISION: ${{ steps.image.outputs.source }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          SHORT: ${{ steps.image.outputs.short }}
+        run: |
+          set -euo pipefail
+          if [ "$STAGE" = "manifest" ]; then
+            branch="chore/action-manifest-$SHORT"
+            make action-manifest-prepare
+            title="chore(action): prepare verified image manifest ${IMAGE_DIGEST#sha256:}"
+          else
+            if [ -z "$MANIFEST_COMMIT" ]; then
+              echo "::error::stage=pin requires manifest_commit (the SHA C landed as on main)"
+              exit 1
+            fi
+            branch="chore/action-pin-${MANIFEST_COMMIT:0:8}"
+            RELEASE_BASE_BRANCH=main make action-pin-prepare
+            title="chore(action): pin self-review to verified manifest ${MANIFEST_COMMIT:0:8}"
+          fi
+          if git diff --quiet; then
+            echo "::error::nothing to commit — the change is already present on main"
+            exit 1
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+      - name: Push the branch
+        env:
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git commit -am "$TITLE"
+          git push origin "$BRANCH"
+
+      - name: Summarise the next step
+        env:
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+          STAGE: ${{ inputs.stage }}
+          SOURCE_REVISION: ${{ steps.image.outputs.source }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          {
+            echo "### Branch pushed: \`$BRANCH\`"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| stage | \`$STAGE\` |"
+            echo "| source S | \`$SOURCE_REVISION\` |"
+            echo "| image D | \`$IMAGE_DIGEST\` |"
+            echo
+            echo "Open the PR yourself — a GITHUB_TOKEN-opened PR carries no required checks:"
+            echo
+            echo '```bash'
+            echo "gh pr create --base main --head $BRANCH --title \"$TITLE\""
+            echo '```'
+            if [ "$STAGE" = "manifest" ]; then
+              echo
+              echo "**Merge it with a merge commit, not a squash** — a squash orphans the"
+              echo "manifest commit and leaves nothing for the pin stage to name (#684)."
+              echo "Then re-run this workflow with \`stage=pin\` and that commit's SHA."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
