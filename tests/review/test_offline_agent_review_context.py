@@ -15,7 +15,6 @@ from tests.context.review_skill_support import (
 from tests.context.support import REPO_INSTRUCTIONS_HEADER, section_text
 
 
-@pytest.mark.xfail(reason="green after RS2: CLI review skills section", strict=False)
 def test_cli_review_renders_the_review_skills_section(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     init_repo_with_skill(repo, body="CLI review skill body.\n")
@@ -27,7 +26,6 @@ def test_cli_review_renders_the_review_skills_section(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after RS2: CLI review_skill_paths extra", strict=False)
 def test_cli_review_populates_review_skill_paths(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     init_repo_with_skill(repo, body="CLI review skill body.\n")
@@ -36,7 +34,6 @@ def test_cli_review_populates_review_skill_paths(tmp_path: Path) -> None:
     assert review_skills == [".github/skills/code-review/SKILL.md"]
 
 
-@pytest.mark.xfail(reason="green after RS2: CLI reference resolution", strict=False)
 def test_cli_review_resolves_skill_references(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     marker = "CLI_RESOLVED_REFERENCE"
@@ -59,7 +56,6 @@ def test_untrusted_cli_source_fences_the_discovered_skill(tmp_path: Path) -> Non
     assert any(marker in block for block in _fenced_blocks(resolved.full))
 
 
-@pytest.mark.xfail(reason="green after RS2: CLI bundle cap", strict=False)
 def test_cli_review_respects_the_bundle_cap(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -69,8 +65,23 @@ def test_cli_review_respects_the_bundle_cap(tmp_path: Path) -> None:
     assert len(resolved.full.encode("utf-8")) <= INSTRUCTION_BUNDLE_BYTE_CAP
 
 
+def test_cli_review_honors_instruction_extra_filenames(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    marker = "TEAM_INSTRUCTION_MARKER"
+    config_dir = repo / ".mergecraft"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.yaml").write_text(
+        "review:\n  instructionExtraFilenames:\n    - TEAM.md\n",
+        encoding="utf-8",
+    )
+    (repo / "TEAM.md").write_text(f"{marker}\n", encoding="utf-8")
+    init_repo_with_skill(repo, body="CLI review skill body.\n")
+    resolved = resolve_offline_instructions(repo)
+    repo_section = section_text(resolved.full, REPO_INSTRUCTIONS_HEADER)
+    assert marker in repo_section
+
+
 @pytest.mark.parametrize("retry", [False, True], ids=["primary", "retry"])
-@pytest.mark.xfail(reason="green after RS2: both offline call sites wired", strict=False)
 def test_both_call_sites_are_wired(tmp_path: Path, retry: bool) -> None:
     repo = tmp_path / "repo"
     init_repo_with_skill(repo, body=f"Offline call site retry={retry}\n")

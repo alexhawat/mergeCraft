@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.evidence.trajectory import (
     ExternalTraceRef,
     ToolCallRecord,
@@ -33,7 +31,6 @@ def _read_external_trace() -> ExternalTraceRef:
     )
 
 
-@pytest.mark.xfail(reason="green after RS2: empty external trace is not coverage", strict=False)
 def test_external_trace_with_no_reads_is_not_read_coverage() -> None:
     state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
     record = build_trajectory_record(state, external_trace=_empty_external_trace())

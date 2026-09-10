@@ -333,6 +333,14 @@ class ReviewSettings(BaseModel):
             "their references are retained first when truncation is required."
         ),
     )
+    instruction_extra_filenames: list[str] = Field(
+        default_factory=list,
+        alias="instructionExtraFilenames",
+        description=(
+            "Additional repo-root filenames to treat as discovered instruction "
+            "sources during review-context rendering (for example TEAM.md)."
+        ),
+    )
 
 
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.

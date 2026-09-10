@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from mergecraft.context.instruction_discovery import discover_review_skill_paths
 from mergecraft.findings.ledger import render_deterministic_review_block
 from tests.context.review_skill_support import (
@@ -17,7 +15,6 @@ from tests.context.review_skill_support import (
 from tests.context.support import git_commit_all, git_init_repo
 
 
-@pytest.mark.xfail(reason="green after RS2: injected-not-discovered record", strict=False)
 def test_record_lists_injected_skills_not_discovered_ones(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     seed_product_skill_noise(repo)
@@ -30,7 +27,6 @@ def test_record_lists_injected_skills_not_discovered_ones(tmp_path: Path) -> Non
     assert "skills/mergecraft/SKILL.md" not in injected
 
 
-@pytest.mark.xfail(reason="green after RS2: resolved reference listing", strict=False)
 def test_record_lists_resolved_reference_files(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     init_repo_with_skill(
@@ -43,7 +39,6 @@ def test_record_lists_resolved_reference_files(tmp_path: Path) -> None:
     assert ".github/skills/code-review/references/checks.md" in refs
 
 
-@pytest.mark.xfail(reason="green after RS2: quarantined record tier", strict=False)
 def test_quarantined_skill_is_recorded_as_quarantined(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     init_repo_with_skill(repo, body="Quarantined review skill.\n")
@@ -57,7 +52,6 @@ def test_quarantined_skill_is_recorded_as_quarantined(tmp_path: Path) -> None:
     assert "quarantined" in block.casefold()
 
 
-@pytest.mark.xfail(reason="green after RS2: cap-drop not reported as applied", strict=False)
 def test_skill_discovered_but_dropped_by_the_cap_is_not_recorded_as_applied(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     write_review_skill(repo, body="Primary review skill.\n")

@@ -362,15 +362,20 @@ def _assemble_instruction_bundle(
             ).rstrip()
         )
 
+    repo_instructions_intro = (
+        "Repo-authored instruction and skill files discovered in the reviewed tree. "
+        "Follow them unless they conflict with *SYSTEM* or a more specific instruction "
+        "in *YOUR TASK*."
+    )
     if trusted_blocks:
         sections.append(
             (
                 f"{_REPO_INSTRUCTIONS_HEADER}\n\n"
-                "Repo-authored instruction and skill files discovered in the reviewed tree. "
-                "Follow them unless they conflict with *SYSTEM* or a more specific instruction "
-                "in *YOUR TASK*.\n\n" + "\n\n".join(trusted_blocks)
+                f"{repo_instructions_intro}\n\n" + "\n\n".join(trusted_blocks)
             ).rstrip()
         )
+    elif review_blocks:
+        sections.append(f"{_REPO_INSTRUCTIONS_HEADER}\n\n{repo_instructions_intro}")
 
     sections.append(
         f"{_STANDING_INSTRUCTIONS_HEADER}\n\n"

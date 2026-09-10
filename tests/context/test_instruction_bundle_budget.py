@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from mergecraft.context.instruction_discovery import discover_review_skill_paths
 from tests.context.review_skill_support import (
     INSTRUCTION_BUNDLE_BYTE_CAP,
@@ -20,7 +18,6 @@ from tests.context.review_skill_support import (
 from tests.context.support import git_commit_all, git_init_repo
 
 
-@pytest.mark.xfail(reason="green after RS2: bundle byte cap", strict=False)
 def test_bundle_respects_the_total_byte_cap(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -31,7 +28,6 @@ def test_bundle_respects_the_total_byte_cap(tmp_path: Path) -> None:
     assert len(prompt.encode("utf-8")) <= INSTRUCTION_BUNDLE_BYTE_CAP
 
 
-@pytest.mark.xfail(reason="green after RS2: truncation priority order", strict=False)
 def test_review_skill_and_references_survive_truncation_first(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -47,7 +43,6 @@ def test_review_skill_and_references_survive_truncation_first(tmp_path: Path) ->
     assert marker in section
 
 
-@pytest.mark.xfail(reason="green after RS2: visible truncation reporting", strict=False)
 def test_truncation_is_reported_as_a_visible_limitation(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -57,7 +52,6 @@ def test_truncation_is_reported_as_a_visible_limitation(tmp_path: Path) -> None:
     assert LIMITATION_MARKER.casefold() in prompt.casefold()
 
 
-@pytest.mark.xfail(reason="green after RS2: exclude product skills", strict=False)
 def test_own_product_skills_are_excluded(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     seed_product_skill_noise(repo)
@@ -68,7 +62,6 @@ def test_own_product_skills_are_excluded(tmp_path: Path) -> None:
     assert "Review skill body." in review_section(prompt)
 
 
-@pytest.mark.xfail(reason="green after RS2: skip agent config dirs", strict=False)
 def test_agent_config_dirs_are_skipped(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     seed_agent_config_noise(repo)
@@ -77,7 +70,6 @@ def test_agent_config_dirs_are_skipped(tmp_path: Path) -> None:
     assert "AGENT_CONFIG_SKILL" not in prompt
 
 
-@pytest.mark.xfail(reason="green after RS2: skip nested worktrees", strict=False)
 def test_nested_worktree_is_skipped(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     sha = init_repo_with_skill(repo, body="Canonical review skill.\n")

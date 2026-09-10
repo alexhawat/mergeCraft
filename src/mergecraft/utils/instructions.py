@@ -305,7 +305,7 @@ def _quote_user(prompt: str) -> str:
     return "\n".join(f"> {line}" for line in prompt.split("\n"))
 
 
-def _instruction_bundle_byte_cap(repo_root: Any) -> int:
+def _load_review_instruction_settings(repo_root: Any) -> tuple[int, tuple[str, ...]]:
     from pathlib import Path as PathType
 
     from mergecraft.config import load_repo_settings
@@ -314,8 +314,15 @@ def _instruction_bundle_byte_cap(repo_root: Any) -> int:
     try:
         settings = load_repo_settings(root=root, load_learnings_files=False)
     except (OSError, ValueError):
-        return 65536
-    return settings.review.instruction_bundle_byte_cap
+        return 65536, ()
+    return (
+        settings.review.instruction_bundle_byte_cap,
+        tuple(settings.review.instruction_extra_filenames),
+    )
+
+
+def _instruction_bundle_byte_cap(repo_root: Any) -> int:
+    return _load_review_instruction_settings(repo_root)[0]
 
 
 def _fence_user_prompt(user: str, *, fence: Fence, payload: dict[str, Any]) -> str:
@@ -677,10 +684,11 @@ Trust the tools — do not repeatedly verify after successful operations. Except
     )
     runtime_section = f"************* RUNTIME *************\n\n{runtime}"
 
-    review_context = ""
-    review_skill_paths: list[str] = []
-    review_skill_ledger: list[str] = []
-    if repo_root is not None:
+    def _render_review_context_bundle(
+        root: Any,
+        byte_cap: int,
+        extra_filenames: tuple[str, ...],
+    ) -> tuple[str, list[str], list[str]]:
         from pathlib import Path as PathType
 
         from mergecraft.context.instruction_discovery import (
@@ -688,25 +696,40 @@ Trust the tools — do not repeatedly verify after successful operations. Except
             render_review_context,
         )
 
-        root = PathType(repo_root)
+        resolved_root = PathType(root)
         commit_sha = str(event.get("headSha") or event.get("head_sha") or "")
-        byte_cap = _instruction_bundle_byte_cap(root)
         record = build_review_skill_record(
-            repo_root=root,
+            repo_root=resolved_root,
             trust_tier=trust_tier,
             repo=f"{repo.owner}/{repo.name}",
             commit_sha=commit_sha,
             byte_cap=byte_cap,
+            extra_filenames=extra_filenames,
         )
-        review_context = render_review_context(
-            repo_root=root,
+        rendered = render_review_context(
+            repo_root=resolved_root,
             trust_tier=trust_tier,
             repo=f"{repo.owner}/{repo.name}",
             commit_sha=commit_sha,
             byte_cap=byte_cap,
+            extra_filenames=extra_filenames,
         )
-        review_skill_paths = list(record.injected)
-        review_skill_ledger = list(record.ledger_review_skills)
+        return rendered, list(record.injected), list(record.ledger_review_skills)
+
+    review_context = ""
+    review_skill_paths: list[str] = []
+    review_skill_ledger: list[str] = []
+    instruction_bundle_byte_cap = 65536
+    instruction_extra_filenames: tuple[str, ...] = ()
+    if repo_root is not None:
+        instruction_bundle_byte_cap, instruction_extra_filenames = (
+            _load_review_instruction_settings(repo_root)
+        )
+        review_context, review_skill_paths, review_skill_ledger = _render_review_context_bundle(
+            repo_root,
+            instruction_bundle_byte_cap,
+            instruction_extra_filenames,
+        )
     mcp_note = ""
     if review_mcp_names:
         listed = ", ".join(f"`{name}`" for name in review_mcp_names)
@@ -739,40 +762,51 @@ Trust the tools — do not repeatedly verify after successful operations. Except
         toc_entries.append(("LEARNINGS", "repo-specific knowledge file path + heading TOC"))
     toc_entries.append(("RUNTIME", "environment metadata"))
 
-    toc = "This prompt contains the following sections:\n" + "\n".join(
-        f"- {label} — {desc}" for label, desc in toc_entries
-    )
+    def _join_prompt_parts(*parts: str) -> str:
+        raw = "\n\n".join(part for part in parts if part)
+        while "\n\n\n" in raw:
+            raw = raw.replace("\n\n\n", "\n\n")
+        return raw
 
-    raw_full = "\n\n".join(
-        part
-        for part in (
-            toc,
+    def _assemble_full_prompt(review_ctx: str) -> str:
+        review_toc_entries = list(toc_entries)
+        if review_ctx and not any(label == "REVIEW SKILLS" for label, _ in review_toc_entries):
+            review_toc_entries.insert(
+                1 if task else 0,
+                ("REVIEW SKILLS", "Copilot-style review skills from the reviewed tree"),
+            )
+        prompt_toc = "This prompt contains the following sections:\n" + "\n".join(
+            f"- {label} — {desc}" for label, desc in review_toc_entries
+        )
+        return _join_prompt_parts(
+            prompt_toc,
             task,
-            review_context,
+            review_ctx,
             mcp_note,
             standing,
             xrepo_section,
             setup_failure,
             setup_skip,
             procedure,
-            # W6.4 — place learnings BEFORE event_context so the
-            # seed-time fence for active entries is the first fence
-            # the model encounters in the prompt. This pins the W5.6
-            # test's invariant that a forged delimiter inside an entry
-            # cannot restructure the instruction block, since the entry
-            # is already enclosed before the model reads the event
-            # metadata (which contains its own pr_title / pr_body
-            # fences).
             learnings_section,
             event_context,
             system,
             runtime_section,
         )
-        if part
-    )
-    # collapse excessive blank lines
-    while "\n\n\n" in raw_full:
-        raw_full = raw_full.replace("\n\n\n", "\n\n")
+
+    raw_full = _assemble_full_prompt(review_context)
+    if repo_root is not None and review_context:
+        full_bytes = len(raw_full.encode("utf-8"))
+        if full_bytes > instruction_bundle_byte_cap:
+            review_bytes = len(review_context.encode("utf-8"))
+            overhead = full_bytes - review_bytes
+            remaining = max(instruction_bundle_byte_cap - overhead, 0)
+            review_context, review_skill_paths, review_skill_ledger = _render_review_context_bundle(
+                repo_root,
+                remaining,
+                instruction_extra_filenames,
+            )
+            raw_full = _assemble_full_prompt(review_context)
 
     event_blob = "\n\n---\n\n".join(p for p in (event_title, event_metadata) if p)
 

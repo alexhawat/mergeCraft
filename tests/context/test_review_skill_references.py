@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.context.review_skill_support import (
     LIMITATION_MARKER,
     REFUSED_MARKER,
@@ -20,7 +18,6 @@ _CHECKS_BODY = "CHECKS_REFERENCE_BODY_UNIQUE_TOKEN"
 _NESTED_BODY = "NESTED_REFERENCE_BODY_UNIQUE_TOKEN"
 
 
-@pytest.mark.xfail(reason="green after RS2: reference resolution", strict=False)
 def test_review_skill_references_are_resolved_into_the_prompt(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     sha = init_repo_with_skill(
@@ -33,7 +30,6 @@ def test_review_skill_references_are_resolved_into_the_prompt(tmp_path: Path) ->
     assert _CHECKS_BODY in section
 
 
-@pytest.mark.xfail(reason="green after RS2: one-level reference depth", strict=False)
 def test_reference_resolution_is_one_level_deep(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     sha = init_repo_with_skill(
@@ -50,7 +46,6 @@ def test_reference_resolution_is_one_level_deep(tmp_path: Path) -> None:
     assert _NESTED_BODY not in section
 
 
-@pytest.mark.xfail(reason="green after RS2: refuse outside-skill links", strict=False)
 def test_reference_outside_the_skill_directory_is_refused(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -67,7 +62,6 @@ def test_reference_outside_the_skill_directory_is_refused(tmp_path: Path) -> Non
     assert _refusal_recorded(record, "../../../REVIEW-CHECKS.md")
 
 
-@pytest.mark.xfail(reason="green after RS2: refuse traversal paths", strict=False)
 def test_absolute_and_traversal_paths_are_refused(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -95,7 +89,6 @@ def test_absolute_and_traversal_paths_are_refused(tmp_path: Path) -> None:
     assert _refusal_recorded(record, "..%2f")
 
 
-@pytest.mark.xfail(reason="green after RS2: per-reference byte cap", strict=False)
 def test_reference_resolution_respects_the_byte_cap(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     huge = "X" * 120_000
@@ -110,7 +103,6 @@ def test_reference_resolution_respects_the_byte_cap(tmp_path: Path) -> None:
     assert LIMITATION_MARKER.casefold() in prompt.casefold()
 
 
-@pytest.mark.xfail(reason="green after RS2: review-tier-only resolution", strict=False)
 def test_only_review_tier_skills_resolve_references(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     generic = repo / ".cursor" / "skills" / "demo"
@@ -134,7 +126,6 @@ def test_only_review_tier_skills_resolve_references(tmp_path: Path) -> None:
     assert _CHECKS_BODY not in prompt
 
 
-@pytest.mark.xfail(reason="green after RS2: untrusted reference fencing", strict=False)
 def test_untrusted_review_skill_references_render_inside_the_fence(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     marker = "UNTRUSTED_REFERENCE_MARKER"
@@ -152,7 +143,6 @@ def test_untrusted_review_skill_references_render_inside_the_fence(tmp_path: Pat
     assert "references/checks.md" in joined or marker in joined
 
 
-@pytest.mark.xfail(reason="green after RS2: missing reference limitations", strict=False)
 def test_missing_reference_is_a_recorded_limitation_not_a_silent_drop(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     sha = init_repo_with_skill(
