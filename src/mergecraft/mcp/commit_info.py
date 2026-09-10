@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -33,7 +34,9 @@ def get_commit_info_tool(ctx: ToolContext):
         logger.debug("wrote commit diff to {} ({} bytes)", diff_file, len(written))
         from mergecraft.mcp.verdict import _looks_like_unified_diff
 
-        if not _looks_like_unified_diff(written):
+        primary = primary_repo_state(ctx.tool_state)
+        pr_head = (primary.checkout_sha or "").strip().lower()
+        if pr_head and sha.strip().lower() == pr_head and not _looks_like_unified_diff(written):
             msg = f"diff_path is empty or not a unified diff: {diff_file}"
             raise ValueError(msg)
         ctx.tool_state.commit_inspection_diffs[sha.strip().lower()] = diff_file
