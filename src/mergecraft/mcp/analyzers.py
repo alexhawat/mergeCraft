@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import AnalyzerRunState, analyzer_run_key, primary_repo_state
+from mergecraft.mcp.tool_state import (
+    AnalyzerRunKey,
+    AnalyzerRunState,
+    AnalyzerStatusRow,
+    analyzer_run_key,
+    primary_repo_state,
+)
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, API_ONLY_SCOPE_GUIDANCE
 
 if TYPE_CHECKING:
@@ -25,17 +31,124 @@ def _resolve_tier(ctx: ToolContext) -> str:
     return ctx.trust_tier
 
 
+def _merge_analyzer_segments(
+    segments: dict[AnalyzerRunKey | None, AnalyzerRunState],
+    *,
+    latest: AnalyzerRunState,
+) -> AnalyzerRunState:
+    """Return one ``AnalyzerRunState`` carrying every retained segment's evidence.
+
+    N2 / D9 — analyzer findings are additive across scopes. A rerun over a
+    different covered-file selection must not erase a finding produced for a
+    file it never looked at, so the merged view is the union of every retained
+    segment. Rows are de-duplicated on fingerprint (an overlapping scope cannot
+    double-count a finding); descriptive fields take the most recent non-empty
+    value, since they describe the latest run rather than the union.
+    """
+    if len(segments) == 1:
+        return next(iter(segments.values()))
+    findings: list[dict[str, Any]] = []
+    inline: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    analyzers: list[AnalyzerStatusRow] = []
+    verified: set[str] = set()
+    seen_findings: set[str] = set()
+    seen_deferred: set[str] = set()
+    seen_inline: set[str] = set()
+    seen_analyzers: set[str] = set()
+    mechanical_section: str | None = None
+    deferred_section: str | None = None
+    pre_merge_summary: str | None = None
+    lockfile_digest: str | None = None
+    for segment in segments.values():
+        for row in segment.findings:
+            fingerprint = str(row.get("fingerprint") or "")
+            if fingerprint and fingerprint in seen_findings:
+                continue
+            if fingerprint:
+                seen_findings.add(fingerprint)
+            findings.append(row)
+        for row in segment.inline:
+            fingerprint = str((row.get("finding") or {}).get("fingerprint") or "")
+            if fingerprint and fingerprint in seen_inline:
+                continue
+            if fingerprint:
+                seen_inline.add(fingerprint)
+            inline.append(row)
+        for row in segment.deferred_findings:
+            fingerprint = str(row.get("fingerprint") or "")
+            if fingerprint and fingerprint in seen_deferred:
+                continue
+            if fingerprint:
+                seen_deferred.add(fingerprint)
+            deferred.append(row)
+        for status_row in segment.analyzers:
+            if status_row.id in seen_analyzers:
+                continue
+            seen_analyzers.add(status_row.id)
+            analyzers.append(status_row)
+        verified |= set(segment.verified_ids)
+        mechanical_section = segment.mechanical_section or mechanical_section
+        deferred_section = segment.deferred_section or deferred_section
+        pre_merge_summary = segment.pre_merge_summary or pre_merge_summary
+        lockfile_digest = segment.lockfile_digest or lockfile_digest
+    scope = latest.covered_scope or latest.key
+    return AnalyzerRunState(
+        ran=any(segment.ran for segment in segments.values()),
+        reason=latest.reason,
+        analyzers=analyzers,
+        findings=findings,
+        inline=inline,
+        mechanical_section=mechanical_section,
+        deferred_section=deferred_section,
+        deferred_findings=deferred,
+        pre_merge_summary=pre_merge_summary,
+        lockfile_digest=lockfile_digest,
+        verified_ids=verified,
+        key=scope,
+        covered_scope=scope,
+    )
+
+
 def _store_run_state(ctx: ToolContext, state: AnalyzerRunState) -> None:
+    """Retain a run's evidence by covered scope (N2 / D9).
+
+    ``verified_ids`` has always been additive across calls; findings are made
+    equally additive here. A rerun supersedes only the segment(s) whose covered
+    scope is equivalent to this run's, and an unavailable run supersedes
+    nothing. ``analyzer_run`` is then rebuilt as the merged view so every
+    downstream consumer (the gate, the packet, ``analyzer_findings``) reads the
+    retained set rather than the last write.
+    """
     from mergecraft.findings.ledger import record_deferred_from_analyzer_run
 
-    session_ids = set(ctx.tool_state.verified_ids)
-    prior = ctx.tool_state.analyzer_run
+    tool_state = ctx.tool_state
+    session_ids = set(tool_state.verified_ids)
+    prior = tool_state.analyzer_run
     if prior is not None:
         session_ids |= set(prior.verified_ids)
     state.verified_ids = set(state.verified_ids) | session_ids
-    ctx.tool_state.analyzer_run = state
-    ctx.tool_state.verified_ids = session_ids | set(state.verified_ids)
-    record_deferred_from_analyzer_run(ctx.tool_state, state)
+    tool_state.verified_ids = session_ids | set(state.verified_ids)
+
+    scope = state.covered_scope or state.key
+    segments = tool_state.analyzer_evidence
+    if prior is not None and state is prior and scope in segments:
+        # The reuse fast-path handed back the already-retained view; there is
+        # nothing new to merge.
+        record_deferred_from_analyzer_run(tool_state, state)
+        return
+    if state.ran:
+        # Equivalent covered scope — supersede it. Any other scope's evidence
+        # survives (D9).
+        segments.pop(scope, None)
+        segments[scope] = state
+    else:
+        # An unavailable run produced no evidence for its scope, so it may not
+        # replace a segment that did. It is recorded only where no evidence
+        # exists yet.
+        segments.setdefault(scope, state)
+    tool_state.analyzer_run = _merge_analyzer_segments(segments, latest=state)
+    record_deferred_from_analyzer_run(tool_state, state)
 
 
 def run_analyzers_tool(ctx: ToolContext):
@@ -95,6 +208,9 @@ def run_analyzers_tool(ctx: ToolContext):
                 mode=ctx.analyzers_mode,
                 self_review_level=str(ctx.tool_state.trust_self_review_level or "off"),
             )
+            # N2 / D9 — record the covered selection this run is evidence for so
+            # a later partial rerun supersedes only an equivalent scope.
+            run_state.covered_scope = request_key
         _store_run_state(ctx, run_state)
 
         payload: dict[str, Any] = {
@@ -219,9 +335,11 @@ def analyzer_findings_tool(ctx: ToolContext):
         name="analyzer_findings",
         tool_class=ToolClass.ANALYSIS,
         description=(
-            "Retrieve the scoped, clustered, budgeted analyzer finding set from the most recent "
-            "run_analyzers call — inline bodies include tool/rule citations and confidence tags. "
-            "Use this for placement instead of re-deriving findings from raw tool output."
+            "Retrieve the scoped, clustered, budgeted analyzer finding set retained across "
+            "every run_analyzers call this session — a later partial rerun does not drop "
+            "findings for files it did not cover. Inline bodies include tool/rule citations "
+            "and confidence tags. Use this for placement instead of re-deriving findings "
+            "from raw tool output."
         ),
         input_schema={
             "type": "object",

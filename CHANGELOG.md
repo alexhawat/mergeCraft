@@ -129,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and semantic dedupe keeps the strongest paraphrase with the discarded members'
   evidence — a weaker copy arriving first can no longer turn a CI blocker green
   (N5)
+- A partial analyzer rerun no longer erases earlier blockers: results are
+  retained by covered scope, so a clean pass over a file the first pass did not
+  cover leaves the prior finding, the shared finding count and the
+  terminal-approve rejection intact (N2)
+- `get_commit_info` can no longer replace the canonical review scope with the
+  HEAD commit's patch; the single-commit diff stays an inspection artifact, so
+  admissible citations, inline anchors and blast radius remain bound to the
+  whole change under review (N3)
 
 - The Action-pin staleness budget counts changes rather than landings. Without
   `--no-merges`, a PR touching `src/mergecraft/` scored twice — its own commit
