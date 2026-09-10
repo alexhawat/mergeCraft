@@ -587,3 +587,42 @@ def test_a_later_commit_cannot_ride_in_on_a_legitimate_digest(
     with pytest.raises(module.VerificationError, match="behavior"):
         module.verify_candidate(repo, source, tampered)
     assert manifest
+
+
+def test_a_reapplied_digest_resolves_to_the_clean_reapplication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P -> revert -> clean reapply must resolve to the reapplication.
+
+    Scanning oldest-first returned the abandoned P — which carried unrelated
+    changes and so fails `verify_manifest` — even though the branch's live
+    introduction of that image is the clean commit at the end.
+    """
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    base = manifest
+    action = repo / "action.yml"
+    clean_action = action.read_text().replace("b" * 64, "c" * 64)
+
+    # P: the digest, alongside unrelated work.
+    action.write_text(clean_action)
+    (repo / "runtime.py").write_text("VALUE = 99\n")
+    _git(repo, "commit", "-am", "test: digest plus unrelated work")
+
+    # Revert both, restoring the base state.
+    action.write_text(action.read_text().replace("c" * 64, "b" * 64))
+    (repo / "runtime.py").write_text("VALUE = 1\n")
+    _git(repo, "commit", "-am", "test: revert")
+
+    # R: reapply the same action.yml, cleanly this time.
+    action.write_text(clean_action)
+    _git(repo, "commit", "-am", "test: reapply the digest on its own")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    image = f"docker://ghcr.io/alexhawat/mergecraft@sha256:{'c' * 64}"
+    resolved = module._digest_introducer(repo, base, head, image)
+    assert resolved == head, "resolved to the abandoned introduction, not the live one"
+
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+    result = module.verify_candidate(repo, base, head)
+    assert result["manifests"][0]["manifest_commit"] == head

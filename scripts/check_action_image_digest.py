@@ -417,9 +417,12 @@ def _digest_introducer(repo: Path, base: str, head: str, image: Any) -> str:
         head_action = _action_at(repo, head)
     except (VerificationError, KeyError, TypeError):
         return head
-    revs = (
-        _git(repo, "rev-list", "--reverse", f"{base}..{head}", "--", "action.yml") or ""
-    ).split()
+    # Newest first (rev-list's default): the *current* introduction of this
+    # image, not the earliest. A branch that adds a digest with unrelated work,
+    # reverts it, then reapplies the same action.yml cleanly must resolve to the
+    # clean reapplication — `--reverse` resolved to the abandoned commit and
+    # rejected a candidate that should pass.
+    revs = (_git(repo, "rev-list", f"{base}..{head}", "--", "action.yml") or "").split()
     for rev in revs:
         try:
             candidate = _action_at(repo, rev)
