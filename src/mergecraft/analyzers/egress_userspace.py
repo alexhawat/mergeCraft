@@ -13,6 +13,7 @@ host firewall state. This backend does not.
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import os
 import shutil
@@ -203,10 +204,23 @@ class UserspaceEgressSession:
         )
 
     def destination_allowed(self, host: str, ip: str) -> bool:
-        """Return True when *ip* or *host* matches the session allowlist."""
-        if ip in self._allowed_ips:
-            return True
-        return host_is_allowlisted(host, allowlist_hosts(self.allowed_hosts))
+        """Return True only when *ip* is an allowlisted literal bound to *host*.
+
+        The child supplies both fields and the parent dials ``ip`` verbatim, so a
+        hostname must never authorize an address on its own: an analyzer could
+        otherwise send ``{"host": "<allowlisted>", "ip": "<anything>"}`` and have
+        the parent open it. The relay listens on ``AF_UNIX`` in the shared
+        filesystem, which the child netns can always reach — a TCP ``OUTPUT``
+        DROP does not apply to it — so this check is the only enforcement point
+        that matters (#538).
+        """
+        return relay_request_allowed(
+            host=host,
+            ip=ip,
+            allowed_hosts=self.allowed_hosts,
+            allowed_ips=self._allowed_ips,
+            host_ips=self._host_ips,
+        )
 
     def _serve(self) -> None:
         assert self._server is not None
@@ -300,11 +314,48 @@ def relay_request_allowed(
     ip: str,
     allowed_hosts: Iterable[str],
     allowed_ips: Iterable[str],
+    host_ips: Mapping[str, frozenset[str]] | None = None,
 ) -> bool:
-    """Pure allowlist check used by the child bridge and tests."""
-    if ip in set(allowed_ips):
+    """Pure allowlist check used by the child bridge, the relay, and tests.
+
+    IP-only by construction. ``host`` narrows the decision, it never widens it:
+    an allowlisted hostname paired with a foreign address is rejected, because
+    the caller dials the address and not the name.
+    """
+    try:
+        parsed = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        # Not a literal address — a name here would be resolved by the dialler,
+        # after this check, which is precisely the gap being closed.
+        return False
+
+    def _same(candidate: str) -> bool:
+        try:
+            return ipaddress.ip_address(candidate.strip()) == parsed
+        except ValueError:
+            return False
+
+    if not any(_same(entry) for entry in allowed_ips):
+        return False
+    if not host:
         return True
-    return host_is_allowlisted(host, allowlist_hosts(allowed_hosts))
+    # A host was named: it must be allowlisted *and* actually resolve to this
+    # address, so one allowlisted name cannot vouch for another name's IP.
+    if not host_is_allowlisted(host, allowlist_hosts(allowed_hosts)):
+        return False
+    if host_ips is None:
+        # No map supplied: the address already had to be on the allowlist above,
+        # so this stays IP-gated. Callers that have a map must pass it.
+        return True
+    bound = host_ips.get(host) or next(
+        (ips for name, ips in host_ips.items() if name.lower() == host.lower()),
+        None,
+    )
+    if bound is None:
+        # A map was supplied and does not know this name — reject rather than
+        # fall back, or an unmapped-but-allowlisted name would widen the check.
+        return False
+    return any(_same(entry) for entry in bound)
 
 
 __all__ = [

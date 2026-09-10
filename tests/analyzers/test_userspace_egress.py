@@ -186,3 +186,73 @@ def test_session_socket_dir_is_private(monkeypatch: MonkeyPatch) -> None:
         assert stat.S_IMODE(mode) == 0o700
     finally:
         session.close()
+
+
+def test_an_allowlisted_host_cannot_authorize_a_foreign_ip() -> None:
+    """(#538) The child names both fields and the parent dials the address.
+
+    The relay listens on AF_UNIX in the shared filesystem, which the child netns
+    can always reach — a TCP OUTPUT DROP does not cover it — so this check is the
+    only enforcement point. Before the fix, an allowlisted hostname returned True
+    for any address, and an analyzer could exfiltrate with
+    `{"host": "api.osv.dev", "ip": "203.0.113.9", "port": 443}`.
+    """
+    assert not relay_request_allowed(
+        host="api.osv.dev",
+        ip="203.0.113.9",
+        allowed_hosts=["api.osv.dev"],
+        allowed_ips=["1.2.3.4"],
+    )
+
+
+def test_a_non_literal_ip_is_rejected() -> None:
+    """A name here would be resolved by the dialler, after this check."""
+    for value in ("api.osv.dev", "", "1.2.3.4.5", "not-an-ip", "1.2.3.4:443"):
+        assert not relay_request_allowed(
+            host="api.osv.dev",
+            ip=value,
+            allowed_hosts=["api.osv.dev"],
+            allowed_ips=["1.2.3.4"],
+        )
+
+
+def test_one_allowlisted_host_cannot_vouch_for_anothers_address() -> None:
+    """host_ips narrows the decision: the name must resolve to that address."""
+    host_ips = {
+        "api.osv.dev": frozenset({"1.2.3.4"}),
+        "registry.npmjs.org": frozenset({"5.6.7.8"}),
+    }
+    assert relay_request_allowed(
+        host="api.osv.dev",
+        ip="1.2.3.4",
+        allowed_hosts=["api.osv.dev", "registry.npmjs.org"],
+        allowed_ips=["1.2.3.4", "5.6.7.8"],
+        host_ips=host_ips,
+    )
+    # Both are allowlisted, but this pairing is not one the resolver produced.
+    assert not relay_request_allowed(
+        host="api.osv.dev",
+        ip="5.6.7.8",
+        allowed_hosts=["api.osv.dev", "registry.npmjs.org"],
+        allowed_ips=["1.2.3.4", "5.6.7.8"],
+        host_ips=host_ips,
+    )
+
+
+def test_an_allowlisted_ip_needs_no_host() -> None:
+    assert relay_request_allowed(
+        host="",
+        ip="1.2.3.4",
+        allowed_hosts=["api.osv.dev"],
+        allowed_ips=["1.2.3.4"],
+    )
+
+
+def test_addresses_compare_by_value_not_by_spelling() -> None:
+    """Equivalent IPv6 spellings must not decide the check."""
+    assert relay_request_allowed(
+        host="",
+        ip="2001:db8::1",
+        allowed_hosts=[],
+        allowed_ips=["2001:0db8:0000:0000:0000:0000:0000:0001"],
+    )

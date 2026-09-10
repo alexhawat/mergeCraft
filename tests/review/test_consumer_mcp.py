@@ -66,3 +66,28 @@ def test_loads_vscode_mcp_json(tmp_path: Path) -> None:
     servers = load_consumer_mcp_servers(tmp_path, trust_tier="trusted")
     assert [server.name for server in servers] == ["catalog"]
     assert servers[0].command == "uv"
+
+
+def test_rejects_a_server_with_no_tool_allowlist() -> None:
+    """An empty allowlist attaches an unrestricted stdio server.
+
+    `as_stdio_entry()` omits the tool restriction when `tools` is empty, so a
+    trusted `.mcp.json` or `.vscode/mcp.json` declaring only `command` would
+    spawn it with no restriction at all. The untrusted tier never reaches this
+    function, which is why the hole was reachable only from trusted config.
+    """
+    assert validate_consumer_mcp_server({"command": "mergecraft"}, name="docs") is None
+    assert validate_consumer_mcp_server({"command": "mergecraft", "tools": []}, name="docs") is None
+    assert (
+        validate_consumer_mcp_server({"command": "mergecraft", "tools": ["  "]}, name="docs")
+        is None
+    )
+
+
+def test_accepts_a_server_with_a_read_only_tool_allowlist() -> None:
+    server = validate_consumer_mcp_server(
+        {"command": "mergecraft", "tools": ["search_docs"]},
+        name="docs",
+    )
+    assert server is not None
+    assert server.tools == ("search_docs",)

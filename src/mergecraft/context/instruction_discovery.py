@@ -170,6 +170,15 @@ def render_review_context(
                 )
             )
 
+    if not review_blocks and not trusted_blocks and not untrusted_blocks:
+        # Nothing was discovered. Returning the headers anyway made this string
+        # unconditionally truthy, so every run — including repos with no
+        # `.github/skills/` at all — got a REVIEW SKILLS entry pointing at
+        # nothing, plus empty REPO INSTRUCTIONS and STANDING INSTRUCTIONS blocks
+        # rendered immediately before the real standing block, and the same pair
+        # prepended to the system prompt via live_prefix.
+        return ""
+
     sections: list[str] = []
     if review_blocks:
         sections.append(
@@ -181,20 +190,19 @@ def render_review_context(
                 + "\n\n".join(review_blocks)
             ).rstrip()
         )
-    sections.extend(
-        [
+    if trusted_blocks:
+        sections.append(
             (
                 f"{_REPO_INSTRUCTIONS_HEADER}\n\n"
                 "Repo-authored instruction and skill files discovered in the reviewed tree. "
                 "Follow them unless they conflict with *SYSTEM* or a more specific instruction "
                 "in *YOUR TASK*.\n\n" + "\n\n".join(trusted_blocks)
-            ).rstrip(),
-            (
-                f"{_STANDING_INSTRUCTIONS_HEADER}\n\n"
-                "Org- and repo-level instructions that apply to every run. Follow them unless they "
-                "conflict with *SYSTEM* or a more specific instruction in *YOUR TASK*."
-            ),
-        ]
+            ).rstrip()
+        )
+    sections.append(
+        f"{_STANDING_INSTRUCTIONS_HEADER}\n\n"
+        "Org- and repo-level instructions that apply to every run. Follow them unless they "
+        "conflict with *SYSTEM* or a more specific instruction in *YOUR TASK*."
     )
     if untrusted_blocks:
         sections.append(

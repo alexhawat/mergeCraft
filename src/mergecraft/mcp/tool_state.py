@@ -391,6 +391,12 @@ class ToolState:
     # to this run (attribution in the sticky record).
     review_skill_paths: tuple[str, ...] = ()
     review_mcp_names: tuple[str, ...] = ()
+    # The resolved server objects behind ``review_mcp_names``. Agents must build
+    # their mcpServers block from this rather than re-reading config.yaml: a
+    # second derivation bypasses apply_trust_tier_to_repo_settings, so a server
+    # that trust-tier filtering dropped would still be attached while the run
+    # record — which reports the names above — omitted it.
+    review_mcp_servers: tuple[Any, ...] = ()
     # Lane B / #552 — loud roster slots skipped for missing credentials (D10).
     credential_degradations: tuple[str, ...] = ()
     # When ``setup_script`` is skipped on an untrusted tier (W1.2), the reason

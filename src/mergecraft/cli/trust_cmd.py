@@ -82,8 +82,13 @@ def patch_self_review_yaml(text: str, level: str) -> str:
             out.append(line)
             continue
         if in_trust:
-            stripped = line.lstrip(" \t")
-            indent = len(line) - len(stripped)
+            # strip(), not lstrip(" \t"): a bare "\n" survives lstrip and reads as
+            # a dedent, so a blank line inside the block ended it early. The
+            # existing key was then never replaced and the fallback regex
+            # appended a second `selfReview:` to the same mapping — loaders that
+            # keep the last duplicate resolved straight back to the old value.
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" \t"))
             if stripped and not stripped.startswith("#") and indent <= trust_indent:
                 in_trust = False
             elif not replaced:
@@ -146,7 +151,19 @@ def apply_self_review_on_default_branch(
         default_branch = str(default_ref.get("name") or "")
     if not repo or not default_branch:
         cli_bail("could not resolve the repository default branch via gh")
-    payload = _gh_json(run, ["api", f"repos/{repo}/contents/{_CONFIG_REL}?ref={default_branch}"])
+    # _gh_optional_json, not _gh_json: the runner *returns* the 404 body, which
+    # _gh_json parses into a dict, so the isinstance guard below never fired. The
+    # run then continued with an empty sha and PUT a malformed blob, so the
+    # operator got a 422 about the sha instead of the actionable fact — there is
+    # no config on the default branch.
+    payload = _gh_optional_json(
+        run, ["api", f"repos/{repo}/contents/{_CONFIG_REL}?ref={default_branch}"]
+    )
+    if payload is None:
+        cli_bail(
+            f"{_CONFIG_REL} does not exist on {default_branch}; "
+            f"commit one there before using --gh-apply"
+        )
     if not isinstance(payload, dict):
         cli_bail(f"could not read default-branch {_CONFIG_REL}")
     content_b64 = str(payload.get("content") or "").replace("\n", "")

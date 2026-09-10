@@ -97,20 +97,17 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     # the server can attribute the primary reviewer's tool.call spans.
     reviewer_entry = mcp_http_server_entry(ctx, "claude")
     verifier_entry = mcp_http_server_entry(ctx, VERIFIER_AGENT_NAME)
-    from mergecraft.config.io import load_config_dict
-    from mergecraft.review.consumer_mcp import consumer_mcp_stdio_entries, load_consumer_mcp_servers
+    from mergecraft.review.consumer_mcp import consumer_mcp_stdio_entries
 
-    trust_tier = str(getattr(ctx.tool_state, "trust_tier", None) or "untrusted")
-    extra: dict[str, dict[str, object]] = {}
-    if trust_tier == "trusted":
-        repo_root = Path.cwd()
-        configured: list[dict[str, object]] = []
-        review_block = load_config_dict(repo_root / ".mergecraft" / "config.yaml").get("review")
-        if isinstance(review_block, dict) and isinstance(review_block.get("mcpServers"), list):
-            configured = [row for row in review_block["mcpServers"] if isinstance(row, dict)]
-        extra = consumer_mcp_stdio_entries(
-            load_consumer_mcp_servers(repo_root, configured=configured, trust_tier=trust_tier)
-        )
+    # Single source of truth: main.py resolves these once, through
+    # apply_trust_tier_to_repo_settings, and records both the objects and the
+    # names it reports in the sticky record. Re-reading config.yaml here bypassed
+    # that filtering, so a server the trust tier had dropped was still attached
+    # while the run record omitted it.
+    resolved = tuple(getattr(ctx.tool_state, "review_mcp_servers", ()) or ())
+    extra: dict[str, dict[str, object]] = (
+        consumer_mcp_stdio_entries(list(resolved)) if resolved else {}
+    )
     config_path.write_text(
         json.dumps(
             {

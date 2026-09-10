@@ -56,6 +56,12 @@ def validate_consumer_mcp_server(raw: dict[str, Any], *, name: str) -> ConsumerM
         return None
     tools_raw = raw.get("tools") or []
     tools = tuple(str(item) for item in tools_raw if isinstance(item, str) and item.strip())
+    if not tools:
+        # An absent or empty allowlist makes as_stdio_entry() omit the tool
+        # restriction entirely, attaching an unrestricted stdio server. The
+        # untrusted tier never reaches here, but a trusted `.mcp.json` would.
+        logger.info("review MCP {} rejected: no tool allowlist to restrict it to", name)
+        return None
     if any(_looks_like_write_tool(tool) for tool in tools):
         logger.info("review MCP {} rejected: tool allowlist includes a write verb", name)
         return None

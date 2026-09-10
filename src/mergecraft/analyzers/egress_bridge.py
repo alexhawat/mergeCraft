@@ -16,6 +16,7 @@ import argparse
 import contextlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -156,6 +157,7 @@ def _proxy_one(
             ip=ip,
             allowed_hosts=allowed_hosts,
             allowed_ips=allowed_ips,
+            host_ips={name: frozenset(ips) for name, ips in host_ips.items()},
         ):
             return
         remote = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -191,6 +193,13 @@ def _copy_both(left: socket.socket, right: socket.socket) -> None:
             pass
         finally:
             done.set()
+            # Half-close so the peer sees EOF. Without it the opposite thread
+            # stays parked in recv() — it never re-tests `done` — so both joins
+            # below block forever and `_proxy_one`'s finally never runs, leaking
+            # the thread and both fds for the life of the bridge. An analyzer
+            # opening many keep-alive connections would exhaust fds.
+            with contextlib.suppress(OSError):
+                dest.shutdown(socket.SHUT_WR)
 
     first = threading.Thread(target=_copy, args=(left, right), daemon=True)
     second = threading.Thread(target=_copy, args=(right, left), daemon=True)
@@ -226,11 +235,42 @@ def _serve_redirect(*, socket_path: str, host_ips: dict[str, list[str]]) -> sock
     return server
 
 
+def _die_with_parent() -> None:
+    """Ask the kernel to SIGKILL this process when the bridge goes away.
+
+    The bridge holds the netns and the relay threads; if a harness ``timeout=``
+    SIGKILLs it, the analyzer would otherwise keep running with its egress path
+    gone. ``PR_SET_PDEATHSIG`` is Linux-only and best-effort — every other
+    platform, and any failure to load libc, simply keeps the old behaviour.
+    """
+    if sys.platform != "linux":
+        return
+    with contextlib.suppress(Exception):
+        import ctypes
+
+        _PR_SET_PDEATHSIG = 1
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(_PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+
+
 def run_analyzer_as_child(command: list[str]) -> int:
     """Fork the analyzer; keep this process so redirect threads stay alive."""
+    parent = os.getpid()
     pid = os.fork()
     if pid == 0:
-        os.execvp(command[0], command)
+        # 127 mirrors the shell's "command not found". Bare `os.execvp` left the
+        # child running Python past the fork on failure, where it fell through to
+        # the `waitpid(pid, 0)` below with pid == 0 — waiting on the whole process
+        # group instead of exiting.
+        try:
+            _die_with_parent()
+            # PDEATHSIG is delivered on parent death, so a parent that died
+            # between fork and prctl would never trigger it. Re-check before exec.
+            if os.getppid() != parent:
+                os._exit(127)
+            os.execvp(command[0], command)
+        except BaseException:  # a forked child must never unwind past exec
+            os._exit(127)
+        os._exit(127)  # unreachable: a successful execvp replaces this image
     _waited, status = os.waitpid(pid, 0)
     if os.WIFEXITED(status):
         return int(os.WEXITSTATUS(status))

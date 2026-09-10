@@ -1278,6 +1278,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         trust_tier=trust_tier,
     )
     tool_state.review_mcp_names = tuple(server.name for server in consumer_mcp)
+    tool_state.review_mcp_servers = tuple(consumer_mcp)
     instructions = resolve_instructions(
         payload=payload,
         repo=run_context.repo,
