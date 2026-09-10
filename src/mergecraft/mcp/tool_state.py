@@ -390,6 +390,7 @@ class ToolState:
     # #620 — Copilot-style review skills and read-only consumer MCP attached
     # to this run (attribution in the sticky record).
     review_skill_paths: tuple[str, ...] = ()
+    review_skills_ledger: tuple[str, ...] = ()
     review_mcp_names: tuple[str, ...] = ()
     # The resolved server objects behind ``review_mcp_names``. Agents must build
     # their mcpServers block from this rather than re-reading config.yaml: a

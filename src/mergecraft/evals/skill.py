@@ -60,6 +60,7 @@ class SkillEvalCaseReport:
 class SkillEvalCorpusReport:
     """Aggregate outcome across the skill eval corpus."""
 
+    passed: bool
     tip_score: float
     baseline_score: float
     summary: str
@@ -169,6 +170,14 @@ def _score_withdrawn(case: dict[str, Any], rendered: str, repo_root: Path) -> fl
     return 1.0
 
 
+_SCENARIO_SCORERS: dict[str, Any] = {
+    "e1": lambda case, rendered, repo_root: _score_prompt_assertions(case, rendered),
+    "e2": lambda case, rendered, repo_root: _score_review_mentions(case, rendered),
+    "e3": lambda case, rendered, repo_root: _score_abstention(case, rendered, repo_root),
+    "e4": lambda case, rendered, repo_root: _score_withdrawn(case, rendered, repo_root),
+}
+
+
 def _score_variant(
     case: dict[str, Any],
     *,
@@ -180,14 +189,9 @@ def _score_variant(
         shutil.copytree(fixture_root, repo_root)
         rendered = _render_for_variant(repo_root, variant)
         scenario = str(case.get("scenario") or "")
-        if scenario == "e1":
-            return _score_prompt_assertions(case, rendered)
-        if scenario == "e2":
-            return _score_review_mentions(case, rendered)
-        if scenario == "e3":
-            return _score_abstention(case, rendered, repo_root)
-        if scenario == "e4":
-            return _score_withdrawn(case, rendered, repo_root)
+        scorer = _SCENARIO_SCORERS.get(scenario)
+        if scorer is not None:
+            return float(scorer(case, rendered, repo_root))
     return 0.0
 
 
@@ -260,6 +264,7 @@ def evaluate_skill_eval_corpus(
     if failures:
         summary = f"{summary}; {'; '.join(failures)}"
     return SkillEvalCorpusReport(
+        passed=passed,
         tip_score=tip_total,
         baseline_score=baseline_total,
         summary=summary,
@@ -298,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         fixture_root=args.fixture_root,
     )
     logger.info("{}", _format_report(report))
-    return 0 if report.tip_score > report.baseline_score else 1
+    return 0 if report.passed else 1
 
 
 if __name__ == "__main__":

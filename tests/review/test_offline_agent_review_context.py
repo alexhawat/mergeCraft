@@ -9,6 +9,7 @@ import pytest
 from tests.context.review_skill_support import (
     INSTRUCTION_BUNDLE_BYTE_CAP,
     init_repo_with_skill,
+    render_prompt,
     resolve_offline_instructions,
     review_section,
 )
@@ -61,8 +62,10 @@ def test_cli_review_respects_the_bundle_cap(tmp_path: Path) -> None:
     repo.mkdir(parents=True)
     (repo / "AGENTS.md").write_text("Z" * 200_000 + "\n", encoding="utf-8")
     init_repo_with_skill(repo, body="Small CLI review skill.\n")
-    resolved = resolve_offline_instructions(repo)
-    assert len(resolved.full.encode("utf-8")) <= INSTRUCTION_BUNDLE_BYTE_CAP
+    # instruction_bundle_byte_cap applies to the review-context bundle only,
+    # not the full assembled prompt (system, procedure, learnings, etc.).
+    bundle = render_prompt(repo, byte_cap=INSTRUCTION_BUNDLE_BYTE_CAP)
+    assert len(bundle.encode("utf-8")) <= INSTRUCTION_BUNDLE_BYTE_CAP
 
 
 def test_cli_review_honors_instruction_extra_filenames(tmp_path: Path) -> None:

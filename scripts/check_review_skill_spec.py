@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from mergecraft.analyzers.agentsec.skill_manifest import parse_skill_file
+from mergecraft.context.instruction_discovery import reference_link_targets
 
 REPO = Path(__file__).resolve().parents[1]
 SKILL_ROOT = REPO / ".github" / "skills" / "code-review"
@@ -20,12 +21,7 @@ _REFERENCE_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
 
 def _reference_paths(body: str) -> list[Path]:
-    rels = [
-        match.group(1)
-        for match in _REFERENCE_LINK_RE.finditer(body)
-        if match.group(1).startswith("references/")
-    ]
-    return [(SKILL_ROOT / rel).resolve() for rel in rels]
+    return [(SKILL_ROOT / rel).resolve() for rel in reference_link_targets(body)]
 
 
 def _fail(message: str) -> None:

@@ -441,6 +441,8 @@ def _image_source_sha() -> str | None:
 
 
 def _loaded_review_skills(tool_state: ToolState) -> list[str]:
+    if tool_state.review_skills_ledger:
+        return list(tool_state.review_skills_ledger)
     return list(tool_state.review_skill_paths)
 
 
@@ -1298,10 +1300,10 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         review_mcp_names=list(tool_state.review_mcp_names),
     )
     tool_state.review_skill_paths = tuple(
-        str(item)
-        for item in instructions.extra.get("review_skills_ledger")
-        or instructions.extra.get("review_skills")
-        or []
+        str(item) for item in instructions.extra.get("review_skills") or []
+    )
+    tool_state.review_skills_ledger = tuple(
+        str(item) for item in instructions.extra.get("review_skills_ledger") or []
     )
     ctx.instructions = instructions
     logger.info("Using agent={} model={}", ctx.agent_id, ctx.resolved_model or "(auto)")

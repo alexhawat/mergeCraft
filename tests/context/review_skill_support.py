@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from mergecraft.config.settings import RepoInfo
+from mergecraft.context.instruction_discovery import DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP
 from mergecraft.modes import Mode
 from mergecraft.utils.instructions import resolve_instructions
 from tests.context.support import (
@@ -16,7 +17,7 @@ from tests.context.support import (
 
 REVIEW_SKILLS_HEADER = "************* REVIEW SKILLS *************"
 
-INSTRUCTION_BUNDLE_BYTE_CAP = 65536
+INSTRUCTION_BUNDLE_BYTE_CAP = DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP
 BASELINE_SKILL_MARKER = "Follow [REVIEW-CHECKS.md](../../../REVIEW-CHECKS.md)"
 DOCTRINE_GRADING_MARKER = "## 1. Code correctness"
 LIMITATION_MARKER = "instruction limitation"

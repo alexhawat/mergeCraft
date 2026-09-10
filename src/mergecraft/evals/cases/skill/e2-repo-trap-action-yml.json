@@ -10,7 +10,7 @@
   "review_assertions": {
     "with_skill_must_mention": [
       "check_action_yml_hygiene.py",
-      "literal `${{`"
+      "$\\{\\{"
     ],
     "without_skill_must_not_block_on_trap": false
   },
