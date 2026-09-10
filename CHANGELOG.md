@@ -119,11 +119,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Incidental prose such as `readme`, `comment`, `style`, `naming` or `typo` no
-  longer caps `Critical`/`Major` findings whose core impact is security or
-  correctness; genuine style nits are still deflated (N4)
-- Category inference no longer returns on the first maintainability pattern match
-  when a security signal is present in the same message (N20)
 - Corroborating duplicates can no longer weaken a finding: clustering keeps the
   strongest member's severity while the agent's prose stays canonical wording,
   and semantic dedupe keeps the strongest paraphrase with the discarded members'
