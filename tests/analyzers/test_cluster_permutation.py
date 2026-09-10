@@ -10,14 +10,7 @@ from __future__ import annotations
 import itertools
 from typing import Any
 
-import pytest
-
 from tests.findings.support import make_finding
-
-_RA4_XFAIL = pytest.mark.xfail(
-    reason="green after RA4: cluster result is invariant under input ordering",
-    strict=False,
-)
 
 _MESSAGE = "same defect, same location"
 
@@ -37,7 +30,6 @@ def _finding(tool: str, severity: str, *, source: str = "analyzer") -> Any:
     )
 
 
-@_RA4_XFAIL
 def test_cluster_result_is_permutation_invariant() -> None:
     """Every ordering of the same input set yields the same severities."""
     from mergecraft.analyzers.cluster import cluster_findings

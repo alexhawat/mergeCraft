@@ -12,14 +12,7 @@ from __future__ import annotations
 import itertools
 from typing import Any
 
-import pytest
-
 from tests.findings.support import make_finding
-
-_RA4_XFAIL = pytest.mark.xfail(
-    reason="green after RA4: semantic dedupe keeps the strongest survivor",
-    strict=False,
-)
 
 
 def _finding(severity: str, message: str, *, evidence: list[str] | None = None) -> Any:
@@ -46,7 +39,6 @@ def _major() -> Any:
     return _finding("Major", "The retry loop never sets a timeout", evidence=["major-evidence"])
 
 
-@_RA4_XFAIL
 def test_semantic_dedupe_keeps_the_strongest_survivor() -> None:
     """The paraphrased retry-loop-timeout pair collapses to the Major row."""
     from mergecraft.findings.dedup import dedupe_findings_with_indices
@@ -57,7 +49,6 @@ def test_semantic_dedupe_keeps_the_strongest_survivor() -> None:
     assert result.findings[0].severity == "Major"
 
 
-@_RA4_XFAIL
 def test_dedupe_result_is_permutation_invariant() -> None:
     """Both orderings of the same pair produce the same survivor severity."""
     from mergecraft.findings.dedup import dedupe_findings_with_indices
@@ -72,7 +63,6 @@ def test_dedupe_result_is_permutation_invariant() -> None:
             assert severities == reference, f"ordering produced {severities!r} != {reference!r}"
 
 
-@_RA4_XFAIL
 def test_evidence_from_discarded_members_is_retained() -> None:
     """A discarded paraphrase's evidence survives on the survivor."""
     from mergecraft.findings.dedup import dedupe_findings_with_indices
@@ -85,7 +75,6 @@ def test_evidence_from_discarded_members_is_retained() -> None:
     assert "major-evidence" in evidence
 
 
-@_RA4_XFAIL
 def test_kept_indices_still_point_at_the_surviving_row() -> None:
     """The cross-lane contract RB6 depends on: indices name the row actually kept."""
     from mergecraft.findings.dedup import dedupe_findings_with_indices

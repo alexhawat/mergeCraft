@@ -109,6 +109,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cluster canonicalization and semantic dedupe now keep the strongest member's
+  severity when corroborating weaker duplicates collapse, so a Major blocker
+  cannot turn green at either pipeline collapse point (N5)
 - Incidental prose such as ``readme``, ``comment``, or ``style`` no longer caps
   ``Critical``/``Major`` findings whose core impact is security or correctness;
   genuine style nits are still deflated (N4)
