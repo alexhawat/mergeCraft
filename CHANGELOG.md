@@ -99,6 +99,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Critical and Major security findings are no longer demoted when incidental
+  maintainability or documentation words appear in the same message; the security
+  lane takes absolute precedence and capping rules are inapplicable when impact
+  evidence supports the asserted severity (N4, N20)
+- Security category inference now recognizes ``auth``/``unauth`` stems and named
+  vulnerability classes (RCE, deserialization, path traversal, SSRF, CSRF, XXE,
+  privilege escalation, prototype pollution, open redirect, hardcoded key) (N20)
+
+### Fixed
+
+- Incidental prose such as ``readme``, ``comment``, or ``style`` no longer caps
+  ``Critical``/``Major`` findings whose core impact is security or correctness;
+  genuine style nits are still deflated (N4)
+- Category inference no longer returns on the first maintainability pattern match
+  when security signals are present in the same message (N20)
+
 - Fork-head runs now reject every indexed provider credential spelling
   (OAuth, device-code, cloud-chain) via a single registry-derived allowlist,
   not only flat ``*_API_KEY`` names (N1)

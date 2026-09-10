@@ -9,14 +9,7 @@ on the stem relaxation for no reason).
 
 from __future__ import annotations
 
-import pytest
-
 from tests.findings.support import make_finding
-
-_RA3_XFAIL = pytest.mark.xfail(
-    reason="green after RA3: widened security vocabulary and auth stem",
-    strict=False,
-)
 
 _AUTH_STEMS = ("auth", "authentication", "authorization", "unauthenticated", "authorize")
 
@@ -36,7 +29,6 @@ _NAMED_SECURITY_CLASSES = (
 )
 
 
-@_RA3_XFAIL
 def test_auth_stems_infer_security_category() -> None:
     """Every ``auth`` stem infers Security — not just the literal token."""
     from mergecraft.findings.severity_rubric import infer_category_from_message
@@ -48,7 +40,6 @@ def test_auth_stems_infer_security_category() -> None:
         )
 
 
-@_RA3_XFAIL
 def test_named_security_classes_infer_security_category() -> None:
     """Named vulnerability classes the eight-pattern vocabulary misses."""
     from mergecraft.findings.severity_rubric import infer_category_from_message
