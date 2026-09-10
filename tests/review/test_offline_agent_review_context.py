@@ -22,9 +22,7 @@ def test_cli_review_renders_the_review_skills_section(tmp_path: Path) -> None:
     resolved = resolve_offline_instructions(repo)
     assert "REVIEW SKILLS" in resolved.full
     assert "CLI review skill body." in review_section(resolved.full)
-    assert REPO_INSTRUCTIONS_HEADER in resolved.full or section_text(
-        resolved.full, REPO_INSTRUCTIONS_HEADER
-    )
+    assert REPO_INSTRUCTIONS_HEADER not in resolved.full
 
 
 def test_cli_review_populates_review_skill_paths(tmp_path: Path) -> None:

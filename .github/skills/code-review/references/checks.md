@@ -2,7 +2,7 @@
 
 ## Table of contents
 
-1. [Functional Correctness](#1-functional-correctness)
+1. [Functional Correctness](#1-code-correctness)
 2. [Data Integrity & Atomicity](#2-data-integrity--atomicity)
 3. [Security & Privacy](#3-security--privacy)
 4. [Stability & Availability](#4-stability--availability)

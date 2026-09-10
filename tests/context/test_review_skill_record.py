@@ -52,6 +52,40 @@ def test_quarantined_skill_is_recorded_as_quarantined(tmp_path: Path) -> None:
     assert "quarantined" in block.casefold()
 
 
+def test_final_cap_pop_syncs_injected_with_dropped_review_skills(tmp_path: Path) -> None:
+    """Final assembly cap enforcement must pop ``injected`` with ``review_blocks``."""
+    repo = tmp_path / "repo"
+    write_review_skill(repo, body="P" * 100 + "\n")
+    secondary_dir = repo / ".github" / "skills" / "pr-review"
+    write_review_skill(
+        repo,
+        body="S" * 100 + "\n",
+        skill_dir=secondary_dir,
+    )
+    git_init_repo(repo)
+    git_commit_all(repo)
+    from mergecraft.context.instruction_discovery import build_review_skill_record
+
+    record = build_review_skill_record(
+        repo_root=repo,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha="fixture-sha",
+        byte_cap=400,
+    )
+    injected = _injected_paths(record)
+    dropped = list(getattr(record, "dropped", ()))
+    ledger = _ledger_review_skills(record)
+    assert injected == [".github/skills/code-review/SKILL.md"]
+    assert ".github/skills/pr-review/SKILL.md" not in injected
+    assert ".github/skills/pr-review/SKILL.md" not in ledger
+    assert ".github/skills/pr-review/SKILL.md" in dropped
+    assert any(
+        "review skill dropped to honor bundle byte cap" in limitation
+        for limitation in getattr(record, "limitations", ())
+    )
+
+
 def test_skill_discovered_but_dropped_by_the_cap_is_not_recorded_as_applied(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     write_review_skill(repo, body="Primary review skill.\n")
@@ -72,7 +106,7 @@ def test_skill_discovered_but_dropped_by_the_cap_is_not_recorded_as_applied(tmp_
         trust_tier="trusted",
         repo="acme/demo",
         commit_sha="fixture-sha",
-        byte_cap=64,
+        byte_cap=330,
     )
     injected = _injected_paths(tiny)
     assert ".github/skills/code-review/SKILL.md" in injected

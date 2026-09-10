@@ -35,7 +35,12 @@ from mergecraft.mcp.inline_anchors import (
 )
 from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import ApprovalRecord, ReviewRecord, primary_repo_state
+from mergecraft.mcp.tool_state import (
+    ApprovalRecord,
+    ReviewRecord,
+    loaded_review_skills_for_ledger,
+    primary_repo_state,
+)
 from mergecraft.mcp.verdict import (
     REJECTION_REQUEST_CHANGES_NO_FINDINGS,
     ReviewPhase,
@@ -170,7 +175,7 @@ def _deterministic_review_block(
         agent_sandbox_decision=tool_state.agent_sandbox_decision,
         action_pin_sha=_review_action_pin_sha(),
         image_source_sha=_review_image_source_sha(),
-        review_skills=list(tool_state.review_skill_paths),
+        review_skills=loaded_review_skills_for_ledger(tool_state),
         review_mcp_servers=list(tool_state.review_mcp_names),
     )
 

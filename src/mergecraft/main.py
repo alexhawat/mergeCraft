@@ -40,7 +40,12 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.dependencies import start_installation
 from mergecraft.mcp.endpoints import mcp_role_url
 from mergecraft.mcp.server import start_mcp_http_server
-from mergecraft.mcp.tool_state import ProgressComment, ToolState, init_tool_state
+from mergecraft.mcp.tool_state import (
+    ProgressComment,
+    ToolState,
+    init_tool_state,
+    loaded_review_skills_for_ledger,
+)
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review.engine import ReviewEngine
@@ -422,7 +427,7 @@ async def publish_deterministic_record(
         agent_sandbox_decision=tool_state.agent_sandbox_decision,
         action_pin_sha=_action_pin_sha(),
         image_source_sha=_image_source_sha(),
-        review_skills=_loaded_review_skills(tool_state),
+        review_skills=loaded_review_skills_for_ledger(tool_state),
         review_mcp_servers=_loaded_review_mcp(tool_state),
     )
     await upsert_sticky_progress_comment(resolved_ctx, block)
@@ -438,12 +443,6 @@ def _image_source_sha() -> str | None:
     from mergecraft.build_metadata import resolve_build_commit
 
     return resolve_build_commit()
-
-
-def _loaded_review_skills(tool_state: ToolState) -> list[str]:
-    if tool_state.review_skills_ledger:
-        return list(tool_state.review_skills_ledger)
-    return list(tool_state.review_skill_paths)
 
 
 def _loaded_review_mcp(tool_state: ToolState) -> list[str]:
