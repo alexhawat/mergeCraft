@@ -1,0 +1,4 @@
+{
+  "$comment": "markdownlint engine 0.41.1 enables MD060 (table-column-style) by default. It fires 493 times across this repo's docs, all 'Table pipe is missing space to the right' — purely cosmetic. The catalog maps error -> Major and gate_policy counts Major toward has_blockers, so leaving it on would block any PR that edits a markdown table line. Re-enable if the table style is ever normalised repo-wide.",
+  "MD060": false
+}

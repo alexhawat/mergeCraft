@@ -35,12 +35,16 @@ def parse_markdownlint_json(
             rule_id = str(names[0])
         start_line = coerce_line(item.get("lineNumber", 1))
         message = str(item.get("ruleDescription") or item.get("errorDetail") or rule_id)
+        # markdownlint 0.47.0 added warning support and 0.49.1 emits a per-finding
+        # `severity`. Older releases omit it, so fall back to "error" — hardcoding
+        # it meant a future `warning` would have been reported as a Major.
+        native_severity = str(item.get("severity") or "error").strip().lower() or "error"
         findings.append(
             make_finding(
                 tool=manifest.id,
                 rule_id=rule_id,
                 category=category,
-                severity=map_native_severity(manifest, "error"),
+                severity=map_native_severity(manifest, native_severity),
                 confidence=map_confidence(None),
                 message=message,
                 path=resolve_repo_relative_path(
