@@ -214,3 +214,34 @@ def test_the_pin_bump_workflow_warns_against_squashing_the_manifest() -> None:
     """Squashing C orphans it and leaves nothing for P to name (#684)."""
     text = read_text(f".github/workflows/{_BUMP_WORKFLOW}")
     assert "squash" in text.lower(), "no squash warning for the manifest stage"
+
+
+def test_the_pin_stage_does_not_resolve_the_image_from_mains_tip() -> None:
+    """By the pin stage, main's tip is never the source the image was built from.
+
+    The manifest PR's own merge advances main, so `stage=pin` resolving from
+    HEAD asked GHCR for a digest tagged with the merge commit and always got
+    nothing:
+
+        {"analyzers_digest": "", "slim_digest": ""}
+        no published slim image for e2da18fc… — wait for CI/CD to finish
+
+    It is redundant as well as wrong: `action-pin-prepare` runs
+    `verify_manifest(manifest_commit)` internally, which verifies the digest
+    against GHCR for the correct source.
+    """
+    steps = job(load_workflow(_BUMP_WORKFLOW), "prepare")["steps"]
+    resolve = [step for step in steps if "action-images-resolve" in str(step.get("run", ""))]
+    assert len(resolve) == 1, "expected exactly one image-resolve step"
+    guard = str(resolve[0].get("if", ""))
+    assert "manifest" in guard, (
+        f"image resolution is not restricted to the manifest stage: {guard!r}"
+    )
+
+
+def test_the_pin_stage_names_its_branch_from_the_manifest_commit() -> None:
+    """The pin branch must not depend on the skipped resolve step's outputs."""
+    text = read_text(f".github/workflows/{_BUMP_WORKFLOW}")
+    assert "chore/action-pin-${MANIFEST_COMMIT" in text, (
+        "pin branch name derives from a step that does not run in this stage"
+    )

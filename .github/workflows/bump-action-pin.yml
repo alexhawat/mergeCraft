@@ -71,8 +71,15 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
 
+      # stage=manifest only. The pin stage must not resolve from main's tip: by
+      # then main has advanced to the manifest PR's own merge commit, which is
+      # never the source the image was built from, so this always resolved an
+      # empty digest and failed. It is redundant there anyway —
+      # `action-pin-prepare` runs verify_manifest(manifest_commit) internally,
+      # which verifies the digest against GHCR for the correct source.
       - name: Resolve and verify the published image
         id: image
+        if: inputs.stage == 'manifest'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -101,6 +108,8 @@ jobs:
           SOURCE_REVISION: ${{ steps.image.outputs.source }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           SHORT: ${{ steps.image.outputs.short }}
+          # Empty for stage=pin, where the source is derived from the manifest
+          # commit by action-pin-prepare rather than from main's tip.
         run: |
           set -euo pipefail
           if [ "$STAGE" = "manifest" ]; then
@@ -140,6 +149,7 @@ jobs:
           BRANCH: ${{ steps.prepare.outputs.branch }}
           TITLE: ${{ steps.prepare.outputs.title }}
           STAGE: ${{ inputs.stage }}
+          MANIFEST_COMMIT: ${{ inputs.manifest_commit }}
           SOURCE_REVISION: ${{ steps.image.outputs.source }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
@@ -149,8 +159,12 @@ jobs:
             echo "| | |"
             echo "| --- | --- |"
             echo "| stage | \`$STAGE\` |"
-            echo "| source S | \`$SOURCE_REVISION\` |"
-            echo "| image D | \`$IMAGE_DIGEST\` |"
+            if [ -n "$SOURCE_REVISION" ]; then
+              echo "| source S | \`$SOURCE_REVISION\` |"
+              echo "| image D | \`$IMAGE_DIGEST\` |"
+            else
+              echo "| manifest C | \`$MANIFEST_COMMIT\` |"
+            fi
             echo
             echo "Open the PR yourself — a GITHUB_TOKEN-opened PR carries no required checks:"
             echo
