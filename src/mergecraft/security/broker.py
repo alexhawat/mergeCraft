@@ -163,9 +163,13 @@ def subscription_auth_usable(raw: str) -> bool:
 _subscription_auth_usable = subscription_auth_usable
 
 
-def resolve_codex_broker_posture(*, openai_api_key: str = "") -> CodexBrokerPosture:
+def resolve_codex_broker_posture(
+    *,
+    openai_api_key: str = "",
+    codex_auth_json: str = "",
+) -> CodexBrokerPosture:
     """Return whether the broker is active for the current Codex auth mode (D3a)."""
-    subscription_raw = os.environ.get("CODEX_AUTH_JSON", "").strip()
+    subscription_raw = codex_auth_json.strip() or os.environ.get("CODEX_AUTH_JSON", "").strip()
     if subscription_raw and subscription_auth_usable(subscription_raw):
         return CodexBrokerPosture(
             active=False,

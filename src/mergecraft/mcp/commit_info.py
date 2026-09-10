@@ -28,20 +28,18 @@ def get_commit_info_tool(ctx: ToolContext):
         content = "".join(parts)
         temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         diff_file = str(Path(temp) / f"commit-{sha[:7]}.diff")
-        Path(diff_file).write_text(content, encoding="utf-8")
-        logger.debug("wrote commit diff to {} ({} bytes)", diff_file, len(content))
+        diff_path = Path(diff_file)
+        diff_path.write_text(content, encoding="utf-8")
+        written = diff_path.read_text(encoding="utf-8")
+        logger.debug("wrote commit diff to {} ({} bytes)", diff_file, len(written))
+        from mergecraft.mcp.verdict import _looks_like_unified_diff
+
         primary = primary_repo_state(ctx.tool_state)
         pr_head = (primary.checkout_sha or "").strip().lower()
-        if pr_head and sha.strip().lower() == pr_head:
-            from mergecraft.mcp.verdict import register_review_scope, validate_review_scope_evidence
-
-            await validate_review_scope_evidence(ctx, diff_path=diff_file, head_sha=sha)
-            register_review_scope(
-                ctx.tool_state,
-                diff_path=diff_file,
-                provenance="commit-info",
-                review_scope=ctx.tool_state.review_scope,
-            )
+        if pr_head and sha.strip().lower() == pr_head and not _looks_like_unified_diff(written):
+            msg = f"diff_path is empty or not a unified diff: {diff_file}"
+            raise ValueError(msg)
+        ctx.tool_state.commit_inspection_diffs[sha.strip().lower()] = diff_file
         stats = data.get("stats") or {}
         return {
             "sha": data.get("sha"),

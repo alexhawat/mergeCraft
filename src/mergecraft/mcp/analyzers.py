@@ -2,17 +2,84 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import AnalyzerRunState, analyzer_run_key, primary_repo_state
+from mergecraft.mcp.tool_state import (
+    AnalyzerRunState,
+    ToolState,
+    analyzer_run_key,
+    primary_repo_state,
+)
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, API_ONLY_SCOPE_GUIDANCE
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+
+_STORE_RUN_STATE_LOCK = threading.Lock()
+
+
+def _scope_key_from_state(state: AnalyzerRunState) -> tuple[str, ...]:
+    if state.key is not None:
+        return state.key.changed_files
+    return ()
+
+
+def _merge_scope_retained_state(
+    tool_state: ToolState, incoming: AnalyzerRunState
+) -> AnalyzerRunState:
+    """Retain analyzer evidence per covered scope; supersede only that scope (D9)."""
+    scope_key = _scope_key_from_state(incoming)
+    tool_state.analyzer_scope_runs[scope_key] = incoming
+    scope_runs = list(tool_state.analyzer_scope_runs.values())
+    if len(scope_runs) == 1:
+        return scope_runs[0]
+    merged_findings: list[dict[str, Any]] = []
+    merged_inline: list[dict[str, Any]] = []
+    merged_deferred: list[dict[str, Any]] = []
+    merged_analyzers: list[Any] = []
+    verified_ids: set[str] = set()
+    ran = False
+    reason: str | None = None
+    mechanical_section: str | None = None
+    deferred_section: str | None = None
+    pre_merge_summary: str | None = None
+    lockfile_digest: str | None = None
+    for scope_state in scope_runs:
+        merged_findings.extend(scope_state.findings)
+        merged_inline.extend(scope_state.inline)
+        merged_deferred.extend(scope_state.deferred_findings)
+        merged_analyzers.extend(scope_state.analyzers)
+        verified_ids |= set(scope_state.verified_ids)
+        ran = ran or scope_state.ran
+        if scope_state.reason:
+            reason = scope_state.reason
+        if scope_state.mechanical_section:
+            mechanical_section = scope_state.mechanical_section
+        if scope_state.deferred_section:
+            deferred_section = scope_state.deferred_section
+        if scope_state.pre_merge_summary:
+            pre_merge_summary = scope_state.pre_merge_summary
+        if scope_state.lockfile_digest:
+            lockfile_digest = scope_state.lockfile_digest
+    return AnalyzerRunState(
+        ran=ran,
+        reason=reason,
+        analyzers=merged_analyzers,
+        findings=merged_findings,
+        inline=merged_inline,
+        mechanical_section=mechanical_section,
+        deferred_section=deferred_section,
+        deferred_findings=merged_deferred,
+        pre_merge_summary=pre_merge_summary,
+        lockfile_digest=lockfile_digest,
+        verified_ids=verified_ids,
+        key=incoming.key,
+    )
 
 
 def _load_diff_text(diff_path: Path | None) -> str:
@@ -28,14 +95,17 @@ def _resolve_tier(ctx: ToolContext) -> str:
 def _store_run_state(ctx: ToolContext, state: AnalyzerRunState) -> None:
     from mergecraft.findings.ledger import record_deferred_from_analyzer_run
 
-    session_ids = set(ctx.tool_state.verified_ids)
-    prior = ctx.tool_state.analyzer_run
-    if prior is not None:
-        session_ids |= set(prior.verified_ids)
-    state.verified_ids = set(state.verified_ids) | session_ids
-    ctx.tool_state.analyzer_run = state
-    ctx.tool_state.verified_ids = session_ids | set(state.verified_ids)
-    record_deferred_from_analyzer_run(ctx.tool_state, state)
+    with _STORE_RUN_STATE_LOCK:
+        session_ids = set(ctx.tool_state.verified_ids)
+        prior = ctx.tool_state.analyzer_run
+        if prior is not None:
+            session_ids |= set(prior.verified_ids)
+        state.verified_ids = set(state.verified_ids) | session_ids
+        merged = _merge_scope_retained_state(ctx.tool_state, state)
+        merged.verified_ids = session_ids | set(merged.verified_ids)
+        ctx.tool_state.analyzer_run = merged
+        ctx.tool_state.verified_ids = merged.verified_ids
+        record_deferred_from_analyzer_run(ctx.tool_state, merged)
 
 
 def run_analyzers_tool(ctx: ToolContext):
@@ -95,6 +165,8 @@ def run_analyzers_tool(ctx: ToolContext):
                 mode=ctx.analyzers_mode,
                 self_review_level=str(ctx.tool_state.trust_self_review_level or "off"),
             )
+        if run_state.key is None:
+            run_state.key = request_key
         _store_run_state(ctx, run_state)
 
         payload: dict[str, Any] = {

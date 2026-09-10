@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
+from mergecraft.evidence.merge import severity_rank
 from mergecraft.review_policy.paths import normalize_repo_path
 from mergecraft.review_policy.security_tokens import DOMAIN_HINT_GROUPS
 
@@ -203,6 +204,22 @@ def _location_key(finding: Finding) -> tuple[str, int | None, int | None, str]:
     )
 
 
+def _merge_cluster_evidence(survivor: Finding, cluster: list[tuple[int, Finding]]) -> Finding:
+    """Union evidence from every semantically similar member onto the survivor."""
+    seen = set(survivor.evidence)
+    for _, finding in cluster:
+        for entry in finding.evidence:
+            if entry not in seen:
+                survivor.evidence.append(entry)
+                seen.add(entry)
+    return survivor
+
+
+def _pick_survivor(cluster: list[tuple[int, Finding]]) -> tuple[int, Finding]:
+    survivor_index, survivor = min(cluster, key=lambda item: severity_rank(item[1]))
+    return survivor_index, _merge_cluster_evidence(survivor, cluster)
+
+
 def dedupe_findings_with_indices(findings: list[Finding]) -> DedupeResult:
     """Return deduped findings and the input indices that survived."""
     if not findings:
@@ -227,7 +244,7 @@ def dedupe_findings_with_indices(findings: list[Finding]) -> DedupeResult:
             if not placed:
                 clusters.append([(index, finding)])
         for cluster in clusters:
-            survivor_index, survivor = cluster[0]
+            survivor_index, survivor = _pick_survivor(cluster)
             deduped.append(survivor)
             kept_indices.append(survivor_index)
     return DedupeResult(findings=deduped, kept_indices=kept_indices)

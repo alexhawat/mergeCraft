@@ -522,6 +522,7 @@ class _OfflineDiffReviewRun:
                     base_ref=built.base_ref,
                     line_count=0 if not filtered.strip() else filtered.count("\n"),
                     empty=not filtered.strip(),
+                    coverage_limitations=built.coverage_limitations,
                 )
         diff_text = built.path.read_text(encoding="utf-8")
         reduced_text, self.scope_reduction = apply_diff_line_budget(
@@ -535,6 +536,7 @@ class _OfflineDiffReviewRun:
                 base_ref=built.base_ref,
                 line_count=self.scope_reduction.kept_lines,
                 empty=not reduced_text.strip(),
+                coverage_limitations=built.coverage_limitations,
             )
         self.materialization = built
         return built
@@ -564,6 +566,19 @@ class _OfflineDiffReviewRun:
                         error=f"failed to write findings JSON: {exc}",
                         outcome=RunOutcome.configuration_error,
                     )
+            if self.materialization.coverage_limitations:
+                excluded = "; ".join(self.materialization.coverage_limitations)
+                return OfflineReviewResult(
+                    success=True,
+                    output=(
+                        "review diff is empty because changes were excluded from coverage: "
+                        f"{excluded}"
+                    ),
+                    diff_path=str(self.materialization.path),
+                    empty_diff=True,
+                    outcome=RunOutcome.inconclusive,
+                    scope_reduction=self.scope_reduction,
+                )
             return OfflineReviewResult(
                 success=True,
                 output="no changes to review (empty diff).",

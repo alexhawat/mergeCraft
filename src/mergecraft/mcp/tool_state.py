@@ -439,6 +439,13 @@ class ToolState:
     agent_diagnostic: Any = None
     browser_daemon: Any = None
     analyzer_run: AnalyzerRunState | None = None
+    # Per-scope analyzer runs retained across partial reruns (N2 / D9). Each
+    # entry is keyed by the sorted changed-file tuple for one ``run_analyzers``
+    # call; a rerun supersedes only its own scope.
+    analyzer_scope_runs: dict[tuple[str, ...], AnalyzerRunState] = field(default_factory=dict)
+    # Single-commit patches from ``get_commit_info`` — inspection artifacts that
+    # must not overwrite ``primary.diff_path`` (N3 / D10).
+    commit_inspection_diffs: dict[str, str] = field(default_factory=dict)
     # Session-scoped verifier confirms. ``run_analyzers`` replaces
     # ``analyzer_run`` wholesale, so confirmations must not live only there.
     verified_ids: set[str] = field(default_factory=set)
@@ -460,9 +467,9 @@ class ToolState:
     # Plan 13 W4 — ``api-only`` when the PR diff is authoritative but the head
     # ref is not checked out locally; ``None`` means full local scope.
     review_scope: str | None = None
-    # How review scope was established (``checkout_pr`` api fallback,
-    # ``establish_review_scope``, or ``get_commit_info`` at PR head).
-    scope_provenance: Literal["api", "checkout", "local-diff", "commit-info"] | None = None
+    # How review scope was established (``checkout_pr`` api fallback or
+    # ``establish_review_scope``).
+    scope_provenance: Literal["api", "checkout", "local-diff"] | None = None
     # Memoized ``git show <rev>:<path>`` output paths keyed ``rev\\0path``.
     git_show_cache: dict[str, str] = field(default_factory=dict)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)

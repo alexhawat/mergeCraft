@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 
@@ -150,22 +151,14 @@ ALWAYS_STRIP_FROM_AGENT_ENV: frozenset[str] = frozenset(
     }
 )
 
+
 # Provider credential env vars — only the active agent's key is re-injected.
-PROVIDER_KEY_ENV_VARS: frozenset[str] = frozenset(
-    {
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GOOGLE_GENERATIVE_AI_API_KEY",
-        "CURSOR_API_KEY",
-        "NOUS_API_KEY",
-        "TOKENHUB_API_KEY",
-        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "CODEX_AUTH_JSON",
-    }
-)
+@functools.cache
+def _provider_key_env_vars() -> frozenset[str]:
+    from mergecraft.config.runtime_provider_registry import provider_credential_env_names
+
+    return provider_credential_env_names(None)
+
 
 ACTIVE_PROVIDER_KEY_BY_AGENT: dict[str, str | None] = {
     "claude": "ANTHROPIC_API_KEY",
@@ -226,7 +219,7 @@ def build_agent_env(
     env = filter_env()
     for key in ALWAYS_STRIP_FROM_AGENT_ENV:
         env.pop(key, None)
-    for key in PROVIDER_KEY_ENV_VARS:
+    for key in _provider_key_env_vars():
         env.pop(key, None)
     for key in (*_BEDROCK_AGENT_ENV_VARS, *_VERTEX_AGENT_ENV_VARS):
         env.pop(key, None)
@@ -259,6 +252,10 @@ def build_agent_env(
         oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
         if oauth:
             env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
+    if agent_id == "codex" and "CODEX_AUTH_JSON" not in registry_mapped:
+        codex_auth = os.environ.get("CODEX_AUTH_JSON", "").strip()
+        if codex_auth:
+            env["CODEX_AUTH_JSON"] = codex_auth
     # Bedrock / Vertex BYOK for Claude *or* OpenCode: reinject when the USE
     # flags are set (callers set them from model id / BEDROCK_MODEL_ID match).
     use_bedrock = bool(
@@ -308,3 +305,10 @@ def resolve_env(mode: EnvMode | None = None) -> dict[str, str]:
         return {**filter_env(), **mode}
     msg = f"invalid env mode: {mode!r}"
     raise ValueError(msg)
+
+
+def __getattr__(name: str) -> object:
+    if name == "PROVIDER_KEY_ENV_VARS":
+        return _provider_key_env_vars()
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)

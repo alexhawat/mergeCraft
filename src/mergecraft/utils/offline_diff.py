@@ -22,6 +22,7 @@ class DiffMaterialization:
     base_ref: str | None
     line_count: int
     empty: bool
+    coverage_limitations: tuple[str, ...] = ()
 
 
 def _run_git(
@@ -144,45 +145,73 @@ def git_staged_diff(*, cwd: Path) -> str:
     return result.stdout
 
 
-def git_unstaged_diff(*, cwd: Path) -> str:
-    """Return unstaged working-tree diff (tracked edits plus untracked adds)."""
+def _list_untracked_paths(*, cwd: Path, ignored: bool) -> list[str]:
+    if ignored:
+        args = ["ls-files", "--others", "-i", "--exclude-standard", "-z"]
+    else:
+        args = ["ls-files", "--others", "--exclude-standard", "-z"]
+    result = _run_git(args, cwd=cwd)
+    if result.returncode != 0 or not result.stdout.strip("\0"):
+        return []
+    return [rel for rel in result.stdout.strip("\0").split("\0") if rel]
+
+
+def _collect_untracked_additions(*, cwd: Path) -> tuple[str, tuple[str, ...]]:
+    """Append eligible untracked adds and surface skips as coverage limitations."""
+    limitations: list[str] = []
+    patch_parts: list[str] = []
+
+    for rel in _list_untracked_paths(cwd=cwd, ignored=True):
+        limitations.append(f"{rel}: excluded (gitignored)")
+
+    for rel in _list_untracked_paths(cwd=cwd, ignored=False):
+        path = cwd / rel
+        if path.is_symlink():
+            limitations.append(f"{rel}: excluded (symlink)")
+            continue
+        if not path.is_file():
+            continue
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if len(raw) > _MAX_UNTRACKED_FILE_BYTES:
+            logger.info("skipped oversized untracked file in unstaged diff: {}", rel)
+            limitations.append(f"{rel}: excluded (oversized untracked file)")
+            continue
+        if b"\0" in raw:
+            logger.info("skipped binary untracked file in unstaged diff: {}", rel)
+            limitations.append(f"{rel}: excluded (binary untracked file)")
+            continue
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError:
+            logger.info("skipped non-UTF-8 untracked file in unstaged diff: {}", rel)
+            limitations.append(f"{rel}: excluded (non-UTF-8 untracked file)")
+            continue
+        patch = _run_git(["diff", "--no-index", "--", "/dev/null", rel], cwd=cwd)
+        if patch.returncode not in (0, 1):
+            msg = f"failed to compute untracked diff for {rel!r}: {patch.stderr.strip()}"
+            raise RuntimeError(msg)
+        patch_parts.append(patch.stdout)
+
+    return "".join(patch_parts), tuple(limitations)
+
+
+def git_unstaged_diff_parts(*, cwd: Path) -> tuple[str, str, tuple[str, ...]]:
+    """Return tracked diff, untracked patch, and coverage limitations."""
     result = _run_git(["diff"], cwd=cwd)
     if result.returncode != 0:
         msg = f"failed to compute unstaged diff: {result.stderr.strip()}"
         raise RuntimeError(msg)
-    untracked = _run_git(
-        ["ls-files", "--others", "--exclude-standard", "-z"],
-        cwd=cwd,
-    )
-    text = result.stdout
-    if untracked.returncode == 0 and untracked.stdout.strip("\0"):
-        for rel in untracked.stdout.strip("\0").split("\0"):
-            if not rel:
-                continue
-            path = cwd / rel
-            if path.is_symlink() or not path.is_file():
-                continue
-            try:
-                raw = path.read_bytes()
-            except OSError:
-                continue
-            if len(raw) > _MAX_UNTRACKED_FILE_BYTES:
-                logger.info("skipped oversized untracked file in unstaged diff: {}", rel)
-                continue
-            if b"\0" in raw:
-                logger.info("skipped binary untracked file in unstaged diff: {}", rel)
-                continue
-            try:
-                raw.decode("utf-8")
-            except UnicodeDecodeError:
-                logger.info("skipped non-UTF-8 untracked file in unstaged diff: {}", rel)
-                continue
-            patch = _run_git(["diff", "--no-index", "--", "/dev/null", rel], cwd=cwd)
-            if patch.returncode not in (0, 1):
-                msg = f"failed to compute untracked diff for {rel!r}: {patch.stderr.strip()}"
-                raise RuntimeError(msg)
-            text += patch.stdout
-    return text
+    untracked_patch, limitations = _collect_untracked_additions(cwd=cwd)
+    return result.stdout, untracked_patch, limitations
+
+
+def git_unstaged_diff(*, cwd: Path) -> str:
+    """Return unstaged working-tree diff (tracked edits plus untracked adds)."""
+    tracked, untracked_patch, _ = git_unstaged_diff_parts(cwd=cwd)
+    return tracked + untracked_patch
 
 
 def git_range_diff(*, cwd: Path, range_spec: str) -> str:
@@ -207,12 +236,15 @@ def materialize_diff(
     path = out_dir / "review.diff"
     base_ref: str | None = None
 
+    coverage_limitations: tuple[str, ...] = ()
     if diff_file is not None:
         text = diff_file.read_text(encoding="utf-8")
         base_ref = None
     else:
         base_ref = base or detect_default_base(cwd, git_dir=git_dir)
         text = git_merge_base_diff(cwd=cwd, base=base_ref, git_dir=git_dir)
+        untracked_patch, coverage_limitations = _collect_untracked_additions(cwd=cwd)
+        text += untracked_patch
 
     # Normalize trailing newline for stable line counts.
     if text and not text.endswith("\n"):
@@ -226,7 +258,13 @@ def materialize_diff(
         f", base={base_ref}" if base_ref else "",
         path,
     )
-    return DiffMaterialization(path=path, base_ref=base_ref, line_count=line_count, empty=empty)
+    return DiffMaterialization(
+        path=path,
+        base_ref=base_ref,
+        line_count=line_count,
+        empty=empty,
+        coverage_limitations=coverage_limitations,
+    )
 
 
 def summarize_diff(text: str) -> str:

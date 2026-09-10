@@ -103,9 +103,12 @@ def finding_dedupe_key(finding: Finding) -> str:
     )
 
 
-def _severity_rank(finding: Finding) -> int:
+def severity_rank(finding: Finding) -> int:
     """Lower is more severe. Unknown grades sort after the taxonomy."""
     return _SEVERITY_RANK.get(finding.severity, len(_SEVERITY_RANK))
+
+
+_severity_rank = severity_rank
 
 
 def merge_findings(*groups: list[Finding]) -> list[Finding]:
@@ -125,7 +128,7 @@ def merge_findings(*groups: list[Finding]) -> list[Finding]:
                 unique[key] = finding
                 order.append(key)
                 continue
-            if _severity_rank(finding) < _severity_rank(existing):
+            if severity_rank(finding) < severity_rank(existing):
                 unique[key] = finding
     return [unique[key] for key in order]
 
@@ -133,6 +136,7 @@ def merge_findings(*groups: list[Finding]) -> list[Finding]:
 __all__ = [
     "finding_dedupe_key",
     "merge_findings",
+    "severity_rank",
     "typed_findings_from_rows",
     "typed_findings_from_rows_with_drops",
 ]

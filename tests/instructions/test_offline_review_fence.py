@@ -140,8 +140,10 @@ def test_injected_pr_body_does_not_change_findings(
     _require_fence()
     repo = _make_diff_repo(tmp_path)
 
-    benign_capture = tmp_path / "benign_prompt.txt"
-    injected_capture = tmp_path / "injected_prompt.txt"
+    capture_dir = tmp_path.parent / "prompt_captures"
+    capture_dir.mkdir(exist_ok=True)
+    benign_capture = capture_dir / "benign_prompt.txt"
+    injected_capture = capture_dir / "injected_prompt.txt"
 
     # Use a model that maps to a stable stub target. The stub
     # monkeypatches `resolve_runtime_agent` directly, so the model slug
