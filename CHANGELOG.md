@@ -108,8 +108,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `config.runtime_provider_registry`, the single credential authority across every
   `authKind`, cloud suffix and spelling — the pinned drift that dropped
   `GOOGLE_API_KEY` is gone, and `AWS_SESSION_TOKEN` is covered (N21)
+- Critical and Major security findings are no longer demoted when incidental
+  maintainability or documentation words appear in the same message; the security
+  lane takes absolute precedence and capping rules are inapplicable when impact
+  evidence supports the asserted severity (N4)
+- Security category inference now recognizes `auth`/`unauth` stems and the named
+  vulnerability classes (RCE, deserialization, pickle, path traversal, SSRF, CSRF,
+  XXE, privilege escalation, prototype pollution, open redirect, hardcoded key)
+  (N20)
 
 ### Fixed
+
+- Incidental prose such as `readme`, `comment`, `style`, `naming` or `typo` no
+  longer caps `Critical`/`Major` findings whose core impact is security or
+  correctness; genuine style nits are still deflated (N4)
+- Category inference no longer returns on the first maintainability pattern match
+  when a security signal is present in the same message (N20)
 
 - The Action-pin staleness budget counts changes rather than landings. Without
   `--no-merges`, a PR touching `src/mergecraft/` scored twice — its own commit

@@ -47,10 +47,64 @@ SEVERITY_RUBRIC: Final[tuple[_RubricRule, ...]] = (
     },
 )
 
-_COMPILED: Final[tuple[tuple[_RubricRule, tuple[re.Pattern[str], ...]], ...]] = tuple(
-    (rule, tuple(re.compile(pattern, re.IGNORECASE) for pattern in rule["patterns"]))
+_SECURITY_RULE_ID: Final[str] = "security-signal"
+_ASSERTED_BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
+
+_RULES_BY_ID: Final[dict[str, _RubricRule]] = {str(rule["id"]): rule for rule in SEVERITY_RUBRIC}
+_SECURITY_RULE: Final[_RubricRule] = _RULES_BY_ID[_SECURITY_RULE_ID]
+
+
+def _compile_patterns(rule: _RubricRule) -> tuple[re.Pattern[str], ...]:
+    return tuple(re.compile(pattern, re.IGNORECASE) for pattern in rule["patterns"])
+
+
+_SECURITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = _compile_patterns(_SECURITY_RULE)
+#: Every category rule except the security lane. Security is handled explicitly
+#: first (D5), so its position in ``SEVERITY_RUBRIC`` is no longer load-bearing.
+_NON_SECURITY_RULES: Final[tuple[tuple[_RubricRule, tuple[re.Pattern[str], ...]], ...]] = tuple(
+    (rule, _compile_patterns(rule))
     for rule in SEVERITY_RUBRIC
+    if str(rule["id"]) != _SECURITY_RULE_ID
 )
+
+
+def _matches_any(message: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
+    return any(pattern.search(message) for pattern in patterns)
+
+
+def _matches_security_signal(message: str) -> bool:
+    return _matches_any(message, _SECURITY_PATTERNS)
+
+
+def _core_impact_message(message: str) -> str:
+    """Return the asserted impact, excluding incidental prose after a semicolon.
+
+    Reviewers append incidental notes (``; see README``, ``; typo``) after the
+    impact they are describing. The core is what carries the claim, so the
+    capping vocabulary is evaluated against it, not against the whole message.
+    """
+    return message.split(";", maxsplit=1)[0].strip()
+
+
+def _core_is_genuine_style_or_docs_nit(message: str) -> bool:
+    """Whether the asserted impact itself is a maintainability/docs nit."""
+    core = _core_impact_message(message)
+    return any(_matches_any(core, patterns) for _, patterns in _NON_SECURITY_RULES)
+
+
+def _cap_inapplicable(message: str, asserted_severity: str) -> bool:
+    """Whether D5 forbids deflating this finding.
+
+    A security signal anywhere makes every capping rule inapplicable (the
+    security lane is non-capping in both directions). Otherwise, a
+    Critical/Major assertion with a non-nit core impact is impact evidence and
+    is not lowered by a stray maintainability or docs word.
+    """
+    if _matches_security_signal(message):
+        return True
+    if asserted_severity not in _ASSERTED_BLOCKING_SEVERITIES:
+        return False
+    return not _core_is_genuine_style_or_docs_nit(message)
 
 
 def _cap_severity(current: str, maximum: str) -> str:
@@ -74,11 +128,15 @@ def apply_severity_rubric(
     """Normalize inflated model severity using the code-defined rubric."""
     severity = model_assigned_severity or finding.severity
     message = finding.message
-    for rule, patterns in _COMPILED:
+    if _cap_inapplicable(message, severity):
+        if severity == finding.severity:
+            return finding
+        return finding.model_copy(update={"severity": severity})
+    for rule, patterns in _NON_SECURITY_RULES:
         categories = rule.get("categories")
         if categories and finding.category not in categories:
             continue
-        if any(pattern.search(message) for pattern in patterns):
+        if _matches_any(message, patterns):
             max_severity = rule.get("max_severity")
             if max_severity is not None:
                 severity = _cap_severity(severity, str(max_severity))
@@ -88,12 +146,20 @@ def apply_severity_rubric(
 
 
 def infer_category_from_message(body: str) -> str:
-    """Infer a taxonomy category from message text using rubric patterns."""
-    for rule, patterns in _COMPILED:
+    """Infer a taxonomy category from message text using rubric patterns.
+
+    The security lane is checked first as a deliberate precedent (D5), not by
+    virtue of its position in ``SEVERITY_RUBRIC``.
+    """
+    if _matches_security_signal(body):
+        categories = _SECURITY_RULE.get("categories")
+        if categories:
+            return str(categories[0])
+    for rule, patterns in _NON_SECURITY_RULES:
         categories = rule.get("categories")
         if not categories:
             continue
-        if any(pattern.search(body) for pattern in patterns):
+        if _matches_any(body, patterns):
             return str(categories[0])
     return "Functional Correctness"
 
