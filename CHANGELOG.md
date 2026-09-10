@@ -137,6 +137,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HEAD commit's patch; the single-commit diff stays an inspection artifact, so
   admissible citations, inline anchors and blast radius remain bound to the
   whole change under review (N3)
+- Default local review includes eligible untracked additions, so a brand-new
+  source file is reviewed without knowing an alternate flag; every exclusion —
+  gitignored, oversized, binary, symlink — is surfaced as a review-coverage
+  limitation, and an all-excluded diff can no longer render as a passed review
+  with "no changes to review" (N7)
 
 - The Action-pin staleness budget counts changes rather than landings. Without
   `--no-merges`, a PR touching `src/mergecraft/` scored twice — its own commit
