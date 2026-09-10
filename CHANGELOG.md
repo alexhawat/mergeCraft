@@ -109,6 +109,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Default local review now includes eligible untracked source files in the
+  materialized diff; gitignored, oversized, binary, and symlink skips are
+  reported as review-coverage limitations instead of silent omissions, and an
+  empty diff caused by exclusions no longer renders as a passed review with
+  "no changes to review" (N7)
+
 - Partial ``run_analyzers`` reruns retain findings from earlier covered scopes
   instead of replacing the whole analyzer run, so a clean pass over an
   uncovered file cannot erase a prior blocker (N2)

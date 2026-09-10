@@ -12,14 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from mergecraft.utils.offline_diff import materialize_diff
-
-_RA6_XFAIL = pytest.mark.xfail(
-    reason="green after RA6: exclusions are reported, empty states are distinguishable",
-    strict=False,
-)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -35,7 +28,7 @@ def _git(cwd: Path, *args: str) -> str:
 
 def _init_repo(tmp_path: Path, *, gitignore: str | None = None) -> Path:
     repo = tmp_path / "repo"
-    repo.mkdir()
+    repo.mkdir(parents=True)
     _git(repo, "init", "-b", "main")
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "Test")
@@ -56,7 +49,6 @@ def _reports(limitations: Any, needle: str) -> bool:
     return any(needle in str(item) for item in (limitations or ()))
 
 
-@_RA6_XFAIL
 def test_exclusions_are_reported_as_review_coverage_limitations(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path, gitignore="ignored.py\n")
     (repo / "ignored.py").write_text("x = 1\n", encoding="utf-8")
@@ -71,7 +63,6 @@ def test_exclusions_are_reported_as_review_coverage_limitations(tmp_path: Path) 
         assert _reports(limitations, name), f"{name} was silently excluded"
 
 
-@_RA6_XFAIL
 def test_empty_because_nothing_changed_is_distinguishable_from_empty_because_excluded(
     tmp_path: Path,
 ) -> None:

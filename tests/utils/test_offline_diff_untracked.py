@@ -12,17 +12,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from mergecraft.utils.offline_diff import (
     git_range_diff,
     git_staged_diff,
     materialize_diff,
-)
-
-_RA6_XFAIL = pytest.mark.xfail(
-    reason="green after RA6: default materialization includes untracked source",
-    strict=False,
 )
 
 
@@ -60,7 +53,6 @@ def _reports(limitations: Any, needle: str) -> bool:
     return any(needle in str(item) for item in (limitations or ()))
 
 
-@_RA6_XFAIL
 def test_default_materialization_includes_an_untracked_addition(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     (repo / "new_bug.py").write_text("def bug():\n    return 1 / 0\n", encoding="utf-8")
@@ -72,7 +64,6 @@ def test_default_materialization_includes_an_untracked_addition(tmp_path: Path) 
     assert result.empty is False
 
 
-@_RA6_XFAIL
 def test_mixed_tracked_and_untracked_changes_include_both(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     (repo / "existing.py").write_text("def existing():\n    return 2\n", encoding="utf-8")
@@ -114,7 +105,6 @@ def test_commit_range_semantics_are_unchanged(tmp_path: Path) -> None:
     assert "new_bug.py" not in text
 
 
-@_RA6_XFAIL
 def test_gitignored_file_is_excluded(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path, gitignore="ignored.py\n")
     (repo / "ignored.py").write_text("def ignored():\n    return 1 / 0\n", encoding="utf-8")
@@ -125,7 +115,6 @@ def test_gitignored_file_is_excluded(tmp_path: Path) -> None:
     assert _reports(_limitations(result), "ignored.py")
 
 
-@_RA6_XFAIL
 def test_oversized_untracked_file_is_excluded_and_reported(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     (repo / "huge.py").write_bytes(b"x = 1\n" + b"# pad\n" * 60_000)
@@ -136,7 +125,6 @@ def test_oversized_untracked_file_is_excluded_and_reported(tmp_path: Path) -> No
     assert _reports(_limitations(result), "huge.py")
 
 
-@_RA6_XFAIL
 def test_binary_untracked_file_is_excluded_and_reported(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     (repo / "blob.bin").write_bytes(b"\x00\x01\x02\x03")
@@ -147,7 +135,6 @@ def test_binary_untracked_file_is_excluded_and_reported(tmp_path: Path) -> None:
     assert _reports(_limitations(result), "blob.bin")
 
 
-@_RA6_XFAIL
 def test_symlink_is_excluded(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     (repo / "target.py").write_text("x = 1\n", encoding="utf-8")
@@ -159,7 +146,6 @@ def test_symlink_is_excluded(tmp_path: Path) -> None:
     assert _reports(_limitations(result), "link.py")
 
 
-@_RA6_XFAIL
 def test_unicode_quoted_path_is_included(tmp_path: Path) -> None:
     """The path round-trips into the materialized diff (adjacent to residual R5)."""
     repo = _init_repo(tmp_path)
