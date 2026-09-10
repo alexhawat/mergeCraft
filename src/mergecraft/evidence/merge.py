@@ -131,6 +131,7 @@ def merge_findings(*groups: list[Finding]) -> list[Finding]:
 
 
 __all__ = [
+    "_severity_rank",
     "finding_dedupe_key",
     "merge_findings",
     "typed_findings_from_rows",
