@@ -392,6 +392,48 @@ def _workflow_pins(text: str, *, strict: bool = True) -> set[str]:
     return pins
 
 
+def _digest_inherited(repo: Path, head: str, image: Any) -> bool:
+    """Whether *head* received *image* from a parent without altering the Action.
+
+    The whole ``action.yml`` must match a parent's, not merely the image field.
+    Comparing only the digest let a commit inherit it *and* change behaviour —
+    an added ``entrypoint:`` alongside an inherited image would have skipped
+    verification entirely, which the existing manifest-behaviour test catches.
+
+    ``verify_manifest`` requires a manifest commit to differ from its image
+    source in ``action.yml`` alone. That holds for a commit produced by
+    ``action-manifest-prepare``; it is false for any merge that *carries* an
+    already-verified digest alongside other work — a forward-port, a sync, or
+    simply the merge commit a manifest PR lands as.
+
+    Treating those as freshly minted manifests rejected them outright: it is
+    why ``dac17243`` could not be pinned and why the first ``pre-0.0.1``
+    forward-port failed its deployment-candidate gate (#684).
+
+    This does not weaken the gate. The digest still had to pass full
+    verification on the branch that introduced it, and a digest that no parent
+    carries is still treated as new and verified here.
+    """
+    if not image:
+        return False
+    parents = (_git(repo, "rev-list", "--parents", "-n", "1", head) or "").split()[1:]
+    try:
+        head_action = _action_at(repo, head)
+    except (VerificationError, KeyError, TypeError):
+        return False
+    if head_action["runs"].get("image") != image:
+        return False
+    for parent in parents:
+        try:
+            if _action_at(repo, parent) == head_action:
+                return True
+        except (VerificationError, KeyError, TypeError):
+            # A parent without a readable action.yml cannot be the source of
+            # this Action definition; treat the commit as minting it.
+            continue
+    return False
+
+
 def verify_candidate(repo: Path, base: str, head: str) -> dict[str, Any]:
     """Verify deployment boundary changes without requiring source S to be published."""
     base, head = _commit(base), _commit(head)
@@ -401,7 +443,9 @@ def verify_candidate(repo: Path, base: str, head: str) -> dict[str, Any]:
     manifests: set[str] = set()
     if "action.yml" in changed:
         before, after = _action_at(repo, base), _action_at(repo, head)
-        if before["runs"].get("image") != after["runs"].get("image"):
+        if before["runs"].get("image") != after["runs"].get("image") and not _digest_inherited(
+            repo, head, after["runs"].get("image")
+        ):
             manifests.add(head)
     base_paths = set(
         _git(repo, "ls-tree", "-r", "--name-only", base, "--", ".github/workflows").splitlines()

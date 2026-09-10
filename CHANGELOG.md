@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `verify_candidate` no longer rejects an image digest inherited through a
+  merge. It treated any commit whose `action.yml` image differed from the base
+  as a freshly minted manifest, and `verify_manifest` requires such a commit to
+  differ from its image source in `action.yml` alone — so a forward-port, a
+  sync, or the merge commit a manifest PR lands as was rejected outright. A
+  commit now counts as inheriting only when its whole `action.yml` matches a
+  parent's, so a behaviour change riding on an inherited digest is still
+  verified (#684).
+
 - markdownlint follows the `markdownlint-cli` 0.49.1 bump: the catalog pin tracks
   the engine, so it moves 0.37.4 → 0.41.1. A markdownlint `warning` now grades
   **Minor** instead of Major — the parser reads the per-finding `severity` that
