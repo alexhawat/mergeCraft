@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `verify_candidate` verifies the commit that introduced an image digest rather
+  than whichever commit the candidate range happens to end at. It treated any
+  commit whose `action.yml` image differed from the base as a freshly minted
+  manifest, and `verify_manifest` requires such a commit to differ from its
+  image source in `action.yml` alone — so a forward-port, a sync, or the merge
+  commit a manifest PR lands as was rejected outright. The introducing commit is
+  substituted only when the candidate's `action.yml` is identical to it, so
+  neither a digest minted mid-branch nor a later Action change riding on a
+  legitimate digest escapes verification (#684).
+
 - markdownlint follows the `markdownlint-cli` 0.49.1 bump: the catalog pin tracks
   the engine, so it moves 0.37.4 → 0.41.1. A markdownlint `warning` now grades
   **Minor** instead of Major — the parser reads the per-finding `severity` that

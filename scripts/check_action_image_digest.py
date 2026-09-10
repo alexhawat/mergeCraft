@@ -392,6 +392,52 @@ def _workflow_pins(text: str, *, strict: bool = True) -> set[str]:
     return pins
 
 
+def _digest_introducer(repo: Path, base: str, head: str, image: Any) -> str:
+    """The commit in ``base..head`` that introduced *head*'s Action image.
+
+    ``verify_manifest`` checks that a manifest commit differs from its image
+    source in ``action.yml`` alone. Verifying *head* directly assumed head was
+    that commit — false for any merge, which carries the digest plus everything
+    merged alongside it. That rejected ``dac17243`` after #669 landed as a merge
+    and failed the first ``pre-0.0.1`` forward-port outright (#684).
+
+    Asking instead "did a parent already have this ``action.yml``?" is not a fix:
+    a parent inside the candidate range proves nothing, since a PR can introduce
+    a bad digest in one commit and inherit it in the next without either being
+    verified.
+
+    So find the commit that actually introduced the image and verify *that*. A
+    forward-port resolves to the real manifest commit, which passes; a digest
+    minted mid-PR resolves to the commit that minted it, which is checked on its
+    own terms and fails if it changed anything beyond ``action.yml``.
+    """
+    if not image:
+        return head
+    try:
+        head_action = _action_at(repo, head)
+    except (VerificationError, KeyError, TypeError):
+        return head
+    # Newest first (rev-list's default): the *current* introduction of this
+    # image, not the earliest. A branch that adds a digest with unrelated work,
+    # reverts it, then reapplies the same action.yml cleanly must resolve to the
+    # clean reapplication — `--reverse` resolved to the abandoned commit and
+    # rejected a candidate that should pass.
+    revs = (_git(repo, "rev-list", f"{base}..{head}", "--", "action.yml") or "").split()
+    for rev in revs:
+        try:
+            candidate = _action_at(repo, rev)
+        except (VerificationError, KeyError, TypeError):
+            continue
+        if candidate["runs"].get("image") != image:
+            continue
+        # Substitute only when head's Action is byte-identical to the
+        # introducer's. Matching on the image alone would let a later commit
+        # inherit a legitimate digest while adding its own `entrypoint:`, and
+        # that change would never be verified.
+        return rev if candidate == head_action else head
+    return head
+
+
 def verify_candidate(repo: Path, base: str, head: str) -> dict[str, Any]:
     """Verify deployment boundary changes without requiring source S to be published."""
     base, head = _commit(base), _commit(head)
@@ -402,7 +448,7 @@ def verify_candidate(repo: Path, base: str, head: str) -> dict[str, Any]:
     if "action.yml" in changed:
         before, after = _action_at(repo, base), _action_at(repo, head)
         if before["runs"].get("image") != after["runs"].get("image"):
-            manifests.add(head)
+            manifests.add(_digest_introducer(repo, base, head, after["runs"].get("image")))
     base_paths = set(
         _git(repo, "ls-tree", "-r", "--name-only", base, "--", ".github/workflows").splitlines()
     )

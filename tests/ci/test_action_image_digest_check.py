@@ -468,3 +468,161 @@ def test_candidate_rejects_mutable_new_pin_but_allows_repair(
     assert result["manifests"][0]["manifest_commit"] == manifest
     with pytest.raises(module.VerificationError):
         module.verify_candidate(repo, "main", manifest)
+
+
+def _merge_history(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """A manifest commit reaching a branch through a merge, with other work.
+
+    Returns ``(repo, base, merge, manifest)``.
+    """
+    repo, _source, manifest = _history(tmp_path)
+    default = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+
+    _git(repo, "checkout", "-b", "side", f"{manifest}~1")
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "runtime.py").write_text("VALUE = 2\n")
+    _git(repo, "commit", "-am", "test: unrelated work")
+    _git(repo, "merge", "--no-ff", "-m", "test: merge manifest into side", manifest)
+    merge = _git(repo, "rev-parse", "HEAD")
+
+    _git(repo, "checkout", default)
+    return repo, base, merge, manifest
+
+
+def test_a_digest_reaching_head_through_a_merge_verifies_its_manifest_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#684 — verify the commit that introduced the image, not the merge.
+
+    A merge carries the digest plus everything merged alongside it, so
+    `verify_manifest` on the merge itself fails by construction. That rejected
+    `dac17243` after #669 landed as a merge, and failed the first `pre-0.0.1`
+    forward-port outright.
+    """
+    module = _load_module()
+    repo, base, merge, manifest = _merge_history(tmp_path)
+    source = _git(repo, "rev-parse", f"{manifest}~1")
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+
+    result = module.verify_candidate(repo, base, merge)
+    assert [row["manifest_commit"] for row in result["manifests"]] == [manifest], (
+        "the merge itself was verified instead of the commit that introduced the digest"
+    )
+
+
+def test_a_digest_minted_mid_pr_is_verified_not_inherited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A parent inside the candidate range proves nothing.
+
+    Introduce a new digest in commit P together with unrelated changes, then add
+    a no-op commit H. Asking "does a parent already carry this action.yml?"
+    accepts H, because P does — but P was never verified anywhere. The digest
+    has to be checked at the commit that minted it, which fails here precisely
+    because P also changed `runtime.py`.
+    """
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    base = manifest
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+
+    # P: new digest *and* unrelated work, so verify_manifest(P) must fail.
+    action = repo / "action.yml"
+    action.write_text(action.read_text().replace("b" * 64, "c" * 64))
+    (repo / "runtime.py").write_text("VALUE = 99\n")
+    _git(repo, "commit", "-am", "test: mint a digest alongside other work")
+
+    # H: a no-op commit whose action.yml equals P's.
+    (repo / "notes.md").write_text("unrelated\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "test: no-op follow-up")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    with pytest.raises(module.VerificationError):
+        module.verify_candidate(repo, base, head)
+
+
+def test_a_plain_manifest_commit_still_verifies_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ordinary action-manifest-prepare case is unchanged."""
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+    result = module.verify_candidate(repo, source, manifest)
+    assert result["manifests"][0]["manifest_commit"] == manifest
+
+
+def test_the_introducer_falls_back_to_head_when_nothing_matches(tmp_path: Path) -> None:
+    """No candidate commit carries the image: verify head, as before."""
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    assert module._digest_introducer(repo, source, manifest, None) == manifest
+    assert module._digest_introducer(repo, source, manifest, "docker://absent") == manifest
+
+
+def test_a_later_commit_cannot_ride_in_on_a_legitimate_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Substituting the introducer requires head's Action to be identical to it.
+
+    Resolving by image alone let a commit inherit a legitimate manifest's digest
+    while adding its own `entrypoint:`: the introducer verified cleanly, so the
+    later behaviour change was never checked. Guards the second cut of #684,
+    which the pre-existing manifest-behaviour test caught.
+    """
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+
+    action = repo / "action.yml"
+    action.write_text(action.read_text() + "  entrypoint: malicious\n")
+    _git(repo, "commit", "-am", "test: keep the digest, change the entrypoint")
+    tampered = _git(repo, "rev-parse", "HEAD")
+
+    image = f"docker://ghcr.io/alexhawat/mergecraft@sha256:{'b' * 64}"
+    assert module._digest_introducer(repo, source, tampered, image) == tampered, (
+        "substituted the manifest commit for a head that altered the Action"
+    )
+    with pytest.raises(module.VerificationError, match="behavior"):
+        module.verify_candidate(repo, source, tampered)
+    assert manifest
+
+
+def test_a_reapplied_digest_resolves_to_the_clean_reapplication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P -> revert -> clean reapply must resolve to the reapplication.
+
+    Scanning oldest-first returned the abandoned P — which carried unrelated
+    changes and so fails `verify_manifest` — even though the branch's live
+    introduction of that image is the clean commit at the end.
+    """
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    base = manifest
+    action = repo / "action.yml"
+    clean_action = action.read_text().replace("b" * 64, "c" * 64)
+
+    # P: the digest, alongside unrelated work.
+    action.write_text(clean_action)
+    (repo / "runtime.py").write_text("VALUE = 99\n")
+    _git(repo, "commit", "-am", "test: digest plus unrelated work")
+
+    # Revert both, restoring the base state.
+    action.write_text(action.read_text().replace("c" * 64, "b" * 64))
+    (repo / "runtime.py").write_text("VALUE = 1\n")
+    _git(repo, "commit", "-am", "test: revert")
+
+    # R: reapply the same action.yml, cleanly this time.
+    action.write_text(clean_action)
+    _git(repo, "commit", "-am", "test: reapply the digest on its own")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    image = f"docker://ghcr.io/alexhawat/mergecraft@sha256:{'c' * 64}"
+    resolved = module._digest_introducer(repo, base, head, image)
+    assert resolved == head, "resolved to the abandoned introduction, not the live one"
+
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+    result = module.verify_candidate(repo, base, head)
+    assert result["manifests"][0]["manifest_commit"] == head
