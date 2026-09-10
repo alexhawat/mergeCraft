@@ -115,6 +115,7 @@ config keys, exit codes, and failure modes.
      skills/gemini-cli/mergecraft/ -> Gemini CLI
      skills/openclaw/mergecraft/   -> OpenClaw
      skills/hermes/mergecraft/     -> Hermes Agent
+     skills/copilot/mergecraft/    -> GitHub Copilot
 
    Almost every agent shares one install destination -- the Agent Skills
    standard path:
@@ -124,6 +125,8 @@ config keys, exit codes, and failure modes.
      .claude/skills/mergecraft/   -> Claude Code (it does NOT read
                                      .agents/skills/); OpenCode reads it too
      hermes skills install        -> Hermes Agent (uses ~/.hermes/skills/)
+     .github/skills/mergecraft/   -> GitHub Copilot (cloud agent, code review,
+                                     CLI, VS Code agent mode)
 
    If your agent is none of these, copy AGENTS.md and llms.txt to the repo
    root -- every agent reads those.
@@ -216,14 +219,18 @@ with the workflow. Print `mergecraft provider auth google --scope github` for me
 handle the API key.
 ```
 
-**GitHub Copilot** (CLI or VS Code) — Copilot already reads
-[`.github/copilot-instructions.md`](.github/copilot-instructions.md), which
-points at `AGENTS.md`:
+**GitHub Copilot** (CLI, VS Code agent mode, or cloud agent) — copy the
+generated package, then follow `AGENTS.md`. Copilot also reads
+[`.github/copilot-instructions.md`](.github/copilot-instructions.md):
 
 ```text
-Following AGENTS.md, add mergeCraft PR review to this repo: uv tool install the
-CLI, `mergecraft init`, commit the config + workflow on a branch, open a PR, and
-print the `mergecraft provider auth` command for me. Do not commit secrets.
+Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md and set
+mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python —
+do not install Python), run `mergecraft init`, wire .mergecraft/config.yaml, and
+open a PR with the workflow. Print the `mergecraft provider auth <provider> --scope github` command for
+me to run myself — never touch credentials. Then copy
+skills/copilot/mergecraft/ into .github/skills/mergecraft/ so Copilot keeps the
+knowledge.
 ```
 
 **OpenClaw / Hermes / any autonomous shell agent** — these have no mergeCraft

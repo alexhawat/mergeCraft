@@ -119,6 +119,7 @@ config keys, exit codes, and failure modes.
      skills/gemini-cli/mergecraft/ -> Gemini CLI
      skills/openclaw/mergecraft/   -> OpenClaw
      skills/hermes/mergecraft/     -> Hermes Agent
+     skills/copilot/mergecraft/    -> GitHub Copilot
 
    Almost every agent shares one install destination -- the Agent Skills
    standard path:
@@ -128,6 +129,8 @@ config keys, exit codes, and failure modes.
      .claude/skills/mergecraft/   -> Claude Code (it does NOT read
                                      .agents/skills/); OpenCode reads it too
      hermes skills install        -> Hermes Agent (uses ~/.hermes/skills/)
+     .github/skills/mergecraft/   -> GitHub Copilot (cloud agent, code review,
+                                     CLI, VS Code agent mode)
 
    If your agent is none of these, copy AGENTS.md and llms.txt to the repo
    root -- every agent reads those.
@@ -220,14 +223,18 @@ with the workflow. Print `mergecraft provider auth google --scope github` for me
 handle the API key.
 ```
 
-**GitHub Copilot** (CLI or VS Code) — Copilot already reads
-[`.github/copilot-instructions.md`](.github/copilot-instructions.md), which
-points at `AGENTS.md`:
+**GitHub Copilot** (CLI, VS Code agent mode, or cloud agent) — copy the
+generated package, then follow `AGENTS.md`. Copilot also reads
+[`.github/copilot-instructions.md`](.github/copilot-instructions.md):
 
 ```text
-Following AGENTS.md, add mergeCraft PR review to this repo: uv tool install the
-CLI, `mergecraft init`, commit the config + workflow on a branch, open a PR, and
-print the `mergecraft provider auth` command for me. Do not commit secrets.
+Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md and set
+mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python —
+do not install Python), run `mergecraft init`, wire .mergecraft/config.yaml, and
+open a PR with the workflow. Print the `mergecraft provider auth <provider> --scope github` command for
+me to run myself — never touch credentials. Then copy
+skills/copilot/mergecraft/ into .github/skills/mergecraft/ so Copilot keeps the
+knowledge.
 ```
 
 **OpenClaw / Hermes / any autonomous shell agent** — these have no mergeCraft
@@ -1223,23 +1230,25 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   behaviour: a declared allowlist drops network isolation so
   `osv-scanner`, `trivy`, `govulncheck`, and `bundler-audit` can reach
   their upstreams. On runners where `ip netns`, veth, and iptables are
-  available, an operator may opt into the experimental backend only in
+  available, an operator may opt into the host FORWARD backend only in
   a disposable credential-free isolated runtime by setting
   `MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME=1` in its parent environment.
-  It is not a repo config field or an Action input; default execution
-  still skips. This opt-in asserts external filesystem isolation; the
+  It is not a repo config field or an Action input. The GitHub Action
+  image typically lacks `CAP_NET_ADMIN` / `CAP_SYS_ADMIN` for that host
+  path; it instead uses a userspace backend (user+net namespace plus a
+  parent TCP relay) so untrusted allowlisted analyzers can reach declared
+  hosts and cannot reach undeclared ones without those capabilities.
+  The host-FORWARD opt-in asserts external filesystem isolation; the
   network backend does not provide host filesystem confidentiality.
-  Within that runtime, untrusted allowlisted analyzers run inside an isolated
-  netns whose host-side FORWARD filter permits only the *IP addresses*
-  the declared hosts resolved to at setup time (sandbox enforcement,
-  not `HTTP_PROXY`) — not the hostnames themselves. Enforcement is by
-  IP, so a CDN-hosted allowlist entry admits every other domain that
-  shares its IP, and setup-time resolution can drift from what the
-  analyzer resolves inside the netns for a load-balanced upstream. A
-  loopback CONNECT proxy in `tests/analyzers/support_allowlist_proxy.py`
-  encodes the same hostname allowlist for tests only; it never runs in
-  production. The GitHub Action image typically lacks `CAP_NET_ADMIN` /
-  `CAP_SYS_ADMIN`, so that path stays a named skip. Enforced by
+  Within either backend, untrusted allowlisted analyzers are confined to
+  the *IP addresses* the declared hosts resolved to at setup time
+  (sandbox enforcement, not `HTTP_PROXY`) — not the hostnames themselves.
+  Enforcement is by IP, so a CDN-hosted allowlist entry admits every
+  other domain that shares its IP, and setup-time resolution can drift
+  from what the analyzer resolves inside the netns for a load-balanced
+  upstream. A loopback CONNECT proxy in
+  `tests/analyzers/support_allowlist_proxy.py` encodes the same hostname
+  allowlist for unit tests. Enforced by
   `evaluate_analyzer_egress_policy()`, `filtered_egress_available()`,
   and `build_analyzer_sandbox_argv_for_run()`.
   Analyzer capabilities are dropped after mount setup, preventing
@@ -1388,7 +1397,7 @@ ciEvidence:
 - **CI SARIF ingest on complete wait.** Declared `sarifArtifacts` are downloaded after `wait-for-ci` reaches `state=complete` (green or red CI). mergeCraft lists workflow runs for the PR head SHA and fetches matching artifacts from those runs. Wait states `timeout`, `absent`, and `skipped` skip ingest; `workflow_dispatch` does not pre-ingest because the wait job is PR-only.
 - **Wait outputs required.** Forward `wait-for-ci` `state` and `failed_count` into the review job as `MERGECRAFT_CI_WAIT_STATE` / `MERGECRAFT_CI_FAILED_COUNT` (or the `CI_STATE` / `CI_FAILED_COUNT` aliases). Without `state=complete` ingest is skipped.
 - **`actions: read` required.** The review workflow job must grant `actions: read` so artifact download succeeds. Without it GitHub answers 403 and SARIF ingest is skipped (the review still completes).
-- **CI SARIF catalog.** Tools that arrive via CI SARIF when declared in `ciEvidence.sarifArtifacts` and uploaded from the consumer's `ci.yml` include **ruff**, **mypy**, **bandit**, **actionlint**, **zizmor**, and **semgrep** — artifact names follow the `<tool>-sarif` pattern and must match both config and workflow upload steps. **trufflehog** is JSONL-only and is not ingested via CI SARIF on this surface.
+- **CI SARIF catalog.** Tools that arrive via CI SARIF when declared in `ciEvidence.sarifArtifacts` and uploaded from the consumer's `ci.yml` include **ruff**, **mypy**, **bandit**, **actionlint**, **zizmor**, **semgrep**, and **trufflehog** — artifact names follow the `<tool>-sarif` pattern and must match both config and workflow upload steps. **trufflehog**'s catalog parser is JSONL; CI converts that output to SARIF so ingest stays one path. A clean scan still uploads a valid empty-results SARIF with tool metadata, never a 0-byte file.
 - **Reported, not blamed.** Bare check-run findings start non-blocking; SARIF `error` from declared `sarifArtifacts` keeps Major/Critical. `introduced_by_pr` stays `unknown` until `ci/blame.py` / `ci/flaky.py` attribute a finding to this PR.
 - **Redacted.** Log excerpts are truncated and passed through `analyzers/redact.py` before they enter a finding.
 
@@ -1919,8 +1928,6 @@ US one:
 | ------- | --- |
 | Local   | `mergecraft tracing logfire enable --region eu` (writes `MERGECRAFT_TRACING_REGION` to `.env`) |
 | Action  | `mergecraft tracing logfire wire-workflow --region eu --apply` (writes it to the step's `env:`). The Action applies that env onto the logfire sink even when tracing is enabled via the `tracing` input rather than `MERGECRAFT_TRACING` |
-
-There is no `tracing-region` Action input, so GitHub never injects `INPUT_TRACING_REGION`. If both `INPUT_TRACING_REGION` and `MERGECRAFT_TRACING_REGION` are set, the Action input wins — it is more specific than the job `env:`.
 
 Both paths converge on the same precedence layer
 (`cli/tracing_precedence.py`) and the same resolver

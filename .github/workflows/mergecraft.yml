@@ -162,7 +162,7 @@ env:
   # Single Action SHA for all three review rungs (D10 / #532). Bump here only;
   # every `uses: alexhawat/mergeCraft@…` below must match — enforced by
   # `make action-pin-check`.
-  MERGECRAFT_ACTION_SHA: "78bfbeb247b1ddb4cbf851e2821c08c1a6c595ec"
+  MERGECRAFT_ACTION_SHA: "280cd0d539152c9b398f53acf607c8d7e74bc084"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -508,7 +508,7 @@ jobs:
         if: env.HAS_APP == 'true' && env.HAS_NOUS == 'true'
         id: app_token_nous
         continue-on-error: true
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.MERGECRAFT_APP_ID }}
           private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
@@ -610,7 +610,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@78bfbeb247b1ddb4cbf851e2821c08c1a6c595ec # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@280cd0d539152c9b398f53acf607c8d7e74bc084 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -694,7 +694,7 @@ jobs:
           )
         id: app_token_codex
         continue-on-error: true
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.MERGECRAFT_APP_ID }}
           private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
@@ -763,7 +763,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@78bfbeb247b1ddb4cbf851e2821c08c1a6c595ec # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@280cd0d539152c9b398f53acf607c8d7e74bc084 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -862,7 +862,7 @@ jobs:
           )
         id: app_token_claude
         continue-on-error: true
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.MERGECRAFT_APP_ID }}
           private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
@@ -892,7 +892,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now 3ed2c798 (#582).
-        uses: alexhawat/mergeCraft@78bfbeb247b1ddb4cbf851e2821c08c1a6c595ec # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@280cd0d539152c9b398f53acf607c8d7e74bc084 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m

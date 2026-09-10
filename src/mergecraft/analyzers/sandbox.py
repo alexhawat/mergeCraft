@@ -18,6 +18,7 @@ from mergecraft.analyzers.finding import Finding, make_finding
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from mergecraft.analyzers.egress import EgressSession
     from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
 
 NetworkDefault = Literal["deny", "allow"]
@@ -37,9 +38,12 @@ _run_probe() {
     mount_cmd="sudo mount"
     umount_cmd="sudo umount"
   fi
-  pid=0 pid_method=none net=0 bind=0 tmpfs=0
+  pid=0 pid_method=none net=0 bind=0 tmpfs=0 userns=0
   if $unshare_cmd --pid --fork --mount-proc true 2>/dev/null; then
     pid=1
+  elif [ "$use_sudo" = 0 ] && unshare --user --map-root-user --pid --fork --mount-proc true 2>/dev/null; then
+    pid=1
+    userns=1
   fi
   if [ "$pid" = 1 ]; then
   if [ "$use_sudo" = 1 ]; then
@@ -50,6 +54,9 @@ _run_probe() {
   fi
   if $unshare_cmd --net true 2>/dev/null; then
     net=1
+  elif [ "$use_sudo" = 0 ] && unshare --user --map-root-user --net true 2>/dev/null; then
+    net=1
+    userns=1
   fi
   tmp=$(mktemp -d)
   target="$tmp/ro-target"; mkdir -p "$target"; echo x >"$target/file"
@@ -58,11 +65,21 @@ _run_probe() {
     && $mount_cmd -o remount,bind,ro "$mnt" 2>/dev/null \
     && $umount_cmd "$mnt" 2>/dev/null; then
     bind=1
+  elif [ "$use_sudo" = 0 ] && unshare --user --map-root-user --mount bash -c '
+      mount --bind "$1" "$2" && mount -o remount,bind,ro "$2" && umount "$2"
+    ' bash "$target" "$mnt" 2>/dev/null; then
+    bind=1
+    userns=1
   fi
   scratch="$tmp/scratch"; mkdir -p "$scratch"
   if $mount_cmd -t tmpfs tmpfs "$scratch" 2>/dev/null \
     && $umount_cmd "$scratch" 2>/dev/null; then
     tmpfs=1
+  elif [ "$use_sudo" = 0 ] && unshare --user --map-root-user --mount bash -c '
+      mount -t tmpfs tmpfs "$1" && umount "$1"
+    ' bash "$scratch" 2>/dev/null; then
+    tmpfs=1
+    userns=1
   fi
   rm -rf "$tmp"
 }
@@ -70,10 +87,10 @@ _run_probe 0
 if [ "$pid" = 0 ] && _sudo_allowed; then
   _run_probe 1
 fi
-echo "pid=$pid pid_method=$pid_method net=$net bind=$bind tmpfs=$tmpfs"
+echo "pid=$pid pid_method=$pid_method net=$net bind=$bind tmpfs=$tmpfs userns=$userns"
 """.strip()
 
-_PROBE_FIELD_RE = re.compile(r"^(pid|pid_method|net|bind|tmpfs)=(.+)$")
+_PROBE_FIELD_RE = re.compile(r"^(pid|pid_method|net|bind|tmpfs|userns)=(.+)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +102,7 @@ class SandboxCapabilities:
     cgroup_memory: bool
     rlimit_nproc: bool
     pid_namespace_method: PidNamespaceMethod = "none"
+    user_namespace: bool = False
     unavailable_reasons: list[str] = field(default_factory=list)
 
 
@@ -134,6 +152,7 @@ _PROBE_TEST_DOUBLE: dict[str, str] = {
     "net": "1",
     "bind": "1",
     "tmpfs": "1",
+    "userns": "0",
 }
 
 
@@ -230,6 +249,7 @@ def probe_capabilities() -> SandboxCapabilities:
         cgroup_memory=cgroup_ok,
         rlimit_nproc=nproc_ok,
         pid_namespace_method=pid_method,
+        user_namespace=probe.get("userns") == "1",
         unavailable_reasons=reasons,
     )
     if reasons:
@@ -533,6 +553,19 @@ def analyzer_egress_skip_reason(
         return outcome.reason
     from mergecraft.mcp.shell import detect_sandbox_method
 
+    if outcome.status == "filtered":
+        from mergecraft.analyzers.egress import probe_filtered_egress
+
+        if detect_sandbox_method() == "none" and probe_filtered_egress().backend != "userspace":
+            tier_label = _egress_tier_label(resolved_name, event_payload)
+            hosts = ", ".join(network_allowlist)
+            return (
+                f"Skipped: egress policy — {analyzer_id} declares network hosts "
+                f"({hosts}) but {tier_label} cannot enforce filtered egress "
+                "(sandbox isolation unavailable on this runner)"
+            )
+        return None
+
     if (
         not egress_trusted_for_host_networking(event_name=resolved_name, event=event_payload)
         and detect_sandbox_method() == "none"
@@ -551,7 +584,10 @@ def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
     # Killing only the waiting unshare parent otherwise leaves PID 1 and its
     # descendants alive after a subprocess timeout.
-    argv: list[str] = ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=KILL"]
+    argv: list[str] = ["unshare"]
+    if caps.user_namespace:
+        argv.extend(["--user", "--map-root-user"])
+    argv.extend(["--pid", "--fork", "--mount-proc", "--kill-child=KILL"])
     if isolate_network and caps.network_namespace:
         argv.append("--net")
     return argv
@@ -620,15 +656,18 @@ def build_analyzer_sandbox_argv_for_run(
     self_review_level: str = "off",
     analyzer_id: str = "",
     netns_name: str | None = None,
+    egress_session: EgressSession | None = None,
 ) -> list[str]:
     """Trust-aware wrapper around ``build_analyzer_sandbox_argv`` (D5/D5a)."""
     from mergecraft.analyzers.egress import wrap_argv_for_filtered_netns
 
     _ = analyzer_id, self_review_level
     isolate = _resolve_isolate_network(context, event_name=event_name, event=event)
-    if netns_name:
+    if netns_name or egress_session is not None:
         isolate = False
     built = build_analyzer_sandbox_argv(argv, context=context, isolate_network=isolate)
+    if egress_session is not None:
+        return egress_session.wrap_argv(built)
     if netns_name:
         return wrap_argv_for_filtered_netns(built, netns_name)
     return built

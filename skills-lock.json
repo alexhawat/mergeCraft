@@ -90,6 +90,12 @@
       "sourceType": "local",
       "skillPath": "skills/grok-bot/mergecraft/SKILL.md",
       "computedHash": "a3b32bce0a179ee9d0f4a3e82aaaf096e868fca31d864242d310c71e06c9a8b3"
+    },
+    "mergecraft-copilot": {
+      "source": "alexhawat/mergeCraft",
+      "sourceType": "local",
+      "skillPath": "skills/copilot/mergecraft/SKILL.md",
+      "computedHash": "a3b32bce0a179ee9d0f4a3e82aaaf096e868fca31d864242d310c71e06c9a8b3"
     }
   }
 }

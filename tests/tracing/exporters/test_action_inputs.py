@@ -205,7 +205,6 @@ def _clear_action_tracing_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
         "INPUT_TRACING",
         "INPUT_TRACING_TO",
-        "INPUT_TRACING_REGION",
         "INPUT_TRACING_CONTENT",
         "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT",
         "INPUT_LOGFIRE_TOKEN",
@@ -231,22 +230,6 @@ def test_action_logfire_shorthand_honors_tracing_region_env(
     resolved = resolve_tracing_from_action_inputs()
     assert resolved["sinks"][0]["type"] == "logfire"
     assert resolved["sinks"][0]["region"] == "eu"
-    assert resolved["settings"].sinks[0].region == "eu"
-
-
-def test_action_logfire_shorthand_honors_tracing_region_input(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``INPUT_TRACING_REGION`` wins over ``MERGECRAFT_TRACING_REGION``."""
-    _clear_action_tracing_env(monkeypatch)
-    monkeypatch.setenv("INPUT_TRACING", "true")
-    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
-    monkeypatch.setenv("INPUT_TRACING_REGION", "eu")
-    monkeypatch.setenv("MERGECRAFT_TRACING_REGION", "us")
-
-    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
-
-    resolved = resolve_tracing_from_action_inputs()
     assert resolved["settings"].sinks[0].region == "eu"
 
 

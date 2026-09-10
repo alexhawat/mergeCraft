@@ -315,6 +315,15 @@ class ReviewSettings(BaseModel):
         default_factory=RoundBudgetsSettings,
         alias="roundBudgets",
     )
+    mcp_servers: list[dict[str, Any]] = Field(
+        default_factory=list,
+        alias="mcpServers",
+        description=(
+            "Optional read-only consumer MCP servers attached during trusted review "
+            "(#620). Local stdio only; OAuth remotes, URL remotes, and write tools "
+            "are rejected. Dropped on the untrusted tier."
+        ),
+    )
 
 
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.
@@ -698,6 +707,11 @@ def apply_trust_tier_to_repo_settings(
         updates["enterprise"] = ent.model_copy(
             update={"https_proxy": "", "no_proxy": "", "ca_file": None}
         )
+
+    if settings.review.mcp_servers:
+        drops["review.mcp_servers"] = _executable_drop_reason("review.mcp_servers", source_label)
+        review_update = updates.get("review", settings.review)
+        updates["review"] = review_update.model_copy(update={"mcp_servers": []})
 
     if not updates:
         return settings, drops

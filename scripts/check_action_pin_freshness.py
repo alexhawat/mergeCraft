@@ -12,26 +12,45 @@ Nothing detected that skew, and it reached 687 commits: PR #443 timed out on a
 branch's own workflow pins the fixed SHA, and CI still exercises the old code
 (#450).
 
-Three checks:
+Four rules, split across two scopes by ``--scope``.
+
+``--scope pr`` — the rules whose subject is the diff under review. Wired into
+``make ci-static``, so they gate every PR.
 
 1. **Self-consistency** (offline, always runs). Every ``uses:`` pin of this
    action inside a workflow file must be the same SHA. The workflow header
    warns that a one-sided bump is a footgun; this makes it an error.
-2. **Freshness** (needs the default-branch ref). The default branch's pin must
+2. **Env parity** (offline, always runs). Every rung pin must equal the hoisted
+   ``env.MERGECRAFT_ACTION_SHA``, so a bump cannot land half-applied.
+3. **Freshness** (needs the default-branch ref). The default branch's pin must
    be an ancestor of this branch's pin and within ``MAX_DRIFT`` commits of it.
    Skips with a notice when the ref is not fetched, so a local ``make lint``
-   in a shallow or offline checkout does not fail on it.
-3. **Staleness** (needs the default-branch ref). The pin must not lag the
-   default branch's own tip by more than ``MAX_PRODUCT_LAG`` commits touching
-   ``src/mergecraft/``. Check 2 compares the two branches' pins only to each
+   in a shallow or offline checkout does not fail on it. It is a no-op unless
+   the branch actually moves the pin, which is what keeps it a PR rule.
+
+``--scope all`` (the default) — adds the rule whose subject is the default
+branch itself. Run on a schedule against ``main`` by
+``.github/workflows/action-pin-staleness.yml``, never as a required PR check.
+
+4. **Staleness** (needs the default-branch ref). The pin must not lag the
+   default branch's own tip by more than ``MAX_PRODUCT_LAG`` non-merge commits
+   touching ``src/mergecraft/``. Rule 3 compares the two branches' pins only to each
    other, so it passes when *both* are equally stale: after PR #457 merged,
    both branches pinned the same SHA and the check reported OK while the
    reviewer ran none of the fixes that had just landed. Measuring against the
    default branch's tip rather than HEAD keeps this stable, since unmerged
    feature commits are not something a pin could reference yet.
 
+Why rule 4 is not a PR gate: nothing in its computation reads the PR's diff, so
+one stale pin on ``main`` failed *every* open PR at once, while the only change
+that could clear it — repointing the pin at a manifest commit that does not
+exist until the manifest PR merges — was itself blocked by the same red check
+(#669). Enforcing a default-branch invariant per-PR turns one commit of debt
+into a repo-wide merge freeze no PR author can lift. The schedule files an
+issue against ``main`` instead, where the debt actually lives.
+
 Module: scripts.check_action_pin_freshness
-Depends: os, re, subprocess, sys, pathlib
+Depends: argparse, os, re, subprocess, sys, pathlib
 
 Exports:
     main — CLI entry; compares self-review Action pins for drift.
@@ -39,11 +58,16 @@ Exports:
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 REPO = Path(__file__).resolve().parents[1]
 WORKFLOW_DIR = REPO / ".github" / "workflows"
@@ -55,7 +79,19 @@ _ENV_SHA_RE = re.compile(
     re.MULTILINE,
 )
 
+# ``git diff-tree --cc`` prefixes its output with the commit id.
+_SHA_LINE = re.compile(r"[0-9a-f]{40}")
+
 DEFAULT_BRANCH = os.environ.get("MERGECRAFT_DEFAULT_BRANCH", "main")
+
+# Rule scopes. ``PR_SCOPE`` holds only assertions a PR author can act on from
+# the branch they are on; ``ALL_SCOPE`` adds the default-branch invariant.
+PR_SCOPE = "pr"
+ALL_SCOPE = "all"
+
+# Where rule 4 is enforced now that it is off the PR gate. Named in the
+# scope-pr success line so an operator reading a green log knows it still runs.
+STALENESS_WORKFLOW = ".github/workflows/action-pin-staleness.yml"
 
 # Chosen to catch a genuinely stale reviewer, not routine lag: a pin a few
 # merges behind still runs substantially current code, while hundreds of
@@ -67,6 +103,13 @@ MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "100"))
 # what the reviewer executes, so counting them would fire for reasons an
 # operator cannot act on. Small, because each one is a behaviour difference
 # between the reviewer and the branch it is reviewing.
+#
+# Counted as changes rather than landings (see ``_product_lag``): plain merges
+# are skipped, because a PR touching this tree otherwise scored twice — its own
+# commit plus the merge that landed it — making the budget of 5 really a budget
+# of about 2. Measured at the 5-of-5 ceiling: 5 raw commits, 3 merges, 2 real
+# changes. Merges that *resolve* product code still count; those edits exist in
+# neither parent.
 MAX_PRODUCT_LAG = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG", "5"))
 
 # The tree whose changes alter reviewer behaviour.
@@ -179,6 +222,48 @@ def _check_freshness(rel_path: str, head_sha: str) -> list[str]:
     ]
 
 
+def _merge_resolves_product_code(sha: str) -> bool:
+    """Whether a merge introduced product changes present in neither parent.
+
+    ``git diff-tree --cc`` is git's combined diff: it lists only paths whose
+    content differs from *every* parent. An ordinary merge takes each file
+    verbatim from one side and lists nothing; a conflict resolution that edits
+    product code while merging lists it. Measured on this repo: the #686, #665
+    and #668 merges list zero files, while the #606 resolution that adapted the
+    orphan sweeper lists ``analyzers/egress.py``.
+    """
+    # -r is redundant today — --cc already reports nested paths, verified against
+    # this repo's own conflict-resolution merge — but it states the intent and
+    # removes any dependence on that implication holding.
+    combined = _git("diff-tree", "-r", "--cc", "--name-only", sha, "--", PRODUCT_PATH)
+    if not combined:
+        return False
+    # The first line is the commit id; anything after it is a resolved path.
+    return any(
+        not _SHA_LINE.fullmatch(line.strip()) for line in combined.splitlines() if line.strip()
+    )
+
+
+def _product_lag(head_sha: str, ref: str) -> int:
+    """Count product-code *changes* the pin is missing, not commits that landed.
+
+    Plain merges are excluded: a merge is the same change arriving, not a
+    distinct behaviour difference, and counting both it and the commit it landed
+    inflated the lag by roughly 2.5x.
+
+    Merges that resolved product code are counted. Those edits exist in neither
+    parent, so skipping every merge would hide them from this gate entirely
+    while the reviewer runs without them.
+    """
+    plain = _git("rev-list", "--count", "--no-merges", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
+    lag = int(plain) if plain and plain.isdigit() else 0
+    merges = _git("rev-list", "--merges", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
+    for sha in (merges or "").split():
+        if _merge_resolves_product_code(sha):
+            lag += 1
+    return lag
+
+
 def _check_staleness(rel_path: str, head_sha: str) -> list[str]:
     """Compare the pin against the default branch's tip, not against another pin."""
     ref = f"origin/{DEFAULT_BRANCH}"
@@ -193,8 +278,7 @@ def _check_staleness(rel_path: str, head_sha: str) -> list[str]:
         # (bumped here, not yet promoted) or it points somewhere unrelated.
         # Neither is staleness, and check 2 already covers divergence.
         return []
-    lag_raw = _git("rev-list", "--count", f"{head_sha}..{ref}", "--", PRODUCT_PATH)
-    lag = int(lag_raw) if lag_raw and lag_raw.isdigit() else 0
+    lag = _product_lag(head_sha, ref)
     if lag <= MAX_PRODUCT_LAG:
         return []
     return [
@@ -205,8 +289,45 @@ def _check_staleness(rel_path: str, head_sha: str) -> list[str]:
     ]
 
 
-def main() -> int:
-    """Report Action-pin drift; return 1 when a check fails."""
+def _rules_for_scope(
+    rel_path: str,
+    text: str,
+    pins: list[tuple[int, str]],
+    scope: str,
+) -> list[str]:
+    """Run the rules belonging to ``scope`` over one workflow file."""
+    failures = [
+        *_check_self_consistency(rel_path, pins),
+        *_check_env_parity(rel_path, text, pins),
+        *_check_freshness(rel_path, pins[0][1]),
+    ]
+    if scope == ALL_SCOPE:
+        failures.extend(_check_staleness(rel_path, pins[0][1]))
+    return failures
+
+
+def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
+    """Parse the scope selector; default to every rule for local and cron use."""
+    parser = argparse.ArgumentParser(
+        description="Compare self-review Action pins for drift (#450, #532).",
+    )
+    parser.add_argument(
+        "--scope",
+        choices=(PR_SCOPE, ALL_SCOPE),
+        default=ALL_SCOPE,
+        help=(
+            "'pr' runs only the rules a PR author can act on: self-consistency, "
+            "env parity and freshness. 'all' (default) adds staleness, whose "
+            "subject is the default branch and which no PR can fix."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Report Action-pin drift; return 1 when a rule in the chosen scope fails."""
+    args = _parse_args(argv)
+
     if not WORKFLOW_DIR.is_dir():
         print("action-pin-check: no .github/workflows directory; nothing to check")
         return 0
@@ -220,16 +341,21 @@ def main() -> int:
             continue
         checked += 1
         rel_path = path.relative_to(REPO).as_posix()
-        failures.extend(_check_self_consistency(rel_path, pins))
-        failures.extend(_check_env_parity(rel_path, text, pins))
-        failures.extend(_check_freshness(rel_path, pins[0][1]))
-        failures.extend(_check_staleness(rel_path, pins[0][1]))
+        failures.extend(_rules_for_scope(rel_path, text, pins, args.scope))
 
     if failures:
         print("action-pin-check FAILED:", file=sys.stderr)
         for failure in failures:
             print(f"  - {failure}", file=sys.stderr)
         return 1
+
+    if args.scope == PR_SCOPE:
+        print(
+            f"action-pin-check OK (scope=pr): {checked} workflow(s) pin this action. "
+            f"Staleness against '{DEFAULT_BRANCH}' is measured on a schedule by "
+            f"{STALENESS_WORKFLOW}."
+        )
+        return 0
 
     print(f"action-pin-check OK: {checked} workflow(s) pin this action")
     return 0

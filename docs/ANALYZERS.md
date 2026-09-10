@@ -94,23 +94,25 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   behaviour: a declared allowlist drops network isolation so
   `osv-scanner`, `trivy`, `govulncheck`, and `bundler-audit` can reach
   their upstreams. On runners where `ip netns`, veth, and iptables are
-  available, an operator may opt into the experimental backend only in
+  available, an operator may opt into the host FORWARD backend only in
   a disposable credential-free isolated runtime by setting
   `MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME=1` in its parent environment.
-  It is not a repo config field or an Action input; default execution
-  still skips. This opt-in asserts external filesystem isolation; the
+  It is not a repo config field or an Action input. The GitHub Action
+  image typically lacks `CAP_NET_ADMIN` / `CAP_SYS_ADMIN` for that host
+  path; it instead uses a userspace backend (user+net namespace plus a
+  parent TCP relay) so untrusted allowlisted analyzers can reach declared
+  hosts and cannot reach undeclared ones without those capabilities.
+  The host-FORWARD opt-in asserts external filesystem isolation; the
   network backend does not provide host filesystem confidentiality.
-  Within that runtime, untrusted allowlisted analyzers run inside an isolated
-  netns whose host-side FORWARD filter permits only the *IP addresses*
-  the declared hosts resolved to at setup time (sandbox enforcement,
-  not `HTTP_PROXY`) — not the hostnames themselves. Enforcement is by
-  IP, so a CDN-hosted allowlist entry admits every other domain that
-  shares its IP, and setup-time resolution can drift from what the
-  analyzer resolves inside the netns for a load-balanced upstream. A
-  loopback CONNECT proxy in `tests/analyzers/support_allowlist_proxy.py`
-  encodes the same hostname allowlist for tests only; it never runs in
-  production. The GitHub Action image typically lacks `CAP_NET_ADMIN` /
-  `CAP_SYS_ADMIN`, so that path stays a named skip. Enforced by
+  Within either backend, untrusted allowlisted analyzers are confined to
+  the *IP addresses* the declared hosts resolved to at setup time
+  (sandbox enforcement, not `HTTP_PROXY`) — not the hostnames themselves.
+  Enforcement is by IP, so a CDN-hosted allowlist entry admits every
+  other domain that shares its IP, and setup-time resolution can drift
+  from what the analyzer resolves inside the netns for a load-balanced
+  upstream. A loopback CONNECT proxy in
+  `tests/analyzers/support_allowlist_proxy.py` encodes the same hostname
+  allowlist for unit tests. Enforced by
   `evaluate_analyzer_egress_policy()`, `filtered_egress_available()`,
   and `build_analyzer_sandbox_argv_for_run()`.
   Analyzer capabilities are dropped after mount setup, preventing
@@ -259,7 +261,7 @@ ciEvidence:
 - **CI SARIF ingest on complete wait.** Declared `sarifArtifacts` are downloaded after `wait-for-ci` reaches `state=complete` (green or red CI). mergeCraft lists workflow runs for the PR head SHA and fetches matching artifacts from those runs. Wait states `timeout`, `absent`, and `skipped` skip ingest; `workflow_dispatch` does not pre-ingest because the wait job is PR-only.
 - **Wait outputs required.** Forward `wait-for-ci` `state` and `failed_count` into the review job as `MERGECRAFT_CI_WAIT_STATE` / `MERGECRAFT_CI_FAILED_COUNT` (or the `CI_STATE` / `CI_FAILED_COUNT` aliases). Without `state=complete` ingest is skipped.
 - **`actions: read` required.** The review workflow job must grant `actions: read` so artifact download succeeds. Without it GitHub answers 403 and SARIF ingest is skipped (the review still completes).
-- **CI SARIF catalog.** Tools that arrive via CI SARIF when declared in `ciEvidence.sarifArtifacts` and uploaded from the consumer's `ci.yml` include **ruff**, **mypy**, **bandit**, **actionlint**, **zizmor**, and **semgrep** — artifact names follow the `<tool>-sarif` pattern and must match both config and workflow upload steps. **trufflehog** is JSONL-only and is not ingested via CI SARIF on this surface.
+- **CI SARIF catalog.** Tools that arrive via CI SARIF when declared in `ciEvidence.sarifArtifacts` and uploaded from the consumer's `ci.yml` include **ruff**, **mypy**, **bandit**, **actionlint**, **zizmor**, **semgrep**, and **trufflehog** — artifact names follow the `<tool>-sarif` pattern and must match both config and workflow upload steps. **trufflehog**'s catalog parser is JSONL; CI converts that output to SARIF so ingest stays one path. A clean scan still uploads a valid empty-results SARIF with tool metadata, never a 0-byte file.
 - **Reported, not blamed.** Bare check-run findings start non-blocking; SARIF `error` from declared `sarifArtifacts` keeps Major/Critical. `introduced_by_pr` stays `unknown` until `ci/blame.py` / `ci/flaky.py` attribute a finding to this PR.
 - **Redacted.** Log excerpts are truncated and passed through `analyzers/redact.py` before they enter a finding.
 

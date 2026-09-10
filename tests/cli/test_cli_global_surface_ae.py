@@ -15,9 +15,15 @@ Pins (D12 / D13):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 import pytest
 from typer.testing import CliRunner
@@ -178,9 +184,21 @@ def test_force_color_enables_ansi_on_dumb_tty() -> None:
     assert _has_ansi(combined)
 
 
+@contextlib.contextmanager
+def _isolated_cwd() -> Iterator[None]:
+    """A temporary working directory for commands that write into the cwd.
+
+    Replaces ``CliRunner.isolated_filesystem``, which click 8.4 removed. These
+    tests only ever needed ``init`` to write somewhere disposable rather than
+    into the checkout; none of them used the fixture's other behaviour.
+    """
+    with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
+        yield
+
+
 def test_color_always_enables_ansi_in_subcommand_output() -> None:
     """``--color always`` forces Rich ANSI on subcommand output when stdout/stderr are redirected."""
-    with runner.isolated_filesystem():
+    with _isolated_cwd():
         result = runner.invoke(
             app,
             ["--color", "always", "init"],
@@ -193,7 +211,7 @@ def test_color_always_enables_ansi_in_subcommand_output() -> None:
 
 def test_log_level_debug_shows_init_debug_message() -> None:
     """``--log-level DEBUG`` reconfigures Loguru before subcommands run."""
-    with runner.isolated_filesystem():
+    with _isolated_cwd():
         result = runner.invoke(
             app,
             ["--log-level", "DEBUG", "init"],
@@ -218,7 +236,7 @@ def test_quiet_suppresses_loguru_info_on_review_dry_run(tmp_path: Path) -> None:
 
 def test_verbose_shows_loguru_debug_on_init() -> None:
     """``--verbose`` enables DEBUG Loguru records for subcommands."""
-    with runner.isolated_filesystem():
+    with _isolated_cwd():
         result = runner.invoke(
             app,
             ["--verbose", "init"],
@@ -231,7 +249,7 @@ def test_verbose_shows_loguru_debug_on_init() -> None:
 
 def test_mergecraft_log_level_env_overrides_default_quietness() -> None:
     """``MERGECRAFT_LOG_LEVEL`` is honoured by the root callback."""
-    with runner.isolated_filesystem():
+    with _isolated_cwd():
         result = runner.invoke(
             app,
             ["init"],

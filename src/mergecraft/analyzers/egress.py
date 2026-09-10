@@ -38,18 +38,22 @@ exfiltrate data by encoding it into DNS labels resolved through an allowed
 resolver. Nothing here inspects DNS payloads or restricts query names; only
 non-DNS egress to non-allowlisted destinations is blocked (#606).
 
-The Action image typically lacks ``CAP_NET_ADMIN`` / ``CAP_SYS_ADMIN``, so
-``filtered_egress_available()`` is False there and the untrusted path stays
-fail-closed (named skip). Capable Linux runners (``ip netns`` plus veth plus
-iptables) run isolated-to-allowlist instead.
+The kernel backend typically lacks ``CAP_NET_ADMIN`` / ``CAP_SYS_ADMIN`` in
+the GitHub Action image, so that path stays fail-closed unless an operator
+opts into ``MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME``. The Action image
+instead uses the userspace backend (user+net namespace + parent TCP relay)
+when ``unshare --user --map-root-user --net`` and ``iptables`` work — Go
+scanners cannot bypass it by ignoring ``HTTP_PROXY``.
 """
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import ipaddress
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -58,7 +62,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Protocol
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -66,9 +70,24 @@ from loguru import logger
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+EgressBackend = Literal["none", "kernel", "userspace"]
+
+
+class EgressSession(Protocol):
+    """Kernel or userspace filtered-egress session."""
+
+    def start(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    def wrap_argv(self, argv: list[str]) -> list[str]: ...
+
+
 _VETH_PROBE_PREFIX = "mcfg"
 _FALLBACK_DNS_RESOLVERS: tuple[str, ...] = ("1.1.1.1",)
 _RESOLV_CONF_PATH = Path("/etc/resolv.conf")
+# Tag parsed by the orphan sweeper: pid for liveness, random tail for identity.
+_SESSION_ID_RE = re.compile(r"mc-eg-(\d+)-([0-9a-f]+)")
 _SUBNET_OCTET_MAX = 250
 _SETUP_LOCK = threading.Lock()
 
@@ -83,6 +102,8 @@ class FilteredEgressProbe:
     iptables: bool
     available: bool
     reason: str
+    backend: EgressBackend = "none"
+    user_namespace: bool = False
 
 
 class FilteredEgressSetupError(Exception):
@@ -179,18 +200,8 @@ def _can_iptables() -> bool:
     return shutil.which("iptables") is not None and shutil.which("setpriv") is not None
 
 
-@functools.lru_cache(maxsize=1)
-def probe_filtered_egress() -> FilteredEgressProbe:
-    """Probe netns + veth + iptables. Nothing is faked when a primitive is missing."""
-    if os.environ.get("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME") != "1":
-        return FilteredEgressProbe(
-            network_namespace=False,
-            veth=False,
-            ip_netns=False,
-            iptables=False,
-            available=False,
-            reason="filtered egress unavailable: experimental backend requires an operator-owned isolated runtime",
-        )
+def _probe_kernel_filtered_egress() -> FilteredEgressProbe:
+    """Probe host netns + veth + iptables. Requires the isolated-runtime opt-in."""
     net = _can_unshare_net()
     veth = _can_create_veth() if net else False
     ip_netns = _can_ip_netns() if veth else False
@@ -203,6 +214,7 @@ def probe_filtered_egress() -> FilteredEgressProbe:
             iptables=True,
             available=True,
             reason="",
+            backend="kernel",
         )
     missing: list[str] = []
     if not net:
@@ -222,6 +234,39 @@ def probe_filtered_egress() -> FilteredEgressProbe:
         iptables=iptables,
         available=False,
         reason=reason,
+        backend="none",
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def probe_filtered_egress() -> FilteredEgressProbe:
+    """Probe userspace first, then the opt-in kernel backend."""
+    from mergecraft.analyzers.egress_userspace import probe_userspace_egress
+
+    userspace = probe_userspace_egress()
+    want_kernel = os.environ.get("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME") == "1"
+    if want_kernel:
+        kernel = _probe_kernel_filtered_egress()
+        if kernel.available:
+            return kernel
+        if userspace.available:
+            return userspace
+        return kernel
+    if userspace.available:
+        return userspace
+    reason = (
+        "filtered egress unavailable: kernel backend requires an operator-owned "
+        f"isolated runtime; {userspace.reason}"
+    )
+    return FilteredEgressProbe(
+        network_namespace=userspace.network_namespace,
+        veth=False,
+        ip_netns=False,
+        iptables=userspace.iptables,
+        available=False,
+        reason=reason,
+        backend="none",
+        user_namespace=userspace.user_namespace,
     )
 
 
@@ -235,10 +280,11 @@ def reset_filtered_egress_cache() -> None:
     probe_filtered_egress.cache_clear()
 
 
-def resolve_allowlist_ips(entries: Iterable[str]) -> frozenset[str]:
-    """Resolve allowlist hostnames to IPv4 addresses (fail-closed if none)."""
-    ips: set[str] = set()
+def resolve_allowlist_host_ips(entries: Iterable[str]) -> dict[str, frozenset[str]]:
+    """Resolve each allowlist hostname to its IPv4 addresses (fail-closed per host)."""
+    mapping: dict[str, frozenset[str]] = {}
     for host in allowlist_hosts(entries):
+        ips: set[str] = set()
         try:
             infos = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
         except OSError:
@@ -247,6 +293,16 @@ def resolve_allowlist_ips(entries: Iterable[str]) -> frozenset[str]:
             ip = info[4][0]
             if isinstance(ip, str) and ip:
                 ips.add(ip)
+        if ips:
+            mapping[host] = frozenset(ips)
+    return mapping
+
+
+def resolve_allowlist_ips(entries: Iterable[str]) -> frozenset[str]:
+    """Resolve allowlist hostnames to the union of their IPv4 addresses."""
+    ips: set[str] = set()
+    for host_ips in resolve_allowlist_host_ips(entries).values():
+        ips.update(host_ips)
     return frozenset(ips)
 
 
@@ -332,6 +388,114 @@ def default_dns_resolvers() -> tuple[str, ...]:
     return _FALLBACK_DNS_RESOLVERS
 
 
+def _pid_alive(pid: int) -> bool:
+    """True when ``pid`` names a live process (or one we lack permission to see)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        # Any other errno (e.g. EPERM for a live-but-foreign pid) means the
+        # process exists; only ESRCH (ProcessLookupError) says it does not.
+        return True
+    return True
+
+
+def _stale_session_ids() -> set[str]:
+    """``mc-eg-<pid>-<suffix>`` ids tagged on rules whose pid is now dead."""
+    stale: set[str] = set()
+    try:
+        result = subprocess.run(
+            ["iptables-save"], capture_output=True, text=True, timeout=5, check=False
+        )
+    except OSError:
+        return stale
+    for match in _SESSION_ID_RE.finditer(result.stdout):
+        session_id = match.group(0)
+        if session_id in stale:
+            continue
+        if not _pid_alive(int(match.group(1))):
+            stale.add(session_id)
+    return stale
+
+
+def _delete_rules_matching(show_argv: list[str], delete_prefix: list[str], needle: str) -> None:
+    """Convert each ``-A ...`` line containing ``needle`` to a ``-D`` and run it.
+
+    ``delete_prefix`` must stop before the chain name: ``iptables -S`` emits the
+    chain as the first token after ``-A``, so the rest of the line already
+    carries it. Repeating it in the prefix builds ``iptables -D FORWARD FORWARD
+    …``, which iptables rejects — and ``check=False`` swallows the rejection, so
+    the jump rules survive and the later ``-X`` cannot delete a chain that is
+    still referenced.
+    """
+    result = subprocess.run(show_argv, capture_output=True, text=True, timeout=5, check=False)
+    for line in result.stdout.splitlines():
+        if needle not in line or not line.startswith("-A "):
+            continue
+        argv = [*delete_prefix, *line[len("-A ") :].split()]
+        with contextlib.suppress(OSError):
+            subprocess.run(argv, check=False, capture_output=True, timeout=5)
+
+
+def _sweep_session(session_id: str) -> None:
+    """Remove FORWARD jump rules, the dedicated chain, the NAT rule, and any
+    leftover veth/netns tagged with one dead session id."""
+    _delete_rules_matching(["iptables", "-S", "FORWARD"], ["iptables", "-D"], session_id)
+    with contextlib.suppress(OSError):
+        subprocess.run(["iptables", "-F", session_id], check=False, capture_output=True, timeout=5)
+    with contextlib.suppress(OSError):
+        subprocess.run(["iptables", "-X", session_id], check=False, capture_output=True, timeout=5)
+    _delete_rules_matching(
+        ["iptables", "-t", "nat", "-S", "POSTROUTING"],
+        ["iptables", "-t", "nat", "-D"],
+        session_id,
+    )
+    match = _SESSION_ID_RE.match(session_id)
+    if match is not None:
+        # The veth pair is named from the random tail, not the pid (see
+        # __post_init__), so carry the tail through as-is rather than int().
+        veth_suffix = match.group(2)
+        with contextlib.suppress(OSError):
+            subprocess.run(
+                ["ip", "link", "delete", f"mcfh{veth_suffix}"],
+                check=False,
+                capture_output=True,
+                timeout=5,
+            )
+    with contextlib.suppress(OSError):
+        subprocess.run(
+            ["ip", "netns", "delete", session_id], check=False, capture_output=True, timeout=5
+        )
+    with contextlib.suppress(OSError):
+        shutil.rmtree(f"/etc/netns/{session_id}", ignore_errors=True)
+
+
+def sweep_orphaned_filtered_egress() -> None:
+    """Best-effort cleanup of state a killed ``FilteredNetnsSession`` left behind (#606 finding 6).
+
+    ``close()`` only runs on a clean exit; SIGKILL (CI cancellation, OOM, a
+    job timeout) skips it and leaves the FORWARD jump rules, the dedicated
+    chain, the NAT rule, and the veth/netns pair behind. Every rule this
+    module creates is tagged ``mc-eg-<pid>-<suffix>`` in an iptables
+    comment; this sweeps whatever still carries that tag for a pid that is
+    no longer alive. Called at the start of every new session so leftovers
+    self-heal instead of accumulating; failures here are logged and
+    swallowed rather than blocking the new session.
+
+    This does not restore host-global ``ip_forward`` to its pre-session
+    value — that value is only ever recorded in the dead process's own
+    memory, not on disk, so a killed session's original setting cannot be
+    recovered here. Leaving ``ip_forward`` enabled is not itself a hole:
+    once the orphaned FORWARD/NAT rules are removed, forwarding follows the
+    host's own default policy like any other traffic.
+    """
+    if shutil.which("iptables") is None:
+        return
+    for session_id in _stale_session_ids():
+        _sweep_session(session_id)
+
+
 @dataclass(slots=True)
 class FilteredNetnsSession:
     """Host-side veth + named netns + iptables FORWARD allowlist.
@@ -357,7 +521,10 @@ class FilteredNetnsSession:
 
     def __post_init__(self) -> None:
         suffix = secrets.token_hex(4)
-        session_id = f"mc-eg-{suffix}"
+        # pid makes a dead session detectable by sweep_orphaned_filtered_egress;
+        # the random tail keeps identity unique, so this does not reintroduce the
+        # 1-in-250 collision that a bare `pid % 10_000` identity caused.
+        session_id = f"mc-eg-{os.getpid()}-{suffix}"
         self.ns_name = session_id
         self._comment = session_id
         # Random session identity separates overlapping sessions in one process.
@@ -377,8 +544,11 @@ class FilteredNetnsSession:
         The lock is host-owned, never supplied by repository contents. Each
         session still has independent rules and cleanup after setup completes.
         """
-        if not filtered_egress_available():
-            raise FilteredEgressSetupError(probe_filtered_egress().reason)
+        probe = probe_filtered_egress()
+        if probe.backend != "kernel":
+            raise FilteredEgressSetupError(
+                probe.reason or "kernel filtered egress is not the active backend"
+            )
 
         import fcntl
 
@@ -413,8 +583,18 @@ class FilteredNetnsSession:
     def _start_locked(self) -> None:
         """Create the namespace while holding the allocation lock."""
         try:
-            if not filtered_egress_available():
-                raise FilteredEgressSetupError(probe_filtered_egress().reason)
+            # Backend assertion first: this class is the kernel path, and with a
+            # userspace backend now available the old `filtered_egress_available()`
+            # check would pass for a backend this session cannot drive.
+            probe = probe_filtered_egress()
+            if probe.backend != "kernel":
+                raise FilteredEgressSetupError(
+                    probe.reason or "kernel filtered egress is not the active backend"
+                )
+            try:
+                sweep_orphaned_filtered_egress()
+            except Exception as exc:  # best-effort self-heal — must never block a new session
+                logger.warning("filtered-egress startup sweep failed (non-fatal): {}", exc)
             # Never sweep other sessions: PID reuse is not proof of ownership.
             self._enable_forward()
             ips = resolve_allowlist_ips(self.allowed_hosts)
@@ -632,7 +812,24 @@ class FilteredNetnsSession:
         self._chain_created = bool(failed)
 
 
+def start_filtered_egress_session(allowed_hosts: list[str]) -> EgressSession:
+    """Start the kernel or userspace backend selected by ``probe_filtered_egress``."""
+    probe = probe_filtered_egress()
+    if probe.backend == "kernel":
+        kernel = FilteredNetnsSession(allowed_hosts)
+        kernel.start()
+        return kernel
+    if probe.backend == "userspace":
+        from mergecraft.analyzers.egress_userspace import UserspaceEgressSession
+
+        userspace = UserspaceEgressSession(allowed_hosts)
+        userspace.start()
+        return userspace
+    raise FilteredEgressSetupError(probe.reason)
+
+
 __all__ = [
+    "EgressSession",
     "FilteredEgressProbe",
     "FilteredEgressSetupError",
     "FilteredNetnsSession",
@@ -642,6 +839,9 @@ __all__ = [
     "host_is_allowlisted",
     "probe_filtered_egress",
     "reset_filtered_egress_cache",
+    "resolve_allowlist_host_ips",
     "resolve_allowlist_ips",
+    "start_filtered_egress_session",
+    "sweep_orphaned_filtered_egress",
     "wrap_argv_for_filtered_netns",
 ]

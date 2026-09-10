@@ -262,8 +262,30 @@ env:
 
 All three review rungs (`uses: alexhawat/mergeCraft@…`) derive from that value,
 with a `# env.MERGECRAFT_ACTION_SHA` comment suffix on each line. A bump is one
-edit; `make action-pin-check` (wired into `make ci-static`) fails when the pin
-drifts from the default branch or when the three rungs disagree (#532).
+edit, and two targets guard it (#532):
+
+| Target | Rules | Where it runs |
+| --- | --- | --- |
+| `make action-pin-check` | rungs disagree, a rung drifts from `env.MERGECRAFT_ACTION_SHA`, the pin diverges from the default branch's | `make ci-static` — a required PR check |
+| `make action-pin-staleness-check` | all of the above, plus the pin lagging the default branch's own tip by more than `MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG` non-merge commits under `src/mergecraft/` | `.github/workflows/action-pin-staleness.yml`, on every push to `main`, with a daily cron backstop |
+
+The split is deliberate. Staleness compares `main`'s pin against `main`'s tip,
+so nothing in it reads the pull request under review. While it gated PRs, one
+stale pin on `main` failed every open PR at once — and the only change that
+could clear it (repointing the pin at a manifest commit that does not exist
+until the manifest PR merges) was blocked by that same red check (#669).
+
+`action-pin-staleness.yml` files a single tracking issue instead, keeps it
+current, and closes it once the pin is bumped. It measures on every push to
+`main`, so debt is reported when it lands rather than up to a day later. The
+daily cron is the backstop for a pin that goes stale because `main` moved under
+it — GitHub's scheduler is best-effort, routinely late and skipped under load,
+so it is the safety net rather than the primary trigger.
+
+`make action-pin-check` still runs every rule a branch can actually act on.
+
+Locally, plain `make action-pin-check` is the PR-scoped set; run
+`make action-pin-staleness-check` for the full picture.
 
 After each review rung, the workflow persists the `evidence_packet` action output
 to disk and uploads it as an artifact (`if: always()`):

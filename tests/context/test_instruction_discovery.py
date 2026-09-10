@@ -161,3 +161,27 @@ def test_injection_inside_a_discovered_instruction_file_is_not_obeyed(tmp_path: 
     assert SAFETY_NOTE in joined
     assert _INJECTION_TEXT not in section_text(prompt, STANDING_INSTRUCTIONS_HEADER)
     assert "<<fence-close-redacted>>" in joined or "nonce=<redacted>" in joined
+
+
+def test_a_repo_with_no_instructions_renders_nothing(tmp_path: Path) -> None:
+    """An empty render must be falsy, or every run carries phantom sections.
+
+    `sections.extend([...])` appended the REPO INSTRUCTIONS and STANDING
+    INSTRUCTIONS headers unconditionally, so the result was never empty. Callers
+    test this string for truthiness: a repo with no `.github/skills/` still got a
+    REVIEW SKILLS table-of-contents entry pointing at nothing, an empty REPO
+    INSTRUCTIONS block, and a second empty STANDING INSTRUCTIONS header directly
+    above the real one — in the prompt and again in `live_prefix`.
+    """
+    git_init_repo(tmp_path)
+    for stray in tmp_path.rglob("*"):
+        if stray.is_file() and ".git/" not in stray.as_posix():
+            stray.unlink()
+    discovery_mod = import_context_module("instruction_discovery")
+    rendered = discovery_mod.render_review_context(
+        repo_root=tmp_path,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha="0" * 40,
+    )
+    assert rendered == "", f"expected an empty render, got:\n{rendered}"
