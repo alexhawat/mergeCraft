@@ -96,6 +96,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outbound egress stays open and ChatGPT subscription auth (`CODEX_AUTH_JSON`) is
   not brokered; clear that secret and use `OPENAI_API_KEY` when broker coverage
   matters (#553)
+- The fork-head credential invariant now rejects indexed OAuth, device-code and
+  cloud-chain credentials (`LLM_PROVIDER_<N>_CLAUDE_CODE_OAUTH_TOKEN`,
+  `_CODEX_AUTH_JSON`, `_AWS_*`, `_GOOGLE_APPLICATION_CREDENTIALS`) instead of only
+  flat names and `_API_KEY`; a fork PR can no longer carry a credential past the
+  pre-dispatch rejection boundary (N1)
+- Indexed Codex `device_code` credentials reach the isolated run home's
+  `auth.json` and the broker reports `subscription`; `_setup_codex_auth` consumes
+  the resolved child mapping instead of reading `os.environ` (N19)
+- The fork-credential allowlist and the agent-env strip set both derive from
+  `config.runtime_provider_registry`, the single credential authority across every
+  `authKind`, cloud suffix and spelling — the pinned drift that dropped
+  `GOOGLE_API_KEY` is gone, and `AWS_SESSION_TOKEN` is covered (N21)
 
 ### Fixed
 
