@@ -305,6 +305,19 @@ def _quote_user(prompt: str) -> str:
     return "\n".join(f"> {line}" for line in prompt.split("\n"))
 
 
+def _instruction_bundle_byte_cap(repo_root: Any) -> int:
+    from pathlib import Path as PathType
+
+    from mergecraft.config import load_repo_settings
+
+    root = PathType(repo_root)
+    try:
+        settings = load_repo_settings(root=root, load_learnings_files=False)
+    except (OSError, ValueError):
+        return 65536
+    return settings.review.instruction_bundle_byte_cap
+
+
 def _fence_user_prompt(user: str, *, fence: Fence, payload: dict[str, Any]) -> str:
     """Fence the user's ``prompt`` payload field for the YOUR TASK section.
 
@@ -666,25 +679,34 @@ Trust the tools — do not repeatedly verify after successful operations. Except
 
     review_context = ""
     review_skill_paths: list[str] = []
+    review_skill_ledger: list[str] = []
     if repo_root is not None:
         from pathlib import Path as PathType
 
         from mergecraft.context.instruction_discovery import (
-            discover_review_skill_paths,
+            build_review_skill_record,
             render_review_context,
         )
 
         root = PathType(repo_root)
         commit_sha = str(event.get("headSha") or event.get("head_sha") or "")
+        byte_cap = _instruction_bundle_byte_cap(root)
+        record = build_review_skill_record(
+            repo_root=root,
+            trust_tier=trust_tier,
+            repo=f"{repo.owner}/{repo.name}",
+            commit_sha=commit_sha,
+            byte_cap=byte_cap,
+        )
         review_context = render_review_context(
             repo_root=root,
             trust_tier=trust_tier,
             repo=f"{repo.owner}/{repo.name}",
             commit_sha=commit_sha,
+            byte_cap=byte_cap,
         )
-        review_skill_paths = [
-            path.relative_to(root).as_posix() for path in discover_review_skill_paths(root)
-        ]
+        review_skill_paths = list(record.injected)
+        review_skill_ledger = list(record.ledger_review_skills)
     mcp_note = ""
     if review_mcp_names:
         listed = ", ".join(f"`{name}`" for name in review_mcp_names)
@@ -782,6 +804,7 @@ Trust the tools — do not repeatedly verify after successful operations. Except
                 else {}
             ),
             **({"review_skills": review_skill_paths} if review_skill_paths else {}),
+            **({"review_skills_ledger": review_skill_ledger} if review_skill_ledger else {}),
             **({"review_mcp": list(review_mcp_names or [])} if review_mcp_names else {}),
         },
     )
