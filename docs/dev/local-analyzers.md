@@ -20,6 +20,7 @@ are locked via `uv.lock` (Python) and `tools/package-lock.json` (npm). `make set
 runs `uv sync --extra dev` and a **soft** npm install via `make setup-local-analyzers`:
 when `npm` is missing or `npm ci` fails, setup prints a warning and continues —
 `markdownlint` and `jscpd` are skipped locally until `tools/node_modules` exists.
+`make npm-lockcheck` (in `make lint`) still enforces lockfile drift when npm is on PATH.
 
 `markdownlint-cli` 0.49.1 requires **Node >= 22** (0.45.0 dropped Node 18, 0.49.0
 dropped Node 20, and a transitive dependency wants >= 22.12.0). `Dockerfile`,
@@ -32,7 +33,6 @@ quiet.
 The engine bump also enables `MD060` (`table-column-style`) by default, which
 fires on this repo's docs tables. Repo-root `.markdownlint.json` disables it —
 see the note in that file.
-`make npm-lockcheck` (in `make lint`) still enforces lockfile drift when npm is on PATH.
 
 ## Intentionally skipped in this repo
 

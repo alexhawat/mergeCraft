@@ -239,3 +239,34 @@ def test_markdownlint_defaults_to_error_when_severity_is_absent() -> None:
     )
     findings = _parse("markdownlint_json", raw, tool_id="markdownlint")
     assert [f.severity for f in findings] == ["Major"]
+
+
+def test_markdownlint_keeps_other_findings_when_one_severity_is_unknown() -> None:
+    """An unmapped native must not cost the whole run.
+
+    `map_native_severity` raises, and adapters.py catches that as a parse
+    failure for the entire analyzer output — so a single unexpected severity
+    would drop every finding, surfacing as "failed to parse analyzer output"
+    with nothing pointing at the cause.
+    """
+    raw = json.dumps(
+        [
+            {
+                "fileName": "README.md",
+                "lineNumber": 1,
+                "ruleNames": ["MD013"],
+                "ruleDescription": "Line length",
+                "severity": "catastrophe",
+            },
+            {
+                "fileName": "README.md",
+                "lineNumber": 2,
+                "ruleNames": ["MD012"],
+                "ruleDescription": "Multiple consecutive blank lines",
+                "severity": "warning",
+            },
+        ]
+    )
+    findings = _parse("markdownlint_json", raw, tool_id="markdownlint")
+    assert len(findings) == 2, "an unknown severity dropped the other findings"
+    assert [f.severity for f in findings] == ["Major", "Minor"]
