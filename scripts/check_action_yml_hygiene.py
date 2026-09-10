@@ -30,7 +30,8 @@ Depends: pathlib, re, sys
 
 Exports:
     main — CLI entry; scans every action.yml/action.yaml for description
-        fields containing a literal ``${{`` token.
+        fields containing a literal ``${{`` token, and every file under
+        ``.github/skills/**`` for the same token (D18).
 """
 
 from __future__ import annotations
@@ -59,6 +60,30 @@ _EXCLUDED_DIR_PARTS = frozenset(
 )
 
 _BLOCK_INDICATORS = ("|", "|-", "|+", ">", ">-", ">+")
+
+
+def _find_skill_files(root: Path) -> list[Path]:
+    """Return every file under ``.github/skills`` (D18 skill-tree hygiene)."""
+    skill_root = root / ".github" / "skills"
+    if not skill_root.is_dir():
+        return []
+    files: list[Path] = []
+    for path in skill_root.rglob("*"):
+        if not path.is_file():
+            continue
+        if _EXCLUDED_DIR_PARTS.intersection(path.parts):
+            continue
+        files.append(path)
+    return sorted(files)
+
+
+def _scan_skill_file(path: Path) -> list[Offense]:
+    """Return every ``${{`` occurrence in a skill-tree file."""
+    offenses: list[Offense] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if "${{" in line:
+            offenses.append(Offense(path, line_no, line.strip()))
+    return offenses
 
 
 def _find_action_manifests(root: Path) -> list[Path]:
@@ -159,25 +184,44 @@ def _scan_manifest(path: Path) -> list[Offense]:
 
 
 def main() -> int:
-    """Scan every action manifest in the repo for `${{` inside `description:` text."""
+    """Scan action manifests and the review skill tree for literal ``${{`` tokens."""
     manifests = _find_action_manifests(REPO)
-    if not manifests:
-        print(f"no action.yml/action.yaml found under {REPO}", file=sys.stderr)
+    skill_files = _find_skill_files(REPO)
+    if not manifests and not skill_files:
+        print(
+            f"no action.yml/action.yaml or .github/skills files found under {REPO}",
+            file=sys.stderr,
+        )
         return 1
 
-    all_offenses: list[Offense] = []
+    manifest_offenses: list[Offense] = []
     for manifest in manifests:
-        all_offenses.extend(_scan_manifest(manifest))
+        manifest_offenses.extend(_scan_manifest(manifest))
 
-    if all_offenses:
+    skill_offenses: list[Offense] = []
+    for skill_file in skill_files:
+        skill_offenses.extend(_scan_skill_file(skill_file))
+
+    if manifest_offenses:
         print(
             "literal `${{` expression syntax found inside `description:` text "
             "(GitHub evaluates it lexically wherever it appears, even in prose "
             "meant only as documentation — see c498e82):",
             file=sys.stderr,
         )
-        for offense in all_offenses:
+        for offense in manifest_offenses:
             print(f"  {offense}", file=sys.stderr)
+
+    if skill_offenses:
+        print(
+            "literal `${{` expression syntax found under .github/skills "
+            "(D18 — use the documented escape or cite the rule without a live token):",
+            file=sys.stderr,
+        )
+        for offense in skill_offenses:
+            print(f"  {offense}", file=sys.stderr)
+
+    if manifest_offenses or skill_offenses:
         return 1
 
     return 0

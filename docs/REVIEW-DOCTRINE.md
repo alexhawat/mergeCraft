@@ -1,5 +1,9 @@
 # Review doctrine
 
+> **Agent-facing artifact:** `.github/skills/code-review/` is what mergeCraft injects
+> into the reviewing agent at runtime; this file is the human-facing rationale the
+> skill distills for prompts.
+
 Review-check reasoning from `review_checks.py`, `review_taxonomy.py`,
 `mcp/static_checks.py`, and `REVIEW-CHECKS.md`. W2 and W5
 build on these decisions — they are not recoverable from code alone.

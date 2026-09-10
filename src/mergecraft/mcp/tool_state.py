@@ -390,6 +390,7 @@ class ToolState:
     # #620 — Copilot-style review skills and read-only consumer MCP attached
     # to this run (attribution in the sticky record).
     review_skill_paths: tuple[str, ...] = ()
+    review_skills_ledger: tuple[str, ...] = ()
     review_mcp_names: tuple[str, ...] = ()
     # The resolved server objects behind ``review_mcp_names``. Agents must build
     # their mcpServers block from this rather than re-reading config.yaml: a
@@ -494,6 +495,13 @@ class ToolState:
         rows.extend(row for row in self.agent_findings if isinstance(row, dict))
         rows.extend(row for row in self.confirmed_findings if isinstance(row, dict))
         return rows
+
+
+def loaded_review_skills_for_ledger(tool_state: ToolState) -> list[str]:
+    """Review skills for the sticky record, preferring the honest ledger."""
+    if tool_state.review_skills_ledger:
+        return list(tool_state.review_skills_ledger)
+    return list(tool_state.review_skill_paths)
 
 
 def record_lens_routing_decision(

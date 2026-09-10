@@ -590,7 +590,7 @@ def build_trajectory_record(
         retries=retries,
         unresolved_errors=unresolved,
         completion_claims=_dedupe(completion),
-        read_coverage=observed_read or external_trace is not None,
+        read_coverage=observed_read,
         external_trace=external_trace,
     )
 

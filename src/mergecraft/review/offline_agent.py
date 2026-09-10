@@ -221,6 +221,8 @@ async def run_offline_agent_review(
             agent_id=agent.name,
             output_schema=output_schema,
             setup_script_skip_reason=setup_script_skip_reason,
+            repo_root=cwd,
+            trust_tier=resolved_tier,
         )
         run_ctx = AgentRunContext(
             payload=payload,
@@ -264,6 +266,8 @@ async def run_offline_agent_review(
                 agent_id=attempt_agent.name,
                 output_schema=output_schema,
                 setup_script_skip_reason=setup_script_skip_reason,
+                repo_root=cwd,
+                trust_tier=resolved_tier,
             )
             attempt_ctx = replace(
                 run_ctx,
