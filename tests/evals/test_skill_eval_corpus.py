@@ -9,10 +9,6 @@ import pytest
 
 _CORPUS_DIR = Path(__file__).resolve().parents[2] / "src/mergecraft/evals/cases/skill"
 _FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "skill_eval"
-_BASELINE_POINTER_BODY = (
-    "Follow [REVIEW-CHECKS.md](../../../REVIEW-CHECKS.md) and "
-    "[docs/REVIEW-DOCTRINE.md](../../../docs/REVIEW-DOCTRINE.md).\n"
-)
 
 
 def _load_cases() -> list[dict[str, object]]:
@@ -28,7 +24,6 @@ def _case_ids() -> list[str]:
 
 
 @pytest.mark.parametrize("case_id", _case_ids())
-@pytest.mark.xfail(reason="green after RS4: per-case skill eval scoring", strict=False)
 def test_skill_eval_case_scores(case_id: str) -> None:
     from mergecraft.evals.skill import score_skill_eval_case
 
@@ -39,7 +34,6 @@ def test_skill_eval_case_scores(case_id: str) -> None:
     assert report.passed, report.summary
 
 
-@pytest.mark.xfail(reason="green after RS4: corpus beats 366-byte baseline", strict=False)
 def test_skill_beats_its_baseline_on_the_corpus() -> None:
     from mergecraft.evals.skill import evaluate_skill_eval_corpus
 

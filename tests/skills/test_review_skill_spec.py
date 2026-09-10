@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 from tests.context.review_skill_support import skill_root
 
 _SKILL_ROOT = skill_root()
@@ -27,7 +26,6 @@ def _reference_paths() -> list[Path]:
     return [(_SKILL_ROOT / rel).resolve() for rel in rels]
 
 
-@pytest.mark.xfail(reason="green after RS3: Agent Skills frontmatter", strict=False)
 def test_frontmatter_satisfies_the_agent_skills_spec() -> None:
     assert "references/" in _skill_text(), "pointer skill is not the authored payload"
     from mergecraft.analyzers.agentsec.skill_manifest import parse_skill_file
@@ -44,14 +42,12 @@ def test_frontmatter_satisfies_the_agent_skills_spec() -> None:
     assert len(description) <= 1024
 
 
-@pytest.mark.xfail(reason="green after RS3: SKILL.md line budget", strict=False)
 def test_body_is_under_the_line_budget() -> None:
     lines = _skill_text().splitlines()
     assert len(lines) > 80, "pointer skill is not the authored payload"
     assert len(lines) < 500
 
 
-@pytest.mark.xfail(reason="green after RS3: reference link resolution", strict=False)
 def test_every_reference_link_resolves_and_is_inside_the_skill_root() -> None:
     body = _skill_text().split("---", 2)[-1]
     links = [
@@ -66,7 +62,6 @@ def test_every_reference_link_resolves_and_is_inside_the_skill_root() -> None:
         assert path.resolve().is_relative_to(skill_root_resolved)
 
 
-@pytest.mark.xfail(reason="green after RS3: one-level reference depth", strict=False)
 def test_no_reference_file_links_to_another_reference_file() -> None:
     refs = _reference_paths()
     assert refs, "expected a references/ tree once RS3 lands"
@@ -79,7 +74,6 @@ def test_no_reference_file_links_to_another_reference_file() -> None:
             )
 
 
-@pytest.mark.xfail(reason="green after RS3: reference TOC requirement", strict=False)
 def test_reference_files_over_100_lines_open_with_a_table_of_contents() -> None:
     refs = _reference_paths()
     assert refs, "expected a references/ tree once RS3 lands"

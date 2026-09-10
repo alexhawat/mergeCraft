@@ -627,6 +627,10 @@ Do not set these in CI or production workflows.
 
 # What mergecraft checks for
 
+> **Agent-facing artifact:** `.github/skills/code-review/` is what mergeCraft injects
+> into the reviewing agent at runtime; this file is the human-facing catalog of the
+> same checks.
+
 > **Doc status (W7 + catalog C6):** §2 describes the analyzer platform and the expanded
 > P0–P3 catalog. Long-tail tools default to **disabled** unless repo config or detection
 > enables them.
@@ -1424,6 +1428,10 @@ Check-run annotations are the documented alternative surface and are not impleme
 ===== FILE: docs/REVIEW-DOCTRINE.md =====
 
 # Review doctrine
+
+> **Agent-facing artifact:** `.github/skills/code-review/` is what mergeCraft injects
+> into the reviewing agent at runtime; this file is the human-facing rationale the
+> skill distills for prompts.
 
 Review-check reasoning from `review_checks.py`, `review_taxonomy.py`,
 `mcp/static_checks.py`, and `REVIEW-CHECKS.md`. W2 and W5
