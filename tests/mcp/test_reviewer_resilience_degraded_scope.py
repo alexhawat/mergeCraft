@@ -326,8 +326,18 @@ async def test_successful_checkout_pr_sets_scope_provenance_checkout(tmp_path: P
     assert ctx.tool_state.review_phase == ReviewPhase.ESTABLISH_SCOPE.value
 
 
+@pytest.mark.xfail(
+    reason="green after RA5: get_commit_info is REPOSITORY_READ and must not register scope",
+    strict=False,
+)
 @pytest.mark.asyncio
-async def test_get_commit_info_registers_scope_for_pr_head(tmp_path: Path) -> None:
+async def test_get_commit_info_does_not_register_scope_for_pr_head(tmp_path: Path) -> None:
+    """N3 / D10 — a metadata read must not replace the canonical review scope.
+
+    The tool still writes and returns its single-commit patch; it must not
+    advance ``review_phase`` or set ``primary.diff_path``. Before RA5 this test
+    pinned the opposite behaviour as intended — that expectation is the defect.
+    """
     head_sha = "5" * 40
     ctx = _ctx(tmp_path, _StubGitHub(head_sha=head_sha))
     ctx.tool_state.pr_number = 1
@@ -336,8 +346,8 @@ async def test_get_commit_info_registers_scope_for_pr_head(tmp_path: Path) -> No
 
     result = await get_commit_info_tool(ctx).execute({"sha": head_sha})
     assert result.is_error is False, result.content[0]["text"]
-    assert ctx.tool_state.review_phase == ReviewPhase.ESTABLISH_SCOPE.value
-    assert primary.diff_path
+    assert ctx.tool_state.review_phase != ReviewPhase.ESTABLISH_SCOPE.value
+    assert primary.diff_path is None
 
 
 @pytest.mark.asyncio
