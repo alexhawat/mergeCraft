@@ -109,6 +109,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Partial ``run_analyzers`` reruns retain findings from earlier covered scopes
+  instead of replacing the whole analyzer run, so a clean pass over an
+  uncovered file cannot erase a prior blocker (N2)
+- ``get_commit_info`` no longer registers review scope at PR head; single-commit
+  patches land in ``commit_inspection_diffs`` instead of overwriting
+  ``primary.diff_path`` (N3)
+
 - Cluster canonicalization and semantic dedupe now keep the strongest member's
   severity when corroborating weaker duplicates collapse, so a Major blocker
   cannot turn green at either pipeline collapse point (N5)

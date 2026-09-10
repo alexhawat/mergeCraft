@@ -24,11 +24,6 @@ from mergecraft.utils.github import GitHubClient
 if TYPE_CHECKING:
     from pathlib import Path
 
-_RA5_XFAIL = pytest.mark.xfail(
-    reason="green after RA5: retain analyzer evidence by covered scope",
-    strict=False,
-)
-
 
 def _ctx(tmp_path: Path) -> ToolContext:
     return ToolContext(
@@ -115,7 +110,6 @@ async def _retained_fingerprints(ctx: ToolContext) -> set[str]:
 
 
 @pytest.mark.asyncio
-@_RA5_XFAIL
 async def test_clean_partial_rerun_does_not_erase_a_prior_blocker(
     tmp_path: Path, pipeline: dict[str, Any]
 ) -> None:
@@ -143,7 +137,6 @@ async def test_same_scope_rerun_supersedes(tmp_path: Path, pipeline: dict[str, A
 
 
 @pytest.mark.asyncio
-@_RA5_XFAIL
 async def test_unavailable_analyzer_rerun_does_not_supersede(
     tmp_path: Path, pipeline: dict[str, Any]
 ) -> None:
@@ -157,7 +150,6 @@ async def test_unavailable_analyzer_rerun_does_not_supersede(
 
 
 @pytest.mark.asyncio
-@_RA5_XFAIL
 async def test_no_match_rerun_does_not_supersede(tmp_path: Path, pipeline: dict[str, Any]) -> None:
     ctx = _ctx(tmp_path)
     await _run(ctx, changed_files=["bug.py"])
@@ -168,7 +160,6 @@ async def test_no_match_rerun_does_not_supersede(tmp_path: Path, pipeline: dict[
 
 
 @pytest.mark.asyncio
-@_RA5_XFAIL
 async def test_terminal_approve_stays_rejected_after_a_partial_clean_rerun(
     tmp_path: Path, pipeline: dict[str, Any]
 ) -> None:
@@ -192,7 +183,6 @@ async def test_terminal_approve_stays_rejected_after_a_partial_clean_rerun(
 
 
 @pytest.mark.asyncio
-@_RA5_XFAIL
 async def test_concurrent_overlapping_runs_do_not_lose_findings(
     tmp_path: Path, pipeline: dict[str, Any]
 ) -> None:

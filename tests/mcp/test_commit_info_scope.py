@@ -20,11 +20,6 @@ from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.mcp.verdict import ReviewPhase, register_review_scope
 from mergecraft.modes import compute_modes
 
-_RA5_XFAIL = pytest.mark.xfail(
-    reason="green after RA5: a metadata read may not register review scope",
-    strict=False,
-)
-
 
 def _ctx(pr: Any, tmp_path: Path) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
@@ -61,7 +56,6 @@ def _read_text(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-@_RA5_XFAIL
 @pytest.mark.asyncio
 async def test_get_commit_info_does_not_change_canonical_scope(tmp_path: Path) -> None:
     pr = build_two_commit_pr(tmp_path)
@@ -89,7 +83,6 @@ async def test_get_commit_info_still_returns_a_usable_diff_file(tmp_path: Path) 
     assert "docs.md" in text
 
 
-@_RA5_XFAIL
 @pytest.mark.asyncio
 async def test_admissible_changed_files_survive_head_inspection(tmp_path: Path) -> None:
     from mergecraft.utils.diff_paths import changed_paths_from_diff
@@ -105,7 +98,6 @@ async def test_admissible_changed_files_survive_head_inspection(tmp_path: Path) 
     assert {"security.py", "docs.md"} <= paths
 
 
-@_RA5_XFAIL
 @pytest.mark.asyncio
 async def test_blast_radius_survives_head_inspection(tmp_path: Path) -> None:
     from mergecraft.evidence.run_packet import classify_run_blast_radius
@@ -124,7 +116,6 @@ async def test_blast_radius_survives_head_inspection(tmp_path: Path) -> None:
     assert after.lane == before.lane
 
 
-@_RA5_XFAIL
 @pytest.mark.asyncio
 async def test_inline_anchors_survive_head_inspection(tmp_path: Path) -> None:
     from mergecraft.mcp.inline_anchors import build_inline_anchor_index
