@@ -442,6 +442,9 @@ jobs:
           model: anthropic/claude-sonnet
           status_checks: enabled
         env:
+          # Keep equal to the `uses:` ref above — the container cannot read it,
+          # so this is the only way the run records which pin it is running.
+          MERGECRAFT_ACTION_SHA: v0.1.0a1
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
