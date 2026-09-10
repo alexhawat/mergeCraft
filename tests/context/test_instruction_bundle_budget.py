@@ -15,7 +15,15 @@ from tests.context.review_skill_support import (
     seed_nested_worktree_duplicate,
     seed_product_skill_noise,
 )
-from tests.context.support import git_commit_all, git_init_repo
+from tests.context.support import (
+    FENCE_OPEN,
+    REPO_INSTRUCTIONS_HEADER,
+    STANDING_INSTRUCTIONS_HEADER,
+    git_commit_all,
+    git_init_repo,
+)
+
+FENCE_CLOSE = "<<<END-UNTRUSTED-MERGECRAFT-CONTENT"
 
 
 def test_bundle_respects_the_total_byte_cap(tmp_path: Path) -> None:
@@ -81,6 +89,33 @@ def test_nested_worktree_is_skipped(tmp_path: Path) -> None:
     prompt = render_prompt(repo, commit_sha=sha)
     assert prompt.count("Canonical review skill.") == 1
     assert "Duplicate worktree skill." not in prompt
+
+
+def test_refusal_notes_stay_within_byte_cap(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    refused_links = "\n".join(f"See [bad{i}](../../../secret{i}.md)." for i in range(50))
+    sha = init_repo_with_skill(repo, body=f"{refused_links}\n")
+    prompt = render_prompt(repo, commit_sha=sha, byte_cap=2048)
+    assert len(prompt.encode("utf-8")) <= 2048
+
+
+def test_review_only_bundle_has_no_phantom_section_headers(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    sha = init_repo_with_skill(repo, body="Review skill body only.\n")
+    prompt = render_prompt(repo, commit_sha=sha)
+    assert REPO_INSTRUCTIONS_HEADER not in prompt
+    assert STANDING_INSTRUCTIONS_HEADER not in prompt
+
+
+def test_untrusted_tight_cap_preserves_fence_closure(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    (repo / "AGENTS.md").write_text("A" * 5000 + "\n", encoding="utf-8")
+    sha = init_repo_with_skill(repo, body="Review skill body.\n")
+    prompt = render_prompt(repo, trust_tier="untrusted", commit_sha=sha, byte_cap=2048)
+    assert prompt.count(FENCE_OPEN) == prompt.count(FENCE_CLOSE)
 
 
 def test_a_repo_with_no_instruction_files_renders_nothing(tmp_path: Path) -> None:
