@@ -99,6 +99,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Fork-head runs now reject every indexed provider credential spelling
+  (OAuth, device-code, cloud-chain) via a single registry-derived allowlist,
+  not only flat ``*_API_KEY`` names (N1)
+- Indexed ``device_code`` Codex credentials reach ``auth.json`` through the
+  resolved child environment instead of ambient ``os.environ``, and broker
+  posture reports ``subscription`` for indexed-only setups (N19)
+- Fork-credential and agent-env strip sets both derive from
+  ``provider_credential_env_names`` so ``GOOGLE_API_KEY``, ``AWS_SESSION_TOKEN``,
+  and future provider names cannot drift between consumers (N21)
 - Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
   tracing-content cap; export of prompt bodies on fork PRs requires the Action
   input, env, or trusted base settings

@@ -32,6 +32,28 @@ _BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
 
 _VERTEX_CLOUD_SUFFIXES: tuple[str, ...] = ("GOOGLE_APPLICATION_CREDENTIALS",)
 
+# Flat harness env vars for cloud-chain auth beyond the indexed suffix tuples.
+_CLOUD_CHAIN_FLAT_ENV_NAMES: tuple[str, ...] = (
+    "AWS_SESSION_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "VERTEX_SERVICE_ACCOUNT_JSON",
+    "GOOGLE_CLOUD_PROJECT",
+    "CLOUD_ML_PROJECT_ID",
+    "VERTEX_LOCATION",
+)
+
+_LEGACY_FLAT_CREDENTIAL_ENV_NAMES: frozenset[str] = frozenset(
+    {
+        "NOUS_API_KEY",
+        "TOKENHUB_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+    }
+)
+
 _BUILTIN_LABEL_TO_HARNESS_API_KEY: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
@@ -55,6 +77,41 @@ def _read_env_value(key: str) -> str | None:
 def indexed_env_key(env_index: int, suffix: str) -> str:
     """Return ``LLM_PROVIDER_<N>_<SUFFIX>``."""
     return f"LLM_PROVIDER_{env_index}_{suffix}"
+
+
+def credential_suffix_vocabulary() -> frozenset[str]:
+    """Return every indexed credential suffix the registry can consume."""
+    suffixes: set[str] = set(_AUTH_KIND_PRIMARY_SUFFIX.values())
+    suffixes.update(_BEDROCK_CLOUD_SUFFIXES)
+    suffixes.update(_VERTEX_CLOUD_SUFFIXES)
+    suffixes.add("API_KEY")
+    return frozenset(suffixes)
+
+
+def _flat_provider_credential_env_names() -> frozenset[str]:
+    """Return every flat (non-indexed) provider credential env name."""
+    names: set[str] = set(_BUILTIN_LABEL_TO_HARNESS_API_KEY.values())
+    names.update(_AUTH_KIND_PRIMARY_SUFFIX.values())
+    names.update(_BEDROCK_CLOUD_SUFFIXES)
+    names.update(_VERTEX_CLOUD_SUFFIXES)
+    names.update(_CLOUD_CHAIN_FLAT_ENV_NAMES)
+    names.update(_LEGACY_FLAT_CREDENTIAL_ENV_NAMES)
+    return frozenset(names)
+
+
+def provider_credential_env_names(settings: RepoSettings | None) -> frozenset[str]:
+    """Return every provider credential env name the registry can consume.
+
+    Covers every ``authKind``, every cloud suffix, both spellings (flat and
+    ``LLM_PROVIDER_<N>_<SUFFIX>``), and ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_*``.
+    """
+    names: set[str] = set(_flat_provider_credential_env_names())
+    if settings is not None:
+        for entry in settings.providers:
+            for suffix in _credential_suffixes_for_entry(entry):
+                names.add(indexed_env_key(entry.env_index, suffix))
+            names.add(f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{entry.env_index}")
+    return frozenset(names)
 
 
 def lookup_registry_entry(
@@ -360,6 +417,7 @@ def infer_harness_for_slug(
 __all__ = [
     "SEED_PROVIDER_URLS",
     "credential_env_keys_for_entry",
+    "credential_suffix_vocabulary",
     "harness_env_for_active_provider",
     "has_registry_credentials",
     "indexed_api_key_for_entry",
@@ -370,6 +428,7 @@ __all__ = [
     "legacy_opencode_harness_for_unregistered_provider",
     "lookup_registry_entry",
     "lookup_registry_entry_by_env_index",
+    "provider_credential_env_names",
     "registry_harness_for_provider",
     "resolve_legacy_nous_gateway_endpoint",
     "resolve_registry_gateway_endpoint",

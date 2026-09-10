@@ -55,6 +55,8 @@ from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
@@ -212,16 +214,18 @@ def _render_toml(table: TomlTable, path: tuple[str, ...] = ()) -> list[str]:
     return lines
 
 
-def _has_openai_api_key() -> bool:
-    return bool(os.environ.get(OPENAI_API_KEY_ENV, "").strip())
+def _has_openai_api_key(env: Mapping[str, str]) -> bool:
+    return bool(env.get(OPENAI_API_KEY_ENV, "").strip())
 
 
 def _setup_codex_auth(
     ctx: AgentRunContext,
     *,
     codex_home: Path,
+    env: Mapping[str, str] | None = None,
 ) -> None:
-    raw = os.environ.get(CODEX_AUTH_ENV, "").strip()
+    resolved = env if env is not None else os.environ
+    raw = resolved.get(CODEX_AUTH_ENV, "").strip()
     if raw and subscription_auth_usable(raw):
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
@@ -233,7 +237,7 @@ def _setup_codex_auth(
             CODEX_AUTH_ENV,
             OPENAI_API_KEY_ENV,
         )
-    if _has_openai_api_key():
+    if _has_openai_api_key(resolved):
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
 
 
@@ -558,6 +562,15 @@ def ctx_tmpdir_fallback() -> str:
     return os.environ.get("MERGECRAFT_TEMP_DIR") or "/tmp"
 
 
+def _resolve_codex_credential_env(ctx: AgentRunContext) -> dict[str, str]:
+    """Build the Codex credential mapping before broker injection (D4)."""
+    codex_home = _codex_home(ctx)
+    extra: dict[str, str] = {"CODEX_HOME": str(codex_home)}
+    if ctx.mcp_auth_token:
+        extra[_CODEX_MCP_TOKEN_ENV] = ctx.mcp_auth_token
+    return build_agent_env("codex", extra, model=ctx.resolved_model)
+
+
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     codex_home = _codex_home(ctx)
     handle = active_broker_handle()
@@ -582,7 +595,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
                 if entry:
                     bypass.setdefault(entry.casefold(), entry)
         env["NO_PROXY"] = env["no_proxy"] = ",".join(bypass.values())
-    _setup_codex_auth(ctx, codex_home=codex_home)
+    _setup_codex_auth(ctx, codex_home=codex_home, env=env)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
     # (config.toml, mergecraft-instructions.md, auth.json) while this process
     # still runs as root. wrap_agent_command()'s setpriv drops the actual
@@ -772,7 +785,11 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    initial_posture = resolve_codex_broker_posture()
+    credential_env = _resolve_codex_credential_env(ctx)
+    initial_posture = resolve_codex_broker_posture(
+        openai_api_key=credential_env.get(OPENAI_API_KEY_ENV, ""),
+        codex_auth_json=credential_env.get(CODEX_AUTH_ENV, ""),
+    )
     try:
         broker_session = begin_broker_session(posture=initial_posture)
     except RuntimeError as err:
