@@ -71,3 +71,60 @@ def test_checkout_does_not_persist_credentials(relpath: str) -> None:
             "extraheader collides with mergeCraft's own Authorization header and "
             "GitHub rejects the fetch with 400 Duplicate header"
         )
+
+
+_PIN_EXAMPLES = (
+    "examples/workflows/mergecraft.yml",
+    "examples/workflows/mergecraft-hardened.yml",
+)
+
+
+@pytest.mark.parametrize("relative", _PIN_EXAMPLES)
+def test_shipped_examples_export_the_pin_they_run(relative: str) -> None:
+    """A consumer copying an example must record the pin it runs (#641).
+
+    `resolve_action_pin_sha()` reads `MERGECRAFT_ACTION_SHA` and nothing else,
+    and the container cannot see the workflow's `uses:` line. An example that
+    omits it hands every copier an empty Action pin and no pin/image mismatch
+    detection — the same gap `mergecraft init` had before #679.
+    """
+    import re
+
+    text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+    uses = re.findall(r"uses:\s*alexhawat/mergeCraft@(\S+)", text)
+    exported = re.findall(r"MERGECRAFT_ACTION_SHA:\s*(\S+)", text)
+
+    assert uses, f"{relative} no longer references the action"
+    assert exported, f"{relative} does not export MERGECRAFT_ACTION_SHA"
+    assert set(exported) == set(uses), (
+        f"{relative} exports {exported} but runs {uses}; "
+        "the recorded pin would not be the code that ran"
+    )
+
+
+def _readme_workflow_examples() -> list[str]:
+    """Fenced yaml blocks in README that configure the action."""
+    import re
+
+    text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```ya?ml\n(.*?)```", text, re.S)
+    return [block for block in blocks if "alexhawat/mergeCraft@" in block]
+
+
+def test_readme_examples_honour_a_dispatch_prompt_they_declare() -> None:
+    """An example that advertises `workflow_dispatch` must actually use it.
+
+    README declared a required `prompt` input and then passed a hardcoded
+    string to the action, so a manually dispatched run silently ignored what
+    the operator typed — unlike the workflow `mergecraft init` generates and
+    unlike both shipped example templates, which resolve it event-aware.
+    """
+    examples = _readme_workflow_examples()
+    assert examples, "no action example found in README"
+    for block in examples:
+        if "workflow_dispatch" not in block or "inputs:" not in block:
+            continue
+        assert "github.event.inputs.prompt" in block or "inputs.prompt" in block, (
+            "README example declares a workflow_dispatch prompt input but never "
+            "passes it to the action; a dispatched run would ignore it"
+        )

@@ -76,18 +76,20 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    read docs/authentication.md and set up the custom-provider env pair instead.
    Each command stores a GitHub Actions secret for me via `gh secret set`.
 
-5. After I confirm the credential is stored, set `models:` in
-   .mergecraft/config.yaml to a fallback chain whose first entry matches the
-   provider I authenticated. Then run `mergecraft doctor` and fix anything it
-   reports that is not the credential itself.
+5. After I confirm the credential is stored, run `mergecraft doctor` and fix
+   anything it reports that is not the credential itself. The first
+   `provider auth` after `init` seeds `agents.reviewer` and `models:` — only
+   edit `models:` if you want a fallback chain.
 
-6. Commit ONLY .mergecraft/config.yaml, .mergecraft/learnings.md, and
-   .github/workflows/mergecraft.yml on a new branch. Never commit secrets.
+6. Commit ONLY .mergecraft/config.yaml, .mergecraft/learnings.md,
+   .github/workflows/mergecraft.yml, and any `.gitignore` lines `init` added.
+   Never commit secrets.
    Open a pull request titled "ci: add mergeCraft AI PR review".
 
 7. That PR is the first review target. Tell me to watch the `mergecraft-approval`
-   check on it, and that I can re-run a review any time by commenting
-   `@mergecraft review`.
+   check on it. Re-run by pushing a commit (`synchronize`) or using
+   `workflow_dispatch`. The default `mergecraft init` workflow does not listen
+   for `@mergecraft review` comments.
 
 Finally, print a short summary: provider chosen, files added, PR link, and the
 exact command I still need to run (if any).
@@ -251,8 +253,8 @@ Constraints:
     Never fabricate, log, or commit a credential.
   - `mergecraft review --agent` streams versioned JSONL on stdout — use that,
     not screen-scraping, if you want to consume review results.
-  - Exit codes are contractual: 0 pass, 10 findings, 11 blocking, 20
-    inconclusive, 30 config error, 40 provider/infra, 50 timeout.
+  - Exit codes are contractual: 0 pass, 10 findings, 11 blocking, 12 failed,
+    20 inconclusive, 30 config error, 40 provider/infra, 50 timeout, 2 usage.
     See docs/EXIT-CODES.md.
 
 Produce a plan, execute it, then open a PR and report the escalation you need.
@@ -397,8 +399,10 @@ The credential is stored as a GitHub Actions secret via `gh secret set`. Add
 More providers, custom gateways and model chains:
 [`docs/authentication.md`](docs/authentication.md).
 
-3. **Trigger a review** — open a pull request, comment `@mergecraft review`, or
-   run the workflow via `workflow_dispatch`.
+3. **Trigger a review** — open a pull request, or run the workflow via
+   `workflow_dispatch`. The default scaffold does not listen for
+   `@mergecraft review` comments (comment triggers are an opt-in pattern in
+   [`docs/workflows.md`](docs/workflows.md)).
 
 ```bash
 mergecraft doctor   # optional: verify git, providers, analyzers, auth, config, MCP
@@ -407,25 +411,46 @@ mergecraft doctor   # optional: verify git, providers, analyzers, auth, config, 
 ### Example 1 — auto-review every PR
 
 ```yaml
-# .github/workflows/mergecraft.yml
+# .github/workflows/mergecraft.yml  — matches `mergecraft init` / examples/workflows/
 name: mergeCraft
 on:
   pull_request:
+    types: [opened, ready_for_review, synchronize]
   workflow_dispatch:
+    inputs:
+      prompt:
+        description: Prompt for the agent
+        required: true
+        type: string
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
+  checks: write
+  actions: read
   id-token: write
 
 jobs:
-  review:
+  mergecraft:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: alexhawat/mergeCraft@v0.1.0a1
+        with:
+          # Event-aware: a pull_request run reviews the PR, a manual dispatch
+          # uses the prompt the operator typed. Hardcoding the text here would
+          # silently ignore the required `prompt` input declared above.
+          prompt: >
+            ${{ github.event_name == 'pull_request'
+                && 'Review this pull request.'
+                || github.event.inputs.prompt }}
+          model: anthropic/claude-sonnet
+          status_checks: enabled
         env:
+          # Keep equal to the `uses:` ref above — the container cannot read it,
+          # so this is the only way the run records which pin it is running.
+          MERGECRAFT_ACTION_SHA: v0.1.0a1
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
@@ -554,8 +579,10 @@ Use this when asked to add AI PR review to another repository.
    that step to the human when interactive auth is required.
 5. **Commit only** `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
    on a new branch. Do not commit secrets.
-6. **Trigger a review** — open a pull request, comment `@mergecraft review`, or
-   run the workflow via `workflow_dispatch`. Local/offline review uses
+6. **Trigger a review** — open a pull request or run the workflow via
+   `workflow_dispatch`. The default `mergecraft init` workflow does **not**
+   listen for `@mergecraft review` comments (comment triggers are opt-in; see
+   [`docs/workflows.md`](docs/workflows.md)). Local/offline review uses
    **`mergecraft review`** (not `diff-review`, which is a deprecated alias that
    emits one stderr warning per invocation).
 

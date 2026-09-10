@@ -115,7 +115,7 @@ different questions and are never conflated:
 |---|---|---|
 | Question | *Did the gate make the right decision?* | *Did the review find the right lines?* |
 | Ground truth | `recorded_findings` + `expected_decision`, no patch | a patch + `baseline.json` (`{"closed_world": bool, "issues": [...]}`) |
-| Cost | free, keyless — `replay_case()` recomputes the verdict | needs a live provider — runs `diff-review` for real |
+| Cost | free, keyless — `replay_case()` recomputes the verdict | needs a live provider — runs `mergecraft review` for real |
 | Consumer | `mergecraft eval replay-bank`, the `gate_matrix` fields | `mergecraft eval bench`, the `detection` section |
 
 A bank case cannot answer a detection question (no patch to review) and a
@@ -131,9 +131,10 @@ make bench-detect
 ```
 
 Joins the keyless structural replay above with a live run against
-`evals/bench/mergecraft/`: each case's patch is reviewed via `diff-review`,
-scored against its `baseline.json` with `score_findings()`, and folded into
-the `detection` section of the published result set (`evals/live_run.py`).
+`evals/bench/mergecraft/`: each case's patch is reviewed via the same offline
+engine as `mergecraft review`, scored against its `baseline.json` with
+`score_findings()`, and folded into the `detection` section of the published
+result set (`evals/live_run.py`).
 The structural section always populates; `detection` is `None` with a typed
 `skipped_reason` — `"no live credential"` or `"no patch-bearing cases"` — when
 it cannot run, never a fabricated zero. B4 seeded the detection corpus (43
@@ -160,7 +161,7 @@ tripll ReviewBench corpus described earlier in this document; caveat it
 separately when publishing (B7).
 
 Provider set defaults to **Claude + OpenAI**; estimate ~10–30 tokens per case for
-a minimal live probe. Full diff-review runs are operator-triggered, not PR CI.
+a minimal live probe. Full live `mergecraft review` runs are operator-triggered, not PR CI.
 
 ## Harbor agent
 
@@ -173,11 +174,13 @@ harbor run -d "<dataset>" --agent mergecraft.harbor.agent:MergecraftReviewAgent
 ```
 
 The agent installs mergecraft with `uv tool install git+https://github.com/alexhawat/mergeCraft@<ref>`
-(default ref `v0.1.0`; override with `MERGECRAFT_INSTALL_REF`) and runs
-`mergecraft diff-review --json` inside each task environment.
+(default ref `v0.1.0a1`, the same pin as README Example 1; override with
+`MERGECRAFT_INSTALL_REF`) and runs `mergecraft diff-review --json` inside each
+task environment — that is the hidden deprecated alias of `mergecraft review`
+(one stderr warning per invocation).
 
-Structured JSON output requires Batch A (`--json` on `diff-review`) — see
-[mergeCraft#30](https://github.com/alexhawat/mergeCraft/issues/30).
+Structured JSON output is `--json` on `mergecraft review` (the Harbor agent still
+calls the hidden alias).
 
 ## See also
 
