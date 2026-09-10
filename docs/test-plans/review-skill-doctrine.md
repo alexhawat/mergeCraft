@@ -75,3 +75,4 @@ Authoring wave: **RS1** (`test-creator`). Implementation: **RS2–RS4**.
 
 - RS1 pins limitation/refusal markers as `instruction limitation` and `refused` substrings in the rendered bundle/record; RS2 may choose exact prose but must keep them visible and machine-checkable.
 - The empty-repo guard (`test_a_repo_with_no_instruction_files_renders_nothing`) is intentionally **not** xfailed — it must stay green through RS2.
+- RS1 fix pass (post-RS2): fixture repos call `repo.mkdir()` before pre-skill file writes; `test_only_review_tier_skills_resolve_references` links `references/checks.md` in the review-tier body; `resolve_offline_instructions` defaults `wired=True` (D19).

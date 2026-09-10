@@ -73,14 +73,14 @@ def resolve_offline_instructions(
     *,
     trust_tier: str | None = None,
     retry: bool = False,
-    wired: bool = False,
+    wired: bool = True,
 ) -> Any:
     """Mirror ``review/offline_agent.py`` resolve_instructions call shape.
 
-    ``wired=False`` (default) matches today's broken CLI call sites at
-    ``offline_agent.py:212`` and ``:255`` — no ``repo_root``, default
-    ``trust_tier="untrusted"``. ``wired=True`` is the RS2 target shape
-    (both ``repo_root`` and a resolved trust tier).
+    ``wired=True`` (default) is the RS2 target shape — passes both
+    ``repo_root`` and a resolved trust tier (D19). ``wired=False`` matches
+    the pre-RS2 broken CLI call sites at ``offline_agent.py:212`` and
+    ``:255`` (no ``repo_root``, default ``trust_tier="untrusted"``).
     """
     from mergecraft.offline_review import resolve_offline_review_trust_tier
 

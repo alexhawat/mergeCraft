@@ -23,6 +23,7 @@ from tests.context.support import git_commit_all, git_init_repo
 @pytest.mark.xfail(reason="green after RS2: bundle byte cap", strict=False)
 def test_bundle_respects_the_total_byte_cap(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
     noise = repo / "AGENTS.md"
     noise.write_text("N" * 200_000 + "\n", encoding="utf-8")
     sha = init_repo_with_skill(repo, body="Small review skill body.\n")
@@ -33,6 +34,7 @@ def test_bundle_respects_the_total_byte_cap(tmp_path: Path) -> None:
 @pytest.mark.xfail(reason="green after RS2: truncation priority order", strict=False)
 def test_review_skill_and_references_survive_truncation_first(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
     (repo / "AGENTS.md").write_text("A" * 200_000 + "\n", encoding="utf-8")
     marker = "PRIORITY_REFERENCE_SURVIVES"
     sha = init_repo_with_skill(
@@ -48,6 +50,7 @@ def test_review_skill_and_references_survive_truncation_first(tmp_path: Path) ->
 @pytest.mark.xfail(reason="green after RS2: visible truncation reporting", strict=False)
 def test_truncation_is_reported_as_a_visible_limitation(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
     (repo / "CLAUDE.md").write_text("C" * 200_000 + "\n", encoding="utf-8")
     sha = init_repo_with_skill(repo, body="Review skill body.\n")
     prompt = render_prompt(repo, commit_sha=sha, byte_cap=4096)

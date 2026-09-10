@@ -53,6 +53,7 @@ def test_reference_resolution_is_one_level_deep(tmp_path: Path) -> None:
 @pytest.mark.xfail(reason="green after RS2: refuse outside-skill links", strict=False)
 def test_reference_outside_the_skill_directory_is_refused(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
     outside = repo / "REVIEW-CHECKS.md"
     outside.write_text("# Outside\n\nOUTSIDE_DOCTRINE_BODY\n", encoding="utf-8")
     sha = init_repo_with_skill(
@@ -69,6 +70,7 @@ def test_reference_outside_the_skill_directory_is_refused(tmp_path: Path) -> Non
 @pytest.mark.xfail(reason="green after RS2: refuse traversal paths", strict=False)
 def test_absolute_and_traversal_paths_are_refused(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
     secret = repo / "secret.txt"
     secret.write_text("SECRET_BODY\n", encoding="utf-8")
     link_body = (
@@ -124,7 +126,7 @@ def test_only_review_tier_skills_resolve_references(tmp_path: Path) -> None:
     )
     sha = init_repo_with_skill(
         repo,
-        body="Review skill body only.\n",
+        body="See [checks](references/checks.md).\n",
         references={"checks.md": "REVIEW_TIER_REFERENCE\n"},
     )
     prompt = render_prompt(repo, commit_sha=sha)
