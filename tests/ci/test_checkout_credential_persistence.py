@@ -100,3 +100,31 @@ def test_shipped_examples_export_the_pin_they_run(relative: str) -> None:
         f"{relative} exports {exported} but runs {uses}; "
         "the recorded pin would not be the code that ran"
     )
+
+
+def _readme_workflow_examples() -> list[str]:
+    """Fenced yaml blocks in README that configure the action."""
+    import re
+
+    text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```ya?ml\n(.*?)```", text, re.S)
+    return [block for block in blocks if "alexhawat/mergeCraft@" in block]
+
+
+def test_readme_examples_honour_a_dispatch_prompt_they_declare() -> None:
+    """An example that advertises `workflow_dispatch` must actually use it.
+
+    README declared a required `prompt` input and then passed a hardcoded
+    string to the action, so a manually dispatched run silently ignored what
+    the operator typed — unlike the workflow `mergecraft init` generates and
+    unlike both shipped example templates, which resolve it event-aware.
+    """
+    examples = _readme_workflow_examples()
+    assert examples, "no action example found in README"
+    for block in examples:
+        if "workflow_dispatch" not in block or "inputs:" not in block:
+            continue
+        assert "github.event.inputs.prompt" in block or "inputs.prompt" in block, (
+            "README example declares a workflow_dispatch prompt input but never "
+            "passes it to the action; a dispatched run would ignore it"
+        )

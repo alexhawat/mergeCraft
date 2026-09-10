@@ -434,7 +434,13 @@ jobs:
       - uses: actions/checkout@v5
       - uses: alexhawat/mergeCraft@v0.1.0a1
         with:
-          prompt: Review this pull request.
+          # Event-aware: a pull_request run reviews the PR, a manual dispatch
+          # uses the prompt the operator typed. Hardcoding the text here would
+          # silently ignore the required `prompt` input declared above.
+          prompt: >
+            ${{ github.event_name == 'pull_request'
+                && 'Review this pull request.'
+                || github.event.inputs.prompt }}
           model: anthropic/claude-sonnet
           status_checks: enabled
         env:
