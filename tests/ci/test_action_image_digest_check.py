@@ -471,84 +471,105 @@ def test_candidate_rejects_mutable_new_pin_but_allows_repair(
 
 
 def _merge_history(tmp_path: Path) -> tuple[Path, str, str, str]:
-    """A manifest commit landing as a merge, alongside unrelated work.
+    """A manifest commit reaching a branch through a merge, with other work.
 
-    Returns ``(repo, base, merge, minted)`` where ``merge`` inherits the digest
-    from a parent and ``minted`` introduces one no parent carries.
+    Returns ``(repo, base, merge, manifest)``.
     """
     repo, _source, manifest = _history(tmp_path)
-    # `manifest` bumped the digest to b*64 on the default branch.
     default = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    base = manifest
 
-    # A side branch doing unrelated work, from before the manifest commit.
     _git(repo, "checkout", "-b", "side", f"{manifest}~1")
+    base = _git(repo, "rev-parse", "HEAD")
     (repo / "runtime.py").write_text("VALUE = 2\n")
     _git(repo, "commit", "-am", "test: unrelated work")
-
-    # Merge the manifest into it: the result carries the digest from a parent
-    # while also differing from the image source in runtime.py.
     _git(repo, "merge", "--no-ff", "-m", "test: merge manifest into side", manifest)
     merge = _git(repo, "rev-parse", "HEAD")
 
-    # A commit that introduces a digest no parent carries.
-    action = repo / "action.yml"
-    action.write_text(action.read_text().replace("b" * 64, "c" * 64))
-    _git(repo, "commit", "-am", "test: mint a new digest")
-    minted = _git(repo, "rev-parse", "HEAD")
-
     _git(repo, "checkout", default)
-    return repo, base, merge, minted
+    return repo, base, merge, manifest
 
 
-def test_a_digest_inherited_through_a_merge_is_not_a_new_manifest(tmp_path: Path) -> None:
-    """#684 — a merge carrying an already-verified digest must not be rejected.
-
-    `verify_manifest` requires a manifest commit to differ from its image source
-    in `action.yml` alone. A merge carries the digest *and* everything merged
-    alongside it, so treating it as freshly minted rejected it outright — which
-    is why `dac17243` could not be pinned and the first `pre-0.0.1` forward-port
-    failed its deployment-candidate gate.
-    """
-    module = _load_module()
-    repo, _base, merge, _minted = _merge_history(tmp_path)
-    image = f"docker://ghcr.io/alexhawat/mergecraft@sha256:{'b' * 64}"
-    assert module._digest_inherited(repo, merge, image) is True
-
-
-def test_a_digest_no_parent_carries_is_still_treated_as_new(tmp_path: Path) -> None:
-    """The gate must not be weakened: a newly minted digest still verifies."""
-    module = _load_module()
-    repo, _base, _merge, minted = _merge_history(tmp_path)
-    image = f"docker://ghcr.io/alexhawat/mergecraft@sha256:{'c' * 64}"
-    assert module._digest_inherited(repo, minted, image) is False
-
-
-def test_a_plain_manifest_commit_is_unaffected(tmp_path: Path) -> None:
-    """A commit from action-manifest-prepare has one parent and mints its digest."""
-    module = _load_module()
-    repo, _source, manifest = _history(tmp_path)
-    image = f"docker://ghcr.io/alexhawat/mergecraft@sha256:{'b' * 64}"
-    assert module._digest_inherited(repo, manifest, image) is False
-
-
-def test_an_empty_image_is_never_inherited(tmp_path: Path) -> None:
-    module = _load_module()
-    repo, _base, merge, _minted = _merge_history(tmp_path)
-    assert module._digest_inherited(repo, merge, None) is False
-    assert module._digest_inherited(repo, merge, "") is False
-
-
-def test_inheriting_a_digest_does_not_excuse_an_action_behaviour_change(
+def test_a_digest_reaching_head_through_a_merge_verifies_its_manifest_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Inheritance must compare the whole Action, not just the image field.
+    """#684 — verify the commit that introduced the image, not the merge.
 
-    A first cut of #684 asked only "does a parent carry this image?". A commit
-    that inherited the digest *and* added an `entrypoint:` then skipped
-    verification entirely — the digest was unchanged from its parent, so the
-    behaviour change rode in unverified. The condition is whole-`action.yml`
-    equality for exactly this reason.
+    A merge carries the digest plus everything merged alongside it, so
+    `verify_manifest` on the merge itself fails by construction. That rejected
+    `dac17243` after #669 landed as a merge, and failed the first `pre-0.0.1`
+    forward-port outright.
+    """
+    module = _load_module()
+    repo, base, merge, manifest = _merge_history(tmp_path)
+    source = _git(repo, "rev-parse", f"{manifest}~1")
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+
+    result = module.verify_candidate(repo, base, merge)
+    assert [row["manifest_commit"] for row in result["manifests"]] == [manifest], (
+        "the merge itself was verified instead of the commit that introduced the digest"
+    )
+
+
+def test_a_digest_minted_mid_pr_is_verified_not_inherited(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A parent inside the candidate range proves nothing.
+
+    Introduce a new digest in commit P together with unrelated changes, then add
+    a no-op commit H. Asking "does a parent already carry this action.yml?"
+    accepts H, because P does — but P was never verified anywhere. The digest
+    has to be checked at the commit that minted it, which fails here precisely
+    because P also changed `runtime.py`.
+    """
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    base = manifest
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+
+    # P: new digest *and* unrelated work, so verify_manifest(P) must fail.
+    action = repo / "action.yml"
+    action.write_text(action.read_text().replace("b" * 64, "c" * 64))
+    (repo / "runtime.py").write_text("VALUE = 99\n")
+    _git(repo, "commit", "-am", "test: mint a digest alongside other work")
+
+    # H: a no-op commit whose action.yml equals P's.
+    (repo / "notes.md").write_text("unrelated\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "test: no-op follow-up")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    with pytest.raises(module.VerificationError):
+        module.verify_candidate(repo, base, head)
+
+
+def test_a_plain_manifest_commit_still_verifies_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ordinary action-manifest-prepare case is unchanged."""
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    monkeypatch.setattr(module, "verify_image", lambda *_args: source)
+    result = module.verify_candidate(repo, source, manifest)
+    assert result["manifests"][0]["manifest_commit"] == manifest
+
+
+def test_the_introducer_falls_back_to_head_when_nothing_matches(tmp_path: Path) -> None:
+    """No candidate commit carries the image: verify head, as before."""
+    module = _load_module()
+    repo, source, manifest = _history(tmp_path)
+    assert module._digest_introducer(repo, source, manifest, None) == manifest
+    assert module._digest_introducer(repo, source, manifest, "docker://absent") == manifest
+
+
+def test_a_later_commit_cannot_ride_in_on_a_legitimate_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Substituting the introducer requires head's Action to be identical to it.
+
+    Resolving by image alone let a commit inherit a legitimate manifest's digest
+    while adding its own `entrypoint:`: the introducer verified cleanly, so the
+    later behaviour change was never checked. Guards the second cut of #684,
+    which the pre-existing manifest-behaviour test caught.
     """
     module = _load_module()
     repo, source, manifest = _history(tmp_path)
@@ -556,13 +577,13 @@ def test_inheriting_a_digest_does_not_excuse_an_action_behaviour_change(
 
     action = repo / "action.yml"
     action.write_text(action.read_text() + "  entrypoint: malicious\n")
-    _git(repo, "commit", "-am", "test: inherit the digest, change the entrypoint")
+    _git(repo, "commit", "-am", "test: keep the digest, change the entrypoint")
     tampered = _git(repo, "rev-parse", "HEAD")
 
     image = f"docker://ghcr.io/alexhawat/mergecraft@sha256:{'b' * 64}"
-    assert module._digest_inherited(repo, tampered, image) is False, (
-        "a behaviour change rode in on an inherited digest"
+    assert module._digest_introducer(repo, source, tampered, image) == tampered, (
+        "substituted the manifest commit for a head that altered the Action"
     )
     with pytest.raises(module.VerificationError, match="behavior"):
         module.verify_candidate(repo, source, tampered)
-    assert manifest  # the untouched manifest commit remains the pinnable one
+    assert manifest
