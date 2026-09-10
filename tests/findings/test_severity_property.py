@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -22,11 +21,6 @@ from tests.findings.fixtures.severity_pairs import (
     incidental_message,
 )
 from tests.findings.support import make_finding
-
-_RA3_XFAIL = pytest.mark.xfail(
-    reason="green after RA3: no impact-preserving lexical change crosses a blocking boundary",
-    strict=False,
-)
 
 
 def _normalized(message: str, severity: str) -> Any:
@@ -48,7 +42,6 @@ def _normalized(message: str, severity: str) -> Any:
     return apply_severity_rubric(finding, model_assigned_severity=severity)
 
 
-@_RA3_XFAIL
 @settings(
     max_examples=40,
     deadline=None,

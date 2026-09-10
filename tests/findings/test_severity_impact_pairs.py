@@ -6,23 +6,16 @@ incidental word and once without. The claim is that the pair agrees. A single
 assertion on one member would pass on a vocabulary change that merely moves
 which word demotes the finding (N4/N20).
 
-Every incidental case is expected to fail until RA3 lands: incidentals must not
-lower a severity across a blocking boundary.
+Incidental prose must not lower a severity across a blocking boundary; RA3 has
+landed, so these cases pin the enforced contract as ordinary passing tests.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from tests.findings.fixtures.severity_pairs import SEVERITY_PAIRS, SeverityPair
 from tests.findings.support import make_finding
-
-_RA3_XFAIL = pytest.mark.xfail(
-    reason="green after RA3: impact decides severity, incidental prose does not",
-    strict=False,
-)
 
 
 def _by_case(case_id: str) -> SeverityPair:
@@ -66,32 +59,26 @@ def _assert_pair_agrees(pair: SeverityPair) -> None:
     )
 
 
-@_RA3_XFAIL
 def test_critical_security_survives_incidental_readme() -> None:
     _assert_pair_agrees(_by_case("critical-security-readme"))
 
 
-@_RA3_XFAIL
 def test_critical_security_survives_incidental_comment() -> None:
     _assert_pair_agrees(_by_case("critical-security-comment"))
 
 
-@_RA3_XFAIL
 def test_critical_security_survives_incidental_style() -> None:
     _assert_pair_agrees(_by_case("critical-security-style"))
 
 
-@_RA3_XFAIL
 def test_critical_security_survives_incidental_naming() -> None:
     _assert_pair_agrees(_by_case("critical-security-naming"))
 
 
-@_RA3_XFAIL
 def test_critical_security_survives_incidental_typo() -> None:
     _assert_pair_agrees(_by_case("critical-security-typo"))
 
 
-@_RA3_XFAIL
 def test_major_correctness_survives_incidental_comment() -> None:
     _assert_pair_agrees(_by_case("major-correctness-comment"))
 

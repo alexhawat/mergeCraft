@@ -10,14 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from tests.findings.support import make_finding
-
-_RA4_XFAIL = pytest.mark.xfail(
-    reason="green after RA4: cluster canonicalization keeps the strongest severity",
-    strict=False,
-)
 
 _MESSAGE = "duplicate defect at the same location"
 
@@ -43,7 +36,6 @@ def _finding(
     )
 
 
-@_RA4_XFAIL
 def test_major_alone_and_major_plus_minor_duplicate_gate_identically() -> None:
     """The audit's reproduction: [Major z] vs [Major z, Minor a]."""
     from mergecraft.agents.gates import decide_approval
@@ -62,7 +54,6 @@ def test_major_alone_and_major_plus_minor_duplicate_gate_identically() -> None:
     assert decide_approval(both, run_succeeded=True, tier="trusted") == "failure"
 
 
-@_RA4_XFAIL
 def test_canonical_keeps_agent_wording_but_not_a_weaker_severity() -> None:
     """D8 — split wording from severity: agent prose wins, the Major survives."""
     from mergecraft.analyzers.cluster import cluster_findings
@@ -77,7 +68,6 @@ def test_canonical_keeps_agent_wording_but_not_a_weaker_severity() -> None:
     assert canonical[0].severity == "Major"
 
 
-@_RA4_XFAIL
 def test_corroboration_cannot_lower_should_verify() -> None:
     """A weaker duplicate must not clear the verification gate."""
     from mergecraft.agents.verifier import should_verify

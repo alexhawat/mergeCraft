@@ -26,11 +26,6 @@ from mergecraft.utils.secrets import (
 from tests.analyzers.support import FORK_PULL_REQUEST_EVENT
 from tests.trust_credentials.support import import_action_symbol
 
-_RA2_XFAIL = pytest.mark.xfail(
-    reason="green after RA2: both credential sets derive from the provider registry",
-    strict=False,
-)
-
 _ENTRIES: tuple[ProviderRegistryEntry, ...] = tuple(
     ProviderRegistryEntry.model_validate(row)
     for row in (
@@ -77,14 +72,12 @@ def _invariant_rejects(name: str) -> bool:
     return False
 
 
-@_RA2_XFAIL
 def test_fork_invariant_covers_every_registry_credential_name() -> None:
     """Every registry credential name — indexed and flat — fires the invariant."""
     missing = sorted(name for name in _registry_names() if not _invariant_rejects(name))
     assert not missing, f"fork invariant misses registry credential names: {missing}"
 
 
-@_RA2_XFAIL
 def test_agent_env_filter_covers_every_registry_credential_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -100,7 +93,6 @@ def test_agent_env_filter_covers_every_registry_credential_name(
     assert not leaked, f"build_agent_env kept registry credentials: {leaked}"
 
 
-@_RA2_XFAIL
 def test_google_api_key_is_present_in_both_sets() -> None:
     """N21's named drift, pinned: ``GOOGLE_API_KEY`` is a credential in both sets."""
     from mergecraft.action.inputs import _PROVIDER_CREDENTIAL_ENV_KEYS
@@ -114,7 +106,6 @@ def _validate_fork(env: Mapping[str, str]) -> None:
     validate(event=FORK_PULL_REQUEST_EVENT, env=dict(env))
 
 
-@_RA2_XFAIL
 @pytest.mark.parametrize(
     "env_key",
     [

@@ -2,7 +2,8 @@
 
 Plan: [`.ignorelocal/waves/20-audit-r2-a-p1-review-integrity-wave-plan.md`](../../.ignorelocal/waves/20-audit-r2-a-p1-review-integrity-wave-plan.md)
 Owner: `test-creator`. Wave RA1 authors the entire RED suite for RA2–RA6; each
-impl wave flips its own slice from `xfail(strict=False)` to green (D13b).
+impl wave flips its own slice green (D13b). All RA1 `xfail(strict=False)`
+markers were removed in the RA7 strictness sweep — see **RA1.7** below.
 
 Baseline for every RED assertion: `origin/main @ 059634b0`, reproduced by RA0 in
 `.ignorelocal/waves/evidence/ra0-baseline.txt`.
@@ -99,7 +100,7 @@ diff runner, because the defect is in what `git diff` omits.
 
 | Test | Owning wave | Change |
 | --- | --- | --- |
-| `tests/mcp/test_reviewer_resilience_degraded_scope.py::test_get_commit_info_registers_scope_for_pr_head` → renamed `test_get_commit_info_does_not_register_scope_for_pr_head` | RA5 (N3) | The old expectation pinned `get_commit_info` registering review scope for the PR head as intended behaviour. The contract inverted: the tool is `REPOSITORY_READ` and must not advance `review_phase` or set `primary.diff_path`. Docstring rewritten; tagged `xfail(strict=False)`. |
+| `tests/mcp/test_reviewer_resilience_degraded_scope.py::test_get_commit_info_registers_scope_for_pr_head` → renamed `test_get_commit_info_does_not_register_scope_for_pr_head` | RA5 (N3) | The old expectation pinned `get_commit_info` registering review scope for the PR head as intended behaviour. The contract inverted: the tool is `REPOSITORY_READ` and must not advance `review_phase` or set `primary.diff_path`. Docstring rewritten; the temporary `xfail(strict=False)` was removed in the RA7 sweep (RA1.7). |
 
 ### Identified but not modified (lane B ownership)
 
@@ -114,3 +115,59 @@ lane B before Final — this plan does not touch the file.
 No pre-existing test pins a *first-survivor* dedupe severity: `tests/findings/test_dedup.py`
 and `tests/analyzers/test_cluster.py` assert collapse counts, not which member
 survives. That gap is why the RA1.3 survival cases are new.
+
+## RA1.7 — strictness sweep (RA7 Step 1)
+
+After RA2–RA6 all landed, every RA1 `xfail(strict=False)` marker on the
+RA1.1–RA1.5 slices was removed. The tests are ordinary passing tests; **no
+`xfail` remains in the lane**. D13b is closed: the ratchet (`tests/conftest.py`
+session hook → `scripts/check_xpass.py`) reports **0 xpassed**.
+
+| Slice | File | `pytest.mark.xfail` declarations removed |
+| --- | --- | --- |
+| RA1.1 | `tests/security/test_fork_credential_invariant.py` | 1 |
+| RA1.1 | `tests/security/test_credential_authority_drift.py` | 1 |
+| RA1.1 | `tests/agents/test_codex_auth_indexed.py` | 1 |
+| RA1.2 | `tests/findings/test_severity_impact_pairs.py` | 1 |
+| RA1.2 | `tests/findings/test_security_vocabulary.py` | 1 |
+| RA1.2 | `tests/findings/test_severity_property.py` | 1 |
+| RA1.2 | `tests/findings/test_severity_end_to_end.py` | 1 |
+| RA1.3 | `tests/analyzers/test_cluster_severity.py` | 1 |
+| RA1.3 | `tests/analyzers/test_cluster_permutation.py` | 1 |
+| RA1.3 | `tests/findings/test_dedup_severity.py` | 1 |
+| RA1.4 | `tests/mcp/test_analyzer_rerun_retention.py` | 1 |
+| RA1.4 | `tests/mcp/test_commit_info_scope.py` | 1 |
+| RA1.4 | `tests/mcp/test_reviewer_resilience_degraded_scope.py` | 1 |
+| RA1.5 | `tests/utils/test_offline_diff_untracked.py` | 1 |
+| RA1.5 | `tests/utils/test_offline_diff_coverage_limits.py` | 1 |
+
+The 15 declarations decorated 48 test functions, collecting as **54 test
+cases** (parametrization expands the RA1.1/RA1.5 rows). `import pytest` was
+dropped from the eight files that used it only for the marker; in
+`tests/agents/test_codex_auth_indexed.py` the surviving `pytest.MonkeyPatch`
+annotation moved under `TYPE_CHECKING`.
+
+### Fixture repairs in the same commit (test-owned)
+
+1. `tests/utils/test_offline_diff_coverage_limits.py::_init_repo` created the
+   repo with `repo.mkdir()`, but callers pass `tmp_path/"clean"` /
+   `tmp_path/"excluded"`, whose parents did not exist — the fixture raised during
+   setup and the D12 case xfailed without ever exercising the product.
+   `mkdir(parents=True)` fixes it. The test now asserts the distinction it was
+   written for: a clean repo returns `empty is True` with **no** coverage
+   limitations, while an all-excluded diff (`huge.py` over the byte cap) reports
+   a coverage limitation, so the two empty states are distinguishable.
+2. `tests/instructions/test_offline_review_fence.py::_make_diff_repo` initialised
+   the reviewed repository at `tmp_path` itself, and both tests wrote their prompt
+   capture files into that same directory. Under RA6's D11 behaviour the run-1
+   capture became an eligible untracked addition, so run 2's diff gained a second
+   file and the outside-fence prompt diverged — a fixture artifact, not a fence
+   regression. The repo now lives at `tmp_path/repo` and the captures at
+   `tmp_path/*.txt`, outside the reviewed tree. Both runs materialize the same
+   one-file diff and the test asserts the fenced-body-only difference it intends.
+
+### Non-lane xfails
+
+Twelve `xfail` tests elsewhere in `tests/` (tracing/evals/evidence waves) remain
+and are genuine xfails; they are outside lane A and untouched. The repo-wide
+ratchet is clean: **0 xpassed**.

@@ -326,10 +326,6 @@ async def test_successful_checkout_pr_sets_scope_provenance_checkout(tmp_path: P
     assert ctx.tool_state.review_phase == ReviewPhase.ESTABLISH_SCOPE.value
 
 
-@pytest.mark.xfail(
-    reason="green after RA5: get_commit_info is REPOSITORY_READ and must not register scope",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_get_commit_info_does_not_register_scope_for_pr_head(tmp_path: Path) -> None:
     """N3 / D10 — a metadata read must not replace the canonical review scope.

@@ -7,21 +7,13 @@ and veto the run. Asserting the rubric in isolation would prove nothing.
 
 from __future__ import annotations
 
-import pytest
-
 from tests.findings.support import make_finding
-
-_RA3_XFAIL = pytest.mark.xfail(
-    reason="green after RA3: inference + cap leave a Critical security finding blocking",
-    strict=False,
-)
 
 _MESSAGE = (
     "Authentication bypass lets an unauthenticated attacker reach the admin endpoint; see README"
 )
 
 
-@_RA3_XFAIL
 def test_critical_security_finding_reaches_decide_approval_as_blocking() -> None:
     """Inference -> cap -> BLOCKING_SEVERITIES -> decide_approval is non-success."""
     from mergecraft.agents.gates import BLOCKING_SEVERITIES, decide_approval

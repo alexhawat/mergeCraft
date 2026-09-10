@@ -17,11 +17,6 @@ from mergecraft.utils.secrets import filter_env
 from tests.analyzers.support import FORK_PULL_REQUEST_EVENT, SAME_REPO_PULL_REQUEST_EVENT
 from tests.trust_credentials.support import import_action_symbol
 
-_RA2_XFAIL = pytest.mark.xfail(
-    reason="green after RA2: fork invariant derives from the one credential registry",
-    strict=False,
-)
-
 _FORK = FORK_PULL_REQUEST_EVENT
 _SAME_REPO = SAME_REPO_PULL_REQUEST_EVENT
 
@@ -38,12 +33,10 @@ def _assert_rejected(env: Mapping[str, str]) -> None:
         _validate(env)
 
 
-@_RA2_XFAIL
 def test_indexed_oauth_credential_is_rejected_on_fork_head() -> None:
     _assert_rejected({"LLM_PROVIDER_1_CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-indexed-oauth"})
 
 
-@_RA2_XFAIL
 def test_indexed_device_code_credential_is_rejected_on_fork_head() -> None:
     _assert_rejected({"LLM_PROVIDER_1_CODEX_AUTH_JSON": '{"tokens": {"access_token": "x"}}'})
 
@@ -56,7 +49,6 @@ def test_indexed_device_code_credential_is_rejected_on_fork_head() -> None:
         ("LLM_PROVIDER_1_GOOGLE_APPLICATION_CREDENTIALS", "/run/vertex/indexed.json"),
     ],
 )
-@_RA2_XFAIL
 def test_indexed_cloud_chain_credentials_are_rejected_on_fork_head(
     env_key: str, value: str
 ) -> None:
@@ -102,7 +94,6 @@ def test_same_repo_event_with_every_auth_kind_is_permitted() -> None:
     validate(event=_SAME_REPO, env=env)
 
 
-@_RA2_XFAIL
 def test_untrusted_tier_filtering_does_not_reintroduce_the_credential() -> None:
     """The audit's reproduction path: agent-env filtering must not be the guard.
 
