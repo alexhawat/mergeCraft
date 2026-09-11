@@ -6,8 +6,6 @@ import os
 import warnings
 from typing import TYPE_CHECKING
 
-from mergecraft.config.provider_registry import BUILTIN_HARNESS_DEFAULTS
-
 if TYPE_CHECKING:
     from mergecraft.config.settings import ProviderRegistryEntry, RepoSettings
 
@@ -31,6 +29,36 @@ _BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
 )
 
 _VERTEX_CLOUD_SUFFIXES: tuple[str, ...] = ("GOOGLE_APPLICATION_CREDENTIALS",)
+
+# Credential-bearing cloud suffixes — a *presence* vocabulary (D3), deliberately
+# wider than ``_credential_suffixes_for_entry`` ("which single value authenticates
+# the entry"). A session token or a Bedrock bearer token is a credential in the
+# environment even though it cannot satisfy a ``cloud_chain`` entry on its own.
+_CLOUD_CREDENTIAL_SUFFIXES: tuple[str, ...] = (
+    *_BEDROCK_CLOUD_SUFFIXES,
+    "AWS_SESSION_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    *_VERTEX_CLOUD_SUFFIXES,
+    "VERTEX_SERVICE_ACCOUNT_JSON",
+)
+
+# Flat credential spellings with no indexed-suffix equivalent: legacy aliases and
+# ambient aliases the built-in harnesses accept.
+_AMBIENT_CREDENTIAL_ENV_NAMES: frozenset[str] = frozenset(
+    {
+        "NOUS_API_KEY",
+        "TOKENHUB_API_KEY",
+        "GOOGLE_API_KEY",
+        "GOOGLE_GENERATIVE_AI_API_KEY",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+    }
+)
+
+# Indexed credentials are swept over this range when no registry rows are
+# available, so the fork invariant still fails closed on an index the operator
+# has not configured. Registry rows extend the sweep with their own ``envIndex``.
+_DEFAULT_ENV_INDEX_SWEEP: tuple[int, ...] = tuple(range(1, 32))
+_CUSTOM_PROVIDER_API_KEY_PREFIX = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_"
 
 _BUILTIN_LABEL_TO_HARNESS_API_KEY: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
@@ -278,6 +306,49 @@ def _harness_env_name_for_suffix(label: str, suffix: str) -> str | None:
     return None
 
 
+def provider_credential_env_suffixes() -> frozenset[str]:
+    """Every credential-bearing env suffix the registry can consume."""
+    return frozenset((*_AUTH_KIND_PRIMARY_SUFFIX.values(), *_CLOUD_CREDENTIAL_SUFFIXES))
+
+
+def _credential_env_indices(settings: RepoSettings | None) -> tuple[int, ...]:
+    indices = set(_DEFAULT_ENV_INDEX_SWEEP)
+    if settings is not None:
+        indices.update(entry.env_index for entry in settings.providers)
+    return tuple(sorted(indices))
+
+
+def provider_credential_env_names(settings: RepoSettings | None = None) -> frozenset[str]:
+    """Return every env name the registry can consume as a provider credential (D2).
+
+    Covers every ``authKind`` (``api_key``, ``oauth``, ``device_code``,
+    ``cloud_chain``), every cloud suffix, and both the flat and
+    ``LLM_PROVIDER_<N>_<SUFFIX>`` spellings — plus the indexed
+    ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>`` workflow secret. *settings*
+    extends the indexed sweep with the operator's configured ``envIndex`` values.
+
+    This is the sole authority for "is this env var a provider credential?".
+    ``action.inputs`` and ``utils.secrets`` derive from it; the drift test fails
+    when a consumer stops deriving.
+    """
+    names: set[str] = set(_AMBIENT_CREDENTIAL_ENV_NAMES)
+    names.update(_BUILTIN_LABEL_TO_HARNESS_API_KEY.values())
+    names.update(_CLOUD_CREDENTIAL_SUFFIXES)
+    names.update(_AUTH_KIND_PRIMARY_SUFFIX.values())
+    if settings is not None:
+        for entry in settings.providers:
+            for suffix in _credential_suffixes_for_entry(entry):
+                harness_name = _harness_env_name_for_suffix(entry.label, suffix)
+                if harness_name is not None:
+                    names.add(harness_name)
+    suffixes = provider_credential_env_suffixes()
+    for index in _credential_env_indices(settings):
+        names.add(f"{_CUSTOM_PROVIDER_API_KEY_PREFIX}{index}")
+        for suffix in suffixes:
+            names.add(indexed_env_key(index, suffix))
+    return frozenset(names)
+
+
 def _read_indexed_credential_value(entry: ProviderRegistryEntry, suffix: str) -> str | None:
     value = _read_env_value(indexed_env_key(entry.env_index, suffix))
     if value:
@@ -342,6 +413,11 @@ def infer_harness_for_slug(
     if registry_harness is not None:
         return registry_harness
 
+    # Imported lazily: ``config.provider_registry`` pulls in ``utils.agent_resolve``
+    # which imports this module back. A top-level import would make this module
+    # unusable as the credential authority for ``utils.secrets``.
+    from mergecraft.config.provider_registry import BUILTIN_HARNESS_DEFAULTS
+
     builtin = BUILTIN_HARNESS_DEFAULTS.get(provider)
     if builtin is not None:
         return builtin
@@ -370,6 +446,8 @@ __all__ = [
     "legacy_opencode_harness_for_unregistered_provider",
     "lookup_registry_entry",
     "lookup_registry_entry_by_env_index",
+    "provider_credential_env_names",
+    "provider_credential_env_suffixes",
     "registry_harness_for_provider",
     "resolve_legacy_nous_gateway_endpoint",
     "resolve_registry_gateway_endpoint",

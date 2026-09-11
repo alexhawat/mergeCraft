@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mergecraft.analyzers.finding import Finding, make_finding
+from mergecraft.evidence.merge import _severity_rank
 from mergecraft.review_taxonomy import FINDING_CONFIDENCES, finding_fingerprint
 
 _CONFIDENCE_RANK = {name: index for index, name in enumerate(FINDING_CONFIDENCES)}
@@ -19,12 +20,27 @@ def _raise_confidence(confidence: str, steps: int = 1) -> str:
     return FINDING_CONFIDENCES[rank]
 
 
+def _strongest_confidence(members: list[Finding]) -> str:
+    """Return the highest-confidence member's grade (lowest rank wins)."""
+    rank = min(_CONFIDENCE_RANK.get(member.confidence, 0) for member in members)
+    return FINDING_CONFIDENCES[rank]
+
+
 def _evidence_entry(finding: Finding) -> str:
     return f"{finding.tool}:{finding.rule_id} — {finding.message}"
 
 
 def _merge_into_canonical(members: list[Finding]) -> Finding:
-    """Merge same-cluster findings into one canonical finding."""
+    """Merge same-cluster findings into one canonical finding.
+
+    Wording and severity are selected independently (D8). Canonical *wording*
+    keeps the agent-prose preference — that is why the selection below prefers
+    ``source == "agent"``. Canonical *severity* is the strongest member's, via
+    the shared ``evidence.merge._severity_rank`` helper, so a corroborating
+    duplicate can never downgrade a CI blocker behind a weaker copy. Evidence
+    from every member is retained; a discarded member's evidence is the
+    corroboration.
+    """
     agent_members = [member for member in members if member.source == "agent"]
     ci_members = [member for member in members if member.source == "ci"]
     analyzer_members = [member for member in members if member.source == "analyzer"]
@@ -35,6 +51,8 @@ def _merge_into_canonical(members: list[Finding]) -> Finding:
         canonical = ci_members[0]
     else:
         canonical = sorted(analyzer_members, key=lambda item: item.tool)[0]
+
+    strongest = min(members, key=_severity_rank)
 
     evidence: list[str] = []
     seen_evidence: set[str] = set()
@@ -50,13 +68,18 @@ def _merge_into_canonical(members: list[Finding]) -> Finding:
     confidence = canonical.confidence
     if corroboration:
         confidence = _raise_confidence(confidence, min(corroboration, 2))
+    # A weaker canonical must not drag confidence below the strongest member's:
+    # corroboration may raise confidence, never lower it.
+    floor = _strongest_confidence(members)
+    if _CONFIDENCE_RANK.get(confidence, 0) > _CONFIDENCE_RANK.get(floor, 0):
+        confidence = floor
 
     key = cluster_key(canonical)
     return make_finding(
         tool=canonical.tool,
         rule_id=canonical.rule_id,
         category=canonical.category,
-        severity=canonical.severity,
+        severity=strongest.severity,
         confidence=confidence,
         message=canonical.message,
         path=canonical.path,

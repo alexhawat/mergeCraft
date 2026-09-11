@@ -7,9 +7,8 @@ twice — once with a benign operator-supplied "PR body" via
 are identical. The agent is stubbed in-process so the test proves the
 *prompt* is fenced, not that a live model resists.
 
-Pending tests are `@pytest.mark.xfail(strict=True)` — W4 will land the
-fence; these tests fail-strict until the implementation arrives. They pin
-the public outcome, not the impl signature.
+The fence has landed (W4), so these tests run for real. They pin the
+public outcome, not the impl signature.
 """
 
 from __future__ import annotations
@@ -49,23 +48,31 @@ def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
-def _make_diff_repo(tmp_path: Path) -> Path:
+def _make_diff_repo(root: Path) -> Path:
     """One fixture diff, identical across both runs of W3.1 — the diff
     content must not change between the benign and the injected body;
     only the body (carried in `prompt_extra`) varies. Mirrors the
-    setup in `tests/utils/test_offline_diff.py::test_materialize_on_feature_branch`."""
-    _git(tmp_path, "init")
-    _git(tmp_path, "config", "user.email", "test@example.com")
-    _git(tmp_path, "config", "user.name", "Test")
-    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
-    _git(tmp_path, "add", "a.txt")
-    _git(tmp_path, "commit", "-m", "init")
-    _git(tmp_path, "branch", "-M", "main")
-    _git(tmp_path, "checkout", "-b", "feature")
-    (tmp_path / "a.txt").write_text("one\ntwo\n", encoding="utf-8")
-    _git(tmp_path, "add", "a.txt")
-    _git(tmp_path, "commit", "-m", "feature change")
-    return tmp_path
+    setup in `tests/utils/test_offline_diff.py::test_materialize_on_feature_branch`.
+
+    The reviewed repository lives in ``root/repo`` so that any capture
+    artifact written under ``root`` is never part of the reviewed tree.
+    RA6's default materialization includes eligible untracked adds (D11),
+    so a capture file written inside the repo would itself change the
+    second run's diff — and the finding set — for the wrong reason."""
+    repo = root / "repo"
+    repo.mkdir(parents=True)
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "a.txt").write_text("one\n", encoding="utf-8")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-m", "init")
+    _git(repo, "branch", "-M", "main")
+    _git(repo, "checkout", "-b", "feature")
+    (repo / "a.txt").write_text("one\ntwo\n", encoding="utf-8")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-m", "feature change")
+    return repo
 
 
 def _build_stub_agent(monkeypatch: MonkeyPatch, capture_path: Path) -> None:
@@ -135,7 +142,10 @@ def test_injected_pr_body_does_not_change_findings(
     captures' structure (ignoring the fenced body bytes) to prove the
     injection only changed the fenced section.
 
-    W4 will land the fence; until then this test is xfail.
+    The capture files live outside the reviewed repository (``tmp_path``
+    while the repo is ``tmp_path/repo``): a capture written inside the
+    tree would count as an untracked addition under RA6 and change the
+    second run's diff for the wrong reason.
     """
     _require_fence()
     repo = _make_diff_repo(tmp_path)

@@ -7,18 +7,40 @@ from typing import Final
 DOMAIN_HINT_GROUPS: Final[tuple[frozenset[str], ...]] = (
     frozenset({"sql", "query", "injection", "unsanitized", "binding"}),
     frozenset({"timeout", "retry", "loop"}),
-    frozenset({"secret", "token", "credential", "password"}),
+    frozenset({"secret", "token", "credential", "password", "hardcoded", "key"}),
+    frozenset({"deserializ", "pickle", "unpickle"}),
+    frozenset({"traversal", "ssrf", "csrf", "xxe"}),
+    frozenset({"privilege", "escalation", "pollution", "redirect"}),
+    frozenset({"execution", "rce", "eval", "unsafe"}),
 )
 
+# ``auth`` must relax to a stem without swallowing the ``author`` word family
+# (lane B's whole-token test). The lookahead excludes words starting ``author``
+# unless followed by ``iz``: ``auth``, ``authentication``, ``authorize`` and
+# ``authorization`` match, while ``author``/``authors``/``authoritative``/
+# ``authority`` do not. ``unauth\w*`` covers the ``unauthenticated``/
+# ``unauthorized`` forms, which have no word boundary before ``auth``.
 SECURITY_MESSAGE_PATTERNS: Final[tuple[str, ...]] = (
     r"\bsecret\b",
     r"\btoken\b",
     r"\bcredential\b",
     r"\bpassword\b",
     r"\binjection\b",
-    r"\bauth\b",
+    r"\bauth(?!or(?!iz))\w*",
+    r"\bunauth\w*\b",
     r"\bsql\b",
     r"\bxss\b",
+    r"\b(?:remote code execution|rce)\b",
+    r"\bdeserializ\w*\b",
+    r"\bpickle\b",
+    r"\bpath traversal\b",
+    r"\bssrf\b",
+    r"\bcsrf\b",
+    r"\bxxe\b",
+    r"\bprivilege escalation\b",
+    r"\bprototype pollution\b",
+    r"\bopen redirect\b",
+    r"\bhardcoded key\b",
 )
 
 __all__ = ["DOMAIN_HINT_GROUPS", "SECURITY_MESSAGE_PATTERNS"]

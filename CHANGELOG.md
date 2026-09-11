@@ -117,8 +117,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outbound egress stays open and ChatGPT subscription auth (`CODEX_AUTH_JSON`) is
   not brokered; clear that secret and use `OPENAI_API_KEY` when broker coverage
   matters (#553)
+- The fork-head credential invariant now rejects indexed OAuth, device-code and
+  cloud-chain credentials (`LLM_PROVIDER_<N>_CLAUDE_CODE_OAUTH_TOKEN`,
+  `_CODEX_AUTH_JSON`, `_AWS_*`, `_GOOGLE_APPLICATION_CREDENTIALS`) instead of only
+  flat names and `_API_KEY`; a fork PR can no longer carry a credential past the
+  pre-dispatch rejection boundary (N1)
+- Indexed Codex `device_code` credentials reach the isolated run home's
+  `auth.json` and the broker reports `subscription`; `_setup_codex_auth` consumes
+  the resolved child mapping instead of reading `os.environ` (N19)
+- The fork-credential allowlist and the agent-env strip set both derive from
+  `config.runtime_provider_registry`, the single credential authority across every
+  `authKind`, cloud suffix and spelling — the pinned drift that dropped
+  `GOOGLE_API_KEY` is gone, and `AWS_SESSION_TOKEN` is covered (N21)
+- Critical and Major security findings are no longer demoted when incidental
+  maintainability or documentation words appear in the same message; the security
+  lane takes absolute precedence and capping rules are inapplicable when impact
+  evidence supports the asserted severity (N4)
+- Security category inference now recognizes `auth`/`unauth` stems and the named
+  vulnerability classes (RCE, deserialization, pickle, path traversal, SSRF, CSRF,
+  XXE, privilege escalation, prototype pollution, open redirect, hardcoded key)
+  (N20)
 
 ### Fixed
+
+- Corroborating duplicates can no longer weaken a finding: clustering keeps the
+  strongest member's severity while the agent's prose stays canonical wording,
+  and semantic dedupe keeps the strongest paraphrase with the discarded members'
+  evidence — a weaker copy arriving first can no longer turn a CI blocker green
+  (N5)
+- A partial analyzer rerun no longer erases earlier blockers: results are
+  retained by covered scope, so a clean pass over a file the first pass did not
+  cover leaves the prior finding, the shared finding count and the
+  terminal-approve rejection intact (N2)
+- `get_commit_info` can no longer replace the canonical review scope with the
+  HEAD commit's patch; the single-commit diff stays an inspection artifact, so
+  admissible citations, inline anchors and blast radius remain bound to the
+  whole change under review (N3)
+- Default local review includes eligible untracked additions, so a brand-new
+  source file is reviewed without knowing an alternate flag; every exclusion —
+  gitignored, oversized, binary, symlink — is surfaced as a review-coverage
+  limitation, and an all-excluded diff can no longer render as a passed review
+  with "no changes to review" (N7)
 
 - The Action-pin staleness budget counts changes rather than landings. Without
   `--no-merges`, a PR touching `src/mergecraft/` scored twice — its own commit

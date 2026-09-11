@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
+from mergecraft.evidence.merge import _severity_rank
 from mergecraft.review_policy.paths import normalize_repo_path
 from mergecraft.review_policy.security_tokens import DOMAIN_HINT_GROUPS
 
@@ -203,8 +204,42 @@ def _location_key(finding: Finding) -> tuple[str, int | None, int | None, str]:
     )
 
 
+def _strongest_member(cluster: list[tuple[int, Finding]]) -> tuple[int, Finding]:
+    """Select the most severe member of a semantic cluster (N5, D7).
+
+    Dedup must not let a weaker paraphrase arriving first hide a blocker. The
+    survivor is the strongest member by the shared ``evidence.merge`` ranking,
+    and its original index is returned alongside it so ``kept_indices`` points
+    at the row actually kept (lane B's RB6 realigns on those indices).
+    """
+    return min(cluster, key=lambda item: (_severity_rank(item[1]), item[0]))
+
+
+def _merge_member_evidence(survivor: Finding, cluster: list[tuple[int, Finding]]) -> None:
+    """Fold every discarded member's evidence into the survivor, in place.
+
+    The survivor object is returned as-is (not copied) so identity is
+    preserved; its evidence list is the one field this helper may change.
+    """
+    merged = list(survivor.evidence)
+    seen = set(merged)
+    for _, member in cluster:
+        if member is survivor:
+            continue
+        for entry in member.evidence:
+            if entry not in seen:
+                merged.append(entry)
+                seen.add(entry)
+    survivor.evidence = merged
+
+
 def dedupe_findings_with_indices(findings: list[Finding]) -> DedupeResult:
-    """Return deduped findings and the input indices that survived."""
+    """Return deduped findings and the input indices that survived.
+
+    Within a semantic cluster the survivor is the **strongest** member, not the
+    first: corroborating paraphrases augment evidence, they do not dilute
+    severity. ``kept_indices`` names the row actually kept.
+    """
     if not findings:
         return DedupeResult(findings=[], kept_indices=[])
 
@@ -227,7 +262,8 @@ def dedupe_findings_with_indices(findings: list[Finding]) -> DedupeResult:
             if not placed:
                 clusters.append([(index, finding)])
         for cluster in clusters:
-            survivor_index, survivor = cluster[0]
+            survivor_index, survivor = _strongest_member(cluster)
+            _merge_member_evidence(survivor, cluster)
             deduped.append(survivor)
             kept_indices.append(survivor_index)
     return DedupeResult(findings=deduped, kept_indices=kept_indices)
