@@ -9,9 +9,43 @@ on the stem relaxation for no reason).
 
 from __future__ import annotations
 
+import pytest
+
 from tests.findings.support import make_finding
 
 _AUTH_STEMS = ("auth", "authentication", "authorization", "unauthenticated", "authorize")
+
+#: ``auth`` forms that name a security concern and must infer Security.
+_SECURITY_AUTH_FORMS = (
+    "auth",
+    "authentication",
+    "authenticate",
+    "authorize",
+    "authorization",
+    "authorized",
+    "authorizer",
+    "authorizing",
+)
+
+#: ``unauth``-prefixed forms have no word boundary before ``auth``; the separate
+#: ``unauth`` pattern covers them, and it must keep doing so.
+_UNAUTH_FORMS = ("unauthenticated", "unauthorized")
+
+#: Ordinary prose that merely begins with ``auth`` — the ``author`` word family.
+_AUTHOR_PROSE_FORMS = (
+    "author",
+    "authors",
+    "authoring",
+    "authored",
+    "authorship",
+    "authoritative",
+    "authority",
+    "authorities",
+)
+
+#: Control text with no security or docs vocabulary. Its inferred category is
+#: the non-security category the prose forms must land on (not pinned by name).
+_AUTHOR_PROSE_CONTROL = "The section is out of date"
 
 _NAMED_SECURITY_CLASSES = (
     "Remote code execution via unsafe eval",
@@ -66,3 +100,35 @@ def test_genuine_style_nit_is_still_capped() -> None:
     normalized = apply_severity_rubric(finding, model_assigned_severity="Critical")
 
     assert normalized.severity not in {"Critical", "Major"}
+
+
+@pytest.mark.parametrize("form", _SECURITY_AUTH_FORMS)
+def test_security_auth_forms_infer_security_category(form: str) -> None:
+    """Every security ``auth`` form infers Security — not just the literal token."""
+    from mergecraft.findings.severity_rubric import infer_category_from_message
+
+    assert infer_category_from_message(f"The {form} path is wrong") == "Security & Privacy", (
+        f"{form!r} did not infer Security & Privacy"
+    )
+
+
+@pytest.mark.parametrize("form", _UNAUTH_FORMS)
+def test_unauth_forms_infer_security_category(form: str) -> None:
+    """``unauth`` forms are covered by their own pattern, not the relaxed stem."""
+    from mergecraft.findings.severity_rubric import infer_category_from_message
+
+    assert infer_category_from_message(f"The {form} path is wrong") == "Security & Privacy", (
+        f"{form!r} did not infer Security & Privacy"
+    )
+
+
+@pytest.mark.parametrize("word", _AUTHOR_PROSE_FORMS)
+def test_author_family_prose_does_not_infer_security_category(word: str) -> None:
+    """The ``author`` word family is ordinary prose, never a security signal."""
+    from mergecraft.findings.severity_rubric import infer_category_from_message
+
+    inferred = infer_category_from_message(f"The {word} section is out of date")
+    assert inferred != "Security & Privacy", f"{word!r} wrongly inferred Security & Privacy"
+    assert inferred == infer_category_from_message(_AUTHOR_PROSE_CONTROL), (
+        f"{word!r} did not match the non-security control category"
+    )

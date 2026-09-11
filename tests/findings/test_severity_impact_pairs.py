@@ -14,7 +14,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.findings.fixtures.severity_pairs import SEVERITY_PAIRS, SeverityPair
+import pytest
+
+from tests.findings.fixtures.severity_pairs import (
+    AUTHOR_FAMILY_PAIRS,
+    SEVERITY_PAIRS,
+    AuthorFamilyPair,
+    SeverityPair,
+)
 from tests.findings.support import make_finding
 
 
@@ -23,6 +30,14 @@ def _by_case(case_id: str) -> SeverityPair:
         if pair.case_id == case_id:
             return pair
     msg = f"unknown severity pair: {case_id}"
+    raise KeyError(msg)
+
+
+def _author_pair(case_id: str) -> AuthorFamilyPair:
+    for pair in AUTHOR_FAMILY_PAIRS:
+        if pair.case_id == case_id:
+            return pair
+    msg = f"unknown author-family pair: {case_id}"
     raise KeyError(msg)
 
 
@@ -90,3 +105,79 @@ def test_control_paraphrases_retain_their_asserted_severity() -> None:
         assert control.severity == pair.asserted_severity, (
             f"{pair.case_id}: control was capped without an incidental word"
         )
+
+
+# ---------------------------------------------------------------------------
+# Author-family pairs (RA3 regression): prose that begins with ``auth`` is not a
+# security signal, so it must not lift a style/docs finding across a blocking
+# boundary — and it must not lower a genuine correctness impact.
+# ---------------------------------------------------------------------------
+
+
+def _assert_author_pair_agrees(pair: AuthorFamilyPair) -> tuple[Any, Any]:
+    incidental = _normalized(pair.incidental_message, pair.asserted_severity)
+    control = _normalized(pair.control_message, pair.asserted_severity)
+    assert incidental.severity == control.severity, (
+        f"{pair.case_id}: author-family prose changed the severity "
+        f"({incidental.severity!r} vs control {control.severity!r})"
+    )
+    return incidental, control
+
+
+@pytest.mark.parametrize("case_id", [pair.case_id for pair in AUTHOR_FAMILY_PAIRS])
+def test_author_family_pair_agrees_on_severity(case_id: str) -> None:
+    _assert_author_pair_agrees(_author_pair(case_id))
+
+
+def test_style_nit_with_authors_tail_is_not_raised_to_blocking() -> None:
+    """An incidental ``authors`` must not keep a style nit at a blocking grade."""
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES, decide_approval
+
+    pair = _author_pair("critical-style-authors-tail")
+    incidental, control = _assert_author_pair_agrees(pair)
+
+    assert control.severity not in BLOCKING_SEVERITIES
+    assert incidental.severity not in BLOCKING_SEVERITIES, (
+        f"incidental 'authors' lifted a style nit to {incidental.severity!r}"
+    )
+    assert decide_approval([incidental], run_succeeded=True, tier="trusted") == "success", (
+        "an incidental author-family word blocked approval of a style nit"
+    )
+
+
+def test_style_nit_with_authorship_in_the_core_is_not_raised_to_blocking() -> None:
+    """The author word in the asserted impact itself must not read as security."""
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES
+
+    pair = _author_pair("critical-style-authorship-core")
+    incidental, control = _assert_author_pair_agrees(pair)
+
+    assert control.severity not in BLOCKING_SEVERITIES
+    assert incidental.severity not in BLOCKING_SEVERITIES, (
+        f"'authorship' in the core lifted a style nit to {incidental.severity!r}"
+    )
+
+
+def test_docs_nit_with_authoritative_tail_is_not_raised_to_blocking() -> None:
+    """An incidental ``authoritative`` must not keep a docs nit at a blocking grade."""
+    from mergecraft.agents.gates import BLOCKING_SEVERITIES, decide_approval
+
+    pair = _author_pair("critical-docs-authoritative-tail")
+    incidental, control = _assert_author_pair_agrees(pair)
+
+    assert control.severity not in BLOCKING_SEVERITIES
+    assert incidental.severity not in BLOCKING_SEVERITIES, (
+        f"incidental 'authoritative' lifted a docs nit to {incidental.severity!r}"
+    )
+    assert decide_approval([incidental], run_succeeded=True, tier="trusted") == "success", (
+        "an incidental author-family word blocked approval of a docs nit"
+    )
+
+
+def test_correctness_impact_keeps_its_asserted_severity_with_an_authors_tail() -> None:
+    """An author-family word must not lower a genuine correctness impact either."""
+    pair = _author_pair("critical-correctness-authors-tail")
+    incidental, control = _assert_author_pair_agrees(pair)
+
+    assert control.severity == pair.asserted_severity
+    assert incidental.severity == pair.asserted_severity

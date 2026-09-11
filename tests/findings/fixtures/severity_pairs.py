@@ -78,6 +78,60 @@ SEVERITY_PAIRS: Final[tuple[SeverityPair, ...]] = (
 #: The six incidental rows only (the seven controls are ``impact_message``).
 INCIDENTAL_PAIRS: Final[tuple[SeverityPair, ...]] = SEVERITY_PAIRS
 
+
+# ---------------------------------------------------------------------------
+# Author-family corpus (RA3 regression): a prose word that begins with ``auth``
+# must not be read as a security signal. An incidental ``authors`` /
+# ``authoritative`` in a style or docs finding must not lift it across a
+# blocking boundary; a genuine correctness impact must keep its asserted grade.
+# ---------------------------------------------------------------------------
+
+STYLE_NIT_IMPACT: Final[str] = "Prefer f-string over percent formatting"
+DOCS_NIT_IMPACT: Final[str] = "Update the comment in this module"
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorFamilyPair:
+    """A prose finding with and without an incidental author-family word.
+
+    ``control_message`` omits the word; ``incidental_message`` carries it. The
+    word does not change the asserted impact, so the pair must agree on the
+    severity that reaches the gate.
+    """
+
+    case_id: str
+    asserted_severity: str
+    control_message: str
+    incidental_message: str
+
+
+AUTHOR_FAMILY_PAIRS: Final[tuple[AuthorFamilyPair, ...]] = (
+    AuthorFamilyPair(
+        case_id="critical-style-authors-tail",
+        asserted_severity="Critical",
+        control_message=STYLE_NIT_IMPACT,
+        incidental_message=f"{STYLE_NIT_IMPACT}; the authors guide documents this",
+    ),
+    AuthorFamilyPair(
+        case_id="critical-style-authorship-core",
+        asserted_severity="Critical",
+        control_message=STYLE_NIT_IMPACT,
+        incidental_message="The authorship rules say prefer f-string over percent formatting",
+    ),
+    AuthorFamilyPair(
+        case_id="critical-docs-authoritative-tail",
+        asserted_severity="Critical",
+        control_message=DOCS_NIT_IMPACT,
+        incidental_message=f"{DOCS_NIT_IMPACT}; this is authoritative",
+    ),
+    AuthorFamilyPair(
+        case_id="critical-correctness-authors-tail",
+        asserted_severity="Critical",
+        control_message=CORRECTNESS_IMPACT,
+        incidental_message=f"{CORRECTNESS_IMPACT}; the authors guide documents this",
+    ),
+)
+
 # ---------------------------------------------------------------------------
 # Property-test corpus (RA1.2): impact statements x incidental tokens.
 # ---------------------------------------------------------------------------
@@ -94,7 +148,9 @@ IMPACT_STATEMENTS: Final[tuple[tuple[str, str], ...]] = (
     ("Major", "Missing validation on the request body"),
 )
 
-#: Incidental tokens that belong to the docs / style vocabulary.
+#: Incidental tokens that belong to the docs / style vocabulary, plus the
+#: ``author`` word family — ordinary prose that must not read as a security
+#: signal (RA3 regression).
 INCIDENTAL_TOKENS: Final[tuple[str, ...]] = (
     "see README",
     "see the comment",
@@ -102,6 +158,13 @@ INCIDENTAL_TOKENS: Final[tuple[str, ...]] = (
     "naming",
     "typo",
     "docstring",
+    "authors",
+    "authoring",
+    "authored",
+    "authorship",
+    "authoritative",
+    "authority",
+    "authorities",
 )
 
 
@@ -111,12 +174,16 @@ def incidental_message(impact: str, incidental: str) -> str:
 
 
 __all__ = [
+    "AUTHOR_FAMILY_PAIRS",
     "CORRECTNESS_IMPACT",
+    "DOCS_NIT_IMPACT",
     "IMPACT_STATEMENTS",
     "INCIDENTAL_PAIRS",
     "INCIDENTAL_TOKENS",
     "SECURITY_IMPACT",
     "SEVERITY_PAIRS",
+    "STYLE_NIT_IMPACT",
+    "AuthorFamilyPair",
     "SeverityPair",
     "incidental_message",
 ]

@@ -29,6 +29,8 @@ and not the other fails with a named list.
 | --- | --- | --- |
 | Matched-paraphrase pairs agree (D15) | `tests/findings/test_severity_impact_pairs.py` | the six r2 rows (`readme`, `comment`, `style`, `naming`, `typo`, correctness-`comment`) plus `test_control_paraphrases_retain_their_asserted_severity` |
 | Auth stems and named classes infer Security (D6) | `tests/findings/test_security_vocabulary.py` | `test_auth_stems_infer_security_category`, `test_named_security_classes_infer_security_category`, `test_genuine_style_nit_is_still_capped` (deflation guard) |
+| Author-family prose is **not** a security signal (RA3 regression) | `tests/findings/test_security_vocabulary.py` | `test_security_auth_forms_infer_security_category` (×8), `test_unauth_forms_infer_security_category` (×2), `test_author_family_prose_does_not_infer_security_category` (×8) |
+| An author-family word does not cross a blocking boundary (D5/D15) | `tests/findings/test_severity_impact_pairs.py` | `test_author_family_pair_agrees_on_severity` (×4), `test_style_nit_with_authors_tail_is_not_raised_to_blocking`, `test_style_nit_with_authorship_in_the_core_is_not_raised_to_blocking`, `test_docs_nit_with_authoritative_tail_is_not_raised_to_blocking`, `test_correctness_impact_keeps_its_asserted_severity_with_an_authors_tail` |
 | No impact-preserving lexical change crosses a blocking boundary (property) | `tests/findings/test_severity_property.py` | `test_no_impact_preserving_lexical_change_crosses_a_blocking_boundary` |
 | Inference → cap → `BLOCKING_SEVERITIES` → `decide_approval` (D14) | `tests/findings/test_severity_end_to_end.py` | `test_critical_security_finding_reaches_decide_approval_as_blocking` |
 
@@ -40,13 +42,36 @@ this lane's slice. It draws from two fixed corpora in
 
 - `IMPACT_STATEMENTS` — eight `(severity, impact)` rows: six security impacts
   asserted `Critical` and two correctness impacts asserted `Major`.
-- `INCIDENTAL_TOKENS` — six docs/style tokens (`see README`, `see the comment`,
-  `style`, `naming`, `typo`, `docstring`).
+- `INCIDENTAL_TOKENS` — thirteen tokens: six docs/style tokens (`see README`,
+  `see the comment`, `style`, `naming`, `typo`, `docstring`) plus seven
+  author-family prose tokens (`authors`, `authoring`, `authored`, `authorship`,
+  `authoritative`, `authority`, `authorities`).
 
 For every sampled `(impact, incidental)` pair the test runs the paraphrased
 message through the real `infer_category_from_message` + `apply_severity_rubric`
 composition and asserts the incidental member's severity equals the control's.
 `max_examples=40`, `deadline=None`.
+
+### RA1.2 follow-up — author-family regression (RA3)
+
+RA3's stem relaxation (`\bauth(?!or\b)\w*`) still matched `authors`,
+`authoring`, `authored`, `authoritative`, `authority`, `authorities` and
+`authorship`, so an incidental prose word could infer `Security & Privacy` and
+— because the security lane is non-capping (D5) — keep a style/docs finding at
+`Critical`/`Major` and block approval. The follow-up narrows the lookahead to
+`\bauth(?!or(?!iz))\w*` and these tests pin the observable contract:
+
+- `tests/findings/test_security_vocabulary.py` — the eight security `auth`
+  forms still infer Security, the two `unauth` forms keep their own pattern
+  (guard), and the eight `author`-family prose forms infer the same non-security
+  category as an author-free control (the exact other category is not pinned).
+- `tests/findings/test_severity_impact_pairs.py` — matched author-family pairs
+  (`AUTHOR_FAMILY_PAIRS` in `tests/findings/fixtures/severity_pairs.py`): a
+  style nit and a docs nit with/without an incidental author word must agree on
+  a **non-blocking** severity and reach `decide_approval` as `success`, while a
+  genuine correctness impact keeps its asserted `Critical`.
+- `tests/findings/test_severity_property.py` — the property corpus now samples
+  the author-family tokens (`INCIDENTAL_TOKENS`).
 
 `tests/analyzers/test_cluster_permutation.py` and
 `tests/findings/test_dedup_severity.py::test_dedupe_result_is_permutation_invariant`
@@ -93,7 +118,9 @@ diff runner, because the defect is in what `git diff` omits.
 ## RA1.6 — fixtures and inverted expectations
 
 - Two-commit PR fixture: `tests/mcp/support_two_commit_pr.py`.
-- Severity corpus: `tests/findings/fixtures/severity_pairs.py`.
+- Severity corpus: `tests/findings/fixtures/severity_pairs.py` (`SEVERITY_PAIRS`,
+  `IMPACT_STATEMENTS`, `INCIDENTAL_TOKENS`, and the RA1.2 follow-up
+  `AUTHOR_FAMILY_PAIRS` / `AuthorFamilyPair`).
 - `docs/test-plans/audit-r2-p1-review-integrity.md` (this file).
 
 ### Pre-existing tests whose expectation was inverted
@@ -111,6 +138,9 @@ to `Functional Correctness`. If RA3 relaxes `\bauth\b` to `\bauth\w*\b`, that
 pattern also matches `author`, so the assertion would flip. RA3 must either
 narrow the stem (exclude `author`) or coordinate the expectation change with
 lane B before Final — this plan does not touch the file.
+The RA1.2 follow-up above narrows the lookahead further so the whole `author`
+family (`authors`, `authority`, `authoritative`, …) stays non-security; lane B's
+single-`author` assertion remains satisfied.
 
 No pre-existing test pins a *first-survivor* dedupe severity: `tests/findings/test_dedup.py`
 and `tests/analyzers/test_cluster.py` assert collapse counts, not which member
