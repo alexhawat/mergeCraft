@@ -15,17 +15,18 @@ DOMAIN_HINT_GROUPS: Final[tuple[frozenset[str], ...]] = (
 )
 
 # ``auth`` must relax to a stem without swallowing the ``author`` word family
-# (lane B's whole-token test). The negative lookahead matches ``auth``,
-# ``authentication``, ``authorization`` and ``authorize`` but not ``author``;
-# ``unauth\w*`` covers the ``unauthenticated``/``unauthorized`` forms, which
-# have no word boundary before ``auth``.
+# (lane B's whole-token test). The lookahead excludes words starting ``author``
+# unless followed by ``iz``: ``auth``, ``authentication``, ``authorize`` and
+# ``authorization`` match, while ``author``/``authors``/``authoritative``/
+# ``authority`` do not. ``unauth\w*`` covers the ``unauthenticated``/
+# ``unauthorized`` forms, which have no word boundary before ``auth``.
 SECURITY_MESSAGE_PATTERNS: Final[tuple[str, ...]] = (
     r"\bsecret\b",
     r"\btoken\b",
     r"\bcredential\b",
     r"\bpassword\b",
     r"\binjection\b",
-    r"\bauth(?!or\b)\w*",
+    r"\bauth(?!or(?!iz))\w*",
     r"\bunauth\w*\b",
     r"\bsql\b",
     r"\bxss\b",
