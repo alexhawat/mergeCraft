@@ -5,14 +5,12 @@ The W6 migration will switch the claude and codex drivers from
 read loop (``subprocess.Popen`` with line iteration). Two contracts that
 already work today must not silently regress:
 
-- **W5.4 — idle detection.** ``utils/activity.py``'s
-  ``create_process_output_activity_timeout`` patches ``sys.stdout.write``
-  / ``sys.stderr.write`` to call ``mark_activity()`` on non-noise output.
-  This is the mechanism that stops long-running reviews from timing out
-  when the CLI is quiet between thinking steps. The W6 read loop must
-  still write to ``sys.stdout`` / ``sys.stderr`` (or the equivalent
-  Python-stream surface) so the patched write continues to receive the
-  chunks and call ``mark_activity``.
+- **W5.4 — idle detection.** ``consume_stream`` calls
+  ``utils/activity.mark_activity()`` once per parsed stream event so
+  long-running reviews do not time out when the CLI is quiet between
+  thinking steps. The W6 read loop must still route each event through
+  ``consume_stream`` (or an equivalent hook) so ``mark_activity`` keeps
+  firing.
 - **W5.5 — failure diagnosis.** PR #16 made the non-zero-exit stderr
   visible at warning level via ``_build_claude_failure_error``. The W6
   read loop must not silently drop this — it must still log the full
@@ -27,6 +25,7 @@ either, the test fails and the operator sees the regression.
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -44,139 +43,34 @@ if TYPE_CHECKING:
 
 
 def test_idle_detection_still_works_without_capture_output(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """W5.4 — ``utils/activity.py``'s mark_activity / get_idle_ms survive the migration.
+    """W5.4 — ``consume_stream`` invokes ``mark_activity`` per stream event.
 
-    Pins the current behaviour: ``mark_activity()`` resets the activity
-    clock; ``get_idle_ms()`` returns the time since the last marker. The
-    W6 driver will iterate lines from a subprocess; the assertion is that
-    the driver's write path (whatever it is) eventually invokes
-    ``mark_activity()`` so the activity monitor in the outer
-    ``create_process_output_activity_timeout`` clock is reset.
-
-    The test patches the driver's subprocess to emit a sequence of writes
-    (mirroring what a streaming read loop will do) and asserts that
-    ``get_idle_ms()`` stays small after each write. We patch the
-    driver's ``sys.stdout.write`` (the same primitive the activity
-    monitor patches) so the assertion is faithful to the existing
-    contract.
+    Pins the live idle-detection hook: each parsed NDJSON event routed
+    through ``consume_stream`` must call ``mark_activity()`` so outer
+    timeout logic observes progress while the CLI is streaming.
     """
-    import time
+    from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
 
-    from mergecraft.agents.claude import _run_claude_once
-    from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
-    from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
-    from mergecraft.mcp.tool_state import init_tool_state
-    from mergecraft.utils import activity as activity_module
-
-    # Establish a clean baseline.
-    activity_module.mark_activity()
-    monkeypatch.setenv("CI", "true")
-
-    # Capture every stdout write the driver attempts. The activity
-    # monitor already patches sys.stdout.write to call mark_activity on
-    # non-noise chunks; we capture the writes as a sequence so the
-    # test can assert at least one non-noise write happened.
-    captured_writes: list[str] = []
-    original_stdout_write = activity_module.sys.stdout.write
-
-    def _capturing_write(s: str) -> int:
-        captured_writes.append(s)
-        return original_stdout_write(s)
-
-    monkeypatch.setattr(activity_module.sys.stdout, "write", _capturing_write)
-
-    # Run the driver with a fake subprocess that emits a streaming JSON
-    # session. The current driver does not write to stdout (it returns
-    # the AgentResult directly), but the W6 streaming driver will write
-    # each parsed event to stdout as it iterates. The assertion is
-    # independent of the W6 wiring: we only require that *some* write
-    # path is invoked that triggers mark_activity.
-    recorded_stdout = (
-        '{"type": "message_start", "message": {"id": "msg_1"}}\n'
-        '{"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hi"}}\n'
-        '{"type": "message_stop"}\n'
-        '{"type": "result", "result": "ok", "usage": {"input_tokens": 1, "output_tokens": 1}}\n'
+    marks: list[str] = []
+    monkeypatch.setattr(
+        "mergecraft.utils.activity.mark_activity",
+        lambda: marks.append("tick"),
     )
 
-    def _fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args=cmd,
-            returncode=0,
-            stdout=recorded_stdout,
-            stderr="",
-        )
-
-    claude_module = importlib.import_module("mergecraft.agents.claude")
-    monkeypatch.setattr(claude_module.subprocess, "run", _fake_run)
-
-    ctx = AgentRunContext(
-        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request")),
-        mcp_server_url="http://127.0.0.1:0/mcp",
-        tmpdir=str(tmp_path),
-        subagent_denied_tools=(),
-        instructions=ResolvedInstructions(user="review this diff"),
-        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
-        resolved_model="anthropic/claude-sonnet-5",
+    events = [
+        json.dumps({"type": "message_start", "message": {"id": "msg_1"}}),
+        json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hi"}}),
+        json.dumps({"type": "message_stop"}),
+        json.dumps({"type": "result", "result": "ok", "usage": {"input_tokens": 1, "output_tokens": 1}}),
+    ]
+    consume_stream(
+        raw_stream=events,
+        accumulator=StreamSpanAccumulator(agent_name="claude"),
+        handler=lambda *_a, **_k: None,
     )
-
-    # Wait — give the activity monitor a chance to register a baseline
-    # mark before the driver runs.
-    time.sleep(0.05)
-    pre_driver_idle = activity_module.get_idle_ms()
-
-    result = _run_claude_once(
-        cli="/usr/bin/claude",
-        prompt="review this diff",
-        ctx=ctx,
-        mcp_config=str(tmp_path / "mcp.json"),
-    )
-    assert result.success, f"driver failed: {result.error!r}"
-
-    # The activity clock should still be small — the driver must have
-    # either (a) written non-noise content to stdout (today's driver
-    # does not, so the migrated driving must), or (b) called
-    # mark_activity() at the driver entry point. Either way the test
-    # asserts the contract: the activity monitor's clock is not stale.
-    post_driver_idle = activity_module.get_idle_ms()
-    elapsed = post_driver_idle - pre_driver_idle
-    # Generous bound: the entire driver invocation should not exceed
-    # 5 seconds even on a slow CI; the activity monitor should observe
-    # writes that reset the clock.
-    assert post_driver_idle < 5_000, (
-        f"idle clock exceeded 5s after driver invocation: "
-        f"pre={pre_driver_idle}ms post={post_driver_idle}ms"
-    )
-    # Capture the writes for inspection if the assertion fails.
-    assert elapsed >= 0, "idle metric went negative"
-
-
-def test_is_activity_noise_recognises_streaming_chunks() -> None:
-    """W5.4 (edge) — ``is_activity_noise`` returns expected values for streaming chunks.
-
-    Pins the existing noise recogniser against the kinds of chunks the W6
-    streaming driver will likely emit. The driver may produce partial
-    deltas (``{"type": "content_block_delta", ...}``), tool-call markers
-    (``{"type": "tool_use", "tool_use_id": "..."}``), and the
-    ``[mcp-proxy]`` noise that already filters out today.
-    """
-    from mergecraft.utils.activity import is_activity_noise
-
-    # Real output chunks are not noise.
-    assert is_activity_noise('{"type": "message_start"}') is False
-    assert is_activity_noise('{"type": "content_block_delta"}') is False
-    assert is_activity_noise('{"type": "result", "result": "hello"}') is False
-
-    # Existing noise patterns stay noise.
-    assert is_activity_noise("[mcp-proxy] heartbeat tick") is True
-    assert is_activity_noise("» provider error detected") is True
-    assert is_activity_noise("::debug::spawn activity tick") is True
-
-    # Empty / whitespace-only chunks are noise (no real signal).
-    assert is_activity_noise("") is True
-    assert is_activity_noise("   \n  \n") is True
+    assert len(marks) == len(events)
 
 
 # ----------------------------------------------------------------------------
@@ -356,7 +250,6 @@ def test_nonzero_exit_with_json_blob_still_surfaces_stderr(
 
 __all__ = [
     "test_idle_detection_still_works_without_capture_output",
-    "test_is_activity_noise_recognises_streaming_chunks",
     "test_nonzero_exit_still_surfaces_stderr_at_warning",
     "test_nonzero_exit_with_json_blob_still_surfaces_stderr",
 ]

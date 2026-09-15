@@ -265,8 +265,8 @@ def captured_streaming_sink() -> CapturedSink:
 def disabled_streaming_sink() -> Any:
     """A ``NullSink`` resolved for the disabled-path tracing case.
 
-    Used by W5.4 to verify that ``utils/activity.py``'s idle-detection
-    behaviour is unaffected by tracing state (convention 9).
+    Used by W5.4 to verify that ``mark_activity`` behaviour is unaffected
+    by tracing state (convention 9).
     """
     from mergecraft.config import RepoSettings
     from mergecraft.tracing import NullSink, sink_factory
