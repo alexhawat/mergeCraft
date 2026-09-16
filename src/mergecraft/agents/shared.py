@@ -200,7 +200,6 @@ class AgentRunContext:
     secret_deny_paths: list[str] | None = None
     todo_tracker: Any = None
     stop_script: str | None = None
-    on_activity_timeout: Callable[[], None] | None = None
     on_tool_use: Callable[[AgentToolUseEvent], None] | None = None
 
 
