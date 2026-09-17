@@ -90,6 +90,7 @@ class ToolContext:
     ci_gate_checks: dict[str, str] = field(default_factory=dict)
     ci_sarif_artifacts: list[str] = field(default_factory=list)
     ci_coverage_artifacts: list[str] = field(default_factory=list)
+    ci_mutation_artifacts: list[str] = field(default_factory=list)
     analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto"
     trust_tier: Literal["trusted", "untrusted"] = "trusted"
     authority_trust: Literal["trusted", "untrusted"] = "trusted"
@@ -134,6 +135,7 @@ class ToolContext:
         ci_gate_checks: dict[str, str] | None = None,
         ci_sarif_artifacts: list[str] | None = None,
         ci_coverage_artifacts: list[str] | None = None,
+        ci_mutation_artifacts: list[str] | None = None,
         analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto",
         trust_tier: Literal["trusted", "untrusted"] = "trusted",
         authority_trust: Literal["trusted", "untrusted"] | None = None,
@@ -187,6 +189,7 @@ class ToolContext:
         self.ci_gate_checks = dict(ci_gate_checks or {})
         self.ci_sarif_artifacts = list(ci_sarif_artifacts or [])
         self.ci_coverage_artifacts = list(ci_coverage_artifacts or [])
+        self.ci_mutation_artifacts = list(ci_mutation_artifacts or [])
         self.analyzers_mode = analyzers_mode
         self.trust_tier = trust_tier
         self.authority_trust = authority_trust if authority_trust is not None else trust_tier

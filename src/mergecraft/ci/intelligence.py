@@ -289,23 +289,40 @@ async def run_ci_intelligence(
         if sarif:
             record_ci_findings(ctx.tool_state, sarif)
         coverage_names = [name.strip() for name in ctx.ci_coverage_artifacts if name.strip()]
-        if coverage_names:
-            from mergecraft.ci.coverage import (
-                collect_ci_coverage_findings,
-                coverage_inputs_from_context,
-            )
+        mutation_names = [name.strip() for name in ctx.ci_mutation_artifacts if name.strip()]
+        if coverage_names or mutation_names:
+            from mergecraft.ci.coverage import coverage_inputs_from_context
 
             diff, source_tree = coverage_inputs_from_context(ctx)
-            coverage = await collect_ci_coverage_findings(
-                ctx,
-                client=client,
-                runs=runs,
-                artifacts=coverage_names,
-                diff=diff,
-                source_tree=source_tree,
-            )
-            if coverage.findings:
-                record_ci_findings(ctx.tool_state, coverage.findings)
+            if coverage_names:
+                from mergecraft.ci.coverage import collect_ci_coverage_findings
+
+                coverage = await collect_ci_coverage_findings(
+                    ctx,
+                    client=client,
+                    runs=runs,
+                    artifacts=coverage_names,
+                    diff=diff,
+                    source_tree=source_tree,
+                )
+                if coverage.findings:
+                    record_ci_findings(ctx.tool_state, coverage.findings)
+            if mutation_names:
+                from mergecraft.ci.changed_functions import changed_functions_from_diff
+                from mergecraft.ci.mutation import collect_ci_mutation_findings
+
+                symbols = changed_functions_from_diff(diff, source_tree)
+                mutation = await collect_ci_mutation_findings(
+                    ctx,
+                    client=client,
+                    runs=runs,
+                    artifacts=mutation_names,
+                    changed_functions=[(symbol.path, symbol.name) for symbol in symbols],
+                    diff=diff,
+                    source_tree=source_tree,
+                )
+                if mutation.findings:
+                    record_ci_findings(ctx.tool_state, mutation.findings)
         suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(
             ctx, check_suite_id=check_suite_id, client=client, runs=runs
         )

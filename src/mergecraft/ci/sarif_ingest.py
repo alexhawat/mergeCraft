@@ -76,11 +76,9 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
         record_ci_findings(ctx.tool_state, findings)
 
     coverage_names = [name.strip() for name in ctx.ci_coverage_artifacts if name.strip()]
-    if coverage_names:
-        from mergecraft.ci.coverage import (
-            collect_ci_coverage_findings,
-            coverage_inputs_from_context,
-        )
+    mutation_names = [name.strip() for name in ctx.ci_mutation_artifacts if name.strip()]
+    if coverage_names or mutation_names:
+        from mergecraft.ci.coverage import coverage_inputs_from_context
 
         diff, source_tree = coverage_inputs_from_context(ctx)
         try:
@@ -93,17 +91,37 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
                 f"ci evidence: coverage check-run listing failed for {head_sha[:7]} — {check_err}"
             )
             check_runs = []
-        coverage = await collect_ci_coverage_findings(
-            ctx,
-            client=client,
-            runs=listed.items,
-            artifacts=coverage_names,
-            diff=diff,
-            source_tree=source_tree,
-            check_runs=check_runs,
-        )
-        if coverage.findings:
-            record_ci_findings(ctx.tool_state, coverage.findings)
+        if coverage_names:
+            from mergecraft.ci.coverage import collect_ci_coverage_findings
+
+            coverage = await collect_ci_coverage_findings(
+                ctx,
+                client=client,
+                runs=listed.items,
+                artifacts=coverage_names,
+                diff=diff,
+                source_tree=source_tree,
+                check_runs=check_runs,
+            )
+            if coverage.findings:
+                record_ci_findings(ctx.tool_state, coverage.findings)
+        if mutation_names:
+            from mergecraft.ci.changed_functions import changed_functions_from_diff
+            from mergecraft.ci.mutation import collect_ci_mutation_findings
+
+            symbols = changed_functions_from_diff(diff, source_tree)
+            mutation = await collect_ci_mutation_findings(
+                ctx,
+                client=client,
+                runs=listed.items,
+                artifacts=mutation_names,
+                changed_functions=[(symbol.path, symbol.name) for symbol in symbols],
+                diff=diff,
+                source_tree=source_tree,
+                check_runs=check_runs,
+            )
+            if mutation.findings:
+                record_ci_findings(ctx.tool_state, mutation.findings)
 
 
 async def ingest_ci_sarif_after_ci_wait(

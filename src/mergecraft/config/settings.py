@@ -147,11 +147,16 @@ class CiEvidenceSettings(_OptionalFeatureModel):
     ``coverageArtifacts`` lists workflow artifact names whose coverage reports
     (coverage.py JSON, lcov, or Cobertura) the reviewer may ingest as CRAP
     findings. Empty means no ingest and no extra API call (C-D2).
+
+    ``mutationArtifacts`` lists workflow artifact names whose mutation reports
+    (mutmut or Stryker JSON) the reviewer may ingest as survivor findings.
+    Empty means no ingest and no extra API call (C-D2).
     """
 
     gates: dict[str, str] = Field(default_factory=dict)
     sarif_artifacts: list[str] = Field(default_factory=list, alias="sarifArtifacts")
     coverage_artifacts: list[str] = Field(default_factory=list, alias="coverageArtifacts")
+    mutation_artifacts: list[str] = Field(default_factory=list, alias="mutationArtifacts")
 
 
 class AnalyzerOverride(_OptionalFeatureModel):
@@ -207,6 +212,13 @@ class CoverageSettings(_OptionalFeatureModel):
 
     mode: GateMode = "shadow"
     bands: CoverageBandSettings = Field(default_factory=CoverageBandSettings)
+
+
+class MutationSettings(_OptionalFeatureModel):
+    """Mutation survivor evidence. Ships in ``shadow`` so survivors never reach ``has_blockers`` (C-D5)."""
+
+    mode: GateMode = "shadow"
+    survivor_threshold: int = Field(default=0, alias="survivorThreshold", ge=0)
 
 
 class GatesSettings(BaseModel):
@@ -705,6 +717,7 @@ class RepoSettings(BaseModel):
     # no declaration, no substitution, no extra API call.
     ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
     coverage: CoverageSettings = Field(default_factory=CoverageSettings)
+    mutation: MutationSettings = Field(default_factory=MutationSettings)
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
     review: ReviewSettings = Field(default_factory=ReviewSettings)
     agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)
