@@ -25,7 +25,7 @@ from mergecraft.analyzers.trust import (
     derive_source_trust_tier,
 )
 from mergecraft.config import load_repo_settings
-from mergecraft.jev.client import AsyncJevClient
+from mergecraft.jev.client import AsyncJevClient, TypeSafeAPIError
 from mergecraft.mcp.checkout import changed_paths_in_diff
 from mergecraft.review.offline_agent import run_offline_agent_review
 from mergecraft.review.offline_result import (
@@ -496,11 +496,36 @@ def _stamp_jev_skip(result: OfflineReviewResult, reason: str | None) -> OfflineR
     return result
 
 
+def _record_shadow_jev_skip(result: OfflineReviewResult, reason: str) -> None:
+    """Record a shadow skip without changing the review result (D4, D6)."""
+    logger.info("jev shadow skip code={}", reason)
+    if not result.jev_skip_reason:
+        result.jev_skip_reason = reason
+
+
+def _findings_for_shadow_judge(
+    driver: _OfflineDiffReviewRun,
+    review_out: OfflineReviewResult,
+) -> list[Finding]:
+    """Merge review findings with analyzer rows; review rows win on fingerprint."""
+    review_findings = parse_offline_review_findings(review_out)
+    analyzer_findings = findings_from_analyzer_run(driver.analyzer_run)
+    seen = {row.fingerprint for row in review_findings}
+    merged = list(review_findings)
+    for finding in analyzer_findings:
+        if finding.fingerprint in seen:
+            continue
+        merged.append(finding)
+        seen.add(finding.fingerprint)
+    return merged
+
+
 async def _run_shadow_jev_review(
     *,
     client: AsyncJevClient,
     driver: _OfflineDiffReviewRun,
     review_out: OfflineReviewResult,
+    settings: RepoSettings,
 ) -> None:
     """Run residual dispatch, parallel judge, and lens fallback as shadow (D6)."""
     from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION, AgentMetadata, MergeEvidencePacket
@@ -514,7 +539,7 @@ async def _run_shadow_jev_review(
     if materialization is None or materialization.empty:
         return
     diff_text = materialization.path.read_text(encoding="utf-8")
-    findings = findings_from_analyzer_run(driver.analyzer_run)
+    findings = _findings_for_shadow_judge(driver, review_out)
     change_id = f"local/{driver.cwd.name}"
     packet = MergeEvidencePacket(
         schema_version=PACKET_SCHEMA_VERSION,
@@ -535,6 +560,7 @@ async def _run_shadow_jev_review(
             output_path=driver.out_dir / "jev-shadow.jsonl",
             run_id="offline-review",
             change_id=change_id,
+            settings=settings,
         )
         body = review_out.output or ""
         if body:
@@ -549,9 +575,12 @@ async def _run_shadow_jev_review(
             trigger_ids=(),
             confidence=selected.confidence,
             selected_ids=selected.lens_ids,
+            settings=settings,
         )
     except JevError as exc:
-        logger.info("jev shadow skip code={}", exc.code)
+        _record_shadow_jev_skip(review_out, exc.code)
+    except TypeSafeAPIError as exc:
+        _record_shadow_jev_skip(review_out, exc.code)
 
 
 @dataclass(slots=True)
@@ -849,6 +878,7 @@ async def _run_offline_diff_review(
                     client=jev_client,
                     driver=driver,
                     review_out=published,
+                    settings=settings,
                 )
             return _stamp_jev_skip(published, jev_skip_reason)
         except TimeoutError:

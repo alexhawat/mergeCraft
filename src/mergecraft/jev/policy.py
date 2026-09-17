@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from mergecraft.analyzers.finding import Finding
+    from mergecraft.config.settings import RepoSettings
     from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.jev.client import AsyncJevClient
 
@@ -80,11 +81,16 @@ class AlignResult(BaseModel):
     blocking: bool = False
 
 
-def bucket_confidence(value: float | None) -> str:
+def bucket_confidence(
+    value: float | None,
+    *,
+    settings: RepoSettings | None = None,
+) -> str:
     """Bucket a calibrated float onto ``certain`` / ``likely`` / ``possible`` (D3).
 
     Args:
         value: Confidence in ``[0, 1]``. ``None`` is rejected.
+        settings: Loaded repo settings. When omitted, falls back to defaults.
 
     Returns:
         str: Taxonomy ordinal.
@@ -97,7 +103,7 @@ def bucket_confidence(value: float | None) -> str:
     number = float(value)
     if number < 0.0 or number > 1.0:
         raise JevError("confidence must be a number in [0, 1]", code="invalid_confidence")
-    certain, likely = _confidence_floors()
+    certain, likely = _confidence_floors(settings)
     if number >= certain:
         return "certain"
     if number >= likely:
@@ -217,6 +223,7 @@ def predict_jev_action(
     *,
     trust_tier: str,
     prior: PolicyVerdict | UnitAssessment | JevPrediction | None = None,
+    settings: RepoSettings | None = None,
 ) -> JevPrediction:
     """Predict the Jev gate action. The reviewer is never skipped (D7).
 
@@ -224,11 +231,12 @@ def predict_jev_action(
         assessment: Incoming unit assessment or verdict.
         trust_tier: ``trusted`` or ``untrusted``.
         prior: Optional prior verdict; severity and suspicion never fall.
+        settings: Loaded repo settings. When omitted, falls back to defaults.
 
     Returns:
         JevPrediction: ``enforced`` is always ``False`` in this plan (D6).
     """
-    gate_mode = _jev_gate_mode()
+    gate_mode = _jev_gate_mode(settings)
     prediction = apply_ratchet(prior=prior, incoming=assessment, trust_tier=trust_tier)
     metadata = dict(prediction.metadata)
     metadata["gate_mode"] = gate_mode
@@ -283,9 +291,9 @@ def record_jev_prediction(
     )
 
 
-def iter_thresholds() -> Iterator[JevThreshold]:
+def iter_thresholds(settings: RepoSettings | None = None) -> Iterator[JevThreshold]:
     """Yield pack-versioned thresholds that name their J1 corpus rows (D15)."""
-    certain, likely = _unit_floors()
+    certain, likely = _unit_floors(settings)
     yield JevThreshold(
         pack_id=UNIT_PACK_ID,
         name="certain",
@@ -301,19 +309,19 @@ def iter_thresholds() -> Iterator[JevThreshold]:
     yield JevThreshold(
         pack_id=LENS_PACK_ID,
         name="likely",
-        value=LIKELY_CONFIDENCE_FLOOR,
+        value=_settings_threshold("lens/v1.likely", LIKELY_CONFIDENCE_FLOOR, settings),
         corpus_ids=LENS_THRESHOLD_CORPUS_IDS,
     )
     yield JevThreshold(
         pack_id=ALIGN_PACK_ID,
         name="same_defect",
-        value=LIKELY_CONFIDENCE_FLOOR,
+        value=_settings_threshold("align/v1.same_defect", LIKELY_CONFIDENCE_FLOOR, settings),
         corpus_ids=ALIGN_THRESHOLD_CORPUS_IDS,
     )
     yield JevThreshold(
         pack_id=ALIGN_PACK_ID,
         name="is_withdrawn_reraise",
-        value=NOUL_ACT_FLOOR,
+        value=_settings_threshold("align/v1.is_withdrawn_reraise", NOUL_ACT_FLOOR, settings),
         corpus_ids=ALIGN_THRESHOLD_CORPUS_IDS,
     )
 
@@ -365,6 +373,7 @@ async def dispatch_residual_units(
     output_path: Path | None = None,
     run_id: str = "jev",
     change_id: str | None = None,
+    settings: RepoSettings | None = None,
 ) -> list[JevPrediction]:
     """Run the unit battery only on analyzer-residual hunks, then order them.
 
@@ -378,6 +387,7 @@ async def dispatch_residual_units(
         output_path: Optional JSONL path for the shadow recorder.
         run_id: Shadow run identifier.
         change_id: Shadow change identifier; defaults to the unit id.
+        settings: Loaded repo settings. When omitted, falls back to defaults.
 
     Returns:
         list[JevPrediction]: Ordered residual predictions. Never suppresses.
@@ -392,7 +402,9 @@ async def dispatch_residual_units(
         if isinstance(assessment, JevCallResult):
             continue
         prior = None if prior_by_unit is None else prior_by_unit.get(unit.unit_id)
-        prediction = predict_jev_action(assessment, trust_tier=trust_tier, prior=prior)
+        prediction = predict_jev_action(
+            assessment, trust_tier=trust_tier, prior=prior, settings=settings
+        )
         record_jev_prediction(
             packet,
             prediction,
@@ -502,21 +514,19 @@ async def semantic_dedupe_pair(
     return kept
 
 
-def _unit_floors() -> tuple[float, float]:
+def _unit_floors(settings: RepoSettings | None = None) -> tuple[float, float]:
     return (
-        _settings_threshold("unit/v1.certain", CERTAIN_CONFIDENCE_FLOOR),
-        _settings_threshold("unit/v1.likely", LIKELY_CONFIDENCE_FLOOR),
+        _settings_threshold("unit/v1.certain", CERTAIN_CONFIDENCE_FLOOR, settings),
+        _settings_threshold("unit/v1.likely", LIKELY_CONFIDENCE_FLOOR, settings),
     )
 
 
-def _confidence_floors() -> tuple[float, float]:
-    return _unit_floors()
+def _confidence_floors(settings: RepoSettings | None = None) -> tuple[float, float]:
+    return _unit_floors(settings)
 
 
-def _jev_gate_mode() -> str:
-    from mergecraft.config.settings import default_settings
-
-    return default_settings().gates.jev
+def _jev_gate_mode(settings: RepoSettings | None = None) -> str:
+    return _repo_settings(settings).gates.jev
 
 
 def _choice_rank(choice: str) -> int:
@@ -622,18 +632,28 @@ def _stronger_member(left: Finding, right: Finding) -> Finding:
     return left
 
 
-def _align_same_floor() -> float:
-    return _settings_threshold("align/v1.same_defect", LIKELY_CONFIDENCE_FLOOR)
+def _align_same_floor(settings: RepoSettings | None = None) -> float:
+    return _settings_threshold("align/v1.same_defect", LIKELY_CONFIDENCE_FLOOR, settings)
 
 
-def _align_noul_floor() -> float:
-    return _settings_threshold("align/v1.is_withdrawn_reraise", NOUL_ACT_FLOOR)
+def _align_noul_floor(settings: RepoSettings | None = None) -> float:
+    return _settings_threshold("align/v1.is_withdrawn_reraise", NOUL_ACT_FLOOR, settings)
 
 
-def _settings_threshold(key: str, default: float) -> float:
+def _repo_settings(settings: RepoSettings | None) -> RepoSettings:
+    if settings is not None:
+        return settings
     from mergecraft.config.settings import default_settings
 
-    value = default_settings().jev.thresholds.get(key)
+    return default_settings()
+
+
+def _settings_threshold(
+    key: str,
+    default: float,
+    settings: RepoSettings | None = None,
+) -> float:
+    value = _repo_settings(settings).jev.thresholds.get(key)
     if isinstance(value, int | float) and not isinstance(value, bool):
         return float(value)
     return default

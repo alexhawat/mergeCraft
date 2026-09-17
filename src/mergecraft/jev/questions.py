@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from mergecraft.agents.lenses._base import LensDefinition
+    from mergecraft.config.settings import RepoSettings
     from mergecraft.jev.client import AsyncJevClient
 
 QuestionKind = Literal["choice", "score", "noul"]
@@ -381,6 +382,7 @@ def select_lenses_or_fallback(
     trigger_ids: Sequence[str] = (),
     confidence: float | None = None,
     selected_ids: Sequence[str] | None = None,
+    settings: RepoSettings | None = None,
 ) -> LensSelection:
     """Choose Jev lenses or today's trigger matching.
 
@@ -393,11 +395,12 @@ def select_lenses_or_fallback(
         trigger_ids: Lenses today's trigger matching already selected.
         confidence: Calibrated confidence for the Jev selection, if any.
         selected_ids: Lens ids Jev marked ``apply``.
+        settings: Loaded repo settings. When omitted, falls back to defaults.
 
     Returns:
         LensSelection: ``source`` is ``triggers`` or ``jev``.
     """
-    floor = _lens_confidence_floor()
+    floor = _lens_confidence_floor(settings)
     if not enabled or confidence is None or confidence < floor:
         return LensSelection(
             pack_id=LENS_PACK_ID,
@@ -415,10 +418,12 @@ def select_lenses_or_fallback(
     )
 
 
-def _lens_confidence_floor() -> float:
-    from mergecraft.config.settings import default_settings
+def _lens_confidence_floor(settings: RepoSettings | None = None) -> float:
+    if settings is None:
+        from mergecraft.config.settings import default_settings
 
-    value = default_settings().jev.thresholds.get("lens/v1.likely")
+        settings = default_settings()
+    value = settings.jev.thresholds.get("lens/v1.likely")
     if isinstance(value, int | float) and not isinstance(value, bool):
         return float(value)
     return LIKELY_CONFIDENCE_FLOOR
