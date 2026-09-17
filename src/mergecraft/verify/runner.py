@@ -208,7 +208,8 @@ async def run_verify_behavior(
     if skipped:
         logger.info("verify-behavior skipped reasons={}", skipped)
         report = _build_report(spec, status="skipped", skipped_or_unverified=skipped)
-        if spec.artifacts_dir:
+        untrusted_skip = any(item.startswith("untrusted:") for item in skipped)
+        if spec.artifacts_dir and not untrusted_skip:
             _write_artifacts(Path(spec.artifacts_dir), report, "")
         return report
 

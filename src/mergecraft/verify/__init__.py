@@ -15,6 +15,10 @@ Exports:
     render_verification_markdown: Markdown view of a report's JSON.
     require_browser_extra: Gate that names ``mergecraft[browser]`` when missing.
     verification_report_schema: JSON Schema derived from ``VerificationReport``.
+    prepare_verification_report_for_prompt: Fence a report before any prompt.
+    render_behavior_section: Markdown behaviour section, or empty if none.
+    consume_verification_report: Load a report JSON, or skip on untrusted.
+    verification_report_to_findings: Always an empty list — not Findings.
 """
 
 from __future__ import annotations
@@ -34,6 +38,12 @@ from mergecraft.verify.models import (
     render_verification_markdown,
     verification_report_schema,
 )
+from mergecraft.verify.review import (
+    consume_verification_report,
+    prepare_verification_report_for_prompt,
+    render_behavior_section,
+    verification_report_to_findings,
+)
 
 __all__ = [
     "CRITERION_STATUSES",
@@ -45,9 +55,13 @@ __all__ = [
     "ReportArtifacts",
     "VerificationInput",
     "VerificationReport",
+    "consume_verification_report",
     "is_successful",
     "load_verification_input",
+    "prepare_verification_report_for_prompt",
+    "render_behavior_section",
     "render_verification_markdown",
     "require_browser_extra",
     "verification_report_schema",
+    "verification_report_to_findings",
 ]

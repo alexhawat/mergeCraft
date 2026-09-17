@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A versioned behaviour-verification report (`schema_version` 1.0.0) records
   what was observed, which criteria passed, and what blocked the run — without
   turning those results into code findings (#61)
+- `mergecraft review --verification-report` (also `diff-review`) consumes a
+  behaviour-verification report, fences it before the prompt, and renders
+  results in a separate section — not as code findings. A blocked report
+  stays visible; no report leaves the review unchanged (#61)
 
 - Opt-in Jev / System One client (`jev.enabled`, default off) with cost
   accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a

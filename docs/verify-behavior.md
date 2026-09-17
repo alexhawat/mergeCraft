@@ -205,3 +205,18 @@ are absorbed into the same contract.
 `## Behavior verification` (verify mode) or `## Reproduction attempt`
 (reproduce mode). Two reports that differ only in `observed` differ in
 Markdown only there. Blocked reports name every `missing` entry.
+
+## Review consume
+
+Pass a report into an offline review:
+
+```bash
+mergecraft review --diff changes.patch \
+  --verification-report .mergecraft/artifacts/prs/42/verify/report.json
+```
+
+`mergecraft diff-review` accepts the same `--verification-report` flag.
+The report is nonce-fenced before it reaches any prompt. Behavioural
+results appear in their own `## Behavior verification` section and are
+not code findings. A `blocked` report is rendered and names what is
+missing. Omitting the flag leaves the review unchanged.

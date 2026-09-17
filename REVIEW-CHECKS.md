@@ -71,6 +71,15 @@ check-run summary or in the agent's prose:
   `declared-but-cannot-run` / `timed_out` are explicit and visible; the
   absence of evidence is itself evidence the verdict must surface.
 
+A behaviour-verification report (from `mergecraft verify-behavior`, consumed
+via `--verification-report`) is **not** a typed `Finding` and is **not**
+mechanical evidence for the approval gate. It is a separate artifact: page
+text and console output the change under review can control, so it is fenced
+before any prompt. Treat it as evidence about the running app, not a
+substitute for reading the diff. `skipped` and `blocked` are not a pass —
+`blocked` names the missing input and stays visible; omitting the report
+leaves the review unchanged.
+
 The merge-evidence packet's `decision` row is computed by
 `mergecraft.agents.gates.decide_approval(findings, *, run_succeeded,
 tier)` from these structural inputs. When the packet is given directly
