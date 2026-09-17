@@ -1,0 +1,17 @@
+{
+  "id": "jev-claim-blocking-heading-no-findings",
+  "pack_id": "claim/v1",
+  "title": "Cross-cutting 🚨 heading with no structured findings row",
+  "shipped_defect": {
+    "kind": "plan-21",
+    "ref": "D6-rule-3",
+    "citation": "plan 21 D6 rule 3: prose in the summary is read by no gate"
+  },
+  "claim": "This pull request must not merge until the HOME redirect lands.",
+  "findings_rows": [],
+  "expected": {
+    "backed_by_row_low": true,
+    "blocking_language_high": true
+  },
+  "calibrates": ["claim/v1.backed_by_row"]
+}

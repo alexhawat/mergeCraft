@@ -1,0 +1,19 @@
+{
+  "http": {
+    "status": 200,
+    "headers": { "content-type": "application/json" }
+  },
+  "body": {
+    "request_id": "req_align_same_defect",
+    "model": "jev-1.13.0",
+    "usage": { "input_tokens": 90, "output_tokens": 4 },
+    "answers": {
+      "same_defect": {
+        "choice": "same",
+        "confidence": 0.86,
+        "probabilities": { "same": 0.86, "related": 0.10, "distinct": 0.04 }
+      },
+      "is_withdrawn_reraise": { "noul": 0.11 }
+    }
+  }
+}

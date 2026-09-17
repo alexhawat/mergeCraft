@@ -693,12 +693,17 @@ def run(
             stream.phase("materialize")
             stream.phase("review")
 
+        if result.jev_skip_reason:
+            logger.info("jev skip reason={}", result.jev_skip_reason)
+
         if result.diff_path:
             logger.info("» diff path: {}", result.diff_path)
 
         packet_path = result.evidence_packet_path
         if packet_path and Path(packet_path).is_file():
             logger.info("» evidence packet: {}", packet_path)
+        if result.jev_shadow_path:
+            logger.info("» jev shadow: {}", result.jev_shadow_path)
 
         outcome = _resolve_outcome(result)
         findings = parse_offline_review_findings(result)

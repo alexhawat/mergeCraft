@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -40,6 +40,11 @@ class OfflineReviewResult:
     evidence_packet_path: str | None = None
     outcome: RunOutcome | None = None
     scope_reduction: ScopeReduction | None = None
+    jev_skip_reason: str | None = None
+    # Durable shadow JSONL (packet sibling when a packet exists) and the
+    # parallel-judge dump. Calibration rows must outlive the temp run dir (D6).
+    jev_shadow_path: str | None = None
+    jev_judge: dict[str, Any] | None = None
 
 
 def _offline_failure(

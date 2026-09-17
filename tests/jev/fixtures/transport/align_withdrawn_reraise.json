@@ -1,0 +1,19 @@
+{
+  "http": {
+    "status": 200,
+    "headers": { "content-type": "application/json" }
+  },
+  "body": {
+    "request_id": "req_align_withdrawn_reraise",
+    "model": "jev-1.13.0",
+    "usage": { "input_tokens": 90, "output_tokens": 4 },
+    "answers": {
+      "same_defect": {
+        "choice": "same",
+        "confidence": 0.89,
+        "probabilities": { "same": 0.89, "related": 0.08, "distinct": 0.03 }
+      },
+      "is_withdrawn_reraise": { "noul": 0.94 }
+    }
+  }
+}

@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in Jev / System One client (`jev.enabled`, default off) with cost
+  accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a
+  skip and does not fail the review (#728)
+- Parallel shadow judge grades review findings and prose against their cited
+  evidence without replacing the reviewer (#728)
+
 - mergeCraft review loads `.github/skills/code-review/` as a self-contained
   Agent Skills payload — `SKILL.md` plus one-level `references/` resolved into
   the `REVIEW SKILLS` prompt section, with a 64 KiB instruction-bundle cap,
@@ -115,6 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Transitive `soupsieve` 2.8.4→2.9.2 in `uv.lock` for `pip-audit`
+  (CVE-2026-85999, CVE-2026-86000) (#728)
 - Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
   tracing-content cap; export of prompt bodies on fork PRs requires the Action
   input, env, or trusted base settings
@@ -145,6 +153,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (N20)
 
 ### Fixed
+
+- Enabled Jev reviews now keep the shadow-judge record next to the evidence
+  packet after the command finishes, so paid calibration rows are retrievable
+  (#728)
+- A TypeSafe connect, DNS, or timeout failure on the shadow judge records a
+  skip and leaves the completed review successful (#728)
+- `jev.model` accepts only the pinned `jev-1.13.0` id, so a configured newer
+  version cannot run while audit rows still claim the pin (#728)
 
 - Corroborating duplicates can no longer weaken a finding: clustering keeps the
   strongest member's severity while the agent's prose stays canonical wording,

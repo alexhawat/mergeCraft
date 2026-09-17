@@ -148,24 +148,34 @@ def _lane_to_repo_area(packet: MergeEvidencePacket) -> str | None:
     return _LANE_TO_AREA.get(lane, lane)
 
 
-def _prediction_outcome_value(prediction: Any) -> str:
-    if hasattr(prediction, "outcome"):
-        return str(prediction.outcome)
-    if hasattr(prediction, "predicted_outcome"):
-        return str(prediction.predicted_outcome)
+def _prediction_attr(prediction: Any, *names: str) -> str | None:
     if isinstance(prediction, dict):
-        raw = prediction.get("outcome") or prediction.get("predicted_outcome")
-        return str(raw)
+        for name in names:
+            raw = prediction.get(name)
+            if raw is not None and raw != "":
+                return str(raw)
+        return None
+    for name in names:
+        if not hasattr(prediction, name):
+            continue
+        raw = getattr(prediction, name)
+        if raw is not None and raw != "":
+            return str(raw)
+    return None
+
+
+def _prediction_outcome_value(prediction: Any) -> str:
+    value = _prediction_attr(prediction, "outcome", "predicted_outcome", "action")
+    if value is not None:
+        return value
     msg = f"unsupported verdict-protocol prediction shape: {type(prediction).__name__}"
     raise TypeError(msg)
 
 
 def _prediction_diagnostic_value(prediction: Any) -> str:
-    if hasattr(prediction, "diagnostic"):
-        return str(prediction.diagnostic)
-    if isinstance(prediction, dict):
-        raw = prediction.get("diagnostic")
-        return str(raw)
+    value = _prediction_attr(prediction, "diagnostic", "pack_id")
+    if value is not None:
+        return value
     msg = f"unsupported verdict-protocol prediction shape: {type(prediction).__name__}"
     raise TypeError(msg)
 
@@ -274,22 +284,33 @@ def record_shadow_prediction(
     policy: GateActionPolicy | None = None,
     prediction: Any | None = None,
     actual_outcome: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> ShadowRecord:
     """Build a :class:`ShadowRecord` and append it to ``output_path`` (W10.2 / VP3).
 
-    When ``prediction`` is supplied the row records a verdict-protocol shadow
-    prediction in the same JSONL file as gate-action rows (D6). Otherwise the
+    When ``prediction`` is supplied the row records a verdict-protocol or Jev
+    shadow prediction in the same JSONL file as gate-action rows (D6).
+    ``metadata`` is merged onto the row (Jev records pack id, model, and the
+    raw confidence float here — never on ``Finding.evidence``). Otherwise the
     gate-action path is unchanged.
     """
     if prediction is not None:
         predicted_outcome = _prediction_outcome_value(prediction)
         diagnostic = _prediction_diagnostic_value(prediction)
         disagreement: bool | None = None
+        pred_lane = getattr(prediction, "lane", None)
+        predicted_lane = pred_lane if isinstance(pred_lane, str) and pred_lane else "review"
+        merged_metadata: dict[str, Any] = {}
+        if metadata:
+            merged_metadata.update(metadata)
+        pred_meta = getattr(prediction, "metadata", None)
+        if isinstance(pred_meta, dict):
+            merged_metadata.update(pred_meta)
         if actual_outcome is not None:
             report = disagree_with_outcome(
                 predicted_action=predicted_outcome,
                 actual_outcome=actual_outcome,
-                predicted_lane="review",
+                predicted_lane=predicted_lane,
                 predicted_rule_id=diagnostic,
                 repo_area=policy_id,
             )
@@ -301,7 +322,7 @@ def record_shadow_prediction(
             policy_id=policy_id,
             rule_id=diagnostic,
             action=predicted_outcome,
-            lane="review",
+            lane=predicted_lane,
             repo_area=policy_id,
             outcome=predicted_outcome,
             predicted_outcome=predicted_outcome,
@@ -309,6 +330,7 @@ def record_shadow_prediction(
             verdict_diagnostic=diagnostic,
             actual_outcome=actual_outcome,
             disagreement=disagreement,
+            metadata=merged_metadata,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("a", encoding="utf-8") as handle:

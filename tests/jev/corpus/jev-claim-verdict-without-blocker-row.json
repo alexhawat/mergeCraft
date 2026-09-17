@@ -1,0 +1,19 @@
+{
+  "id": "jev-claim-verdict-without-blocker-row",
+  "pack_id": "claim/v1",
+  "title": "request_changes verdict with no blocking findings row",
+  "shipped_defect": {
+    "kind": "plan-21",
+    "ref": "D6-rule-4",
+    "citation": "plan 21 D6 rule 4 / G10: exactly one terminal verdict; the verdict follows from the findings"
+  },
+  "claim": "request_changes: authorization bypass on fork pull requests",
+  "terminal_verdict": "request_changes",
+  "findings_rows": [],
+  "expected": {
+    "backed_by_row_low": true,
+    "blocking_language_high": true,
+    "contradicts_verdict_low": true
+  },
+  "calibrates": ["claim/v1.contradicts_verdict", "claim/v1.blocking_language"]
+}

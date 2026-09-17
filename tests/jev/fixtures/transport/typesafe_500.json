@@ -1,0 +1,17 @@
+{
+  "http": {
+    "status": 500,
+    "headers": { "content-type": "application/json" }
+  },
+  "error": {
+    "type": "TypeSafeAPIError",
+    "status_code": 500,
+    "code": "server_error"
+  },
+  "body": {
+    "error": {
+      "type": "server_error",
+      "message": "server_error"
+    }
+  }
+}

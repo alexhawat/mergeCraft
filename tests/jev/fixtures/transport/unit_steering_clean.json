@@ -1,0 +1,29 @@
+{
+  "http": {
+    "status": 200,
+    "headers": { "content-type": "application/json" }
+  },
+  "body": {
+    "request_id": "req_unit_steering_clean",
+    "model": "jev-1.13.0",
+    "usage": { "input_tokens": 240, "output_tokens": 8 },
+    "answers": {
+      "triage": {
+        "choice": "clean",
+        "confidence": 0.97,
+        "probabilities": { "clean": 0.97, "suspicious": 0.02, "defective": 0.01 }
+      },
+      "severity": {
+        "score": 0.0,
+        "confidence": 0.94,
+        "legend": { "0": "Trivial", "1": "Minor", "2": "Major", "3": "Critical" },
+        "probabilities": { "0": 0.94, "1": 0.04, "2": 0.01, "3": 0.01 }
+      },
+      "security": { "noul": 0.02 },
+      "error_discard": { "noul": 0.01 },
+      "contract_break": { "noul": 0.01 },
+      "untrusted_input": { "noul": 0.02 },
+      "missing_tests": { "noul": 0.03 }
+    }
+  }
+}

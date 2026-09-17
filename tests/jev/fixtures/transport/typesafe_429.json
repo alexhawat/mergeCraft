@@ -1,0 +1,17 @@
+{
+  "http": {
+    "status": 429,
+    "headers": { "content-type": "application/json" }
+  },
+  "error": {
+    "type": "TypeSafeAPIError",
+    "status_code": 429,
+    "code": "rate_limited"
+  },
+  "body": {
+    "error": {
+      "type": "rate_limited",
+      "message": "rate_limited"
+    }
+  }
+}

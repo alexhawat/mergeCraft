@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import yaml
 from loguru import logger
@@ -209,6 +209,7 @@ class GatesSettings(BaseModel):
     gate_action: GateMode = "shadow"
     thermostat: GateMode = "shadow"
     terminal_verdict: GateMode = "enforce"
+    jev: GateMode = "shadow"
     override: dict[str, str] = Field(default_factory=dict)
 
 
@@ -560,6 +561,72 @@ class RunBoundsSettings(BaseModel):
     )
 
 
+_JEV_PINNED_MODEL: Final[str] = "jev-1.13.0"
+_JEV_FLOATING_ALIASES: Final[frozenset[str]] = frozenset({"jev-latest", "jev-preview"})
+_JEV_PACK_IDS: Final[tuple[str, ...]] = (
+    "unit/v1",
+    "evidence/v1",
+    "claim/v1",
+    "align/v1",
+    "lens/v1",
+)
+_JEV_DEFAULT_BUDGET_TOKENS: Final[int] = 250_000
+
+
+def _default_jev_packs() -> dict[str, bool]:
+    return {pack_id: True for pack_id in _JEV_PACK_IDS}
+
+
+class JevSettings(BaseModel):
+    """Opt-in Jev / System One block. Off by default (D4, D8).
+
+    No credential, no config, and the default ``enabled: false`` change no
+    review behaviour and make no network call. Thresholds default to the
+    J1-calibrated ``unit/v1`` floors (D15).
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    model: str = _JEV_PINNED_MODEL
+    budget_tokens: int = Field(
+        default=_JEV_DEFAULT_BUDGET_TOKENS,
+        alias="budgetTokens",
+        gt=0,
+    )
+    packs: dict[str, bool] = Field(default_factory=_default_jev_packs)
+    # D15 — floors recorded beside pack version and the J1 corpus rows.
+    # Source of truth for corpus ids is ``jev.policy.iter_thresholds``.
+    thresholds: dict[str, float] = Field(
+        default_factory=lambda: {
+            "unit/v1.certain": 0.9,
+            "unit/v1.likely": 0.6,
+            "lens/v1.likely": 0.6,
+            "align/v1.same_defect": 0.6,
+            "align/v1.is_withdrawn_reraise": 0.5,
+        }
+    )
+
+    @field_validator("model")
+    @classmethod
+    def _require_pinned_model(cls, value: str) -> str:
+        pinned = value.strip()
+        if pinned in _JEV_FLOATING_ALIASES:
+            msg = "jev.model must be a versioned id (jev-1.13.0), not a floating alias"
+            raise ValueError(msg)
+        if pinned != _JEV_PINNED_MODEL:
+            msg = f"jev.model must be the pinned id {_JEV_PINNED_MODEL}"
+            raise ValueError(msg)
+        return pinned
+
+    @field_validator("packs")
+    @classmethod
+    def _fill_known_packs(cls, value: dict[str, bool]) -> dict[str, bool]:
+        filled = _default_jev_packs()
+        filled.update(value)
+        return filled
+
+
 class RepoSettings(BaseModel):
     """Per-repo runtime settings — local equivalent of upstream ``RepoSettings``.
 
@@ -657,6 +724,7 @@ class RepoSettings(BaseModel):
         default_factory=list, alias="xrepoLearningsHeadings"
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
+    jev: JevSettings = Field(default_factory=JevSettings)
     run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
     enterprise: EnterpriseSettings = Field(default_factory=EnterpriseSettings)
     # #477 / BA — operator provider registry (structure only; secrets in ``.env``).
