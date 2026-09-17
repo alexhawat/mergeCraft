@@ -472,7 +472,11 @@ def _assemble_instruction_bundle(
     while rendered and _rendered_byte_len(rendered) > byte_cap and review_blocks:
         review_blocks.pop()
         if injected:
-            dropped.append(injected.pop())
+            origin = injected.pop()
+            dropped.append(origin)
+            for ref in skill_references.pop(origin, ()):
+                if ref in resolved_refs:
+                    resolved_refs.remove(ref)
         limitations.append(f"({_LIMITATION_LABEL}: review skill dropped to honor bundle byte cap)")
         rendered = _assemble_bundle_sections(
             review_blocks=review_blocks,
