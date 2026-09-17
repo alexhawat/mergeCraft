@@ -30,13 +30,13 @@ from __future__ import annotations
 
 import ast
 import json
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from zipfile import BadZipFile, ZipFile
 
+from defusedxml.ElementTree import ParseError, fromstring
 from loguru import logger
 
 from mergecraft.analyzers.finding import Finding, make_finding
@@ -299,8 +299,8 @@ def parse_lcov(text: str) -> ParsedCoverage:
 def parse_cobertura(text: str) -> ParsedCoverage:
     """Parse Cobertura ``<method>`` elements."""
     try:
-        root = ET.fromstring(text)
-    except ET.ParseError:
+        root = fromstring(text)
+    except ParseError:
         return ParsedCoverage(skip_reason=SKIP_UNSUPPORTED_COVERAGE_FORMAT)
 
     functions: list[CoverageFunction] = []

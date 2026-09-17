@@ -1732,6 +1732,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "anyio" },
+    { name = "defusedxml" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -1795,6 +1796,7 @@ requires-dist = [
     { name = "ast-grep-cli", marker = "extra == 'dev'", specifier = "==0.44.1" },
     { name = "bandit", extras = ["toml"], marker = "extra == 'dev'", specifier = "==1.9.4" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = "==1.40.1" },
+    { name = "defusedxml", specifier = "==0.7.1" },
     { name = "fastapi", specifier = "==0.141.1" },
     { name = "harbor", marker = "python_full_version >= '3.12' and extra == 'harbor'", specifier = "==0.20.0" },
     { name = "httpx", specifier = "==0.28.1" },
