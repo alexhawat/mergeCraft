@@ -121,6 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Transitive `soupsieve` 2.8.4→2.9.2 in `uv.lock` for `pip-audit`
+  (CVE-2026-85999, CVE-2026-86000) (#728)
 - Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
   tracing-content cap; export of prompt bodies on fork PRs requires the Action
   input, env, or trusted base settings
