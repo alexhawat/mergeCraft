@@ -24,7 +24,14 @@ from typing import TYPE_CHECKING, Any, Protocol
 from loguru import logger
 from tenacity import AsyncRetrying, retry_if_exception
 
-from mergecraft.jev.cost import TokenBudget, compute_cost
+from mergecraft.agents.token_budget import (
+    TokenBudget,
+    apply_kill_switch,
+    current_run_budget,
+    record_provider_usage,
+    token_budget_for,
+)
+from mergecraft.jev.cost import compute_cost
 from mergecraft.jev.types import (
     PINNED_MODEL,
     JevCallResult,
@@ -335,11 +342,15 @@ class AsyncJevClient:
         self._settings = settings
         self._api_key = _resolve_api_key(api_key)
         self.transport = transport
-        self._budget = (
-            budget if budget is not None else TokenBudget(max_tokens=_budget_tokens(settings))
-        )
         self._tracer = tracer
         self._model = settings.model if settings is not None else PINNED_MODEL
+        bound = current_run_budget()
+        if budget is not None:
+            self._budget = budget
+        elif bound is not None:
+            self._budget = bound
+        else:
+            self._budget = token_budget_for(model=self._model, max_tokens=_budget_tokens(settings))
 
     def availability_skip(self, *, pack_id: str | None = None) -> JevCallResult | None:
         """Return an honest skip when this client must not dispatch (D4).
@@ -356,7 +367,7 @@ class AsyncJevClient:
             return _skip("disabled")
         if self._api_key is None:
             return _skip("credential_absent")
-        if self._budget.should_stop():
+        if apply_kill_switch(self._budget) == "kill_switch":
             return _skip("kill_switch")
         return None
 
@@ -407,7 +418,8 @@ class AsyncJevClient:
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
         )
-        accepted = self._budget.record_usage(
+        accepted = record_provider_usage(
+            self._budget,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
         )
