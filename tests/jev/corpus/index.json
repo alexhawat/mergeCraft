@@ -1,0 +1,6 @@
+{
+  "min_scenarios_per_pack": 3,
+  "packs": ["unit/v1", "evidence/v1", "claim/v1", "align/v1", "lens/v1"],
+  "threshold_rule": "a threshold with no corpus row behind it does not merge",
+  "scoring": "Jev must not score this corpus (D15 / plan 25)"
+}

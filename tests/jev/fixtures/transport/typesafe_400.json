@@ -1,0 +1,17 @@
+{
+  "http": {
+    "status": 400,
+    "headers": { "content-type": "application/json" }
+  },
+  "error": {
+    "type": "TypeSafeAPIError",
+    "status_code": 400,
+    "code": "invalid_request"
+  },
+  "body": {
+    "error": {
+      "type": "invalid_request_error",
+      "message": "invalid_request"
+    }
+  }
+}

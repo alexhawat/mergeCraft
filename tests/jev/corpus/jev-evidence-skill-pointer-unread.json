@@ -1,0 +1,17 @@
+{
+  "id": "jev-evidence-skill-pointer-unread",
+  "pack_id": "evidence/v1",
+  "title": "Finding cites REVIEW-CHECKS.md that never entered the prompt",
+  "shipped_defect": {
+    "kind": "plan-21",
+    "ref": "F1/F4",
+    "citation": "plan 21 F1/F4: skill pointer never resolved; production run advertised the skill with zero doctrine reads"
+  },
+  "claim": "The reviewer applied REVIEW-CHECKS.md grading doctrine",
+  "section": "Follow REVIEW-CHECKS.md (link only; body never injected)",
+  "expected": {
+    "relation": "says_nothing",
+    "falsifiable_low": true
+  },
+  "calibrates": ["evidence/v1.relation.says_nothing"]
+}

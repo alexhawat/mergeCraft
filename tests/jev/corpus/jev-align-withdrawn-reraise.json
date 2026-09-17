@@ -1,0 +1,20 @@
+{
+  "id": "jev-align-withdrawn-reraise",
+  "pack_id": "align/v1",
+  "title": "New finding restates a withdrawn privilege-drop non-issue",
+  "shipped_defect": {
+    "kind": "plan-21",
+    "ref": "D6-rule-2",
+    "citation": "plan 21 D6 rule 2 / G14: never re-raise anything under ## Withdrawn review findings; skill eval e4"
+  },
+  "withdrawn_fixture": "privilege_drop.md",
+  "new_finding": {
+    "message": "wrap_agent_command drops uid without redirecting HOME",
+    "path": "src/mergecraft/utils/privilege.py"
+  },
+  "expected": {
+    "same_defect": "same",
+    "is_withdrawn_reraise_high": true
+  },
+  "calibrates": ["align/v1.is_withdrawn_reraise"]
+}

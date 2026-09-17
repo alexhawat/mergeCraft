@@ -1,0 +1,19 @@
+{
+  "id": "jev-align-n5-weaker-first",
+  "pack_id": "align/v1",
+  "title": "Weaker paraphrase arriving first must not lower severity",
+  "shipped_defect": {
+    "kind": "pr",
+    "ref": "#711",
+    "citation": "audit r2 N5 / PR #711: cluster canonicalization and semantic dedupe keep the strongest severity"
+  },
+  "pair": {
+    "first": { "severity": "Minor", "message": "duplicate finding, weaker copy" },
+    "second": { "severity": "Critical", "message": "same defect, stronger copy" }
+  },
+  "expected": {
+    "same_defect": "same",
+    "kept_severity": "Critical"
+  },
+  "calibrates": ["align/v1.same_defect"]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "jev-lens-privilege-drop-not-generic-security",
+  "pack_id": "lens/v1",
+  "title": "Privilege-drop ordering, not generic security",
+  "shipped_defect": {
+    "kind": "shipped-twice",
+    "ref": "privilege-drop-ordering lens",
+    "citation": "src/mergecraft/agents/lenses/_definitions.py: generic security misses privileged-then-dropped EACCES"
+  },
+  "expected": {
+    "selected": ["privilege-drop-ordering"],
+    "not_sufficient_alone": ["security"]
+  },
+  "calibrates": ["lens/v1.privilege-drop-ordering"]
+}
