@@ -209,6 +209,7 @@ class GatesSettings(BaseModel):
     gate_action: GateMode = "shadow"
     thermostat: GateMode = "shadow"
     terminal_verdict: GateMode = "enforce"
+    jev: GateMode = "shadow"
     override: dict[str, str] = Field(default_factory=dict)
 
 
@@ -580,8 +581,8 @@ class JevSettings(BaseModel):
     """Opt-in Jev / System One block. Off by default (D4, D8).
 
     No credential, no config, and the default ``enabled: false`` change no
-    review behaviour and make no network call. Thresholds stay empty until
-    J3 sets them from the eval corpus (D15).
+    review behaviour and make no network call. Thresholds default to the
+    J1-calibrated ``unit/v1`` floors (D15).
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -594,7 +595,11 @@ class JevSettings(BaseModel):
         gt=0,
     )
     packs: dict[str, bool] = Field(default_factory=_default_jev_packs)
-    thresholds: dict[str, float] = Field(default_factory=dict)
+    # D15 — floors recorded beside pack ``unit/v1`` and the J1 unit corpus rows.
+    # Source of truth for corpus ids is ``jev.policy.iter_thresholds``.
+    thresholds: dict[str, float] = Field(
+        default_factory=lambda: {"unit/v1.certain": 0.9, "unit/v1.likely": 0.6}
+    )
 
     @field_validator("model")
     @classmethod

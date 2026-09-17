@@ -9,6 +9,11 @@ Exports:
     ScoreAnswer: Ordered score with confidence, legend, and probabilities.
     SystemOneResponse: Parsed ``system_one`` body.
     JevCallResult: One client call outcome, including honest skips.
+    HunkUnit: One hunk-shaped review unit (D2).
+    UnitAssessment: Parsed ``unit/v1`` battery.
+    PolicyVerdict: Prior or incoming ratchet verdict.
+    JevPrediction: Shadow prediction; never skip or suppress.
+    JevThreshold: Pack-versioned floor with corpus row ids.
     TransportHttp: Recorded HTTP envelope.
     TransportError: Recorded TypeSafe error object.
     TransportEnvelope: Recorded transport fixture payload.
@@ -68,8 +73,8 @@ class ScoreAnswer(BaseModel):
 
     score: float
     confidence: float
-    legend: dict[str, str] = Field(default_factory=dict)
-    probabilities: dict[str, float] = Field(default_factory=dict)
+    legend: dict[int, str] = Field(default_factory=dict)
+    probabilities: dict[int, float] = Field(default_factory=dict)
 
 
 JevAnswer = ChoiceAnswer | ScoreAnswer | NoulAnswer
@@ -84,6 +89,102 @@ class SystemOneResponse(BaseModel):
     model: str
     usage: Usage = Field(default_factory=Usage)
     answers: dict[str, JevAnswer] = Field(default_factory=dict)
+
+
+UNIT_PACK_ID: Final[str] = "unit/v1"
+CERTAIN_CONFIDENCE_FLOOR: Final[float] = 0.9
+LIKELY_CONFIDENCE_FLOOR: Final[float] = 0.6
+UNIT_THRESHOLD_CORPUS_IDS: Final[tuple[str, ...]] = (
+    "jev-unit-privilege-drop-home",
+    "jev-unit-auth-stem-author",
+    "jev-unit-mcp-config-root",
+)
+
+SEVERITY_BY_SCORE: Final[dict[int, str]] = {
+    0: "Trivial",
+    1: "Minor",
+    2: "Major",
+    3: "Critical",
+}
+
+TriageChoice = Literal["clean", "suspicious", "defective"]
+TrustTierName = Literal["trusted", "untrusted"]
+
+
+class HunkUnit(BaseModel):
+    """One hunk-shaped review unit (D2). Function units are out of scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["hunk"] = "hunk"
+    path: str
+    content: str
+    context_lines: int
+    unit_id: str
+    start_line: int
+    end_line: int
+
+
+class UnitAssessment(BaseModel):
+    """Parsed ``unit/v1`` battery for one hunk."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str
+    choice: str
+    confidence: float
+    severity_score: float
+    severity: str | None = None
+    pack_id: str = UNIT_PACK_ID
+    lane: str | None = None
+
+
+class PolicyVerdict(BaseModel):
+    """A prior or incoming policy verdict the ratchet compares."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    choice: str
+    confidence: float
+    severity: str
+    severity_score: float
+
+
+class JevPrediction(BaseModel):
+    """Shadow prediction for one unit. Never skip or suppress (D7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: str
+    skip_reviewer: bool = False
+    suppressed: bool = False
+    enforced: bool = False
+    choice: str
+    confidence: float
+    severity: str
+    severity_score: float
+    unit_id: str | None = None
+    pack_id: str = UNIT_PACK_ID
+    lane: str | None = None
+    discarded_deescalation: bool = False
+    concluded_clean: bool = False
+    cleared: bool = False
+    recorded: bool = False
+    trust_tier: str = "trusted"
+    outcome: str | None = None
+    diagnostic: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class JevThreshold(BaseModel):
+    """One pack-versioned threshold tied to eval-corpus rows (D15)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pack_id: str
+    value: float
+    corpus_ids: tuple[str, ...]
+    name: str | None = None
 
 
 class JevCallResult(BaseModel):
@@ -171,8 +272,8 @@ def _parse_answer(raw: dict[str, Any]) -> JevAnswer:
             {
                 "score": raw["score"],
                 "confidence": raw.get("confidence", 0.0),
-                "legend": _stringify_keys(raw.get("legend")),
-                "probabilities": _stringify_keys(raw.get("probabilities")),
+                "legend": _intify_keys(raw.get("legend")),
+                "probabilities": _intify_keys(raw.get("probabilities")),
             }
         )
     if "noul" in raw:
@@ -180,25 +281,40 @@ def _parse_answer(raw: dict[str, Any]) -> JevAnswer:
     raise JevError("unrecognized answer shape", code="invalid_response")
 
 
-def _stringify_keys(value: object) -> dict[str, Any]:
+def _intify_keys(value: object) -> dict[int, Any]:
     if not isinstance(value, dict):
         return {}
-    return {str(key): item for key, item in value.items()}
+    converted: dict[int, Any] = {}
+    for key, item in value.items():
+        converted[int(key)] = item
+    return converted
 
 
 __all__ = [
+    "CERTAIN_CONFIDENCE_FLOOR",
+    "LIKELY_CONFIDENCE_FLOOR",
     "PINNED_MODEL",
+    "SEVERITY_BY_SCORE",
+    "UNIT_PACK_ID",
+    "UNIT_THRESHOLD_CORPUS_IDS",
     "ChoiceAnswer",
+    "HunkUnit",
     "JevAnswer",
     "JevCallResult",
     "JevError",
+    "JevPrediction",
     "JevSkipReason",
+    "JevThreshold",
     "NoulAnswer",
+    "PolicyVerdict",
     "ScoreAnswer",
     "SystemOneResponse",
     "TransportEnvelope",
     "TransportError",
     "TransportHttp",
+    "TriageChoice",
+    "TrustTierName",
+    "UnitAssessment",
     "Usage",
     "parse_system_one_response",
 ]
