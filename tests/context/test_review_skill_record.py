@@ -36,6 +36,14 @@ _TRUSTED_CAP_SECONDARY_REF_BODY = "TRUSTED_CAP_SECONDARY_REFERENCE_BODY_UNIQUE_T
 # pops the last review_block. Verified on 7adb3fac: 720 drops the
 # secondary+ref, 896 keeps both.
 _TRUSTED_TIGHT_CAP = 720
+_SOLE_OVERSIZE_PREFIX = "SOLE_OVERSIZE_PRIORITY_SKILL_PREFIX_UNIQUE_TOKEN"
+# Body alone exceeds this small valid instructionBundleByteCap. After
+# _Budget.take reserves the truncation marker inside the limit, the sole
+# review skill stays injected (12ba1ec8). On 8380c7e3 the marker was appended
+# after taking ``limit`` bytes and the final cap loop popped the only
+# review_block. Verified: 512 keeps heading + prefix; 400 keeps heading only.
+_SOLE_OVERSIZE_CAP = 512
+_SOLE_OVERSIZE_BODY = f"{_SOLE_OVERSIZE_PREFIX}\n" + ("X" * 4000)
 
 
 def test_record_lists_injected_skills_not_discovered_ones(tmp_path: Path) -> None:
@@ -202,6 +210,42 @@ def test_untrusted_tight_cap_dropped_skill_is_not_recorded_as_injected(
     )
     assert _SKILL_REL not in block
     assert "Review skills (injected):" not in block
+
+
+def test_sole_oversized_priority_skill_is_truncated_and_retained(
+    tmp_path: Path,
+) -> None:
+    """A sole oversized review skill must be truncated and kept, not dropped.
+
+    Calls the real loader against a one-skill fixture repo (D14). No other
+    instruction files. The skill body alone exceeds the tight cap; the
+    assembled prompt must still name the skill, stay inside the cap, and
+    record a review-skill truncation — not move the path to ``dropped``.
+    """
+    assert len(_SOLE_OVERSIZE_BODY.encode("utf-8")) > _SOLE_OVERSIZE_CAP
+    repo = tmp_path / "repo"
+    sha = init_repo_with_skill(repo, body=f"{_SOLE_OVERSIZE_BODY}\n")
+
+    prompt, record = assemble_review_instruction_bundle(
+        repo_root=repo,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha=sha,
+        byte_cap=_SOLE_OVERSIZE_CAP,
+    )
+    heading = f"### `{_SKILL_REL}`"
+    assert heading in prompt
+    assert _SOLE_OVERSIZE_PREFIX in prompt
+    assert len(prompt.encode("utf-8")) <= _SOLE_OVERSIZE_CAP
+    assert any(
+        "review skill" in limitation and "truncated" in limitation
+        for limitation in getattr(record, "limitations", ())
+    )
+
+    injected = _injected_paths(record)
+    dropped = list(getattr(record, "dropped", ()))
+    assert _SKILL_REL in injected
+    assert _SKILL_REL not in dropped
 
 
 def test_skill_discovered_but_dropped_by_the_cap_is_not_recorded_as_applied(tmp_path: Path) -> None:
