@@ -70,6 +70,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # (non-root) is unaffected.
 ENV IS_SANDBOX=1
 
+# Official python:3.14-slim-bookworm last rebuilt 2026-09-01 still ships
+# libpcre2-8-0 10.42-1. Debian DLA-4772-1 / bookworm-security has the
+# HIGH fixes (CVE-2026-86145, CVE-2026-89157, CVE-2026-89161).
 RUN apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
         ca-certificates \
@@ -78,6 +81,7 @@ RUN apt-get update -qq \
         iproute2 \
         iptables \
         jq \
+        libpcre2-8-0=10.42-1+deb12u1 \
         openssh-client \
         procps \
         sudo \
