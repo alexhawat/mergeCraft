@@ -40,7 +40,11 @@ _ALLOWED_VERDICTS = frozenset({"approve", "request_changes"})
 _ALLOWED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary", "findings"})
 _REQUIRED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary"})
 _REVIEW_MODES = frozenset({"Review", "IncrementalReview"})
-_SCOPE_PROVENANCE = frozenset({"api", "checkout", "local-diff", "commit-info"})
+# N3 / D10 — ``commit-info`` is deliberately absent. ``get_commit_info`` is a
+# REPOSITORY_READ and may not register review scope, so no caller can name that
+# provenance. The three remaining values are the paths that legitimately
+# materialize a canonical review diff.
+_SCOPE_PROVENANCE = frozenset({"api", "checkout", "local-diff"})
 _UNIFIED_DIFF_MARKERS = ("diff --git", "--- a/", "+++ b/")
 
 REJECTION_INVALID_VERDICT = "invalid_verdict"
@@ -207,7 +211,7 @@ def register_review_scope(
     tool_state: ToolState,
     *,
     diff_path: str,
-    provenance: Literal["api", "checkout", "local-diff", "commit-info"],
+    provenance: Literal["api", "checkout", "local-diff"],
     review_scope: str | None = None,
 ) -> None:
     """Record evidence-backed review scope and advance past ``INIT`` (D4)."""
@@ -315,8 +319,9 @@ def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> N
     """Raise when a Review-mode terminal tool runs before review scope exists (D10).
 
     Scope is evidence-backed (D4) and may be established by ``checkout_pr``,
-    :func:`establish_review_scope`, :func:`establish_offline_review_scope`, or
-    ``get_commit_info`` when its SHA equals the PR head.
+    :func:`establish_review_scope`, or :func:`establish_offline_review_scope`.
+    ``get_commit_info`` may not establish scope (N3 / D10) — it is a
+    ``REPOSITORY_READ`` and its patch is an inspection artifact only.
     """
     mode = tool_state.selected_mode
     if mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT:
