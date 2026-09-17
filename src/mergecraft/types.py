@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 # ── agent / MCP ───────────────────────────────────────────────────────────────
 
@@ -42,38 +42,8 @@ def format_mcp_tool_ref(agent_id: AgentId, tool_name: str) -> str:
 
 # ── tool / runtime permissions ────────────────────────────────────────────────
 
-ToolPermission = Literal["disabled", "enabled"]
 ShellPermission = Literal["disabled", "restricted", "enabled"]
 PushPermission = Literal["disabled", "restricted", "enabled"]
-StatusChecksPermission = Literal["disabled", "enabled"]
-
-# ── workflow.yml GITHUB_TOKEN permissions ─────────────────────────────────────
-
-WorkflowPermissionValue = Literal["read", "write", "none"]
-WorkflowIdTokenPermissionValue = Literal["write", "none"]
-
-
-class WorkflowPermissions(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    actions: WorkflowPermissionValue | None = None
-    attestations: WorkflowPermissionValue | None = None
-    checks: WorkflowPermissionValue | None = None
-    contents: WorkflowPermissionValue | None = None
-    deployments: WorkflowPermissionValue | None = None
-    discussions: WorkflowPermissionValue | None = None
-    id_token: WorkflowIdTokenPermissionValue | None = Field(default=None, alias="id-token")
-    issues: WorkflowPermissionValue | None = None
-    models: WorkflowPermissionValue | None = None
-    packages: WorkflowPermissionValue | None = None
-    pages: WorkflowPermissionValue | None = None
-    pull_requests: WorkflowPermissionValue | None = Field(default=None, alias="pull-requests")
-    repository_projects: WorkflowPermissionValue | None = Field(
-        default=None, alias="repository-projects"
-    )
-    security_events: WorkflowPermissionValue | None = Field(default=None, alias="security-events")
-    statuses: WorkflowPermissionValue | None = None
-
 
 # GitHub permission levels: admin > write > maintain > triage > read > none
 AuthorPermission = Literal["admin", "maintain", "write", "triage", "read", "none"]
