@@ -294,6 +294,24 @@ async def run_ci_intelligence(
             from mergecraft.ci.coverage import coverage_inputs_from_context
 
             diff, source_tree = coverage_inputs_from_context(ctx)
+            head_sha = next(
+                (
+                    str(run.get("head_sha") or "").strip()
+                    for run in runs
+                    if str(run.get("head_sha") or "").strip()
+                ),
+                "",
+            )
+            try:
+                listed_checks = await client.list_check_runs_for_ref(
+                    ctx.repo.owner, ctx.repo.name, head_sha
+                )
+                check_runs = list(listed_checks.items)
+            except Exception as check_err:
+                warn_ci_evidence(
+                    f"ci evidence: coverage check-run listing failed for {head_sha[:7]} — {check_err}"
+                )
+                check_runs = []
             if coverage_names:
                 from mergecraft.ci.coverage import collect_ci_coverage_findings
 
@@ -304,6 +322,7 @@ async def run_ci_intelligence(
                     artifacts=coverage_names,
                     diff=diff,
                     source_tree=source_tree,
+                    check_runs=check_runs,
                 )
                 if coverage.findings:
                     record_ci_findings(ctx.tool_state, coverage.findings)
@@ -320,6 +339,7 @@ async def run_ci_intelligence(
                     changed_functions=[(symbol.path, symbol.name) for symbol in symbols],
                     diff=diff,
                     source_tree=source_tree,
+                    check_runs=check_runs,
                 )
                 if mutation.findings:
                     record_ci_findings(ctx.tool_state, mutation.findings)
