@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.jev.support import import_jev, load_transport_body
+from tests.jev.support import (
+    TEST_API_KEY,
+    import_jev,
+    inject_recorded_jev_client,
+    load_transport_body,
+    published_review_engine,
+    write_offline_jev_repo,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _policy() -> Any:
@@ -241,3 +251,79 @@ def test_iter_thresholds_unit_floors_follow_settings(
     values = {(item.pack_id, item.name): item.value for item in _policy().iter_thresholds()}
     assert values[("unit/v1", "certain")] == 0.95
     assert values[("unit/v1", "likely")] == 0.75
+
+
+async def test_review_path_applies_config_jev_thresholds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Loaded ``.mergecraft/config.yaml`` floors must reach residual dispatch.
+
+    Guard-deletion: if ``run_offline_diff_review`` stops passing ``RepoSettings``
+    through, ``dispatch_residual_units`` / ``predict_jev_action`` see defaults
+    (0.9 / 0.6) and 0.92 buckets ``certain``.
+    """
+    from mergecraft.offline_review import run_offline_diff_review
+    from mergecraft.review.offline_result import OfflineReviewResult
+
+    monkeypatch.delenv("MERGECRAFT_CONFIG", raising=False)
+    monkeypatch.setenv("TYPESAFE_API_KEY", TEST_API_KEY)
+    repo, diff = write_offline_jev_repo(
+        tmp_path,
+        config_yaml=(
+            "push: restricted\n"
+            "shell: restricted\n"
+            "analyzers:\n"
+            "  enabled: false\n"
+            "jev:\n"
+            "  enabled: true\n"
+            "  thresholds:\n"
+            "    unit/v1.certain: 0.95\n"
+            "    unit/v1.likely: 0.75\n"
+        ),
+    )
+    inject_recorded_jev_client(monkeypatch, "unit_happy.json")
+    policy = _policy()
+    dispatched_settings: list[Any] = []
+    predicted_settings: list[Any] = []
+    original_dispatch = policy.dispatch_residual_units
+    original_predict = policy.predict_jev_action
+
+    async def _watch_dispatch(*args: Any, **kwargs: Any) -> Any:
+        dispatched_settings.append(kwargs.get("settings"))
+        return await original_dispatch(*args, **kwargs)
+
+    def _watch_predict(*args: Any, **kwargs: Any) -> Any:
+        predicted_settings.append(kwargs.get("settings"))
+        return original_predict(*args, **kwargs)
+
+    monkeypatch.setattr(policy, "dispatch_residual_units", _watch_dispatch)
+    monkeypatch.setattr(policy, "predict_jev_action", _watch_predict)
+    result = await run_offline_diff_review(
+        cwd=repo,
+        diff_file=diff,
+        dry_run=False,
+        engine=published_review_engine(
+            OfflineReviewResult(
+                success=True,
+                output="demo.py prints one.\n",
+                structured_output='{"findings": []}',
+                empty_diff=False,
+            )
+        ),
+    )
+    assert result.success is True
+    assert dispatched_settings, "shadow path must call dispatch_residual_units"
+    settings = dispatched_settings[0]
+    assert settings is not None, (
+        "run_offline_diff_review must pass loaded RepoSettings into residual dispatch"
+    )
+    assert settings.jev.thresholds["unit/v1.certain"] == 0.95
+    assert settings.jev.thresholds["unit/v1.likely"] == 0.75
+    assert predicted_settings
+    assert predicted_settings[0] is settings
+    assert policy.bucket_confidence(0.92, settings=settings) == "likely"
+    assert policy.bucket_confidence(0.95, settings=settings) == "certain"
+    assert policy.bucket_confidence(0.7499, settings=settings) == "possible"
+    floors = {(item.pack_id, item.name): item.value for item in policy.iter_thresholds(settings)}
+    assert floors[("unit/v1", "certain")] == 0.95
+    assert floors[("unit/v1", "likely")] == 0.75

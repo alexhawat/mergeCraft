@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import subprocess
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,6 +18,9 @@ from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.review_taxonomy import FindingSource
 
 PINNED_MODEL: Final[str] = "jev-1.13.0"
+OFFLINE_DEMO_PATCH: Final[str] = (
+    "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
+)
 PACK_IDS: Final[tuple[str, ...]] = (
     "unit/v1",
     "evidence/v1",
@@ -222,6 +226,85 @@ def watch_async_jev_client(monkeypatch: Any) -> list[Any]:
     if getattr(offline_mod, "AsyncJevClient", None) is not None:
         monkeypatch.setattr(offline_mod, "AsyncJevClient", WatchedAsyncJevClient)
     return seen
+
+
+class StateRecordingTransport:
+    """Replay a recorded envelope while capturing each ``system_one`` state."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.states: list[dict[str, Any]] = []
+
+    async def system_one(
+        self,
+        *,
+        state: dict[str, Any],
+        questions: dict[str, Any],
+        model: str,
+    ) -> Any:
+        self.states.append(dict(state))
+        return await self._inner.system_one(state=state, questions=questions, model=model)
+
+    @property
+    def calls(self) -> int:
+        return int(self._inner.calls)
+
+    @property
+    def last_model(self) -> str | None:
+        return self._inner.last_model
+
+
+def inject_recorded_jev_client(monkeypatch: Any, fixture_name: str) -> StateRecordingTransport:
+    """Force review-path ``AsyncJevClient`` construction onto a recorded transport (D14)."""
+    client_mod = import_jev("client")
+    original = client_mod.AsyncJevClient
+    inner = client_mod.RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
+    transport = StateRecordingTransport(inner)
+
+    class InjectedAsyncJevClient(original):  # type: ignore[misc,valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(client_mod, "AsyncJevClient", InjectedAsyncJevClient)
+    package = import_jev()
+    monkeypatch.setattr(package, "AsyncJevClient", InjectedAsyncJevClient)
+    import mergecraft.offline_review as offline_mod
+
+    monkeypatch.setattr(offline_mod, "AsyncJevClient", InjectedAsyncJevClient)
+    return transport
+
+
+def write_offline_jev_repo(
+    tmp_path: Path,
+    *,
+    config_yaml: str,
+    patch: str = OFFLINE_DEMO_PATCH,
+) -> tuple[Path, Path]:
+    """Create a tmp git repo with ``.mergecraft/config.yaml`` and a patch file."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    config_dir = repo / ".mergecraft"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(config_yaml, encoding="utf-8")
+    diff = tmp_path / "change.diff"
+    diff.write_text(patch, encoding="utf-8")
+    return repo, diff
+
+
+def published_review_engine(published: Any) -> Any:
+    """Materialize the diff, then return a canned successful review (no live agent)."""
+    from mergecraft.review.engine import ReviewEngine
+
+    class PublishedReviewEngine(ReviewEngine):  # type: ignore[type-arg]
+        async def run(self, driver: Any, /, **kwargs: Any) -> Any:
+            del kwargs
+            self._ran.clear()
+            await driver.materialize()
+            return self.result(published)
+
+    return PublishedReviewEngine()
 
 
 def assert_honest_skip(

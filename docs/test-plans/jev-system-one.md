@@ -143,3 +143,14 @@ skip/dispatch wiring stay RED until the executor lands J6-wire.
 | **F-DISPATCH-NO-SHADOW** | `dispatch_residual_units` calls `record_jev_prediction`. Removing that call fails the test. | `test_dispatch.py::test_dispatch_residual_units_calls_record_jev_prediction` |
 
 Skip observability is `JevCallResult.reason` / `skipped`, `OfflineReviewResult.jev_skip_reason` (if added), or the existing client log `jev skip reason=credential_absent` — not a substring in a question dict. CI still makes zero live TypeSafe calls (D14).
+
+## PR #728 review Majors (2026-09-17)
+
+Guard-deletion regressions for `34662a84`. Ordinary assertions (no xfail). They
+must fail if the product fix is reverted.
+
+| Finding | Contract | Test(s) |
+| --- | --- | --- |
+| **F-AGENT-JUDGE** | A review whose only finding is agent-authored reaches `run_parallel_judge` / the shadow evidence pack. Analyzer-residual-only (`findings_from_analyzer_run`) drops the row. | `test_review_wire.py::test_agent_only_finding_reaches_shadow_judge` |
+| **F-OUTAGE-SKIP** | Shadow `TypeSafeAPIError` 429 (`rate_limited`) and 500 (`server_error`) record a skip (`jev_skip_reason` or `jev skip reason=`) and leave the review `success=True`. Recorded envelopes: `fixtures/transport/typesafe_429.json`, `typesafe_500.json`. | `test_review_wire.py::test_typesafe_outage_is_recorded_skip_review_stays_successful` |
+| **F-CONFIG-THRESHOLDS** | `jev.thresholds` from a real `.mergecraft/config.yaml` (not `default_settings()` monkeypatch) reach `dispatch_residual_units` / `predict_jev_action` / `bucket_confidence` via `run_offline_diff_review`. Non-default `unit/v1.certain=0.95` / `unit/v1.likely=0.75` move 0.92 to `likely`. | `test_policy.py::test_review_path_applies_config_jev_thresholds` |
