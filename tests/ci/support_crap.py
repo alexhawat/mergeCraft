@@ -1,8 +1,6 @@
 """Shared helpers and C0-pinned tokens for the CRAP / mutation evidence suite.
 
-Imports of not-yet-written ``mergecraft.ci.*`` modules stay inside helpers so
-collection succeeds (C1 RED). Skip reasons and run notes are the C0 tokens,
-not English sentences.
+Skip reasons and run notes are the C0 tokens, not English sentences.
 """
 
 from __future__ import annotations
@@ -14,23 +12,11 @@ from pathlib import Path
 from typing import Any, Final
 from zipfile import ZipFile
 
-import pytest
-
 from mergecraft.analyzers.finding import Finding
 from mergecraft.evidence.packet import (
     PACKET_SCHEMA_VERSION,
     AgentMetadata,
     MergeEvidencePacket,
-)
-
-C2_XFAIL = pytest.mark.xfail(
-    reason="green after C2: coverage ingest and CRAP",
-    strict=False,
-)
-C3_XFAIL = pytest.mark.xfail(reason="green after C3: mutation ingest", strict=False)
-C4_XFAIL = pytest.mark.xfail(
-    reason="green after C4: local CLI coverage and mutation",
-    strict=False,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

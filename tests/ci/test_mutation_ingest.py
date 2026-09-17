@@ -14,7 +14,6 @@ from mergecraft.modes import compute_modes
 from mergecraft.scm.types import ListedItems
 from mergecraft.utils.github import GitHubClient
 from tests.ci.support_crap import (
-    C3_XFAIL,
     CRAP_FIXTURES,
     REPO_ROOT,
     SKIP_UNSUPPORTED_MUTATION_FORMAT,
@@ -88,7 +87,6 @@ def test_makefile_still_has_mutation_test_decisions_target() -> None:
     assert "scripts/mutate_decision_modules.py" in makefile
 
 
-@C3_XFAIL
 def test_mutmut_json_parses_survivors() -> None:
     parsed = _mutation().parse_mutmut_json(load_mutation("mutmut-survivor.json"))
     assert parsed.skip_reason is None
@@ -101,7 +99,6 @@ def test_mutmut_json_parses_survivors() -> None:
     assert parsed.total == 3
 
 
-@C3_XFAIL
 def test_stryker_json_parses_survivors() -> None:
     parsed = _mutation().parse_stryker_json(load_mutation("stryker-survivor.json"))
     assert parsed.skip_reason is None
@@ -111,7 +108,6 @@ def test_stryker_json_parses_survivors() -> None:
     assert any(item.status.lower() == "survived" for item in parsed.survivors)
 
 
-@C3_XFAIL
 def test_unsupported_mutation_format_skips_with_zero_findings() -> None:
     mutation = _mutation()
     parsed = mutation.parse_mutation_artifact(
@@ -124,7 +120,6 @@ def test_unsupported_mutation_format_skips_with_zero_findings() -> None:
     assert result.skip_reason == SKIP_UNSUPPORTED_MUTATION_FORMAT
 
 
-@C3_XFAIL
 def test_survivor_on_changed_function_is_evidence() -> None:
     mutation = _mutation()
     parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
@@ -144,7 +139,6 @@ def test_survivor_on_changed_function_is_evidence() -> None:
     assert "fn_watch" in finding.message
 
 
-@C3_XFAIL
 def test_survivor_on_unchanged_function_is_not_emitted() -> None:
     mutation = _mutation()
     parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
@@ -158,7 +152,6 @@ def test_survivor_on_unchanged_function_is_not_emitted() -> None:
     assert "src/other.py" not in paths
 
 
-@C3_XFAIL
 def test_kill_and_escape_rate() -> None:
     mutation = _mutation()
     assert mutation.kill_rate(killed=9, total=10) == pytest.approx(0.9)
@@ -167,7 +160,6 @@ def test_kill_and_escape_rate() -> None:
     assert mutation.escape_rate(killed=0, total=0) is None
 
 
-@C3_XFAIL
 def test_survivor_threshold_zero_emits_any_changed_survivor() -> None:
     mutation = _mutation()
     parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
@@ -181,7 +173,6 @@ def test_survivor_threshold_zero_emits_any_changed_survivor() -> None:
     assert len(result.findings) == 1
 
 
-@C3_XFAIL
 def test_survivor_threshold_two_suppresses_single_survivor() -> None:
     mutation = _mutation()
     parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
@@ -195,7 +186,6 @@ def test_survivor_threshold_two_suppresses_single_survivor() -> None:
     assert result.findings == []
 
 
-@C3_XFAIL
 def test_shadow_mutation_does_not_reach_has_blockers() -> None:
     mutation = _mutation()
     parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
@@ -210,7 +200,6 @@ def test_shadow_mutation_does_not_reach_has_blockers() -> None:
     assert _packet_has_blockers(packet_with_findings(result.findings)) is False
 
 
-@C3_XFAIL
 def test_mutation_ingest_does_not_import_internal_harness() -> None:
     import sys
 
@@ -219,7 +208,6 @@ def test_mutation_ingest_does_not_import_internal_harness() -> None:
     assert loaded == []
 
 
-@C3_XFAIL
 @pytest.mark.asyncio
 async def test_undeclared_mutation_makes_no_api_call(tmp_path: Path) -> None:
     github = _ArtifactGitHub(artifacts=[], archives={})
@@ -236,7 +224,6 @@ async def test_undeclared_mutation_makes_no_api_call(tmp_path: Path) -> None:
     assert github.download_calls == 0
 
 
-@C3_XFAIL
 @pytest.mark.asyncio
 async def test_declared_failed_mutation_check_emits_finding_never_substitution(
     tmp_path: Path,
@@ -262,7 +249,6 @@ async def test_declared_failed_mutation_check_emits_finding_never_substitution(
     assert result.substitutions == []
 
 
-@C3_XFAIL
 @pytest.mark.asyncio
 async def test_declared_successful_mutmut_artifact_attributes_survivor(
     tmp_path: Path,

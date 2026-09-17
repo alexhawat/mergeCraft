@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.ci.support_crap import (
-    C4_XFAIL,
     DEFAULT_MAX_MUTANTS,
     DEFAULT_TIMEOUT_SECONDS,
     SKIP_NO_SANDBOX_BACKEND,
@@ -62,7 +61,6 @@ def diff_file(tmp_path: Path) -> Path:
     return path
 
 
-@C4_XFAIL
 def test_review_help_documents_coverage_and_mutation_flags() -> None:
     result = runner.invoke(
         app,
@@ -75,7 +73,6 @@ def test_review_help_documents_coverage_and_mutation_flags() -> None:
     assert "--with-mutation" in out
 
 
-@C4_XFAIL
 def test_review_forwards_with_coverage_and_with_mutation(
     captured_kwargs: dict[str, Any], diff_file: Path
 ) -> None:
@@ -95,7 +92,6 @@ def test_review_forwards_with_coverage_and_with_mutation(
     assert captured_kwargs["with_mutation"] is True
 
 
-@C4_XFAIL
 def test_untrusted_tier_refuses_local_coverage() -> None:
     local = _local()
     with pytest.raises(local.LocalEvidenceRefused) as exc_info:
@@ -106,7 +102,6 @@ def test_untrusted_tier_refuses_local_coverage() -> None:
     assert exc_info.value.code == SKIP_UNTRUSTED_TIER
 
 
-@C4_XFAIL
 def test_no_sandbox_backend_refuses_local_mutation() -> None:
     local = _local()
     with pytest.raises(local.LocalEvidenceRefused) as exc_info:
@@ -117,7 +112,6 @@ def test_no_sandbox_backend_refuses_local_mutation() -> None:
     assert exc_info.value.code == SKIP_NO_SANDBOX_BACKEND
 
 
-@C4_XFAIL
 def test_unsandboxed_shell_env_does_not_fail_open(monkeypatch: pytest.MonkeyPatch) -> None:
     """C-D7 / #593: this plan refuses rather than inheriting fail-open."""
     monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
@@ -130,7 +124,6 @@ def test_unsandboxed_shell_env_does_not_fail_open(monkeypatch: pytest.MonkeyPatc
     assert exc_info.value.code == SKIP_NO_SANDBOX_BACKEND
 
 
-@C4_XFAIL
 def test_run_local_coverage_does_not_execute_on_untrusted_tier(tmp_path: Path) -> None:
     local = _local()
     result = local.run_local_coverage(
@@ -144,7 +137,6 @@ def test_run_local_coverage_does_not_execute_on_untrusted_tier(tmp_path: Path) -
     assert result.findings == []
 
 
-@C4_XFAIL
 def test_run_local_mutation_does_not_execute_without_sandbox(tmp_path: Path) -> None:
     local = _local()
     result = local.run_local_mutation(
@@ -158,7 +150,6 @@ def test_run_local_mutation_does_not_execute_without_sandbox(tmp_path: Path) -> 
     assert result.findings == []
 
 
-@C4_XFAIL
 def test_review_with_coverage_refuses_untrusted_cli(
     captured_kwargs: dict[str, Any], diff_file: Path
 ) -> None:
@@ -178,7 +169,6 @@ def test_review_with_coverage_refuses_untrusted_cli(
     assert captured_kwargs.get("with_coverage") in {True, None}
 
 
-@C4_XFAIL
 def test_empty_path_allowlist_uses_changed_paths_only() -> None:
     local = _local()
     planned = local.plan_local_mutation_paths(
@@ -191,7 +181,6 @@ def test_empty_path_allowlist_uses_changed_paths_only() -> None:
     assert "tests/test_a.py" not in planned
 
 
-@C4_XFAIL
 def test_path_allowlist_intersects_changed_paths() -> None:
     local = _local()
     planned = local.plan_local_mutation_paths(
@@ -202,7 +191,6 @@ def test_path_allowlist_intersects_changed_paths() -> None:
     assert planned == ["src/a.py"] or set(planned) == {"src/a.py"}
 
 
-@C4_XFAIL
 def test_max_mutants_bound_is_enforced() -> None:
     local = _local()
     bounded = local.bound_mutants(list(range(200)), max_mutants=DEFAULT_MAX_MUTANTS)
@@ -210,7 +198,6 @@ def test_max_mutants_bound_is_enforced() -> None:
     assert DEFAULT_MAX_MUTANTS == 50
 
 
-@C4_XFAIL
 def test_timeout_seconds_default_is_300() -> None:
     from mergecraft.config.settings import default_settings
 
@@ -219,7 +206,6 @@ def test_timeout_seconds_default_is_300() -> None:
     assert settings.coverage.timeout_seconds == DEFAULT_TIMEOUT_SECONDS
 
 
-@C4_XFAIL
 def test_local_coverage_findings_are_analyzer_source(tmp_path: Path) -> None:
     local = _local()
     artifact = tmp_path / "coverage.json"
@@ -237,7 +223,6 @@ def test_local_coverage_findings_are_analyzer_source(tmp_path: Path) -> None:
     assert all(item.source == "analyzer" for item in result.findings)
 
 
-@C4_XFAIL
 def test_absent_toolchain_is_honest_skip_not_silent_pass(tmp_path: Path) -> None:
     local = _local()
     result = local.run_local_coverage(
@@ -252,7 +237,6 @@ def test_absent_toolchain_is_honest_skip_not_silent_pass(tmp_path: Path) -> None
     assert result.findings == []
 
 
-@C4_XFAIL
 def test_local_mutation_findings_are_analyzer_source(tmp_path: Path) -> None:
     local = _local()
     artifact = tmp_path / "mutmut-survivor.json"

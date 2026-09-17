@@ -12,17 +12,22 @@ fail-open. A surviving mutant is evidence of a weak test; zero survivors is not 
 
 Cross-wave markers are `strict=False`. Never `strict=True`.
 
-| Marker | Greening wave | What it covers |
-| --- | --- | --- |
-| `C2_XFAIL` | C2 | Coverage parsers, CRAP arithmetic, changed-function resolution, declared ingest, shadow, config `coverage` / `coverageArtifacts`, run notes |
-| `C3_XFAIL` | C3 | Mutation parsers, survivor attribution, kill/escape rate, `mutation` / `mutationArtifacts`, harness isolation |
-| `C4_XFAIL` | C4 | CLI `--with-coverage` / `--with-mutation`, bounds, untrusted / no-sandbox refusal, `source="analyzer"` |
+C2–C4 xfails were **removed** in post-impl reconciliation after C4 tip
+`c1d9ded0` (this commit). No `C2_XFAIL` / `C3_XFAIL` / `C4_XFAIL` markers
+remain. Do not re-add them.
 
-Green now (no xfail): FindingSource pin, unknown `coverage:` key rejected,
+| Marker | Greening wave | Status |
+| --- | --- | --- |
+| `C2_XFAIL` | C2 | **Green** — coverage parsers, CRAP, changed-function resolution, declared ingest, shadow, config |
+| `C3_XFAIL` | C3 | **Green** — mutation parsers, survivor attribution, kill/escape rate, harness isolation |
+| `C4_XFAIL` | C4 | **Green** — CLI `--with-coverage` / `--with-mutation`, bounds, untrusted / no-sandbox refusal |
+
+Still green without xfail (C1 pins): FindingSource, unknown `coverage:` key,
 internal harness existence, Makefile target, this file's C-D10 sentence.
 
-Collected suite: **90** tests — **5** passed, **85** xfailed (`strict=False`).
-Split: **54** C2 / **15** C3 / **16** C4.
+Collected suite (post-reconciliation): **91** tests expected pass,
+**0** xfail / xpass. Split: **54** C2 / **15** C3 / **16** C4 / **5** C1-green
+/ **1** C2–C4 deliverable-symbol export.
 
 ## Contract matrix
 
@@ -99,9 +104,16 @@ Split: **54** C2 / **15** C3 / **16** C4.
 | `parse_mutmut_json` / `parse_stryker_json` / `parse_mutation_artifact` | `ci/mutation.py` | `test_mutation_ingest.py` |
 | `mutation_findings` / `collect_ci_mutation_findings` | `ci/mutation.py` | `test_mutation_ingest.py` |
 | `kill_rate` / `escape_rate` | `ci/mutation.py` | `test_mutation_ingest.py` |
+| `CrapBands` | `ci/crap.py` | `test_coverage_mutation_settings.py::test_c2_c4_deliverable_symbol_export` |
+| `ChangedFunction` | `ci/changed_functions.py` | `…::test_c2_c4_deliverable_symbol_export` |
 | `CoverageSettings` / `CoverageBandSettings` | `config/settings.py` | `test_coverage_mutation_settings.py` |
+| `CoverageFunction` / `ParsedCoverage` / `CoverageIngestResult` | `ci/coverage.py` | `…::test_c2_c4_deliverable_symbol_export` |
+| `complexity_from_source` / `coverage_inputs_from_context` | `ci/coverage.py` | `…::test_c2_c4_deliverable_symbol_export` |
+| `ci_coverage_artifacts` / `ci_mutation_artifacts` | `mcp/context.py` | `…::test_c2_c4_deliverable_symbol_export` |
+| `MutationSurvivor` / `ParsedMutation` / `MutationIngestResult` | `ci/mutation.py` | `…::test_c2_c4_deliverable_symbol_export` |
 | `MutationSettings` | `config/settings.py` | `test_coverage_mutation_settings.py` |
 | `CiEvidenceSettings.coverage_artifacts` / `mutation_artifacts` | `config/settings.py` | `test_coverage_mutation_settings.py` |
+| `LocalEvidenceResult` | `ci/local_evidence.py` | `…::test_c2_c4_deliverable_symbol_export` |
 | `require_trusted_sandboxed_execution` / `LocalEvidenceRefused` | `ci/local_evidence.py` | `test_review_coverage_mutation.py` |
 | `run_local_coverage` / `run_local_mutation` | `ci/local_evidence.py` | `test_review_coverage_mutation.py` |
 | `plan_local_mutation_paths` / `bound_mutants` | `ci/local_evidence.py` | `test_review_coverage_mutation.py` |

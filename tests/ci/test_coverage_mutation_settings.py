@@ -9,9 +9,6 @@ from pydantic import ValidationError
 
 from mergecraft.review_taxonomy import FindingSource
 from tests.ci.support_crap import (
-    C2_XFAIL,
-    C3_XFAIL,
-    C4_XFAIL,
     C_D10_NOT_PROOF,
     C_D10_WEAK_TEST,
     DEFAULT_BANDS,
@@ -45,7 +42,6 @@ def test_docs_state_what_green_does_not_prove() -> None:
     assert C_D10_NOT_PROOF in text
 
 
-@C2_XFAIL
 def test_default_coverage_artifacts_empty_and_mode_shadow() -> None:
     from mergecraft.config.settings import default_settings
 
@@ -58,7 +54,6 @@ def test_default_coverage_artifacts_empty_and_mode_shadow() -> None:
     assert settings.coverage.bands.severe == DEFAULT_BANDS["severe"]
 
 
-@C3_XFAIL
 def test_default_mutation_artifacts_empty_mode_shadow_threshold_zero() -> None:
     from mergecraft.config.settings import default_settings
 
@@ -68,7 +63,6 @@ def test_default_mutation_artifacts_empty_mode_shadow_threshold_zero() -> None:
     assert settings.mutation.survivor_threshold == DEFAULT_SURVIVOR_THRESHOLD
 
 
-@C4_XFAIL
 def test_default_cli_bounds() -> None:
     from mergecraft.config.settings import default_settings
 
@@ -79,7 +73,6 @@ def test_default_cli_bounds() -> None:
     assert settings.coverage.timeout_seconds == DEFAULT_TIMEOUT_SECONDS
 
 
-@C2_XFAIL
 def test_absent_config_file_still_has_empty_coverage_artifacts(tmp_path: Path) -> None:
     from mergecraft.config.settings import load_repo_settings
 
@@ -88,7 +81,6 @@ def test_absent_config_file_still_has_empty_coverage_artifacts(tmp_path: Path) -
     assert settings.coverage.mode == "shadow"
 
 
-@C2_XFAIL
 def test_consumer_coverage_yaml_overrides_default_bands(tmp_path: Path) -> None:
     from mergecraft.config.settings import load_repo_settings
 
@@ -115,7 +107,6 @@ def test_consumer_coverage_yaml_overrides_default_bands(tmp_path: Path) -> None:
     assert settings.coverage.mode == "shadow"
 
 
-@C3_XFAIL
 def test_consumer_mutation_yaml_overrides_survivor_threshold(tmp_path: Path) -> None:
     from mergecraft.config.settings import load_repo_settings
 
@@ -148,3 +139,41 @@ def test_unknown_coverage_key_is_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(ValidationError):
         load_repo_settings(root=tmp_path, load_learnings_files=False)
+
+
+def test_c2_c4_deliverable_symbol_export() -> None:
+    """Direct name pins for C2-C4 deliverable types (verifier check 3)."""
+    from mergecraft.ci.changed_functions import ChangedFunction
+    from mergecraft.ci.coverage import (
+        CoverageFunction,
+        CoverageIngestResult,
+        ParsedCoverage,
+        complexity_from_source,
+        coverage_inputs_from_context,
+    )
+    from mergecraft.ci.crap import CrapBands
+    from mergecraft.ci.local_evidence import LocalEvidenceResult
+    from mergecraft.ci.mutation import MutationIngestResult, MutationSurvivor, ParsedMutation
+    from mergecraft.config.settings import (
+        CoverageBandSettings,
+        CoverageSettings,
+        MutationSettings,
+    )
+    from mergecraft.mcp.context import ToolContext
+
+    assert CrapBands.__name__ == "CrapBands"
+    assert ChangedFunction.__name__ == "ChangedFunction"
+    assert CoverageSettings.__name__ == "CoverageSettings"
+    assert CoverageBandSettings.__name__ == "CoverageBandSettings"
+    assert CoverageFunction.__name__ == "CoverageFunction"
+    assert ParsedCoverage.__name__ == "ParsedCoverage"
+    assert CoverageIngestResult.__name__ == "CoverageIngestResult"
+    assert callable(complexity_from_source)
+    assert callable(coverage_inputs_from_context)
+    assert "ci_coverage_artifacts" in ToolContext.__dataclass_fields__
+    assert MutationSurvivor.__name__ == "MutationSurvivor"
+    assert ParsedMutation.__name__ == "ParsedMutation"
+    assert MutationIngestResult.__name__ == "MutationIngestResult"
+    assert MutationSettings.__name__ == "MutationSettings"
+    assert "ci_mutation_artifacts" in ToolContext.__dataclass_fields__
+    assert LocalEvidenceResult.__name__ == "LocalEvidenceResult"

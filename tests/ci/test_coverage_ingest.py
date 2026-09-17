@@ -15,7 +15,6 @@ from mergecraft.modes import compute_modes
 from mergecraft.scm.types import ListedItems
 from mergecraft.utils.github import GitHubClient
 from tests.ci.support_crap import (
-    C2_XFAIL,
     CRAP_FIXTURES,
     NOTE_COVERAGE_CLEAN,
     NOTE_COVERAGE_CONSUMER_BANDS,
@@ -107,7 +106,6 @@ def _watch_findings(**kwargs: Any) -> Any:
     )
 
 
-@C2_XFAIL
 def test_coverage_py_json_with_function_records() -> None:
     parsed = _coverage().parse_coverage_py_json(load_format("coverage.py.json"))
     assert parsed.skip_reason is None
@@ -117,14 +115,12 @@ def test_coverage_py_json_with_function_records() -> None:
     assert parsed.functions[0].path == "src/mod.py"
 
 
-@C2_XFAIL
 def test_lcov_with_function_records() -> None:
     parsed = _coverage().parse_lcov(load_format("lcov.info"))
     assert parsed.skip_reason is None
     assert [item.name for item in parsed.functions] == ["fn_watch"]
 
 
-@C2_XFAIL
 def test_cobertura_with_method_elements() -> None:
     parsed = _coverage().parse_cobertura(load_format("cobertura.xml"))
     assert parsed.skip_reason is None
@@ -133,7 +129,6 @@ def test_cobertura_with_method_elements() -> None:
     assert parsed.functions[0].coverage == pytest.approx(0.5)
 
 
-@C2_XFAIL
 def test_coverage_py_without_function_records_skips_with_zero_findings() -> None:
     coverage = _coverage()
     parsed = coverage.parse_coverage_py_json(load_format("coverage.py.nofn.json"))
@@ -144,7 +139,6 @@ def test_coverage_py_without_function_records_skips_with_zero_findings() -> None
     assert result.skip_reason == SKIP_COVERAGE_NO_FUNCTION_RECORDS
 
 
-@C2_XFAIL
 def test_lcov_without_function_records_skips_with_zero_findings() -> None:
     coverage = _coverage()
     parsed = coverage.parse_lcov(load_format("lcov.nofn.info"))
@@ -154,7 +148,6 @@ def test_lcov_without_function_records_skips_with_zero_findings() -> None:
     assert result.skip_reason == SKIP_LCOV_NO_FUNCTION_RECORDS
 
 
-@C2_XFAIL
 def test_cobertura_without_method_elements_skips_with_zero_findings() -> None:
     coverage = _coverage()
     parsed = coverage.parse_cobertura(load_format("cobertura.nofn.xml"))
@@ -164,7 +157,6 @@ def test_cobertura_without_method_elements_skips_with_zero_findings() -> None:
     assert result.skip_reason == SKIP_COBERTURA_NO_METHOD_ELEMENTS
 
 
-@C2_XFAIL
 def test_unsupported_coverage_format_skips_with_zero_findings() -> None:
     coverage = _coverage()
     parsed = coverage.parse_coverage_artifact(
@@ -177,7 +169,6 @@ def test_unsupported_coverage_format_skips_with_zero_findings() -> None:
     assert result.skip_reason == SKIP_UNSUPPORTED_COVERAGE_FORMAT
 
 
-@C2_XFAIL
 def test_parse_coverage_artifact_sniffs_each_supported_format() -> None:
     coverage = _coverage()
     py_parsed = coverage.parse_coverage_artifact(
@@ -192,7 +183,6 @@ def test_parse_coverage_artifact_sniffs_each_supported_format() -> None:
     assert [item.name for item in cob_parsed.functions] == ["fn_watch"]
 
 
-@C2_XFAIL
 def test_clean_band_does_not_emit_a_finding() -> None:
     coverage = _coverage()
     parsed = coverage.parse_coverage_py_json(load_band_coverage("clean"))
@@ -207,7 +197,6 @@ def test_clean_band_does_not_emit_a_finding() -> None:
     assert NOTE_COVERAGE_CLEAN in result.run_notes
 
 
-@C2_XFAIL
 @pytest.mark.parametrize("band", ["watch", "elevated", "crap", "severe"])
 def test_watch_and_above_emit_changed_function_finding(band: str) -> None:
     coverage = _coverage()
@@ -237,14 +226,12 @@ def test_watch_and_above_emit_changed_function_finding(band: str) -> None:
     )
 
 
-@C2_XFAIL
 def test_ingested_coverage_findings_are_ci_source() -> None:
     result = _watch_findings()
     assert result.findings
     assert all(item.source == "ci" for item in result.findings)
 
 
-@C2_XFAIL
 def test_shadow_severe_does_not_reach_has_blockers() -> None:
     coverage = _coverage()
     parsed = coverage.parse_coverage_py_json(load_band_coverage("severe"))
@@ -261,21 +248,18 @@ def test_shadow_severe_does_not_reach_has_blockers() -> None:
     assert _packet_has_blockers(packet_with_findings(result.findings)) is False
 
 
-@C2_XFAIL
 def test_default_bands_run_note() -> None:
     result = _watch_findings()
     assert NOTE_COVERAGE_DEFAULT_BANDS in result.run_notes
     assert NOTE_COVERAGE_CONSUMER_BANDS not in result.run_notes
 
 
-@C2_XFAIL
 def test_consumer_bands_run_note() -> None:
     result = _watch_findings(bands={"watch": 3, "elevated": 15, "crap": 30, "severe": 50})
     assert NOTE_COVERAGE_CONSUMER_BANDS in result.run_notes
     assert NOTE_COVERAGE_DEFAULT_BANDS not in result.run_notes
 
 
-@C2_XFAIL
 @pytest.mark.asyncio
 async def test_undeclared_coverage_makes_no_api_call(tmp_path: Path) -> None:
     github = _ArtifactGitHub(artifacts=[], archives={})
@@ -294,7 +278,6 @@ async def test_undeclared_coverage_makes_no_api_call(tmp_path: Path) -> None:
     assert github.download_calls == 0
 
 
-@C2_XFAIL
 @pytest.mark.asyncio
 async def test_declared_successful_coverage_artifact_emits_changed_function_finding(
     tmp_path: Path,
@@ -323,7 +306,6 @@ async def test_declared_successful_coverage_artifact_emits_changed_function_find
     assert NOTE_COVERAGE_UNDECLARED not in result.run_notes
 
 
-@C2_XFAIL
 @pytest.mark.asyncio
 async def test_declared_failed_coverage_check_emits_finding_never_substitution(
     tmp_path: Path,
@@ -349,7 +331,6 @@ async def test_declared_failed_coverage_check_emits_finding_never_substitution(
     assert not any(getattr(item, "status", None) == "satisfied-by-ci" for item in result.findings)
 
 
-@C2_XFAIL
 @pytest.mark.asyncio
 async def test_concurrent_same_token_coverage_ingest(tmp_path: Path) -> None:
     document = load_band_coverage("watch")

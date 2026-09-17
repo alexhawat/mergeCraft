@@ -9,7 +9,6 @@ import pytest
 
 from tests.ci.support_crap import (
     BANDS,
-    C2_XFAIL,
     DEFAULT_BANDS,
     DISPLAY_SEVERITY,
     FINDING_SEVERITY,
@@ -23,7 +22,6 @@ def _crap() -> Any:
     return import_ci("crap")
 
 
-@C2_XFAIL
 @pytest.mark.parametrize(
     ("band", "complexity", "coverage", "expected"),
     WORKED_EXAMPLES,
@@ -38,7 +36,6 @@ def test_worked_example_crap_score(
     assert load_meta(band)["crap"] == pytest.approx(expected)
 
 
-@C2_XFAIL
 @pytest.mark.parametrize(
     ("score", "band"),
     [
@@ -70,7 +67,6 @@ def test_crap_band_inclusive_lower_exclusive_upper_except_severe(score: float, b
     assert _crap().crap_band(score) == band
 
 
-@C2_XFAIL
 @pytest.mark.parametrize("band", BANDS)
 def test_display_and_finding_severity_for_each_band(band: str) -> None:
     crap = _crap()
@@ -78,7 +74,6 @@ def test_display_and_finding_severity_for_each_band(band: str) -> None:
     assert crap.crap_finding_severity(band) == FINDING_SEVERITY[band]
 
 
-@C2_XFAIL
 def test_default_bands_match_c0_table() -> None:
     bands = _crap().DEFAULT_CRAP_BANDS
     assert bands.watch == DEFAULT_BANDS["watch"]
@@ -87,7 +82,6 @@ def test_default_bands_match_c0_table() -> None:
     assert bands.severe == DEFAULT_BANDS["severe"]
 
 
-@C2_XFAIL
 def test_consumer_bands_move_a_score_across_the_watch_line() -> None:
     """C=2, cov=0.2 → CRAP≈4.048: clean under defaults, watch when watch=3."""
     crap = _crap()
@@ -98,7 +92,6 @@ def test_consumer_bands_move_a_score_across_the_watch_line() -> None:
     assert crap.crap_band(score, bands=consumer) == "watch"
 
 
-@C2_XFAIL
 def test_crap_score_rejects_complexity_below_one() -> None:
     crap = _crap()
     with pytest.raises(crap.CrapError) as exc_info:
@@ -106,7 +99,6 @@ def test_crap_score_rejects_complexity_below_one() -> None:
     assert exc_info.value.code == "invalid_complexity"
 
 
-@C2_XFAIL
 def test_crap_score_rejects_coverage_outside_unit_interval() -> None:
     crap = _crap()
     with pytest.raises(crap.CrapError) as exc_info:
@@ -117,7 +109,6 @@ def test_crap_score_rejects_coverage_outside_unit_interval() -> None:
     assert exc_info.value.code == "invalid_coverage"
 
 
-@C2_XFAIL
 def test_crap_score_rejects_none_inputs() -> None:
     crap = _crap()
     with pytest.raises(crap.CrapError) as exc_info:

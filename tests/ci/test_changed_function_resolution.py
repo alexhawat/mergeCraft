@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from tests.ci.support_crap import (
-    C2_XFAIL,
     CRAP_FIXTURES,
     SKIP_ENCLOSING_SYMBOL_UNRESOLVED,
     import_ci,
@@ -18,7 +17,6 @@ def _changed() -> Any:
     return import_ci("changed_functions")
 
 
-@C2_XFAIL
 def test_hunk_inside_function_resolves_enclosing_symbol() -> None:
     changed = _changed()
     source = load_source("watch")
@@ -29,7 +27,6 @@ def test_hunk_inside_function_resolves_enclosing_symbol() -> None:
     assert symbol.start_line == 1
 
 
-@C2_XFAIL
 def test_changed_functions_from_diff_returns_only_the_enclosing_function() -> None:
     changed = _changed()
     symbols = changed.changed_functions_from_diff(
@@ -41,7 +38,6 @@ def test_changed_functions_from_diff_returns_only_the_enclosing_function() -> No
     assert all(item.path == "src/mod.py" for item in symbols)
 
 
-@C2_XFAIL
 def test_unresolvable_hunk_emits_nothing_never_file_scope() -> None:
     """C-D4: no enclosing symbol → skip, zero findings, never a file-level score."""
     coverage = import_ci("coverage")
@@ -67,12 +63,10 @@ def test_unresolvable_hunk_emits_nothing_never_file_scope() -> None:
     assert all(getattr(item, "start_line", None) is not None for item in result.findings)
 
 
-@C2_XFAIL
 def test_empty_diff_yields_no_changed_functions() -> None:
     assert _changed().changed_functions_from_diff("", source_tree={}) == []
 
 
-@C2_XFAIL
 def test_unicode_path_survives_resolution() -> None:
     changed = _changed()
     source = "def fn_ünicode() -> int:\n    return 1\n"
