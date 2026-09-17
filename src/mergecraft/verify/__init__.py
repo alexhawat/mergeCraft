@@ -1,6 +1,8 @@
-"""Behaviour verification — versioned report contract.
+"""Behaviour verification — versioned report contract and driver seam.
 
 Exports:
+    BrowserDriver: Runtime-checkable browser protocol (Playwright-free).
+    BrowserExtraMissingError: Raised when ``mergecraft[browser]`` is absent.
     CRITERION_STATUSES: Closed per-criterion statuses.
     REPRODUCE_STATUSES: Closed reproduce-mode report statuses.
     ReportArtifacts: Screenshot, log, and nullable video/trace paths.
@@ -11,11 +13,14 @@ Exports:
     is_successful: True only for verify ``pass`` or reproduce ``reproduced``.
     load_verification_input: YAML file → ``VerificationInput``.
     render_verification_markdown: Markdown view of a report's JSON.
+    require_browser_extra: Gate that names ``mergecraft[browser]`` when missing.
     verification_report_schema: JSON Schema derived from ``VerificationReport``.
 """
 
 from __future__ import annotations
 
+from mergecraft.verify.driver import BrowserDriver
+from mergecraft.verify.extra import BrowserExtraMissingError, require_browser_extra
 from mergecraft.verify.models import (
     CRITERION_STATUSES,
     REPRODUCE_STATUSES,
@@ -35,11 +40,14 @@ __all__ = [
     "REPRODUCE_STATUSES",
     "VERIFICATION_SCHEMA_VERSION",
     "VERIFY_STATUSES",
+    "BrowserDriver",
+    "BrowserExtraMissingError",
     "ReportArtifacts",
     "VerificationInput",
     "VerificationReport",
     "is_successful",
     "load_verification_input",
     "render_verification_markdown",
+    "require_browser_extra",
     "verification_report_schema",
 ]

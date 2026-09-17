@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Optional `mergecraft[browser]` extra for Playwright-backed behaviour
+  verification; the base install and `make ci` stay browser-free (#61)
+
 - A versioned behaviour-verification report (`schema_version` 1.0.0) records
   what was observed, which criteria passed, and what blocked the run — without
   turning those results into code findings (#61)

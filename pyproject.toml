@@ -57,6 +57,11 @@ tracing = [
     "opentelemetry-exporter-otlp-proto-http==1.44.0",
     "opentelemetry-semantic-conventions==0.65b0",
 ]
+# Optional Playwright for behaviour verification. Base install unchanged.
+# Python package only — do not install browser binaries into CI images.
+browser = [
+    "playwright==1.63.0",
+]
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",

@@ -10,6 +10,34 @@ not a typed finding: a behavioural mismatch has no diff line to anchor to.
 derived from the Pydantic models. Markdown is a **view** of that JSON, not a
 second source of truth.
 
+## Optional extra and driver
+
+The driver is a thin protocol (`BrowserDriver`): navigate, extract text, click,
+fill, type, press key, scroll, screenshot, read/set cookies, and read console.
+Playwright is the one implementation, isolated in
+`mergecraft.verify.playwright_driver`. Nothing else in mergeCraft imports
+Playwright.
+
+Install the optional extra to use that implementation:
+
+```text
+pip install 'merge-craft[browser]'
+```
+
+The extra installs the Playwright Python package only. It does not download
+browser binaries, and the production Action image does not include a browser.
+When the extra is absent, the gate names `mergecraft[browser]` rather than
+raising a raw import error.
+
+CI (`make ci` / `make test`) never launches a live browser. Unit tests drive
+an in-process fake. A real-browser smoke test, if added later, must be marked
+`integration` so those targets exclude it.
+
+Cookie handling on the protocol uses name/value dicts. Reports and logs record
+credential **names** only — never values. Playwright tracing may fill the
+nullable `artifacts.trace` field at no extra pipeline cost; there is no video
+recording pipeline.
+
 ## Status vocabulary
 
 Closed sets. Unknown values are rejected.
