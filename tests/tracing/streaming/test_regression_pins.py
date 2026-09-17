@@ -61,9 +61,17 @@ def test_idle_detection_still_works_without_capture_output(
 
     events = [
         json.dumps({"type": "message_start", "message": {"id": "msg_1"}}),
-        json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hi"}}),
+        json.dumps(
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "hi"},
+            }
+        ),
         json.dumps({"type": "message_stop"}),
-        json.dumps({"type": "result", "result": "ok", "usage": {"input_tokens": 1, "output_tokens": 1}}),
+        json.dumps(
+            {"type": "result", "result": "ok", "usage": {"input_tokens": 1, "output_tokens": 1}}
+        ),
     ]
     consume_stream(
         raw_stream=events,
