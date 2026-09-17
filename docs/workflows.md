@@ -58,7 +58,7 @@ mergecraft review --json findings.json                 # machine-readable Findin
 mergecraft review --output-format sarif --output report.sarif.json
 mergecraft review --output-format jsonl --output stream.jsonl
 mergecraft review --agent                              # JSONL agent protocol on stdout
-mergecraft review 2> review.md                         # human text is on stderr (D14)
+mergecraft review 2> review.md                         # human text is on stderr
 ```
 
 Human-readable review text (default mode) is written to **stderr** so stdout stays free
@@ -159,7 +159,7 @@ the payload/span-count caps: [docs/TRACING.md](TRACING.md).
 
 <!-- Asset pending: a screenshot of this trace tree for a real review,
 committed under assets/ and linked here — operator-captured, see the
-issues-showcase-readiness wave plan (PR G5 / D7). -->
+issues-showcase-readiness follow-up. -->
 
 <span id="security-model"></span>
 

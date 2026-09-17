@@ -656,12 +656,12 @@ A quick orientation before the lists:
 7. [Memory across runs](#7-memory-across-runs)
 8. [Output shape](#8-output-shape)
 9. [Address-reviews checks](#9-address-reviews-checks)
-10. [Trajectory checks](#10-trajectory-checks-43-49)
-11. [Deterministic run record](#11-deterministic-run-record-plan-12)
+10. [Trajectory checks](#10-trajectory-checks)
+11. [Deterministic run record](#11-deterministic-run-record)
 
 ---
 
-## Mechanical evidence — what counts (#41, W2.5)
+## Mechanical evidence — what counts
 
 Mechanical evidence is what the merge-evidence packet calls **structural**
 — typed `Finding`s, deterministic gate outcomes, and CI check-suite
@@ -675,7 +675,7 @@ verdict; everything else is advisory. Concretely:
   `introduced_by_pr`, `source`, `scope`, `cluster_id`. Findings are the
   authoritative structural input to `decide_approval()`. Only `scope="change"`
   findings can block; `scope="run"` rows are advisory and partition into the
-  packet's `run_health` section at assembly time (plan 12).
+  packet's `run_health` section at assembly time.
 - **`DeterministicCheck` rows** — one per declared `staticChecks` or
   discovered Makefile target. Status is one of five: `passed`, `failed`,
   `timed_out`, `unavailable`, `declared-but-cannot-run`. **Only
@@ -685,8 +685,8 @@ verdict; everything else is advisory. Concretely:
   plus the cluster/blame/flaky annotations from `src/mergecraft/ci/`.
 - **The agent's `approved` boolean** — **NOT** mechanical evidence. It
   is recorded on the packet as `self_assessment` and is advisory only;
-  a self-assessment-only run cannot reach `auto_merge` (the #41 hard
-  rule, pinned by `tests/evidence/test_self_assessment.py`).
+  a self-assessment-only run cannot reach `auto_merge` (pinned by
+  `tests/evidence/test_self_assessment.py`).
 
 What does *not* count as mechanical evidence, even when it appears in a
 check-run summary or in the agent's prose:
@@ -749,7 +749,7 @@ The reviewer reads the whole diff itself, then picks the **lenses** the PR actua
 
 Each review round records which lenses were **selected**, which were **skipped** (with reasons from deterministic routing), and which were **actually dispatched**. That set is written into the review metadata HTML comment and the merge-evidence packet so the next round — and incremental complement routing in a follow-up review — can read what already ran without re-deriving it from prose.
 
-**Run lifecycle (S1)** — a failed or timed-out trusted-tier `setupScript` yields `RunOutcome.inconclusive` (neutral check conclusion), not a review. An under-provisioned tree never receives a review verdict. See [`docs/config-failure-policy.md`](docs/config-failure-policy.md#setup-script-failures-s1--d5--d10--f6) for the policy table and operator checklist.
+**Run lifecycle (S1)** — a failed or timed-out trusted-tier `setupScript` yields `RunOutcome.inconclusive` (neutral check conclusion), not a review. An under-provisioned tree never receives a review verdict. See [`docs/config-failure-policy.md`](docs/config-failure-policy.md#setup-script-failures) for the policy table and operator checklist.
 
 **Always in play**
 
@@ -832,21 +832,21 @@ Reference: [`docs/ANALYZERS.md`](docs/ANALYZERS.md) (generated from manifests; C
 Contributor path: [`docs/CONTRIBUTING-ANALYZERS.md`](docs/CONTRIBUTING-ANALYZERS.md).
 Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif|lock`.
 
-**Execution preference (D4):** `repo-native` → existing CI result → managed pinned binary → container → **skip with a named reason**. Skipped is skipped — never a finding, never a failed pre-merge row.
+**Execution preference:** `repo-native` → existing CI result → managed pinned binary → container → **skip with a named reason**. Skipped is skipped — never a finding, never a failed pre-merge row.
 
-**Trust tiers (D7):** `trusted` (same-repo PR, `workflow_dispatch`, offline `diff-review`) vs `untrusted` (fork PR / `pull_request_target` — no secrets, network deny-by-default, no PR-authored command construction; trusted-only manifests skip with reasons). Offline `diff-review` runs analyzers at trusted tier without shell.
+**Trust tiers:** `trusted` (same-repo PR, `workflow_dispatch`, offline `diff-review`) vs `untrusted` (fork PR / `pull_request_target` — no secrets, network deny-by-default, no PR-authored command construction; trusted-only manifests skip with reasons). Offline `diff-review` runs analyzers at trusted tier without shell.
 
 **`shell: disabled` (#35):** hardening the workflow no longer costs you the catalog. Repo-declared gates stay withheld — they run command strings the PR author controls — but mergeCraft's own **`managed` / `container` analyzers still run**, because their argv comes verbatim from a manifest mergeCraft ships and a repo-provided binary may not stand in for the pinned one. `repo-native` manifests are withheld, each with a named reason, since they exist to run the repo's own tool against the repo's own config. What a consumer sees on a `pull_request_target` + `shell: disabled` run: analyzer rows for the managed tools that matched the diff, `unavailable` rows naming why each other manifest was withheld, and the `staticChecks` gates reported as `declared-but-cannot-run`. The full runtime × shell × trust matrix is generated into [`docs/ANALYZERS.md`](docs/ANALYZERS.md).
 
-**Scoping (D6):** analyzers run on **head** by default; findings outside the diff hunks are dropped unless the path is an explicit exception (new file, dependency manifest, lockfile, workflow, migration). `introduced_by_pr: unknown` when no base run happened — never implied `true`.
+**Scoping:** analyzers run on **head** by default; findings outside the diff hunks are dropped unless the path is an explicit exception (new file, dependency manifest, lockfile, workflow, migration). `introduced_by_pr: unknown` when no base run happened — never implied `true`.
 
-**Clustering (D12):** one defect from multiple tools publishes **one** finding with corroborating evidence and raised `confidence`.
+**Clustering:** one defect from multiple tools publishes **one** finding with corroborating evidence and raised `confidence`.
 
-**Verification (D11):** Critical/Major analyzer hits are **hypotheses** until the read-only `mergecraft-verifier` subagent confirms, downgrades, or drops them. Drops write a reason under `## Withdrawn review findings (known non-issues)`.
+**Verification:** Critical/Major analyzer hits are **hypotheses** until the read-only `mergecraft-verifier` subagent confirms, downgrades, or drops them. Drops write a reason under `## Withdrawn review findings (known non-issues)`.
 
-**Noise budget (D14):** inline analyzer slots cap at **8** (W0.2 measurement). Analyzer overflow lands in `### 🔧 Mechanical findings` (compact tool table). Agent overflow lands in `### 🗂 Deferred findings` with full finding text (non-blocking, server-appended). Agent findings win ties; Trivial/Low value never inline.
+**Noise budget:** inline analyzer slots cap at **8**. Analyzer overflow lands in `### 🔧 Mechanical findings` (compact tool table). Agent overflow lands in `### 🗂 Deferred findings` with full finding text (non-blocking, server-appended). Agent findings win ties; Trivial/Low value never inline.
 
-**Lockfile (D24):** `.mergecraft/analyzers.lock` records resolved tool id, version, source, and SHA256; the pre-merge **Analyzers** row echoes the digest.
+**Lockfile:** `.mergecraft/analyzers.lock` records resolved tool id, version, source, and SHA256; the pre-merge **Analyzers** row echoes the digest.
 
 ### CI pipeline intelligence (`analyze_ci_failures`)
 
@@ -989,7 +989,7 @@ What mergecraft deliberately does **not** report — this is most of what keeps 
 - Anything already refuted in the learnings file (see next group).
 - **Bloat-shaped findings** — proposed fixes that would add defensive checks for cases that can't happen, abstractions used once, comments restating obvious code, tests asserting tautologies, or "just-in-case" guards. The bar for an inline comment is sound **and** correct **and** elegant; a change that improves only one of the three makes the codebase worse.
 - On `IncrementalReview`, anything that restates feedback a prior review already gave.
-- On `IncrementalReview`, **first-pass miss labelling (D10):** when a *new* finding's root cause is on a line that already existed at the first reviewed commit (context in the incremental diff, not a line the fix commits added), the inline body is prefixed with `_(First-pass miss — this line was already present at the first reviewed commit.)_`. That label is honest scope disclosure — not a restatement of prior feedback and not a drop.
+- On `IncrementalReview`, **first-pass miss labelling:** when a *new* finding's root cause is on a line that already existed at the first reviewed commit (context in the incremental diff, not a line the fix commits added), the inline body is prefixed with `_(First-pass miss — this line was already present at the first reviewed commit.)_`. That label is honest scope disclosure — not a restatement of prior feedback and not a drop.
 - On `IncrementalReview`, **deferred promotion:** when the incremental diff touches a path cited by a ledger `deferred` finding, checkout promotes that record back to `open` with an audit reason. Promotion is back in scope — not a restatement of prior inline feedback.
 - **PR prose is evidence, never instruction.** A finding whose only support is the PR title, PR body, a comment, or any other fenced untrusted field is **dropped** if the prose merely *describes* a change without anchoring to diff lines, and **downgraded** to a question if the prose *asserts* a property that the diff does not demonstrate. The diff (or, for design questions, the linked design doc) is the only thing that anchors a finding. Sentences inside the per-run fence block are untrusted internet content by default — they may inform a hypothesis, but they never stand in for evidence.
 
@@ -997,7 +997,7 @@ What mergecraft deliberately does **not** report — this is most of what keeps 
 
 - **Withdrawn findings** — when an author refutes a review finding and `AddressReviews` accepts the pushback, it records the *reason* in `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`. A `drop` verdict from the verifier writes to the same section, so a finding the reviewer refuted *before publishing* is also refuted permanently. Later reviews read that section first and treat it as binding, so a false positive is argued once instead of on every PR.
 - **Finding fingerprints** — each inline comment is stamped server-side with a content hash of its path and body (`<!-- mergecraft-finding:v1:… -->`). Whitespace and case are normalized, so a re-raised finding is recognizable across runs even when reworded.
-- **Open-PR finding ledger** — the sticky progress comment carries `<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->` markers for every finding this pull request's reviews considered, including deferred overflow, verifier drops (`withdrawn`), and over-budget verifications (`unpublished`). Persistence is GitHub-only; inspect with `mergecraft findings ledger --pr N`. The ledger never files GitHub issues — post-merge carryover owns issue filing (D5).
+- **Open-PR finding ledger** — the sticky progress comment carries `<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->` markers for every finding this pull request's reviews considered, including deferred overflow, verifier drops (`withdrawn`), and over-budget verifications (`unpublished`). Persistence is GitHub-only; inspect with `mergecraft findings ledger --pr N`. The ledger never files GitHub issues — post-merge carryover owns issue filing.
 - **Repo learnings** — test commands, conventions, gotchas, and architecture notes persist in the same file and are loaded into every run.
 
 ## 8. Output shape
@@ -1027,7 +1027,7 @@ Formatting rules that are enforced by the prompt:
   severity, dedup identity (`finding_key` stays `(path, body, line)`), or inline
   placement.
 
-## 10. Trajectory checks (#43, #49)
+## 10. Trajectory checks
 
 Everything above reads the **diff**. These eight checks read *how the run
 produced it* — the tool calls mergeCraft mediated. A diff can look clean while
@@ -1053,27 +1053,26 @@ gated on the record carrying that signal at all: `changed-unread-file` needs
 `read_coverage`, `missing-completion-signal` needs at least one recorded call. A
 check that fires on every run is noise, not a gate.
 
-**Run-scoped, never blocking (D2).** Trajectory checks stamp `scope="run"`,
+**Run-scoped, never blocking.** Trajectory checks stamp `scope="run"`,
 `source="trajectory"`, and `introduced_by_pr="false"`. They partition into the
 packet's `run_health` section and render under a separate collapsed heading in
 the deterministic run record. `blocking_findings()` drops them before severity
 grading — no severity, and no future check, makes a run-scoped finding fail a
-PR. There is no separate trajectory verdict and no second required check-run
-(D14).
+PR. There is no separate trajectory verdict and no second required check-run.
 
 **They never crowd out code findings.** Inline slots go to code findings first;
 trajectory findings take only what is left and otherwise report in the body or
 the run-health section.
 
-## 11. Deterministic run record (plan 12)
+## 11. Deterministic run record
 
 Every run that resolves a PR number leaves exactly one authoritative sticky
 progress comment, whether the agent published a review, posted no verdict, or
-failed mid-run (D6). Re-runs edit the same comment in place via the existing
+failed mid-run. Re-runs edit the same comment in place via the existing
 sticky marker — they do not append a second one.
 
 The comment and the published review body both render from
-`render_deterministic_review_block()` in `findings/ledger.py` (D7), so the two
+`render_deterministic_review_block()` in `findings/ledger.py`, so the two
 surfaces cannot drift. The agent cannot suppress the block by supplying its own
 copy of the markers — dedupe keeps the server's version.
 
@@ -1151,7 +1150,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
 | `cppcheck` | lint | c, cpp | auto | managed | trusted | — | — |
 | `detekt` | lint | kotlin | auto | repo-native | trusted | — | — |
-| `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings (D8). |
+| `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings. |
 | `ember-template-lint` | lint | ember | auto | repo-native | trusted | — | — |
 | `eslint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `flake8` | lint | python | disabled | repo-native | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
@@ -1165,7 +1164,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `knip` | quality | javascript, typescript | auto | repo-native | trusted | — | — |
 | `languagetool` | lint | text | disabled | container | trusted | — | manifest-only — LanguageTool runtime not bundled on Linux runners (C6 out of scope) |
 | `luacheck` | lint | lua | auto | repo-native | trusted | — | — |
-| `markdownlint` | lint | markdown | auto | repo-native | trusted | — | — |
+| `markdownlint` | lint | markdown | auto | repo-native | trusted | — | No markdownlint config → shipped fallback disables MD060 (table-column-style) only. |
 | `mypy` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `oasdiff` | contract | — | auto | managed | untrusted | — | — |
 | `opengrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | disabled | managed | untrusted | pattern-scanner | — |
@@ -1173,7 +1172,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `oxlint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
 | `phpmd` | lint | php | disabled | repo-native | trusted | — | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
-| `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0 (D12). |
+| `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0. |
 | `pmd` | lint | java | auto | managed | trusted | — | — |
 | `presidio` | security | — | disabled | container | trusted | — | Container-only; high-confidence entity types only. |
 | `prisma-lint` | lint | prisma | auto | repo-native | trusted | — | — |
@@ -1343,16 +1342,16 @@ analyzers:
 
 See [CONTRIBUTING-ANALYZERS.md](CONTRIBUTING-ANALYZERS.md) to add a tool.
 
-## Noise budget (D14)
+## Noise budget
 
-Inline review comments from analyzers and the reviewing agent share a single cap of **8** slots (W0.2 measurement; configurable via `analyzers.inlineBudget`). Placement is deterministic:
+Inline review comments from analyzers and the reviewing agent share a single cap of **8** slots (measured; configurable via `analyzers.inlineBudget`). Placement is deterministic:
 
 - **Inline** — highest-priority findings up to the cap. Agent findings win tie-breaks over analyzer findings at the same severity and path.
 - **Mechanical overflow** — `source: analyzer` / `source: ci` findings that did not earn an inline slot render as a compact `### 🔧 Mechanical findings` table (tool, rule id, path:line). mergeCraft appends this section server-side at publish time.
 - **Deferred overflow** — `source: agent` findings that did not earn an inline slot render in `### 🗂 Deferred findings` with severity, path, line, and the **full finding body**. This lane is non-blocking (no inline anchor) and is also server-appended at publish time so overflow reasoning is never discarded.
 - **Nitpicks** — `Trivial` severity or `Low value` effort never occupy inline or deferred slots; they belong in the Nitpicks section.
 
-## Verification gate (D11)
+## Verification gate
 
 `Critical` and `Major` findings are hypotheses until the read-only `mergecraft-verifier` subagent reads the cited code. That gate applies to analyzer, CI, and agent-authored findings.
 
@@ -1419,8 +1418,8 @@ analyzers:
 
 What is and is not uploaded:
 
-- **Catalog analyzers only.** Only `source: analyzer` findings are eligible. `source: ci` findings carry truncated pipeline log excerpts and `source: agent` findings carry narrative; neither is uploaded, and raw logs never leave the process (D13).
-- **The clustered, placed set.** The upload reuses the findings the pipeline already clustered and placed, not the raw analyzer output, so cross-tool duplicates arrive as one alert (D14). It is *not* truncated at the inline comment budget — the overflow is exactly what this surface exists to show.
+- **Catalog analyzers only.** Only `source: analyzer` findings are eligible. `source: ci` findings carry truncated pipeline log excerpts and `source: agent` findings carry narrative; neither is uploaded, and raw logs never leave the process.
+- **The clustered, placed set.** The upload reuses the findings the pipeline already clustered and placed, not the raw analyzer output, so cross-tool duplicates arrive as one alert. It is *not* truncated at the inline comment budget — the overflow is exactly what this surface exists to show.
 - **Trust-gated.** Each finding's analyzer must still pass this run's `trust` x `shell` x `analyzers:` selection chain — the same predicates the pipeline calls, re-evaluated at upload time. A finding from a tool with no catalog manifest cannot be gated, so it is refused.
 - **Redacted before serialization.** `message`, `evidence`, `remediation` and `autofix` pass through `analyzers/redact.py` while still typed `Finding`s, before SARIF is built. `path` is left intact: it becomes `artifactLocation.uri`, and mangling it would detach the alert from its file.
 - **Never a gate.** A rejected upload — missing permission, code scanning unavailable, transport error — is logged at `warning` and the run continues.
@@ -1436,8 +1435,8 @@ Check-run annotations are the documented alternative surface and are not impleme
 > skill distills for prompts.
 
 Review-check reasoning from `review_checks.py`, `review_taxonomy.py`,
-`mcp/static_checks.py`, and `REVIEW-CHECKS.md`. W2 and W5
-build on these decisions — they are not recoverable from code alone.
+`mcp/static_checks.py`, and `REVIEW-CHECKS.md`. Later review-integrity
+work builds on these decisions — they are not recoverable from code alone.
 
 ## Mechanical gates vs findings
 
@@ -1448,7 +1447,7 @@ Only a real non-zero exit from an executable gate is evidence. The Action image 
 lands as `unavailable` there unless the repo declares explicit `staticChecks` with binaries
 that exist in the image.
 
-## Finding scope: change vs run (plan 12, D1–D2)
+## Finding scope: change vs run
 
 Every `Finding` carries a `scope` axis: `change` or `run`. The default is `change`, so
 existing producers keep their meaning without silent reclassification.
@@ -1457,17 +1456,17 @@ existing producers keep their meaning without silent reclassification.
   block merge after causality policy and severity grading.
 - **`run`** — a claim about how the review executed (trajectory auditor rows, environment
   observations, and similar process evidence). These are **advisory only** and can never
-  block (D2). Run health is reported — in the evidence packet's `run_health` section, the
+  block. Run health is reported — in the evidence packet's `run_health` section, the
   deterministic run record, the `mergecraft` completion check summary, and the job step
-  summary — never enforced as a second merge gate (D14).
+  summary — never enforced as a second merge gate.
 
 `blocking_findings()` in `agents/gates.py` is the single predicate: drop `scope == "run"`,
 apply `apply_causality_policy`, then test `BLOCKING_SEVERITIES`. `_has_blocker`,
 `_packet_has_blockers`, `decide_approval`, and `mcp/verdict.py::_blocks_approve` all route
-through it — two predicates that disagree is a defect class, not a style question (D3).
+through it — two predicates that disagree is a defect class, not a style question.
 
-Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by_pr="false"`
-(D4). All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
+Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by_pr="false"`.
+All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
 `source` drives rendering.
 
 ## Makefile discovery, not tool inference
@@ -1495,14 +1494,14 @@ tradeoff favors stable dedup over semantic similarity.
 ## Output cap
 
 **`MAX_OUTPUT_CHARS = 8_000`** caps combined stdout+stderr embedded in prompts. Raw tool output
-beyond this truncates — a design constraint for W4's move to file-based parsing. Mechanical
+beyond this truncates — a design constraint once parsing moved to files. Mechanical
 gate output is evidence, not the finding itself.
 
 ## Subagent deny-list
 
 **`subagent_denied_tool_names()` derives from every MCP tool with `mutates=True`.** If that
 list is empty, startup **raises** — refusing to run a review subagent with the mutation gate
-effectively disabled. The verification agent (W7) inherits the same guard.
+effectively disabled. The verification agent inherits the same guard.
 
 ## Verification covers every source, including ourselves (C6)
 
@@ -1525,7 +1524,7 @@ the finding's own fingerprint, so the same claim is skipped before verification 
 run — the same section, parser and identity analyzer suppression already uses. Verifying a
 finding the author refuted last month is the failure this prevents.
 
-## Recall pass — the verifier's mirror (RC10, D1, D7)
+## Recall pass — the verifier's mirror
 
 **Every stage before publication subtracts findings; the recall pass is the one stage that may
 add them back.** After aggregation the orchestrator dispatches `mergecraft-recall` with the
@@ -1534,19 +1533,19 @@ subagent deny-list as `mergecraft-reviewer`, and may return only findings absent
 draft — paraphrases and overlaps are filtered through `findings.dedup.dedupe_findings`, not a
 second matcher.
 
-**Output is always deferred (D1).** Recall findings publish in `### 🗂 Deferred findings`
+**Output is always deferred.** Recall findings publish in `### 🗂 Deferred findings`
 regardless of the severity the subagent claims. They never consume inline budget and never
 block merge. A precision gain bought by silently dropping recall output would be a regression;
 the novelty filter and deferred placement are the paired constraint.
 
-**Default off, dogfooded here (D7).** `review.recallPass` defaults `false` for consumers — it
+**Default off, dogfooded here.** `review.recallPass` defaults `false` for consumers — it
 costs a subagent dispatch per review. mergeCraft's own `.mergecraft/config.yaml` keeps it off
 until the recallPass schema lands on `pre-0.0.1` (the PR-branch action pin cannot consume the
 field before merge); dogfood re-enables it after that merge.
-The W7 corpus gate (`evaluate_recall_pass_corpus`) must show first-pass recall up with the DG1
-precision corpus flat or better before the wave ships.
+The corpus gate (`evaluate_recall_pass_corpus`) must show first-pass recall up with the
+precision corpus flat or better before that default flips.
 
-## LLM judges are secondary evaluators (D14, #45)
+## LLM judges are secondary evaluators
 
 **The verifier is an LLM judging an LLM, so it is pinned, logged, ordered last, and never
 decisive alone.**
@@ -1569,7 +1568,8 @@ decisive alone.**
   finding on a migration or an auth change is the expensive direction to be wrong in.
 
 **Cost:** a run whose reviewer never calls the deterministic tools gets no verification at all.
-That is deliberate — a judge with nothing to be secondary to is the failure mode #45 names.
+That is deliberate — a judge with nothing to be secondary to is the failure
+mode that made judges last and never decisive alone.
 
 ## Shell permission and static checks
 
@@ -1592,17 +1592,17 @@ self-report. Two consequences follow:
   reviewed `sha`) — a sibling of `decision`, not a substitute. When the
   agent's `self_assessment.approved == True` is the *only* positive
   signal, the verdict is `neutral` (or the packet's explicit `decision`
-  if set upstream), not `auto_merge`. That is the #41 hard rule; it is
+  if set upstream), not `auto_merge`. That rule is
   pinned by `tests/evidence/test_self_assessment.py::test_self_assessment_alone_blocks_auto_merge`.
 - **The decision is monotone in blockers.** Any `Critical` or `Major`
   finding yields `failure` regardless of the agent's `approved` value;
   `run_succeeded == False` yields `neutral`; `tier == "untrusted"`
   yields `neutral`. A "green" check-run never outvotes a blocker; an
   agent's `approved=True` never outvotes a blocker. See
-  `mergecraft.agents.gates.decide_approval` (the security-trust-boundary
-  plan's Batch D contract, D5) and `tests/status_checks/test_decide_approval.py`.
+  `mergecraft.agents.gates.decide_approval` and
+  `tests/status_checks/test_decide_approval.py`.
 
-### Run outcome taxonomy (D3, W5)
+### Run outcome taxonomy
 
 A run ends in exactly one of six named outcomes —
 `mergecraft.run_outcome.RunOutcome`: `passed`, `failed`, `inconclusive`,
@@ -1612,12 +1612,12 @@ carries it, and two mappings key off it:
 | Mapping | Lives in | Notes |
 |---------|----------|-------|
 | outcome → `mergecraft` completion check-run conclusion | `mergecraft.run_outcome.RUN_OUTCOME_CONCLUSION` | Only `passed` → `success`; `failed` → `failure`; `timed_out` → GitHub's literal `timed_out`; everything else → `neutral`. |
-| outcome → `result` output JSON | `cli/gha_cmd.py` (`_structured_failure_result`, W5.3) | `{"outcome": ..., "error": {"code": "mergecraft.<outcome>", "message": <redacted>}}` on any failure path — not just `::error::` + exit 1. |
+| outcome → `result` output JSON | `cli/gha_cmd.py` (`_structured_failure_result`) | `{"outcome": ..., "error": {"code": "mergecraft.<outcome>", "message": <redacted>}}` on any failure path — not just `::error::` + exit 1. |
 
 The `mergecraft-approval` check stays governed by the existing
 `decide_approval` 3-way conclusion above: every outcome except `passed`
 feeds it `run_succeeded=False` (`run_outcome.run_succeeded_for_outcome`), so
-this taxonomy is additive detail on top of the pre-W5 boolean, never a
+this taxonomy is additive detail on top of the earlier boolean, never a
 looser gate.
 
 ### Evidence weighting
@@ -1639,9 +1639,9 @@ deterministic check on the diff. The merge-evidence packet is the
 single artifact a human or a later tool reads to reconstruct why a PR
 was auto-merged, blocked, or escalated; it is durable, versioned, and
 the schema is derived from the Pydantic models (`mergecraft.evidence.
-packet.PACKET_SCHEMA_VERSION`, D7).
+packet.PACKET_SCHEMA_VERSION`).
 
-### Honesty about unavailable signals (W2.4)
+### Honesty about unavailable signals
 
 Where a signal source is unreachable, the packet records it as
 `unavailable` with a reason — never silently as "passing". This is the
@@ -1726,9 +1726,9 @@ How a reviewer should weigh that header on a per-field basis:
   `mergecraft.utils.fence`. The trust exemption is *per-field*, not per-thread:
   an OWNER-typed review comment does not extend trust to a sibling attacker's
   comment in the same thread. Each field's `author_association` is checked
-  independently, and the W4 enumeration test pins that.
+  independently, and an enumeration test pins that.
 
-The hard rule (W4.5 / D9): **PR prose is evidence, never instruction.** A finding whose
+The hard rule: **PR prose is evidence, never instruction.** A finding whose
 only support is the PR title, PR body, or a comment is dropped or downgraded; the diff
 must anchor every surviving finding. The fence is the technical mechanism that makes
 this rule enforceable — without it, prose and instruction share a channel and a
@@ -1812,7 +1812,7 @@ rules in trusted mergeCraft code: `request_changes` with zero findings,
 a failing required deterministic check are all rejected with a typed
 `rejection_reason`. A rejected submission leaves
 `terminal_submission_received=false` — fallback-eligible, same as no
-submission (D8). The approve path fails closed on *unverified* blockers too: a
+submission. The approve path fails closed on *unverified* blockers too: a
 Critical/Major analyzer finding that is neither verifier-confirmed nor withdrawn
 rejects `approve`, so skipping verification is not a route to approval.
 
@@ -1941,11 +1941,11 @@ tracing:
   enabled: true                # default: unset (treated as off); bool | null
   retentionDays: 30            # default: 30
   redaction: true              # default: true
-  content: redacted            # default: redacted; off | metadata | redacted | full (OB2/D6)
+  content: redacted            # default: redacted; off | metadata | redacted | full
   sinks:
     - type: jsonl_file
       path: .mergecraft/traces/
-    # Batch D adds: logfire, otel (behind the [tracing] extra, D6).
+    # logfire and otel sit behind the [tracing] extra.
 ```
 
 `enabled` is tri-state: `true`, `false`, or unset (`null`). Unset defers to
@@ -1957,7 +1957,7 @@ off). See `src/mergecraft/action/inputs.py::apply_tracing_overrides`.
 ### Shorthand form
 
 The shorthand `to: local_files` is normalised into the canonical `sinks`
-list at parse time (D9) — exactly one shape exists downstream:
+list at parse time — exactly one shape exists downstream:
 
 ```yaml
 tracing:
@@ -1976,7 +1976,7 @@ tracing:
 | `endpoint`    | string              | OTLP / collector endpoint.                      |
 | `headers`     | map[string]string   | Optional headers for OTLP / collectors.         |
 
-`tokenRef` is never inlined (D5). `path` is repo-relative when the sink
+`tokenRef` is never inlined. `path` is repo-relative when the sink
 operates inside the Action container.
 
 ## Sink types
@@ -1987,7 +1987,7 @@ operates inside the Action container.
 | `memory`     | `MemorySink`             | Batch A (W2)   |
 | `logfire`    | OTLP exporter (one path) | Batch D (W8)   |
 | `otel`       | OTLP exporter (one path) | Batch D (W8)   |
-| `sqlite`     | deferred (D10)           | not scheduled  |
+| `sqlite`     | deferred                 | not scheduled  |
 
 ### `jsonl_file` — daily rotation, 30-day retention
 
@@ -2000,12 +2000,12 @@ files whose mtime is older than the cap.
 Records every event in a `list`; available for tests and short-lived
 fixtures. Nothing escapes the process.
 
-### `logfire` / `otel` — one path (D5)
+### `logfire` / `otel` — one path
 
 Both resolve to the same OTLP exporter behind a batch processor. The
 remote sink contract is owned by W8.
 
-## Redaction guarantee (D7)
+## Redaction guarantee
 
 Redaction runs **once**, **before** fan-out. Every event reaches every
 sink through a `RedactingSink` wrapper around `MultiSink` — no sink is
@@ -2023,7 +2023,7 @@ ever reachable without going through the redaction boundary.
   into nested dicts and lists) so `ghp_…` and `sk-…` substrings cannot
   escape.
 
-## Payload cap (D8)
+## Payload cap
 
 `TRACE_ATTRS_JSON_MAX_BYTES = 64 * 1024`. When any single string value in
 an event's `attrs` exceeds the cap, the row is written with
@@ -2031,7 +2031,7 @@ an event's `attrs` exceeds the cap, the row is written with
 downstream consumers see the marker rather than a missing or half-written
 record.
 
-## Retention (D8)
+## Retention
 
 `retentionDays` (default `30`) governs `JSONLFileSink.purge_expired()`. Files
 whose mtime is older than the cap are removed on the next write (or
@@ -2061,13 +2061,13 @@ does hit it, raise the `Final` constant; it is a single line to change.
    a `NullSink.emit` is never invoked.
 2. **Tracing never fails the run** (convention 6). A sink that raises on
    `write` is caught and logged at `logger.warning`; the run continues.
-3. **Optional extra** (D6). `logfire` and `opentelemetry-*` are not base
+3. **Optional extra.** `logfire` and `opentelemetry-*` are not base
    dependencies. `pip install merge-craft[tracing]` pulls them in;
    `make ci-resume` passes with them uninstalled (convention 5).
 4. **No network in `make ci-resume`** (convention 8). Exporter tests
    target a fake transport.
 
-## D15 — remote sinks export reviewed-repo content
+## Remote sinks export reviewed-repo content
 
 > Enabling a **remote** sink (`logfire`, `otel`) exports reviewed-repo
 > content — the prompts the reviewer received, the tool inputs and
@@ -2078,16 +2078,16 @@ does hit it, raise the `Final` constant; it is a single line to change.
 > (`if: github.event.pull_request.head.repo.fork == false`) when the
 > reviewer should not exfiltrate fork-PR content.
 
-There is no config-level trust gate. D15's hard requirement is that the
+There is no config-level trust gate. The hard requirement is that the
 statement above appears plainly in this document, so the operator sees
 it the first time they reach for a remote sink.
 
-## Content-capture policy for model payloads (OB2 — D6/D7/D8)
+## Content-capture policy for model payloads
 
-D15 warns that remote sinks export reviewed-repo content; the `content`
+Remote sinks export reviewed-repo content; the `content`
 policy is the **level control** that decides how much of it leaves the
 runner. It governs model payloads (prompts, completions, reasoning) via
-`tracing/content.py`, with four levels (D6):
+`tracing/content.py`, with four levels:
 
 | Level | Body | Metadata (`.chars` / `.bytes` / `.sha256`) | Use |
 | --- | --- | --- | --- |
@@ -2102,10 +2102,10 @@ default `redacted`. An unrecognised value at any step falls through to the
 next, ending at the default — fail safe, never `full`. Bodies are
 byte-capped at the shared `TRACE_ATTRS_JSON_MAX_BYTES` budget and flagged
 `.truncated`; `.chars` / `.bytes` / `.sha256` always describe the
-**original** payload (D8), so the hash detects prompt drift between two
+**original** payload, so the hash detects prompt drift between two
 runs even when neither shipped a body.
 
-**D7 — untrusted runs cap at `metadata` unless you opt in twice.** At any
+**Untrusted runs cap at `metadata` unless you opt in twice.** At any
 trust tier other than `trusted`, a body-emitting level is lowered to
 `metadata` **after** precedence resolution. `content: full` in YAML and
 `MERGECRAFT_TRACING_CONTENT=full` both yield `metadata` on a fork-PR-shaped
@@ -2204,7 +2204,7 @@ mergecraft.run                       (root; run_id, repo, pr_number,
 - The tracer is **never on the critical path** (convention 6). Any
   exception inside an emit site is caught by `MultiSink.write` and logged
   at `logger.warning` with the sink type and message; the run continues.
-- **Redaction runs once, before fan-out** (D7). Every emit traverses a
+- **Redaction runs once, before fan-out.** Every emit traverses a
   `RedactingSink` wrapper around `MultiSink`. The `MemorySink` that
   structural tests use also redacts on write, so test assertions and the
   production path see the same surface.
@@ -2266,12 +2266,12 @@ agent.attempt
   `thread.started` / `turn.completed`; Gemini on `init` / `result`. The
   span exists so Logfire groups rows by transport family.
 - **When does `http.client.request` fire?** Once per outbound `httpx`
-  `send()` on a wrapper mergeCraft constructed (D8 — no global monkey
+  `send()` on a wrapper mergeCraft constructed (no global monkey
   patch). The wrapper installs on the two `httpx.AsyncClient` instances
   `agents/opencode.py::_prompt_session` and `agents/opencode.py::_run`
   use for the custom OpenAI-compatible provider path, the only httpx
   sites in the repo.
-- **`http.url` is always redacted inline** (D9 — see the URL redaction
+- **`http.url` is always redacted inline** (see the URL redaction
   table below).
 
 ### URL redaction table
@@ -2298,7 +2298,7 @@ grouping in Logfire's row inspector keeps working.
 Every `tool.call` span carries the request/response byte counts,
 `exit_code`, error class/message, and input-key list sevn splits across
 `tool.invoke` / `tool.complete`. The shape is additive on the post-#137
-tree (D5: one enriched `tool.call` span, not sevn's `tool.invoke` /
+tree (one enriched `tool.call` span, not sevn's `tool.invoke` /
 `tool.complete` split) so the existing `tool.name` / `tool.id` /
 `tool.server` / `gen_ai.*` attrs remain on the same row. The
 `src/mergecraft/tracing/_tool_attrs.py` helpers expose the open-side
@@ -2398,7 +2398,7 @@ automatically — no attribute search required.
 ### How it is generated
 
 The resolver follows the same precedence as the existing session-id
-resolver (D7 / T3.2):
+resolver:
 
 1. `MERGECRAFT_TRACE_ID` — explicit per-run override.
 2. `MERGECRAFT_TRACE_SESSION_ID` — alias preserving the pre-#137 contract
@@ -2431,20 +2431,20 @@ the run's trace.
 
 One logical review fans out into several processes: the orchestrating run
 plus one spawned agent CLI per subagent. Three identifiers — not two —
-describe that shape (D2):
+describe that shape:
 
 | Identifier | Scope | Source |
 | --- | --- | --- |
 | `review.id` | **One logical review**, across every process and agent run | `tracing/review_context.py::resolve_review_id()` — `MERGECRAFT_REVIEW_ID` inherited verbatim, else a fresh `uuid4` per review |
 | `trace_id` | **One agent run** (one process) | `tracing/tracer.py::resolve_trace_id()` — see *One trace per run (T3)* above |
-| `review.correlation_key` | **Every attempt at one commit** — deliberately collides | `correlation_key_for()` — deterministic `sha256(repo\|pr\|head_sha)` (D3) |
+| `review.correlation_key` | **Every attempt at one commit** — deliberately collides | `correlation_key_for()` — deterministic `sha256(repo\|pr\|head_sha)` |
 
 The shape to remember: **one review with three agent runs has one
 `review.id` and three `trace_id` values.** One `review.id` filter returns
 the entire review — every agent, every tool call, the verdict — across
 every process. `review.correlation_key` answers the orthogonal query:
 "every attempt at this commit", because two reviews of one commit are two
-reviews (distinct `review.id`s) but share the key (D3). A local patch
+reviews (distinct `review.id`s) but share the key. A local patch
 review has no repo/pr/head context, so its key is empty and the attribute
 is omitted rather than emitted as a misleading constant.
 
@@ -2454,7 +2454,7 @@ is omitted rather than emitted as a misleading constant.
   (`offline_review.py::run_offline_diff_review`) and the Action
   (`main.py::main`) — bind a frozen `ReviewContext` via
   `bind_review_context(...)`. `Span.close()` reads the bound context at
-  **close time** (D4), so a context bound after the tracer was built still
+  **close time**, so a context bound after the tracer was built still
   reaches spans that are already open. Merge precedence: tracer baseline →
   review context → lazy `attrs_source` → explicit `set_attribute`.
 - **Across the process boundary (O2):** `agents/shared.py::spawn_agent_cli`
@@ -2469,7 +2469,7 @@ is omitted rather than emitted as a misleading constant.
   the VCS/CI fields (`vcs.repository.name`, `vcs.change.id`,
   `vcs.revision`, `ci.workflow_run_id`, `ci.job_id`) so a span can say
   which build and which change produced it. The `Tracer` carries them in a
-  `baseline_attrs` field with `repr=False` (D5).
+  `baseline_attrs` field with `repr=False`.
 
 ## What's next
 
@@ -2478,7 +2478,7 @@ is omitted rather than emitted as a misleading constant.
 | C     | W6    | `stream-json` migration for per-tool spans            |
 | D     | W8    | `logfire` + `otel` exporters, CLI / action inputs, complete docs (DONE) |
 
-## Self-hosted endpoints (W8.1 / D5)
+## Self-hosted endpoints
 
 The `otel` sink accepts any OTLP/HTTP collector URL. The token / API key
 travels as an `Authorization: Bearer …` header; the `headers` map on the
@@ -2500,10 +2500,10 @@ For Logfire, the endpoint is the region-aware OTLP/HTTP ingest URL —
 `https://logfire-eu.pydantic.dev/v1/traces` (EU), selected by the sink's
 `region` field (default `us`). The `project` field is informational only;
 Logfire routes spans by the token itself, so no `x-logfire-project` header
-is sent. The token is resolved through `tokenRef` (D5) — see *Token
+is sent. The token is resolved through `tokenRef` — see *Token
 resolution* below.
 
-## Token resolution (W8.2 / D5)
+## Token resolution
 
 `logfire` tokens are referenced by name, never inlined. The factory
 resolves a `tokenRef` against `os.environ` at run time; when the
@@ -2532,10 +2532,10 @@ without touching `.mergecraft/config.yaml`:
 | ------------------------------------ | ---------------------------------------------------- |
 | `tracing`                            | `tracing.enabled` (overrides config)                 |
 | `tracing-to`                         | `tracing.to` shorthand (overrides config)            |
-| `logfire-token`                      | resolved logfire token (D5 — held at runtime only)   |
+| `logfire-token`                      | resolved logfire token (held at runtime only)        |
 | `otel-endpoint`                      | `tracing.sinks[].endpoint` for the `otel` sink type  |
 | `tracing-content`                    | `tracing.content` (`off` / `metadata` / `redacted` / `full`) |
-| `tracing-export-untrusted-content`   | operator D7 lift (env / Action; fork HEAD YAML cannot) |
+| `tracing-export-untrusted-content`   | operator lift of the untrusted content cap (env / Action; fork HEAD YAML cannot) |
 
 The Action wraps `${{ secrets.LOGFIRE_TOKEN }}` into `logfire-token`
 so the secret never appears in the workflow file.
@@ -2559,7 +2559,7 @@ The precedence order is **CLI flag > env var > `.mergecraft/config.yaml`
 `mergecraft config tracing` does **not** require the `tracing` extra
 — it operates on resolved settings, not on the live exporters.
 
-## Artifact upload (W8.6 / D14)
+## Artifact upload
 
 The Action writes local traces under `.mergecraft/traces/`. A typical
 workflow ships them out of CI with `actions/upload-artifact@v4`:
@@ -2686,7 +2686,7 @@ You do not need `uv tool install` on your laptop unless you want local
 
 # Authentication
 
-## Quick start — init → auth → review (D10)
+## Quick start — init → auth → review
 
 A new consumer repo can review immediately after two commands — no manual roster
 editing:
@@ -2842,7 +2842,7 @@ regression-tested.
 
 | Form | Example | Provider id |
 |------|---------|-------------|
-| Singleton back-compat alias (PR #79 / D7) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `nous/...` or `tokenhub/...`) |
+| Singleton back-compat alias (PR #79) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `nous/...` or `tokenhub/...`) |
 | Indexed multi-provider | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1`, `_2`, `_3`, … | `provider_1`, `provider_2`, `provider_3`, … |
 
 Indexed env vars are operator-locked — both halves of each numeric pair
@@ -2877,11 +2877,11 @@ See [docs/action-reference.md](action-reference.md) for the full input list
 (every `with:` key, literal defaults, and descriptions).
 
 Behavioural note: `setup_failure_policy`'s and `setup_timeout`'s literal
-`action.yml` default is an empty string (unset defers to the S1/D10 policy
+`action.yml` default is an empty string (unset defers to the setup-script policy
 described below); the *effective* runtime default when left unset is
 `inconclusive` and `10m` respectively.
 
-- S1 / D10 — what a trusted-tier `setupScript` failure (non-zero exit **or**
+- What a trusted-tier `setupScript` failure (non-zero exit **or**
   timeout) maps to: `inconclusive` (effective default — neutral check
   conclusion, the run is no-verdict), `fail` (`configuration_error`), or
   `warn` (run continues; prompt still carries the failure text). Closed

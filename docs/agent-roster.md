@@ -3,7 +3,7 @@
 One operator-facing surface for **which models each agent uses, in what order**,
 **how many agents of each kind exist**, and **which of them run concurrently**.
 The roster lives in `.mergecraft/config.yaml`; GitHub Actions auth wiring stays
-in `.github/workflows/mergecraft.yml` (D1).
+in `.github/workflows/mergecraft.yml`.
 
 ```bash
 mergecraft agent assign-model reviewer p0 nous/tencent/hy3   # exact slot, idempotent
@@ -19,7 +19,7 @@ mergecraft provider status --github   # also check repo secret presence
 
 Full command reference: [`docs/cli.md`](cli.md).
 
-## Two files, two jobs (D1)
+## Two files, two jobs
 
 | File | Owns |
 |------|------|
@@ -27,32 +27,32 @@ Full command reference: [`docs/cli.md`](cli.md).
 | `.github/workflows/mergecraft.yml` | Auth manifest — which providers CI can authenticate via `env: secrets.*` |
 
 Naming a model whose provider has no credential step in the workflow is a **hard
-error** at CLI write time and again at run start (D1a). Use
+error** at CLI write time and again at run start. Use
 `mergecraft workflow sync --apply` to add the missing step, or
 `--allow-unwired` on `agent assign-model` only when you intend to wire CI later.
 
 ## Priority slots (`pN`)
 
 Priorities are `modelChain` list positions — **`pN` is a positional alias for
-index N**, not a separate field (D3).
+index N**, not a separate field.
 
 | Command | Behaviour |
 |---------|-----------|
-| `agent assign-model <name> p0 <slug>` | Replace the primary model (idempotent on re-run, D4) |
+| `agent assign-model <name> p0 <slug>` | Replace the primary model (idempotent on re-run) |
 | `agent assign-model <name> p1 <slug>` | Replace or append at the next dense slot |
-| `agent add-model <name> <slug>` | Append at the tail; no-op with a message when duplicate (D4) |
+| `agent add-model <name> <slug>` | Append at the tail; no-op with a message when duplicate |
 | `agent remove-model <name> <token>` | Remove by slot (`p1`) or slug; compacts the chain |
 
-Slots are **dense** (D5). Assigning `p3` on a two-long chain errors and names
+Slots are **dense**. Assigning `p3` on a two-long chain errors and names
 the next assignable slot instead of writing a hole.
 
 Within one agent, fallback on credential miss or retryable failure still walks
 `modelChain` left to right — that is independent of multi-agent `after:`
-ordering (D15).
+ordering.
 
 ## Named agents
 
-Agent names match `^[a-z][a-z0-9_-]{0,31}$` (D11). Use `agent create` to add
+Agent names match `^[a-z][a-z0-9_-]{0,31}$`. Use `agent create` to add
 bindings outside the closed `AgentRole` enum — for example a second reviewer:
 
 ```yaml
@@ -68,12 +68,12 @@ agents:
 ```
 
 `agent delete` refuses to remove the last binding of a required role (`reviewer`,
-`verifier`, D12). `orchestrator` may never be duplicated (D7 cardinality).
+`verifier`). `orchestrator` may never be duplicated.
 
 `agent list` shows every binding, its `modelChain`, and the resolved dispatch
 level. `agent show <name>` prints the effective model and limits for one agent.
 
-## Local vs committed scope (D2)
+## Local vs committed scope
 
 | Surface | Writes | Read in CI? |
 |---------|--------|-------------|
@@ -86,13 +86,13 @@ GitHub Action read the committed roster from the run-scope settings snapshot.
 `agent-local` skips the workflow auth-manifest check so you can experiment with
 providers that are not wired into `mergecraft.yml` yet.
 
-## Multi-reviewer execution (D6, D7, D15, D16)
+## Multi-reviewer execution
 
 When more than one binding has `role: reviewer` and no `lens`, **all of them
 run** on the same PR. Parallelism is in-process sub-agent dispatch — not one
-GitHub Actions job per reviewer (D16).
+GitHub Actions job per reviewer.
 
-**Dispatch levels** come from `after:` (D15):
+**Dispatch levels** come from `after:`:
 
 - Omit `after:` → run in parallel with every other agent at the same level.
 - `after: reviewer2` → run once `reviewer2` finishes.
@@ -100,7 +100,7 @@ GitHub Actions job per reviewer (D16).
   reviewer produced nothing.
 
 **Findings merge** across reviewers by `(path, body, line)` — the same key
-`ensemble` uses (D6). Duplicate findings keep the **strictest severity**.
+`ensemble` uses. Duplicate findings keep the **strictest severity**.
 
 **Attribution (`raised_by`).** Dispatch stamps `raised_by` server-side when
 findings merge — agents cannot supply it on `submit_review_verdict`. Identical
@@ -108,11 +108,11 @@ findings from two reviewers list both agent ids; unknown provenance reads
 `unknown`, never the primary reviewer. The field is display-only on the
 published review and run record; it does not change verdict, severity, or dedup.
 
-**One verdict** is submitted by the orchestrator as today (D7). Terminal-verdict
+**One verdict** is submitted by the orchestrator as today. Terminal-verdict
 cardinality is unchanged: `mergecraft-approval` stays a single hardcoded check
 name because there is only ever one submission.
 
-## Trust boundary (D9)
+## Trust boundary
 
 `.mergecraft/config.yaml` is PR-controlled after `checkout_pr`. The roster is
 therefore read from the **run-start settings snapshot**, never from the
@@ -149,7 +149,7 @@ mergecraft provider status --json       # machine-readable output (schema v1)
 ``--github`` needs a token with ``repo`` scope (``gh auth token`` or
 ``GITHUB_TOKEN``). Without one every remote field is ``unknown`` and the command
 still exits 0. Secrets are reported as present/absent only — values are never
-printed (#520 / D11).
+printed (#520).
 
 ``--cwd`` selects every target — config path, git resolution, workflow file,
 and registry — the same rule as `provider disable` (#521).
@@ -172,7 +172,7 @@ in config.
 
 After `mergecraft init`, authenticate one provider — the first successful
 `mergecraft provider auth <label>` seeds `agents.reviewer` p0 from that
-provider's preferred model (D10). No third command is required before
+provider's preferred model. No third command is required before
 `mergecraft review` works. See [`docs/authentication.md`](authentication.md#quick-start-init--auth--review).
 
 **See also:** [`docs/authentication.md`](authentication.md) · [`docs/workflows.md`](workflows.md) · [`docs/cli.md`](cli.md)

@@ -81,7 +81,7 @@ it with:
 mergecraft findings ledger --pr 161 --output-format json
 ```
 
-**No double-filing (D5).** The ledger never creates GitHub issues. Post-merge
+**No double-filing.** The ledger never creates GitHub issues. Post-merge
 carryover (`findings carryover`) files issues for unresolved **published**
 threads only. Fingerprints already recorded in the open-PR ledger are skipped by
 carryover while the pull request is open, so deferred findings are disclosed on

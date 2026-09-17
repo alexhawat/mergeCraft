@@ -7,7 +7,7 @@ replace the maintainer-dispatched approval lane in `mergecraft-approve.yml`.
 
 **Audience:** consumer (operators wiring self-review on their own repository)
 
-## Why two axes (D13)
+## Why two axes
 
 | Axis | Question | Typical consumer |
 |------|----------|------------------|
@@ -146,7 +146,7 @@ live, **then** write the key.
 `pull_request_target` runs read PR-authored content as part of reviewing it.
 The agent's own `approved: true` narrative cannot be the thing that unlocks a
 real merge approval on that trigger — that is the lesson of PR #200 and the
-D14 separation. Default `off` preserves today's posture byte-for-byte.
+authority/execution separation. Default `off` preserves today's posture byte-for-byte.
 
 `full` is an explicit operator opt-out of that separation for **their own**
 repository. It requires:
@@ -182,7 +182,7 @@ that same day because it hands credentials to PR-controlled workflow definitions
 Read more: [`.github/workflows/mergecraft-approve.yml`](../../.github/workflows/mergecraft-approve.yml),
 [Security model — structural approval](workflows.md#security-model).
 
-## Base-snapshot rule (D15)
+## Base-snapshot rule
 
 The effective trust policy is resolved **once at run start from the base tree**
 — the same snapshot that supplies `.mergecraft/config.yaml` on

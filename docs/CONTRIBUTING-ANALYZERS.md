@@ -1,7 +1,7 @@
 # Contributing analyzers
 
 Add a new catalog tool with **one manifest YAML**, **one parser fixture**, and **one
-`docs/ANALYZERS.md` row**. mergeCraft runs the platform — not bespoke Python per tool (D16/C6).
+`docs/ANALYZERS.md` row**. mergeCraft runs the platform — not bespoke Python per tool.
 
 ## Checklist
 
@@ -26,9 +26,9 @@ Add a new catalog tool with **one manifest YAML**, **one parser fixture**, and *
 | `parser` | Existing parser id (`sarif`, `ruff_json`, …) or `*_native` for inline adapters. |
 | `severity_map` | Maps **every** native severity the parser emits → review taxonomy. |
 | `default_enabled` | `false` for P1–P3 long tail; `auto` only with strong repo detection. |
-| `runtime` | `repo-native` → `managed` → `container` (D4). **Also decides eligibility under `shell: disabled`** — see below. |
-| `trust` | `trusted` or `untrusted` (D7). |
-| `exclusive_group` | One winner per group unless repo overrides both (D13/C1). |
+| `runtime` | `repo-native` → `managed` → `container`. **Also decides eligibility under `shell: disabled`** — see below. |
+| `trust` | `trusted` or `untrusted`. |
+| `exclusive_group` | One winner per group unless repo overrides both. |
 | `declared_unavailable` | Honest skip reason when the tool cannot run yet (C6.4). |
 
 ## Choosing a parser
@@ -48,8 +48,8 @@ severities (`Critical`, `Major`, `Minor`, `Trivial`). CI calls `severity_map_com
 ## Trust and provenance
 
 - Managed binaries: pin `version`, `provenance[platform].url`, and `sha256`.
-- Untrusted fork PRs: no secret verification, no network unless allowlisted (D7/C2).
-- Container-only heavy tools: `runtime: container`, `default_enabled: false` (D18/C4).
+- Untrusted fork PRs: no secret verification, no network unless allowlisted.
+- Container-only heavy tools: `runtime: container`, `default_enabled: false`.
 
 ## Eligibility under `shell: disabled` (#35)
 

@@ -39,7 +39,7 @@ Redirects for mutating verbs: `push` → `push_branch`, `fetch` → `git_fetch`,
 
 ## `establish_review_scope`
 
-Second evidence-backed route into review scope (D4) when `checkout_pr` cannot
+Second evidence-backed route into review scope when `checkout_pr` cannot
 fetch the head but a materialized diff already exists — e.g. from `get_commit_info`
 at PR head.
 
@@ -71,7 +71,7 @@ at PR head.
 Also accepted scope paths: `checkout_pr` (full or degraded), `get_commit_info`
 when SHA equals PR head, offline `establish_offline_review_scope`.
 
-## `checkout_pr` — degraded `api-only` scope (W4 / D1–D2)
+## `checkout_pr` — degraded `api-only` scope
 
 When the PR head **cannot be fetched** (dead remote, auth-class failure after
 classification, etc.), `checkout_pr` **does not fail the run**. It builds the
@@ -105,9 +105,9 @@ temp dir, and registers scope as `api-only`.
 
 **Operator guidance for agents:** use `git show <base>:path` and the diff; do
 not claim to have read a head-only file. A degraded review **may still APPROVE**
-when findings warrant it (D2) — transport failure is not an automatic merge block.
+when findings warrant it — transport failure is not an automatic merge block.
 
-Auth-class fetch failures degrade immediately with **no retry** (D3). Transient
+Auth-class fetch failures degrade immediately with **no retry**. Transient
 failures may retry once before degradation.
 
 ## Parameter aliases (W3)

@@ -105,11 +105,11 @@ tracing:
   enabled: true                # default: unset (treated as off); bool | null
   retentionDays: 30            # default: 30
   redaction: true              # default: true
-  content: redacted            # default: redacted; off | metadata | redacted | full (OB2/D6)
+  content: redacted            # default: redacted; off | metadata | redacted | full
   sinks:
     - type: jsonl_file
       path: .mergecraft/traces/
-    # Batch D adds: logfire, otel (behind the [tracing] extra, D6).
+    # logfire and otel sit behind the [tracing] extra.
 ```
 
 `enabled` is tri-state: `true`, `false`, or unset (`null`). Unset defers to
@@ -121,7 +121,7 @@ off). See `src/mergecraft/action/inputs.py::apply_tracing_overrides`.
 ### Shorthand form
 
 The shorthand `to: local_files` is normalised into the canonical `sinks`
-list at parse time (D9) — exactly one shape exists downstream:
+list at parse time — exactly one shape exists downstream:
 
 ```yaml
 tracing:
@@ -140,7 +140,7 @@ tracing:
 | `endpoint`    | string              | OTLP / collector endpoint.                      |
 | `headers`     | map[string]string   | Optional headers for OTLP / collectors.         |
 
-`tokenRef` is never inlined (D5). `path` is repo-relative when the sink
+`tokenRef` is never inlined. `path` is repo-relative when the sink
 operates inside the Action container.
 
 ## Sink types
@@ -151,7 +151,7 @@ operates inside the Action container.
 | `memory`     | `MemorySink`             | Batch A (W2)   |
 | `logfire`    | OTLP exporter (one path) | Batch D (W8)   |
 | `otel`       | OTLP exporter (one path) | Batch D (W8)   |
-| `sqlite`     | deferred (D10)           | not scheduled  |
+| `sqlite`     | deferred                 | not scheduled  |
 
 ### `jsonl_file` — daily rotation, 30-day retention
 
@@ -164,12 +164,12 @@ files whose mtime is older than the cap.
 Records every event in a `list`; available for tests and short-lived
 fixtures. Nothing escapes the process.
 
-### `logfire` / `otel` — one path (D5)
+### `logfire` / `otel` — one path
 
 Both resolve to the same OTLP exporter behind a batch processor. The
 remote sink contract is owned by W8.
 
-## Redaction guarantee (D7)
+## Redaction guarantee
 
 Redaction runs **once**, **before** fan-out. Every event reaches every
 sink through a `RedactingSink` wrapper around `MultiSink` — no sink is
@@ -187,7 +187,7 @@ ever reachable without going through the redaction boundary.
   into nested dicts and lists) so `ghp_…` and `sk-…` substrings cannot
   escape.
 
-## Payload cap (D8)
+## Payload cap
 
 `TRACE_ATTRS_JSON_MAX_BYTES = 64 * 1024`. When any single string value in
 an event's `attrs` exceeds the cap, the row is written with
@@ -195,7 +195,7 @@ an event's `attrs` exceeds the cap, the row is written with
 downstream consumers see the marker rather than a missing or half-written
 record.
 
-## Retention (D8)
+## Retention
 
 `retentionDays` (default `30`) governs `JSONLFileSink.purge_expired()`. Files
 whose mtime is older than the cap are removed on the next write (or
@@ -225,13 +225,13 @@ does hit it, raise the `Final` constant; it is a single line to change.
    a `NullSink.emit` is never invoked.
 2. **Tracing never fails the run** (convention 6). A sink that raises on
    `write` is caught and logged at `logger.warning`; the run continues.
-3. **Optional extra** (D6). `logfire` and `opentelemetry-*` are not base
+3. **Optional extra.** `logfire` and `opentelemetry-*` are not base
    dependencies. `pip install merge-craft[tracing]` pulls them in;
    `make ci-resume` passes with them uninstalled (convention 5).
 4. **No network in `make ci-resume`** (convention 8). Exporter tests
    target a fake transport.
 
-## D15 — remote sinks export reviewed-repo content
+## Remote sinks export reviewed-repo content
 
 > Enabling a **remote** sink (`logfire`, `otel`) exports reviewed-repo
 > content — the prompts the reviewer received, the tool inputs and
@@ -242,16 +242,16 @@ does hit it, raise the `Final` constant; it is a single line to change.
 > (`if: github.event.pull_request.head.repo.fork == false`) when the
 > reviewer should not exfiltrate fork-PR content.
 
-There is no config-level trust gate. D15's hard requirement is that the
+There is no config-level trust gate. The hard requirement is that the
 statement above appears plainly in this document, so the operator sees
 it the first time they reach for a remote sink.
 
-## Content-capture policy for model payloads (OB2 — D6/D7/D8)
+## Content-capture policy for model payloads
 
-D15 warns that remote sinks export reviewed-repo content; the `content`
+Remote sinks export reviewed-repo content; the `content`
 policy is the **level control** that decides how much of it leaves the
 runner. It governs model payloads (prompts, completions, reasoning) via
-`tracing/content.py`, with four levels (D6):
+`tracing/content.py`, with four levels:
 
 | Level | Body | Metadata (`.chars` / `.bytes` / `.sha256`) | Use |
 | --- | --- | --- | --- |
@@ -266,10 +266,10 @@ default `redacted`. An unrecognised value at any step falls through to the
 next, ending at the default — fail safe, never `full`. Bodies are
 byte-capped at the shared `TRACE_ATTRS_JSON_MAX_BYTES` budget and flagged
 `.truncated`; `.chars` / `.bytes` / `.sha256` always describe the
-**original** payload (D8), so the hash detects prompt drift between two
+**original** payload, so the hash detects prompt drift between two
 runs even when neither shipped a body.
 
-**D7 — untrusted runs cap at `metadata` unless you opt in twice.** At any
+**Untrusted runs cap at `metadata` unless you opt in twice.** At any
 trust tier other than `trusted`, a body-emitting level is lowered to
 `metadata` **after** precedence resolution. `content: full` in YAML and
 `MERGECRAFT_TRACING_CONTENT=full` both yield `metadata` on a fork-PR-shaped
@@ -368,7 +368,7 @@ mergecraft.run                       (root; run_id, repo, pr_number,
 - The tracer is **never on the critical path** (convention 6). Any
   exception inside an emit site is caught by `MultiSink.write` and logged
   at `logger.warning` with the sink type and message; the run continues.
-- **Redaction runs once, before fan-out** (D7). Every emit traverses a
+- **Redaction runs once, before fan-out.** Every emit traverses a
   `RedactingSink` wrapper around `MultiSink`. The `MemorySink` that
   structural tests use also redacts on write, so test assertions and the
   production path see the same surface.
@@ -430,12 +430,12 @@ agent.attempt
   `thread.started` / `turn.completed`; Gemini on `init` / `result`. The
   span exists so Logfire groups rows by transport family.
 - **When does `http.client.request` fire?** Once per outbound `httpx`
-  `send()` on a wrapper mergeCraft constructed (D8 — no global monkey
+  `send()` on a wrapper mergeCraft constructed (no global monkey
   patch). The wrapper installs on the two `httpx.AsyncClient` instances
   `agents/opencode.py::_prompt_session` and `agents/opencode.py::_run`
   use for the custom OpenAI-compatible provider path, the only httpx
   sites in the repo.
-- **`http.url` is always redacted inline** (D9 — see the URL redaction
+- **`http.url` is always redacted inline** (see the URL redaction
   table below).
 
 ### URL redaction table
@@ -462,7 +462,7 @@ grouping in Logfire's row inspector keeps working.
 Every `tool.call` span carries the request/response byte counts,
 `exit_code`, error class/message, and input-key list sevn splits across
 `tool.invoke` / `tool.complete`. The shape is additive on the post-#137
-tree (D5: one enriched `tool.call` span, not sevn's `tool.invoke` /
+tree (one enriched `tool.call` span, not sevn's `tool.invoke` /
 `tool.complete` split) so the existing `tool.name` / `tool.id` /
 `tool.server` / `gen_ai.*` attrs remain on the same row. The
 `src/mergecraft/tracing/_tool_attrs.py` helpers expose the open-side
@@ -562,7 +562,7 @@ automatically — no attribute search required.
 ### How it is generated
 
 The resolver follows the same precedence as the existing session-id
-resolver (D7 / T3.2):
+resolver:
 
 1. `MERGECRAFT_TRACE_ID` — explicit per-run override.
 2. `MERGECRAFT_TRACE_SESSION_ID` — alias preserving the pre-#137 contract
@@ -595,20 +595,20 @@ the run's trace.
 
 One logical review fans out into several processes: the orchestrating run
 plus one spawned agent CLI per subagent. Three identifiers — not two —
-describe that shape (D2):
+describe that shape:
 
 | Identifier | Scope | Source |
 | --- | --- | --- |
 | `review.id` | **One logical review**, across every process and agent run | `tracing/review_context.py::resolve_review_id()` — `MERGECRAFT_REVIEW_ID` inherited verbatim, else a fresh `uuid4` per review |
 | `trace_id` | **One agent run** (one process) | `tracing/tracer.py::resolve_trace_id()` — see *One trace per run (T3)* above |
-| `review.correlation_key` | **Every attempt at one commit** — deliberately collides | `correlation_key_for()` — deterministic `sha256(repo\|pr\|head_sha)` (D3) |
+| `review.correlation_key` | **Every attempt at one commit** — deliberately collides | `correlation_key_for()` — deterministic `sha256(repo\|pr\|head_sha)` |
 
 The shape to remember: **one review with three agent runs has one
 `review.id` and three `trace_id` values.** One `review.id` filter returns
 the entire review — every agent, every tool call, the verdict — across
 every process. `review.correlation_key` answers the orthogonal query:
 "every attempt at this commit", because two reviews of one commit are two
-reviews (distinct `review.id`s) but share the key (D3). A local patch
+reviews (distinct `review.id`s) but share the key. A local patch
 review has no repo/pr/head context, so its key is empty and the attribute
 is omitted rather than emitted as a misleading constant.
 
@@ -618,7 +618,7 @@ is omitted rather than emitted as a misleading constant.
   (`offline_review.py::run_offline_diff_review`) and the Action
   (`main.py::main`) — bind a frozen `ReviewContext` via
   `bind_review_context(...)`. `Span.close()` reads the bound context at
-  **close time** (D4), so a context bound after the tracer was built still
+  **close time**, so a context bound after the tracer was built still
   reaches spans that are already open. Merge precedence: tracer baseline →
   review context → lazy `attrs_source` → explicit `set_attribute`.
 - **Across the process boundary (O2):** `agents/shared.py::spawn_agent_cli`
@@ -633,7 +633,7 @@ is omitted rather than emitted as a misleading constant.
   the VCS/CI fields (`vcs.repository.name`, `vcs.change.id`,
   `vcs.revision`, `ci.workflow_run_id`, `ci.job_id`) so a span can say
   which build and which change produced it. The `Tracer` carries them in a
-  `baseline_attrs` field with `repr=False` (D5).
+  `baseline_attrs` field with `repr=False`.
 
 ## What's next
 
@@ -642,7 +642,7 @@ is omitted rather than emitted as a misleading constant.
 | C     | W6    | `stream-json` migration for per-tool spans            |
 | D     | W8    | `logfire` + `otel` exporters, CLI / action inputs, complete docs (DONE) |
 
-## Self-hosted endpoints (W8.1 / D5)
+## Self-hosted endpoints
 
 The `otel` sink accepts any OTLP/HTTP collector URL. The token / API key
 travels as an `Authorization: Bearer …` header; the `headers` map on the
@@ -664,10 +664,10 @@ For Logfire, the endpoint is the region-aware OTLP/HTTP ingest URL —
 `https://logfire-eu.pydantic.dev/v1/traces` (EU), selected by the sink's
 `region` field (default `us`). The `project` field is informational only;
 Logfire routes spans by the token itself, so no `x-logfire-project` header
-is sent. The token is resolved through `tokenRef` (D5) — see *Token
+is sent. The token is resolved through `tokenRef` — see *Token
 resolution* below.
 
-## Token resolution (W8.2 / D5)
+## Token resolution
 
 `logfire` tokens are referenced by name, never inlined. The factory
 resolves a `tokenRef` against `os.environ` at run time; when the
@@ -696,10 +696,10 @@ without touching `.mergecraft/config.yaml`:
 | ------------------------------------ | ---------------------------------------------------- |
 | `tracing`                            | `tracing.enabled` (overrides config)                 |
 | `tracing-to`                         | `tracing.to` shorthand (overrides config)            |
-| `logfire-token`                      | resolved logfire token (D5 — held at runtime only)   |
+| `logfire-token`                      | resolved logfire token (held at runtime only)        |
 | `otel-endpoint`                      | `tracing.sinks[].endpoint` for the `otel` sink type  |
 | `tracing-content`                    | `tracing.content` (`off` / `metadata` / `redacted` / `full`) |
-| `tracing-export-untrusted-content`   | operator D7 lift (env / Action; fork HEAD YAML cannot) |
+| `tracing-export-untrusted-content`   | operator lift of the untrusted content cap (env / Action; fork HEAD YAML cannot) |
 
 The Action wraps `${{ secrets.LOGFIRE_TOKEN }}` into `logfire-token`
 so the secret never appears in the workflow file.
@@ -723,7 +723,7 @@ The precedence order is **CLI flag > env var > `.mergecraft/config.yaml`
 `mergecraft config tracing` does **not** require the `tracing` extra
 — it operates on resolved settings, not on the live exporters.
 
-## Artifact upload (W8.6 / D14)
+## Artifact upload
 
 The Action writes local traces under `.mergecraft/traces/`. A typical
 workflow ships them out of CI with `actions/upload-artifact@v4`:

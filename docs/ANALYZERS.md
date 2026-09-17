@@ -27,7 +27,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `clippy` | lint | rust | auto | repo-native | trusted | rust-lint | — |
 | `cppcheck` | lint | c, cpp | auto | managed | trusted | — | — |
 | `detekt` | lint | kotlin | auto | repo-native | trusted | — | — |
-| `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings (D8). |
+| `dotenv-linter` | lint | — | disabled | managed | trusted | — | Values never printed in findings. |
 | `ember-template-lint` | lint | ember | auto | repo-native | trusted | — | — |
 | `eslint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `flake8` | lint | python | disabled | repo-native | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
@@ -49,7 +49,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `oxlint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `phpcs` | lint | php | disabled | repo-native | trusted | php-lint | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
 | `phpmd` | lint | php | disabled | repo-native | trusted | — | Legacy opt-in — disabled by default; phpstan is the default PHP signal. |
-| `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0 (D12). |
+| `phpstan` | lint | php | auto | repo-native | trusted | — | No phpstan.neon/neon.dist → runs at --level=0. |
 | `pmd` | lint | java | auto | managed | trusted | — | — |
 | `presidio` | security | — | disabled | container | trusted | — | Container-only; high-confidence entity types only. |
 | `prisma-lint` | lint | prisma | auto | repo-native | trusted | — | — |
@@ -219,16 +219,16 @@ analyzers:
 
 See [CONTRIBUTING-ANALYZERS.md](CONTRIBUTING-ANALYZERS.md) to add a tool.
 
-## Noise budget (D14)
+## Noise budget
 
-Inline review comments from analyzers and the reviewing agent share a single cap of **8** slots (W0.2 measurement; configurable via `analyzers.inlineBudget`). Placement is deterministic:
+Inline review comments from analyzers and the reviewing agent share a single cap of **8** slots (measured; configurable via `analyzers.inlineBudget`). Placement is deterministic:
 
 - **Inline** — highest-priority findings up to the cap. Agent findings win tie-breaks over analyzer findings at the same severity and path.
 - **Mechanical overflow** — `source: analyzer` / `source: ci` findings that did not earn an inline slot render as a compact `### 🔧 Mechanical findings` table (tool, rule id, path:line). mergeCraft appends this section server-side at publish time.
 - **Deferred overflow** — `source: agent` findings that did not earn an inline slot render in `### 🗂 Deferred findings` with severity, path, line, and the **full finding body**. This lane is non-blocking (no inline anchor) and is also server-appended at publish time so overflow reasoning is never discarded.
 - **Nitpicks** — `Trivial` severity or `Low value` effort never occupy inline or deferred slots; they belong in the Nitpicks section.
 
-## Verification gate (D11)
+## Verification gate
 
 `Critical` and `Major` findings are hypotheses until the read-only `mergecraft-verifier` subagent reads the cited code. That gate applies to analyzer, CI, and agent-authored findings.
 
@@ -295,8 +295,8 @@ analyzers:
 
 What is and is not uploaded:
 
-- **Catalog analyzers only.** Only `source: analyzer` findings are eligible. `source: ci` findings carry truncated pipeline log excerpts and `source: agent` findings carry narrative; neither is uploaded, and raw logs never leave the process (D13).
-- **The clustered, placed set.** The upload reuses the findings the pipeline already clustered and placed, not the raw analyzer output, so cross-tool duplicates arrive as one alert (D14). It is *not* truncated at the inline comment budget — the overflow is exactly what this surface exists to show.
+- **Catalog analyzers only.** Only `source: analyzer` findings are eligible. `source: ci` findings carry truncated pipeline log excerpts and `source: agent` findings carry narrative; neither is uploaded, and raw logs never leave the process.
+- **The clustered, placed set.** The upload reuses the findings the pipeline already clustered and placed, not the raw analyzer output, so cross-tool duplicates arrive as one alert. It is *not* truncated at the inline comment budget — the overflow is exactly what this surface exists to show.
 - **Trust-gated.** Each finding's analyzer must still pass this run's `trust` x `shell` x `analyzers:` selection chain — the same predicates the pipeline calls, re-evaluated at upload time. A finding from a tool with no catalog manifest cannot be gated, so it is refused.
 - **Redacted before serialization.** `message`, `evidence`, `remediation` and `autofix` pass through `analyzers/redact.py` while still typed `Finding`s, before SARIF is built. `path` is left intact: it becomes `artifactLocation.uri`, and mangling it would detach the alert from its file.
 - **Never a gate.** A rejected upload — missing permission, code scanning unavailable, transport error — is logged at `warning` and the run continues.

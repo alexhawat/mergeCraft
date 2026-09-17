@@ -23,7 +23,7 @@ Workflow configuration alone is not evidence that the jobs ran.
 
 Verify a published digest locally (see [CONTRIBUTING.md](../CONTRIBUTING.md#verify-a-published-image)).
 
-## Operator actions (D17)
+## Operator actions
 
 ### PyPI (`merge-craft`)
 
@@ -84,7 +84,7 @@ The mark and wordmark are already tracked in [`assets/brand/`](../assets/brand/)
 to add there. The one binary still outstanding is the demo capture; see
 [`docs/assets/README.md`](assets/README.md) for what's needed and where it goes.
 
-## Python version and Docker (D16)
+## Python version and Docker
 
 **Python >=3.11** is the install floor for `uv tool install` / local CLI development
 (`pyproject.toml`). CI runs on **3.11** and **3.14**. PyPI (`merge-craft`) is **not**
@@ -93,7 +93,7 @@ pinned runtime without managing Python versions should use the **Docker Action**
 (`alexhawat/mergeCraft@…`) — the image ships a compatible runtime; no local Python
 install is required.
 
-## Shipped package names (D15)
+## Shipped package names
 
 | Path | Status |
 |------|--------|

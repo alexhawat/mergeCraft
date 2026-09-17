@@ -496,7 +496,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
-        """Assign a registered model to a positional slot (idempotent, D4)."""
+        """Assign a registered model to a positional slot (idempotent)."""
         agent_name = _validate_agent_name(name)
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)
@@ -535,7 +535,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
-        """Append a registered model to an agent's chain (no-op when duplicate, D4)."""
+        """Append a registered model to an agent's chain (no-op when duplicate)."""
         agent_name = _validate_agent_name(name)
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)
@@ -594,7 +594,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
-        """Change dispatch ordering after agent creation (D15)."""
+        """Change dispatch ordering after agent creation."""
         agent_name = _validate_agent_name(name)
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)

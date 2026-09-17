@@ -1181,7 +1181,7 @@ def migrate_cmd(
     ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
-    """Migrate legacy ``*_API_KEY`` env vars into indexed provider registry layout (D2 / #483)."""
+    """Migrate legacy ``*_API_KEY`` env vars into indexed provider registry layout (#483)."""
     repo_root = cwd.resolve()
     config_path = _config_path(repo_root)
     env_path = _env_path(cwd)

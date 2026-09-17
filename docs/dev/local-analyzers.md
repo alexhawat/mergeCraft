@@ -50,4 +50,4 @@ these tools locally; mergeCraft still skips them with the standard
 `not found in repo PATH or tooling` reason when the binary is absent.
 
 Do **not** flip these manifests to `runtime: managed` or add darwin provenance —
-they stay `runtime: repo-native` per catalog policy (C3/D5).
+they stay `runtime: repo-native` per catalog policy.

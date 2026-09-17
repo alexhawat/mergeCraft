@@ -27,7 +27,7 @@ inputs:
     required: false
   model_pin:
     description: >-
-      #37 / W4 / D8 — opt into the legacy "use exactly this model" semantics
+      #37 — opt into the legacy "use exactly this model" semantics
       for the `model:` input. Default `disabled`: `model:` becomes the chain
       head; the configured `models:` / `modelFallbacks:` tail is walked on
       credential miss or retryable failure. Set to `enabled` to collapse the
@@ -74,7 +74,7 @@ inputs:
     required: false
     default: disabled
   allow_pr_target_comments:
-    description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72 / D6."
+    description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72."
     required: false
     default: "false"
   codex_sandbox:
@@ -90,7 +90,7 @@ inputs:
   provider_base_url:
     description: >-
       Custom OpenAI-compatible base URL for the singleton provider
-      (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`, PR #79 / D7). Use this to point
+      (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`, PR #79). Use this to point
       Codex or OpenCode at a third-party OpenAI-compatible gateway without
       committing env-var names in workflow YAML. The indexed multi-provider
       form (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>` for `N >= 1`)
@@ -176,7 +176,7 @@ inputs:
     default: ""
   setup_failure_policy:
     description: >-
-      S1 / D10 — what happens when a trusted-tier ``setupScript`` fails (non-zero
+      What happens when a trusted-tier ``setupScript`` fails (non-zero
       exit) or times out. ``inconclusive`` (default) maps the run to
       ``RunOutcome.inconclusive`` (a ``neutral`` check conclusion) — the run is
       treated as no-verdict, never a passing review of an under-provisioned tree.
