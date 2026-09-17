@@ -7,9 +7,26 @@ from typing import TYPE_CHECKING, Any, Literal
 from mergecraft.config.layered import load_layered_config_dict
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 TrustTier = Literal["trusted", "untrusted"]
+
+_TRUFFLEHOG_NAMED_FIXTURE_SUPPRESSIONS: dict[str, str] = {
+    "tests/analyzers/fixtures/repo/config/planted-secret.env": (
+        "Intentional planted-secret fixture for detector wiring"
+    ),
+    "tests/tracing/test_redact_url.py": (
+        "Contains secret-shaped strings so URL redaction can be tested"
+    ),
+    "tests/security/test_credentials.py": (
+        "Credential-shaped fixtures used by the credentials test suite"
+    ),
+    "tests/scripts/test_native_output_to_sarif.py": (
+        "Embeds SARIF secret-shaped samples for the native-to-SARIF converter"
+    ),
+}
+_TRUFFLEHOG_VENV_MARKERS = frozenset({".venv", ".venv-dev", "venv", "site-packages"})
 
 
 def raw_analyzers_block(repo_root: Path) -> dict[str, Any]:
@@ -38,4 +55,31 @@ def trufflehog_verify_enabled(
     return False
 
 
-__all__ = ["raw_analyzers_block", "trufflehog_verify_enabled"]
+def trufflehog_named_fixture_suppressions() -> Mapping[str, str]:
+    """Return path → reason for intentional secret fixtures (not a tests/ glob)."""
+    return dict(_TRUFFLEHOG_NAMED_FIXTURE_SUPPRESSIONS)
+
+
+def _normalize_trufflehog_path(path: str) -> str:
+    return path.replace("\\", "/").lstrip("./")
+
+
+def is_trufflehog_path_suppressed(path: str) -> bool:
+    """Return True for named fixtures or virtualenv trees; never a blanket tests/ skip."""
+    normalized = _normalize_trufflehog_path(path)
+    suppressions = trufflehog_named_fixture_suppressions()
+    if normalized in suppressions:
+        return True
+    for named in suppressions:
+        if normalized.endswith("/" + named):
+            return True
+    parts = [part for part in normalized.split("/") if part]
+    return bool(_TRUFFLEHOG_VENV_MARKERS.intersection(parts))
+
+
+__all__ = [
+    "is_trufflehog_path_suppressed",
+    "raw_analyzers_block",
+    "trufflehog_named_fixture_suppressions",
+    "trufflehog_verify_enabled",
+]

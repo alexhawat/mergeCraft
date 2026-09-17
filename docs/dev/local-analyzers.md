@@ -32,7 +32,11 @@ quiet.
 
 The engine bump also enables `MD060` (`table-column-style`) by default, which
 fires on this repo's docs tables. Repo-root `.markdownlint.json` disables it —
-see the note in that file.
+see the note in that file. Consumers with no markdownlint config receive the
+same MD060-only disable via the shipped `markdownlint-default-config.json`
+fallback; a run note records that the fallback applied so operators can tell
+repo-rules-clean from fallback-clean. A consumer whose own config enables
+MD060 still gets it.
 
 ## Intentionally skipped in this repo
 

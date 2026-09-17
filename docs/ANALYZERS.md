@@ -41,7 +41,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `knip` | quality | javascript, typescript | auto | repo-native | trusted | — | — |
 | `languagetool` | lint | text | disabled | container | trusted | — | manifest-only — LanguageTool runtime not bundled on Linux runners (C6 out of scope) |
 | `luacheck` | lint | lua | auto | repo-native | trusted | — | — |
-| `markdownlint` | lint | markdown | auto | repo-native | trusted | — | — |
+| `markdownlint` | lint | markdown | auto | repo-native | trusted | — | No markdownlint config → shipped fallback disables MD060 (table-column-style) only. |
 | `mypy` | lint | python | auto | repo-native | trusted | python-typecheck | — |
 | `oasdiff` | contract | — | auto | managed | untrusted | — | — |
 | `opengrep` | security | python, javascript, typescript, go, java, ruby, rust, yaml | disabled | managed | untrusted | pattern-scanner | — |

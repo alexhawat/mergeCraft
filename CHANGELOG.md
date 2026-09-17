@@ -23,10 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the engine, so it moves 0.37.4 → 0.41.1. A markdownlint `warning` now grades
   **Minor** instead of Major — the parser reads the per-finding `severity` that
   0.49.1 emits rather than hardcoding `error`, and an unrecognised severity
-  grades as `error` with a log line instead of failing the whole run. Repo-root
-  `.markdownlint.json` disables `MD060` (`table-column-style`), which the engine
-  bump enables by default and which fires 493 times on this repo's docs tables;
-  consumer repos without their own config still inherit it.
+  grades as `error` with a log line instead of failing the whole run. The engine
+  bump also enables `MD060` (`table-column-style`) by default. This repo's
+  `.markdownlint.json` disables it; consumers with no markdownlint config get
+  the same MD060-only disable via the shipped `markdownlint-default-config.json`
+  fallback, and a run note records that the fallback applied so operators can
+  tell repo-rules-clean from fallback-clean. A consumer whose own config
+  enables MD060 still gets it (#704).
+
+- trufflehog no longer reports secrets from virtualenv trees (`.venv`,
+  `.venv-dev`, `site-packages`) or four named intentional fixtures; each
+  fixture suppression names why it is exempt, and a newly committed secret
+  under `tests/` still fires.
 
 ### Added
 

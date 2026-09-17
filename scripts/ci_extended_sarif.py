@@ -28,6 +28,8 @@ _SCAN_PATHS = ("src", "tests", "scripts", "action.yml")
 _TRUFFLEHOG_EXCLUDE_REGEXES = (
     r"\.git/",
     r"(^|/)\.venv/",
+    r"(^|/)\.venv-dev/",
+    r"site-packages/",
     r"\.mergecraft/analyzer-cache/",
     r"node_modules/",
     r"graphify-out/",

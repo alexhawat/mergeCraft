@@ -530,6 +530,11 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
             notes.append("verify off by default; impossible on fork PRs (C2).")
         if manifest.id == "phpstan":
             notes.append("No phpstan.neon/neon.dist → runs at --level=0 (D12).")
+        if manifest.id == "markdownlint":
+            notes.append(
+                "No markdownlint config → shipped fallback disables MD060 "
+                "(table-column-style) only."
+            )
         if manifest.id in ("flake8", "pylint"):
             notes.append("Legacy opt-in — disabled by default; enable via config override.")
         if manifest.id in ("phpcs", "phpmd"):
