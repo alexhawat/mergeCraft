@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -397,6 +397,8 @@ async def run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     engine: ReviewEngine[OfflineReviewResult] | None = None,
+    with_coverage: bool = False,
+    with_mutation: bool = False,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     spec = source_spec or SourceResolverSpec(cwd=cwd, invocation_root=invocation_root or cwd)
@@ -441,6 +443,8 @@ async def run_offline_diff_review(
             on_finding=on_finding,
             use_cache=use_cache,
             engine=engine,
+            with_coverage=with_coverage,
+            with_mutation=with_mutation,
         )
 
 
@@ -664,6 +668,9 @@ class _OfflineDiffReviewRun:
     # caller that omits it keeps the pre-flag behaviour: repo-native analyzers
     # stay withheld unless `mergecraft review --shell` explicitly raises this.
     shell: ShellPermission = "disabled"
+    with_coverage: bool = False
+    with_mutation: bool = False
+    local_findings: list[Finding] = field(default_factory=list)
     materialization: DiffMaterialization | None = None
     scope_reduction: ScopeReduction | None = None
     cache_key: str | None = None
@@ -712,6 +719,7 @@ class _OfflineDiffReviewRun:
         assert self.materialization is not None
         if self.dry_run:
             return
+        self._collect_local_evidence()
         from mergecraft.review.offline_stages import run_offline_analyze
 
         self.analyzer_run = await run_offline_analyze(
@@ -721,6 +729,67 @@ class _OfflineDiffReviewRun:
             shell=self.shell,
             analyzers_enabled=self.analyzers_enabled,
         )
+
+    def _collect_local_evidence(self) -> None:
+        """Run opt-in local coverage/mutation when the trusted-sandbox gate passes."""
+        if not (self.with_coverage or self.with_mutation):
+            return
+        if self.materialization is None:
+            return
+        from mergecraft.ci.local_evidence import run_local_coverage, run_local_mutation
+        from mergecraft.mcp.shell import detect_sandbox_method
+
+        settings = load_repo_settings(root=self.cwd, load_learnings_files=False)
+        backend = detect_sandbox_method()
+        try:
+            diff = self.materialization.path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("local evidence: failed to read diff: {}", exc)
+            return
+        if self.with_coverage:
+            from mergecraft.ci.crap import DEFAULT_CRAP_BANDS
+
+            bands = settings.coverage.bands
+            band_arg = None
+            if (
+                bands.watch != DEFAULT_CRAP_BANDS.watch
+                or bands.elevated != DEFAULT_CRAP_BANDS.elevated
+                or bands.crap != DEFAULT_CRAP_BANDS.crap
+                or bands.severe != DEFAULT_CRAP_BANDS.severe
+            ):
+                band_arg = {
+                    "watch": bands.watch,
+                    "elevated": bands.elevated,
+                    "crap": bands.crap,
+                    "severe": bands.severe,
+                }
+            coverage = run_local_coverage(
+                repo_root=self.cwd,
+                diff=diff,
+                trust_tier=self.trust_tier,
+                sandbox_backend=backend,
+                timeout_seconds=settings.coverage.timeout_seconds,
+                mode=settings.coverage.mode,
+                bands=band_arg,
+            )
+            if coverage.skip_reason:
+                logger.info("local coverage skip reason={}", coverage.skip_reason)
+            self.local_findings.extend(coverage.findings)
+        if self.with_mutation:
+            mutation = run_local_mutation(
+                repo_root=self.cwd,
+                diff=diff,
+                trust_tier=self.trust_tier,
+                sandbox_backend=backend,
+                timeout_seconds=settings.mutation.timeout_seconds,
+                max_mutants=settings.mutation.max_mutants,
+                path_allowlist=settings.mutation.path_allowlist,
+                mode=settings.mutation.mode,
+                survivor_threshold=settings.mutation.survivor_threshold,
+            )
+            if mutation.skip_reason:
+                logger.info("local mutation skip reason={}", mutation.skip_reason)
+            self.local_findings.extend(mutation.findings)
 
     async def review(self) -> OfflineReviewResult:
         assert self.materialization is not None
@@ -808,7 +877,8 @@ class _OfflineDiffReviewRun:
                     cached.diff_path = str(self.materialization.path)
                 self.from_cache = True
                 return merge_analyzer_findings_into_result(
-                    cached, findings_from_analyzer_run(self.analyzer_run)
+                    cached,
+                    findings_from_analyzer_run(self.analyzer_run) + self.local_findings,
                 )
 
         reviewed = await run_offline_agent_review(
@@ -826,7 +896,8 @@ class _OfflineDiffReviewRun:
             analyzer_run=self.analyzer_run,
         )
         return merge_analyzer_findings_into_result(
-            reviewed, findings_from_analyzer_run(self.analyzer_run)
+            reviewed,
+            findings_from_analyzer_run(self.analyzer_run) + self.local_findings,
         )
 
     async def publish(self, review_out: OfflineReviewResult) -> OfflineReviewResult:
@@ -861,6 +932,8 @@ async def _run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     engine: ReviewEngine[OfflineReviewResult] | None = None,
+    with_coverage: bool = False,
+    with_mutation: bool = False,
 ) -> OfflineReviewResult:
     """Body of :func:`run_offline_diff_review`, run under the bound review context."""
     cwd = cwd.resolve()
@@ -915,9 +988,16 @@ async def _run_offline_diff_review(
         evidence_packet_path=evidence_packet_path,
         on_finding=on_finding,
         read_cache=use_cache,
+        with_coverage=with_coverage,
+        with_mutation=with_mutation,
     )
 
     try:
+        if (with_coverage or with_mutation) and trust_tier == "untrusted":
+            return _offline_failure(
+                error="--with-coverage/--with-mutation require a trusted review source",
+                outcome=RunOutcome.configuration_error,
+            )
         try:
             staged = await runner.run(driver)
             published = staged.published_or(

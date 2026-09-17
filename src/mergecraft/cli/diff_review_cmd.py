@@ -505,6 +505,24 @@ def run(
         ),
         rich_help_panel=_PANEL_OUTPUT,
     ),
+    with_coverage: bool = typer.Option(
+        False,
+        "--with-coverage",
+        help=(
+            "Run coverage locally and emit CRAP findings on changed functions "
+            "(trusted, sandboxed CLI only). Refuses on an untrusted tier."
+        ),
+        rich_help_panel=_PANEL_TRUST,
+    ),
+    with_mutation: bool = typer.Option(
+        False,
+        "--with-mutation",
+        help=(
+            "Run a bounded mutation pass locally and emit survivor findings "
+            "(trusted, sandboxed CLI only). Refuses on an untrusted tier."
+        ),
+        rich_help_panel=_PANEL_TRUST,
+    ),
 ) -> None:
     if ctx.info_name == "diff-review":
         console.print(_DIFF_REVIEW_DEPRECATION)
@@ -533,6 +551,12 @@ def run(
         trust_override = parse_cli_trust_override(trust)
     except ValueError as exc:
         _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
+
+    if (with_coverage or with_mutation) and trust_override == "untrusted":
+        _exit_with_message(
+            "--with-coverage/--with-mutation require a trusted review source",
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
 
     try:
         from mergecraft.cli.config_surface_cmd import validate_repo_config_or_raise
@@ -674,6 +698,8 @@ def run(
                     on_finding=_on_finding if agent_mode else None,
                     use_cache=read_cache,
                     engine=engine,
+                    with_coverage=with_coverage,
+                    with_mutation=with_mutation,
                 )
             )
         except TimeoutError:

@@ -212,6 +212,7 @@ class CoverageSettings(_OptionalFeatureModel):
 
     mode: GateMode = "shadow"
     bands: CoverageBandSettings = Field(default_factory=CoverageBandSettings)
+    timeout_seconds: int = Field(default=300, alias="timeoutSeconds", gt=0)
 
 
 class MutationSettings(_OptionalFeatureModel):
@@ -219,6 +220,9 @@ class MutationSettings(_OptionalFeatureModel):
 
     mode: GateMode = "shadow"
     survivor_threshold: int = Field(default=0, alias="survivorThreshold", ge=0)
+    timeout_seconds: int = Field(default=300, alias="timeoutSeconds", gt=0)
+    max_mutants: int = Field(default=50, alias="maxMutants", ge=1)
+    path_allowlist: list[str] = Field(default_factory=list, alias="pathAllowlist")
 
 
 class GatesSettings(BaseModel):
