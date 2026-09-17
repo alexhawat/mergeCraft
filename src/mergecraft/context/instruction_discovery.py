@@ -285,10 +285,12 @@ class _Budget:
             self.limitations.append(note)
             self.remaining = max(self.remaining - len(fitted.encode("utf-8")), 0)
             return fitted, True
-        truncated = encoded[:limit].decode("utf-8", errors="ignore").rstrip()
+        suffix = f"\n\n{note}"
+        body_budget = max(limit - _rendered_byte_len(suffix), 0)
+        truncated = encoded[:body_budget].decode("utf-8", errors="ignore").rstrip()
         self.limitations.append(note)
-        rendered = f"{truncated}\n\n{note}" if truncated else note
-        self.remaining = max(self.remaining - len(rendered.encode("utf-8")), 0)
+        rendered = f"{truncated}{suffix}" if truncated else note
+        self.remaining = max(self.remaining - _rendered_byte_len(rendered), 0)
         return rendered, bool(truncated)
 
 
