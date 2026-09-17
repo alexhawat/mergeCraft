@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import yaml
 from loguru import logger
@@ -560,6 +560,59 @@ class RunBoundsSettings(BaseModel):
     )
 
 
+_JEV_PINNED_MODEL: Final[str] = "jev-1.13.0"
+_JEV_FLOATING_ALIASES: Final[frozenset[str]] = frozenset({"jev-latest", "jev-preview"})
+_JEV_PACK_IDS: Final[tuple[str, ...]] = (
+    "unit/v1",
+    "evidence/v1",
+    "claim/v1",
+    "align/v1",
+    "lens/v1",
+)
+_JEV_DEFAULT_BUDGET_TOKENS: Final[int] = 250_000
+
+
+def _default_jev_packs() -> dict[str, bool]:
+    return {pack_id: True for pack_id in _JEV_PACK_IDS}
+
+
+class JevSettings(BaseModel):
+    """Opt-in Jev / System One block. Off by default (D4, D8).
+
+    No credential, no config, and the default ``enabled: false`` change no
+    review behaviour and make no network call. Thresholds stay empty until
+    J3 sets them from the eval corpus (D15).
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    model: str = _JEV_PINNED_MODEL
+    budget_tokens: int = Field(
+        default=_JEV_DEFAULT_BUDGET_TOKENS,
+        alias="budgetTokens",
+        gt=0,
+    )
+    packs: dict[str, bool] = Field(default_factory=_default_jev_packs)
+    thresholds: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("model")
+    @classmethod
+    def _reject_floating_alias(cls, value: str) -> str:
+        pinned = value.strip()
+        if pinned in _JEV_FLOATING_ALIASES:
+            msg = "jev.model must be a versioned id (jev-1.13.0), not a floating alias"
+            raise ValueError(msg)
+        return pinned
+
+    @field_validator("packs")
+    @classmethod
+    def _fill_known_packs(cls, value: dict[str, bool]) -> dict[str, bool]:
+        filled = _default_jev_packs()
+        filled.update(value)
+        return filled
+
+
 class RepoSettings(BaseModel):
     """Per-repo runtime settings — local equivalent of upstream ``RepoSettings``.
 
@@ -657,6 +710,7 @@ class RepoSettings(BaseModel):
         default_factory=list, alias="xrepoLearningsHeadings"
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
+    jev: JevSettings = Field(default_factory=JevSettings)
     run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
     enterprise: EnterpriseSettings = Field(default_factory=EnterpriseSettings)
     # #477 / BA — operator provider registry (structure only; secrets in ``.env``).
