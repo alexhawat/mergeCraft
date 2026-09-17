@@ -12,11 +12,6 @@ import pytest
 
 from tests.analyzers.support import import_module
 
-H3 = pytest.mark.xfail(
-    reason="green after H3: markdownlint fallback via _apply_config_absent_patches",
-    strict=False,
-)
-
 _CATALOG_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "analyzers" / "catalog"
 _FALLBACK_NAME = "markdownlint-default-config.json"
 
@@ -46,13 +41,11 @@ def _registry() -> object:
     return import_module("mergecraft.analyzers.registry")
 
 
-@H3
 def test_has_markdownlint_config_is_false_when_absent(tmp_path: Path) -> None:
     detect = _detect()
     assert detect.has_markdownlint_config(tmp_path) is False
 
 
-@H3
 @pytest.mark.parametrize("name", _MARKDOWNLINT_CONFIG_NAMES)
 def test_has_markdownlint_config_recognises_each_filename_family(tmp_path: Path, name: str) -> None:
     detect = _detect()
@@ -60,14 +53,12 @@ def test_has_markdownlint_config_recognises_each_filename_family(tmp_path: Path,
     assert detect.has_markdownlint_config(tmp_path) is True
 
 
-@H3
 def test_has_markdownlint_config_ignores_a_directory_with_the_same_name(tmp_path: Path) -> None:
     detect = _detect()
     (tmp_path / ".markdownlint.json").mkdir()
     assert detect.has_markdownlint_config(tmp_path) is False
 
 
-@H3
 def test_has_markdownlint_config_ignores_nested_config(tmp_path: Path) -> None:
     detect = _detect()
     nested = tmp_path / "docs"
@@ -76,13 +67,11 @@ def test_has_markdownlint_config_ignores_nested_config(tmp_path: Path) -> None:
     assert detect.has_markdownlint_config(tmp_path) is False
 
 
-@H3
 def test_has_markdownlint_config_is_exported() -> None:
     detect = _detect()
     assert "has_markdownlint_config" in detect.__all__
 
 
-@H3
 def test_markdownlint_default_config_disables_only_md060() -> None:
     """Decision 8 — option 2 contents; do not demote MD013 / MD024 / MD033."""
     path = _CATALOG_DIR / _FALLBACK_NAME
@@ -92,7 +81,6 @@ def test_markdownlint_default_config_disables_only_md060() -> None:
         assert rule not in payload
 
 
-@H3
 def test_apply_config_absent_patches_injects_fallback_before_files_token(
     tmp_path: Path,
 ) -> None:
@@ -124,7 +112,6 @@ def test_apply_config_absent_patches_does_not_override_repo_config(
     assert _FALLBACK_NAME not in " ".join(patched)
 
 
-@H3
 def test_markdownlint_without_config_uses_conservative_fallback(tmp_path: Path) -> None:
     resolve = _resolve()
     (tmp_path / "README.md").write_text("# hi\n", encoding="utf-8")
@@ -165,7 +152,6 @@ def test_markdownlint_with_repo_config_keeps_repo_rules(tmp_path: Path) -> None:
     assert plan.config_note is None or "fallback" not in plan.config_note.casefold()
 
 
-@H3
 def test_markdownlint_fallback_note_constant_matches_prisma_pattern() -> None:
     resolve = _resolve()
     note = resolve._MARKDOWNLINT_FALLBACK_NOTE

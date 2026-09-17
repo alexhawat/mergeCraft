@@ -7,14 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.analyzers.support import import_module
-
-H3 = pytest.mark.xfail(
-    reason="green after H3: trufflehog virtualenv exclude and named fixture suppressions",
-    strict=False,
-)
 
 # Observed noise on run 34542726646 — each exemption names why, not a path glob.
 _NAMED_FIXTURES: tuple[tuple[str, str], ...] = (
@@ -45,7 +38,6 @@ def _ci_sarif() -> object:
     return import_module("scripts.ci_extended_sarif")
 
 
-@H3
 def test_trufflehog_exclude_paths_cover_venv_dev_and_virtualenv_trees(
     tmp_path: Path,
 ) -> None:
@@ -66,7 +58,6 @@ def test_trufflehog_exclude_paths_do_not_blanket_skip_tests(tmp_path: Path) -> N
     assert not any(line.strip() in {"tests/", "tests/**"} for line in text.splitlines())
 
 
-@H3
 def test_trufflehog_named_fixture_suppressions_cover_each_intentional_fixture() -> None:
     config = _config()
     suppressions = dict(config.trufflehog_named_fixture_suppressions())
@@ -77,7 +68,6 @@ def test_trufflehog_named_fixture_suppressions_cover_each_intentional_fixture() 
         assert needle.casefold() in reason.casefold()
 
 
-@H3
 def test_named_fixture_is_suppressed_and_a_new_test_secret_is_not() -> None:
     config = _config()
     planted = "tests/analyzers/fixtures/repo/config/planted-secret.env"
@@ -86,7 +76,6 @@ def test_named_fixture_is_suppressed_and_a_new_test_secret_is_not() -> None:
     assert config.is_trufflehog_path_suppressed("tests/security/test_unrelated.py") is False
 
 
-@H3
 def test_virtualenv_tree_is_out_of_trufflehog_scope() -> None:
     config = _config()
     assert (
