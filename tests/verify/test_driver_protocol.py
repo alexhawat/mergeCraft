@@ -11,7 +11,6 @@ from tests.verify.fake_driver import FakeBrowserDriver, FakeUnreachableError
 from tests.verify.support import (
     CANARY_TOKEN,
     SECRET_ENV_NAME,
-    V3_XFAIL,
     import_verify,
     require_symbol,
 )
@@ -31,7 +30,6 @@ PROTOCOL_METHODS: tuple[str, ...] = (
 )
 
 
-@V3_XFAIL
 def test_protocol_declares_every_driver_method() -> None:
     driver_mod = import_verify("driver")
     protocol = require_symbol(driver_mod, "BrowserDriver")
@@ -41,7 +39,6 @@ def test_protocol_declares_every_driver_method() -> None:
         assert name in hints or callable(getattr(protocol, name, None))
 
 
-@V3_XFAIL
 def test_fake_satisfies_protocol() -> None:
     driver_mod = import_verify("driver")
     protocol = require_symbol(driver_mod, "BrowserDriver")
@@ -49,7 +46,6 @@ def test_fake_satisfies_protocol() -> None:
     assert isinstance(fake, protocol)
 
 
-@V3_XFAIL
 async def test_fake_navigate_click_fill_type_press_scroll(tmp_path: Path) -> None:
     driver_mod = import_verify("driver")
     protocol = require_symbol(driver_mod, "BrowserDriver")
@@ -79,7 +75,6 @@ async def test_fake_navigate_click_fill_type_press_scroll(tmp_path: Path) -> Non
         assert method in names
 
 
-@V3_XFAIL
 async def test_cookies_are_set_and_read_by_name() -> None:
     """Cookie handling records names; tests never assert a credential value is correct."""
     driver_mod = import_verify("driver")
@@ -91,7 +86,6 @@ async def test_cookies_are_set_and_read_by_name() -> None:
     assert [item["name"] for item in cookies] == [SECRET_ENV_NAME]
 
 
-@V3_XFAIL
 async def test_console_messages_are_readable() -> None:
     driver_mod = import_verify("driver")
     protocol = require_symbol(driver_mod, "BrowserDriver")
@@ -104,7 +98,6 @@ async def test_console_messages_are_readable() -> None:
     assert CANARY_TOKEN in messages[0]["text"]
 
 
-@V3_XFAIL
 async def test_screenshot_writes_a_file(tmp_path: Path) -> None:
     driver_mod = import_verify("driver")
     protocol = require_symbol(driver_mod, "BrowserDriver")
@@ -115,7 +108,6 @@ async def test_screenshot_writes_a_file(tmp_path: Path) -> None:
     assert path.read_bytes().startswith(b"\x89PNG")
 
 
-@V3_XFAIL
 async def test_unreachable_url_raises_on_protocol_navigate() -> None:
     driver_mod = import_verify("driver")
     protocol = require_symbol(driver_mod, "BrowserDriver")
@@ -126,7 +118,6 @@ async def test_unreachable_url_raises_on_protocol_navigate() -> None:
     assert exc_info.value.url == "http://127.0.0.1:1/gone"
 
 
-@V3_XFAIL
 def test_protocol_module_does_not_import_playwright() -> None:
     """Nothing outside the Playwright implementation module may import Playwright."""
     import sys

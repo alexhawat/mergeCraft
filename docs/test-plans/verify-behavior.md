@@ -12,6 +12,8 @@ be marked `integration` so `make test` excludes it.
 
 ## Greening milestones
 
+All four milestones are green. No `xfail` markers remain in `tests/verify/`.
+
 | Milestone | What lands | Suite |
 | --- | --- | --- |
 | Report models | Pydantic input/report, derived JSON Schema, markdown view, closed statuses, `blocked` validity | `test_report_schema.py`, `test_union_contract.py`, `test_status_and_blocked.py`, `test_markdown_view.py` |
@@ -19,7 +21,7 @@ be marked `integration` so `make test` excludes it.
 | Command | `mergecraft verify-behavior`, trust and `shell: disabled` gates, artifact layout, redaction, process cleanup | `test_trust_gate.py`, `test_modes_and_inputs.py`, `test_artifacts_and_lifecycle.py`, `test_cli.py` |
 | Review consume | `--verification-report`, fence-before-prompt, behaviour section, no-report path, blocked surfaced | `test_review_integration.py` |
 
-Controls that are green on `main` today (regression pins, not xfail):
+Regression pins that must stay green:
 
 | Contract | Test |
 | --- | --- |
@@ -89,6 +91,7 @@ Controls that are green on `main` today (regression pins, not xfail):
 | `BrowserDriver` | `mergecraft.verify.driver` | `test_driver_protocol.py` |
 | `BrowserExtraMissingError` / `require_browser_extra` | `mergecraft.verify.extra` | `test_extra.py` |
 | `run_verify_behavior` | `mergecraft.verify.runner` | `test_trust_gate.py`, `test_modes_and_inputs.py` |
+| `VerifyBehaviorSettings` | `mergecraft.config.settings` | `test_trust_gate.py` |
 | `resolve_artifacts_dir` / `redact_screenshot` | `mergecraft.verify.artifacts` | `test_artifacts_and_lifecycle.py` |
 | `prepare_verification_report_for_prompt` | `mergecraft.verify.review` | `test_review_integration.py` |
 | `render_behavior_section` / `consume_verification_report` | `mergecraft.verify.review` | `test_review_integration.py` |

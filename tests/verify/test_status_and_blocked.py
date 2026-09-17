@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from tests.verify.support import (
     CRITERION_STATUSES,
     REPRODUCE_STATUSES,
-    V2_XFAIL,
     VERIFY_STATUSES,
     import_verify,
     make_blocked_report,
@@ -18,7 +17,6 @@ from tests.verify.support import (
 )
 
 
-@V2_XFAIL
 def test_status_vocabulary_is_closed() -> None:
     """Verify, reproduce, and per-criterion statuses are closed sets."""
     models = import_verify("models")
@@ -27,21 +25,18 @@ def test_status_vocabulary_is_closed() -> None:
     assert require_symbol(models, "CRITERION_STATUSES") == CRITERION_STATUSES
 
 
-@V2_XFAIL
 @pytest.mark.parametrize("status", sorted(VERIFY_STATUSES))
 def test_verify_status_members_are_accepted(status: str) -> None:
     report = make_report(mode="verify", status=status, blocked=_blocked_if(status))
     assert report.status == status
 
 
-@V2_XFAIL
 @pytest.mark.parametrize("status", sorted(REPRODUCE_STATUSES))
 def test_reproduce_status_members_are_accepted(status: str) -> None:
     report = make_report(mode="reproduce", status=status, blocked=_blocked_if(status))
     assert report.status == status
 
 
-@V2_XFAIL
 def test_verify_rejects_reproduce_only_status() -> None:
     models = import_verify("models")
     report_cls = require_symbol(models, "VerificationReport")
@@ -50,7 +45,6 @@ def test_verify_rejects_reproduce_only_status() -> None:
         report_cls.model_validate(payload)
 
 
-@V2_XFAIL
 def test_reproduce_rejects_verify_only_status() -> None:
     models = import_verify("models")
     report_cls = require_symbol(models, "VerificationReport")
@@ -59,7 +53,6 @@ def test_reproduce_rejects_verify_only_status() -> None:
         report_cls.model_validate(payload)
 
 
-@V2_XFAIL
 def test_unknown_status_is_rejected() -> None:
     models = import_verify("models")
     report_cls = require_symbol(models, "VerificationReport")
@@ -68,7 +61,6 @@ def test_unknown_status_is_rejected() -> None:
         report_cls.model_validate(payload)
 
 
-@V2_XFAIL
 def test_criterion_rejects_unknown_status() -> None:
     models = import_verify("models")
     report_cls = require_symbol(models, "VerificationReport")
@@ -85,7 +77,6 @@ def test_criterion_rejects_unknown_status() -> None:
         report_cls.model_validate(payload)
 
 
-@V2_XFAIL
 def test_blocked_report_with_empty_missing_is_invalid() -> None:
     """A blocked report must name what is missing — empty is invalid."""
     models = import_verify("models")
@@ -96,7 +87,6 @@ def test_blocked_report_with_empty_missing_is_invalid() -> None:
     assert "missing" in str(exc_info.value).lower()
 
 
-@V2_XFAIL
 def test_blocked_report_without_blocked_object_is_invalid() -> None:
     models = import_verify("models")
     report_cls = require_symbol(models, "VerificationReport")
@@ -105,7 +95,6 @@ def test_blocked_report_without_blocked_object_is_invalid() -> None:
         report_cls.model_validate(payload)
 
 
-@V2_XFAIL
 def test_blocked_is_not_a_pass() -> None:
     """``blocked`` never maps to a successful outcome."""
     models = import_verify("models")
@@ -116,7 +105,6 @@ def test_blocked_is_not_a_pass() -> None:
     assert is_successful(report) is False
 
 
-@V2_XFAIL
 @pytest.mark.parametrize("status", ["fail", "partial", "skipped", "not_reproduced", "blocked"])
 def test_non_success_statuses_are_not_successful(status: str) -> None:
     models = import_verify("models")

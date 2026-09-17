@@ -14,7 +14,6 @@ from tests.verify.support import (
     REPRODUCE_STATUSES,
     SECRET_ENV_NAME,
     SECRET_ENV_VALUE,
-    V4_XFAIL,
     import_verify,
     make_input,
     require_symbol,
@@ -25,7 +24,6 @@ def _run() -> Any:
     return require_symbol(import_verify("runner"), "run_verify_behavior")
 
 
-@V4_XFAIL
 async def test_verify_mode_produces_per_criterion_status() -> None:
     run = _run()
     fake = FakeBrowserDriver(page_text="image still visible")
@@ -46,7 +44,6 @@ async def test_verify_mode_produces_per_criterion_status() -> None:
         assert all(isinstance(path, str) for path in criterion.evidence)
 
 
-@V4_XFAIL
 async def test_reproduce_mode_reports_observed_versus_expected() -> None:
     run = _run()
     fake = FakeBrowserDriver(page_text="image still visible")
@@ -68,7 +65,6 @@ async def test_reproduce_mode_reports_observed_versus_expected() -> None:
     assert report.steps
 
 
-@V4_XFAIL
 async def test_unreachable_url_yields_blocked_naming_the_url() -> None:
     run = _run()
     url = "http://127.0.0.1:1/does-not-listen"
@@ -84,7 +80,6 @@ async def test_unreachable_url_yields_blocked_naming_the_url() -> None:
     assert url in named
 
 
-@V4_XFAIL
 async def test_missing_credentials_yields_blocked_not_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -105,7 +100,6 @@ async def test_missing_credentials_yields_blocked_not_fail(
     assert SECRET_ENV_NAME in named
 
 
-@V4_XFAIL
 async def test_credential_values_never_appear_in_the_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -122,7 +116,6 @@ async def test_credential_values_never_appear_in_the_report(
     assert SECRET_ENV_VALUE not in str(report.model_dump())
 
 
-@V4_XFAIL
 async def test_concurrent_same_credential_records_name_not_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

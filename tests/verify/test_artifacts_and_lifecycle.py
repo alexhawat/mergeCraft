@@ -14,7 +14,6 @@ from tests.verify.fake_driver import FakeBrowserDriver
 from tests.verify.support import (
     CANARY_TOKEN,
     SECRET_ENV_NAME,
-    V4_XFAIL,
     import_verify,
     make_input,
     require_symbol,
@@ -29,7 +28,6 @@ def _layout() -> Any:
     return require_symbol(import_verify("artifacts"), "resolve_artifacts_dir")
 
 
-@V4_XFAIL
 def test_issue_artifacts_land_under_repro(tmp_path: Path) -> None:
     resolve = _layout()
     path = resolve(root=tmp_path, issue=61, mode="reproduce")
@@ -37,7 +35,6 @@ def test_issue_artifacts_land_under_repro(tmp_path: Path) -> None:
     assert path == expected
 
 
-@V4_XFAIL
 def test_pr_artifacts_land_under_verify(tmp_path: Path) -> None:
     resolve = _layout()
     path = resolve(root=tmp_path, pr=42, mode="verify")
@@ -45,7 +42,6 @@ def test_pr_artifacts_land_under_verify(tmp_path: Path) -> None:
     assert path == expected
 
 
-@V4_XFAIL
 def test_manual_artifacts_land_under_timestamp(tmp_path: Path) -> None:
     resolve = _layout()
     path = resolve(root=tmp_path, timestamp="20260918T000000Z", mode="verify")
@@ -53,7 +49,6 @@ def test_manual_artifacts_land_under_timestamp(tmp_path: Path) -> None:
     assert path == expected
 
 
-@V4_XFAIL
 async def test_artifacts_are_redacted_before_write(tmp_path: Path) -> None:
     """A console line containing a secret-shaped token is redacted on disk."""
     fake = FakeBrowserDriver(
@@ -81,7 +76,6 @@ async def test_artifacts_are_redacted_before_write(tmp_path: Path) -> None:
     )
 
 
-@V4_XFAIL
 async def test_post_auth_screenshots_are_redacted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -108,7 +102,6 @@ async def test_post_auth_screenshots_are_redacted(
     assert redacted == fake.last_screenshot or str(redacted)
 
 
-@V4_XFAIL
 async def test_no_raw_browser_log_is_written_wholesale(tmp_path: Path) -> None:
     raw = ("CDP " + CANARY_TOKEN + "\n") * 5000
     fake = FakeBrowserDriver(console=[{"level": "debug", "text": raw}])
@@ -135,7 +128,6 @@ def _alive(pid: int) -> bool:
     return True
 
 
-@V4_XFAIL
 @pytest.mark.parametrize("outcome", ["success", "failure", "blocked"])
 async def test_app_process_is_terminated_on_every_path(
     tmp_path: Path,

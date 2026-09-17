@@ -8,7 +8,6 @@ from typing import Any
 from mergecraft.analyzers.trust import derive_trust_tier
 from tests.verify.fake_driver import FakeBrowserDriver
 from tests.verify.support import (
-    V4_XFAIL,
     import_verify,
     make_input,
     require_symbol,
@@ -21,7 +20,6 @@ def _runner() -> Any:
     return require_symbol(import_verify("runner"), "run_verify_behavior")
 
 
-@V4_XFAIL
 async def test_untrusted_tier_is_inert_and_reports_skipped() -> None:
     """``derive_trust_tier`` → ``untrusted`` skips; reason names the tier."""
     event = untrusted_fork_event()
@@ -37,7 +35,6 @@ async def test_untrusted_tier_is_inert_and_reports_skipped() -> None:
     assert any("untrusted" in item.lower() for item in report.skipped_or_unverified)
 
 
-@V4_XFAIL
 async def test_pull_request_target_is_inert() -> None:
     event: dict[str, object] = {}
     assert derive_trust_tier(event, event_name="pull_request_target") == "untrusted"
@@ -52,7 +49,6 @@ async def test_pull_request_target_is_inert() -> None:
     assert any("untrusted" in item.lower() for item in report.skipped_or_unverified)
 
 
-@V4_XFAIL
 async def test_untrusted_does_not_execute_startup_command(tmp_path: Path) -> None:
     """Guard deletion: if the trust check is removed, the sentinel is created and this fails."""
     sentinel = tmp_path / "started"
@@ -67,7 +63,6 @@ async def test_untrusted_does_not_execute_startup_command(tmp_path: Path) -> Non
     assert not sentinel.exists()
 
 
-@V4_XFAIL
 async def test_shell_disabled_is_inert_even_when_trusted(tmp_path: Path) -> None:
     """``shell: disabled`` skips on a trusted tier and names ``shell``."""
     sentinel = tmp_path / "started"
@@ -88,12 +83,13 @@ async def test_shell_disabled_is_inert_even_when_trusted(tmp_path: Path) -> None
     assert not sentinel.exists()
 
 
-@V4_XFAIL
 async def test_config_cannot_reenable_on_untrusted() -> None:
     """``verify_behavior.enabled: true`` does not override an untrusted tier."""
-    from mergecraft.config.settings import RepoSettings
+    from mergecraft.config.settings import RepoSettings, VerifyBehaviorSettings
 
     settings = RepoSettings.model_validate({"verify_behavior": {"enabled": True}})
+    assert isinstance(settings.verify_behavior, VerifyBehaviorSettings)
+    assert settings.verify_behavior.enabled is True
     run = _runner()
     report = await run(
         make_input(credential_env_names=[]),
@@ -106,7 +102,6 @@ async def test_config_cannot_reenable_on_untrusted() -> None:
     assert any("untrusted" in item.lower() for item in report.skipped_or_unverified)
 
 
-@V4_XFAIL
 async def test_trusted_offline_is_not_skipped_for_trust() -> None:
     """A trusted local run may proceed (fake driver); skip reason is not untrusted."""
     run = _runner()

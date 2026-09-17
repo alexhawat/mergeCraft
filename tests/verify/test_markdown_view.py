@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from tests.verify.support import (
-    V2_XFAIL,
     import_verify,
     make_blocked_report,
     make_report,
@@ -11,7 +10,6 @@ from tests.verify.support import (
 )
 
 
-@V2_XFAIL
 def test_markdown_render_is_a_view_of_the_json() -> None:
     """Two reports that differ only in ``observed`` differ in markdown only there."""
     models = import_verify("models")
@@ -29,7 +27,6 @@ def test_markdown_render_is_a_view_of_the_json() -> None:
     assert stripped_a == stripped_b
 
 
-@V2_XFAIL
 def test_markdown_includes_status_and_criteria() -> None:
     models = import_verify("models")
     render = require_symbol(models, "render_verification_markdown")
@@ -40,7 +37,6 @@ def test_markdown_includes_status_and_criteria() -> None:
     assert "## Behavior verification" in text or "## Reproduction attempt" in text
 
 
-@V2_XFAIL
 def test_markdown_blocked_names_missing_input() -> None:
     models = import_verify("models")
     render = require_symbol(models, "render_verification_markdown")

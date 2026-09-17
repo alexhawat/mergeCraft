@@ -12,7 +12,6 @@ from tests.verify.support import (
     PINNED_INPUT_FIELDS,
     PINNED_REPORT_FIELDS,
     PINNED_SCHEMA_VERSION,
-    V2_XFAIL,
     import_verify,
     make_report,
     require_symbol,
@@ -20,7 +19,6 @@ from tests.verify.support import (
 )
 
 
-@V2_XFAIL
 def test_report_schema_is_derived_from_models() -> None:
     """``verification_report_schema()`` matches ``VerificationReport.model_json_schema()``."""
     models = import_verify("models")
@@ -33,7 +31,6 @@ def test_report_schema_is_derived_from_models() -> None:
     assert derived == direct or derived.get("properties") == direct.get("properties")
 
 
-@V2_XFAIL
 def test_report_round_trips() -> None:
     """A fully populated report serializes and re-validates, including unicode."""
     report = make_report(observed="清除按钮未移除图片")
@@ -46,7 +43,6 @@ def test_report_round_trips() -> None:
     assert restored.model_dump() == report.model_dump()
 
 
-@V2_XFAIL
 def test_report_rejects_unknown_fields() -> None:
     """``extra="forbid"`` rejects keys that are not on the report model."""
     models = import_verify("models")
@@ -58,7 +54,6 @@ def test_report_rejects_unknown_fields() -> None:
     assert "not_a_contract_field" in str(exc_info.value)
 
 
-@V2_XFAIL
 def test_input_rejects_unknown_fields() -> None:
     """Input model also forbids extras so YAML cannot smuggle unknown keys."""
     models = import_verify("models")
@@ -72,7 +67,6 @@ def test_input_rejects_unknown_fields() -> None:
     assert "unexpected_yaml_key" in str(exc_info.value)
 
 
-@V2_XFAIL
 def test_report_requires_schema_version() -> None:
     """``schema_version`` is required — omitting it is invalid."""
     models = import_verify("models")
@@ -85,7 +79,6 @@ def test_report_requires_schema_version() -> None:
     assert report_cls.model_fields["schema_version"].is_required() is True
 
 
-@V2_XFAIL
 def test_report_schema_version_is_pinned() -> None:
     """Field-set drift without a version bump fails this pin."""
     models = import_verify("models")
@@ -100,7 +93,6 @@ def test_report_schema_version_is_pinned() -> None:
     assert set(artifacts_cls.model_fields) == PINNED_ARTIFACT_FIELDS
 
 
-@V2_XFAIL
 def test_artifacts_video_and_trace_are_nullable() -> None:
     """Video is unused in v1; trace is nullable (present when the driver is free)."""
     report = make_report()

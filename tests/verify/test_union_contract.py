@@ -10,7 +10,6 @@ from tests.verify.support import (
     INPUT_UNION_FIELDS,
     OUTPUT_UNION_FIELDS,
     SAMPLE_YAML_INPUT,
-    V2_XFAIL,
     import_verify,
     make_input,
     model_has_dotted_field,
@@ -18,7 +17,6 @@ from tests.verify.support import (
 )
 
 
-@V2_XFAIL
 @pytest.mark.parametrize(("field_path", "issues"), INPUT_UNION_FIELDS)
 def test_input_covers_union_field(field_path: str, issues: str) -> None:
     """Each named input field from the three-issue union exists on the input model."""
@@ -31,7 +29,6 @@ def test_input_covers_union_field(field_path: str, issues: str) -> None:
     assert getattr(spec, head, None) is not None or field_path == "yaml_input"
 
 
-@V2_XFAIL
 @pytest.mark.parametrize(("field_path", "issues"), OUTPUT_UNION_FIELDS)
 def test_report_covers_union_field(field_path: str, issues: str) -> None:
     """Each named output field from the three-issue union exists on the report model."""
@@ -41,7 +38,6 @@ def test_report_covers_union_field(field_path: str, issues: str) -> None:
     assert model_has_dotted_field(report_cls, field_path), field_path
 
 
-@V2_XFAIL
 def test_yaml_input_loads_union_fields(tmp_path: Path) -> None:
     """Issue 62's YAML shape populates the same input model as the flags."""
     models = import_verify("models")

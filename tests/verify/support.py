@@ -1,21 +1,14 @@
 """Shared imports, factories, and field tables for behaviour-verification tests.
 
 Production modules under ``mergecraft.verify`` are imported inside helpers so
-collection succeeds before those modules exist. Cross-wave tests stay
-``xfail(strict=False)`` until the named greening wave.
+a missing symbol fails the test with a clear message instead of a collection
+error.
 """
 
 from __future__ import annotations
 
 import importlib
 from typing import Any, Final, get_args, get_origin
-
-import pytest
-
-V2_XFAIL = pytest.mark.xfail(reason="green after V2: schema models", strict=False)
-V3_XFAIL = pytest.mark.xfail(reason="green after V3: driver protocol", strict=False)
-V4_XFAIL = pytest.mark.xfail(reason="green after V4: verify-behavior CLI", strict=False)
-V5_XFAIL = pytest.mark.xfail(reason="green after V5: review report consume", strict=False)
 
 PINNED_SCHEMA_VERSION: Final[str] = "1.0.0"
 

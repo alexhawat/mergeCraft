@@ -7,19 +7,17 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
-from tests.verify.support import CLI_FLAGS, SAMPLE_YAML_INPUT, V4_XFAIL
+from tests.verify.support import CLI_FLAGS, SAMPLE_YAML_INPUT
 
 _RUNNER = CliRunner()
 
 
-@V4_XFAIL
 def test_verify_behavior_is_registered() -> None:
     result = _RUNNER.invoke(app, ["verify-behavior", "--help"])
     assert result.exit_code == 0
     assert "verify-behavior" in result.stdout or "reproduce" in result.stdout.lower()
 
 
-@V4_XFAIL
 def test_cli_exposes_issue_61_flags_plus_absorbed_extras() -> None:
     result = _RUNNER.invoke(app, ["verify-behavior", "--help"])
     assert result.exit_code == 0
@@ -28,7 +26,6 @@ def test_cli_exposes_issue_61_flags_plus_absorbed_extras() -> None:
         assert flag in text, flag
 
 
-@V4_XFAIL
 def test_cli_verify_mode_writes_a_report(tmp_path: Path) -> None:
     artifacts = tmp_path / "arts"
     criteria = tmp_path / "criteria.md"
@@ -54,7 +51,6 @@ def test_cli_verify_mode_writes_a_report(tmp_path: Path) -> None:
     assert written
 
 
-@V4_XFAIL
 def test_cli_reproduce_mode_accepts_issue_file(tmp_path: Path) -> None:
     issue = tmp_path / "issue.md"
     issue.write_text("## Repro\n1. Open upload\n2. Click Clear\n", encoding="utf-8")
@@ -81,7 +77,6 @@ def test_cli_reproduce_mode_accepts_issue_file(tmp_path: Path) -> None:
     assert list(artifacts.rglob("*.json"))
 
 
-@V4_XFAIL
 def test_cli_accepts_yaml_input(tmp_path: Path) -> None:
     yaml_path = tmp_path / "spec.yaml"
     yaml_path.write_text(SAMPLE_YAML_INPUT, encoding="utf-8")

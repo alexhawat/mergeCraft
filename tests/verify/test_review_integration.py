@@ -10,7 +10,6 @@ from mergecraft.analyzers.trust import derive_trust_tier
 from mergecraft.offline_review import build_offline_review_prompt
 from tests.verify.support import (
     INJECTION_STRING,
-    V5_XFAIL,
     import_verify,
     make_blocked_report,
     make_report,
@@ -32,13 +31,12 @@ def _write_diff(tmp_path: Path) -> Path:
 
 
 def test_offline_prompt_without_report_has_no_behavior_section(tmp_path: Path) -> None:
-    """Today's no-report path has no behaviour section; V5 must keep that."""
+    """The no-report path has no behaviour section."""
     prompt = build_offline_review_prompt(diff_path=_write_diff(tmp_path), base_ref="HEAD")
     assert "## Behavior verification" not in prompt
     assert "select_mode" in prompt
 
 
-@V5_XFAIL
 def test_report_enters_the_prompt_fenced(tmp_path: Path) -> None:
     review = _review()
     prepare = require_symbol(review, "prepare_verification_report_for_prompt")
@@ -62,7 +60,6 @@ def test_report_enters_the_prompt_fenced(tmp_path: Path) -> None:
     assert INJECTION_STRING in prompt
 
 
-@V5_XFAIL
 def test_review_includes_a_behavior_section() -> None:
     review = _review()
     render = require_symbol(review, "render_behavior_section")
@@ -73,7 +70,6 @@ def test_review_includes_a_behavior_section() -> None:
     assert "Clear button removes the image" in text
 
 
-@V5_XFAIL
 def test_blocked_report_is_surfaced_not_swallowed() -> None:
     review = _review()
     render = require_symbol(review, "render_behavior_section")
@@ -84,7 +80,6 @@ def test_blocked_report_is_surfaced_not_swallowed() -> None:
     assert "## Behavior verification" in text
 
 
-@V5_XFAIL
 def test_skipped_when_no_report_supplied() -> None:
     review = _review()
     consume = require_symbol(review, "consume_verification_report")
@@ -93,7 +88,6 @@ def test_skipped_when_no_report_supplied() -> None:
     assert render(None) == ""
 
 
-@V5_XFAIL
 def test_behavioural_results_do_not_become_findings() -> None:
     review = _review()
     to_findings = require_symbol(review, "verification_report_to_findings")
@@ -103,7 +97,6 @@ def test_behavioural_results_do_not_become_findings() -> None:
     assert not any(isinstance(item, Finding) for item in findings)
 
 
-@V5_XFAIL
 async def test_untrusted_run_neither_produces_nor_consumes_a_report(
     tmp_path: Path,
 ) -> None:
@@ -131,7 +124,6 @@ async def test_untrusted_run_neither_produces_nor_consumes_a_report(
     assert json_files == []
 
 
-@V5_XFAIL
 def test_diff_review_accepts_verification_report_flag(tmp_path: Path) -> None:
     from typer.testing import CliRunner
 

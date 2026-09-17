@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
-from tests.verify.support import V3_XFAIL, V4_XFAIL, import_verify, require_symbol
+from tests.verify.support import import_verify, require_symbol
 
 _RUNNER = CliRunner()
 
@@ -31,7 +31,6 @@ def test_other_commands_work_without_browser_extra() -> None:
     assert result.stdout.strip()
 
 
-@V3_XFAIL
 def test_require_browser_extra_names_install_extra() -> None:
     extra = import_verify("extra")
     error_cls = require_symbol(extra, "BrowserExtraMissingError")
@@ -50,7 +49,6 @@ def test_require_browser_extra_names_install_extra() -> None:
         sys.modules.update(hidden)
 
 
-@V4_XFAIL
 def test_verify_behavior_cli_errors_when_extra_absent() -> None:
     """The command names ``mergecraft[browser]`` rather than dumping ImportError."""
     hidden = {
