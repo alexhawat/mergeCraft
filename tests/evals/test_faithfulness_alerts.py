@@ -18,11 +18,6 @@ from mergecraft.jev.judge import (
     ParallelJudgeResult,
 )
 
-E4_XFAIL = pytest.mark.xfail(
-    reason="green after E4: Logfire alerts on J4 faithfulness signals",
-    strict=False,
-)
-
 
 def _faith() -> Any:
     import mergecraft.evals.faithfulness as module
@@ -57,7 +52,6 @@ def _supported() -> EvidenceJudgeResult:
     return EvidenceJudgeResult(relation="supports", scope="run", blocking=False, findings=[])
 
 
-@E4_XFAIL
 def test_collect_faithfulness_signals_from_parallel_judge() -> None:
     """Happy: rates and quote failures are derived from J4 output, not a new judge."""
     module = _faith()
@@ -74,7 +68,6 @@ def test_collect_faithfulness_signals_from_parallel_judge() -> None:
         assert hasattr(signals, name)
 
 
-@E4_XFAIL
 def test_empty_judge_result_is_honest_zero() -> None:
     """Edge: no evidence yields 0.0 rates, never NaN."""
     module = _faith()
@@ -87,7 +80,6 @@ def test_empty_judge_result_is_honest_zero() -> None:
     assert signals.quote_verification_failures == 0
 
 
-@E4_XFAIL
 def test_says_nothing_is_a_quote_verification_failure() -> None:
     """Quote-verification failures include ``says_nothing`` evidence rows."""
     module = _faith()
@@ -102,7 +94,6 @@ def test_says_nothing_is_a_quote_verification_failure() -> None:
     assert signals.unverified_finding_rate == pytest.approx(1.0)
 
 
-@E4_XFAIL
 def test_collect_does_not_require_a_client() -> None:
     """No second judge: collection is a pure function of ``ParallelJudgeResult``."""
     module = _faith()
@@ -115,7 +106,6 @@ def test_collect_does_not_require_a_client() -> None:
     assert getattr(module, "replaces_verifier", False) is False
 
 
-@E4_XFAIL
 def test_emit_faithfulness_alerts_writes_all_three_signals() -> None:
     """Logfire-hookable span attrs for the three #723 item 5 signals, zeros included."""
     from mergecraft.tracing import MemorySink, Tracer
@@ -137,7 +127,6 @@ def test_emit_faithfulness_alerts_writes_all_three_signals() -> None:
     assert attrs["mergecraft.faithfulness.quote_verification_failures"] == 2
 
 
-@E4_XFAIL
 def test_emit_faithfulness_alerts_null_tracer_is_a_noop() -> None:
     """Tracing must not fail a review — ``None`` tracer is total."""
     module = _faith()
@@ -149,7 +138,6 @@ def test_emit_faithfulness_alerts_null_tracer_is_a_noop() -> None:
     module.emit_faithfulness_alerts(signals, tracer=None)
 
 
-@E4_XFAIL
 def test_faithfulness_signal_names_match_the_locked_set() -> None:
     """Named deliverable: the three signals #723 item 5 lists, no extras as aliases."""
     module = _faith()
@@ -157,7 +145,6 @@ def test_faithfulness_signal_names_match_the_locked_set() -> None:
     assert names == FAITHFULNESS_SIGNAL_NAMES
 
 
-@E4_XFAIL
 def test_collect_rejects_a_non_judge_result() -> None:
     """Error: a random object is not silently treated as an empty pack."""
     module = _faith()

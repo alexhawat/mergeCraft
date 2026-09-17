@@ -1,14 +1,14 @@
 """E4 — lift J2 ``TokenBudget`` + kill-switch to every provider path (E-D9).
 
 Closes #723 item 8 without forking a second budget system. Lazy imports keep
-collection clean. Cross-wave reds are ``strict=False`` so E4 can XPASS.
+collection clean.
 """
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from tests.agents.conftest import make_agent_run_context
@@ -18,11 +18,6 @@ from mergecraft.agents.shared import AgentImpl, AgentResult
 from mergecraft.jev.cost import TokenBudget as JevTokenBudget
 from mergecraft.jev.cost import compute_cost as jev_compute_cost
 
-E4_XFAIL = pytest.mark.xfail(
-    reason="green after E4: lift TokenBudget kill-switch to every provider path",
-    strict=False,
-)
-
 
 def _budget_mod() -> Any:
     import mergecraft.agents.token_budget as module
@@ -30,7 +25,6 @@ def _budget_mod() -> Any:
     return module
 
 
-@E4_XFAIL
 def test_token_budget_is_the_jev_class_not_a_fork() -> None:
     """E-D9 — the lift re-exports J2's ``TokenBudget``, it does not invent one."""
     module = _budget_mod()
@@ -38,7 +32,6 @@ def test_token_budget_is_the_jev_class_not_a_fork() -> None:
     assert module.compute_cost is jev_compute_cost
 
 
-@E4_XFAIL
 def test_provider_paths_cover_every_agent_and_jev() -> None:
     """Every reviewing provider path is in the lift set, including Jev."""
     from mergecraft.agents import agents
@@ -51,7 +44,6 @@ def test_provider_paths_cover_every_agent_and_jev() -> None:
 
 
 @pytest.mark.parametrize("provider", sorted(PROVIDER_PATHS - {"jev"}))
-@E4_XFAIL
 async def test_kill_switch_stops_provider_dispatch(tmp_path: Path, provider: str) -> None:
     """Guard-deletion: a stopped budget must prevent ``_run`` from dispatching."""
     module = _budget_mod()
@@ -80,7 +72,6 @@ async def test_kill_switch_stops_provider_dispatch(tmp_path: Path, provider: str
     assert reason == "kill_switch" or "kill_switch" in blob
 
 
-@E4_XFAIL
 def test_unreported_tokens_stay_honest_on_the_shared_path() -> None:
     """Same J2 contract: ``None`` tokens are not recorded as zero cost."""
     module = _budget_mod()
@@ -95,7 +86,6 @@ def test_unreported_tokens_stay_honest_on_the_shared_path() -> None:
     assert assessment.cost_usd is None
 
 
-@E4_XFAIL
 def test_record_provider_usage_does_not_zero_partial_none() -> None:
     """Guard: a wrapper that coerces ``None`` to ``0`` fails this test."""
     module = _budget_mod()
@@ -107,7 +97,6 @@ def test_record_provider_usage_does_not_zero_partial_none() -> None:
     assert budget.stopped is False
 
 
-@E4_XFAIL
 async def test_concurrent_same_credential_shares_one_budget(tmp_path: Path) -> None:
     """Two provider dispatches bearing the same bound budget share one cap."""
     module = _budget_mod()
@@ -130,7 +119,6 @@ async def test_concurrent_same_credential_shares_one_budget(tmp_path: Path) -> N
     assert budget.tokens_used <= budget.max_tokens
 
 
-@E4_XFAIL
 def test_budget_is_keyed_by_pinned_model_id() -> None:
     """Price / budget lookup stays keyed by pinned model id (J2 PRICE_TABLE)."""
     module = _budget_mod()
@@ -149,7 +137,6 @@ def test_budget_is_keyed_by_pinned_model_id() -> None:
     assert unknown.cost_known is False
 
 
-@E4_XFAIL
 def test_kill_switch_stop_reason_is_the_j2_token() -> None:
     """Skip / stop reason stays ``kill_switch``, not an English sentence."""
     module = _budget_mod()
@@ -158,3 +145,24 @@ def test_kill_switch_stop_reason_is_the_j2_token() -> None:
     stopped = module.apply_kill_switch(budget)
     assert stopped == "kill_switch"
     assert module.apply_kill_switch(JevTokenBudget(max_tokens=100)) == "ok"
+
+
+def test_current_run_budget_reads_the_bound_cap() -> None:
+    """Public bind reader: unbound is None; bind yields the same object."""
+    module = _budget_mod()
+    assert module.current_run_budget() is None
+    budget = JevTokenBudget(max_tokens=50)
+    with module.bind_run_budget(budget):
+        assert module.current_run_budget() is budget
+    assert module.current_run_budget() is None
+
+
+def test_kill_switch_status_is_the_j2_literal_pair() -> None:
+    """KillSwitchStatus is Literal['kill_switch', 'ok'] — apply_kill_switch's type."""
+    module = _budget_mod()
+    assert get_args(module.KillSwitchStatus) == ("kill_switch", "ok")
+    stopped = JevTokenBudget(max_tokens=1)
+    stopped.record_usage(input_tokens=2, output_tokens=0)
+    statuses = get_args(module.KillSwitchStatus)
+    assert module.apply_kill_switch(stopped) in statuses
+    assert module.apply_kill_switch(JevTokenBudget(max_tokens=100)) in statuses

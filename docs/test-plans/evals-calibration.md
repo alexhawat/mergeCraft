@@ -50,24 +50,26 @@ suite are gone — do not restore `AblationConfig` / `run_ablation` /
 | CLI: `--baseline` / `--candidate` together | E2 (green today) | `tests/cli/test_eval_regression_gate_output.py::test_baseline_and_candidate_must_be_given_together` |
 | CLI failure names metric + ledger | E2 (green today) | `…::test_regression_gate_failure_names_metric_and_ledger` |
 | CLI clean pair exits 0 | E2 (green today) | `…::test_clean_regression_gate_exits_zero` |
-| **E-D9** `TokenBudget` / `compute_cost` are the J2 objects | E4 (xfail) | `tests/agents/test_provider_token_budget.py::test_token_budget_is_the_jev_class_not_a_fork` |
-| **E-D9** `PROVIDER_PATHS` covers five agents + `jev` | E4 (xfail) | `…::test_provider_paths_cover_every_agent_and_jev` |
-| Kill-switch stops `AgentImpl._run` per provider | E4 (xfail) | `…::test_kill_switch_stops_provider_dispatch` |
-| Unreported tokens stay `cost_known=False` | E4 (xfail) | `…::test_unreported_tokens_stay_honest_on_the_shared_path` |
-| Partial `None` tokens are not coerced to zero | E4 (xfail) | `…::test_record_provider_usage_does_not_zero_partial_none` |
-| Concurrent same-budget dispatches share one cap | E4 (xfail) | `…::test_concurrent_same_credential_shares_one_budget` |
-| Budget keyed by pinned model id | E4 (xfail) | `…::test_budget_is_keyed_by_pinned_model_id` |
-| Stop reason is `kill_switch` | E4 (xfail) | `…::test_kill_switch_stop_reason_is_the_j2_token` |
-| Collect rates from `ParallelJudgeResult` | E4 (xfail) | `tests/evals/test_faithfulness_alerts.py::test_collect_faithfulness_signals_from_parallel_judge` |
-| Empty pack is honest zero | E4 (xfail) | `…::test_empty_judge_result_is_honest_zero` |
-| `says_nothing` is a quote-verification failure | E4 (xfail) | `…::test_says_nothing_is_a_quote_verification_failure` |
-| No second judge / no `AsyncJevClient` | E4 (xfail) | `…::test_collect_does_not_require_a_client` |
-| Logfire-hookable span attrs (zeros included) | E4 (xfail) | `…::test_emit_faithfulness_alerts_writes_all_three_signals` |
-| `None` tracer is a no-op | E4 (xfail) | `…::test_emit_faithfulness_alerts_null_tracer_is_a_noop` |
-| Signal name set | E4 (xfail) | `…::test_faithfulness_signal_names_match_the_locked_set` |
-| Non-judge input is TypeError / ValueError | E4 (xfail) | `…::test_collect_rejects_a_non_judge_result` |
+| **E-D9** `TokenBudget` / `compute_cost` are the J2 objects | E4 | `tests/agents/test_provider_token_budget.py::test_token_budget_is_the_jev_class_not_a_fork` |
+| **E-D9** `PROVIDER_PATHS` covers five agents + `jev` | E4 | `…::test_provider_paths_cover_every_agent_and_jev` |
+| Kill-switch stops `AgentImpl._run` per provider | E4 | `…::test_kill_switch_stops_provider_dispatch` |
+| Unreported tokens stay `cost_known=False` | E4 | `…::test_unreported_tokens_stay_honest_on_the_shared_path` |
+| Partial `None` tokens are not coerced to zero | E4 | `…::test_record_provider_usage_does_not_zero_partial_none` |
+| Concurrent same-budget dispatches share one cap | E4 | `…::test_concurrent_same_credential_shares_one_budget` |
+| Budget keyed by pinned model id | E4 | `…::test_budget_is_keyed_by_pinned_model_id` |
+| Stop reason is `kill_switch` | E4 | `…::test_kill_switch_stop_reason_is_the_j2_token` |
+| `current_run_budget` reads the bound cap (None unbound) | E4 | `…::test_current_run_budget_reads_the_bound_cap` |
+| `KillSwitchStatus` is `Literal["kill_switch", "ok"]` | E4 | `…::test_kill_switch_status_is_the_j2_literal_pair` |
+| Collect rates from `ParallelJudgeResult` | E4 | `tests/evals/test_faithfulness_alerts.py::test_collect_faithfulness_signals_from_parallel_judge` |
+| Empty pack is honest zero | E4 | `…::test_empty_judge_result_is_honest_zero` |
+| `says_nothing` is a quote-verification failure | E4 | `…::test_says_nothing_is_a_quote_verification_failure` |
+| No second judge / no `AsyncJevClient` | E4 | `…::test_collect_does_not_require_a_client` |
+| Logfire-hookable span attrs (zeros included) | E4 | `…::test_emit_faithfulness_alerts_writes_all_three_signals` |
+| `None` tracer is a no-op | E4 | `…::test_emit_faithfulness_alerts_null_tracer_is_a_noop` |
+| Signal name set | E4 | `…::test_faithfulness_signal_names_match_the_locked_set` |
+| Non-judge input is TypeError / ValueError | E4 | `…::test_collect_rejects_a_non_judge_result` |
 
-Cross-wave reds use `@pytest.mark.xfail(reason="green after E4: …", strict=False)`.
+E4 landed `01ba793a`; xfails removed. No remaining E4 cross-wave reds.
 Never `strict=True` (`xfail_strict = true` in this repo).
 
 ## Deliverable symbols
@@ -86,6 +88,8 @@ Every named symbol has ≥1 direct test (`git grep -c` under `tests/`).
 | `TokenBudget` / `compute_cost` | `mergecraft.agents.token_budget` re-export of `mergecraft.jev.cost` | E4 |
 | `PROVIDER_PATHS` | `mergecraft.agents.token_budget` | E4 |
 | `bind_run_budget` | `mergecraft.agents.token_budget` | E4 |
+| `current_run_budget` | `mergecraft.agents.token_budget` | E4 |
+| `KillSwitchStatus` | `mergecraft.agents.token_budget` | E4 |
 | `record_provider_usage` | `mergecraft.agents.token_budget` | E4 |
 | `token_budget_for` | `mergecraft.agents.token_budget` | E4 |
 | `apply_kill_switch` | `mergecraft.agents.token_budget` | E4 |
@@ -135,4 +139,5 @@ After E2: the `tests/ci/test_eval_pr_gate.py` job-missing failures and the
 three `format_pr_gate_summary` ImportErrors should become real passes. After
 E4: delete the `E4_XFAIL` markers (`strict=False` only — never flip to
 `strict=True`). The xpass ratchet in `tests/conftest.py` will fail the session
-if those markers are left on passing tests.
+if those markers are left on passing tests. E4 landed `01ba793a`; xfails
+removed.
