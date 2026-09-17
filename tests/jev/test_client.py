@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from tests.jev.support import (
-    J2_XFAIL,
     PINNED_MODEL,
     SKIP_REASONS,
     TEST_API_KEY,
@@ -33,7 +32,6 @@ def _recorded_client(
     return module.AsyncJevClient(api_key=api_key, transport=transport, **kwargs)
 
 
-@J2_XFAIL
 def test_pinned_model_is_jev_1_13_0() -> None:
     client_mod = _client_mod()
     package = import_jev()
@@ -43,7 +41,6 @@ def test_pinned_model_is_jev_1_13_0() -> None:
     assert client_mod.PINNED_MODEL != "jev-preview"
 
 
-@J2_XFAIL
 async def test_call_sends_pinned_model_to_recorded_transport() -> None:
     client = _recorded_client("unit_happy.json")
     result = await client.call(
@@ -60,7 +57,6 @@ async def test_call_sends_pinned_model_to_recorded_transport() -> None:
     assert client.transport.last_model == PINNED_MODEL
 
 
-@J2_XFAIL
 async def test_retry_on_transient_then_success() -> None:
     module = _client_mod()
     transport = module.FlakyRecordedTransport(
@@ -75,7 +71,6 @@ async def test_retry_on_transient_then_success() -> None:
     assert result.response.request_id == "req_unit_happy"
 
 
-@J2_XFAIL
 async def test_permanent_typesafe_error_does_not_retry() -> None:
     module = _client_mod()
     transport = module.FlakyRecordedTransport(
@@ -96,7 +91,6 @@ async def test_permanent_typesafe_error_does_not_retry() -> None:
     assert mapped is ProviderFailureClass.PERMANENT
 
 
-@J2_XFAIL
 async def test_rate_limit_maps_to_retryable_provider_failure() -> None:
     module = _client_mod()
     transport = module.FlakyRecordedTransport(
@@ -115,7 +109,6 @@ async def test_rate_limit_maps_to_retryable_provider_failure() -> None:
     assert exc_info.value.code == "rate_limited"
 
 
-@J2_XFAIL
 async def test_none_state_raises_structured_jev_error() -> None:
     module = _client_mod()
     client = _recorded_client("unit_happy.json")
@@ -124,7 +117,6 @@ async def test_none_state_raises_structured_jev_error() -> None:
     assert exc_info.value.code == "invalid_state"
 
 
-@J2_XFAIL
 async def test_disabled_settings_are_a_recorded_skip_not_a_failure() -> None:
     from mergecraft.config.settings import JevSettings
 
@@ -139,7 +131,6 @@ async def test_disabled_settings_are_a_recorded_skip_not_a_failure() -> None:
     assert client.transport.calls == 0
 
 
-@J2_XFAIL
 async def test_enabled_without_credential_is_recorded_skip_not_silent_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -157,7 +148,6 @@ async def test_enabled_without_credential_is_recorded_skip_not_silent_pass(
     assert client.transport.calls == 0
 
 
-@J2_XFAIL
 async def test_kill_switch_stops_dispatch_and_records_the_stop() -> None:
     cost_mod = import_jev("cost")
     budget = cost_mod.TokenBudget(max_tokens=1)
@@ -173,7 +163,6 @@ async def test_kill_switch_stops_dispatch_and_records_the_stop() -> None:
     assert client.transport.calls == 1
 
 
-@J2_XFAIL
 async def test_concurrent_same_api_key_shares_one_budget() -> None:
     cost_mod = import_jev("cost")
     budget = cost_mod.TokenBudget(max_tokens=10_000)
@@ -191,7 +180,6 @@ async def test_concurrent_same_api_key_shares_one_budget() -> None:
     assert budget.tokens_used <= budget.max_tokens
 
 
-@J2_XFAIL
 async def test_successful_call_records_non_negative_wall_clock_latency() -> None:
     client = _recorded_client("unit_happy.json")
     result = await client.call(state={"hunk": "x"}, pack_id="unit/v1", unit_id="u")
@@ -199,7 +187,6 @@ async def test_successful_call_records_non_negative_wall_clock_latency() -> None
     assert result.latency_ms >= 0
 
 
-@J2_XFAIL
 def test_package_exports_client_and_result_types() -> None:
     package = import_jev()
     assert package.AsyncJevClient is _client_mod().AsyncJevClient

@@ -6,7 +6,6 @@ import json
 
 from tests.jev.support import (
     CORPUS_DIR,
-    J3_XFAIL,
     PACK_IDS,
     import_jev,
     load_corpus,
@@ -47,7 +46,6 @@ def test_every_corpus_row_declares_calibration_targets() -> None:
             assert str(target).startswith(f"{row['pack_id']}.")
 
 
-@J3_XFAIL
 def test_every_threshold_names_corpus_rows_and_pack_version() -> None:
     policy = import_jev("policy")
     corpus_ids = {str(row["id"]) for row in load_corpus()}
@@ -60,7 +58,6 @@ def test_every_threshold_names_corpus_rows_and_pack_version() -> None:
         assert not missing
 
 
-@J3_XFAIL
 def test_threshold_without_corpus_row_must_not_merge() -> None:
     policy = import_jev("policy")
     corpus_ids = {str(row["id"]) for row in load_corpus()}
@@ -72,7 +69,6 @@ def test_threshold_without_corpus_row_must_not_merge() -> None:
     assert orphan == []
 
 
-@J3_XFAIL
 def test_iter_thresholds_is_the_deliverable_symbol() -> None:
     policy = import_jev("policy")
     first = next(iter(policy.iter_thresholds()))

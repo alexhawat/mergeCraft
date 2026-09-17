@@ -9,9 +9,6 @@ from tests.jev.support import (
     CLAIM_QUESTION_NAMES,
     EVIDENCE_QUESTION_NAMES,
     FORBIDDEN_COUNT_NAMES,
-    J3_XFAIL,
-    J4_XFAIL,
-    J5_XFAIL,
     PACK_IDS,
     UNIT_QUESTION_NAMES,
     import_jev,
@@ -27,7 +24,6 @@ def _types() -> Any:
     return import_jev("types")
 
 
-@J3_XFAIL
 def test_unit_pack_v1_names_and_types() -> None:
     pack = _questions().unit_pack()
     assert pack.pack_id == "unit/v1"
@@ -44,7 +40,6 @@ def test_unit_pack_v1_names_and_types() -> None:
         assert pack.question_type(name) == "noul"
 
 
-@J4_XFAIL
 def test_evidence_pack_v1_names_and_types() -> None:
     pack = _questions().evidence_pack()
     assert pack.pack_id == "evidence/v1"
@@ -54,7 +49,6 @@ def test_evidence_pack_v1_names_and_types() -> None:
     assert pack.question_type("located") == "noul"
 
 
-@J4_XFAIL
 def test_claim_pack_v1_names_and_types() -> None:
     pack = _questions().claim_pack()
     assert pack.pack_id == "claim/v1"
@@ -63,7 +57,6 @@ def test_claim_pack_v1_names_and_types() -> None:
         assert pack.question_type(name) == "noul"
 
 
-@J5_XFAIL
 def test_align_pack_v1_names_and_types() -> None:
     pack = _questions().align_pack()
     assert pack.pack_id == "align/v1"
@@ -72,7 +65,6 @@ def test_align_pack_v1_names_and_types() -> None:
     assert pack.question_type("is_withdrawn_reraise") == "noul"
 
 
-@J3_XFAIL
 def test_get_pack_returns_every_versioned_id() -> None:
     questions = _questions()
     for pack_id in PACK_IDS:
@@ -80,7 +72,6 @@ def test_get_pack_returns_every_versioned_id() -> None:
         assert pack.pack_id == pack_id
 
 
-@J3_XFAIL
 def test_packs_do_not_include_counting_or_arithmetic_questions() -> None:
     questions = _questions()
     for pack_id in PACK_IDS:
@@ -88,7 +79,6 @@ def test_packs_do_not_include_counting_or_arithmetic_questions() -> None:
         assert names.isdisjoint(FORBIDDEN_COUNT_NAMES)
 
 
-@J3_XFAIL
 def test_parse_choice_score_and_noul_from_recorded_unit_body() -> None:
     types = _types()
     body = load_transport_body("unit_happy.json")

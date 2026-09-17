@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 
 from tests.jev.support import (
-    J2_XFAIL,
     PINNED_MODEL,
     TRANSPORT_DIR,
     import_jev,
@@ -22,7 +21,6 @@ def _client() -> Any:
     return import_jev("client")
 
 
-@J2_XFAIL
 def test_price_table_is_keyed_by_pinned_model() -> None:
     cost = _cost()
     assert PINNED_MODEL in cost.PRICE_TABLE
@@ -31,7 +29,6 @@ def test_price_table_is_keyed_by_pinned_model() -> None:
     assert output_price > 0
 
 
-@J2_XFAIL
 def test_compute_cost_uses_price_table_when_tokens_known() -> None:
     cost = _cost()
     assessment = cost.compute_cost(
@@ -45,7 +42,6 @@ def test_compute_cost_uses_price_table_when_tokens_known() -> None:
     assert assessment.cost_usd != 0
 
 
-@J2_XFAIL
 def test_unreported_tokens_set_cost_known_false_not_zero() -> None:
     cost = _cost()
     assessment = cost.compute_cost(
@@ -57,7 +53,6 @@ def test_unreported_tokens_set_cost_known_false_not_zero() -> None:
     assert assessment.cost_usd is None
 
 
-@J2_XFAIL
 def test_partial_none_tokens_are_not_recorded_as_zero_cost() -> None:
     cost = _cost()
     assessment = cost.compute_cost(
@@ -69,7 +64,6 @@ def test_partial_none_tokens_are_not_recorded_as_zero_cost() -> None:
     assert assessment.cost_usd is None
 
 
-@J2_XFAIL
 def test_unknown_model_does_not_invent_zero_cost() -> None:
     cost = _cost()
     assessment = cost.compute_cost(
@@ -81,7 +75,6 @@ def test_unknown_model_does_not_invent_zero_cost() -> None:
     assert assessment.cost_usd is None
 
 
-@J2_XFAIL
 async def test_client_survives_usage_input_tokens_none() -> None:
     module = _client()
     transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "usage_tokens_none.json")
@@ -94,7 +87,6 @@ async def test_client_survives_usage_input_tokens_none() -> None:
     assert result.response.usage.output_tokens is None
 
 
-@J2_XFAIL
 def test_token_budget_kill_switch_records_stop() -> None:
     cost = _cost()
     budget = cost.TokenBudget(max_tokens=50)
@@ -108,7 +100,6 @@ def test_token_budget_kill_switch_records_stop() -> None:
     assert budget.should_stop() is True
 
 
-@J2_XFAIL
 def test_token_budget_none_usage_does_not_count_as_zero() -> None:
     cost = _cost()
     budget = cost.TokenBudget(max_tokens=50)

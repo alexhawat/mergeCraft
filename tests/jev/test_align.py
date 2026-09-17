@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from tests.jev.support import (
-    J5_XFAIL,
     TRANSPORT_DIR,
     import_jev,
     load_withdrawn,
@@ -17,7 +16,6 @@ def _align() -> Any:
     return import_jev("policy")
 
 
-@J5_XFAIL
 async def test_withdrawn_reraise_is_detected() -> None:
     client_mod = import_jev("client")
     transport = client_mod.RecordedTransport.from_fixture(
@@ -39,7 +37,6 @@ async def test_withdrawn_reraise_is_detected() -> None:
     assert result.blocking is False
 
 
-@J5_XFAIL
 async def test_semantic_dedupe_keeps_the_stronger_severity() -> None:
     client_mod = import_jev("client")
     transport = client_mod.RecordedTransport.from_fixture(TRANSPORT_DIR / "align_same_defect.json")
@@ -60,7 +57,6 @@ async def test_semantic_dedupe_keeps_the_stronger_severity() -> None:
     assert kept.severity != "Minor"
 
 
-@J5_XFAIL
 async def test_semantic_dedupe_is_escalate_only_when_weaker_arrives_first() -> None:
     """Guard-deletion: keeping the first member must fail this test (N5)."""
     client_mod = import_jev("client")

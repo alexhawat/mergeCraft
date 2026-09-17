@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from tests.jev.support import (
-    J4_XFAIL,
     PINNED_MODEL,
     TRANSPORT_DIR,
     import_jev,
@@ -22,7 +21,6 @@ def _client() -> Any:
     return import_jev("client")
 
 
-@J4_XFAIL
 def test_jev_judge_pin_records_pinned_model() -> None:
     pin = _judge().JevJudgePin()
     assert pin.model == PINNED_MODEL
@@ -32,7 +30,6 @@ def test_jev_judge_pin_records_pinned_model() -> None:
     assert pin.provider in {"jev", "typesafe"}
 
 
-@J4_XFAIL
 async def test_evidence_pack_over_unsupported_quote() -> None:
     module = _client()
     transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "evidence_says_nothing.json")
@@ -54,7 +51,6 @@ async def test_evidence_pack_over_unsupported_quote() -> None:
     assert transport.calls == 1
 
 
-@J4_XFAIL
 async def test_claim_pack_over_blocker_summary_with_no_findings_row() -> None:
     module = _client()
     transport = module.RecordedTransport.from_fixture(
@@ -72,7 +68,6 @@ async def test_claim_pack_over_blocker_summary_with_no_findings_row() -> None:
     assert result.blocking is False
 
 
-@J4_XFAIL
 async def test_judge_runs_beside_verifier_not_instead() -> None:
     from mergecraft.agents.verifier import should_verify
 
@@ -93,7 +88,6 @@ async def test_judge_runs_beside_verifier_not_instead() -> None:
     assert should_verify(finding) is True
 
 
-@J4_XFAIL
 def test_judge_disagreement_is_a_signal_not_a_gate() -> None:
     judge = _judge()
     record = judge.record_judge_disagreement(

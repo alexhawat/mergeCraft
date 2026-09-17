@@ -6,13 +6,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.jev.support import J2_XFAIL, J3_XFAIL, PACK_IDS, PINNED_MODEL
+from tests.jev.support import PACK_IDS, PINNED_MODEL
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-@J2_XFAIL
 def test_default_settings_jev_is_disabled() -> None:
     from mergecraft.config.settings import default_settings
 
@@ -22,7 +21,6 @@ def test_default_settings_jev_is_disabled() -> None:
     assert settings.jev.budget_tokens > 0
 
 
-@J2_XFAIL
 def test_absent_config_file_does_not_enable_jev(tmp_path: Path) -> None:
     from mergecraft.config.settings import load_repo_settings
 
@@ -30,7 +28,6 @@ def test_absent_config_file_does_not_enable_jev(tmp_path: Path) -> None:
     assert settings.jev.enabled is False
 
 
-@J2_XFAIL
 def test_explicit_jev_enabled_flip_is_opt_in(tmp_path: Path) -> None:
     from mergecraft.config.settings import load_repo_settings
 
@@ -44,7 +41,6 @@ def test_explicit_jev_enabled_flip_is_opt_in(tmp_path: Path) -> None:
     assert settings.jev.model == PINNED_MODEL
 
 
-@J2_XFAIL
 def test_per_pack_toggles_default_on_for_every_versioned_pack() -> None:
     from mergecraft.config.settings import default_settings
 
@@ -53,14 +49,12 @@ def test_per_pack_toggles_default_on_for_every_versioned_pack() -> None:
         assert packs[pack_id] is True
 
 
-@J3_XFAIL
 def test_jev_gate_defaults_to_shadow() -> None:
     from mergecraft.config.settings import GatesSettings
 
     assert GatesSettings().jev == "shadow"
 
 
-@J2_XFAIL
 def test_jev_settings_model_cannot_be_floating_alias() -> None:
     from pydantic import ValidationError
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from tests.jev.support import (
-    J2_XFAIL,
     PINNED_MODEL,
     TRANSPORT_DIR,
     import_jev,
@@ -16,7 +15,6 @@ def _jev_spans(sink: Any) -> list[Any]:
     return [event for event in sink.events if "gen_ai.request.model" in event.attrs]
 
 
-@J2_XFAIL
 async def test_each_call_emits_one_genai_span(memory_tracer: dict[str, Any]) -> None:
     module = import_jev("client")
     transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
@@ -41,7 +39,6 @@ async def test_each_call_emits_one_genai_span(memory_tracer: dict[str, Any]) -> 
     assert attrs["gen_ai.usage.output_tokens"] == 8
 
 
-@J2_XFAIL
 async def test_jev_specific_attrs_live_under_mergecraft_not_gen_ai(
     memory_tracer: dict[str, Any],
 ) -> None:
@@ -72,7 +69,6 @@ async def test_jev_specific_attrs_live_under_mergecraft_not_gen_ai(
             assert "ratchet" not in key
 
 
-@J2_XFAIL
 async def test_unreported_usage_does_not_zero_gen_ai_usage_attrs(
     memory_tracer: dict[str, Any],
 ) -> None:

@@ -1,9 +1,7 @@
-"""Shared helpers and pinned symbols for the Jev RED suite.
+"""Shared helpers and pinned symbols for the Jev suite.
 
 Imports of ``mergecraft.jev`` stay inside helpers so collection stays clean
-before J2 lands the package. Cross-wave tests use the non-strict ``xfail``
-markers below; never ``strict=True`` (global ``xfail_strict`` would XPASS-fail
-an impl wave).
+if a submodule is unused. CI makes zero live TypeSafe calls (D14).
 """
 
 from __future__ import annotations
@@ -13,27 +11,8 @@ import json
 from pathlib import Path
 from typing import Any, Final
 
-import pytest
-
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.review_taxonomy import FindingSource
-
-J2_XFAIL = pytest.mark.xfail(
-    reason="green after J2: client pin retry cost kill-switch",
-    strict=False,
-)
-J3_XFAIL = pytest.mark.xfail(
-    reason="green after J3: segmenter battery shadow ratchet",
-    strict=False,
-)
-J4_XFAIL = pytest.mark.xfail(
-    reason="green after J4: parallel judge and claims",
-    strict=False,
-)
-J5_XFAIL = pytest.mark.xfail(
-    reason="green after J5: lens routing and alignment",
-    strict=False,
-)
 
 PINNED_MODEL: Final[str] = "jev-1.13.0"
 PACK_IDS: Final[tuple[str, ...]] = (

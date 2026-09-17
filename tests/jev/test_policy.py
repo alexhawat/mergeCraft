@@ -6,14 +6,13 @@ from typing import Any
 
 import pytest
 
-from tests.jev.support import J3_XFAIL, import_jev, load_transport_body
+from tests.jev.support import import_jev, load_transport_body
 
 
 def _policy() -> Any:
     return import_jev("policy")
 
 
-@J3_XFAIL
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -31,14 +30,12 @@ def test_bucket_confidence_at_every_band_boundary(value: float, expected: str) -
     assert _policy().bucket_confidence(value) == expected
 
 
-@J3_XFAIL
 def test_bucket_confidence_rejects_none() -> None:
     with pytest.raises(_policy().JevError) as exc_info:
         _policy().bucket_confidence(None)
     assert exc_info.value.code == "invalid_confidence"
 
 
-@J3_XFAIL
 def test_bucket_confidence_rejects_out_of_range() -> None:
     policy = _policy()
     with pytest.raises(policy.JevError) as exc_info:
@@ -49,7 +46,6 @@ def test_bucket_confidence_rejects_out_of_range() -> None:
     assert exc_info.value.code == "invalid_confidence"
 
 
-@J3_XFAIL
 def test_order_units_by_choice_then_confidence_then_severity() -> None:
     policy = _policy()
     types = import_jev("types")
@@ -95,7 +91,6 @@ def test_order_units_by_choice_then_confidence_then_severity() -> None:
     ]
 
 
-@J3_XFAIL
 def test_high_confidence_clean_does_not_skip_reviewer() -> None:
     policy = _policy()
     types = import_jev("types")
@@ -113,7 +108,6 @@ def test_high_confidence_clean_does_not_skip_reviewer() -> None:
     assert prediction.action != "suppress"
 
 
-@J3_XFAIL
 def test_predict_never_lowers_severity_below_prior() -> None:
     policy = _policy()
     types = import_jev("types")
@@ -139,7 +133,6 @@ def test_predict_never_lowers_severity_below_prior() -> None:
     assert prediction.suppressed is False
 
 
-@J3_XFAIL
 def test_parse_unit_assessment_from_recorded_answers() -> None:
     policy = _policy()
     body = load_transport_body("unit_happy.json")

@@ -7,6 +7,14 @@ Authoring wave: **J1** (`test-creator`). Implementation: **J2–J5**. Final: **J
 Recorded TypeSafe envelopes live under `tests/jev/fixtures/transport/`. CI makes
 zero live TypeSafe calls (D14). J0 live smoke is `skipped: no live credential`.
 
+## J6.1 xfail reconciliation (2026-09-17)
+
+J1 authored 92 cross-wave reds as `J2_XFAIL` / `J3_XFAIL` / `J4_XFAIL` /
+`J5_XFAIL` (`strict=False`). J2–J5 XPASS'd all of them. This sweep deleted
+those four markers and every decorator so **none remain**. The greening-wave
+column below is historical. Suite end state: ordinary passing tests; 0
+xfail / 0 xpass. J6 plan checkboxes stay ☐.
+
 ## Contract matrix
 
 | Contract | Greening wave | Primary test(s) |

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from tests.jev.support import J3_XFAIL, PINNED_MODEL, import_jev, shadow_packet
+from tests.jev.support import PINNED_MODEL, import_jev, shadow_packet
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -14,7 +14,6 @@ def _policy() -> Any:
     return import_jev("policy")
 
 
-@J3_XFAIL
 def test_jev_prediction_is_a_shadow_jsonl_row(tmp_path: Path) -> None:
     from mergecraft.evidence.shadow import load_shadow_records
 
@@ -48,7 +47,6 @@ def test_jev_prediction_is_a_shadow_jsonl_row(tmp_path: Path) -> None:
     assert rows[0].metadata["unit_id"] == "unit-1"
 
 
-@J3_XFAIL
 def test_shadow_row_does_not_change_a_published_review(tmp_path: Path) -> None:
     policy = _policy()
     types = import_jev("types")
@@ -72,7 +70,6 @@ def test_shadow_row_does_not_change_a_published_review(tmp_path: Path) -> None:
     assert prediction.skip_reviewer is False
 
 
-@J3_XFAIL
 def test_disagreement_report_groups_by_lane_and_rule(tmp_path: Path) -> None:
     from mergecraft.evidence.shadow import disagreement_report, load_shadow_records
 

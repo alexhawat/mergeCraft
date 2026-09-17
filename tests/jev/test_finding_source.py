@@ -8,7 +8,6 @@ import pytest
 
 from mergecraft.analyzers.finding import Finding, FindingValidationError, make_finding
 from mergecraft.review_taxonomy import FINDING_CONFIDENCES, FindingSource
-from tests.jev.support import J3_XFAIL
 
 
 def test_finding_confidence_stays_three_value_ordinal() -> None:
@@ -23,7 +22,6 @@ def test_finding_has_no_raw_float_confidence_field() -> None:
     assert "noul" not in fields
 
 
-@J3_XFAIL
 def test_finding_source_gains_exactly_classifier() -> None:
     assert get_args(FindingSource) == (
         "analyzer",
@@ -34,7 +32,6 @@ def test_finding_source_gains_exactly_classifier() -> None:
     )
 
 
-@J3_XFAIL
 def test_make_finding_accepts_classifier_source() -> None:
     finding = make_finding(
         tool="jev",

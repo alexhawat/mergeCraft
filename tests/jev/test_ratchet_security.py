@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.jev.support import J3_XFAIL, import_jev, load_transport_body
+from tests.jev.support import import_jev, load_transport_body
 
 
 def _policy() -> Any:
@@ -28,7 +28,6 @@ def _steered_clean() -> Any:
     return _policy().assessment_from_response(load_transport_body("unit_steering_clean.json"))
 
 
-@J3_XFAIL
 def test_steering_payload_cannot_move_untrusted_verdict_downward() -> None:
     """Guard-deletion: identity ``apply_ratchet`` must fail this test (D5)."""
     policy = _policy()
@@ -52,7 +51,6 @@ def test_steering_payload_cannot_move_untrusted_verdict_downward() -> None:
     )
 
 
-@J3_XFAIL
 def test_untrusted_clean_cannot_be_concluded_without_prior() -> None:
     policy = _policy()
     incoming = _steered_clean()
@@ -68,7 +66,6 @@ def test_untrusted_clean_cannot_be_concluded_without_prior() -> None:
     assert result.choice != "clean"
 
 
-@J3_XFAIL
 def test_untrusted_escalation_is_kept() -> None:
     policy = _policy()
     types = _types()
@@ -94,7 +91,6 @@ def test_untrusted_escalation_is_kept() -> None:
     assert result.discarded_deescalation is False
 
 
-@J3_XFAIL
 def test_ratchet_records_discarded_steering_on_untrusted() -> None:
     policy = _policy()
     result = policy.apply_ratchet(
