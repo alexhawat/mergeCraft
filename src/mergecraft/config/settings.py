@@ -609,10 +609,13 @@ class JevSettings(BaseModel):
 
     @field_validator("model")
     @classmethod
-    def _reject_floating_alias(cls, value: str) -> str:
+    def _require_pinned_model(cls, value: str) -> str:
         pinned = value.strip()
         if pinned in _JEV_FLOATING_ALIASES:
             msg = "jev.model must be a versioned id (jev-1.13.0), not a floating alias"
+            raise ValueError(msg)
+        if pinned != _JEV_PINNED_MODEL:
+            msg = f"jev.model must be the pinned id {_JEV_PINNED_MODEL}"
             raise ValueError(msg)
         return pinned
 

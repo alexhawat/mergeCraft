@@ -503,6 +503,44 @@ def _record_shadow_jev_skip(result: OfflineReviewResult, reason: str) -> None:
         result.jev_skip_reason = reason
 
 
+def _jev_shadow_artifact_path(
+    review_out: OfflineReviewResult,
+    driver: _OfflineDiffReviewRun,
+) -> Path:
+    """Prefer the packet sibling ``emit_run_packet`` already writes (D6)."""
+    packet = review_out.evidence_packet_path
+    if packet:
+        return Path(packet).with_name("merge-evidence-shadow.jsonl")
+    return driver.out_dir / "jev-shadow.jsonl"
+
+
+def _persist_shadow_jev_artifacts(
+    review_out: OfflineReviewResult,
+    *,
+    packet: Any,
+    shadow_path: Path,
+    judge: Any,
+    change_id: str,
+) -> None:
+    """Write judge + unit rows to the durable shadow log and stamp the result."""
+    from mergecraft.jev.judge import record_parallel_judge
+
+    try:
+        if judge is not None:
+            record_parallel_judge(
+                packet,
+                judge,
+                output_path=shadow_path,
+                run_id="offline-review",
+                change_id=change_id,
+            )
+            review_out.jev_judge = judge.model_dump(mode="json")
+        if shadow_path.is_file():
+            review_out.jev_shadow_path = str(shadow_path)
+    except Exception as exc:  # an audit artifact never fails the review (D6)
+        logger.warning("jev shadow persist failed — {}", exc)
+
+
 def _findings_for_shadow_judge(
     driver: _OfflineDiffReviewRun,
     review_out: OfflineReviewResult,
@@ -549,6 +587,7 @@ async def _run_shadow_jev_review(
         findings=[],
         deterministic_checks=[],
     )
+    shadow_path = _jev_shadow_artifact_path(review_out, driver)
     try:
         units = segment_hunks(diff_text)
         await dispatch_residual_units(
@@ -557,18 +596,26 @@ async def _run_shadow_jev_review(
             client=client,
             trust_tier=driver.trust_tier,
             packet=packet,
-            output_path=driver.out_dir / "jev-shadow.jsonl",
+            output_path=shadow_path,
             run_id="offline-review",
             change_id=change_id,
             settings=settings,
         )
         body = review_out.output or ""
+        judge = None
         if body:
-            await run_parallel_judge(
+            judge = await run_parallel_judge(
                 findings=findings,
                 review_body=body,
                 client=client,
             )
+        _persist_shadow_jev_artifacts(
+            review_out,
+            packet=packet,
+            shadow_path=shadow_path,
+            judge=judge,
+            change_id=change_id,
+        )
         selected = await select_lenses(state={"diff": diff_text}, client=client)
         select_lenses_or_fallback(
             enabled=True,

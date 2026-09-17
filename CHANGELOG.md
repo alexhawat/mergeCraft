@@ -152,6 +152,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Enabled Jev reviews now keep the shadow-judge record next to the evidence
+  packet after the command finishes, so paid calibration rows are retrievable
+  (#728)
+- `jev.model` accepts only the pinned `jev-1.13.0` id, so a configured newer
+  version cannot run while audit rows still claim the pin (#728)
+
 - Corroborating duplicates can no longer weaken a finding: clustering keeps the
   strongest member's severity while the agent's prose stays canonical wording,
   and semantic dedupe keeps the strongest paraphrase with the discarded members'

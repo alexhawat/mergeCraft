@@ -15,13 +15,14 @@ Exports:
     judge_finding_evidence: Citation-check one finding.
     judge_prose_claims: Claim battery over extracted prose.
     run_parallel_judge: Evidence + claims beside ``should_verify``.
+    record_parallel_judge: Persist the parallel result through the shadow recorder.
     record_judge_disagreement: Record disagreement as a signal.
 """
 
 from __future__ import annotations
 
 import hashlib
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,7 +44,9 @@ from mergecraft.jev.types import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
+    from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.jev.client import AsyncJevClient
 
 JEV_JUDGE_VERSION: Final[str] = "1.0.0"
@@ -324,6 +327,75 @@ async def run_parallel_judge(
     )
 
 
+def record_parallel_judge(
+    packet: MergeEvidencePacket | None,
+    result: ParallelJudgeResult,
+    *,
+    output_path: Path | None,
+    run_id: str,
+    change_id: str,
+) -> Any:
+    """Persist one parallel-judge result through the existing shadow recorder (D6).
+
+    Args:
+        packet: Merge-evidence packet (source of truth; not mutated).
+        result: ``run_parallel_judge`` outcome.
+        output_path: JSONL shadow log. ``None`` records the call without a write.
+        run_id: Run identifier.
+        change_id: Change identifier.
+
+    Returns:
+        ShadowRecord | None: The row that was appended, or ``None`` when not persisted.
+    """
+    from mergecraft.evidence.shadow import record_shadow_prediction
+    from mergecraft.jev.types import JevPrediction
+
+    if packet is None or output_path is None:
+        return None
+    prediction = JevPrediction(
+        action="require_human_review",
+        skip_reviewer=False,
+        suppressed=False,
+        enforced=False,
+        choice="parallel",
+        confidence=0.0,
+        severity="Minor",
+        severity_score=0.0,
+        unit_id="parallel-judge",
+        pack_id=EVIDENCE_PACK_ID,
+        outcome="require_human_review",
+        diagnostic="jev-judge",
+        metadata={
+            "model": result.pin.model,
+            "pack_id": EVIDENCE_PACK_ID,
+            "judge_version": result.pin.judge_version,
+            "rubric_version": result.pin.rubric_version,
+            "replaces_verifier": result.replaces_verifier,
+            "result": result.model_dump(mode="json"),
+        },
+    )
+    logger.info(
+        "jev judge persist pin={} evidence={} claims={} enforced=false",
+        result.pin.model,
+        len(result.evidence),
+        0 if result.claims is None else 1,
+    )
+    return record_shadow_prediction(
+        packet,
+        change_id=change_id,
+        run_id=run_id,
+        policy_id="jev-judge",
+        output_path=output_path,
+        prediction=prediction,
+        metadata={
+            "model": result.pin.model,
+            "pack_id": EVIDENCE_PACK_ID,
+            "judge_version": result.pin.judge_version,
+            "rubric_version": result.pin.rubric_version,
+        },
+    )
+
+
 def record_judge_disagreement(
     *,
     jev_verdict: str,
@@ -452,5 +524,6 @@ __all__ = [
     "judge_finding_evidence",
     "judge_prose_claims",
     "record_judge_disagreement",
+    "record_parallel_judge",
     "run_parallel_judge",
 ]
