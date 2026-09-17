@@ -148,12 +148,6 @@ class AgentUsage:
 
 
 @dataclass(slots=True)
-class AgentToolUseEvent:
-    tool_name: str
-    input: Any
-
-
-@dataclass(slots=True)
 class AgentResult:
     success: bool
     output: str | None = None
@@ -200,7 +194,6 @@ class AgentRunContext:
     secret_deny_paths: list[str] | None = None
     todo_tracker: Any = None
     stop_script: str | None = None
-    on_tool_use: Callable[[AgentToolUseEvent], None] | None = None
 
 
 def mcp_auth_headers(ctx: AgentRunContext) -> dict[str, str]:
