@@ -228,15 +228,18 @@ def predict_jev_action(
     Returns:
         JevPrediction: ``enforced`` is always ``False`` in this plan (D6).
     """
-    _ = _jev_gate_mode()
-    return apply_ratchet(prior=prior, incoming=assessment, trust_tier=trust_tier)
+    gate_mode = _jev_gate_mode()
+    prediction = apply_ratchet(prior=prior, incoming=assessment, trust_tier=trust_tier)
+    metadata = dict(prediction.metadata)
+    metadata["gate_mode"] = gate_mode
+    return prediction.model_copy(update={"enforced": False, "metadata": metadata})
 
 
 def record_jev_prediction(
-    packet: MergeEvidencePacket,
+    packet: MergeEvidencePacket | None,
     prediction: JevPrediction,
     *,
-    output_path: Path,
+    output_path: Path | None,
     run_id: str,
     change_id: str,
 ) -> Any:
@@ -245,12 +248,12 @@ def record_jev_prediction(
     Args:
         packet: Merge-evidence packet (source of truth; not mutated).
         prediction: ``predict_jev_action`` result.
-        output_path: JSONL shadow log.
+        output_path: JSONL shadow log. ``None`` records the call without a write.
         run_id: Run identifier.
         change_id: Change identifier.
 
     Returns:
-        ShadowRecord: The row that was appended.
+        ShadowRecord | None: The row that was appended, or ``None`` when not persisted.
     """
     from mergecraft.evidence.shadow import record_shadow_prediction
 
@@ -259,8 +262,17 @@ def record_jev_prediction(
         "pack_id": prediction.pack_id,
         "raw_confidence": prediction.confidence,
         "unit_id": prediction.unit_id,
+        "gate_mode": prediction.metadata.get("gate_mode"),
     }
-    record = record_shadow_prediction(
+    logger.info(
+        "jev shadow unit_id={} pack_id={} action={} enforced=false",
+        prediction.unit_id,
+        prediction.pack_id,
+        prediction.action,
+    )
+    if packet is None or output_path is None:
+        return None
+    return record_shadow_prediction(
         packet,
         change_id=change_id,
         run_id=run_id,
@@ -269,27 +281,21 @@ def record_jev_prediction(
         prediction=prediction,
         metadata=metadata,
     )
-    logger.info(
-        "jev shadow unit_id={} pack_id={} action={} enforced=false",
-        prediction.unit_id,
-        prediction.pack_id,
-        prediction.action,
-    )
-    return record
 
 
 def iter_thresholds() -> Iterator[JevThreshold]:
     """Yield pack-versioned thresholds that name their J1 corpus rows (D15)."""
+    certain, likely = _unit_floors()
     yield JevThreshold(
         pack_id=UNIT_PACK_ID,
         name="certain",
-        value=CERTAIN_CONFIDENCE_FLOOR,
+        value=certain,
         corpus_ids=UNIT_THRESHOLD_CORPUS_IDS,
     )
     yield JevThreshold(
         pack_id=UNIT_PACK_ID,
         name="likely",
-        value=LIKELY_CONFIDENCE_FLOOR,
+        value=likely,
         corpus_ids=UNIT_THRESHOLD_CORPUS_IDS,
     )
     yield JevThreshold(
@@ -317,7 +323,7 @@ async def unit_battery(
     *,
     client: AsyncJevClient,
     trust_tier: str = "trusted",
-) -> UnitAssessment:
+) -> UnitAssessment | JevCallResult:
     """Ask the ``unit/v1`` battery about one residual hunk.
 
     Args:
@@ -326,10 +332,7 @@ async def unit_battery(
         trust_tier: ``trusted`` or ``untrusted``.
 
     Returns:
-        UnitAssessment: Parsed triage, confidence, and severity.
-
-    Raises:
-        JevError: When the client skips or returns no answers.
+        UnitAssessment | JevCallResult: Parsed triage, or the client skip (D4).
     """
     from mergecraft.jev.questions import unit_pack
 
@@ -343,7 +346,7 @@ async def unit_battery(
         questions=pack.as_system_one(),
     )
     if result.skipped or result.response is None:
-        raise JevError("unit battery produced no answers", code="invalid_response")
+        return result
     return assessment_from_response(
         result.response,
         unit_id=unit.unit_id,
@@ -358,6 +361,10 @@ async def dispatch_residual_units(
     client: AsyncJevClient,
     trust_tier: str,
     prior_by_unit: Mapping[str, PolicyVerdict] | None = None,
+    packet: MergeEvidencePacket | None = None,
+    output_path: Path | None = None,
+    run_id: str = "jev",
+    change_id: str | None = None,
 ) -> list[JevPrediction]:
     """Run the unit battery only on analyzer-residual hunks, then order them.
 
@@ -367,6 +374,10 @@ async def dispatch_residual_units(
         client: Pinned Jev client.
         trust_tier: ``trusted`` or ``untrusted``.
         prior_by_unit: Optional priors for the ratchet.
+        packet: Optional packet for the shadow recorder.
+        output_path: Optional JSONL path for the shadow recorder.
+        run_id: Shadow run identifier.
+        change_id: Shadow change identifier; defaults to the unit id.
 
     Returns:
         list[JevPrediction]: Ordered residual predictions. Never suppresses.
@@ -378,8 +389,17 @@ async def dispatch_residual_units(
     predictions: list[JevPrediction] = []
     for unit in residual:
         assessment = await unit_battery(unit, client=client, trust_tier=trust_tier)
+        if isinstance(assessment, JevCallResult):
+            continue
         prior = None if prior_by_unit is None else prior_by_unit.get(unit.unit_id)
         prediction = predict_jev_action(assessment, trust_tier=trust_tier, prior=prior)
+        record_jev_prediction(
+            packet,
+            prediction,
+            output_path=output_path,
+            run_id=run_id,
+            change_id=change_id or unit.unit_id,
+        )
         assessments.append(
             UnitAssessment(
                 unit_id=unit.unit_id,
@@ -482,17 +502,15 @@ async def semantic_dedupe_pair(
     return kept
 
 
+def _unit_floors() -> tuple[float, float]:
+    return (
+        _settings_threshold("unit/v1.certain", CERTAIN_CONFIDENCE_FLOOR),
+        _settings_threshold("unit/v1.likely", LIKELY_CONFIDENCE_FLOOR),
+    )
+
+
 def _confidence_floors() -> tuple[float, float]:
-    certain = CERTAIN_CONFIDENCE_FLOOR
-    likely = LIKELY_CONFIDENCE_FLOOR
-    for threshold in iter_thresholds():
-        if threshold.pack_id != UNIT_PACK_ID:
-            continue
-        if threshold.name == "certain":
-            certain = threshold.value
-        elif threshold.name == "likely":
-            likely = threshold.value
-    return certain, likely
+    return _unit_floors()
 
 
 def _jev_gate_mode() -> str:

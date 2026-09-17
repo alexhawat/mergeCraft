@@ -29,9 +29,7 @@ from mergecraft.jev.types import (
     LIKELY_CONFIDENCE_FLOOR,
     UNIT_PACK_ID,
     ChoiceAnswer,
-    JevCallResult,
     JevError,
-    SystemOneResponse,
 )
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 
@@ -140,6 +138,8 @@ class LensSelection(BaseModel):
     lens_ids: tuple[str, ...] = ()
     source: LensSource = "jev"
     confidence: float | None = None
+    skipped: bool = False
+    reason: str | None = None
 
 
 def unit_pack() -> QuestionPack:
@@ -333,10 +333,8 @@ async def select_lenses(
         client: Pinned Jev client (recorded transport in CI).
 
     Returns:
-        LensSelection: Catalog ids Jev marked ``apply``. ``source`` is ``jev``.
-
-    Raises:
-        JevError: When the client skips or returns no answers.
+        LensSelection: Catalog ids Jev marked ``apply``. ``source`` is ``jev``,
+        or ``triggers`` when the client skips (D4).
     """
     pack = lens_pack()
     result = await client.call(
@@ -345,7 +343,15 @@ async def select_lenses(
         unit_id="pr",
         questions=pack.as_system_one(),
     )
-    response = _require_response(result, code="invalid_response")
+    if result.skipped or result.response is None:
+        return LensSelection(
+            pack_id=pack.pack_id,
+            lens_ids=(),
+            source="triggers",
+            skipped=True,
+            reason=result.reason,
+        )
+    response = result.response
     catalog = _live_lens_definitions()
     selected: list[str] = []
     confidences: list[float] = []
@@ -416,13 +422,6 @@ def _lens_confidence_floor() -> float:
     if isinstance(value, int | float) and not isinstance(value, bool):
         return float(value)
     return LIKELY_CONFIDENCE_FLOOR
-
-
-def _require_response(result: JevCallResult, *, code: str) -> SystemOneResponse:
-    response = getattr(result, "response", None)
-    if getattr(result, "skipped", False) or not isinstance(response, SystemOneResponse):
-        raise JevError("lens pack produced no answers", code=code)
-    return response
 
 
 __all__ = [

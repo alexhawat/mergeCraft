@@ -36,7 +36,6 @@ from mergecraft.jev.types import (
     EVIDENCE_PACK_ID,
     PINNED_MODEL,
     ChoiceAnswer,
-    JevCallResult,
     JevError,
     NoulAnswer,
     SystemOneResponse,
@@ -76,6 +75,8 @@ class EvidenceJudgeResult(BaseModel):
     located: float = 0.0
     scope: Literal["run"] = "run"
     blocking: bool = False
+    skipped: bool = False
+    reason: str | None = None
     pin: JevJudgePin = Field(default_factory=JevJudgePin)
     findings: list[Finding] = Field(default_factory=list)
 
@@ -91,6 +92,8 @@ class ClaimJudgeResult(BaseModel):
     contradicts_verdict: float = 0.0
     scope: Literal["run"] = "run"
     blocking: bool = False
+    skipped: bool = False
+    reason: str | None = None
     pin: JevJudgePin = Field(default_factory=JevJudgePin)
     findings: list[Finding] = Field(default_factory=list)
 
@@ -139,10 +142,8 @@ async def judge_finding_evidence(
         client: Pinned Jev client (recorded transport in CI).
 
     Returns:
-        EvidenceJudgeResult: Relation plus attesting ``scope="run"`` findings.
-
-    Raises:
-        JevError: When the client skips or returns no answers.
+        EvidenceJudgeResult: Relation plus attesting ``scope="run"`` findings,
+        or a skip result when the client does not dispatch (D4).
     """
     pack = evidence_pack()
     pin = _registered_pin()
@@ -158,7 +159,15 @@ async def judge_finding_evidence(
         unit_id=finding.fingerprint or finding.path or "finding",
         questions=pack.as_system_one(),
     )
-    response = _require_response(result)
+    if result.skipped or result.response is None:
+        return EvidenceJudgeResult(
+            pack_id=pack.pack_id,
+            relation="",
+            skipped=True,
+            reason=result.reason,
+            pin=pin,
+        )
+    response = result.response
     relation = _choice(response, "relation")
     falsifiable = _noul(response, "falsifiable")
     located = _noul(response, "located")
@@ -198,10 +207,8 @@ async def judge_prose_claims(
         client: Pinned Jev client (recorded transport in CI).
 
     Returns:
-        ClaimJudgeResult: Aggregated nouls plus attesting run findings.
-
-    Raises:
-        JevError: When a dispatched call skips or returns no answers.
+        ClaimJudgeResult: Aggregated nouls plus attesting run findings,
+        or a skip result when the client does not dispatch (D4).
     """
     pack = claim_pack()
     pin = _registered_pin()
@@ -224,7 +231,14 @@ async def judge_prose_claims(
             unit_id=_claim_unit_id(claim.text),
             questions=pack.as_system_one(),
         )
-        response = _require_response(result)
+        if result.skipped or result.response is None:
+            return ClaimJudgeResult(
+                pack_id=pack.pack_id,
+                skipped=True,
+                reason=result.reason,
+                pin=pin,
+            )
+        response = result.response
         backed_by_row = _noul(response, "backed_by_row")
         blocking_language = _noul(response, "blocking_language")
         contradicts_verdict = _noul(response, "contradicts_verdict")
@@ -249,6 +263,18 @@ async def judge_prose_claims(
                     confidence=contradicts_verdict,
                 )
             )
+
+    if len(_named_terminal_verdicts(review_body)) > 1 and not any(
+        item.rule_id == "jev-claim-verdict-mismatch" for item in attestations
+    ):
+        attestations.append(
+            _attest(
+                rule_id="jev-claim-verdict-mismatch",
+                message="Review body names more than one terminal verdict",
+                path="",
+                confidence=1.0,
+            )
+        )
 
     return ClaimJudgeResult(
         pack_id=pack.pack_id,
@@ -330,13 +356,6 @@ def record_judge_disagreement(
     return record
 
 
-def _require_response(result: JevCallResult) -> SystemOneResponse:
-    response = getattr(result, "response", None)
-    if getattr(result, "skipped", False) or not isinstance(response, SystemOneResponse):
-        raise JevError("judge battery produced no answers", code="invalid_response")
-    return response
-
-
 def _choice(response: SystemOneResponse, name: str) -> str:
     answer = response.answers.get(name)
     if isinstance(answer, ChoiceAnswer):
@@ -388,12 +407,32 @@ def _render_findings_table(findings: Sequence[Finding]) -> str:
     return "\n".join(lines)
 
 
-def _stated_terminal_verdict(review_body: str) -> str:
+_REQUEST_VERDICT_TOKENS: Final[tuple[str, ...]] = (
+    "request_changes",
+    "must not merge",
+    "must block",
+)
+_APPROVE_VERDICT_TOKENS: Final[tuple[str, ...]] = ("approve",)
+
+
+def _named_terminal_verdicts(review_body: str) -> frozenset[str]:
     lowered = review_body.casefold()
-    if "request_changes" in lowered or "must not merge" in lowered or "must block" in lowered:
+    found: set[str] = set()
+    if any(token in lowered for token in _REQUEST_VERDICT_TOKENS):
+        found.add("request_changes")
+    if any(token in lowered for token in _APPROVE_VERDICT_TOKENS):
+        found.add("approve")
+    return frozenset(found)
+
+
+def _stated_terminal_verdict(review_body: str) -> str:
+    named = _named_terminal_verdicts(review_body)
+    if named == {"request_changes"}:
         return "request_changes"
-    if "approve" in lowered:
+    if named == {"approve"}:
         return "approve"
+    if len(named) > 1:
+        return "conflicted"
     return "unspecified"
 
 

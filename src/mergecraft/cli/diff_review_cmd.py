@@ -693,6 +693,9 @@ def run(
             stream.phase("materialize")
             stream.phase("review")
 
+        if result.jev_skip_reason:
+            logger.info("jev skip reason={}", result.jev_skip_reason)
+
         if result.diff_path:
             logger.info("» diff path: {}", result.diff_path)
 

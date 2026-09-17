@@ -340,6 +340,25 @@ class AsyncJevClient:
         self._tracer = tracer
         self._model = settings.model if settings is not None else PINNED_MODEL
 
+    def availability_skip(self, *, pack_id: str | None = None) -> JevCallResult | None:
+        """Return an honest skip when this client must not dispatch (D4).
+
+        Args:
+            pack_id: Optional pack to honor ``JevSettings.packs``.
+
+        Returns:
+            JevCallResult | None: A skip result, or ``None`` when a call may proceed.
+        """
+        if self._settings is not None and not self._settings.enabled:
+            return _skip("disabled")
+        if pack_id is not None and not _pack_enabled(self._settings, pack_id):
+            return _skip("disabled")
+        if self._api_key is None:
+            return _skip("credential_absent")
+        if self._budget.should_stop():
+            return _skip("kill_switch")
+        return None
+
     async def call(
         self,
         *,
@@ -363,12 +382,9 @@ class AsyncJevClient:
         Returns:
             JevCallResult: A completed call or an honest skip.
         """
-        if self._settings is not None and not self._settings.enabled:
-            return _skip("disabled")
-        if self._api_key is None:
-            return _skip("credential_absent")
-        if self._budget.should_stop():
-            return _skip("kill_switch")
+        skipped = self.availability_skip(pack_id=pack_id)
+        if skipped is not None:
+            return skipped
         if state is None:
             raise JevError("system_one state must be a mapping", code="invalid_state")
 
@@ -480,6 +496,13 @@ class AsyncJevClient:
         with tracer.start_span("llm.call") as span:
             for key, value in attrs.items():
                 span.set_attribute(key, value)
+
+
+def _pack_enabled(settings: JevSettings | None, pack_id: str) -> bool:
+    from mergecraft.config.settings import default_settings
+
+    packs = settings.packs if settings is not None else default_settings().jev.packs
+    return bool(packs.get(pack_id, True))
 
 
 def _budget_tokens(settings: JevSettings | None) -> int:

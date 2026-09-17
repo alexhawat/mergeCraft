@@ -40,6 +40,7 @@ class OfflineReviewResult:
     evidence_packet_path: str | None = None
     outcome: RunOutcome | None = None
     scope_reduction: ScopeReduction | None = None
+    jev_skip_reason: str | None = None
 
 
 def _offline_failure(
