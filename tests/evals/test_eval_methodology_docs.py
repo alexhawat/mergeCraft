@@ -61,7 +61,7 @@ def test_eval_methodology_page_exists_and_names_metrics() -> None:
     """Happy: the docs page describes the metric set without living on README."""
     text = read_text(_METHODOLOGY_PATH)
     lowered = text.casefold()
-    for term in ("blocker precision", "latency", "cost per review", "ablation"):
+    for term in ("blocker precision", "latency", "cost per review", "corpora"):
         assert term in lowered, f"{_METHODOLOGY_PATH} missing {term!r}"
 
 
