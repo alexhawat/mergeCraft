@@ -37,7 +37,7 @@ def _write_discovery_repo(root: Path) -> str:
     (root / "AGENTS.md").write_text(
         "Follow the service boundaries in `services/`.\n", encoding="utf-8"
     )
-    skill_dir = root / ".cursor" / "skills" / "demo"
+    skill_dir = root / "team-skills" / "demo"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
         f"---\nname: demo\n---\n\n{_SKILL_MARKER}\n",
@@ -161,6 +161,30 @@ def test_injection_inside_a_discovered_instruction_file_is_not_obeyed(tmp_path: 
     assert SAFETY_NOTE in joined
     assert _INJECTION_TEXT not in section_text(prompt, STANDING_INSTRUCTIONS_HEADER)
     assert "<<fence-close-redacted>>" in joined or "nonce=<redacted>" in joined
+
+
+def test_cursor_rules_are_discovered(tmp_path: Path) -> None:
+    """Thermos turn 2 — ``.cursor/rules/*.md`` must not be blanket-skipped with ``.cursor``."""
+    repo_root = tmp_path / "repo"
+    rules_dir = repo_root / ".cursor" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "team.md").write_text(
+        "# Team rules\n\nCURSOR_RULE_DISCOVERY_MARKER\n",
+        encoding="utf-8",
+    )
+    git_init_repo(repo_root)
+    commit_sha = git_commit_all(repo_root)
+    discovery_mod = import_context_module("instruction_discovery")
+    paths = discovery_mod.discover_instruction_paths(repo_root)
+    rels = [path.relative_to(repo_root).as_posix() for path in paths]
+    assert ".cursor/rules/team.md" in rels
+    prompt = discovery_mod.render_review_context(
+        repo_root=repo_root,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha=commit_sha,
+    )
+    assert "CURSOR_RULE_DISCOVERY_MARKER" in prompt
 
 
 def test_a_repo_with_no_instructions_renders_nothing(tmp_path: Path) -> None:

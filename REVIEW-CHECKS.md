@@ -1,5 +1,9 @@
 # What mergecraft checks for
 
+> **Agent-facing artifact:** `.github/skills/code-review/` is what mergeCraft injects
+> into the reviewing agent at runtime; this file is the human-facing catalog of the
+> same checks.
+
 > **Doc status (W7 + catalog C6):** §2 describes the analyzer platform and the expanded
 > P0–P3 catalog. Long-tail tools default to **disabled** unless repo config or detection
 > enables them.

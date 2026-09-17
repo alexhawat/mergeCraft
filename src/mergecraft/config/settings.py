@@ -324,6 +324,23 @@ class ReviewSettings(BaseModel):
             "are rejected. Dropped on the untrusted tier."
         ),
     )
+    instruction_bundle_byte_cap: int = Field(
+        default=65536,
+        alias="instructionBundleByteCap",
+        description=(
+            "Maximum UTF-8 byte size for the rendered review instruction bundle "
+            "(review skills, references, and repo instructions). Review skills and "
+            "their references are retained first when truncation is required."
+        ),
+    )
+    instruction_extra_filenames: list[str] = Field(
+        default_factory=list,
+        alias="instructionExtraFilenames",
+        description=(
+            "Additional repo-root filenames to treat as discovered instruction "
+            "sources during review-context rendering (for example TEAM.md)."
+        ),
+    )
 
 
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.

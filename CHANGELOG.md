@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- mergeCraft review loads `.github/skills/code-review/` as a self-contained
+  Agent Skills payload — `SKILL.md` plus one-level `references/` resolved into
+  the `REVIEW SKILLS` prompt section, with a 64 KiB instruction-bundle cap,
+  taxonomy/spec drift gates, and a small eval corpus that must beat the
+  366-byte pointer baseline; `review.instructionExtraFilenames` wires configured
+  extras through the CLI and Action review-context path
 - GitHub Copilot is a first-class Agent Skills harness: generated
   `skills/copilot/mergecraft/`, install path `.github/skills/mergecraft/`,
   a Copilot repo-MCP snippet with the six public tools, and a thin
