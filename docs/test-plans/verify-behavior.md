@@ -14,10 +14,10 @@ real-browser smoke test, if added later, must be marked `integration` so
 
 ## Greening milestones
 
-The report, driver-protocol, command, and review-consume milestones are green.
-Operator-path launch when the extra is present is still pending: those cases
-are `xfail` (non-strict) in `test_playwright_launch.py` until
-`launch_playwright_driver` is the CLI driver factory.
+The report, driver-protocol, command, review-consume, and operator-path
+launch milestones are green. Extra present calls `launch_playwright_driver`
+(never the CLI stub); adapter tests bind `PlaywrightBrowserDriver` to an
+in-process fake Page.
 
 | Milestone | What lands | Suite |
 | --- | --- | --- |
@@ -106,6 +106,9 @@ Regression pins that must stay green:
 | `BrowserExtraMissingError` / `require_browser_extra` | `mergecraft.verify.extra` | `test_extra.py` |
 | `launch_playwright_driver` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
 | `PlaywrightBrowserDriver` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
+| `_await_if_needed` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
+| `PlaywrightBrowserDriver.close` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
+| `_close_driver` | `mergecraft.cli.verify_behavior_cmd` | `test_playwright_launch.py` |
 | `run_verify_behavior` | `mergecraft.verify.runner` | `test_trust_gate.py`, `test_modes_and_inputs.py` |
 | `VerifyBehaviorSettings` | `mergecraft.config.settings` | `test_trust_gate.py` |
 | `resolve_artifacts_dir` / `redact_screenshot` | `mergecraft.verify.artifacts` | `test_artifacts_and_lifecycle.py` |

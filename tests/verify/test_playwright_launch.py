@@ -11,9 +11,11 @@ import sys
 import tomllib
 import types
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pytest
+if TYPE_CHECKING:
+    import pytest
+
 from loguru import logger
 from typer.testing import CliRunner
 
@@ -26,9 +28,6 @@ _PYPROJECT = _REPO / "pyproject.toml"
 _PNG_STUB = b"\x89PNG\r\n\x1a\n"
 _PNG_LAUNCHED = _PNG_STUB + b"fixture-not-stub"
 _RUNNER = CliRunner()
-
-# Pending the operator-path bind: extra present must call launch_playwright_driver.
-_BIND_XFAIL = pytest.mark.xfail(reason="green after V6 driver bind", strict=False)
 
 
 class _SentinelDriver:
@@ -214,7 +213,6 @@ def _src_lines_containing(needle: str) -> list[str]:
     return hits
 
 
-@_BIND_XFAIL
 async def test_resolve_driver_is_not_stub_when_extra_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -233,12 +231,17 @@ async def test_resolve_driver_is_not_stub_when_extra_present(
         assert await driver.extract_text() != "stub page"
 
 
-@_BIND_XFAIL
 def test_launch_playwright_driver_is_referenced_from_production_src() -> None:
     """``PlaywrightBrowserDriver`` must be constructed from ``launch_playwright_driver``."""
     mod = _playwright_driver_module()
     launch_playwright_driver = require_symbol(mod, "launch_playwright_driver")
     assert callable(launch_playwright_driver)
+    assert callable(require_symbol(mod, "_await_if_needed"))
+    assert callable(require_symbol(mod, "PlaywrightBrowserDriver").close)
+
+    from mergecraft.cli import verify_behavior_cmd as cmd
+
+    assert callable(require_symbol(cmd, "_close_driver"))
 
     launch_hits = _src_lines_containing("launch_playwright_driver")
     assert launch_hits, "src/ must define and call launch_playwright_driver"
@@ -328,7 +331,6 @@ async def test_playwright_driver_cookie_helpers_record_names_only() -> None:
     assert all(item.get("name") == SECRET_ENV_NAME for item in page.context.added)
 
 
-@_BIND_XFAIL
 def test_cli_verify_does_not_emit_stub_pass_when_extra_present(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
