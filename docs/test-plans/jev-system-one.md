@@ -83,7 +83,7 @@ xfail / 0 xpass. J6 plan checkboxes stay ☐.
 | `PINNED_MODEL` | `jev/__init__.py`, `jev/client.py` | `test_client.py` |
 | `AsyncJevClient` | `jev/client.py` | `test_client.py`, `test_cost.py`, `test_tracing.py` |
 | `RecordedTransport` / `FlakyRecordedTransport` | `jev/client.py` | `test_client.py` |
-| `TypeSafeAPIError` / `map_typesafe_error` | `jev/client.py` | `test_client.py` |
+| `TypeSafeAPIError` / `map_typesafe_error` / `_adapt_sdk_error` | `jev/client.py` | `test_client.py` |
 | `JevCallResult` / `JevError` | `jev/types.py` | `test_client.py`, `test_types.py` |
 | `PRICE_TABLE` / `compute_cost` / `TokenBudget` | `jev/cost.py` | `test_cost.py` |
 | `JevSettings` | `config/settings.py` | `test_settings.py`, `test_client.py` |
@@ -168,3 +168,13 @@ must fail if the product fix is reverted.
 | **F-PINNED-MODEL** | `JevSettings.model` accepts only `jev-1.13.0`. `jev-1.14.0` raises `ValidationError` on the constructor and when loading `.mergecraft/config.yaml`. Floating aliases (`jev-latest` / `jev-preview`) still raise the alias error. | `test_settings.py::test_jev_settings_rejects_unpinned_version_id`, `…::test_config_yaml_rejects_unpinned_jev_model`, `…::test_jev_settings_model_cannot_be_floating_alias`, `…::test_jev_settings_accepts_pinned_model` |
 | **F-SHADOW-PERSIST** | After `run_offline_diff_review` (enabled + recorded transport, not dry-run), `result.jev_shadow_path` exists. Packet present → sibling `merge-evidence-shadow.jsonl`. No packet → temp `jev-shadow.jsonl`. JSONL has `policy_id == "jev-judge"`. `result.jev_judge` dumps `pin.model == "jev-1.13.0"` and `replaces_verifier is False`. | `test_review_wire.py::test_shadow_judge_persisted_as_packet_sibling`, `…::test_shadow_judge_uses_temp_fallback_without_packet` |
 | **F-RECORD-JUDGE** | `record_parallel_judge` writes the `jev-judge` shadow row (apply site). | `test_judge.py::test_record_parallel_judge_writes_jev_judge_row` |
+
+## PR #728 review — status-less transport (2026-09-17)
+
+Guard-deletion regressions for `f3f6f4bc`. Ordinary assertions (no xfail). They
+must fail if the product fix is reverted.
+
+| Finding | Contract | Test(s) |
+| --- | --- | --- |
+| **F-STATUSLESS-SKIP** | Shadow `system_one` raising a status-less transport exception (`ConnectionError`) records `jev_skip_reason == "transport_error"` (or `jev skip reason=`) and leaves the review `success=True`. Letting the exception fail the review fails this test. | `test_review_wire.py::test_statusless_transport_is_recorded_skip_review_stays_successful` |
+| **F-ADAPT-STATUSLESS** | `_adapt_sdk_error(ConnectionError("dns"))` is `TypeSafeAPIError` with `code="transport_error"` and `status_code=0`. Re-raising the status-less exception fails this test. | `test_client.py::test_adapt_sdk_error_wraps_statusless_connection` |

@@ -109,6 +109,15 @@ async def test_rate_limit_maps_to_retryable_provider_failure() -> None:
     assert exc_info.value.code == "rate_limited"
 
 
+def test_adapt_sdk_error_wraps_statusless_connection() -> None:
+    """Status-less SDK/transport exceptions become TypeSafeAPIError, not a re-raise."""
+    module = _client_mod()
+    adapted = module._adapt_sdk_error(ConnectionError("dns"))
+    assert isinstance(adapted, module.TypeSafeAPIError)
+    assert adapted.code == "transport_error"
+    assert adapted.status_code == 0
+
+
 async def test_none_state_raises_structured_jev_error() -> None:
     module = _client_mod()
     client = _recorded_client("unit_happy.json")

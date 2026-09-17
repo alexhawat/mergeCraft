@@ -248,6 +248,43 @@ async def test_typesafe_outage_is_recorded_skip_review_stays_successful(
     )
 
 
+async def test_statusless_transport_is_recorded_skip_review_stays_successful(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Status-less transport errors on the shadow path are a skip, not a failed review."""
+    _prepare_shadow_review(monkeypatch)
+    repo, diff = _repo_with_jev(tmp_path, enabled=True)
+    transport = inject_recorded_jev_client(monkeypatch, "evidence_says_nothing.json")
+
+    async def _raise_statusless(
+        *,
+        state: dict[str, Any],
+        questions: dict[str, Any],
+        model: str,
+    ) -> Any:
+        del state, questions, model
+        raise ConnectionError("dns")
+
+    monkeypatch.setattr(transport, "system_one", _raise_statusless)
+    skip_code = "transport_error"
+    with loguru_lines() as logs:
+        result = await run_offline_diff_review(
+            cwd=repo,
+            diff_file=diff,
+            dry_run=False,
+            engine=published_review_engine(_successful_published()),
+        )
+    assert result.success is True
+    recorded = getattr(result, "jev_skip_reason", None)
+    logged = any(skip_code in line and "skip" in line.casefold() for line in logs) or any(
+        f"jev skip reason={skip_code}" in line for line in logs
+    )
+    assert recorded == skip_code or logged, (
+        f"status-less transport must record skip {skip_code!r} "
+        f"(jev_skip_reason or jev skip reason=); got {recorded!r}"
+    )
+
+
 async def test_shadow_judge_persisted_as_packet_sibling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
