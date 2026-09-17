@@ -344,6 +344,8 @@ def _assemble_instruction_bundle(
     injected: list[str] = []
     resolved_refs: list[str] = []
     dropped: list[str] = []
+    skill_references: dict[str, list[str]] = {}
+    untrusted_origins: list[str | None] = []
 
     fence = Fence()
     review_blocks: list[str] = []
@@ -383,6 +385,7 @@ def _assemble_instruction_bundle(
         refusals.extend(refusals_for_skill)
         limitations.extend(limitations_for_skill)
         resolved_refs.extend(ref_paths)
+        skill_references[rel_path] = list(ref_paths)
         block = "\n\n".join([header, *refs]) if refs else header
         injected.append(rel_path)
         if trust_tier == "trusted":
@@ -397,6 +400,7 @@ def _assemble_instruction_bundle(
                     nonce=fence.nonce,
                 )
             )
+            untrusted_origins.append(rel_path)
 
     for rel_path in other_rels:
         instruction_block = _block_for_instruction(
@@ -416,6 +420,7 @@ def _assemble_instruction_bundle(
             trusted_blocks.append(block)
         else:
             untrusted_blocks.append(block)
+            untrusted_origins.append(None)
 
     if not review_blocks and not trusted_blocks and not untrusted_blocks:
         return _InstructionBundle(
@@ -448,6 +453,14 @@ def _assemble_instruction_bundle(
         )
     while rendered and _rendered_byte_len(rendered) > byte_cap and untrusted_blocks:
         untrusted_blocks.pop()
+        origin = untrusted_origins.pop()
+        if origin is not None:
+            if origin in injected:
+                injected.remove(origin)
+            dropped.append(origin)
+            for ref in skill_references.pop(origin, ()):
+                if ref in resolved_refs:
+                    resolved_refs.remove(ref)
         limitations.append(
             f"({_LIMITATION_LABEL}: untrusted instruction dropped to honor bundle byte cap)"
         )
