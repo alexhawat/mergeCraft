@@ -1,6 +1,6 @@
 """Plan 26 H2 — Darwin skip, fail-closed ``--shell enabled``, honest context, sandbox-exec.
 
-Contracts: plan decisions 1-4. Cross-wave reds green after H2.
+Contracts: plan decisions 1-4. H2 xfails removed after the impl landed.
 """
 
 from __future__ import annotations
@@ -19,11 +19,6 @@ from mergecraft.mcp import shell as shell_mod
 from mergecraft.mcp.tool_state import AnalyzerRunState
 from mergecraft.review.offline_stages import run_offline_analyze
 from mergecraft.utils.offline_diff import DiffMaterialization
-
-H2 = pytest.mark.xfail(
-    reason="green after H2: Darwin detection, fail-closed shell, sandbox-exec",
-    strict=False,
-)
 
 _OVERRIDE = "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL"
 _PATCH = "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ a/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
@@ -44,7 +39,8 @@ def _empty_caps() -> sandbox_mod.SandboxCapabilities:
 def _force_no_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sandbox_mod, "sys", SimpleNamespace(platform="linux"))
     monkeypatch.setattr(sandbox_mod, "probe_capabilities", _empty_caps)
-    monkeypatch.setattr(sandbox_mod.probe_capabilities, "cache_clear", lambda: None)
+    # Stand-in is not lru_cache; do not require a real cache_clear.
+    monkeypatch.setattr(sandbox_mod.probe_capabilities, "cache_clear", lambda: None, raising=False)
     monkeypatch.setattr(shell_mod, "_detected_sandbox", None)
     monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "none")
     monkeypatch.delenv(_OVERRIDE, raising=False)
@@ -67,7 +63,6 @@ def _clear_probe_cache() -> None:
     shell_mod.reset_detection_cache()
 
 
-@H2
 def test_darwin_does_not_run_linux_isolation_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -89,7 +84,6 @@ def test_darwin_does_not_run_linux_isolation_probe(
     assert "unshare --net failed" not in joined
 
 
-@H2
 def test_enabled_shell_refuses_without_backend_and_names_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -102,7 +96,6 @@ def test_enabled_shell_refuses_without_backend_and_names_override(
     assert "1" in message
 
 
-@H2
 @pytest.mark.parametrize("value", ["", "0", "false", "yes", "true"])
 def test_enabled_shell_override_is_only_the_literal_one(
     monkeypatch: pytest.MonkeyPatch, value: str
@@ -114,14 +107,12 @@ def test_enabled_shell_override_is_only_the_literal_one(
         sandbox_mod.require_sandbox_for_enabled_shell(shell="enabled")
 
 
-@H2
 def test_enabled_shell_override_allows_proceed(monkeypatch: pytest.MonkeyPatch) -> None:
     _force_no_backend(monkeypatch)
     monkeypatch.setenv(_OVERRIDE, "1")
     sandbox_mod.require_sandbox_for_enabled_shell(shell="enabled")
 
 
-@H2
 @pytest.mark.parametrize("shell", ["disabled", "restricted"])
 def test_non_enabled_shell_does_not_require_a_backend(
     monkeypatch: pytest.MonkeyPatch, shell: str
@@ -130,7 +121,6 @@ def test_non_enabled_shell_does_not_require_a_backend(
     sandbox_mod.require_sandbox_for_enabled_shell(shell=shell)
 
 
-@H2
 def test_enabled_shell_proceeds_when_sandbox_exec_backend_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -140,7 +130,6 @@ def test_enabled_shell_proceeds_when_sandbox_exec_backend_exists(
     sandbox_mod.require_sandbox_for_enabled_shell(shell="enabled")
 
 
-@H2
 async def test_offline_analyze_enabled_shell_does_not_start_pipeline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -178,7 +167,6 @@ async def test_offline_analyze_enabled_shell_does_not_start_pipeline(
     assert _OVERRIDE in state.reason
 
 
-@H2
 def test_sandbox_execution_context_names_local_cli(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -188,7 +176,6 @@ def test_sandbox_execution_context_names_local_cli(
     assert sandbox_mod.sandbox_execution_context() == "local CLI"
 
 
-@H2
 def test_sandbox_execution_context_names_action_container(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -197,7 +184,6 @@ def test_sandbox_execution_context_names_action_container(
     assert sandbox_mod.sandbox_execution_context() == "Action container"
 
 
-@H2
 def test_sandbox_execution_context_names_container_without_cgroups(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -206,7 +192,6 @@ def test_sandbox_execution_context_names_container_without_cgroups(
     assert sandbox_mod.sandbox_execution_context() == "container-without-cgroups"
 
 
-@H2
 def test_probe_reasons_include_the_named_execution_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -223,7 +208,6 @@ def test_probe_reasons_include_the_named_execution_context(
     assert "container-without-cgroups" not in joined
 
 
-@H2
 def test_detect_sandbox_method_returns_sandbox_exec_on_darwin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -253,7 +237,6 @@ def test_detect_sandbox_method_is_none_when_sandbox_exec_missing(
     assert shell_mod.detect_sandbox_method() == "none"
 
 
-@H2
 def test_sandbox_exec_policy_denies_network_and_writes_outside_workspace(
     tmp_path: Path,
 ) -> None:
@@ -268,7 +251,6 @@ def test_sandbox_exec_policy_denies_network_and_writes_outside_workspace(
     assert "file-write" in lowered or "file-write*" in lowered
 
 
-@H2
 def test_build_sandbox_exec_argv_invokes_sandbox_exec(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -278,7 +260,6 @@ def test_build_sandbox_exec_argv_invokes_sandbox_exec(tmp_path: Path) -> None:
     assert "ok" in argv
 
 
-@H2
 @pytest.mark.skipif(sys.platform != "darwin", reason="sandbox-exec is a Darwin backend")
 @pytest.mark.skipif(shutil.which("sandbox-exec") is None, reason="sandbox-exec not on PATH")
 def test_sandbox_exec_blocks_write_outside_workspace(tmp_path: Path) -> None:
@@ -294,7 +275,6 @@ def test_sandbox_exec_blocks_write_outside_workspace(tmp_path: Path) -> None:
     assert not outside.exists()
 
 
-@H2
 @pytest.mark.skipif(sys.platform != "darwin", reason="sandbox-exec is a Darwin backend")
 @pytest.mark.skipif(shutil.which("sandbox-exec") is None, reason="sandbox-exec not on PATH")
 def test_sandbox_exec_blocks_network(tmp_path: Path) -> None:
