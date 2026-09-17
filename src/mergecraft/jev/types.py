@@ -3,6 +3,8 @@
 Exports:
     PINNED_MODEL: Versioned Jev model id (D8).
     JevError: Structured client/parse failure.
+    EVIDENCE_PACK_ID: Versioned ``evidence/v1`` pack id (J4).
+    CLAIM_PACK_ID: Versioned ``claim/v1`` pack id (J4).
     Usage: Token counts; either field may be ``None`` (T4).
     NoulAnswer: Probability of yes; no confidence field (T5 / G6).
     ChoiceAnswer: Discrete choice with confidence and probabilities.
@@ -92,6 +94,8 @@ class SystemOneResponse(BaseModel):
 
 
 UNIT_PACK_ID: Final[str] = "unit/v1"
+EVIDENCE_PACK_ID: Final[str] = "evidence/v1"
+CLAIM_PACK_ID: Final[str] = "claim/v1"
 CERTAIN_CONFIDENCE_FLOOR: Final[float] = 0.9
 LIKELY_CONFIDENCE_FLOOR: Final[float] = 0.6
 UNIT_THRESHOLD_CORPUS_IDS: Final[tuple[str, ...]] = (
@@ -292,6 +296,8 @@ def _intify_keys(value: object) -> dict[int, Any]:
 
 __all__ = [
     "CERTAIN_CONFIDENCE_FLOOR",
+    "CLAIM_PACK_ID",
+    "EVIDENCE_PACK_ID",
     "LIKELY_CONFIDENCE_FLOOR",
     "PINNED_MODEL",
     "SEVERITY_BY_SCORE",

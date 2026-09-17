@@ -1,13 +1,13 @@
-"""Versioned Jev question packs. J3 ships ``unit/v1`` (D1, D16).
+"""Versioned Jev question packs. ``unit/v1`` (J3), ``evidence/v1`` and ``claim/v1`` (J4).
 
-J4/J5 packs are registered by id only so ``get_pack`` can name every
-versioned pack. Their questions land with those waves.
+J5 packs stay registered by id only so ``get_pack`` can name every versioned
+pack. Their questions land with that wave.
 
 Exports:
     QuestionPack: Versioned pack with typed questions.
     unit_pack: Per-hunk Choice + Score + Noul battery.
-    evidence_pack: Stub ``evidence/v1`` (J4).
-    claim_pack: Stub ``claim/v1`` (J4).
+    evidence_pack: Citation-check battery per finding (T12).
+    claim_pack: Prose-claim battery for plan 21 D6 rules 1, 3, 4.
     align_pack: Stub ``align/v1`` (J5).
     lens_pack: Stub ``lens/v1`` (J5).
     get_pack: Lookup by versioned pack id.
@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mergecraft.jev.types import UNIT_PACK_ID, JevError
+from mergecraft.jev.types import CLAIM_PACK_ID, EVIDENCE_PACK_ID, UNIT_PACK_ID, JevError
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 
 QuestionKind = Literal["choice", "score", "noul"]
@@ -147,13 +147,56 @@ def unit_pack() -> QuestionPack:
 
 
 def evidence_pack() -> QuestionPack:
-    """Pack ``evidence/v1`` — questions land in J4."""
-    return QuestionPack(pack_id="evidence/v1")
+    """Pack ``evidence/v1`` — one call per finding (T12 citation-check)."""
+    return QuestionPack(
+        pack_id=EVIDENCE_PACK_ID,
+        questions=(
+            QuestionSpec(
+                name="relation",
+                kind="choice",
+                instructions="How does the cited code relate to the finding's claim?",
+                criteria={
+                    "supports": "The cited code supports the finding's claim.",
+                    "contradicts": "The cited code contradicts the finding's claim.",
+                    "says_nothing": "The cited code says nothing about the finding's claim.",
+                },
+            ),
+            QuestionSpec(
+                name="falsifiable",
+                kind="noul",
+                instructions="The claim can be checked against the diff rather than asserted.",
+            ),
+            QuestionSpec(
+                name="located",
+                kind="noul",
+                instructions="The cited path and line range are the ones the claim is about.",
+            ),
+        ),
+    )
 
 
 def claim_pack() -> QuestionPack:
-    """Pack ``claim/v1`` — questions land in J4."""
-    return QuestionPack(pack_id="claim/v1")
+    """Pack ``claim/v1`` — one call per extracted prose claim (plan 21 D6 1/3/4)."""
+    return QuestionPack(
+        pack_id=CLAIM_PACK_ID,
+        questions=(
+            QuestionSpec(
+                name="backed_by_row",
+                kind="noul",
+                instructions="This claim corresponds to a row in the findings table.",
+            ),
+            QuestionSpec(
+                name="blocking_language",
+                kind="noul",
+                instructions="This claim asserts something that should block the merge.",
+            ),
+            QuestionSpec(
+                name="contradicts_verdict",
+                kind="noul",
+                instructions="This claim is inconsistent with the stated terminal verdict.",
+            ),
+        ),
+    )
 
 
 def align_pack() -> QuestionPack:
@@ -168,8 +211,8 @@ def lens_pack() -> QuestionPack:
 
 _PACK_FACTORIES = {
     UNIT_PACK_ID: unit_pack,
-    "evidence/v1": evidence_pack,
-    "claim/v1": claim_pack,
+    EVIDENCE_PACK_ID: evidence_pack,
+    CLAIM_PACK_ID: claim_pack,
     "align/v1": align_pack,
     "lens/v1": lens_pack,
 }
