@@ -255,13 +255,14 @@ class LiveTypeSafeTransport:
         return _response_from_sdk(response)
 
 
-def _adapt_sdk_error(exc: BaseException) -> TypeSafeAPIError | BaseException:
+def _adapt_sdk_error(exc: BaseException) -> TypeSafeAPIError:
     status = getattr(exc, "status", None)
     if not isinstance(status, int):
         status = getattr(exc, "status_code", None)
-    if not isinstance(status, int):
-        return exc
     body = getattr(exc, "body", None)
+    if not isinstance(status, int):
+        code = _code_from_sdk_body(body) or "transport_error"
+        return TypeSafeAPIError(str(exc), status_code=0, code=code, body=body)
     code = _code_from_sdk_body(body) or type(exc).__name__
     return TypeSafeAPIError(str(exc), status_code=status, code=code, body=body)
 

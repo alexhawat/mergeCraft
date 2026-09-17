@@ -503,6 +503,14 @@ def _record_shadow_jev_skip(result: OfflineReviewResult, reason: str) -> None:
         result.jev_skip_reason = reason
 
 
+def _shadow_provider_skip_code(exc: BaseException) -> str:
+    """Skip code for a shadow-path provider or transport failure (D6)."""
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and code:
+        return code
+    return "transport_error"
+
+
 def _jev_shadow_artifact_path(
     review_out: OfflineReviewResult,
     driver: _OfflineDiffReviewRun,
@@ -624,10 +632,13 @@ async def _run_shadow_jev_review(
             selected_ids=selected.lens_ids,
             settings=settings,
         )
-    except JevError as exc:
+    except (JevError, TypeSafeAPIError) as exc:
         _record_shadow_jev_skip(review_out, exc.code)
-    except TypeSafeAPIError as exc:
-        _record_shadow_jev_skip(review_out, exc.code)
+    except Exception as exc:
+        # Status-less SDK/network failures (DNS/connect/timeout) must not
+        # fail an otherwise completed review (D6).
+        logger.warning("jev shadow provider failure type={} — {}", type(exc).__name__, exc)
+        _record_shadow_jev_skip(review_out, _shadow_provider_skip_code(exc))
 
 
 @dataclass(slots=True)

@@ -155,6 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enabled Jev reviews now keep the shadow-judge record next to the evidence
   packet after the command finishes, so paid calibration rows are retrievable
   (#728)
+- A TypeSafe connect, DNS, or timeout failure on the shadow judge records a
+  skip and leaves the completed review successful (#728)
 - `jev.model` accepts only the pinned `jev-1.13.0` id, so a configured newer
   version cannot run while audit rows still claim the pin (#728)
 
