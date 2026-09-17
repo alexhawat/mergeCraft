@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from mergecraft.analyzers.finding import (
     STRUCTURED_OUTPUT_REQUIRED_MSG,
     Finding,
@@ -522,6 +524,7 @@ class _OfflineDiffReviewRun:
                     base_ref=built.base_ref,
                     line_count=0 if not filtered.strip() else filtered.count("\n"),
                     empty=not filtered.strip(),
+                    coverage_limitations=built.coverage_limitations,
                 )
         diff_text = built.path.read_text(encoding="utf-8")
         reduced_text, self.scope_reduction = apply_diff_line_budget(
@@ -535,6 +538,7 @@ class _OfflineDiffReviewRun:
                 base_ref=built.base_ref,
                 line_count=self.scope_reduction.kept_lines,
                 empty=not reduced_text.strip(),
+                coverage_limitations=built.coverage_limitations,
             )
         self.materialization = built
         return built
@@ -555,7 +559,26 @@ class _OfflineDiffReviewRun:
 
     async def review(self) -> OfflineReviewResult:
         assert self.materialization is not None
+        limitations = self.materialization.coverage_limitations
         if self.materialization.empty:
+            if limitations:
+                # "empty because we did not look" must not masquerade as
+                # "empty because there is nothing" (D12). Name every excluded
+                # path and refuse to report a pass.
+                detail = "; ".join(limitations)
+                message = (
+                    "no changes to review: every change was excluded from coverage "
+                    f"({detail}); this is not a clean pass."
+                )
+                return OfflineReviewResult(
+                    success=False,
+                    error=message,
+                    output=message,
+                    diff_path=str(self.materialization.path),
+                    empty_diff=True,
+                    outcome=RunOutcome.inconclusive,
+                    scope_reduction=self.scope_reduction,
+                )
             if self.json_path is not None:
                 try:
                     write_findings_json(self.json_path, [])
@@ -571,6 +594,13 @@ class _OfflineDiffReviewRun:
                 empty_diff=True,
                 outcome=outcome_with_scope_reduction(RunOutcome.passed, self.scope_reduction),
                 scope_reduction=self.scope_reduction,
+            )
+
+        if limitations:
+            logger.warning(
+                "review coverage limited: {} path(s) excluded — {}",
+                len(limitations),
+                "; ".join(limitations),
             )
 
         output_schema = findings_output_schema() if self.json_path is not None else None
