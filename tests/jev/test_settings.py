@@ -60,7 +60,43 @@ def test_jev_settings_model_cannot_be_floating_alias() -> None:
 
     from mergecraft.config.settings import JevSettings
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="floating alias"):
         JevSettings(enabled=True, model="jev-latest")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="floating alias"):
         JevSettings(enabled=True, model="jev-preview")
+
+
+def test_jev_settings_rejects_unpinned_version_id() -> None:
+    """D8: a versioned id that is not the pin must fail closed."""
+    from pydantic import ValidationError
+
+    from mergecraft.config.settings import JevSettings
+
+    with pytest.raises(ValidationError, match=r"pinned id jev-1\.13\.0"):
+        JevSettings(model="jev-1.14.0")
+
+
+def test_config_yaml_rejects_unpinned_jev_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D8: ``.mergecraft/config.yaml`` cannot load an unpinned ``jev.model``."""
+    from pydantic import ValidationError
+
+    from mergecraft.config.settings import load_repo_settings
+
+    monkeypatch.delenv("MERGECRAFT_CONFIG", raising=False)
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "push: restricted\nshell: restricted\njev:\n  model: jev-1.14.0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError, match=r"pinned id jev-1\.13\.0"):
+        load_repo_settings(root=tmp_path, load_learnings_files=False)
+
+
+def test_jev_settings_accepts_pinned_model() -> None:
+    from mergecraft.config.settings import JevSettings
+
+    settings = JevSettings(model="jev-1.13.0")
+    assert settings.model == PINNED_MODEL

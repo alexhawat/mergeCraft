@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -13,6 +14,7 @@ from mergecraft.cli.app import app
 from mergecraft.offline_review import run_offline_diff_review
 from mergecraft.review.offline_result import OfflineReviewResult
 from tests.jev.support import (
+    PINNED_MODEL,
     TEST_API_KEY,
     import_jev,
     inject_recorded_jev_client,
@@ -21,9 +23,6 @@ from tests.jev.support import (
     published_review_engine,
     watch_async_jev_client,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _PATCH = "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
 _AGENT_ONLY_MESSAGE = "AGENT-ONLY-JEV-JUDGE: subprocess uses shell=True on untrusted argv"
@@ -51,7 +50,7 @@ def _prepare_shadow_review(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TYPESAFE_API_KEY", TEST_API_KEY)
 
 
-def _agent_only_published() -> OfflineReviewResult:
+def _agent_only_published(*, evidence_packet_path: str | None = None) -> OfflineReviewResult:
     from mergecraft.analyzers.finding import FindingsPayload
 
     finding = make_agent_finding(
@@ -65,6 +64,34 @@ def _agent_only_published() -> OfflineReviewResult:
         output=f"{_AGENT_ONLY_MESSAGE}\nThis is a blocking defect.\n",
         structured_output=FindingsPayload(findings=[finding]).model_dump_json(),
         empty_diff=False,
+        evidence_packet_path=evidence_packet_path,
+    )
+
+
+def _assert_shadow_judge_persisted(result: OfflineReviewResult) -> Path:
+    """Pin the apply site: discarding ``run_parallel_judge`` drops these fields."""
+    from mergecraft.evidence.shadow import load_shadow_records
+
+    assert result.jev_shadow_path, "shadow judge must persist a JSONL path on the result"
+    shadow = Path(result.jev_shadow_path)
+    assert shadow.is_file()
+    rows = load_shadow_records(shadow)
+    assert any(row.policy_id == "jev-judge" for row in rows), (
+        "shadow JSONL must contain policy_id='jev-judge'; "
+        "discarding run_parallel_judge() drops the row"
+    )
+    dump = result.jev_judge
+    assert dump is not None, "result.jev_judge must dump the parallel-judge result"
+    pin = dump.get("pin")
+    assert isinstance(pin, dict)
+    assert pin.get("model") == PINNED_MODEL
+    assert dump.get("replaces_verifier") is False
+    return shadow
+
+
+def _shadow_enabled_yaml() -> str:
+    return (
+        "push: restricted\nshell: restricted\nanalyzers:\n  enabled: false\njev:\n  enabled: true\n"
     )
 
 
@@ -146,18 +173,7 @@ async def test_agent_only_finding_reaches_shadow_judge(
 ) -> None:
     """Shadow judge must see an agent-authored finding, not analyzer residuals only."""
     _prepare_shadow_review(monkeypatch)
-    repo, diff = _repo_with_jev(
-        tmp_path,
-        enabled=True,
-        config_yaml=(
-            "push: restricted\n"
-            "shell: restricted\n"
-            "analyzers:\n"
-            "  enabled: false\n"
-            "jev:\n"
-            "  enabled: true\n"
-        ),
-    )
+    repo, diff = _repo_with_jev(tmp_path, enabled=True, config_yaml=_shadow_enabled_yaml())
     transport = inject_recorded_jev_client(monkeypatch, "evidence_says_nothing.json")
     judge_mod = import_jev("judge")
     seen: list[list[Any]] = []
@@ -230,3 +246,44 @@ async def test_typesafe_outage_is_recorded_skip_review_stays_successful(
         f"TypeSafe outage must record skip {skip_code!r} "
         f"(jev_skip_reason or jev skip reason=); got {recorded!r}"
     )
+
+
+async def test_shadow_judge_persisted_as_packet_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D6: when a packet exists, shadow JSONL is its sibling and jev_judge is stamped."""
+    _prepare_shadow_review(monkeypatch)
+    repo, diff = _repo_with_jev(tmp_path, enabled=True, config_yaml=_shadow_enabled_yaml())
+    inject_recorded_jev_client(monkeypatch, "evidence_says_nothing.json")
+    packet = tmp_path / "artifacts" / "merge-evidence.json"
+    packet.parent.mkdir()
+    packet.write_text("{}", encoding="utf-8")
+    result = await run_offline_diff_review(
+        cwd=repo,
+        diff_file=diff,
+        dry_run=False,
+        engine=published_review_engine(_agent_only_published(evidence_packet_path=str(packet))),
+    )
+    assert result.success is True
+    shadow = _assert_shadow_judge_persisted(result)
+    assert shadow == packet.with_name("merge-evidence-shadow.jsonl")
+    assert shadow.name == "merge-evidence-shadow.jsonl"
+    assert shadow != Path(packet.parent) / "jev-shadow.jsonl"
+
+
+async def test_shadow_judge_uses_temp_fallback_without_packet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D6: no evidence packet → temp ``jev-shadow.jsonl``, still a persisted judge dump."""
+    _prepare_shadow_review(monkeypatch)
+    repo, diff = _repo_with_jev(tmp_path, enabled=True, config_yaml=_shadow_enabled_yaml())
+    inject_recorded_jev_client(monkeypatch, "evidence_says_nothing.json")
+    result = await run_offline_diff_review(
+        cwd=repo,
+        diff_file=diff,
+        dry_run=False,
+        engine=published_review_engine(_agent_only_published()),
+    )
+    assert result.success is True
+    shadow = _assert_shadow_judge_persisted(result)
+    assert shadow.name == "jev-shadow.jsonl"

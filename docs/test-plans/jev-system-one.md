@@ -35,6 +35,8 @@ xfail / 0 xpass. J6 plan checkboxes stay ☐.
 | **J1.1** client survives `Usage` None | J2 | `test_cost.py::test_client_survives_usage_input_tokens_none` |
 | **J1.1** `jev:` default off | J2 | `test_settings.py::test_default_settings_jev_is_disabled` |
 | **J1.1** floating alias rejected | J2 | `test_settings.py::test_jev_settings_model_cannot_be_floating_alias` |
+| **J1.1** unpinned version id rejected (D8) | J6-wire | `test_settings.py::test_jev_settings_rejects_unpinned_version_id`, `…::test_config_yaml_rejects_unpinned_jev_model` |
+| **J1.1** pinned `jev-1.13.0` remains valid | J6-wire | `test_settings.py::test_jev_settings_accepts_pinned_model` |
 | **J1.1** wire types | J2 | `test_types.py` |
 | **J1.2** one GenAI span + `gen_ai.*` | J2 | `test_tracing.py::test_each_call_emits_one_genai_span` |
 | **J1.2** Jev attrs under `mergecraft.*` (D9) | J2 | `…::test_jev_specific_attrs_live_under_mergecraft_not_gen_ai` |
@@ -93,7 +95,8 @@ xfail / 0 xpass. J6 plan checkboxes stay ☐.
 | `unit_battery` / `dispatch_residual_units` | `jev/policy.py` | `test_dispatch.py` |
 | `record_jev_prediction` / `iter_thresholds` | `jev/policy.py` | `test_shadow.py`, `test_eval_corpus.py`, `test_dispatch.py` |
 | `detect_withdrawn_reraise` / `semantic_dedupe_pair` | `jev/policy.py` | `test_align.py` |
-| `JevJudgePin` / `judge_finding_evidence` / `judge_prose_claims` / `run_parallel_judge` | `jev/judge.py` | `test_judge.py` |
+| `JevJudgePin` / `judge_finding_evidence` / `judge_prose_claims` / `run_parallel_judge` / `record_parallel_judge` | `jev/judge.py` | `test_judge.py` |
+| `OfflineReviewResult.jev_shadow_path` / `jev_judge` | `review/offline_result.py` | `test_review_wire.py` |
 | `jev-evidence-unsupported` / `jev-claim-unbacked-blocker` / `jev-claim-verdict-mismatch` | `jev/judge.py` | `test_judge.py` |
 | `extract_claims` | `jev/claims.py` | `test_claims.py` |
 | `FindingSource` + `classifier` | `review_taxonomy.py` | `test_finding_source.py` |
@@ -154,3 +157,14 @@ must fail if the product fix is reverted.
 | **F-AGENT-JUDGE** | A review whose only finding is agent-authored reaches `run_parallel_judge` / the shadow evidence pack. Analyzer-residual-only (`findings_from_analyzer_run`) drops the row. | `test_review_wire.py::test_agent_only_finding_reaches_shadow_judge` |
 | **F-OUTAGE-SKIP** | Shadow `TypeSafeAPIError` 429 (`rate_limited`) and 500 (`server_error`) record a skip (`jev_skip_reason` or `jev skip reason=`) and leave the review `success=True`. Recorded envelopes: `fixtures/transport/typesafe_429.json`, `typesafe_500.json`. | `test_review_wire.py::test_typesafe_outage_is_recorded_skip_review_stays_successful` |
 | **F-CONFIG-THRESHOLDS** | `jev.thresholds` from a real `.mergecraft/config.yaml` (not `default_settings()` monkeypatch) reach `dispatch_residual_units` / `predict_jev_action` / `bucket_confidence` via `run_offline_diff_review`. Non-default `unit/v1.certain=0.95` / `unit/v1.likely=0.75` move 0.92 to `likely`. | `test_policy.py::test_review_path_applies_config_jev_thresholds` |
+
+## PR #728 review — persist + pin (2026-09-17)
+
+Guard-deletion regressions for `e58e25b1`. Ordinary assertions (no xfail). They
+must fail if the product fix is reverted.
+
+| Finding | Contract | Test(s) |
+| --- | --- | --- |
+| **F-PINNED-MODEL** | `JevSettings.model` accepts only `jev-1.13.0`. `jev-1.14.0` raises `ValidationError` on the constructor and when loading `.mergecraft/config.yaml`. Floating aliases (`jev-latest` / `jev-preview`) still raise the alias error. | `test_settings.py::test_jev_settings_rejects_unpinned_version_id`, `…::test_config_yaml_rejects_unpinned_jev_model`, `…::test_jev_settings_model_cannot_be_floating_alias`, `…::test_jev_settings_accepts_pinned_model` |
+| **F-SHADOW-PERSIST** | After `run_offline_diff_review` (enabled + recorded transport, not dry-run), `result.jev_shadow_path` exists. Packet present → sibling `merge-evidence-shadow.jsonl`. No packet → temp `jev-shadow.jsonl`. JSONL has `policy_id == "jev-judge"`. `result.jev_judge` dumps `pin.model == "jev-1.13.0"` and `replaces_verifier is False`. | `test_review_wire.py::test_shadow_judge_persisted_as_packet_sibling`, `…::test_shadow_judge_uses_temp_fallback_without_packet` |
+| **F-RECORD-JUDGE** | `record_parallel_judge` writes the `jev-judge` shadow row (apply site). | `test_judge.py::test_record_parallel_judge_writes_jev_judge_row` |

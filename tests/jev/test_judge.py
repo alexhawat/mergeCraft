@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -14,8 +14,12 @@ from tests.jev.support import (
     load_review,
     loguru_lines,
     make_agent_finding,
+    shadow_packet,
     skipping_jev_client,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _judge() -> Any:
@@ -218,3 +222,25 @@ async def test_judge_prose_claims_skip_does_not_raise(
             pytest.fail(f"judge must not raise JevError on skip (D4); code={exc.code}")
     assert transport.calls == 0
     assert_honest_skip(result, logs, reason="credential_absent")
+
+
+def test_record_parallel_judge_writes_jev_judge_row(tmp_path: Path) -> None:
+    """D6 apply site: ``record_parallel_judge`` appends ``policy_id='jev-judge'``."""
+    from mergecraft.evidence.shadow import load_shadow_records
+
+    judge = _judge()
+    path = tmp_path / "shadow.jsonl"
+    result = judge.ParallelJudgeResult()
+    record = judge.record_parallel_judge(
+        shadow_packet(),
+        result,
+        output_path=path,
+        run_id="run-jev-judge",
+        change_id="acme/demo#724",
+    )
+    rows = load_shadow_records(path)
+    assert record is not None
+    assert record.policy_id == "jev-judge"
+    assert any(row.policy_id == "jev-judge" for row in rows)
+    assert result.pin.model == PINNED_MODEL
+    assert result.replaces_verifier is False
