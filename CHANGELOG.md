@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A versioned behaviour-verification report (`schema_version` 1.0.0) records
+  what was observed, which criteria passed, and what blocked the run — without
+  turning those results into code findings (#61)
+
 - Opt-in Jev / System One client (`jev.enabled`, default off) with cost
   accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a
   skip and does not fail the review (#728)
