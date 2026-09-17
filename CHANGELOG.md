@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in Jev / System One client (`jev.enabled`, default off) with cost
+  accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a
+  skip and does not fail the review (#728)
+- Parallel shadow judge grades review findings and prose against their cited
+  evidence without replacing the reviewer (#728)
+
 - mergeCraft review loads `.github/skills/code-review/` as a self-contained
   Agent Skills payload — `SKILL.md` plus one-level `references/` resolved into
   the `REVIEW SKILLS` prompt section, with a 64 KiB instruction-bundle cap,
