@@ -19,7 +19,7 @@ concurrency:
 jobs:
   changelog-preview:
     # Pin: getsentry/craft changelog-preview@v2 → 2.30.1; dependabot owns bumps.
-    uses: getsentry/craft/.github/workflows/changelog-preview.yml@cd1e8294061fd970b40d98b77aaa109cb1e00e78 # v2
+    uses: getsentry/craft/.github/workflows/changelog-preview.yml@55694f8bf3a0fd051e21a877f57b4c0dd8e946bb # v2
     # Pin the craft binary too: the upstream default ("latest") queries
     # api.github.com unauthenticated, which 403s on rate-limit and fails the job.
     with:
