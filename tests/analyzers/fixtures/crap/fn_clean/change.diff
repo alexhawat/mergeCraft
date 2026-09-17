@@ -1,0 +1,7 @@
+diff --git a/src/mod.py b/src/mod.py
+--- a/src/mod.py
++++ b/src/mod.py
+@@ -1,2 +1,2 @@
+ def fn_clean() -> int:
+-    return 1
++    return 2

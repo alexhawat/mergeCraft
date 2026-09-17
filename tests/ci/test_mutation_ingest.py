@@ -1,0 +1,286 @@
+"""C3 — mutation report parsers, survivor attribution, kill rate (C-D2, C-D3)."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING, Any
+
+import pytest
+
+from mergecraft.agents.gates import _packet_has_blockers
+from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
+from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.modes import compute_modes
+from mergecraft.scm.types import ListedItems
+from mergecraft.utils.github import GitHubClient
+from tests.ci.support_crap import (
+    C3_XFAIL,
+    CRAP_FIXTURES,
+    REPO_ROOT,
+    SKIP_UNSUPPORTED_MUTATION_FORMAT,
+    import_ci,
+    load_diff,
+    load_mutation,
+    load_source,
+    packet_with_findings,
+    zip_artifact,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+class _ArtifactGitHub(GitHubClient):
+    def __init__(self, *, artifacts: list[dict[str, Any]], archives: dict[int, bytes]) -> None:
+        super().__init__(token="test-token")
+        self.artifacts = artifacts
+        self.archives = archives
+        self.list_calls = 0
+        self.download_calls = 0
+
+    async def list_workflow_run_artifacts(self, owner: str, repo: str, run_id: int) -> ListedItems:
+        _ = (owner, repo, run_id)
+        self.list_calls += 1
+        return ListedItems(items=list(self.artifacts), incomplete=False)
+
+    async def download_artifact_zip(self, owner: str, repo: str, artifact_id: int) -> bytes:
+        _ = (owner, repo)
+        self.download_calls += 1
+        return self.archives[artifact_id]
+
+
+def _ctx(tmp_path: Path, *, github: GitHubClient) -> ToolContext:
+    return ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(
+            event=PayloadEvent(trigger="pull_request", issue_number=42, is_pr=True),
+            status_checks=True,
+            shell="restricted",
+        ),
+        github=github,
+        github_installation_token="",
+        git_token="",
+        api_token="",
+        modes=compute_modes("claude"),
+        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+        mcp_server_url="",
+        tmpdir=str(tmp_path),
+        trust_tier="trusted",
+        resolved_model="claude-sonnet-4-5",
+    )
+
+
+def _mutation() -> Any:
+    return import_ci("mutation")
+
+
+def test_internal_harness_script_still_exists() -> None:
+    script = REPO_ROOT / "scripts" / "mutate_decision_modules.py"
+    assert script.is_file()
+    text = script.read_text(encoding="utf-8")
+    assert "def " in text
+
+
+def test_makefile_still_has_mutation_test_decisions_target() -> None:
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "mutation-test-decisions:" in makefile
+    assert "scripts/mutate_decision_modules.py" in makefile
+
+
+@C3_XFAIL
+def test_mutmut_json_parses_survivors() -> None:
+    parsed = _mutation().parse_mutmut_json(load_mutation("mutmut-survivor.json"))
+    assert parsed.skip_reason is None
+    assert parsed.format == "mutmut"
+    statuses = {(item.function, item.status) for item in parsed.survivors}
+    assert ("fn_watch", "survived") in statuses or any(
+        item.function == "fn_watch" for item in parsed.survivors
+    )
+    assert parsed.killed == 1
+    assert parsed.total == 3
+
+
+@C3_XFAIL
+def test_stryker_json_parses_survivors() -> None:
+    parsed = _mutation().parse_stryker_json(load_mutation("stryker-survivor.json"))
+    assert parsed.skip_reason is None
+    assert parsed.format == "stryker"
+    assert parsed.killed == 1
+    assert parsed.total == 2
+    assert any(item.status.lower() == "survived" for item in parsed.survivors)
+
+
+@C3_XFAIL
+def test_unsupported_mutation_format_skips_with_zero_findings() -> None:
+    mutation = _mutation()
+    parsed = mutation.parse_mutation_artifact(
+        load_mutation("unsupported.xml"),
+        filename="junit.xml",
+    )
+    assert parsed.skip_reason == SKIP_UNSUPPORTED_MUTATION_FORMAT
+    result = mutation.mutation_findings(parsed, changed_functions=[("src/mod.py", "fn_watch")])
+    assert result.findings == []
+    assert result.skip_reason == SKIP_UNSUPPORTED_MUTATION_FORMAT
+
+
+@C3_XFAIL
+def test_survivor_on_changed_function_is_evidence() -> None:
+    mutation = _mutation()
+    parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
+    result = mutation.mutation_findings(
+        parsed,
+        changed_functions=[("src/mod.py", "fn_watch")],
+        source="ci",
+        mode="shadow",
+        survivor_threshold=0,
+    )
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.source == "ci"
+    assert finding.path == "src/mod.py"
+    assert finding.introduced_by_pr == "true"
+    assert finding.rule_id == "survivor"
+    assert "fn_watch" in finding.message
+
+
+@C3_XFAIL
+def test_survivor_on_unchanged_function_is_not_emitted() -> None:
+    mutation = _mutation()
+    parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
+    result = mutation.mutation_findings(
+        parsed,
+        changed_functions=[("src/mod.py", "fn_watch")],
+        source="ci",
+        mode="shadow",
+    )
+    paths = {item.path for item in result.findings}
+    assert "src/other.py" not in paths
+
+
+@C3_XFAIL
+def test_kill_and_escape_rate() -> None:
+    mutation = _mutation()
+    assert mutation.kill_rate(killed=9, total=10) == pytest.approx(0.9)
+    assert mutation.escape_rate(killed=9, total=10) == pytest.approx(0.1)
+    assert mutation.kill_rate(killed=0, total=0) is None
+    assert mutation.escape_rate(killed=0, total=0) is None
+
+
+@C3_XFAIL
+def test_survivor_threshold_zero_emits_any_changed_survivor() -> None:
+    mutation = _mutation()
+    parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
+    result = mutation.mutation_findings(
+        parsed,
+        changed_functions=[("src/mod.py", "fn_watch")],
+        survivor_threshold=0,
+        source="ci",
+        mode="shadow",
+    )
+    assert len(result.findings) == 1
+
+
+@C3_XFAIL
+def test_survivor_threshold_two_suppresses_single_survivor() -> None:
+    mutation = _mutation()
+    parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
+    result = mutation.mutation_findings(
+        parsed,
+        changed_functions=[("src/mod.py", "fn_watch")],
+        survivor_threshold=2,
+        source="ci",
+        mode="shadow",
+    )
+    assert result.findings == []
+
+
+@C3_XFAIL
+def test_shadow_mutation_does_not_reach_has_blockers() -> None:
+    mutation = _mutation()
+    parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
+    result = mutation.mutation_findings(
+        parsed,
+        changed_functions=[("src/mod.py", "fn_watch")],
+        source="ci",
+        mode="shadow",
+    )
+    assert result.findings
+    assert result.reaches_has_blockers is False
+    assert _packet_has_blockers(packet_with_findings(result.findings)) is False
+
+
+@C3_XFAIL
+def test_mutation_ingest_does_not_import_internal_harness() -> None:
+    import sys
+
+    _mutation()
+    loaded = [name for name in sys.modules if "mutate_decision_modules" in name]
+    assert loaded == []
+
+
+@C3_XFAIL
+@pytest.mark.asyncio
+async def test_undeclared_mutation_makes_no_api_call(tmp_path: Path) -> None:
+    github = _ArtifactGitHub(artifacts=[], archives={})
+    ctx = _ctx(tmp_path, github=github)
+    result = await _mutation().collect_ci_mutation_findings(
+        ctx,
+        client=github,
+        runs=[{"id": 88}],
+        artifacts=[],
+        changed_functions=[("src/mod.py", "fn_watch")],
+    )
+    assert result.findings == []
+    assert github.list_calls == 0
+    assert github.download_calls == 0
+
+
+@C3_XFAIL
+@pytest.mark.asyncio
+async def test_declared_failed_mutation_check_emits_finding_never_substitution(
+    tmp_path: Path,
+) -> None:
+    check_run = json.loads(
+        (CRAP_FIXTURES / "ingest" / "declared-failed" / "check-run.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    check_run["name"] = "mutation-json"
+    github = _ArtifactGitHub(artifacts=[], archives={})
+    ctx = _ctx(tmp_path, github=github)
+    result = await _mutation().collect_ci_mutation_findings(
+        ctx,
+        client=github,
+        runs=[{"id": 88}],
+        artifacts=["mutation-json"],
+        changed_functions=[("src/mod.py", "fn_watch")],
+        check_runs=[check_run],
+    )
+    assert result.findings
+    assert all(item.source == "ci" for item in result.findings)
+    assert result.substitutions == []
+
+
+@C3_XFAIL
+@pytest.mark.asyncio
+async def test_declared_successful_mutmut_artifact_attributes_survivor(
+    tmp_path: Path,
+) -> None:
+    document = load_mutation("mutmut-survivor.json")
+    github = _ArtifactGitHub(
+        artifacts=[{"id": 11, "name": "mutmut-json"}],
+        archives={11: zip_artifact("mutmut-survivor.json", document)},
+    )
+    ctx = _ctx(tmp_path, github=github)
+    result = await _mutation().collect_ci_mutation_findings(
+        ctx,
+        client=github,
+        runs=[{"id": 88}],
+        artifacts=["mutmut-json"],
+        changed_functions=[("src/mod.py", "fn_watch")],
+        diff=load_diff("watch"),
+        source_tree={"src/mod.py": load_source("watch")},
+        check_runs=[{"name": "mutmut-json", "conclusion": "success", "status": "completed"}],
+    )
+    assert any(item.rule_id == "survivor" and item.source == "ci" for item in result.findings)
