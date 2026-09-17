@@ -143,10 +143,15 @@ class CiEvidenceSettings(_OptionalFeatureModel):
 
     ``sarifArtifacts`` lists workflow artifact names whose SARIF the reviewer may
     ingest as CI findings.
+
+    ``coverageArtifacts`` lists workflow artifact names whose coverage reports
+    (coverage.py JSON, lcov, or Cobertura) the reviewer may ingest as CRAP
+    findings. Empty means no ingest and no extra API call (C-D2).
     """
 
     gates: dict[str, str] = Field(default_factory=dict)
     sarif_artifacts: list[str] = Field(default_factory=list, alias="sarifArtifacts")
+    coverage_artifacts: list[str] = Field(default_factory=list, alias="coverageArtifacts")
 
 
 class AnalyzerOverride(_OptionalFeatureModel):
@@ -186,6 +191,22 @@ GateMode = Literal["shadow", "enforce"]
 """Whether a gate this plan introduced runs in shadow (predict+record)
 or enforce (apply the action as a gate). Every gate introduced by this
 plan defaults to ``shadow`` (D12)."""
+
+
+class CoverageBandSettings(_OptionalFeatureModel):
+    """Inclusive-lower CRAP band thresholds. ``severe`` has no exclusive upper bound."""
+
+    watch: float = 5
+    elevated: float = 15
+    crap: float = 30
+    severe: float = 50
+
+
+class CoverageSettings(_OptionalFeatureModel):
+    """CRAP coverage evidence. Ships in ``shadow`` so scores never reach ``has_blockers`` (C-D5)."""
+
+    mode: GateMode = "shadow"
+    bands: CoverageBandSettings = Field(default_factory=CoverageBandSettings)
 
 
 class GatesSettings(BaseModel):
@@ -683,6 +704,7 @@ class RepoSettings(BaseModel):
     # #36 / D10 — declared-only reuse of the repo's finished CI. Default empty:
     # no declaration, no substitution, no extra API call.
     ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
+    coverage: CoverageSettings = Field(default_factory=CoverageSettings)
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
     review: ReviewSettings = Field(default_factory=ReviewSettings)
     agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)

@@ -75,6 +75,36 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
     if findings:
         record_ci_findings(ctx.tool_state, findings)
 
+    coverage_names = [name.strip() for name in ctx.ci_coverage_artifacts if name.strip()]
+    if coverage_names:
+        from mergecraft.ci.coverage import (
+            collect_ci_coverage_findings,
+            coverage_inputs_from_context,
+        )
+
+        diff, source_tree = coverage_inputs_from_context(ctx)
+        try:
+            listed_checks = await client.list_check_runs_for_ref(
+                ctx.repo.owner, ctx.repo.name, head_sha.strip()
+            )
+            check_runs = list(listed_checks.items)
+        except Exception as check_err:
+            warn_ci_evidence(
+                f"ci evidence: coverage check-run listing failed for {head_sha[:7]} — {check_err}"
+            )
+            check_runs = []
+        coverage = await collect_ci_coverage_findings(
+            ctx,
+            client=client,
+            runs=listed.items,
+            artifacts=coverage_names,
+            diff=diff,
+            source_tree=source_tree,
+            check_runs=check_runs,
+        )
+        if coverage.findings:
+            record_ci_findings(ctx.tool_state, coverage.findings)
+
 
 async def ingest_ci_sarif_after_ci_wait(
     ctx: ToolContext,

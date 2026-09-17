@@ -288,6 +288,24 @@ async def run_ci_intelligence(
         sarif = await collect_ci_sarif_findings(ctx, client=client, runs=runs)
         if sarif:
             record_ci_findings(ctx.tool_state, sarif)
+        coverage_names = [name.strip() for name in ctx.ci_coverage_artifacts if name.strip()]
+        if coverage_names:
+            from mergecraft.ci.coverage import (
+                collect_ci_coverage_findings,
+                coverage_inputs_from_context,
+            )
+
+            diff, source_tree = coverage_inputs_from_context(ctx)
+            coverage = await collect_ci_coverage_findings(
+                ctx,
+                client=client,
+                runs=runs,
+                artifacts=coverage_names,
+                diff=diff,
+                source_tree=source_tree,
+            )
+            if coverage.findings:
+                record_ci_findings(ctx.tool_state, coverage.findings)
         suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(
             ctx, check_suite_id=check_suite_id, client=client, runs=runs
         )
