@@ -85,12 +85,16 @@ ARG HADOLINT_SHA256=56de6d5e5ec427e17b74fa48d51271c7fc0d61244bf5c90e828aab8362d5
 ARG ZIZMOR_VERSION=1.28.0
 ARG ZIZMOR_SHA256=e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09
 
+# Official python:3.14-slim-bookworm last rebuilt 2026-09-01 still ships
+# libpcre2-8-0 10.42-1. Debian DLA-4772-1 / bookworm-security has the
+# HIGH fixes (CVE-2026-86145, CVE-2026-89157, CVE-2026-89161).
 RUN apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
         ca-certificates \
         curl \
         git \
         jq \
+        libpcre2-8-0=10.42-1+deb12u1 \
         openssh-client \
         sudo \
         unzip \
