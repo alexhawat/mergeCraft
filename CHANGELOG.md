@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `mergecraft verify-behavior` launches headless Chromium when
+  `mergecraft[browser]` is installed; the stub driver is used only when that
+  extra is absent (#61)
+
 - `verify_candidate` verifies the commit that introduced an image digest rather
   than whichever commit the candidate range happens to end at. It treated any
   commit whose `action.yml` image differed from the base as a freshly minted

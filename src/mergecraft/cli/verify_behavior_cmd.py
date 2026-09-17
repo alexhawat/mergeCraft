@@ -1,15 +1,16 @@
 """``mergecraft verify-behavior`` — reproduce a bug or verify acceptance criteria.
 
-Never imports Playwright. The real Playwright path calls
-``require_browser_extra()`` only; unit tests use a stub driver so no live
-browser is launched.
+Never imports Playwright. When ``mergecraft[browser]`` is present this module
+calls ``launch_playwright_driver`` (Playwright is imported only inside that
+function). When the extra is absent, a stub driver writes a report for unit
+tests and for ``--artifacts-dir`` / ``--input`` runs.
 """
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 from loguru import logger
@@ -29,7 +30,11 @@ from mergecraft.verify.models import (
     is_successful,
     load_verification_input,
 )
+from mergecraft.verify.playwright_driver import launch_playwright_driver
 from mergecraft.verify.runner import run_verify_behavior
+
+if TYPE_CHECKING:
+    from mergecraft.verify.driver import BrowserDriver
 
 _PNG_HEADER = b"\x89PNG\r\n\x1a\n"
 
@@ -112,22 +117,40 @@ def _extra_missing() -> bool:
     return False
 
 
-def _resolve_driver(*, allow_stub: bool) -> _StubBrowserDriver:
-    """Return a stub, or fail naming ``mergecraft[browser]`` when a stub is not allowed.
+def _close_driver(driver: object) -> None:
+    """Close a launched browser when the driver owns one.
 
-    ``require_browser_extra`` is the real Playwright gate. This CLI never
-    launches a live browser (``PlaywrightBrowserDriver`` needs an existing
-    page). A stub still writes a versioned report for unit tests and for
-    extra-absent runs that already have ``--artifacts-dir`` or ``--input``.
+    Args:
+        driver (object): Protocol driver or CLI stub.
+
+    Returns:
+        None: No-op when the driver has no ``close`` method.
+    """
+    closer = getattr(driver, "close", None)
+    if callable(closer):
+        closer()
+
+
+def _resolve_driver(
+    *,
+    allow_stub: bool,
+    viewport: Viewport | None = None,
+) -> BrowserDriver:
+    """Return a live Playwright driver, a stub, or raise when the extra is required.
+
+    Extra missing + ``allow_stub=False`` raises ``BrowserExtraMissingError``.
+    Extra missing + ``allow_stub=True`` returns ``_StubBrowserDriver``.
+    Extra present always calls ``launch_playwright_driver`` — never the stub.
     """
     if _extra_missing():
         if not allow_stub:
             require_browser_extra()
         logger.debug("verify-behavior using stub driver; extra absent")
         return _StubBrowserDriver()
-    require_browser_extra()
-    logger.debug("verify-behavior extra present; stub driver (no live browser)")
-    return _StubBrowserDriver()
+    logger.debug("verify-behavior extra present; launching Playwright")
+    if viewport is not None:
+        return launch_playwright_driver(width=viewport.width, height=viewport.height)
+    return launch_playwright_driver()
 
 
 def _spec_from_flags(
@@ -198,13 +221,6 @@ def run(
 ) -> None:
     """Reproduce a bug or verify acceptance criteria in a running app."""
     allow_stub = artifacts_dir is not None or input_path is not None
-    try:
-        driver = _resolve_driver(allow_stub=allow_stub)
-    except BrowserExtraMissingError as exc:
-        # Plain echo: Rich would treat ``[browser]`` as a markup tag.
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
-
     if input_path is not None:
         spec = load_verification_input(input_path)
     else:
@@ -219,16 +235,26 @@ def run(
             viewport=viewport,
         )
 
+    try:
+        driver = _resolve_driver(allow_stub=allow_stub, viewport=spec.viewport)
+    except BrowserExtraMissingError as exc:
+        # Plain echo: Rich would treat ``[browser]`` as a markup tag.
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
+
     settings = load_repo_settings(root=Path.cwd())
-    report = asyncio.run(
-        run_verify_behavior(
-            spec,
-            driver=driver,
-            offline=True,
-            settings=settings,
-            shell=settings.shell,
+    try:
+        report = asyncio.run(
+            run_verify_behavior(
+                spec,
+                driver=driver,
+                offline=True,
+                settings=settings,
+                shell=settings.shell,
+            )
         )
-    )
+    finally:
+        _close_driver(driver)
     typer.echo(f"{report.mode} {report.status}")
     if report.blocked is not None:
         typer.echo("blocked: " + ", ".join(report.blocked.missing))

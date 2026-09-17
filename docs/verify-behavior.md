@@ -16,8 +16,10 @@ in `.mergecraft/config.yaml` cannot re-enable it on an untrusted tier. The
 setting defaults to off and is not a blocking review gate.
 
 The Playwright implementation lives behind the optional `mergecraft[browser]`
-extra. `--help` works without that extra. A run that needs a real browser
-names `mergecraft[browser]` when the extra is absent.
+extra. `--help` works without that extra. When the extra is installed, the
+command launches headless Chromium; the stub driver is used only when the
+extra is absent. A run that needs a real browser names `mergecraft[browser]`
+when the extra is absent.
 
 Flags:
 
