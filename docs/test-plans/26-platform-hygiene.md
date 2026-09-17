@@ -4,7 +4,7 @@ Authoring wave: **H1** (`test-creator`). Implementation: **H2** (sandbox), **H3*
 
 Public markdown in this file cites behaviour and test names only. It does not use opaque ledger tokens, a wave-plan preamble, or pointers into gitignored trees.
 
-H1 authored cross-wave reds as `H2` / `H3` / `H4` markers (`strict=False`). Reconciliation after each impl wave removes satisfied xfails. H2 xfails were stripped after the impl landed. H3 xfails were removed after `401a6a41`. `_force_no_backend` sets `cache_clear` with `raising=False` because the empty-caps stand-in is not an `lru_cache` wrapper; pytest was raising before the fail-closed gate ran.
+H1 authored cross-wave reds as `H2` / `H3` / `H4` markers (`strict=False`). Reconciliation after each impl wave removes satisfied xfails. H2 xfails were stripped after the impl landed. H3 xfails were removed after `401a6a41`. H4 xfails were removed after `f212673b`. `_force_no_backend` sets `cache_clear` with `raising=False` because the empty-caps stand-in is not an `lru_cache` wrapper; pytest was raising before the fail-closed gate ran.
 
 ## Contract matrix
 

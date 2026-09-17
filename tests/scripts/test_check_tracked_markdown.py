@@ -15,11 +15,6 @@ from typing import Any
 
 import pytest
 
-H4 = pytest.mark.xfail(
-    reason="green after H4: tracked-markdown checker",
-    strict=False,
-)
-
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "check_tracked_markdown.py"
 _ALLOWLIST = "docs/dev/changelog-archive.md"
@@ -56,7 +51,6 @@ def _commit_all(repo: Path, message: str) -> None:
     _git(repo, "commit", "-q", "-m", message)
 
 
-@H4
 def test_list_tracked_markdown_invokes_git_ls_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -74,7 +68,6 @@ def test_list_tracked_markdown_invokes_git_ls_files(
     assert names == {"README.md", "cli.md"}
 
 
-@H4
 def test_scan_flags_decision_id_wave_plan_and_ignorelocal_citation() -> None:
     module = _load_checker()
     text = (
@@ -93,7 +86,6 @@ def test_scan_flags_decision_id_wave_plan_and_ignorelocal_citation() -> None:
     )
 
 
-@H4
 def test_allowlisted_changelog_archive_is_not_an_offense() -> None:
     module = _load_checker()
     text = "Historical note (D14) and Wave plan: archived.\n"
@@ -101,7 +93,6 @@ def test_allowlisted_changelog_archive_is_not_an_offense() -> None:
     assert offenses == []
 
 
-@H4
 def test_main_fails_on_tracked_decision_id(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     (tmp_path / "README.md").write_text("# Title (D14)\n", encoding="utf-8")
@@ -111,7 +102,6 @@ def test_main_fails_on_tracked_decision_id(tmp_path: Path) -> None:
     assert module.main() != 0
 
 
-@H4
 def test_main_passes_on_clean_tracked_markdown(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     (tmp_path / "README.md").write_text("# Title\nPlain behaviour.\n", encoding="utf-8")
@@ -121,7 +111,6 @@ def test_main_passes_on_clean_tracked_markdown(tmp_path: Path) -> None:
     assert module.main() == 0
 
 
-@H4
 def test_checker_never_walks_a_gitignored_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -156,7 +145,6 @@ def test_checker_never_walks_a_gitignored_directory(
     assert not any(".ignorelocal" in path for path in walked)
 
 
-@H4
 def test_checker_reports_tracked_file_not_gitignored_twin(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     docs = tmp_path / "docs"
