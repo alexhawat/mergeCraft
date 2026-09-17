@@ -1,0 +1,16 @@
+{
+  "http": {
+    "status": 200,
+    "headers": { "content-type": "application/json" }
+  },
+  "body": {
+    "request_id": "req_claim_verdict_mismatch",
+    "model": "jev-1.13.0",
+    "usage": { "input_tokens": 64, "output_tokens": 4 },
+    "answers": {
+      "backed_by_row": { "noul": 0.81 },
+      "blocking_language": { "noul": 0.12 },
+      "contradicts_verdict": { "noul": 0.91 }
+    }
+  }
+}

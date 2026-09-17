@@ -142,3 +142,102 @@ def test_parse_unit_assessment_from_recorded_answers() -> None:
     assert assessment.severity == "Critical"
     assert assessment.severity_score == 3.0
     assert policy.bucket_confidence(assessment.confidence) == "certain"
+
+
+def test_predict_jev_action_honors_shadow_gate_mode() -> None:
+    """F-GATE-DISCARD: ``GatesSettings.jev`` default ``shadow`` is applied; enforced stays false."""
+    from mergecraft.config.settings import default_settings
+
+    assert default_settings().gates.jev == "shadow"
+    policy = _policy()
+    types = import_jev("types")
+    assessment = types.UnitAssessment(
+        unit_id="unit-1",
+        choice="defective",
+        confidence=0.92,
+        severity="Critical",
+        severity_score=3.0,
+        pack_id="unit/v1",
+    )
+    prediction = policy.predict_jev_action(assessment, trust_tier="trusted")
+    assert prediction.enforced is False
+    assert prediction.skip_reviewer is False
+    assert prediction.metadata.get("gate_mode") == "shadow"
+
+
+def test_predict_jev_action_stays_unenforced_when_gate_set_to_enforce(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F-GATE-DISCARD / D6: mode is applied, but this plan never flips ``enforced``."""
+    from mergecraft.config.settings import default_settings
+
+    base = default_settings()
+    configured = base.model_copy(update={"gates": base.gates.model_copy(update={"jev": "enforce"})})
+    monkeypatch.setattr("mergecraft.config.settings.default_settings", lambda: configured)
+    policy = _policy()
+    types = import_jev("types")
+    assessment = types.UnitAssessment(
+        unit_id="unit-1",
+        choice="defective",
+        confidence=0.92,
+        severity="Critical",
+        severity_score=3.0,
+        pack_id="unit/v1",
+    )
+    prediction = policy.predict_jev_action(assessment, trust_tier="trusted")
+    assert prediction.enforced is False
+    assert prediction.metadata.get("gate_mode") == "enforce"
+
+
+def test_bucket_confidence_reads_configured_unit_thresholds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F-UNIT-THRESHOLDS: changing ``unit/v1.certain`` / ``unit/v1.likely`` moves the bucket."""
+    from mergecraft.config.settings import default_settings
+
+    base = default_settings()
+    configured = base.model_copy(
+        update={
+            "jev": base.jev.model_copy(
+                update={
+                    "thresholds": {
+                        **dict(base.jev.thresholds),
+                        "unit/v1.certain": 0.95,
+                        "unit/v1.likely": 0.75,
+                    }
+                }
+            )
+        }
+    )
+    monkeypatch.setattr("mergecraft.config.settings.default_settings", lambda: configured)
+    policy = _policy()
+    assert policy.bucket_confidence(0.92) == "likely"
+    assert policy.bucket_confidence(0.95) == "certain"
+    assert policy.bucket_confidence(0.7499) == "possible"
+    assert policy.bucket_confidence(0.75) == "likely"
+
+
+def test_iter_thresholds_unit_floors_follow_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F-UNIT-THRESHOLDS: ``iter_thresholds`` reads the same config keys as bucketing."""
+    from mergecraft.config.settings import default_settings
+
+    base = default_settings()
+    configured = base.model_copy(
+        update={
+            "jev": base.jev.model_copy(
+                update={
+                    "thresholds": {
+                        **dict(base.jev.thresholds),
+                        "unit/v1.certain": 0.95,
+                        "unit/v1.likely": 0.75,
+                    }
+                }
+            )
+        }
+    )
+    monkeypatch.setattr("mergecraft.config.settings.default_settings", lambda: configured)
+    values = {(item.pack_id, item.name): item.value for item in _policy().iter_thresholds()}
+    assert values[("unit/v1", "certain")] == 0.95
+    assert values[("unit/v1", "likely")] == 0.75

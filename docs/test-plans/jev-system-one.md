@@ -85,14 +85,16 @@ xfail / 0 xpass. J6 plan checkboxes stay ☐.
 | `JevCallResult` / `JevError` | `jev/types.py` | `test_client.py`, `test_types.py` |
 | `PRICE_TABLE` / `compute_cost` / `TokenBudget` | `jev/cost.py` | `test_cost.py` |
 | `JevSettings` | `config/settings.py` | `test_settings.py`, `test_client.py` |
-| `GatesSettings.jev` | `config/settings.py` | `test_settings.py` |
+| `GatesSettings.jev` | `config/settings.py` | `test_settings.py`, `test_policy.py` |
 | `segment_hunks` / `unit_id` / `unit_cache_key` / `residual_units` | `jev/segment.py` | `test_segment.py` |
 | `unit_pack` / `evidence_pack` / `claim_pack` / `align_pack` / `lens_pack` / `get_pack` | `jev/questions.py` | `test_questions.py`, `test_lens.py` |
 | `select_lenses` / `select_lenses_or_fallback` | `jev/questions.py` | `test_lens.py` |
 | `bucket_confidence` / `order_units` / `predict_jev_action` / `apply_ratchet` | `jev/policy.py` | `test_policy.py`, `test_ratchet_security.py` |
-| `record_jev_prediction` / `iter_thresholds` | `jev/policy.py` | `test_shadow.py`, `test_eval_corpus.py` |
+| `unit_battery` / `dispatch_residual_units` | `jev/policy.py` | `test_dispatch.py` |
+| `record_jev_prediction` / `iter_thresholds` | `jev/policy.py` | `test_shadow.py`, `test_eval_corpus.py`, `test_dispatch.py` |
 | `detect_withdrawn_reraise` / `semantic_dedupe_pair` | `jev/policy.py` | `test_align.py` |
 | `JevJudgePin` / `judge_finding_evidence` / `judge_prose_claims` / `run_parallel_judge` | `jev/judge.py` | `test_judge.py` |
+| `jev-evidence-unsupported` / `jev-claim-unbacked-blocker` / `jev-claim-verdict-mismatch` | `jev/judge.py` | `test_judge.py` |
 | `extract_claims` | `jev/claims.py` | `test_claims.py` |
 | `FindingSource` + `classifier` | `review_taxonomy.py` | `test_finding_source.py` |
 
@@ -121,3 +123,23 @@ defect this repo shipped:
 - `lens_pack()` must read `LENS_DEFINITIONS` at runtime (plan 21 D9).
 - Thresholds are unset until J3; `iter_thresholds()` must name corpus ids.
 - Jev must not score this corpus (D15 / out of scope).
+
+## J6-wire — verifier findings (2026-09-17)
+
+J6 (`wave-verifier`) found the library green and the review path unwired.
+These tests pin the missing apply sites. They are ordinary assertions (no
+xfail). Library-local rule-id guards may already pass; review-path and
+skip/dispatch wiring stay RED until the executor lands J6-wire.
+
+| Finding | Contract | Test(s) |
+| --- | --- | --- |
+| **F-WIRE-REVIEW** | `mergecraft review` / `run_offline_diff_review` constructs `AsyncJevClient` when `jev.enabled: true`. No `TYPESAFE_API_KEY` records `credential_absent` (log line or structured result field) and does not fail. `enabled: false` constructs nothing and does not require a skip (D4, D14). | `test_review_wire.py::test_enabled_review_without_credential_constructs_client_and_records_skip`, `…::test_disabled_review_does_not_construct_client_or_require_a_skip`, `…::test_cli_review_enabled_without_credential_records_skip_and_exits_zero` |
+| **F-SKIP-RAISES** | `unit_battery` / `judge_finding_evidence` / `judge_prose_claims` / `select_lenses` must not raise `JevError` when the client returns a skip. Skip stays a skip (D4). Reintroducing raise-on-skip fails these tests. | `test_dispatch.py::test_unit_battery_skip_does_not_raise_jev_error`, `test_dispatch.py::test_dispatch_residual_units_skip_does_not_fail_the_run`, `test_judge.py::test_judge_finding_evidence_skip_does_not_raise`, `test_judge.py::test_judge_prose_claims_skip_does_not_raise`, `test_lens.py::test_select_lenses_skip_does_not_raise` |
+| **F-UNBACKED-DISPATCH** | Direct behavioural tests for `unit_battery` and `dispatch_residual_units`. Analyzer-flagged hunks are not re-asked; residual hunks are; skip does not fail the run. | `test_dispatch.py::test_unit_battery_parses_recorded_unit_pack`, `…::test_dispatch_residual_units_asks_residual_not_analyzer_flagged`, `…::test_dispatch_residual_units_skip_does_not_fail_the_run` |
+| **F-UNBACKED-RULE-IDS** | Attestation rule ids fail if the emit-`if` blocks are deleted. Attestations are `scope="run"` and never blocking (D6). Plan 21 D6 rule 4 (exactly one terminal verdict) fails when the body names two verdicts. | `test_judge.py::test_unsupported_evidence_emits_jev_evidence_unsupported`, `…::test_unbacked_blocker_emits_jev_claim_unbacked_blocker`, `…::test_verdict_mismatch_emits_jev_claim_verdict_mismatch`, `…::test_two_terminal_verdicts_violate_exactly_one_verdict_rule` |
+| **F-GATE-DISCARD** | `GatesSettings.jev` is applied (not read-and-discarded). Default `shadow`; `enforced` stays false even when the setting is `enforce` (D6). | `test_policy.py::test_predict_jev_action_honors_shadow_gate_mode`, `…::test_predict_jev_action_stays_unenforced_when_gate_set_to_enforce` |
+| **F-PACKS-DEAD** | `JevSettings.packs` has an apply site. A disabled pack is not dispatched. | `test_client.py::test_disabled_pack_is_a_recorded_skip_not_a_dispatch`, `test_packs.py::test_client_does_not_dispatch_a_disabled_pack`, `…::test_unit_battery_skips_disabled_unit_pack`, `…::test_judge_skips_disabled_evidence_pack`, `…::test_select_lenses_skips_disabled_lens_pack` |
+| **F-UNIT-THRESHOLDS** | `unit/v1.certain` / `unit/v1.likely` are read by bucketing / `iter_thresholds`. Changing the setting changes the bucket boundary. | `test_policy.py::test_bucket_confidence_reads_configured_unit_thresholds`, `…::test_iter_thresholds_unit_floors_follow_settings` |
+| **F-DISPATCH-NO-SHADOW** | `dispatch_residual_units` calls `record_jev_prediction`. Removing that call fails the test. | `test_dispatch.py::test_dispatch_residual_units_calls_record_jev_prediction` |
+
+Skip observability is `JevCallResult.reason` / `skipped`, `OfflineReviewResult.jev_skip_reason` (if added), or the existing client log `jev skip reason=credential_absent` — not a substring in a question dict. CI still makes zero live TypeSafe calls (D14).

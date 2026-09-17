@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.jev.support import TRANSPORT_DIR, import_jev
+import pytest
+
+from tests.jev.support import (
+    TRANSPORT_DIR,
+    assert_honest_skip,
+    import_jev,
+    loguru_lines,
+    skipping_jev_client,
+)
 
 
 def _questions() -> Any:
@@ -61,3 +69,24 @@ def test_disabled_or_low_confidence_falls_back_to_trigger_matching() -> None:
     )
     assert low.source == "triggers"
     assert low.lens_ids == ("security",)
+
+
+async def test_select_lenses_skip_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F-SKIP-RAISES: ``select_lenses`` must not raise ``JevError`` when the client skips."""
+    types = import_jev("types")
+    client, transport = skipping_jev_client(monkeypatch, "lens_privilege_drop.json")
+    with loguru_lines() as logs:
+        try:
+            selected = await _questions().select_lenses(
+                state={"diff": "setpriv --reuid without HOME"},
+                client=client,
+            )
+        except types.JevError as exc:
+            pytest.fail(f"select_lenses must not raise JevError on skip (D4); code={exc.code}")
+    assert transport.calls == 0
+    skipped = getattr(selected, "skipped", False)
+    if skipped:
+        assert_honest_skip(selected, logs, reason="credential_absent")
+        return
+    assert selected.source == "triggers" or selected.lens_ids == ()
+    assert any("credential_absent" in line for line in logs) or skipped

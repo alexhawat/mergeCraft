@@ -131,6 +131,26 @@ async def test_disabled_settings_are_a_recorded_skip_not_a_failure() -> None:
     assert client.transport.calls == 0
 
 
+async def test_disabled_pack_is_a_recorded_skip_not_a_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F-PACKS-DEAD: ``JevSettings.packs`` is applied on ``call``; a disabled pack is not sent."""
+    from mergecraft.config.settings import JevSettings, default_settings
+
+    packs = {pack_id: True for pack_id in default_settings().jev.packs}
+    packs["unit/v1"] = False
+    settings = JevSettings(enabled=True, model=PINNED_MODEL, packs=packs)
+    monkeypatch.setattr(
+        "mergecraft.config.settings.default_settings",
+        lambda: default_settings().model_copy(update={"jev": settings}),
+    )
+    client = _recorded_client("unit_happy.json", settings=settings)
+    result = await client.call(state={"hunk": "x"}, pack_id="unit/v1", unit_id="u")
+    assert result.skipped is True
+    assert result.available is False
+    assert client.transport.calls == 0
+
+
 async def test_enabled_without_credential_is_recorded_skip_not_silent_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

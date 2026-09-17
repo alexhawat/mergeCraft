@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import importlib
 import json
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Final
 
@@ -149,3 +151,92 @@ def shadow_packet(**overrides: Any) -> Any:
     }
     base.update(overrides)
     return MergeEvidencePacket(**base)
+
+
+@contextmanager
+def loguru_lines() -> Iterator[list[str]]:
+    """Capture loguru INFO+ messages. pytest ``caplog`` does not see loguru."""
+    from loguru import logger
+
+    captured: list[str] = []
+    sink_id = logger.add(lambda message: captured.append(str(message)), level="INFO")
+    try:
+        yield captured
+    finally:
+        logger.remove(sink_id)
+
+
+def make_hunk_unit(
+    *,
+    path: str = "src/mergecraft/example.py",
+    unit_id: str = "hunk:example",
+    start_line: int = 1,
+    content: str | None = None,
+) -> Any:
+    """Build a hunk unit for battery / dispatch tests."""
+    types = import_jev("types")
+    body = content if content is not None else f"@@ -{start_line} +{start_line} @@\n+{unit_id}\n"
+    return types.HunkUnit(
+        kind="hunk",
+        path=path,
+        content=body,
+        context_lines=0,
+        unit_id=unit_id,
+        start_line=start_line,
+        end_line=start_line,
+    )
+
+
+def skipping_jev_client(
+    monkeypatch: Any,
+    fixture_name: str = "unit_happy.json",
+    **settings_kwargs: Any,
+) -> tuple[Any, Any]:
+    """Enabled client with no credential — ``call`` records ``credential_absent``."""
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    from mergecraft.config.settings import JevSettings
+
+    module = import_jev("client")
+    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
+    settings = JevSettings(enabled=True, model=PINNED_MODEL, **settings_kwargs)
+    client = module.AsyncJevClient(api_key=None, transport=transport, settings=settings)
+    return client, transport
+
+
+def watch_async_jev_client(monkeypatch: Any) -> list[Any]:
+    """Record every ``AsyncJevClient`` construction across import sites."""
+    seen: list[Any] = []
+    client_mod = import_jev("client")
+    original = client_mod.AsyncJevClient
+
+    class WatchedAsyncJevClient(original):  # type: ignore[misc,valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            seen.append(self)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(client_mod, "AsyncJevClient", WatchedAsyncJevClient)
+    package = import_jev()
+    monkeypatch.setattr(package, "AsyncJevClient", WatchedAsyncJevClient)
+    import mergecraft.offline_review as offline_mod
+
+    if getattr(offline_mod, "AsyncJevClient", None) is not None:
+        monkeypatch.setattr(offline_mod, "AsyncJevClient", WatchedAsyncJevClient)
+    return seen
+
+
+def assert_honest_skip(
+    result: object,
+    logs: Sequence[str],
+    *,
+    reason: str = "credential_absent",
+) -> None:
+    """Pin an observable skip — result field or log line, never a silent assessment."""
+    skipped = getattr(result, "skipped", False) is True
+    result_reason = getattr(result, "reason", None)
+    jev_skip = getattr(result, "jev_skip_reason", None) or getattr(result, "jev_reason", None)
+    logged = any(reason in line for line in logs)
+    if getattr(result, "choice", None) and not skipped and result_reason != reason:
+        msg = "D4: a client skip must not become a unit assessment"
+        raise AssertionError(msg)
+    assert skipped or result_reason == reason or jev_skip == reason or result is None or logged
+    assert reason in (result_reason, jev_skip) or logged or skipped
