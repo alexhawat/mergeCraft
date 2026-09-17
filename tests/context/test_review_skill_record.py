@@ -20,12 +20,22 @@ from tests.context.support import git_commit_all, git_init_repo
 
 _SKILL_REL = ".github/skills/code-review/SKILL.md"
 _REF_REL = ".github/skills/code-review/references/checks.md"
+_SECONDARY_SKILL_REL = ".github/skills/pr-review/SKILL.md"
+_SECONDARY_REF_REL = ".github/skills/pr-review/references/checks.md"
 _UNTRUSTED_TIGHT_CAP_SKILL_BODY = "UNTRUSTED_TIGHT_CAP_SKILL_BODY_UNIQUE_TOKEN"
 _UNTRUSTED_TIGHT_CAP_REF_BODY = "UNTRUSTED_TIGHT_CAP_REFERENCE_BODY_UNIQUE_TOKEN"
 # Small but valid instructionBundleByteCap. First-pass budget accepts the skill
 # and its reference; the final untrusted cap loop then pops the fenced block
 # (F12). Verified on b325f6dc: 768 drops the block, 896 keeps it.
 _UNTRUSTED_TIGHT_CAP = 768
+_TRUSTED_CAP_PRIMARY_BODY = "TRUSTED_CAP_PRIMARY_SKILL_BODY_UNIQUE_TOKEN"
+_TRUSTED_CAP_SECONDARY_BODY = "TRUSTED_CAP_SECONDARY_SKILL_BODY_UNIQUE_TOKEN"
+_TRUSTED_CAP_SECONDARY_REF_BODY = "TRUSTED_CAP_SECONDARY_REFERENCE_BODY_UNIQUE_TOKEN"
+# Small but valid instructionBundleByteCap. First-pass budget accepts both
+# skills and records the secondary reference; the final trusted cap loop then
+# pops the last review_block. Verified on 7adb3fac: 720 drops the
+# secondary+ref, 896 keeps both.
+_TRUSTED_TIGHT_CAP = 720
 
 
 def test_record_lists_injected_skills_not_discovered_ones(tmp_path: Path) -> None:
@@ -66,37 +76,74 @@ def test_quarantined_skill_is_recorded_as_quarantined(tmp_path: Path) -> None:
 
 
 def test_final_cap_pop_syncs_injected_with_dropped_review_skills(tmp_path: Path) -> None:
-    """Final assembly cap enforcement must pop ``injected`` with ``review_blocks``."""
+    """Trusted final-cap drop must pop the skill, its refs, and the ledger.
+
+    Calls the real loader against a fixture repo (D14). Generous-cap control
+    proves the referenced secondary would be injected; the tight cap must then
+    drop that skill from the prompt *and* from ``injected`` / ``references``.
+    """
     repo = tmp_path / "repo"
-    write_review_skill(repo, body="P" * 100 + "\n")
-    secondary_dir = repo / ".github" / "skills" / "pr-review"
     write_review_skill(
         repo,
-        body="S" * 100 + "\n",
-        skill_dir=secondary_dir,
+        body=f"{_TRUSTED_CAP_PRIMARY_BODY}\n" + ("P" * 100) + "\n",
+    )
+    write_review_skill(
+        repo,
+        body=(
+            "See [checks](references/checks.md).\n\n"
+            f"{_TRUSTED_CAP_SECONDARY_BODY}\n" + ("S" * 100) + "\n"
+        ),
+        references={"checks.md": f"# Checks\n\n{_TRUSTED_CAP_SECONDARY_REF_BODY}\n"},
+        skill_dir=repo / ".github" / "skills" / "pr-review",
     )
     git_init_repo(repo)
-    git_commit_all(repo)
-    from mergecraft.context.instruction_discovery import build_review_skill_record
+    sha = git_commit_all(repo)
 
-    record = build_review_skill_record(
+    generous_prompt, generous = assemble_review_instruction_bundle(
         repo_root=repo,
         trust_tier="trusted",
         repo="acme/demo",
-        commit_sha="fixture-sha",
-        byte_cap=400,
+        commit_sha=sha,
+        byte_cap=INSTRUCTION_BUNDLE_BYTE_CAP,
     )
-    injected = _injected_paths(record)
-    dropped = list(getattr(record, "dropped", ()))
-    ledger = _ledger_review_skills(record)
-    assert injected == [".github/skills/code-review/SKILL.md"]
-    assert ".github/skills/pr-review/SKILL.md" not in injected
-    assert ".github/skills/pr-review/SKILL.md" not in ledger
-    assert ".github/skills/pr-review/SKILL.md" in dropped
+    assert _TRUSTED_CAP_PRIMARY_BODY in generous_prompt
+    assert _TRUSTED_CAP_SECONDARY_BODY in generous_prompt
+    assert _TRUSTED_CAP_SECONDARY_REF_BODY in generous_prompt
+    assert _SKILL_REL in _injected_paths(generous)
+    assert _SECONDARY_SKILL_REL in _injected_paths(generous)
+    assert _SECONDARY_REF_REL in _resolved_reference_paths(generous)
+
+    prompt, record = assemble_review_instruction_bundle(
+        repo_root=repo,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha=sha,
+        byte_cap=_TRUSTED_TIGHT_CAP,
+    )
+    assert _TRUSTED_CAP_PRIMARY_BODY in prompt
+    assert _TRUSTED_CAP_SECONDARY_BODY not in prompt
+    assert _TRUSTED_CAP_SECONDARY_REF_BODY not in prompt
     assert any(
         "review skill dropped to honor bundle byte cap" in limitation
         for limitation in getattr(record, "limitations", ())
     )
+
+    injected = _injected_paths(record)
+    refs = _resolved_reference_paths(record)
+    ledger = _ledger_review_skills(record)
+    dropped = list(getattr(record, "dropped", ()))
+    assert injected == [_SKILL_REL]
+    assert _SECONDARY_SKILL_REL not in injected
+    assert _SECONDARY_REF_REL not in refs
+    assert _SECONDARY_SKILL_REL not in ledger
+    assert _SECONDARY_SKILL_REL in dropped
+
+    block = render_deterministic_review_block(
+        packet=_empty_packet(),
+        review_skills=ledger,
+    )
+    assert _SECONDARY_SKILL_REL not in block
+    assert _SECONDARY_REF_REL not in block
 
 
 def test_untrusted_tight_cap_dropped_skill_is_not_recorded_as_injected(
