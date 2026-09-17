@@ -595,10 +595,16 @@ class JevSettings(BaseModel):
         gt=0,
     )
     packs: dict[str, bool] = Field(default_factory=_default_jev_packs)
-    # D15 — floors recorded beside pack ``unit/v1`` and the J1 unit corpus rows.
+    # D15 — floors recorded beside pack version and the J1 corpus rows.
     # Source of truth for corpus ids is ``jev.policy.iter_thresholds``.
     thresholds: dict[str, float] = Field(
-        default_factory=lambda: {"unit/v1.certain": 0.9, "unit/v1.likely": 0.6}
+        default_factory=lambda: {
+            "unit/v1.certain": 0.9,
+            "unit/v1.likely": 0.6,
+            "lens/v1.likely": 0.6,
+            "align/v1.same_defect": 0.6,
+            "align/v1.is_withdrawn_reraise": 0.5,
+        }
     )
 
     @field_validator("model")

@@ -5,6 +5,8 @@ Exports:
     JevError: Structured client/parse failure.
     EVIDENCE_PACK_ID: Versioned ``evidence/v1`` pack id (J4).
     CLAIM_PACK_ID: Versioned ``claim/v1`` pack id (J4).
+    ALIGN_PACK_ID: Versioned ``align/v1`` pack id (J5).
+    LENS_PACK_ID: Versioned ``lens/v1`` pack id (J5).
     Usage: Token counts; either field may be ``None`` (T4).
     NoulAnswer: Probability of yes; no confidence field (T5 / G6).
     ChoiceAnswer: Discrete choice with confidence and probabilities.
@@ -96,12 +98,25 @@ class SystemOneResponse(BaseModel):
 UNIT_PACK_ID: Final[str] = "unit/v1"
 EVIDENCE_PACK_ID: Final[str] = "evidence/v1"
 CLAIM_PACK_ID: Final[str] = "claim/v1"
+ALIGN_PACK_ID: Final[str] = "align/v1"
+LENS_PACK_ID: Final[str] = "lens/v1"
 CERTAIN_CONFIDENCE_FLOOR: Final[float] = 0.9
 LIKELY_CONFIDENCE_FLOOR: Final[float] = 0.6
+NOUL_ACT_FLOOR: Final[float] = 0.5
 UNIT_THRESHOLD_CORPUS_IDS: Final[tuple[str, ...]] = (
     "jev-unit-privilege-drop-home",
     "jev-unit-auth-stem-author",
     "jev-unit-mcp-config-root",
+)
+LENS_THRESHOLD_CORPUS_IDS: Final[tuple[str, ...]] = (
+    "jev-lens-privilege-drop-not-generic-security",
+    "jev-lens-copy-vs-code-help-string",
+    "jev-lens-data-integrity-write-before-confirm",
+)
+ALIGN_THRESHOLD_CORPUS_IDS: Final[tuple[str, ...]] = (
+    "jev-align-auth-author-paraphrase",
+    "jev-align-n5-weaker-first",
+    "jev-align-withdrawn-reraise",
 )
 
 SEVERITY_BY_SCORE: Final[dict[int, str]] = {
@@ -295,10 +310,15 @@ def _intify_keys(value: object) -> dict[int, Any]:
 
 
 __all__ = [
+    "ALIGN_PACK_ID",
+    "ALIGN_THRESHOLD_CORPUS_IDS",
     "CERTAIN_CONFIDENCE_FLOOR",
     "CLAIM_PACK_ID",
     "EVIDENCE_PACK_ID",
+    "LENS_PACK_ID",
+    "LENS_THRESHOLD_CORPUS_IDS",
     "LIKELY_CONFIDENCE_FLOOR",
+    "NOUL_ACT_FLOOR",
     "PINNED_MODEL",
     "SEVERITY_BY_SCORE",
     "UNIT_PACK_ID",

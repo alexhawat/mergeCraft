@@ -1,28 +1,48 @@
-"""Versioned Jev question packs. ``unit/v1`` (J3), ``evidence/v1`` and ``claim/v1`` (J4).
-
-J5 packs stay registered by id only so ``get_pack`` can name every versioned
-pack. Their questions land with that wave.
+"""Versioned Jev question packs, including live-catalog ``lens/v1`` (J5).
 
 Exports:
     QuestionPack: Versioned pack with typed questions.
+    LensQuestionPack: ``lens/v1`` bound to the live lens catalog.
+    LensSelection: Selected lens ids plus the source of the choice.
     unit_pack: Per-hunk Choice + Score + Noul battery.
     evidence_pack: Citation-check battery per finding (T12).
     claim_pack: Prose-claim battery for plan 21 D6 rules 1, 3, 4.
-    align_pack: Stub ``align/v1`` (J5).
-    lens_pack: Stub ``lens/v1`` (J5).
+    align_pack: Entity-alignment battery per candidate pair (G14).
+    lens_pack: One Choice per catalog lens, read live (plan 21 D9).
     get_pack: Lookup by versioned pack id.
+    select_lenses: One ``lens/v1`` call per PR.
+    select_lenses_or_fallback: ``jev:`` toggle + confidence-floor fallback.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
-from mergecraft.jev.types import CLAIM_PACK_ID, EVIDENCE_PACK_ID, UNIT_PACK_ID, JevError
+from mergecraft.jev.types import (
+    ALIGN_PACK_ID,
+    CLAIM_PACK_ID,
+    EVIDENCE_PACK_ID,
+    LENS_PACK_ID,
+    LIKELY_CONFIDENCE_FLOOR,
+    UNIT_PACK_ID,
+    ChoiceAnswer,
+    JevCallResult,
+    JevError,
+    SystemOneResponse,
+)
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from mergecraft.agents.lenses._base import LensDefinition
+    from mergecraft.jev.client import AsyncJevClient
+
 QuestionKind = Literal["choice", "score", "noul"]
+LensSource = Literal["jev", "triggers"]
 
 _SEVERITY_LEGEND: dict[int, str] = {
     0: "Trivial — nitpick; body-only and never a merge blocker",
@@ -33,6 +53,13 @@ _SEVERITY_LEGEND: dict[int, str] = {
 
 # Repo taxonomy names are the Score legend labels (axis is Trivial → Critical).
 assert set(FINDING_SEVERITIES) == {"Trivial", "Minor", "Major", "Critical"}
+
+
+def _live_lens_definitions() -> dict[str, LensDefinition]:
+    """Return the live catalog object — never a copied name list (plan 21 D9)."""
+    from mergecraft.agents.lenses._definitions import LENS_DEFINITIONS
+
+    return LENS_DEFINITIONS
 
 
 class QuestionSpec(BaseModel):
@@ -88,6 +115,31 @@ class QuestionPack(BaseModel):
     def as_system_one(self) -> dict[str, Any]:
         """Render the ``questions=`` mapping for ``system_one``."""
         return {question.name: question.as_system_one() for question in self.questions}
+
+
+class LensQuestionPack(QuestionPack):
+    """``lens/v1`` pack whose families are read from the live catalog."""
+
+    reads_live_catalog: bool = True
+
+    @property
+    def source_catalog(self) -> Mapping[str, LensDefinition]:
+        return _live_lens_definitions()
+
+    @property
+    def lens_ids(self) -> tuple[str, ...]:
+        return tuple(_live_lens_definitions())
+
+
+class LensSelection(BaseModel):
+    """Lenses chosen by Jev or by today's trigger matching."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pack_id: str = LENS_PACK_ID
+    lens_ids: tuple[str, ...] = ()
+    source: LensSource = "jev"
+    confidence: float | None = None
 
 
 def unit_pack() -> QuestionPack:
@@ -200,21 +252,54 @@ def claim_pack() -> QuestionPack:
 
 
 def align_pack() -> QuestionPack:
-    """Pack ``align/v1`` — questions land in J5."""
-    return QuestionPack(pack_id="align/v1")
+    """Pack ``align/v1`` — one call per candidate pair (G14)."""
+    return QuestionPack(
+        pack_id=ALIGN_PACK_ID,
+        questions=(
+            QuestionSpec(
+                name="same_defect",
+                kind="choice",
+                instructions="How do these two findings relate?",
+                criteria={
+                    "same": "Both findings describe the same defect.",
+                    "related": "The findings describe related defects.",
+                    "distinct": "The findings describe unrelated defects.",
+                },
+            ),
+            QuestionSpec(
+                name="is_withdrawn_reraise",
+                kind="noul",
+                instructions=(
+                    "This finding re-raises one recorded under Withdrawn review findings."
+                ),
+            ),
+        ),
+    )
 
 
-def lens_pack() -> QuestionPack:
-    """Pack ``lens/v1`` — live catalog read lands in J5."""
-    return QuestionPack(pack_id="lens/v1")
+def lens_pack() -> LensQuestionPack:
+    """Pack ``lens/v1`` — one Choice per live catalog family (plan 21 D9)."""
+    questions = tuple(
+        QuestionSpec(
+            name=lens_id,
+            kind="choice",
+            instructions=f"Should the {definition.title} lens apply to this change?",
+            criteria={
+                "apply": f"The {definition.title} lens applies to this change.",
+                "skip": f"The {definition.title} lens is outside this change.",
+            },
+        )
+        for lens_id, definition in _live_lens_definitions().items()
+    )
+    return LensQuestionPack(pack_id=LENS_PACK_ID, questions=questions)
 
 
 _PACK_FACTORIES = {
     UNIT_PACK_ID: unit_pack,
     EVIDENCE_PACK_ID: evidence_pack,
     CLAIM_PACK_ID: claim_pack,
-    "align/v1": align_pack,
-    "lens/v1": lens_pack,
+    ALIGN_PACK_ID: align_pack,
+    LENS_PACK_ID: lens_pack,
 }
 
 
@@ -236,7 +321,113 @@ def get_pack(pack_id: str) -> QuestionPack:
     return factory()
 
 
+async def select_lenses(
+    *,
+    state: dict[str, Any],
+    client: AsyncJevClient,
+) -> LensSelection:
+    """Ask ``lens/v1`` which catalog families apply to this PR.
+
+    Args:
+        state: Structured PR payload (diff text, paths).
+        client: Pinned Jev client (recorded transport in CI).
+
+    Returns:
+        LensSelection: Catalog ids Jev marked ``apply``. ``source`` is ``jev``.
+
+    Raises:
+        JevError: When the client skips or returns no answers.
+    """
+    pack = lens_pack()
+    result = await client.call(
+        state=state,
+        pack_id=pack.pack_id,
+        unit_id="pr",
+        questions=pack.as_system_one(),
+    )
+    response = _require_response(result, code="invalid_response")
+    catalog = _live_lens_definitions()
+    selected: list[str] = []
+    confidences: list[float] = []
+    for lens_id in catalog:
+        answer = response.answers.get(lens_id)
+        if isinstance(answer, ChoiceAnswer) and answer.choice == "apply":
+            selected.append(lens_id)
+            confidences.append(float(answer.confidence))
+    confidence = min(confidences) if confidences else None
+    logger.info(
+        "jev lens select pack_id={} lenses={} confidence={}",
+        pack.pack_id,
+        selected,
+        confidence,
+    )
+    return LensSelection(
+        pack_id=pack.pack_id,
+        lens_ids=tuple(selected),
+        source="jev",
+        confidence=confidence,
+    )
+
+
+def select_lenses_or_fallback(
+    *,
+    enabled: bool,
+    trigger_ids: Sequence[str] = (),
+    confidence: float | None = None,
+    selected_ids: Sequence[str] | None = None,
+) -> LensSelection:
+    """Choose Jev lenses or today's trigger matching.
+
+    Disabled Jev, or confidence below the ``lens/v1`` floor, returns the
+    trigger-matched ids. A wrong Jev answer must not hide a trigger match:
+    when Jev is used, trigger ids are kept and Jev may only add lenses.
+
+    Args:
+        enabled: ``jev.enabled`` toggle (D4).
+        trigger_ids: Lenses today's trigger matching already selected.
+        confidence: Calibrated confidence for the Jev selection, if any.
+        selected_ids: Lens ids Jev marked ``apply``.
+
+    Returns:
+        LensSelection: ``source`` is ``triggers`` or ``jev``.
+    """
+    floor = _lens_confidence_floor()
+    if not enabled or confidence is None or confidence < floor:
+        return LensSelection(
+            pack_id=LENS_PACK_ID,
+            lens_ids=tuple(trigger_ids),
+            source="triggers",
+            confidence=confidence,
+        )
+    # Union: Jev may add a wasted lens pass; it cannot drop a trigger match.
+    merged = tuple(dict.fromkeys([*trigger_ids, *(selected_ids or ())]))
+    return LensSelection(
+        pack_id=LENS_PACK_ID,
+        lens_ids=merged,
+        source="jev",
+        confidence=confidence,
+    )
+
+
+def _lens_confidence_floor() -> float:
+    from mergecraft.config.settings import default_settings
+
+    value = default_settings().jev.thresholds.get("lens/v1.likely")
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return LIKELY_CONFIDENCE_FLOOR
+
+
+def _require_response(result: JevCallResult, *, code: str) -> SystemOneResponse:
+    response = getattr(result, "response", None)
+    if getattr(result, "skipped", False) or not isinstance(response, SystemOneResponse):
+        raise JevError("lens pack produced no answers", code=code)
+    return response
+
+
 __all__ = [
+    "LensQuestionPack",
+    "LensSelection",
     "QuestionPack",
     "QuestionSpec",
     "align_pack",
@@ -244,5 +435,7 @@ __all__ = [
     "evidence_pack",
     "get_pack",
     "lens_pack",
+    "select_lenses",
+    "select_lenses_or_fallback",
     "unit_pack",
 ]
