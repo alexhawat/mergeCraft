@@ -29,6 +29,10 @@ Collected suite (post-reconciliation): **91** tests expected pass,
 **0** xfail / xpass. Split: **54** C2 / **15** C3 / **16** C4 / **5** C1-green
 / **1** C2–C4 deliverable-symbol export.
 
+C5-F2 escalation (2026-09-18): **2** additional tests pin the intelligence
+sibling (`run_ci_intelligence` must list check runs and pass them into
+`collect_*`). They are **not** xfailed — they fail on today's call site.
+
 ## Contract matrix
 
 | Contract | Greening wave | Primary test(s) |
@@ -59,6 +63,7 @@ Collected suite (post-reconciliation): **91** tests expected pass,
 | Undeclared = no API call, `coverage_undeclared` (C-D2) | C2 | `…::test_undeclared_coverage_makes_no_api_call` |
 | Declared success → changed-function finding | C2 | `…::test_declared_successful_coverage_artifact_emits_changed_function_finding` |
 | Declared-failed → finding, never substitution (C-D2) | C2 | `…::test_declared_failed_coverage_check_emits_finding_never_substitution` |
+| Intelligence sibling lists check runs and passes them into collect (C5-F2 / C-D2) | C5 | `test_intelligence_coverage_mutation.py::test_run_ci_intelligence_declared_failed_check_emits_finding_never_downloads` |
 | Concurrent same-token ingest | C2 | `…::test_concurrent_same_token_coverage_ingest` |
 | Config `ciEvidence.coverageArtifacts` / `coverage:` defaults | C2 | `test_coverage_mutation_settings.py::test_default_coverage_artifacts_empty_and_mode_shadow` |
 | Consumer YAML override | C2 | `…::test_consumer_coverage_yaml_overrides_default_bands` |
@@ -75,6 +80,7 @@ Collected suite (post-reconciliation): **91** tests expected pass,
 | Ingest does not import internal harness (K6) | C3 | `…::test_mutation_ingest_does_not_import_internal_harness` |
 | Undeclared mutation = no API call | C3 | `…::test_undeclared_mutation_makes_no_api_call` |
 | Declared-failed mutation → finding, never substitution | C3 | `…::test_declared_failed_mutation_check_emits_finding_never_substitution` |
+| Intelligence sibling, declared-failed mutation (C5-F2 / C-D2) | C5 | `test_intelligence_coverage_mutation.py` (parametrize `mutation-json`) |
 | Declared mutmut artifact | C3 | `…::test_declared_successful_mutmut_artifact_attributes_survivor` |
 | Config `mutationArtifacts` / `survivorThreshold` | C3 | `test_coverage_mutation_settings.py` |
 | Internal harness still present (K6) | C1 green | `test_mutation_ingest.py::test_internal_harness_script_still_exists`, `…::test_makefile_still_has_mutation_test_decisions_target` |
@@ -150,6 +156,13 @@ Under `tests/analyzers/fixtures/`:
 
 ## Escalation notes
 
+- **C5-F2 / C-D2 sibling:** `run_ci_intelligence` must call
+  `list_check_runs_for_ref` (or equivalent) and pass `check_runs=` into
+  `collect_ci_coverage_findings` / `collect_ci_mutation_findings`. A declared
+  failed check emits a `source="ci"` `check-run/failure` finding; the failed
+  job's artifact is never downloaded; `substitutions` / `satisfied-by-ci` must
+  not appear. Guard deletion: omitting `check_runs=` fails this test (the
+  poison zip would otherwise ingest as a receipt).
 - Display severity `note` is not a `Finding.severity` value. Clean maps to
   `Trivial` and does not emit a finding; watch+ use Minor / Major / Critical.
 - `has_blockers` is pinned via `_packet_has_blockers` on a packet of the
