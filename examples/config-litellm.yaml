@@ -1,0 +1,25 @@
+# LiteLLM proxy — OpenAI-compatible custom provider for mergeCraft
+#
+# mergeCraft has no first-class LLM_PROVIDER=litellm flag. Point the existing
+# custom-provider env pair at LiteLLM's OpenAI-compatible /v1 surface instead.
+#
+# Copy this file to your repo as `.mergecraft/config.yaml`, then wire secrets
+# (GitHub Actions `env:` / `gh secret set`, or local `.env` via
+# `mergecraft provider auth … --scope local`). Never commit real keys.
+#
+# Required environment (placeholders only):
+#   MERGECRAFT_CUSTOM_PROVIDER_BASE_URL=https://<litellm-host>/v1
+#   MERGECRAFT_CUSTOM_PROVIDER_API_KEY=<litellm-master-or-virtual-key>
+#
+# Model slug: use a `<prefix>/<model-id>` pass-through slug where `<model-id>`
+# is the model name LiteLLM accepts (for example `gpt-4o` or
+# `anthropic/claude-sonnet-4-20250514`). The prefix matches how the provider
+# is registered:
+#   - Singleton custom-provider alias (env pair above only): `default/<model-id>`
+#   - Registered label via `mergecraft provider add --label litellm`: `litellm/<model-id>`
+#
+# See README (Authentication) and docs/authentication.md#custom-openai-compatible-provider.
+
+harness: opencode
+models:
+  - default/gpt-4o

@@ -140,8 +140,12 @@ workflow wiring is `mergecraft workflow sync`; detection is this probe (#552).
 ### Custom OpenAI-compatible provider
 
 For any OpenAI-compatible endpoint (Nous Portal, Tencent TokenHub,
-MiniMax, OpenRouter, a self-hosted vLLM, etc.), mergeCraft exposes one
-mechanism that both harnesses consume. Issue
+MiniMax, OpenRouter, a [LiteLLM](https://docs.litellm.ai/) proxy, a self-hosted
+vLLM, etc.), mergeCraft exposes one mechanism that both harnesses consume.
+LiteLLM has no first-class provider id — point
+`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` at `https://<litellm-host>/v1` and
+`MERGECRAFT_CUSTOM_PROVIDER_API_KEY` at your proxy key; see
+[`examples/config-litellm.yaml`](../examples/config-litellm.yaml). Issue
 [#71](https://github.com/alexhawat/mergeCraft/issues/71) closes on this
 surface — the **Codex half** is new in `v0.0.x`; the OpenCode half
 shipped earlier in PR
