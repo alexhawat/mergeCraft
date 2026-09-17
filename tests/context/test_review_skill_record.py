@@ -4,15 +4,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mergecraft.context.instruction_discovery import discover_review_skill_paths
+from mergecraft.context.instruction_discovery import (
+    assemble_review_instruction_bundle,
+    discover_review_skill_paths,
+)
 from mergecraft.findings.ledger import render_deterministic_review_block
 from tests.context.review_skill_support import (
+    INSTRUCTION_BUNDLE_BYTE_CAP,
     init_repo_with_skill,
     review_skill_record,
     seed_product_skill_noise,
     write_review_skill,
 )
 from tests.context.support import git_commit_all, git_init_repo
+
+_SKILL_REL = ".github/skills/code-review/SKILL.md"
+_REF_REL = ".github/skills/code-review/references/checks.md"
+_UNTRUSTED_TIGHT_CAP_SKILL_BODY = "UNTRUSTED_TIGHT_CAP_SKILL_BODY_UNIQUE_TOKEN"
+_UNTRUSTED_TIGHT_CAP_REF_BODY = "UNTRUSTED_TIGHT_CAP_REFERENCE_BODY_UNIQUE_TOKEN"
+# Small but valid instructionBundleByteCap. First-pass budget accepts the skill
+# and its reference; the final untrusted cap loop then pops the fenced block
+# (F12). Verified on b325f6dc: 768 drops the block, 896 keeps it.
+_UNTRUSTED_TIGHT_CAP = 768
 
 
 def test_record_lists_injected_skills_not_discovered_ones(tmp_path: Path) -> None:
@@ -84,6 +97,64 @@ def test_final_cap_pop_syncs_injected_with_dropped_review_skills(tmp_path: Path)
         "review skill dropped to honor bundle byte cap" in limitation
         for limitation in getattr(record, "limitations", ())
     )
+
+
+def test_untrusted_tight_cap_dropped_skill_is_not_recorded_as_injected(
+    tmp_path: Path,
+) -> None:
+    """F12 — a cap-dropped untrusted review skill must not be recorded as injected.
+
+    Calls the real loader against a fixture repo (D14). Generous-cap control
+    proves the skill would be quarantined into the prompt; the tight cap must
+    then drop that block from *both* the prompt and the record.
+    """
+    repo = tmp_path / "repo"
+    sha = init_repo_with_skill(
+        repo,
+        body=f"See [checks](references/checks.md).\n\n{_UNTRUSTED_TIGHT_CAP_SKILL_BODY}\n",
+        references={"checks.md": f"# Checks\n\n{_UNTRUSTED_TIGHT_CAP_REF_BODY}\n"},
+    )
+    generous_prompt, generous = assemble_review_instruction_bundle(
+        repo_root=repo,
+        trust_tier="untrusted",
+        repo="acme/demo",
+        commit_sha=sha,
+        byte_cap=INSTRUCTION_BUNDLE_BYTE_CAP,
+    )
+    assert _UNTRUSTED_TIGHT_CAP_SKILL_BODY in generous_prompt
+    assert _UNTRUSTED_TIGHT_CAP_REF_BODY in generous_prompt
+    assert _SKILL_REL in _injected_paths(generous)
+    assert _REF_REL in _resolved_reference_paths(generous)
+
+    prompt, record = assemble_review_instruction_bundle(
+        repo_root=repo,
+        trust_tier="untrusted",
+        repo="acme/demo",
+        commit_sha=sha,
+        byte_cap=_UNTRUSTED_TIGHT_CAP,
+    )
+    assert _UNTRUSTED_TIGHT_CAP_SKILL_BODY not in prompt
+    assert _UNTRUSTED_TIGHT_CAP_REF_BODY not in prompt
+    assert any(
+        "untrusted instruction dropped to honor bundle byte cap" in limitation
+        for limitation in getattr(record, "limitations", ())
+    )
+
+    injected = _injected_paths(record)
+    refs = _resolved_reference_paths(record)
+    ledger = _ledger_review_skills(record)
+    dropped = list(getattr(record, "dropped", ()))
+    assert _SKILL_REL not in injected
+    assert _REF_REL not in refs
+    assert not any(_SKILL_REL in item for item in ledger)
+    assert _SKILL_REL in dropped
+
+    block = render_deterministic_review_block(
+        packet=_empty_packet(),
+        review_skills=ledger,
+    )
+    assert _SKILL_REL not in block
+    assert "Review skills (injected):" not in block
 
 
 def test_skill_discovered_but_dropped_by_the_cap_is_not_recorded_as_applied(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@
 
 Wave plan: `.ignorelocal/waves/21-review-skill-doctrine-wave-plan.md`
 Worktree: `mc-review-skill` @ `wave/review-skill-doctrine`
-Authoring wave: **RS1** (`test-creator`). Implementation: **RS2–RS4**.
+Authoring wave: **RS1** (`test-creator`). Implementation: **RS2–RS4**. **F12** RED added in RS6.
 
 ## Contract matrix
 
@@ -27,6 +27,7 @@ Authoring wave: **RS1** (`test-creator`). Implementation: **RS2–RS4**.
 | **RS1.3** record lists resolved references | RS2 | `…::test_record_lists_resolved_reference_files` |
 | **RS1.3** quarantined skill recorded (F8) | RS2 | `…::test_quarantined_skill_is_recorded_as_quarantined` |
 | **RS1.3** cap-dropped skill not applied | RS2 | `…::test_skill_discovered_but_dropped_by_the_cap_is_not_recorded_as_applied` |
+| **F12** untrusted tight-cap record/prompt sync (D12) | RS6 | `test_review_skill_record.py::test_untrusted_tight_cap_dropped_skill_is_not_recorded_as_injected` |
 | **RS1.4** empty external trace ≠ read coverage (F10) | RS2 | `test_trajectory_read_coverage.py::test_external_trace_with_no_reads_is_not_read_coverage` |
 | **RS1.4** external trace with reads is coverage | RS2 | `…::test_external_trace_with_reads_is_read_coverage` |
 | **RS1.4** MCP reads still coverage | RS2 | `…::test_mcp_observed_reads_are_still_read_coverage` |
@@ -76,3 +77,4 @@ Authoring wave: **RS1** (`test-creator`). Implementation: **RS2–RS4**.
 - RS1 pins limitation/refusal markers as `instruction limitation` and `refused` substrings in the rendered bundle/record; RS2 may choose exact prose but must keep them visible and machine-checkable.
 - The empty-repo guard (`test_a_repo_with_no_instruction_files_renders_nothing`) is intentionally **not** xfailed — it must stay green through RS2.
 - RS1 fix pass (post-RS2): fixture repos call `repo.mkdir()` before pre-skill file writes; `test_only_review_tier_skills_resolve_references` links `references/checks.md` in the review-tier body; `resolve_offline_instructions` defaults `wired=True` (D19).
+- F12 (RS6): `test_untrusted_tight_cap_dropped_skill_is_not_recorded_as_injected` pins `assemble_review_instruction_bundle` at `byte_cap=768` / `trust_tier="untrusted"` against a one-skill fixture (`UNTRUSTED_TIGHT_CAP_*` markers). After the untrusted cap-loop drop, `injected`, `references`, and `ledger_review_skills` must not claim the skill; `dropped` must list it. Expected RED on `b325f6dc` — do not xfail.
