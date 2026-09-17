@@ -51,6 +51,7 @@ from mergecraft.cli import (
     tracing_logfire_cmd,
     trust_cmd,
     update_cmd,
+    verify_behavior_cmd,
     watch_cmd,
     workflow_cmd,
     xrepo_cmd,
@@ -118,6 +119,7 @@ app.command("init")(init_cmd.run)
 app.command("watch")(watch_cmd.run)
 app.command("doctor")(doctor_cmd.run)
 app.command("update")(update_cmd.run)
+app.command("verify-behavior")(verify_behavior_cmd.run)
 app.command("capabilities")(capabilities_cmd.run)
 app.command("describe")(describe_cmd.run)
 app.command("explain")(explain_cmd.run)

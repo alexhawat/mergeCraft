@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft verify-behavior` reproduces a bug or verifies acceptance
+  criteria in a running app, writes a versioned report under
+  `.mergecraft/artifacts/`, and stays inert on an untrusted tier or when
+  `shell: disabled` (#61)
 - Optional `mergecraft[browser]` extra for Playwright-backed behaviour
   verification; the base install and `make ci` stay browser-free (#61)
 

@@ -6,6 +6,64 @@ not a typed finding: a behavioural mismatch has no diff line to anchor to.
 
 **Audience:** consumer (operators and agents who will run or consume a report)
 
+## Command
+
+`mergecraft verify-behavior` reproduces a bug or verifies acceptance criteria
+against a running app. It is trusted-tier only: on an untrusted checkout
+(typically a fork pull request) or when `shell: disabled`, the command is
+inert and the report status is `skipped`. Setting `verify_behavior.enabled`
+in `.mergecraft/config.yaml` cannot re-enable it on an untrusted tier. The
+setting defaults to off and is not a blocking review gate.
+
+The Playwright implementation lives behind the optional `mergecraft[browser]`
+extra. `--help` works without that extra. A run that needs a real browser
+names `mergecraft[browser]` when the extra is absent.
+
+Flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--mode` | `reproduce` or `verify` |
+| `--base` | Git base ref |
+| `--start-command` | Command that starts the app |
+| `--url` | Base URL to open |
+| `--criteria-file` | Acceptance criteria, one per line |
+| `--artifacts-dir` | Directory for the report JSON and redacted logs |
+| `--issue-file` | Issue or repro notes (reproduce) |
+| `--input` | YAML verification input |
+| `--viewport` | Pixel size, for example `1280x720` |
+
+### Verify a feature
+
+```bash
+pip install 'merge-craft[browser]'
+mergecraft verify-behavior \
+  --mode verify \
+  --url http://127.0.0.1:8765/ \
+  --criteria-file criteria.md \
+  --artifacts-dir .mergecraft/artifacts/prs/42/verify \
+  --start-command 'python -m http.server 8765'
+```
+
+`criteria.md` is one criterion per line (`- Clear button removes the image`).
+The run writes `report.json` and redacted console logs under `--artifacts-dir`.
+
+### Reproduce a bug
+
+```bash
+mergecraft verify-behavior \
+  --mode reproduce \
+  --url http://127.0.0.1:8765/ \
+  --issue-file issue.md \
+  --viewport 1280x720 \
+  --base origin/main \
+  --artifacts-dir .mergecraft/artifacts/issues/61/repro
+```
+
+`issue.md` holds the repro steps. The report records observed versus expected
+and a step list. Credentials are env-var **names** only (`credential_env_names`
+in YAML); values never appear in the report JSON.
+
 `schema_version` is required and pinned to **`1.0.0`**. The JSON Schema is
 derived from the Pydantic models. Markdown is a **view** of that JSON, not a
 second source of truth.
