@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
@@ -31,7 +33,7 @@ from mergecraft.utils.workspace import (
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
-SandboxMethod = Literal["unshare", "sudo-unshare", "none"]
+SandboxMethod = Literal["unshare", "sudo-unshare", "sandbox-exec", "none"]
 MAX_OUTPUT_CHARS = 5000
 
 _detected_sandbox: SandboxMethod | None = None
@@ -59,6 +61,9 @@ def get_sandbox_method() -> SandboxMethod:
 def detect_sandbox_method() -> SandboxMethod:
     global _detected_sandbox
     if _detected_sandbox is not None:
+        return _detected_sandbox
+    if sys.platform == "darwin" and shutil.which("sandbox-exec"):
+        _detected_sandbox = "sandbox-exec"
         return _detected_sandbox
     from mergecraft.analyzers.sandbox import probe_capabilities
 
@@ -305,7 +310,7 @@ def _spawn_shell(
     isolate_network: bool = False,
 ) -> subprocess.Popen[bytes]:
     method = detect_sandbox_method()
-    if isolate_network and not _network_namespace_available():
+    if isolate_network and method != "sandbox-exec" and not _network_namespace_available():
         msg = (
             "network namespace isolation is required but unavailable "
             "(unshare --net and sudo unshare --net failed)"
@@ -335,6 +340,17 @@ def _spawn_shell(
     wrapped = f"{proc_cleanup} {socket_cleanup} {fs_mounts} {command}"
     unshare_argv = _unshare_argv(isolate_network=isolate_network)
 
+    if method == "sandbox-exec":
+        from mergecraft.analyzers.sandbox import build_sandbox_exec_argv
+
+        return subprocess.Popen(
+            build_sandbox_exec_argv(("bash", "-c", command), workspace=Path(cwd)),
+            cwd=cwd,
+            env=env,
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,
+        )
     if method == "unshare":
         return subprocess.Popen(
             [*unshare_argv, "bash", "-c", wrapped],
