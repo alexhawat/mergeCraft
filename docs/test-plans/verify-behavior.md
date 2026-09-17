@@ -7,12 +7,17 @@ consume a report through `--verification-report`; the report is nonce-fenced
 before it reaches any prompt.
 
 CI never launches a live browser. Unit tests drive an in-process fake in
-`tests/verify/fake_driver.py`. A real-browser smoke test, if added later, must
-be marked `integration` so `make test` excludes it.
+`tests/verify/fake_driver.py`, a fake Playwright `Page` in
+`test_playwright_launch.py`, and a mocked `launch_playwright_driver`. A
+real-browser smoke test, if added later, must be marked `integration` so
+`make test` excludes it.
 
 ## Greening milestones
 
-All four milestones are green. No `xfail` markers remain in `tests/verify/`.
+The report, driver-protocol, command, and review-consume milestones are green.
+Operator-path launch when the extra is present is still pending: those cases
+are `xfail` (non-strict) in `test_playwright_launch.py` until
+`launch_playwright_driver` is the CLI driver factory.
 
 | Milestone | What lands | Suite |
 | --- | --- | --- |
@@ -20,6 +25,7 @@ All four milestones are green. No `xfail` markers remain in `tests/verify/`.
 | Driver seam | `BrowserDriver` protocol, optional-extra error, cookies / screenshot / console on the protocol | `test_driver_protocol.py`, `test_extra.py` |
 | Command | `mergecraft verify-behavior`, trust and `shell: disabled` gates, artifact layout, redaction, process cleanup | `test_trust_gate.py`, `test_modes_and_inputs.py`, `test_artifacts_and_lifecycle.py`, `test_cli.py` |
 | Review consume | `--verification-report`, fence-before-prompt, behaviour section, no-report path, blocked surfaced | `test_review_integration.py` |
+| Operator-path launch | Extra present calls `launch_playwright_driver` (never the CLI stub); adapter against a fake Page; extra-absent still names `mergecraft[browser]` | `test_playwright_launch.py` |
 
 Regression pins that must stay green:
 
@@ -29,6 +35,8 @@ Regression pins that must stay green:
 | `FindingSource` gains no behaviour member | `test_finding_unchanged.py::test_finding_source_gains_no_behavior_value` |
 | Importing mergeCraft does not load Playwright | `test_extra.py::test_importing_mergecraft_does_not_require_playwright` |
 | Other CLI commands work without the extra | `test_extra.py::test_other_commands_work_without_browser_extra` |
+| Extra-absent error names `mergecraft[browser]` | `test_extra.py::test_require_browser_extra_names_install_extra`, `test_extra.py::test_verify_behavior_cli_errors_when_extra_absent` |
+| Playwright is not a default or `dev` dependency | `test_playwright_launch.py::test_playwright_is_not_in_default_or_dev_extra` |
 | Review prompt without a report has no behaviour section | `test_review_integration.py::test_offline_prompt_without_report_has_no_behavior_section` |
 
 ## Contract matrix
@@ -54,6 +62,12 @@ Regression pins that must stay green:
 | Protocol module does not import Playwright | Driver seam | `test_driver_protocol.py::test_protocol_module_does_not_import_playwright` |
 | Extra-absent error names `mergecraft[browser]` | Driver seam | `test_extra.py::test_require_browser_extra_names_install_extra` |
 | CLI names the extra when Playwright is missing | Command | `test_extra.py::test_verify_behavior_cli_errors_when_extra_absent` |
+| Extra present: `_resolve_driver` returns `launch_playwright_driver`, never `_StubBrowserDriver` | Operator-path launch | `test_playwright_launch.py::test_resolve_driver_is_not_stub_when_extra_present` |
+| `PlaywrightBrowserDriver(` and `launch_playwright_driver` appear in `src/` beyond the class definition | Operator-path launch | `test_playwright_launch.py::test_launch_playwright_driver_is_referenced_from_production_src` |
+| Adapter: `navigate` → `page.goto`; `extract_text` → `inner_text` on body or selector | Operator-path launch | `test_playwright_launch.py::test_playwright_driver_navigate_calls_page_goto`, `…::test_playwright_driver_extract_text_uses_inner_text` |
+| Adapter: `screenshot` → `page.screenshot`; click / fill / type / press / scroll call matching page APIs | Operator-path launch | `test_playwright_launch.py::test_playwright_driver_screenshot_calls_page_screenshot`, `…::test_playwright_driver_actions_call_matching_page_apis` |
+| Adapter: `console_messages` from `page.on("console")`; cookies log names only | Operator-path launch | `test_playwright_launch.py::test_playwright_driver_console_messages_from_page_on`, `…::test_playwright_driver_cookie_helpers_record_names_only` |
+| CLI verify with extra present reports launched page text, not `stub page` | Operator-path launch | `test_playwright_launch.py::test_cli_verify_does_not_emit_stub_pass_when_extra_present` |
 | Untrusted tier (`derive_trust_tier` → `untrusted`) is inert and reports `skipped` | Command | `test_trust_gate.py::test_untrusted_tier_is_inert_and_reports_skipped`, `…::test_pull_request_target_is_inert` |
 | Trust guard deletion: startup command must not run | Command | `test_trust_gate.py::test_untrusted_does_not_execute_startup_command` |
 | `shell: disabled` is inert on a trusted tier and names `shell` | Command | `test_trust_gate.py::test_shell_disabled_is_inert_even_when_trusted` |
@@ -90,6 +104,8 @@ Regression pins that must stay green:
 | `render_verification_markdown` | `mergecraft.verify.models` | `test_markdown_view.py` |
 | `BrowserDriver` | `mergecraft.verify.driver` | `test_driver_protocol.py` |
 | `BrowserExtraMissingError` / `require_browser_extra` | `mergecraft.verify.extra` | `test_extra.py` |
+| `launch_playwright_driver` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
+| `PlaywrightBrowserDriver` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
 | `run_verify_behavior` | `mergecraft.verify.runner` | `test_trust_gate.py`, `test_modes_and_inputs.py` |
 | `VerifyBehaviorSettings` | `mergecraft.config.settings` | `test_trust_gate.py` |
 | `resolve_artifacts_dir` / `redact_screenshot` | `mergecraft.verify.artifacts` | `test_artifacts_and_lifecycle.py` |
@@ -105,6 +121,13 @@ Removing the untrusted-tier check fails
 `test_untrusted_does_not_execute_startup_command` (the startup command writes a
 sentinel file). Removing the `shell: disabled` check fails
 `test_shell_disabled_is_inert_even_when_trusted` the same way.
+
+Deleting the `launch_playwright_driver` call from driver resolution and
+returning `_StubBrowserDriver` while the extra is present fails
+`test_resolve_driver_is_not_stub_when_extra_present` (the patched launch
+returns a sentinel whose text is not `stub page`). Removing the
+`PlaywrightBrowserDriver(` construction from the launch path fails
+`test_launch_playwright_driver_is_referenced_from_production_src`.
 
 ## Out of scope in this suite
 
