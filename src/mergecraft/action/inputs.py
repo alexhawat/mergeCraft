@@ -21,7 +21,11 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any, Literal
 
-from mergecraft.config.settings import TraceSinkEntry, TracingSettings
+from mergecraft.config.runtime_provider_registry import (
+    provider_credential_env_names,
+    provider_credential_env_suffixes,
+)
+from mergecraft.config.settings import RepoSettings, TraceSinkEntry, TracingSettings
 from mergecraft.config.trust_policy import is_fork_pull_request
 
 if TYPE_CHECKING:
@@ -347,8 +351,6 @@ def apply_setup_overrides(settings: Any) -> Any:
     Invalid values from the action input raise before the run starts — the
     outer catch maps them to ``RunOutcome.configuration_error``.
     """
-    from mergecraft.config.settings import RepoSettings
-
     if not isinstance(settings, RepoSettings):
         return settings
 
@@ -369,41 +371,40 @@ class ForkCredentialInvariantError(RuntimeError):
     """Fork head + provider credential present — refuse before review starts (D2b)."""
 
 
-_PROVIDER_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
-    {
-        "ANTHROPIC_API_KEY",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "OPENAI_API_KEY",
-        "CODEX_AUTH_JSON",
-        "NOUS_API_KEY",
-        "TOKENHUB_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_GENERATIVE_AI_API_KEY",
-        "CURSOR_API_KEY",
-        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
-        "AWS_BEARER_TOKEN_BEDROCK",
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "VERTEX_SERVICE_ACCOUNT_JSON",
-    }
-)
+# Derived from the one credential authority (D2). The set covers every
+# ``authKind``, every cloud suffix and both spellings; ``_provider_credential_present``
+# additionally scans for indexed names the sweep did not enumerate.
+_PROVIDER_CREDENTIAL_ENV_KEYS: frozenset[str] = provider_credential_env_names()
+_PROVIDER_CREDENTIAL_SUFFIXES: frozenset[str] = provider_credential_env_suffixes()
+_INDEXED_PROVIDER_CREDENTIAL_PREFIX = "LLM_PROVIDER_"
+_CUSTOM_PROVIDER_API_KEY_PREFIX = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_"
 
 
-def _provider_credential_present(env: Mapping[str, str]) -> bool:
-    for key in _PROVIDER_CREDENTIAL_ENV_KEYS:
+def _is_indexed_credential_key(key: str) -> bool:
+    """Return whether *key* is ``LLM_PROVIDER_<N>_<credential-suffix>`` (any N)."""
+    if not key.startswith(_INDEXED_PROVIDER_CREDENTIAL_PREFIX):
+        return False
+    return any(key.endswith(f"_{suffix}") for suffix in _PROVIDER_CREDENTIAL_SUFFIXES)
+
+
+def _provider_credential_present(
+    env: Mapping[str, str],
+    settings: RepoSettings | None = None,
+) -> bool:
+    keys = _PROVIDER_CREDENTIAL_ENV_KEYS
+    if settings is not None:
+        keys = keys | provider_credential_env_names(settings)
+    for key in keys:
         value = env.get(key)
         if isinstance(value, str) and value.strip():
             return True
     for key, value in env.items():
         if not isinstance(value, str) or not value.strip():
             continue
-        if key.startswith("MERGECRAFT_CUSTOM_PROVIDER_API_KEY_"):
+        if key.startswith(_CUSTOM_PROVIDER_API_KEY_PREFIX):
             return True
-        if key.startswith("LLM_PROVIDER_") and key.endswith("_API_KEY"):
+        if _is_indexed_credential_key(key):
             return True
-        if key.startswith("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_"):
-            continue
     return False
 
 
@@ -412,16 +413,19 @@ def validate_fork_credential_invariant(
     event: dict[str, Any],
     env: Mapping[str, str] | None = None,
     agent_sandbox_tier: str | None = None,
+    settings: RepoSettings | None = None,
 ) -> None:
     """Refuse fork-head runs that carry provider credentials (lane B D2b).
 
-    Independent of ``trust.agentSandbox`` and the consumer workflow YAML.
+    Independent of ``trust.agentSandbox`` and the consumer workflow YAML. The
+    check is on credential *presence* (D3), not on whether a running agent can
+    reach the credential; it runs before any provider is selected.
     """
     _ = agent_sandbox_tier
     if not is_fork_pull_request(event):
         return
     env_map = env if env is not None else os.environ
-    if not _provider_credential_present(env_map):
+    if not _provider_credential_present(env_map, settings):
         return
     msg = (
         "refusing fork pull request run: provider credentials are present in the "

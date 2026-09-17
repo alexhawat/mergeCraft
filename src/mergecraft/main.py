@@ -753,7 +753,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     repo_root = Path.cwd()
     gh_event = ctx.gh_event or {}
     try:
-        validate_fork_credential_invariant(event=gh_event, env=os.environ)
+        validate_fork_credential_invariant(event=gh_event, env=os.environ, settings=ctx.settings)
     except ForkCredentialInvariantError as exc:
         raise _ConfigurationError(str(exc)) from exc
 
