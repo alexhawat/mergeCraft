@@ -12,12 +12,13 @@ from mergecraft.agents.lenses import get_lens, load_lens_catalog, resolve_lens_p
 from mergecraft.classify.change_classifier import classify_change
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.review.lens_routing import load_routing_registry, route_lenses
 
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="lens",
     help="Inspect and test bundled review lenses.",
     no_args_is_help=True,

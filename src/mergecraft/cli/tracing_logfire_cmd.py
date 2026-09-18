@@ -40,6 +40,7 @@ from mergecraft.cli.tracing_logfire_wf_yaml import (
     remove_logfire_wiring,
     render_workflow_diff,
 )
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.utils.git_hardening import git_argv
 
 # ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region; it is
@@ -48,13 +49,13 @@ from mergecraft.utils.git_hardening import git_argv
 LOGFIRE_REGION_ENV = "MERGECRAFT_TRACING_REGION"
 _VALID_REGIONS = ("us", "eu")
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="tracing",
     help="Trace export configuration (Logfire). Mirrors ``sevn tracing logfire``.",
     no_args_is_help=True,
 )
 
-logfire_app = typer.Typer(
+logfire_app = mergecraft_typer(
     name="logfire",
     help="Logfire trace export. Mirrors ``sevn tracing logfire``.",
     no_args_is_help=True,

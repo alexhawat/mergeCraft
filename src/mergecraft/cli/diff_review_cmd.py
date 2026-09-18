@@ -51,13 +51,15 @@ _PANEL_TRUST = "Trust"
 # so example commands stay copy-pasteable in ``mergecraft review --help``.
 _REVIEW_COMMAND_HELP = """Review a local git diff offline (no GitHub Action / PR posting).
 
-No flags are required. The minimum invocation is:
+No flags are required. On a TTY, `mergecraft review` opens an interactive
+session (source, diff selection, dry-run, output). In scripts, CI, or when any
+flag is passed, it reviews the current git checkout immediately:
 
 \b
   mergecraft review
 
-That reviews the current git checkout: uncommitted edits plus commits since the
-detected base (upstream, else origin/main or origin/master). You need:
+That reviews uncommitted edits plus commits since the detected base (upstream,
+else origin/main or origin/master). You need:
 
 * a git repository here, or --cwd PATH, or --repo, or --diff FILE
 * a provider credential (`mergecraft auth …`) unless you pass --dry-run
@@ -508,6 +510,29 @@ def run(
 ) -> None:
     if ctx.info_name == "diff-review":
         console.print(_DIFF_REVIEW_DEPRECATION)
+    from mergecraft.cli.interactive import (
+        command_was_invoked_bare,
+        is_interactive_session,
+        run_review_wizard,
+    )
+
+    if is_interactive_session() and command_was_invoked_bare(ctx):
+        wizard = run_review_wizard()
+        repo = wizard.repo
+        if wizard.cwd is not None:
+            cwd = wizard.cwd
+        diff = wizard.diff
+        staged = wizard.staged
+        unstaged = wizard.unstaged
+        base = wizard.base
+        head = wizard.head
+        commit_range = wizard.commit_range
+        dry_run = wizard.dry_run
+        agent_mode = wizard.agent_mode
+        if wizard.json_output is not None:
+            json_output = wizard.json_output
+        if wizard.prompt is not None:
+            prompt = wizard.prompt
     configure_logging()
     effective_output_format = _resolve_review_output_format(ctx, output_format=output_format)
     invocation_root = Path.cwd().resolve()

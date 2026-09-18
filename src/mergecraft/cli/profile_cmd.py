@@ -15,8 +15,9 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.cli.profiles import select_profile_from_risk
+from mergecraft.cli.typer_group import mergecraft_typer
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="profile",
     help="Recommend a review profile from change risk.",
     no_args_is_help=True,

@@ -6,9 +6,10 @@ from pathlib import Path
 
 import typer
 
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.enterprise.support_bundle import write_support_bundle
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="support-bundle",
     help="Write a gzipped support bundle with secret redaction.",
     no_args_is_help=False,

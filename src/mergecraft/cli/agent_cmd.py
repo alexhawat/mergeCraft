@@ -26,6 +26,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.init_cmd import _ensure_gitignore_line
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.agent_roster import (
     AgentRosterError,
     add_model,
@@ -344,7 +345,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         if target == AgentRosterTarget.COMMITTED
         else "Author local-only agent roster overrides (gitignored, not read in CI)."
     )
-    roster_app = typer.Typer(
+    roster_app = mergecraft_typer(
         name="agent-local" if target == AgentRosterTarget.LOCAL else "agent",
         help=help_suffix,
         no_args_is_help=True,

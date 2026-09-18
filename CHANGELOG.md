@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bare CLI command names open a TTY interactive session. `mergecraft`,
+  `mergecraft review`, and groups such as `mergecraft provider` offer a menu
+  (or a review wizard) when stdin is a TTY. Scripts, CI, piped invocations,
+  and any invocation that already passes flags keep today's non-interactive
+  behaviour. Missing required arguments are prompted on a TTY instead of
+  failing with Click's "Missing argument". `mergecraft config set` writes
+  `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
+
 ### Changed
 
 - `verify_candidate` verifies the commit that introduced an image digest rather

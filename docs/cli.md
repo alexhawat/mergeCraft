@@ -55,6 +55,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft cache prune` | Evict oldest entries until usage is within the byte ceiling. |
 | `mergecraft capabilities` | Print the review-only capability manifest. |
 | `mergecraft config explain <key>` | Explain which precedence layer wins for a config key. |
+| `mergecraft config set <key> <value>` | Write a supported config key into `.mergecraft/config.yaml`. |
 | `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
 | `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
