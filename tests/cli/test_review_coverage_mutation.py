@@ -8,6 +8,9 @@ import shutil
 import subprocess
 from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 import pytest
 from tests.ci.support_crap import (
     DEFAULT_MAX_MUTANTS,
@@ -283,6 +286,65 @@ def test_max_mutants_bound_is_enforced() -> None:
     assert DEFAULT_MAX_MUTANTS == 50
 
 
+def test_execute_mutation_bounds_discovered_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    seen: dict[str, Any] = {}
+
+    def fake_which(name: str) -> str | None:
+        return "/usr/bin/mutmut" if name == "mutmut" else None
+
+    def fake_wrap(argv: list[str], *, repo_root: Path) -> list[str]:
+        return ["unshare", *argv]
+
+    def fake_discover(
+        repo_root: Path,
+        patterns: Sequence[str],
+        *,
+        timeout_seconds: int,
+    ) -> list[str]:
+        seen["patterns"] = list(patterns)
+        return [f"mod.x_fn__mutmut_{index}" for index in range(120)]
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        if cmd and cmd[0] == "unshare" and cmd[1] == "/usr/bin/mutmut":
+            seen["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    def fake_export(repo_root: Path) -> Path:
+        dest = repo_root / "mutmut-results.json"
+        dest.write_text('{"schema_version":1,"mutants":[]}', encoding="utf-8")
+        return dest
+
+    monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
+    monkeypatch.setattr(local, "_sandboxed_argv", fake_wrap)
+    monkeypatch.setattr(local, "_discover_mutmut_keys", fake_discover)
+    monkeypatch.setattr(local, "_export_mutmut_json", fake_export)
+    monkeypatch.setattr(local.shutil, "which", fake_which)
+    monkeypatch.setattr(local.subprocess, "run", fake_run)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("def a():\n    return 1\n", encoding="utf-8")
+    artifact = local._execute_mutation(
+        tmp_path,
+        timeout_seconds=120,
+        paths=["src/a.py"],
+        diff=(
+            "diff --git a/src/a.py b/src/a.py\n"
+            "--- a/src/a.py\n+++ b/src/a.py\n"
+            "@@ -1,2 +1,2 @@\n def a():\n-    return 1\n+    return 0\n"
+        ),
+        max_mutants=12,
+    )
+    assert artifact is not None
+    cmd = seen["cmd"]
+    assert cmd[2] == "run"
+    assert len(cmd) == 3 + 12
+    assert "mod.x_fn__mutmut_0" in cmd
+    assert "mod.x_fn__mutmut_11" in cmd
+    assert "mod.x_fn__mutmut_12" not in cmd
+
+
 def test_timeout_seconds_default_is_300() -> None:
     from mergecraft.config.settings import default_settings
 
@@ -398,8 +460,17 @@ def test_mutmut_run_uses_supported_selection_and_config(
         dest.write_text('{"schema_version":1,"mutants":[]}', encoding="utf-8")
         return dest
 
+    def fake_discover(
+        repo_root: Path,
+        patterns: Sequence[str],
+        *,
+        timeout_seconds: int,
+    ) -> list[str]:
+        return ["a.x_a__mutmut_1"]
+
     monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
     monkeypatch.setattr(local, "_sandboxed_argv", fake_wrap)
+    monkeypatch.setattr(local, "_discover_mutmut_keys", fake_discover)
     monkeypatch.setattr(local, "_export_mutmut_json", fake_export)
     monkeypatch.setattr(local.shutil, "which", fake_which)
     monkeypatch.setattr(local.subprocess, "run", fake_run)
@@ -422,7 +493,7 @@ def test_mutmut_run_uses_supported_selection_and_config(
     assert cmd[0] == "unshare"
     assert cmd[1] == "/usr/bin/mutmut"
     assert cmd[2] == "run"
-    assert "a.x_a*" in cmd
+    assert "a.x_a__mutmut_1" in cmd
     assert "--paths-to-mutate" not in cmd
     assert "1-50" not in cmd
     setup_cfg = seen["setup_cfg"]

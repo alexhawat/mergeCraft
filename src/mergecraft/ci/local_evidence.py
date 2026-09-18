@@ -74,6 +74,34 @@ _GITHUB_OWNER_REPO = re.compile(
 _MUTMUT_CLASS_SEP = "\u01c1"
 _MUTMUT_KEY_SUFFIX = re.compile(r"__mutmut_\d+$")
 _MUTMUT_KILLED_EXIT_CODES = frozenset({1, 3})
+_DISCOVER_MUTMUT_KEYS_SCRIPT = """\
+import json
+import sys
+from pathlib import Path
+
+patterns = json.loads(sys.stdin.read())
+from mutmut.__main__ import (
+    collect_or_load_stats,
+    collect_source_file_mutation_data,
+    copy_also_copy_files,
+    copy_src_dir,
+    create_mutants,
+    get_mutant_runner,
+    setup_source_paths,
+    store_lines_covered_by_tests,
+)
+
+Path("mutants").mkdir(exist_ok=True)
+copy_src_dir()
+copy_also_copy_files()
+setup_source_paths()
+store_lines_covered_by_tests()
+create_mutants(1)
+runner = get_mutant_runner(1)
+collect_or_load_stats(runner, apply_config_invalidation=True)
+mutants, _ = collect_source_file_mutation_data(mutant_names=tuple(patterns))
+json.dump([name for _, name, _ in mutants], sys.stdout)
+"""
 
 T = TypeVar("T")
 
@@ -397,12 +425,12 @@ def mutmut_selection_patterns(
     paths: Sequence[str],
     diff: str,
     source_tree: Mapping[str, str],
-    max_mutants: int = DEFAULT_MAX_MUTANTS,
 ) -> list[str]:
-    """Return bounded ``mutmut run`` wildcard patterns for changed functions (C-D8).
+    """Return ``mutmut run`` wildcard patterns for changed functions.
 
     mutmut 3+ selects mutants via configuration (``only_mutate``) and optional
     ``mutmut run`` name patterns — not ``--paths-to-mutate`` or ID ranges.
+    Call :func:`bound_mutants` on discovered mutant keys before execution (C-D8).
     """
     patterns: list[str] = []
     seen: set[str] = set()
@@ -419,7 +447,52 @@ def mutmut_selection_patterns(
                 continue
             seen.add(pattern)
             patterns.append(pattern)
-    return bound_mutants(patterns, max_mutants=max_mutants)
+    return patterns
+
+
+def _discover_mutmut_keys(
+    repo_root: Path,
+    patterns: Sequence[str],
+    *,
+    timeout_seconds: int,
+) -> list[str]:
+    """Generate mutmut metadata and list mutant keys matching *patterns*."""
+    if not patterns:
+        return []
+    try:
+        result = subprocess.run(
+            _sandboxed_argv(
+                [sys.executable, "-c", _DISCOVER_MUTMUT_KEYS_SCRIPT],
+                repo_root=repo_root,
+            ),
+            cwd=repo_root,
+            input=json.dumps(list(patterns)),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except LocalEvidenceRefused:
+        raise
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("local mutation: mutant discovery failed — {}", exc)
+        return []
+    if result.returncode != 0:
+        logger.warning(
+            "local mutation: mutant discovery exited {}: {}",
+            result.returncode,
+            result.stderr.strip() or result.stdout.strip(),
+        )
+        return []
+    try:
+        keys = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        logger.warning("local mutation: mutant discovery returned invalid JSON — {}", exc)
+        return []
+    if not isinstance(keys, list):
+        logger.warning("local mutation: mutant discovery returned non-list payload")
+        return []
+    return [key for key in keys if isinstance(key, str)]
 
 
 def _function_name_from_mutant_key(mutant_key: str) -> str:
@@ -522,21 +595,29 @@ def _execute_mutation(
     if mutmut is None or not paths:
         return None
     source_tree = _load_source_tree(repo_root, diff)
-    selection = mutmut_selection_patterns(
+    selection_patterns = mutmut_selection_patterns(
         paths=paths,
         diff=diff,
         source_tree=source_tree,
-        max_mutants=max_mutants,
     )
     only_mutate = _mutmut_only_mutate_patterns(paths)
     source_paths = _mutmut_source_path_dirs(paths)
-    cmd = [mutmut, "run", *selection]
     try:
         with _ephemeral_mutmut_config(
             repo_root,
             only_mutate=only_mutate,
             source_paths=source_paths,
         ):
+            discovered = _discover_mutmut_keys(
+                repo_root,
+                selection_patterns,
+                timeout_seconds=timeout_seconds,
+            )
+            selection = bound_mutants(discovered, max_mutants=max_mutants)
+            if not selection:
+                logger.warning("local mutation: no mutants matched the planned selection")
+                return None
+            cmd = [mutmut, "run", *selection]
             run_result = subprocess.run(
                 _sandboxed_argv(cmd, repo_root=repo_root),
                 cwd=repo_root,
@@ -664,7 +745,7 @@ def run_local_mutation(
         produced_artifact: Pre-produced mutmut/Stryker JSON to parse instead of running.
         toolchain_available: Explicit toolchain probe; ``None`` means detect.
         timeout_seconds: Bound for a real mutation run (C-D8).
-        max_mutants: Cap applied when planning a live run.
+        max_mutants: Cap on executed mutants after discovery (C-D8).
         path_allowlist: Empty means changed paths only.
         mode: Gate mode forwarded to :func:`mutation_findings` (default ``shadow``).
         survivor_threshold: Minimum attributed survivors to emit.
@@ -757,10 +838,10 @@ def plan_local_mutation_paths(
 
 
 def bound_mutants(items: Sequence[T], max_mutants: int = DEFAULT_MAX_MUTANTS) -> list[T]:
-    """Return at most ``max_mutants`` items (C-D8).
+    """Return at most ``max_mutants`` mutant keys to execute (C-D8).
 
     Args:
-        items: Mutants or other items to cap.
+        items: Discovered mutant keys (or other items) to cap.
         max_mutants: Inclusive upper bound. Default ``50``.
 
     Returns:
