@@ -162,6 +162,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Local `--shell enabled` now refuses when no sandbox backend is available unless
+  `MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1` is set; on macOS, `sandbox-exec` is
+  the backend when present (#593)
+- Tracked public markdown is linted for decision-ledger tokens, wave-dot
+  citations, and pointers into gitignored wave plans; Priority 1 docs were
+  rewritten to stand alone (#709)
+- `trivy` on Apple Silicon provisions the native ARM64 build so the local
+  coverage gate does not hang under Rosetta
+
 - Enabled Jev reviews now keep the shadow-judge record next to the evidence
   packet after the command finishes, so paid calibration rows are retrievable
   (#728)

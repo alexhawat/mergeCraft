@@ -78,7 +78,7 @@ def _validate_role(role: str) -> str:
 
 def _validate_agent_name(name: str) -> str:
     if not _AGENT_NAME_RE.match(name):
-        cli_bail(f"invalid agent name {name!r}: must match pattern ^[a-z][a-z0-9_-]{{0,31}}$ (D11)")
+        cli_bail(f"invalid agent name {name!r}: must match pattern ^[a-z][a-z0-9_-]{{0,31}}$")
     return name
 
 
@@ -417,12 +417,15 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
 
     @roster_app.command("create")
     def create_cmd(
-        name: str = typer.Argument(..., help="New agent name (D11 pattern)."),
+        name: str = typer.Argument(
+            ...,
+            help="New agent name (lowercase letter first, up to 32 chars).",
+        ),
         role: str = typer.Option(..., "--role", help="Agent role for the new binding."),
         after: str | None = typer.Option(
             None,
             "--after",
-            help="Run after this agent finishes (D15); omit for parallel dispatch.",
+            help="Run after this agent finishes; omit for parallel dispatch.",
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
