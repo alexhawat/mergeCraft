@@ -3,12 +3,13 @@
 This is the only mergeCraft module that may import Playwright. Call
 ``require_browser_extra()`` before constructing a driver so a missing extra
 raises ``BrowserExtraMissingError`` instead of a raw ``ImportError``.
+Playwright is imported lazily and only via the async API.
 
 Cookie **values** are never logged — only names, and only at debug.
 
 Exports:
     PlaywrightBrowserDriver: Playwright ``Page`` adapter implementing the protocol.
-    launch_playwright_driver: Start headless Chromium and return a bound driver.
+    launch_playwright_driver: Return a lazy driver; Chromium starts on first use.
 """
 
 from __future__ import annotations
@@ -26,14 +27,12 @@ from mergecraft.verify.extra import require_browser_extra
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from mergecraft.verify.driver import BrowserDriver
-
 
 async def _await_if_needed(value: Any) -> Any:
     """Await ``value`` when it is awaitable; otherwise return it.
 
-    Sync Playwright APIs return plain values; the in-process fake Page used
-    in unit tests exposes async methods. Both must work on this adapter.
+    Async Playwright page methods return coroutines. In-process fake Pages
+    used in unit tests may expose sync or async methods. Both must work.
 
     Args:
         value (Any): Maybe-awaitable Playwright or fake-Page result.
@@ -51,6 +50,21 @@ async def _await_if_needed(value: Any) -> Any:
     return value
 
 
+def _release_caller_event_loop() -> None:
+    """Clear a leftover running-loop flag on this thread, if any.
+
+    Lazy launch does not start Playwright, so the normal path has no flag.
+
+    Returns:
+        None: This thread has no running loop.
+
+    Examples:
+        >>> callable(_release_caller_event_loop)
+        True
+    """
+    asyncio.events._set_running_loop(None)
+
+
 def _cookie_names(cookies: list[dict[str, Any]]) -> list[str]:
     """Return cookie names only — never values.
 
@@ -65,23 +79,6 @@ def _cookie_names(cookies: list[dict[str, Any]]) -> list[str]:
         ['sid']
     """
     return [str(item["name"]) for item in cookies if "name" in item]
-
-
-def _release_caller_event_loop() -> None:
-    """Clear the thread's running-loop flag left by sync Playwright ``start()``.
-
-    ``sync_playwright().start()`` marks a loop running on this thread so a
-    later ``asyncio.run`` in the CLI raises. Detach the flag only; do not
-    stop Playwright — ``PlaywrightBrowserDriver.close`` owns that.
-
-    Returns:
-        None: The caller thread has no running loop.
-
-    Examples:
-        >>> callable(_release_caller_event_loop)
-        True
-    """
-    asyncio.events._set_running_loop(None)
 
 
 def _cookies_for_playwright(cookies: list[dict[str, Any]], page_url: str) -> list[dict[str, Any]]:
@@ -115,25 +112,27 @@ class PlaywrightBrowserDriver:
 
     def __init__(
         self,
-        page: Any,
+        page: Any = None,
         *,
+        width: int | None = None,
+        height: int | None = None,
         playwright: Any = None,
         browser: Any = None,
-        playwright_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
-        """Bind to an existing Playwright page and start collecting console rows.
+        """Bind to an existing page, or lazy-bind on first async page call.
 
         Args:
-            page (Any): Live Playwright page (sync or async API) or a unit-test
-                fake. Browser binaries are the caller's responsibility unless
-                this instance was created by ``launch_playwright_driver``.
-            playwright (Any, optional): Sync Playwright driver to stop on
+            page (Any, optional): Live Playwright page or a unit-test fake.
+                When omitted, Chromium starts on the first async method.
+                Defaults to ``None``.
+            width (int | None, optional): Viewport width for a lazy launch.
+                Applied when ``height`` is also set. Defaults to ``None``.
+            height (int | None, optional): Viewport height for a lazy launch.
+                Applied when ``width`` is also set. Defaults to ``None``.
+            playwright (Any, optional): Async Playwright driver to stop on
                 ``close``. Defaults to ``None``.
             browser (Any, optional): Launched Chromium handle to close on
                 ``close``. Defaults to ``None``.
-            playwright_loop (asyncio.AbstractEventLoop | None, optional): Loop
-                ``sync_playwright().start()`` left running. Rebound around
-                later sync calls after launch detaches it. Defaults to ``None``.
 
         Returns:
             None: The adapter is ready for protocol calls.
@@ -143,54 +142,79 @@ class PlaywrightBrowserDriver:
             'PlaywrightBrowserDriver'
         """
         self._page = page
+        self._width = width
+        self._height = height
         self._playwright = playwright
         self._browser = browser
-        self._playwright_loop = playwright_loop
         self._console: list[dict[str, str]] = []
-        page.on("console", self._on_console)
+        if page is not None:
+            page.on("console", self._on_console)
 
     @contextmanager
     def _playwright_loop_bound(self) -> Iterator[None]:
-        """Rebind Playwright's ``start()`` loop for one sync API call.
-
-        Launch detaches the running-loop flag so the CLI can run a coroutine
-        afterward. Sync Playwright still needs that loop for ``stop()`` and
-        page calls.
+        """No-op: async page calls already run on the caller's loop.
 
         Yields:
-            None: The Playwright loop is the thread's running loop, if any.
+            None: The caller loop is unchanged.
         """
-        loop = self._playwright_loop
-        if loop is None:
-            yield
-            return
-        previous = asyncio.events._get_running_loop()
-        asyncio.events._set_running_loop(loop)
-        try:
-            yield
-        finally:
-            asyncio.events._set_running_loop(previous)
+        yield
 
     async def _playwright_call(self, op: Callable[[], Any]) -> Any:
-        """Run a Playwright operation with its ``start()`` loop rebound.
+        """Await ``op`` when needed. Page methods do not call this.
 
         Args:
-            op (Callable[[], Any]): Sync or async Playwright call.
+            op (Callable[[], Any]): Sync or async page call.
 
         Returns:
             Any: The operation result, awaited when needed.
         """
-        with self._playwright_loop_bound():
-            return await _await_if_needed(op())
+        return await _await_if_needed(op())
 
-    def close(self) -> None:
-        """Close a launched Chromium and stop Playwright when we own them.
+    async def _ensure_page(self) -> Any:
+        """Return the bound page, starting async Playwright on first use.
 
         Returns:
-            None: Handles are released. Safe to call when we did not launch.
+            Any: The live or fake page.
 
         Examples:
-            >>> callable(PlaywrightBrowserDriver.close)
+            >>> import inspect
+            >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver._ensure_page)
+            True
+        """
+        if self._page is not None:
+            return self._page
+        from playwright.async_api import async_playwright
+
+        playwright = await async_playwright().start()
+        browser: Any = None
+        try:
+            browser = await playwright.chromium.launch(headless=True)
+            page_kwargs: dict[str, Any] = {}
+            if self._width is not None and self._height is not None:
+                page_kwargs["viewport"] = {"width": self._width, "height": self._height}
+            page = await browser.new_page(**page_kwargs)
+            page.on("console", self._on_console)
+        except BaseException:
+            try:
+                if browser is not None:
+                    await _await_if_needed(browser.close())
+            finally:
+                await _await_if_needed(playwright.stop())
+            raise
+        self._playwright = playwright
+        self._browser = browser
+        self._page = page
+        return page
+
+    async def _aclose(self) -> None:
+        """Stop a launched Chromium and Playwright when this instance owns them.
+
+        Returns:
+            None: Handles are released. Safe when we did not launch.
+
+        Examples:
+            >>> import inspect
+            >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver._aclose)
             True
         """
         browser = self._browser
@@ -198,15 +222,34 @@ class PlaywrightBrowserDriver:
         self._browser = None
         self._playwright = None
         try:
-            with self._playwright_loop_bound():
-                try:
-                    if browser is not None:
-                        browser.close()
-                finally:
-                    if playwright is not None:
-                        playwright.stop()
+            if browser is not None:
+                await _await_if_needed(browser.close())
         finally:
-            self._playwright_loop = None
+            if playwright is not None:
+                await _await_if_needed(playwright.stop())
+
+    def close(self) -> Any:
+        """Close a launched Chromium and stop Playwright when we own them.
+
+        When this instance owns async Playwright and no loop is running,
+        drives ``_aclose`` with ``asyncio.run``. When a loop is running,
+        returns the ``_aclose`` coroutine so callers can ``await`` it.
+
+        Returns:
+            Any: ``None`` after a sync close, or an awaitable ``_aclose``.
+
+        Examples:
+            >>> callable(PlaywrightBrowserDriver.close)
+            True
+        """
+        if self._browser is None and self._playwright is None:
+            return None
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self._aclose())
+            return None
+        return self._aclose()
 
     def _on_console(self, message: Any) -> None:
         """Record a Playwright console message as ``level`` / ``text``.
@@ -239,7 +282,12 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.navigate)
             True
         """
-        await self._playwright_call(lambda: self._page.goto(url))
+        await self._ensure_page()
+        goto = self._page.goto
+        if inspect.iscoroutinefunction(goto):
+            await self._page.goto(url)
+            return
+        await _await_if_needed(goto(url))
 
     async def extract_text(self, selector: str | None = None) -> str:
         """Return visible text for ``selector``, or the page body when omitted.
@@ -255,8 +303,9 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.extract_text)
             True
         """
+        await self._ensure_page()
         target = "body" if selector is None else selector
-        return str(await self._playwright_call(lambda: self._page.inner_text(target)))
+        return str(await _await_if_needed(self._page.inner_text(target)))
 
     async def click(self, selector: str) -> None:
         """Click the first element matching ``selector``.
@@ -272,7 +321,8 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.click)
             True
         """
-        await self._playwright_call(lambda: self._page.click(selector))
+        await self._ensure_page()
+        await _await_if_needed(self._page.click(selector))
 
     async def fill(self, selector: str, value: str) -> None:
         """Replace the contents of the field matching ``selector``.
@@ -289,7 +339,8 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.fill)
             True
         """
-        await self._playwright_call(lambda: self._page.fill(selector, value))
+        await self._ensure_page()
+        await _await_if_needed(self._page.fill(selector, value))
 
     async def type_text(self, text: str) -> None:
         """Type ``text`` into the focused element.
@@ -305,7 +356,8 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.type_text)
             True
         """
-        await self._playwright_call(lambda: self._page.keyboard.type(text))
+        await self._ensure_page()
+        await _await_if_needed(self._page.keyboard.type(text))
 
     async def press_key(self, key: str) -> None:
         """Press a single named key (for example ``Enter``).
@@ -321,7 +373,8 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.press_key)
             True
         """
-        await self._playwright_call(lambda: self._page.keyboard.press(key))
+        await self._ensure_page()
+        await _await_if_needed(self._page.keyboard.press(key))
 
     async def scroll(self, *, x: int = 0, y: int = 0) -> None:
         """Scroll the page by ``x`` / ``y`` pixels.
@@ -338,8 +391,9 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.scroll)
             True
         """
-        await self._playwright_call(
-            lambda: self._page.evaluate("([dx, dy]) => { window.scrollBy(dx, dy); }", [x, y])
+        await self._ensure_page()
+        await _await_if_needed(
+            self._page.evaluate("([dx, dy]) => { window.scrollBy(dx, dy); }", [x, y])
         )
 
     async def screenshot(self, path: str | Path) -> Path:
@@ -356,9 +410,10 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.screenshot)
             True
         """
+        await self._ensure_page()
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        await self._playwright_call(lambda: self._page.screenshot(path=dest))
+        await _await_if_needed(self._page.screenshot(path=dest))
         return dest
 
     async def get_cookies(self) -> list[dict[str, Any]]:
@@ -372,7 +427,8 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.get_cookies)
             True
         """
-        cookies = await self._playwright_call(lambda: self._page.context.cookies())
+        await self._ensure_page()
+        cookies = await _await_if_needed(self._page.context.cookies())
         logger.debug("get_cookies names={}", _cookie_names([dict(c) for c in cookies]))
         return [dict(cookie) for cookie in cookies]
 
@@ -390,9 +446,10 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.set_cookies)
             True
         """
+        await self._ensure_page()
         logger.debug("set_cookies names={}", _cookie_names(cookies))
-        prepared = _cookies_for_playwright(cookies, self._page.url)
-        await self._playwright_call(lambda: self._page.context.add_cookies(prepared))
+        prepared = _cookies_for_playwright(cookies, str(self._page.url))
+        await _await_if_needed(self._page.context.add_cookies(prepared))
 
     async def console_messages(self) -> list[dict[str, str]]:
         """Return captured console rows as ``level`` / ``text`` dicts.
@@ -412,13 +469,11 @@ def launch_playwright_driver(
     *,
     width: int | None = None,
     height: int | None = None,
-) -> PlaywrightBrowserDriver | BrowserDriver:
-    """Start headless Chromium and return a bound ``PlaywrightBrowserDriver``.
+) -> PlaywrightBrowserDriver:
+    """Return a lazy ``PlaywrightBrowserDriver``; Chromium starts on first use.
 
-    Uses the sync Playwright API so this can run before the runner loop.
-    Detaches the running-loop flag ``start()`` leaves on this thread so the
-    caller can run a coroutine afterward. The returned driver keeps
-    Playwright and browser handles for ``close()`` after the run.
+    Does not start Playwright, so the caller thread has no running loop.
+    The first async page method starts async Playwright on that method's loop.
 
     Args:
         width (int | None, optional): Viewport width in pixels. Applied when
@@ -427,7 +482,7 @@ def launch_playwright_driver(
             ``width`` is also set. Defaults to ``None``.
 
     Returns:
-        PlaywrightBrowserDriver | BrowserDriver: Driver bound to a live page.
+        PlaywrightBrowserDriver: Driver that binds a page on first use.
 
     Raises:
         BrowserExtraMissingError: When ``mergecraft[browser]`` is not installed.
@@ -437,31 +492,4 @@ def launch_playwright_driver(
         True
     """
     require_browser_extra()
-    from playwright.sync_api import sync_playwright
-
-    playwright = sync_playwright().start()
-    playwright_loop = asyncio.events._get_running_loop()
-    browser = None
-    owned = False
-    try:
-        browser = playwright.chromium.launch(headless=True)
-        page_kwargs: dict[str, Any] = {}
-        if width is not None and height is not None:
-            page_kwargs["viewport"] = {"width": width, "height": height}
-        page = browser.new_page(**page_kwargs)
-        driver = PlaywrightBrowserDriver(
-            page,
-            playwright=playwright,
-            browser=browser,
-            playwright_loop=playwright_loop,
-        )
-        owned = True
-        _release_caller_event_loop()
-        return driver
-    finally:
-        if not owned:
-            try:
-                if browser is not None:
-                    browser.close()
-            finally:
-                playwright.stop()
+    return PlaywrightBrowserDriver(width=width, height=height)

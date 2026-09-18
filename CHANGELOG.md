@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Live `mergecraft verify-behavior` no longer hangs when opening a page with
+  `mergecraft[browser]` installed (#61)
+
 - `mergecraft verify-behavior` no longer crashes after launching Chromium when
   `mergecraft[browser]` is installed (#61)
 
