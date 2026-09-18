@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Reviews can ingest declared coverage receipts and report change-risk scores on the functions the PR actually touched, advisory by default (#714)
+- Reviews can ingest declared mutation survivors the same way; local `mergecraft review --with-coverage` / `--with-mutation` run those tools only on a trusted sandboxed CLI (#714)
+
 - Opt-in Jev / System One client (`jev.enabled`, default off) with cost
   accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a
   skip and does not fail the review (#728)
