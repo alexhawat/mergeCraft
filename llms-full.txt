@@ -2184,7 +2184,7 @@ mergecraft.run                       (root; run_id, repo, pr_number,
 
 ### Attributes per kind
 
-| Kind                          | Required attributes (issue §4 + W4.4)                                                                 |
+| Kind                          | Required attributes (issue §4)                                                                        |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `mergecraft.run`              | `run_id`, `repo`, `pr_number`, `commit_sha`, `workflow_run_id`, `job_id` (correlation from env or kwarg) |
 | `mergecraft.prep`             | (no required attrs beyond span defaults)                                                              |
@@ -2223,13 +2223,13 @@ depends on what the upstream CLI emits; this table pins the version the
 plan was authored against and the per-event coverage each driver
 delivers today.
 
-| Driver   | CLI version pinned (W0.5) | Streaming flag                                | Coverage                                                                                  |
+| Driver   | CLI version pinned        | Streaming flag                                | Coverage                                                                                  |
 | -------- | ------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `claude` | Claude Code 2.1.226       | `--print --output-format stream-json`         | **Per-event**: one `llm.call` per `message_start`/`message_stop`; one `tool.call` per `content_block_start`/`stop`. Authoritative usage from the final `result` event. |
 | `codex`  | codex-cli 0.146.0         | `codex exec --json`                           | **Per-event**: one `llm.call` per `thread.started`; one `tool.call` per `item.started`/`item.completed`. Authoritative usage from the `turn.completed` event. |
 | `gemini` | gemini-cli 0.53.0         | `-p <prompt> --output-format stream-json`     | **Per-event**: one `llm.call` per `init`; one `tool.call` per `tool_use`/`tool_result`. Final usage from the `result` event. |
-| `opencode` | opencode 1.18.13        | `opencode run --format json` (HTTP via serve) | **Run-level only** — opencode's events are partial (W0.5), so the driver degrades to a `run`-level span per `agent.attempt`. The HTTP polling path emits no NDJSON stream to consume. |
-| `cursor` | (cloud)                   | n/a — Cursor Cloud HTTP polling               | **Run-level only** — no local streaming; the driver intentionally does not change its read path (W6.4). |
+| `opencode` | opencode 1.18.13        | `opencode run --format json` (HTTP via serve) | **Run-level only** — opencode's events are partial, so the driver degrades to a `run`-level span per `agent.attempt`. The HTTP polling path emits no NDJSON stream to consume. |
+| `cursor` | (cloud)                   | n/a — Cursor Cloud HTTP polling               | **Run-level only** — no local streaming; the driver intentionally does not change its read path. |
 
 Graceful degradation is the contract: a driver that cannot stream (or
 whose CLI's event shapes are not granular enough) emits run-level
@@ -2523,7 +2523,7 @@ via `collect_tracing_warnings_for_summary()` — a configured-but-inactive
 Logfire sink is no longer silent. The warning names `logfire-token`,
 `INPUT_LOGFIRE_TOKEN`, and `MERGECRAFT_LOGFIRE_TOKEN`.
 
-## Action inputs (W8.5 / W7.7)
+## Action inputs
 
 `action.yml` exposes tracing inputs so a consuming repo can wire tracing
 without touching `.mergecraft/config.yaml`:
@@ -2540,7 +2540,7 @@ without touching `.mergecraft/config.yaml`:
 The Action wraps `${{ secrets.LOGFIRE_TOKEN }}` into `logfire-token`
 so the secret never appears in the workflow file.
 
-## CLI surface (W8.4 / W7.6)
+## CLI surface
 
 ```text
 mergecraft review --tracing|--no-tracing [--tracing-to <shorthand>] \
@@ -2581,7 +2581,7 @@ exits non-zero — the trace is the most useful when the run failed.
 The path is `.mergecraft/traces/` by default; override with the
 `trace_dir` config field or the `--trace-dir` flag.
 
-## Structured logs (operator debugging, W12.6 / #33)
+## Structured logs (operator debugging, #33)
 
 Tracing owns spans; default Loguru output stays human-readable. For
 correlation fields in the log stream itself (without enabling tracing),
