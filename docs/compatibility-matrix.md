@@ -1,7 +1,7 @@
 # Compatibility matrix
 
 Supported Action runtime combinations for mergeCraft (production-readiness
-`#36` / W11.3). The PR E2E gate exercises the **security-relevant slice**; a
+`#36`). The PR E2E gate exercises the **security-relevant slice**; a
 scheduled nightly job covers the **broad slice** plus live providers
 (secrets-gated).
 

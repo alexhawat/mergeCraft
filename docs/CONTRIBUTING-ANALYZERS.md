@@ -104,7 +104,7 @@ These ship as manifests so repos can opt in later, but always skip with `declare
 | `smarty-lint` | Manifest-only — runtime not bundled. |
 | `fortitude` | Manifest-only — runtime not bundled. |
 
-**Deferred:** ShellCheck on workflow `run:` blocks (parent W6.3) — inline shell in YAML
+**Deferred:** ShellCheck on workflow `run:` blocks — inline shell in YAML
  lacks reliable line mapping to workflow file lines; revisit when mapping is clean.
 
 ## P3 example

@@ -346,8 +346,8 @@ and the gate layer. Consumers of the packet should:
 
 - **Schema & model:** `src/mergecraft/evidence/packet.py`
 - **Pure assembly:** `src/mergecraft/evidence/build.py` (convention 5)
-- **I/O shell:** `src/mergecraft/evidence/emit.py` (W1.4)
-- **Tests:** `tests/evidence/` (WA-T; W1.6 un-xfails the schema, round-trip, and sections)
+- **I/O shell:** `src/mergecraft/evidence/emit.py`
+- **Tests:** `tests/evidence/` (WA-T; covers the schema, round-trip, and sections)
 - **Test plan:** `docs/dev/test-plans/merge-evidence-gating.md`
 
 ## Cross-references

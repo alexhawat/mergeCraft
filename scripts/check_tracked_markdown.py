@@ -3,9 +3,10 @@
 
 Scans ``git ls-files '*.md'`` only — never walks the working tree — and fails
 when a non-allowlisted file contains a decision-id token (``D14``), a
-``Wave plan:`` preamble, or a ``.ignorelocal/waves/`` citation. Gitignored
-trees (``.ignorelocal/``, ``.claude/``, ``.cursor/``, ``CLAUDE.md``) are
-invisible because they are not in the git listing.
+wave-dot token (``W4.4``), a ``Wave plan:`` preamble, or a
+``.ignorelocal/waves/`` citation. Gitignored trees (``.ignorelocal/``,
+``.claude/``, ``.cursor/``, ``CLAUDE.md``) are invisible because they are
+not in the git listing.
 
 Module: scripts.check_tracked_markdown
 Depends: dataclasses, pathlib, re, subprocess, sys
@@ -43,6 +44,7 @@ _ALLOWLIST_PREFIXES = (
 )
 
 _DECISION_ID = re.compile(r"\bD\d+\b")
+_WAVE_DOT = re.compile(r"\bW\d+\.\d+\b")
 _WAVE_PLAN = "Wave plan:"
 _IGNORELOCAL_WAVES = ".ignorelocal/waves/"
 
@@ -56,7 +58,8 @@ class Offense:
     Args:
         relpath: Repo-relative posix path of the file.
         line_no: 1-based line number of the match.
-        kind: ``decision-id``, ``wave-plan``, or ``ignorelocal-waves``.
+        kind: ``decision-id``, ``wave-dot``, ``wave-plan``, or
+            ``ignorelocal-waves``.
         text: The matched token or the offending line, stripped.
     """
 
@@ -125,6 +128,8 @@ def scan_markdown(text: str, *, relpath: str) -> list[Offense]:
     Examples:
         >>> [item.kind for item in scan_markdown("See D14.\\n", relpath="docs/x.md")]
         ['decision-id']
+        >>> [item.kind for item in scan_markdown("See W4.4.\\n", relpath="docs/x.md")]
+        ['wave-dot']
         >>> scan_markdown("See D14.\\n", relpath="docs/dev/changelog-archive.md")
         []
     """
@@ -136,6 +141,10 @@ def scan_markdown(text: str, *, relpath: str) -> list[Offense]:
         for match in _DECISION_ID.finditer(line):
             offenses.append(
                 Offense(relpath=relpath, line_no=line_no, kind="decision-id", text=match.group(0))
+            )
+        for match in _WAVE_DOT.finditer(line):
+            offenses.append(
+                Offense(relpath=relpath, line_no=line_no, kind="wave-dot", text=match.group(0))
             )
         if _WAVE_PLAN in line:
             offenses.append(
@@ -181,9 +190,9 @@ def main() -> int:
         return 0
 
     print(
-        "tracked markdown cites a decision ID, a Wave plan: preamble, or "
-        ".ignorelocal/waves/ (public docs must describe behaviour without "
-        "gitignored ledgers):",
+        "tracked markdown cites a decision ID, a wave-dot token (W#.#), a "
+        "Wave plan: preamble, or .ignorelocal/waves/ (public docs must "
+        "describe behaviour without gitignored ledgers):",
         file=sys.stderr,
     )
     for offense in offenses:

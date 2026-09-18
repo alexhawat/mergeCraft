@@ -120,7 +120,7 @@ inputs:
     default: ${{ github.token }}
   suggest_eval_add:
     description: |
-      Opt-in (W12.4 / #44): when enabled, log a logger.info suggestion to add
+      Opt-in (#44): when enabled, log a logger.info suggestion to add
       the run to the eval bank when the run produced no positive
       findings, the trust tier is trusted, and the trigger is a re-review
       (not a fresh PR). Accepts disabled|enabled (also true/false aliases).
@@ -129,14 +129,14 @@ inputs:
     default: "disabled"
   tracing:
     description: |
-      Tracing enablement (W8.5 / W7.7): true / false. Wins over the
+      Tracing enablement: true / false. Wins over the
       .mergecraft/config.yaml ``tracing.enabled`` block when set. Unset
       defers to the config (default off).
     required: false
     default: ""
   tracing-to:
     description: |
-      Tracing shorthand (W8.5 / W7.7): ``local_files`` / ``logfire`` /
+      Tracing shorthand: ``local_files`` / ``logfire`` /
       ``otel``. Wins over the config block. ``logfire`` requires the
       optional ``[tracing]`` extra plus a `LOGFIRE_TOKEN` secret wired via
       `logfire-token` below; ``otel`` requires an ``otel-endpoint``.
@@ -144,7 +144,7 @@ inputs:
     default: ""
   logfire-token:
     description: |
-      Direct logfire token (W8.5 / W7.7). Wire from a `LOGFIRE_TOKEN`
+      Direct logfire token. Wire from a `LOGFIRE_TOKEN`
       GitHub Actions secret (interpolated in your workflow YAML, not written
       literally here) so the secret never appears in the workflow file.
       Held at runtime only; never inlined into config dumps.
@@ -152,7 +152,7 @@ inputs:
     default: ""
   otel-endpoint:
     description: |
-      OTLP collector URL (W8.5 / W7.7): e.g.
+      OTLP collector URL: e.g.
       ``http://127.0.0.1:4318/v1/traces``. Wins over the config block.
     required: false
     default: ""

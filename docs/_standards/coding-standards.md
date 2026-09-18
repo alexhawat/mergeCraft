@@ -788,7 +788,7 @@ This is enforced by `scripts/check_action_yml_hygiene.py` (`make lint` / pre-com
 
 ## Public documentation
 
-Tracked public markdown describes behaviour. It does not cite gitignored operator wave-plan paths or a decision ledger (`D##` tokens, "Wave plan" preambles). Where history matters, write one sentence of prose. Do not invent a replacement numbering scheme.
+Tracked public markdown describes behaviour. It does not cite gitignored operator wave-plan paths or a decision ledger (`D##` tokens, `W#.#` tokens, "Wave plan" preambles). Where history matters, write one sentence of prose. Do not invent a replacement numbering scheme.
 
 `scripts/check_tracked_markdown.py` scans `git ls-files '*.md'` only and never walks gitignored trees. It is wired into `make lint` and pre-commit. The historical changelog and internal test-plan / eval / fixture trees keep their existing vocabulary until those follow-ups land.
 
@@ -830,7 +830,7 @@ Keep the hook `rev`s aligned with the pinned dev-dependency versions in `pyproje
 | Script | Enforces | Runs in |
 |--------|----------|---------|
 | `scripts/check_loguru_only.py` | No stdlib `logging` under `src/mergecraft/` | `make lint`, pre-commit |
-| `scripts/check_tracked_markdown.py` | No decision-ledger tokens or gitignored wave-plan citations in public markdown | `make lint`, pre-commit |
+| `scripts/check_tracked_markdown.py` | No decision-ledger tokens, wave-dot tokens, or gitignored wave-plan citations in public markdown | `make lint`, pre-commit |
 | `scripts/check_conventional_commit.py` | Commit subject format | `commit-msg` hook |
 | `scripts/ci_resume.sh` | Resumable `make ci` with checkpointing | `make ci-resume` / `ci-reset` |
 | `mergecraft.analyzers.catalog_docs` | Analyzer manifest ↔ fixture ↔ doc ↔ severity parity | `make catalog-check`, `ci-static` |

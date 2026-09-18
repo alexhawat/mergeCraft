@@ -204,7 +204,7 @@ issues-showcase-readiness follow-up. -->
   subprocesses drop to the unprivileged ``mergecraft`` user via ``setpriv``
   while the action entrypoint stays root for GitHub file commands.
 - **Network is outside the hard sandbox guarantee when ``unshare --net`` is
-  unavailable (W12.7)** — on CI hosts that support it, untrusted MCP shell
+  unavailable** — on CI hosts that support it, untrusted MCP shell
   spawns with ``unshare --pid --net`` so the child has an empty network
   namespace. Where that probe fails (macOS runners, restricted containers,
   missing CAP_SYS_ADMIN), shell egress is not kernel-isolated; the W2

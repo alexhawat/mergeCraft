@@ -68,7 +68,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
 | `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
 | `mergecraft eval list` | List cases in the bank. |
-| `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44, W12.1). |
+| `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44). |
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
 | `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set (#140). |
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |

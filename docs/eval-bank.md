@@ -385,9 +385,9 @@ The following rules are pinned:
 - `src/mergecraft/cli/eval_cmd.py` — the I/O shell (`add`, `list`,
   `replay`, `promote`).
 - `src/mergecraft/evidence/packet.py` — the typed `EvalMetadata`
-  breadcrumb on `MergeEvidencePacket.evals` (W12.2; schema `1.2.0`).
+  breadcrumb on `MergeEvidencePacket.evals` (schema `1.2.0`).
 - `src/mergecraft/mcp/review.py` — the `create_pull_request_review` MCP
-  tool + the `_maybe_suggest_eval_add` auto-prompt (W12.4).
+  tool + the `_maybe_suggest_eval_add` auto-prompt.
 - `tests/evals/test_store.py`, `tests/evals/test_replay.py`,
   `tests/evals/test_promote.py` — the pinned tests for the store,
   the replay diff, and the promote-to-permanent-test workflow.
