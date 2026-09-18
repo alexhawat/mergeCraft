@@ -13,7 +13,9 @@ Exports:
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +24,8 @@ from loguru import logger
 from mergecraft.verify.extra import require_browser_extra
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from mergecraft.verify.driver import BrowserDriver
 
 
@@ -63,6 +67,23 @@ def _cookie_names(cookies: list[dict[str, Any]]) -> list[str]:
     return [str(item["name"]) for item in cookies if "name" in item]
 
 
+def _release_caller_event_loop() -> None:
+    """Clear the thread's running-loop flag left by sync Playwright ``start()``.
+
+    ``sync_playwright().start()`` marks a loop running on this thread so a
+    later ``asyncio.run`` in the CLI raises. Detach the flag only; do not
+    stop Playwright — ``PlaywrightBrowserDriver.close`` owns that.
+
+    Returns:
+        None: The caller thread has no running loop.
+
+    Examples:
+        >>> callable(_release_caller_event_loop)
+        True
+    """
+    asyncio.events._set_running_loop(None)
+
+
 def _cookies_for_playwright(cookies: list[dict[str, Any]], page_url: str) -> list[dict[str, Any]]:
     """Copy cookies and attach ``url`` when Playwright would otherwise reject them.
 
@@ -98,6 +119,7 @@ class PlaywrightBrowserDriver:
         *,
         playwright: Any = None,
         browser: Any = None,
+        playwright_loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
         """Bind to an existing Playwright page and start collecting console rows.
 
@@ -109,6 +131,9 @@ class PlaywrightBrowserDriver:
                 ``close``. Defaults to ``None``.
             browser (Any, optional): Launched Chromium handle to close on
                 ``close``. Defaults to ``None``.
+            playwright_loop (asyncio.AbstractEventLoop | None, optional): Loop
+                ``sync_playwright().start()`` left running. Rebound around
+                later sync calls after launch detaches it. Defaults to ``None``.
 
         Returns:
             None: The adapter is ready for protocol calls.
@@ -120,8 +145,43 @@ class PlaywrightBrowserDriver:
         self._page = page
         self._playwright = playwright
         self._browser = browser
+        self._playwright_loop = playwright_loop
         self._console: list[dict[str, str]] = []
         page.on("console", self._on_console)
+
+    @contextmanager
+    def _playwright_loop_bound(self) -> Iterator[None]:
+        """Rebind Playwright's ``start()`` loop for one sync API call.
+
+        Launch detaches the running-loop flag so the CLI can run a coroutine
+        afterward. Sync Playwright still needs that loop for ``stop()`` and
+        page calls.
+
+        Yields:
+            None: The Playwright loop is the thread's running loop, if any.
+        """
+        loop = self._playwright_loop
+        if loop is None:
+            yield
+            return
+        previous = asyncio.events._get_running_loop()
+        asyncio.events._set_running_loop(loop)
+        try:
+            yield
+        finally:
+            asyncio.events._set_running_loop(previous)
+
+    async def _playwright_call(self, op: Callable[[], Any]) -> Any:
+        """Run a Playwright operation with its ``start()`` loop rebound.
+
+        Args:
+            op (Callable[[], Any]): Sync or async Playwright call.
+
+        Returns:
+            Any: The operation result, awaited when needed.
+        """
+        with self._playwright_loop_bound():
+            return await _await_if_needed(op())
 
     def close(self) -> None:
         """Close a launched Chromium and stop Playwright when we own them.
@@ -138,11 +198,15 @@ class PlaywrightBrowserDriver:
         self._browser = None
         self._playwright = None
         try:
-            if browser is not None:
-                browser.close()
+            with self._playwright_loop_bound():
+                try:
+                    if browser is not None:
+                        browser.close()
+                finally:
+                    if playwright is not None:
+                        playwright.stop()
         finally:
-            if playwright is not None:
-                playwright.stop()
+            self._playwright_loop = None
 
     def _on_console(self, message: Any) -> None:
         """Record a Playwright console message as ``level`` / ``text``.
@@ -175,7 +239,7 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.navigate)
             True
         """
-        await _await_if_needed(self._page.goto(url))
+        await self._playwright_call(lambda: self._page.goto(url))
 
     async def extract_text(self, selector: str | None = None) -> str:
         """Return visible text for ``selector``, or the page body when omitted.
@@ -192,7 +256,7 @@ class PlaywrightBrowserDriver:
             True
         """
         target = "body" if selector is None else selector
-        return str(await _await_if_needed(self._page.inner_text(target)))
+        return str(await self._playwright_call(lambda: self._page.inner_text(target)))
 
     async def click(self, selector: str) -> None:
         """Click the first element matching ``selector``.
@@ -208,7 +272,7 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.click)
             True
         """
-        await _await_if_needed(self._page.click(selector))
+        await self._playwright_call(lambda: self._page.click(selector))
 
     async def fill(self, selector: str, value: str) -> None:
         """Replace the contents of the field matching ``selector``.
@@ -225,7 +289,7 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.fill)
             True
         """
-        await _await_if_needed(self._page.fill(selector, value))
+        await self._playwright_call(lambda: self._page.fill(selector, value))
 
     async def type_text(self, text: str) -> None:
         """Type ``text`` into the focused element.
@@ -241,7 +305,7 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.type_text)
             True
         """
-        await _await_if_needed(self._page.keyboard.type(text))
+        await self._playwright_call(lambda: self._page.keyboard.type(text))
 
     async def press_key(self, key: str) -> None:
         """Press a single named key (for example ``Enter``).
@@ -257,7 +321,7 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.press_key)
             True
         """
-        await _await_if_needed(self._page.keyboard.press(key))
+        await self._playwright_call(lambda: self._page.keyboard.press(key))
 
     async def scroll(self, *, x: int = 0, y: int = 0) -> None:
         """Scroll the page by ``x`` / ``y`` pixels.
@@ -274,8 +338,8 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.scroll)
             True
         """
-        await _await_if_needed(
-            self._page.evaluate("([dx, dy]) => { window.scrollBy(dx, dy); }", [x, y])
+        await self._playwright_call(
+            lambda: self._page.evaluate("([dx, dy]) => { window.scrollBy(dx, dy); }", [x, y])
         )
 
     async def screenshot(self, path: str | Path) -> Path:
@@ -294,7 +358,7 @@ class PlaywrightBrowserDriver:
         """
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        await _await_if_needed(self._page.screenshot(path=dest))
+        await self._playwright_call(lambda: self._page.screenshot(path=dest))
         return dest
 
     async def get_cookies(self) -> list[dict[str, Any]]:
@@ -308,7 +372,7 @@ class PlaywrightBrowserDriver:
             >>> inspect.iscoroutinefunction(PlaywrightBrowserDriver.get_cookies)
             True
         """
-        cookies = await _await_if_needed(self._page.context.cookies())
+        cookies = await self._playwright_call(lambda: self._page.context.cookies())
         logger.debug("get_cookies names={}", _cookie_names([dict(c) for c in cookies]))
         return [dict(cookie) for cookie in cookies]
 
@@ -328,7 +392,7 @@ class PlaywrightBrowserDriver:
         """
         logger.debug("set_cookies names={}", _cookie_names(cookies))
         prepared = _cookies_for_playwright(cookies, self._page.url)
-        await _await_if_needed(self._page.context.add_cookies(prepared))
+        await self._playwright_call(lambda: self._page.context.add_cookies(prepared))
 
     async def console_messages(self) -> list[dict[str, str]]:
         """Return captured console rows as ``level`` / ``text`` dicts.
@@ -351,9 +415,10 @@ def launch_playwright_driver(
 ) -> PlaywrightBrowserDriver | BrowserDriver:
     """Start headless Chromium and return a bound ``PlaywrightBrowserDriver``.
 
-    Uses the sync Playwright API so this can run before the runner's
-    ``asyncio.run`` loop. The returned driver keeps Playwright and browser
-    handles for ``close()`` after the run.
+    Uses the sync Playwright API so this can run before the runner loop.
+    Detaches the running-loop flag ``start()`` leaves on this thread so the
+    caller can run a coroutine afterward. The returned driver keeps
+    Playwright and browser handles for ``close()`` after the run.
 
     Args:
         width (int | None, optional): Viewport width in pixels. Applied when
@@ -375,6 +440,7 @@ def launch_playwright_driver(
     from playwright.sync_api import sync_playwright
 
     playwright = sync_playwright().start()
+    playwright_loop = asyncio.events._get_running_loop()
     browser = None
     owned = False
     try:
@@ -383,8 +449,14 @@ def launch_playwright_driver(
         if width is not None and height is not None:
             page_kwargs["viewport"] = {"width": width, "height": height}
         page = browser.new_page(**page_kwargs)
-        driver = PlaywrightBrowserDriver(page, playwright=playwright, browser=browser)
+        driver = PlaywrightBrowserDriver(
+            page,
+            playwright=playwright,
+            browser=browser,
+            playwright_loop=playwright_loop,
+        )
         owned = True
+        _release_caller_event_loop()
         return driver
     finally:
         if not owned:

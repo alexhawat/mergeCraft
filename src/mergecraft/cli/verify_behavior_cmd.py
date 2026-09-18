@@ -9,8 +9,10 @@ tests and for ``--artifacts-dir`` / ``--input`` runs.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import typer
 from loguru import logger
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
     from mergecraft.verify.driver import BrowserDriver
 
 _PNG_HEADER = b"\x89PNG\r\n\x1a\n"
+T = TypeVar("T")
 
 
 class _StubBrowserDriver:
@@ -115,6 +118,33 @@ def _extra_missing() -> bool:
     except BrowserExtraMissingError:
         return True
     return False
+
+
+def run_async(coro: Coroutine[Any, Any, T]) -> T:
+    """Run ``coro`` even when this thread already has a running loop.
+
+    Playwright's sync ``start()`` can leave ``asyncio`` marked running on
+    the caller thread, so a nested ``asyncio.run`` would raise. When a loop
+    is already running, drive the coroutine on a worker thread.
+
+    Args:
+        coro (Coroutine[Any, Any, T]): Awaitable to drive to completion.
+
+    Returns:
+        T: The coroutine's result.
+
+    Examples:
+        >>> async def _one() -> int:
+        ...     return 1
+        >>> run_async(_one())
+        1
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 def _close_driver(driver: object) -> None:
@@ -244,7 +274,7 @@ def run(
 
     settings = load_repo_settings(root=Path.cwd())
     try:
-        report = asyncio.run(
+        report = run_async(
             run_verify_behavior(
                 spec,
                 driver=driver,

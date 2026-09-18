@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bump enables by default and which fires 493 times on this repo's docs tables;
   consumer repos without their own config still inherit it.
 
+### Fixed
+
+- `mergecraft verify-behavior` no longer crashes after launching Chromium when
+  `mergecraft[browser]` is installed (#61)
+
 ### Added
 
 - `mergecraft verify-behavior` reproduces a bug or verifies acceptance
