@@ -14,8 +14,10 @@ mock only Playwright start / launch / new_page, so they do not skip the
 `asyncio.run` crash. When the `playwright` package is absent those cases
 still run (fake `sync_playwright().start()`); an extra
 `importorskip("playwright")` case is skipped so the default `dev` extra
-stays green. A real-browser smoke test, if added later, must be marked
-`integration` so `make test` excludes it.
+stays green. Async-driver tests fake `async_playwright` and make
+`sync_playwright` raise, so `make test` never needs Chromium. A
+real-browser smoke test, if added later, must be marked `integration` so
+`make test` excludes it.
 
 ## Greening milestones
 
@@ -24,7 +26,9 @@ launch, and CLI event-loop milestones are green. Extra present calls
 `launch_playwright_driver` (never the CLI stub); adapter tests bind
 `PlaywrightBrowserDriver` to an in-process fake Page. Extra-present
 `verify-behavior` uses `run_async` after launch; launch does not leave
-a running loop that blocks `asyncio.run`.
+a running loop that blocks `asyncio.run`. The async Playwright runner
+milestone is still red: launch must not call `sync_playwright`, and
+`navigate` must await async `page.goto` from inside `run_verify_behavior`.
 
 | Milestone | What lands | Suite |
 | --- | --- | --- |
@@ -34,6 +38,7 @@ a running loop that blocks `asyncio.run`.
 | Review consume | `--verification-report`, fence-before-prompt, behaviour section, no-report path, blocked surfaced | `test_review_integration.py` |
 | Operator-path launch | Extra present calls `launch_playwright_driver` (never the CLI stub); adapter against a fake Page; extra-absent still names `mergecraft[browser]` | `test_playwright_launch.py` |
 | CLI event loop | Extra-present `verify-behavior` uses `run_async` after launch; launch does not leave a running loop that blocks `asyncio.run` | `test_cli_event_loop.py` |
+| Async Playwright runner | Launch does not import or call `sync_playwright`; `navigate` / `inner_text` / `screenshot` await the async Page APIs; `run_verify_behavior` plus a launched driver returns a report when only `async_playwright` is faked | `test_async_playwright_runner.py` |
 
 Regression pins that must stay green:
 
@@ -80,6 +85,10 @@ Regression pins that must stay green:
 | After real `launch_playwright_driver` returns, `asyncio.run` succeeds (no Chromium) | CLI event loop | `test_cli_event_loop.py::test_launch_playwright_driver_does_not_block_asyncio_run` |
 | Extra-present CLI verify / reproduce / `--input` do not raise `RuntimeError` about a running event loop | CLI event loop | `test_cli_event_loop.py::test_extra_present_cli_does_not_raise_running_loop_error` |
 | Optional: same launch contract when the `playwright` package is installed (skipped otherwise) | CLI event loop | `test_cli_event_loop.py::test_optional_real_playwright_package_launch_allows_asyncio_run` |
+| `launch_playwright_driver` does not import or call `playwright.sync_api.sync_playwright`; return type is `PlaywrightBrowserDriver` | Async Playwright runner | `test_async_playwright_runner.py::test_launch_playwright_driver_does_not_use_sync_playwright` |
+| `PlaywrightBrowserDriver.navigate` awaits async `page.goto`; sync `goto` raises the running-task RuntimeError and is not used | Async Playwright runner | `test_async_playwright_runner.py::test_playwright_driver_navigate_awaits_async_goto_not_sync` |
+| Same async-not-sync contract for `inner_text` and `screenshot` | Async Playwright runner | `test_async_playwright_runner.py::test_playwright_driver_navigate_awaits_async_goto_not_sync` |
+| `run_verify_behavior` plus launched driver returns a report (`status` present) when `async_playwright` is faked and `sync_playwright` would raise; no hang (5s bound) | Async Playwright runner | `test_async_playwright_runner.py::test_run_verify_behavior_completes_with_async_playwright_fakes` |
 | Untrusted tier (`derive_trust_tier` → `untrusted`) is inert and reports `skipped` | Command | `test_trust_gate.py::test_untrusted_tier_is_inert_and_reports_skipped`, `…::test_pull_request_target_is_inert` |
 | Trust guard deletion: startup command must not run | Command | `test_trust_gate.py::test_untrusted_does_not_execute_startup_command` |
 | `shell: disabled` is inert on a trusted tier and names `shell` | Command | `test_trust_gate.py::test_shell_disabled_is_inert_even_when_trusted` |
@@ -117,8 +126,8 @@ Regression pins that must stay green:
 | `render_verification_markdown` | `mergecraft.verify.models` | `test_markdown_view.py` |
 | `BrowserDriver` | `mergecraft.verify.driver` | `test_driver_protocol.py` |
 | `BrowserExtraMissingError` / `require_browser_extra` | `mergecraft.verify.extra` | `test_extra.py` |
-| `launch_playwright_driver` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
-| `PlaywrightBrowserDriver` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
+| `launch_playwright_driver` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py`, `test_async_playwright_runner.py` |
+| `PlaywrightBrowserDriver` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py`, `test_async_playwright_runner.py` |
 | `_await_if_needed` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
 | `PlaywrightBrowserDriver.close` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
 | `_close_driver` | `mergecraft.cli.verify_behavior_cmd` | `test_playwright_launch.py` |
@@ -126,7 +135,7 @@ Regression pins that must stay green:
 | `_release_caller_event_loop` | `mergecraft.verify.playwright_driver` | `test_cli_event_loop.py` |
 | `_playwright_loop_bound` | `mergecraft.verify.playwright_driver` | `test_cli_event_loop.py` |
 | `_playwright_call` | `mergecraft.verify.playwright_driver` | `test_cli_event_loop.py` |
-| `run_verify_behavior` | `mergecraft.verify.runner` | `test_trust_gate.py`, `test_modes_and_inputs.py` |
+| `run_verify_behavior` | `mergecraft.verify.runner` | `test_trust_gate.py`, `test_modes_and_inputs.py`, `test_async_playwright_runner.py` |
 | `VerifyBehaviorSettings` | `mergecraft.config.settings` | `test_trust_gate.py` |
 | `resolve_artifacts_dir` / `redact_screenshot` | `mergecraft.verify.artifacts` | `test_artifacts_and_lifecycle.py` |
 | `prepare_verification_report_for_prompt` | `mergecraft.verify.review` | `test_review_integration.py` |
@@ -156,6 +165,15 @@ Removing `run_async` from `verify_behavior_cmd.run` (or calling
 cannot start fails
 `test_launch_playwright_driver_does_not_block_asyncio_run` and the
 extra-present CLI cases in `test_cli_event_loop.py`.
+
+Calling `sync_playwright` from `launch_playwright_driver` fails
+`test_launch_playwright_driver_does_not_use_sync_playwright` (the
+patched `sync_playwright` raises). Routing `navigate` through sync
+`page.goto` from a running task fails
+`test_playwright_driver_navigate_awaits_async_goto_not_sync`. A hang
+or that running-task RuntimeError from `run_verify_behavior` plus a
+launched driver fails
+`test_run_verify_behavior_completes_with_async_playwright_fakes`.
 
 ## Out of scope in this suite
 
