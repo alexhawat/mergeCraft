@@ -76,13 +76,13 @@ async def test_artifacts_are_redacted_before_write(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("strategy", ["env", "manual"])
+@pytest.mark.parametrize("strategy", ["env", "manual", "mock"])
 async def test_auth_suppresses_screenshots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     strategy: str,
 ) -> None:
-    """env- and manual-auth runs skip screenshots until pixel redaction exists."""
+    """Authenticated runs skip screenshots until pixel redaction exists."""
     fake = FakeBrowserDriver()
     artifacts_dir = tmp_path / "out"
     run = _run()
@@ -103,6 +103,28 @@ async def test_auth_suppresses_screenshots(
     assert not any(call[0] == "screenshot" for call in fake.calls)
     assert report.artifacts.screenshots == []
     assert not (artifacts_dir / "screenshot.png").exists()
+
+
+async def test_mock_auth_viewport_secret_suppresses_screenshot(tmp_path: Path) -> None:
+    """mock auth with credential-shaped page text must not write screenshot.png."""
+    fake = FakeBrowserDriver(page_text=f"signed in as {CANARY_TOKEN}")
+    artifacts_dir = tmp_path / "out"
+    run = _run()
+    report = await run(
+        make_input(
+            artifacts_dir=str(artifacts_dir),
+            auth={"strategy": "mock"},
+            credential_env_names=[],
+            actions=[{"action": "fill", "selector": "#password", "text": CANARY_TOKEN}],
+        ),
+        driver=fake,
+        offline=True,
+    )
+    assert fake.last_screenshot is None
+    assert not any(call[0] == "screenshot" for call in fake.calls)
+    assert report.artifacts.screenshots == []
+    assert not (artifacts_dir / "screenshot.png").exists()
+    assert CANARY_TOKEN not in report.model_dump_json()
 
 
 async def test_run_without_artifacts_dir_writes_no_screenshot_to_cwd(

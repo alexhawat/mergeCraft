@@ -119,8 +119,9 @@ an in-process fake. A real-browser smoke test, if added later, must be marked
 
 Cookie handling on the protocol uses name/value dicts. Reports and logs record
 credential **names** only — never values. Post-run `screenshot.png` is omitted
-when `auth.strategy` is `env` or `manual` until pixel redaction exists — login
-forms and session cookies can paint secrets into the viewport. A nullable
+until pixel redaction exists — `auth.strategy` is not a reliable signal that the
+viewport is secret-free (a `mock` spec can still run against an authenticated
+CDP session or fill credentials via actions). A nullable
 `artifacts.trace` field may be filled when the driver records tracing at no
 extra pipeline cost; there is no video recording pipeline.
 

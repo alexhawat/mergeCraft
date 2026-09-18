@@ -56,10 +56,9 @@ def resolve_artifacts_dir(
 def redact_screenshot(path: Path) -> Path:
     """Redact a screenshot before it is referenced in a report.
 
-    Pixel OCR is not implemented. ``run_verify_behavior`` suppresses
-    screenshots entirely when ``auth.strategy`` is ``env`` or ``manual`` so
-    credential-bearing viewports are never written. For other strategies, the
-    hook exists so a future redactor can rewrite ``path`` in one place.
+    Pixel OCR is not implemented. ``run_verify_behavior`` suppresses all
+    screenshots until this hook can rewrite ``path`` in place — YAML
+    ``auth.strategy`` is not a reliable signal that the viewport is secret-free.
 
     Args:
         path (Path): Path written by ``BrowserDriver.screenshot``.
