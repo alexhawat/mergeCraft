@@ -8,16 +8,22 @@ before it reaches any prompt.
 
 CI never launches a live browser. Unit tests drive an in-process fake in
 `tests/verify/fake_driver.py`, a fake Playwright `Page` in
-`test_playwright_launch.py`, and a mocked `launch_playwright_driver`. A
-real-browser smoke test, if added later, must be marked `integration` so
-`make test` excludes it.
+`test_playwright_launch.py`, and a mocked `launch_playwright_driver` for
+bind tests. Event-loop tests call the real `launch_playwright_driver` and
+mock only Playwright start / launch / new_page, so they do not skip the
+`asyncio.run` crash. When the `playwright` package is absent those cases
+still run (fake `sync_playwright().start()`); an extra
+`importorskip("playwright")` case is skipped so the default `dev` extra
+stays green. A real-browser smoke test, if added later, must be marked
+`integration` so `make test` excludes it.
 
 ## Greening milestones
 
 The report, driver-protocol, command, review-consume, and operator-path
 launch milestones are green. Extra present calls `launch_playwright_driver`
 (never the CLI stub); adapter tests bind `PlaywrightBrowserDriver` to an
-in-process fake Page.
+in-process fake Page. The CLI event-loop milestone is still red until
+`run_async` lands and launch no longer blocks `asyncio.run`.
 
 | Milestone | What lands | Suite |
 | --- | --- | --- |
@@ -26,6 +32,7 @@ in-process fake Page.
 | Command | `mergecraft verify-behavior`, trust and `shell: disabled` gates, artifact layout, redaction, process cleanup | `test_trust_gate.py`, `test_modes_and_inputs.py`, `test_artifacts_and_lifecycle.py`, `test_cli.py` |
 | Review consume | `--verification-report`, fence-before-prompt, behaviour section, no-report path, blocked surfaced | `test_review_integration.py` |
 | Operator-path launch | Extra present calls `launch_playwright_driver` (never the CLI stub); adapter against a fake Page; extra-absent still names `mergecraft[browser]` | `test_playwright_launch.py` |
+| CLI event loop | Extra-present `verify-behavior` uses `run_async` after launch; launch does not leave a running loop that blocks `asyncio.run` | `test_cli_event_loop.py` |
 
 Regression pins that must stay green:
 
@@ -68,6 +75,10 @@ Regression pins that must stay green:
 | Adapter: `screenshot` → `page.screenshot`; click / fill / type / press / scroll call matching page APIs | Operator-path launch | `test_playwright_launch.py::test_playwright_driver_screenshot_calls_page_screenshot`, `…::test_playwright_driver_actions_call_matching_page_apis` |
 | Adapter: `console_messages` from `page.on("console")`; cookies log names only | Operator-path launch | `test_playwright_launch.py::test_playwright_driver_console_messages_from_page_on`, `…::test_playwright_driver_cookie_helpers_record_names_only` |
 | CLI verify with extra present reports launched page text, not `stub page` | Operator-path launch | `test_playwright_launch.py::test_cli_verify_does_not_emit_stub_pass_when_extra_present` |
+| `run_async` returns a coroutine result from an already-running loop; `run` calls it and does not call `asyncio.run(` | CLI event loop | `test_cli_event_loop.py::test_run_async_returns_result_from_a_running_loop` |
+| After real `launch_playwright_driver` returns, `asyncio.run` succeeds (no Chromium) | CLI event loop | `test_cli_event_loop.py::test_launch_playwright_driver_does_not_block_asyncio_run` |
+| Extra-present CLI verify / reproduce / `--input` do not raise `RuntimeError` about a running event loop | CLI event loop | `test_cli_event_loop.py::test_extra_present_cli_does_not_raise_running_loop_error` |
+| Optional: same launch contract when the `playwright` package is installed (skipped otherwise) | CLI event loop | `test_cli_event_loop.py::test_optional_real_playwright_package_launch_allows_asyncio_run` |
 | Untrusted tier (`derive_trust_tier` → `untrusted`) is inert and reports `skipped` | Command | `test_trust_gate.py::test_untrusted_tier_is_inert_and_reports_skipped`, `…::test_pull_request_target_is_inert` |
 | Trust guard deletion: startup command must not run | Command | `test_trust_gate.py::test_untrusted_does_not_execute_startup_command` |
 | `shell: disabled` is inert on a trusted tier and names `shell` | Command | `test_trust_gate.py::test_shell_disabled_is_inert_even_when_trusted` |
@@ -83,6 +94,7 @@ Regression pins that must stay green:
 | Post-auth screenshots pass redaction | Command | `test_artifacts_and_lifecycle.py::test_post_auth_screenshots_are_redacted` |
 | App process terminated on success, failure, and blocked | Command | `test_artifacts_and_lifecycle.py::test_app_process_is_terminated_on_every_path` |
 | CLI flags: `--mode`, `--base`, `--start-command`, `--url`, `--criteria-file`, `--artifacts-dir`, `--issue-file`, `--input`, `--viewport` | Command | `test_cli.py::test_cli_exposes_issue_61_flags_plus_absorbed_extras` |
+| Extra-absent CLI verify / reproduce / `--input` still use the stub path | Command | `test_cli.py` (module fixture hides Playwright) |
 | Report is nonce-fenced via `utils/fence.py` before any prompt | Review consume | `test_review_integration.py::test_report_enters_the_prompt_fenced` |
 | Review output has a distinct behaviour section | Review consume | `test_review_integration.py::test_review_includes_a_behavior_section` |
 | Blocked report is surfaced, not swallowed | Review consume | `test_review_integration.py::test_blocked_report_is_surfaced_not_swallowed` |
@@ -109,6 +121,7 @@ Regression pins that must stay green:
 | `_await_if_needed` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
 | `PlaywrightBrowserDriver.close` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
 | `_close_driver` | `mergecraft.cli.verify_behavior_cmd` | `test_playwright_launch.py` |
+| `run_async` | `mergecraft.cli.verify_behavior_cmd` | `test_cli_event_loop.py` |
 | `run_verify_behavior` | `mergecraft.verify.runner` | `test_trust_gate.py`, `test_modes_and_inputs.py` |
 | `VerifyBehaviorSettings` | `mergecraft.config.settings` | `test_trust_gate.py` |
 | `resolve_artifacts_dir` / `redact_screenshot` | `mergecraft.verify.artifacts` | `test_artifacts_and_lifecycle.py` |
@@ -131,6 +144,14 @@ returning `_StubBrowserDriver` while the extra is present fails
 returns a sentinel whose text is not `stub page`). Removing the
 `PlaywrightBrowserDriver(` construction from the launch path fails
 `test_launch_playwright_driver_is_referenced_from_production_src`.
+
+Removing `run_async` from `verify_behavior_cmd.run` (or calling
+`asyncio.run(` there directly) fails
+`test_run_async_returns_result_from_a_running_loop`. Leaving
+`sync_playwright().start()` running on the CLI thread so `asyncio.run`
+cannot start fails
+`test_launch_playwright_driver_does_not_block_asyncio_run` and the
+extra-present CLI cases in `test_cli_event_loop.py`.
 
 ## Out of scope in this suite
 

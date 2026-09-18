@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from tests.verify.support import CLI_FLAGS, SAMPLE_YAML_INPUT
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 _RUNNER = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _extra_absent_stub_path() -> Iterator[None]:
+    """These cases pin the extra-absent stub path, not a live Playwright launch."""
+    hidden = {
+        name: sys.modules.pop(name)
+        for name in list(sys.modules)
+        if name == "playwright" or name.startswith("playwright.")
+    }
+    sys.modules["playwright"] = None  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        sys.modules.pop("playwright", None)
+        sys.modules.update(hidden)
 
 
 def test_verify_behavior_is_registered() -> None:
