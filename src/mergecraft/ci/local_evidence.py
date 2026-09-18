@@ -26,18 +26,20 @@ Exports:
         SKIP_EXECUTION_FAILED — Timeout, no artifact, or failed tool run.
         plan_local_mutation_paths — Changed-path ∩ allowlist (empty = changed).
         bound_mutants — Cap a mutant list at ``max_mutants``.
+        mutmut_selection_patterns — Wildcards for ``mutmut run`` from a diff.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
@@ -45,11 +47,12 @@ from typing import TYPE_CHECKING, TypeVar
 from loguru import logger
 
 from mergecraft.analyzers.scope import parse_diff_scope
+from mergecraft.ci.changed_functions import changed_functions_from_diff
 from mergecraft.ci.coverage import coverage_findings, parse_coverage_artifact
 from mergecraft.ci.mutation import mutation_findings, parse_mutation_artifact
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
     from mergecraft.analyzers.finding import Finding
     from mergecraft.ci.crap import CrapBands
@@ -68,6 +71,9 @@ _GITHUB_OWNER_REPO = re.compile(
     r"github\.com(?::\d+)?[:/]+([^/]+)/([^/]+?)(?:\.git)?/?$",
     re.IGNORECASE,
 )
+_MUTMUT_CLASS_SEP = "\u01c1"
+_MUTMUT_KEY_SUFFIX = re.compile(r"__mutmut_\d+$")
+_MUTMUT_KILLED_EXIT_CODES = frozenset({1, 3})
 
 T = TypeVar("T")
 
@@ -347,37 +353,197 @@ def _execute_coverage(repo_root: Path, *, timeout_seconds: int) -> Path | None:
     return dest
 
 
+def _path_to_dotted_module(path: str) -> str:
+    module_path = Path(path)
+    if module_path.suffix == ".py":
+        module_path = module_path.with_suffix("")
+    parts = module_path.parts
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    return ".".join(parts)
+
+
+def _mutmut_only_mutate_patterns(paths: Sequence[str]) -> list[str]:
+    patterns: list[str] = []
+    for path in paths:
+        if path.endswith(".py"):
+            patterns.append(path)
+        else:
+            patterns.append(f"{path}*")
+    return patterns
+
+
+def _mutmut_source_path_dirs(paths: Sequence[str]) -> list[str]:
+    roots: set[str] = set()
+    for path in paths:
+        parts = Path(path).parts
+        if (len(parts) >= 2 and parts[0] in {"src", "lib"}) or parts:
+            roots.add(parts[0])
+    return sorted(roots)
+
+
+def _mutmut_pattern_for_symbol(path: str, function_name: str) -> str:
+    module = _path_to_dotted_module(path)
+    return f"{module}.x_{function_name}*"
+
+
+def _mutmut_pattern_for_path(path: str) -> str:
+    module = _path_to_dotted_module(path)
+    return f"{module}.*"
+
+
+def mutmut_selection_patterns(
+    *,
+    paths: Sequence[str],
+    diff: str,
+    source_tree: Mapping[str, str],
+    max_mutants: int = DEFAULT_MAX_MUTANTS,
+) -> list[str]:
+    """Return bounded ``mutmut run`` wildcard patterns for changed functions (C-D8).
+
+    mutmut 3+ selects mutants via configuration (``only_mutate``) and optional
+    ``mutmut run`` name patterns — not ``--paths-to-mutate`` or ID ranges.
+    """
+    patterns: list[str] = []
+    seen: set[str] = set()
+    for symbol in changed_functions_from_diff(diff, source_tree):
+        pattern = _mutmut_pattern_for_symbol(symbol.path, symbol.name)
+        if pattern in seen:
+            continue
+        seen.add(pattern)
+        patterns.append(pattern)
+    if not patterns:
+        for path in paths:
+            pattern = _mutmut_pattern_for_path(path)
+            if pattern in seen:
+                continue
+            seen.add(pattern)
+            patterns.append(pattern)
+    return bound_mutants(patterns, max_mutants=max_mutants)
+
+
+def _function_name_from_mutant_key(mutant_key: str) -> str:
+    mangled = _MUTMUT_KEY_SUFFIX.sub("", mutant_key.rsplit(".", 1)[-1])
+    if _MUTMUT_CLASS_SEP in mangled:
+        return mangled.split(_MUTMUT_CLASS_SEP)[-1]
+    if mangled.startswith("x_"):
+        return mangled[2:]
+    return mangled
+
+
+def _mutmut_status_from_exit_code(exit_code: int | None) -> str | None:
+    if exit_code in _MUTMUT_KILLED_EXIT_CODES:
+        return "killed"
+    if exit_code == 0:
+        return "survived"
+    return None
+
+
+def _export_mutmut_json(repo_root: Path) -> Path | None:
+    mutants_dir = repo_root / "mutants"
+    if not mutants_dir.is_dir():
+        return None
+    rows: list[dict[str, object]] = []
+    mutant_id = 0
+    for meta_path in sorted(mutants_dir.rglob("*.meta")):
+        rel_source = meta_path.relative_to(mutants_dir).with_suffix("")
+        source_path = rel_source.as_posix()
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("local mutation: unreadable meta {} — {}", meta_path, exc)
+            continue
+        exit_codes = meta.get("exit_code_by_key")
+        if not isinstance(exit_codes, dict):
+            continue
+        for mutant_key, exit_code in exit_codes.items():
+            if not isinstance(mutant_key, str):
+                continue
+            status = _mutmut_status_from_exit_code(
+                exit_code if isinstance(exit_code, int) else None
+            )
+            if status is None:
+                continue
+            mutant_id += 1
+            rows.append(
+                {
+                    "id": str(mutant_id),
+                    "filename": source_path,
+                    "line": None,
+                    "status": status,
+                    "function": _function_name_from_mutant_key(mutant_key),
+                }
+            )
+    if not rows:
+        return None
+    dest = Path(tempfile.mkdtemp(prefix="mergecraft-local-mut-")) / "mutmut-results.json"
+    dest.write_text(
+        json.dumps({"schema_version": 1, "mutants": rows}, indent=2),
+        encoding="utf-8",
+    )
+    return dest
+
+
+@contextmanager
+def _ephemeral_mutmut_config(
+    repo_root: Path,
+    *,
+    only_mutate: Sequence[str],
+    source_paths: Sequence[str],
+) -> Iterator[None]:
+    setup_cfg = repo_root / "setup.cfg"
+    backup = setup_cfg.read_text(encoding="utf-8") if setup_cfg.is_file() else None
+    lines = ["[mutmut]", "only_mutate =", *[f"    {pattern}" for pattern in only_mutate]]
+    if source_paths:
+        if len(source_paths) == 1:
+            lines.append(f"source_paths = {source_paths[0]}")
+        else:
+            lines.extend(["source_paths =", *[f"    {path}" for path in source_paths]])
+    setup_cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        yield
+    finally:
+        if backup is None:
+            setup_cfg.unlink(missing_ok=True)
+        else:
+            setup_cfg.write_text(backup, encoding="utf-8")
+
+
 def _execute_mutation(
     repo_root: Path,
     *,
     timeout_seconds: int,
     paths: Sequence[str],
+    diff: str,
     max_mutants: int = DEFAULT_MAX_MUTANTS,
 ) -> Path | None:
     """Best-effort mutmut run. Returns a JSON artifact when one appears."""
     mutmut = shutil.which("mutmut")
-    if mutmut is None:
+    if mutmut is None or not paths:
         return None
-    candidates = (
-        repo_root / "mutmut-results.json",
-        repo_root / "mutmut-survivor.json",
-        repo_root / "mutation-report.json",
+    source_tree = _load_source_tree(repo_root, diff)
+    selection = mutmut_selection_patterns(
+        paths=paths,
+        diff=diff,
+        source_tree=source_tree,
+        max_mutants=max_mutants,
     )
-    preexisting = {path: path.is_file() for path in candidates}
-    started = time.time()
+    only_mutate = _mutmut_only_mutate_patterns(paths)
+    source_paths = _mutmut_source_path_dirs(paths)
+    cmd = [mutmut, "run", *selection]
     try:
-        cmd = [mutmut, "run"]
-        if paths:
-            cmd.extend(["--paths-to-mutate", ",".join(paths)])
-        if max_mutants > 0:
-            cmd.append(f"1-{max_mutants}")
-        run_result = subprocess.run(
-            _sandboxed_argv(cmd, repo_root=repo_root),
-            cwd=repo_root,
-            timeout=timeout_seconds,
-            capture_output=True,
-            check=False,
-        )
+        with _ephemeral_mutmut_config(
+            repo_root,
+            only_mutate=only_mutate,
+            source_paths=source_paths,
+        ):
+            run_result = subprocess.run(
+                _sandboxed_argv(cmd, repo_root=repo_root),
+                cwd=repo_root,
+                timeout=timeout_seconds,
+                capture_output=True,
+                check=False,
+            )
     except LocalEvidenceRefused:
         raise
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -386,13 +552,10 @@ def _execute_mutation(
     if run_result.returncode != 0:
         logger.warning("local mutation: mutmut exited {}", run_result.returncode)
         return None
-    for candidate in candidates:
-        if not candidate.is_file():
-            continue
-        if not preexisting.get(candidate, False) or candidate.stat().st_mtime >= started:
-            return candidate
-    logger.warning("local mutation: mutmut produced no fresh JSON artifact")
-    return None
+    artifact = _export_mutmut_json(repo_root)
+    if artifact is None:
+        logger.warning("local mutation: mutmut produced no exportable results")
+    return artifact
 
 
 def run_local_coverage(
@@ -534,6 +697,7 @@ def run_local_mutation(
                 repo_root,
                 timeout_seconds=timeout_seconds,
                 paths=planned,
+                diff=diff,
                 max_mutants=max_mutants,
             )
         except LocalEvidenceRefused as exc:
