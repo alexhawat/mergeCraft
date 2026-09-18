@@ -1,10 +1,10 @@
-# Operator action: land mergeCraft dogfood workflow on `main` (D6)
+# Operator action: land mergeCraft dogfood workflow on `main`
 
 **Status:** Blocked on operator — W10 does **not** push this to `main`.
 
 ## Why a separate step
 
-GitHub resolves `pull_request_target` workflows from the repository **default branch** (`main`), not from `pre-0.0.1`. Today `main` holds only `LICENSE`; Batch C worktrees target `pre-0.0.1`. Landing `.github/workflows/mergecraft.yml` on `main` is the first real content on the production default branch and must be an explicit operator decision (plan D6).
+GitHub resolves `pull_request_target` workflows from the repository **default branch** (`main`), not from `pre-0.0.1`. Today `main` holds only `LICENSE`; Batch C worktrees target `pre-0.0.1`. Landing `.github/workflows/mergecraft.yml` on `main` is the first real content on the production default branch and must be an explicit operator decision.
 
 ## Review artifact (Batch C PR)
 

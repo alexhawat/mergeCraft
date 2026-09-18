@@ -402,7 +402,7 @@ def promote(
         help="Overwrite an existing permanent test for the same case.",
     ),
 ) -> None:
-    """Promote a case into a permanent pytest test file (#44, W12.1).
+    """Promote a case into a permanent pytest test file (#44).
 
     The promoted test re-runs the case against the current code via
     ``mergecraft.evals.store.replay_case`` and fails when the replay

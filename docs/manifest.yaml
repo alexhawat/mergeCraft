@@ -101,7 +101,7 @@ pages:
     audience: contributor
     template: contributor
     generator: null
-    purpose: setup_failure_policy and setup_timeout runtime behaviour (S1 / D10).
+    purpose: setup_failure_policy and setup_timeout runtime behaviour.
 
   - path: docs/eval-bank.md
     audience: contributor
@@ -191,7 +191,7 @@ pages:
     audience: consumer
     template: consumer
     generator: null
-    purpose: Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot (D9).
+    purpose: Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot.
 
   - path: docs/workflows.md
     audience: consumer
@@ -209,7 +209,7 @@ pages:
     audience: satellite
     template: satellite
     generator: null
-    purpose: Architecture diagram SVG inventory and D2 regeneration commands.
+    purpose: Architecture diagram SVG inventory and Terrastruct diagram regeneration commands.
 
   - path: assets/brand/README.md
     audience: satellite

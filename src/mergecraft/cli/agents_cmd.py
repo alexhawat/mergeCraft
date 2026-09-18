@@ -325,7 +325,7 @@ def setmodel_cmd(
     ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
-    """Replace the primary model for an agent role; backups are preserved (D8)."""
+    """Replace the primary model for an agent role; backups are preserved."""
     _warn_agents_model_deprecation("setmodel", "assign-model <name> p0 <slug>")
     if all_agents and agent is not None:
         cli_bail("pass either --agent or --all, not both")

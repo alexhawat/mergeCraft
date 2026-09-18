@@ -1,6 +1,6 @@
 # Authentication
 
-## Quick start — init → auth → review (D10)
+## Quick start — init → auth → review
 
 A new consumer repo can review immediately after two commands — no manual roster
 editing:
@@ -156,7 +156,7 @@ regression-tested.
 
 | Form | Example | Provider id |
 |------|---------|-------------|
-| Singleton back-compat alias (PR #79 / D7) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `nous/...` or `tokenhub/...`) |
+| Singleton back-compat alias (PR #79) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `nous/...` or `tokenhub/...`) |
 | Indexed multi-provider | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1`, `_2`, `_3`, … | `provider_1`, `provider_2`, `provider_3`, … |
 
 Indexed env vars are operator-locked — both halves of each numeric pair
@@ -191,11 +191,11 @@ See [docs/action-reference.md](action-reference.md) for the full input list
 (every `with:` key, literal defaults, and descriptions).
 
 Behavioural note: `setup_failure_policy`'s and `setup_timeout`'s literal
-`action.yml` default is an empty string (unset defers to the S1/D10 policy
+`action.yml` default is an empty string (unset defers to the setup-script policy
 described below); the *effective* runtime default when left unset is
 `inconclusive` and `10m` respectively.
 
-- S1 / D10 — what a trusted-tier `setupScript` failure (non-zero exit **or**
+- What a trusted-tier `setupScript` failure (non-zero exit **or**
   timeout) maps to: `inconclusive` (effective default — neutral check
   conclusion, the run is no-verdict), `fail` (`configuration_error`), or
   `warn` (run continues; prompt still carries the failure text). Closed

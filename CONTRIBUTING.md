@@ -50,12 +50,12 @@ ladder (first hit wins):
 |-----------|-----------|
 | No ``GITHUB_WORKSPACE`` | process ``cwd`` |
 | ``cwd`` inside ``GITHUB_WORKSPACE`` (normal CI) | ``GITHUB_WORKSPACE`` |
-| ``cwd`` in a **sibling git worktree** of the same repo | the **cwd** worktree (#573 / D2) |
+| ``cwd`` in a **sibling git worktree** of the same repo | the **cwd** worktree (#573) |
 | otherwise | ``GITHUB_WORKSPACE`` |
 
 The coverage gate's base measurement runs inside a detached worktree and
 **re-exports ``GITHUB_WORKSPACE`` at that worktree** before calling
-``make coverage-measure`` (D1). Each tree therefore reads its own config even
+``make coverage-measure``. Each tree therefore reads its own config even
 when Actions still has the PR checkout as the outer workspace.
 
 ### Coverage gate contract (#432 / #536)
@@ -68,8 +68,8 @@ On ``pull_request``, ``scripts/ci_coverage_delta_gate.sh``:
 
 | Step | On failure |
 |------|------------|
-| Base measurement | **No** ``coverage-base.json``; delta **skipped** with an Actions ``::warning::`` and a job-summary line naming ``GITHUB_BASE_REF`` and the reason (D4/D6) |
-| Head ``make coverage-gate`` | Run **fails** — the ratchet stays on (D5) |
+| Base measurement | **No** ``coverage-base.json``; delta **skipped** with an Actions ``::warning::`` and a job-summary line naming ``GITHUB_BASE_REF`` and the reason |
+| Head ``make coverage-gate`` | Run **fails** — the ratchet stays on |
 | Delta comparison | Runs only when base measurement succeeded |
 
 On ``push`` / ``workflow_dispatch`` the script runs the head gate only (no
@@ -82,7 +82,7 @@ MERGECRAFT_LIVE=1 make test-integration-live
 ```
 
 `MERGECRAFT_LIVE=1` is the opt-in gate: without it, the live modules skip collection.
-With the flag set but secrets absent the suite still fails loudly (D9 — fail-closed).
+With the flag set but secrets absent the suite still fails loudly (fail-closed).
 
 ## Operator: branch protection
 
@@ -94,7 +94,7 @@ runs (#425). Requiring CI/CD makes that silence block merges. Apply this in GitH
 branch protection; this repository does not configure it automatically.
 
 `make lint` now includes ``scripts/check_called_workflow_permissions.py`` to catch
-the permissions mismatch at authoring time (D5).
+the permissions mismatch at authoring time.
 
 ## Commits
 
@@ -113,7 +113,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 
 - Application code uses **loguru** only (no stdlib `logging` outside `src/mergecraft/logging/`).
 - This is a standalone BYOK port — do not add proprietary SaaS clients.
-- Config-failure policy (D4): security/runtime settings fail closed;
+- Config-failure policy: security/runtime settings fail closed;
   optional features warn-and-disable. See [`docs/config-failure-policy.md`](docs/config-failure-policy.md).
 
 ## Naming (S1)

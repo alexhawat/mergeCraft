@@ -239,9 +239,11 @@ def _shell_trust_matrix_lines() -> list[str]:
         "  untrusted-only`. Enforced by `evaluate_manifest_for_mode()` plus",
         "  `resolve_selection_tier()`.",
         "",
-        "On macOS no native analyzer isolation backend exists. Linux capability",
-        "probes are skipped, and untrusted analyzers are refused before launch.",
-        "Trusted local shell execution is an explicit execution permission, not",
+        "On macOS, `sandbox-exec` is the MCP-shell backend (workspace-only writes,",
+        "`.git` write denied, network denied). It is not an analyzer isolation",
+        "backend: Linux capability probes are skipped, untrusted analyzers are",
+        "refused before launch, and trusted analyzer argv is not wrapped.",
+        "Trusted local `--shell enabled` is an explicit execution permission, not",
         "an isolation guarantee; incomplete isolation produces a warning.",
         "Use `MERGECRAFT_DISPOSABLE_LINUX=1 make test-filtered-egress` as root",
         "only on a disposable Linux runner to exercise the real kernel boundary.",
@@ -381,10 +383,10 @@ def _noise_budget_lines() -> list[str]:
     """Render the inline/deferred placement section (D14, W1)."""
     return [
         "",
-        "## Noise budget (D14)",
+        "## Noise budget",
         "",
         "Inline review comments from analyzers and the reviewing agent share a single "
-        "cap of **8** slots (W0.2 measurement; configurable via `analyzers.inlineBudget`). "
+        "cap of **8** slots (measured; configurable via `analyzers.inlineBudget`). "
         "Placement is deterministic:",
         "",
         "- **Inline** — highest-priority findings up to the cap. Agent findings win "
@@ -406,7 +408,7 @@ def _verification_gate_lines() -> list[str]:
     """Render the verifier dispatch budget section (D11, RC3 / D2)."""
     return [
         "",
-        "## Verification gate (D11)",
+        "## Verification gate",
         "",
         "`Critical` and `Major` findings are hypotheses until the read-only "
         "`mergecraft-verifier` subagent reads the cited code. That gate applies to "
@@ -470,10 +472,10 @@ def _sarif_upload_lines() -> list[str]:
         f"- **Catalog analyzers only.** Only `source: {UPLOADABLE_SOURCE}` findings are "
         "eligible. `source: ci` findings carry truncated pipeline log excerpts and "
         "`source: agent` findings carry narrative; neither is uploaded, and raw logs "
-        "never leave the process (D13).",
+        "never leave the process.",
         "- **The clustered, placed set.** The upload reuses the findings the pipeline "
         "already clustered and placed, not the raw analyzer output, so cross-tool "
-        "duplicates arrive as one alert (D14). It is *not* truncated at the inline "
+        "duplicates arrive as one alert. It is *not* truncated at the inline "
         "comment budget — the overflow is exactly what this surface exists to show.",
         "- **Trust-gated.** Each finding's analyzer must still pass this run's "
         "`trust` x `shell` x `analyzers:` selection chain — the same predicates the "
@@ -525,11 +527,16 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
         if manifest.id == "presidio":
             notes.append("Container-only; high-confidence entity types only.")
         if manifest.id == "dotenv-linter":
-            notes.append("Values never printed in findings (D8).")
+            notes.append("Values never printed in findings.")
         if manifest.id == "trufflehog":
             notes.append("verify off by default; impossible on fork PRs (C2).")
         if manifest.id == "phpstan":
-            notes.append("No phpstan.neon/neon.dist → runs at --level=0 (D12).")
+            notes.append("No phpstan.neon/neon.dist → runs at --level=0.")
+        if manifest.id == "markdownlint":
+            notes.append(
+                "No markdownlint config → shipped fallback disables MD060 "
+                "(table-column-style) only."
+            )
         if manifest.id in ("flake8", "pylint"):
             notes.append("Legacy opt-in — disabled by default; enable via config override.")
         if manifest.id in ("phpcs", "phpmd"):

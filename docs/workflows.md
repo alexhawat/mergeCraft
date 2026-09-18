@@ -58,7 +58,7 @@ mergecraft review --json findings.json                 # machine-readable Findin
 mergecraft review --output-format sarif --output report.sarif.json
 mergecraft review --output-format jsonl --output stream.jsonl
 mergecraft review --agent                              # JSONL agent protocol on stdout
-mergecraft review 2> review.md                         # human text is on stderr (D14)
+mergecraft review 2> review.md                         # human text is on stderr
 ```
 
 Human-readable review text (default mode) is written to **stderr** so stdout stays free
@@ -159,7 +159,7 @@ the payload/span-count caps: [docs/TRACING.md](TRACING.md).
 
 <!-- Asset pending: a screenshot of this trace tree for a real review,
 committed under assets/ and linked here — operator-captured, see the
-issues-showcase-readiness wave plan (PR G5 / D7). -->
+issues-showcase-readiness follow-up. -->
 
 <span id="security-model"></span>
 
@@ -203,14 +203,15 @@ issues-showcase-readiness wave plan (PR G5 / D7). -->
   ``working_directory`` must resolve inside allowed workspace roots. Agent CLI
   subprocesses drop to the unprivileged ``mergecraft`` user via ``setpriv``
   while the action entrypoint stays root for GitHub file commands.
-- **Network is outside the hard sandbox guarantee when ``unshare --net`` is
-  unavailable (W12.7)** — on CI hosts that support it, untrusted MCP shell
-  spawns with ``unshare --pid --net`` so the child has an empty network
-  namespace. Where that probe fails (macOS runners, restricted containers,
-  missing CAP_SYS_ADMIN), shell egress is not kernel-isolated; the W2
-  credential allowlist (no ambient ``GITHUB_TOKEN`` / provider keys / askpass)
-  remains the binding control. Trusted-tier shell does not force ``--net`` so
-  provider CLIs can still reach their APIs.
+- **Network isolation depends on the sandbox backend** — on CI hosts that
+  support it, untrusted MCP shell spawns with ``unshare --pid --net`` so the
+  child has an empty network namespace. On macOS, ``sandbox-exec`` applies
+  ``(deny network*)``. Where neither backend can isolate the network
+  (restricted containers, missing CAP_SYS_ADMIN, no ``sandbox-exec``), shell
+  egress is not kernel-isolated; the credential allowlist (no ambient
+  ``GITHUB_TOKEN`` / provider keys / askpass) remains the binding control.
+  Trusted-tier shell does not force ``--net`` so provider CLIs can still
+  reach their APIs.
 
 Report vulnerabilities via [SECURITY.md](../SECURITY.md). What a review does and
 never does: [REVIEW-CHECKS.md](../REVIEW-CHECKS.md).

@@ -11,7 +11,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [Landing README](../README.md) | consumer | Product landing page — install, features, and pointers to generated reference pages. |
 | [REVIEW-CHECKS](../REVIEW-CHECKS.md) | contributor | Enumerated review checks mergeCraft applies on pull requests. |
 | [brand README](../assets/brand/README.md) | satellite | Brand SVG inventory and regeneration commands for logo assets. |
-| [diagrams README](../assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and D2 regeneration commands. |
+| [diagrams README](../assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and Terrastruct diagram regeneration commands. |
 | [ANALYZERS](ANALYZERS.md) | consumer | Shipped analyzer catalog — rows generated from manifests via make catalog-check. |
 | [CONTRIBUTING-ANALYZERS](CONTRIBUTING-ANALYZERS.md) | contributor | How to add or change a catalog analyzer and keep make catalog-check green. |
 | [EXIT-CODES](EXIT-CODES.md) | consumer | Named CLI exit codes and when mergecraft returns each status. |
@@ -22,14 +22,14 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [coding-standards](_standards/coding-standards.md) | contributor | Normative repo-wide coding conventions — style, types, async, testing, security, Git. |
 | [action-reference](action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
 | [agent-loop](agent-loop.md) | consumer | Reference workflow for an external coding agent looping with mergecraft review --agent. |
-| [agent-roster](agent-roster.md) | consumer | Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot (D9). |
+| [agent-roster](agent-roster.md) | consumer | Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot. |
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
 | [cli-examples](cli-examples.md) | consumer | Runnable mergecraft review CLI example trees under examples/cli/. |
 | [cli](cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
 | [compatibility-matrix](compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
-| [config-failure-policy](config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour (S1 / D10). |
+| [config-failure-policy](config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour. |
 | [provider-harness](dev/provider-harness.md) | contributor | Provider harness notes for OpenCode, Codex, and OpenAI-compatible gateways. |
 | [python-version-floor](dev/python-version-floor.md) | contributor | ADR for the Python 3.11 install floor and PEP 758 parenthesize-now strategy. |
 | [distribution](distribution.md) | consumer | How mergeCraft is packaged — PyPI, Docker, and git install paths. |

@@ -13,7 +13,7 @@ Every example ships:
 - `run.sh` — executable entry point (no provider credentials)
 - `expected/` — committed golden output compared by `make cli-examples-check`
 
-CI runs the offline half only (`--dry-run` or exit-code fixtures per D12). The
+CI runs the offline half only (`--dry-run` or exit-code fixtures). The
 live command in each README is what you run locally after `mergecraft auth …`.
 
 ## Examples
