@@ -7,6 +7,8 @@ collection clean.
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, get_args
 
@@ -23,6 +25,18 @@ def _budget_mod() -> Any:
     import mergecraft.agents.token_budget as module
 
     return module
+
+
+def test_token_budget_imports_in_a_fresh_interpreter() -> None:
+    """Action ``main()`` lazy-imports this before any ``jev`` import."""
+    result = subprocess.run(
+        [sys.executable, "-c", "import mergecraft.agents.token_budget"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_token_budget_is_the_jev_class_not_a_fork() -> None:

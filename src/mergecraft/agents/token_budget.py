@@ -22,10 +22,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Final, Literal
 
-from mergecraft.jev.cost import TokenBudget, compute_cost
-
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from mergecraft.jev.cost import TokenBudget, compute_cost
 
 PROVIDER_PATHS: Final[frozenset[str]] = frozenset(
     {"claude", "codex", "cursor", "gemini", "opencode", "jev"}
@@ -102,7 +102,25 @@ def token_budget_for(*, model: str, max_tokens: int) -> TokenBudget:
     if not model:
         msg = "token_budget_for requires a pinned model id"
         raise ValueError(msg)
-    return TokenBudget(max_tokens=max_tokens)
+    from mergecraft.jev.cost import TokenBudget as JevTokenBudget
+
+    return JevTokenBudget(max_tokens=max_tokens)
+
+
+def __getattr__(name: str) -> object:
+    """Load J2 ``TokenBudget`` / ``compute_cost`` without importing ``jev`` at init.
+
+    A module-level ``from mergecraft.jev.cost import …`` re-enters this module
+    through ``jev/__init__.py`` → ``jev.client`` and crashes Action ``main()``.
+    """
+    if name in {"TokenBudget", "compute_cost"}:
+        from mergecraft.jev.cost import TokenBudget, compute_cost
+
+        globals()["TokenBudget"] = TokenBudget
+        globals()["compute_cost"] = compute_cost
+        return globals()[name]
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
 
 
 def apply_kill_switch(budget: TokenBudget) -> KillSwitchStatus:

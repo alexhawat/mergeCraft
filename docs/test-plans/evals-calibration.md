@@ -60,6 +60,7 @@ suite are gone — do not restore `AblationConfig` / `run_ablation` /
 | Stop reason is `kill_switch` | E4 | `…::test_kill_switch_stop_reason_is_the_j2_token` |
 | `current_run_budget` reads the bound cap (None unbound) | E4 | `…::test_current_run_budget_reads_the_bound_cap` |
 | `KillSwitchStatus` is `Literal["kill_switch", "ok"]` | E4 | `…::test_kill_switch_status_is_the_j2_literal_pair` |
+| Fresh-interpreter `import token_budget` (no `jev` preload) | E4 | `…::test_token_budget_imports_in_a_fresh_interpreter` |
 | Collect rates from `ParallelJudgeResult` | E4 | `tests/evals/test_faithfulness_alerts.py::test_collect_faithfulness_signals_from_parallel_judge` |
 | Empty pack is honest zero | E4 | `…::test_empty_judge_result_is_honest_zero` |
 | `says_nothing` is a quote-verification failure | E4 | `…::test_says_nothing_is_a_quote_verification_failure` |

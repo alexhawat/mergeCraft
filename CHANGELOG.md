@@ -154,6 +154,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Action reviews no longer crash at startup with `infra_error` when loading
+  the shared token cap (#741)
 - Enabled Jev reviews now keep the shadow-judge record next to the evidence
   packet after the command finishes, so paid calibration rows are retrievable
   (#728)
