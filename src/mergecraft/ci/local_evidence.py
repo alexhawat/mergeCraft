@@ -31,6 +31,7 @@ Exports:
 
 from __future__ import annotations
 
+import configparser
 import importlib.util
 import json
 import os
@@ -41,6 +42,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -420,6 +422,60 @@ def _mutmut_pattern_for_path(path: str) -> str:
     return f"{module}.*"
 
 
+def _mutmut_python_executable(mutmut_executable: str) -> str:
+    """Return the interpreter that owns the ``mutmut`` on ``PATH``."""
+    mutmut_path = Path(mutmut_executable).resolve()
+    try:
+        first_line = mutmut_path.read_text(encoding="utf-8").splitlines()[0]
+    except OSError:
+        first_line = ""
+    if first_line.startswith("#!"):
+        interpreter = first_line[2:].strip()
+        if interpreter and Path(interpreter).is_file():
+            return interpreter
+    for candidate in (mutmut_path.parent / "python", mutmut_path.parent / "python3"):
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
+
+def _render_mutmut_setup_cfg(
+    setup_cfg: Path,
+    *,
+    only_mutate: Sequence[str],
+    source_paths: Sequence[str],
+) -> str:
+    """Merge ephemeral ``[mutmut]`` overrides into an existing ``setup.cfg``."""
+    parser = configparser.ConfigParser()
+    if setup_cfg.is_file():
+        parser.read(setup_cfg, encoding="utf-8")
+    if not parser.has_section("mutmut"):
+        parser.add_section("mutmut")
+    if len(only_mutate) == 1:
+        parser.set("mutmut", "only_mutate", only_mutate[0])
+    elif only_mutate:
+        parser.set(
+            "mutmut",
+            "only_mutate",
+            "\n" + "\n".join(f"    {pattern}" for pattern in only_mutate),
+        )
+    elif parser.has_option("mutmut", "only_mutate"):
+        parser.remove_option("mutmut", "only_mutate")
+    if len(source_paths) == 1:
+        parser.set("mutmut", "source_paths", source_paths[0])
+    elif source_paths:
+        parser.set(
+            "mutmut",
+            "source_paths",
+            "\n" + "\n".join(f"    {path}" for path in source_paths),
+        )
+    elif parser.has_option("mutmut", "source_paths"):
+        parser.remove_option("mutmut", "source_paths")
+    buffer = StringIO()
+    parser.write(buffer)
+    return buffer.getvalue()
+
+
 def mutmut_selection_patterns(
     *,
     paths: Sequence[str],
@@ -454,15 +510,17 @@ def _discover_mutmut_keys(
     repo_root: Path,
     patterns: Sequence[str],
     *,
+    mutmut_executable: str,
     timeout_seconds: int,
 ) -> list[str]:
     """Generate mutmut metadata and list mutant keys matching *patterns*."""
     if not patterns:
         return []
+    python_executable = _mutmut_python_executable(mutmut_executable)
     try:
         result = subprocess.run(
             _sandboxed_argv(
-                [sys.executable, "-c", _DISCOVER_MUTMUT_KEYS_SCRIPT],
+                [python_executable, "-c", _DISCOVER_MUTMUT_KEYS_SCRIPT],
                 repo_root=repo_root,
             ),
             cwd=repo_root,
@@ -566,13 +624,14 @@ def _ephemeral_mutmut_config(
 ) -> Iterator[None]:
     setup_cfg = repo_root / "setup.cfg"
     backup = setup_cfg.read_text(encoding="utf-8") if setup_cfg.is_file() else None
-    lines = ["[mutmut]", "only_mutate =", *[f"    {pattern}" for pattern in only_mutate]]
-    if source_paths:
-        if len(source_paths) == 1:
-            lines.append(f"source_paths = {source_paths[0]}")
-        else:
-            lines.extend(["source_paths =", *[f"    {path}" for path in source_paths]])
-    setup_cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    setup_cfg.write_text(
+        _render_mutmut_setup_cfg(
+            setup_cfg,
+            only_mutate=only_mutate,
+            source_paths=source_paths,
+        ),
+        encoding="utf-8",
+    )
     try:
         yield
     finally:
@@ -611,6 +670,7 @@ def _execute_mutation(
             discovered = _discover_mutmut_keys(
                 repo_root,
                 selection_patterns,
+                mutmut_executable=mutmut,
                 timeout_seconds=timeout_seconds,
             )
             selection = bound_mutants(discovered, max_mutants=max_mutants)

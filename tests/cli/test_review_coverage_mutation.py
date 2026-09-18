@@ -286,6 +286,36 @@ def test_max_mutants_bound_is_enforced() -> None:
     assert DEFAULT_MAX_MUTANTS == 50
 
 
+def test_mutmut_python_executable_uses_tool_shebang(tmp_path: Path) -> None:
+    local = _local()
+    python = tmp_path / "python"
+    mutmut = tmp_path / "mutmut"
+    python.write_text("", encoding="utf-8")
+    mutmut.write_text(f"#!{python}\n", encoding="utf-8")
+    assert local._mutmut_python_executable(str(mutmut)) == str(python)
+
+
+def test_ephemeral_mutmut_config_preserves_existing_sections(tmp_path: Path) -> None:
+    local = _local()
+    setup_cfg = tmp_path / "setup.cfg"
+    setup_cfg.write_text(
+        "[pytest]\naddopts = -q\n\n[mutmut]\nrunner = pytest\n",
+        encoding="utf-8",
+    )
+    with local._ephemeral_mutmut_config(
+        tmp_path,
+        only_mutate=["src/a.py"],
+        source_paths=["src"],
+    ):
+        merged = setup_cfg.read_text(encoding="utf-8")
+    assert "[pytest]" in merged
+    assert "addopts = -q" in merged
+    assert "only_mutate" in merged
+    assert "src/a.py" in merged
+    restored = setup_cfg.read_text(encoding="utf-8")
+    assert restored == "[pytest]\naddopts = -q\n\n[mutmut]\nrunner = pytest\n"
+
+
 def test_execute_mutation_bounds_discovered_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -302,9 +332,11 @@ def test_execute_mutation_bounds_discovered_keys(
         repo_root: Path,
         patterns: Sequence[str],
         *,
+        mutmut_executable: str,
         timeout_seconds: int,
     ) -> list[str]:
         seen["patterns"] = list(patterns)
+        seen["mutmut_executable"] = mutmut_executable
         return [f"mod.x_fn__mutmut_{index}" for index in range(120)]
 
     def fake_run(cmd: list[str], **kwargs: Any) -> Any:
@@ -464,6 +496,7 @@ def test_mutmut_run_uses_supported_selection_and_config(
         repo_root: Path,
         patterns: Sequence[str],
         *,
+        mutmut_executable: str,
         timeout_seconds: int,
     ) -> list[str]:
         return ["a.x_a__mutmut_1"]
@@ -476,6 +509,7 @@ def test_mutmut_run_uses_supported_selection_and_config(
     monkeypatch.setattr(local.subprocess, "run", fake_run)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.py").write_text("def a():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "setup.cfg").write_text("[pytest]\naddopts = -q\n", encoding="utf-8")
     result = local.run_local_mutation(
         repo_root=tmp_path,
         diff=(
@@ -499,6 +533,8 @@ def test_mutmut_run_uses_supported_selection_and_config(
     setup_cfg = seen["setup_cfg"]
     assert "only_mutate" in setup_cfg
     assert "src/a.py" in setup_cfg
+    assert "[pytest]" in setup_cfg
+    assert "addopts = -q" in setup_cfg
     assert result.executed is True
 
 
