@@ -79,6 +79,8 @@ _MUTMUT_KILLED_EXIT_CODES = frozenset({1, 3})
 _DISCOVER_MUTMUT_KEYS_SCRIPT = """\
 import json
 import sys
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 patterns = json.loads(sys.stdin.read())
@@ -93,15 +95,16 @@ from mutmut.__main__ import (
     store_lines_covered_by_tests,
 )
 
-Path("mutants").mkdir(exist_ok=True)
-copy_src_dir()
-copy_also_copy_files()
-setup_source_paths()
-store_lines_covered_by_tests()
-create_mutants(1)
-runner = get_mutant_runner(1)
-collect_or_load_stats(runner, apply_config_invalidation=True)
-mutants, _ = collect_source_file_mutation_data(mutant_names=tuple(patterns))
+with redirect_stdout(StringIO()):
+    Path("mutants").mkdir(exist_ok=True)
+    copy_src_dir()
+    copy_also_copy_files()
+    setup_source_paths()
+    store_lines_covered_by_tests()
+    create_mutants(1)
+    runner = get_mutant_runner(1)
+    collect_or_load_stats(runner, apply_config_invalidation=True)
+    mutants, _ = collect_source_file_mutation_data(mutant_names=tuple(patterns))
 json.dump([name for _, name, _ in mutants], sys.stdout)
 """
 
@@ -543,14 +546,24 @@ def _discover_mutmut_keys(
         )
         return []
     try:
-        keys = json.loads(result.stdout)
+        keys = _parse_discovered_mutmut_keys(result.stdout)
     except json.JSONDecodeError as exc:
         logger.warning("local mutation: mutant discovery returned invalid JSON — {}", exc)
         return []
-    if not isinstance(keys, list):
-        logger.warning("local mutation: mutant discovery returned non-list payload")
-        return []
-    return [key for key in keys if isinstance(key, str)]
+    return keys
+
+
+def _parse_discovered_mutmut_keys(stdout: str) -> list[str]:
+    """Parse mutant keys from discovery output that may include mutmut progress noise."""
+    for line in reversed(stdout.splitlines()):
+        stripped = line.strip()
+        if not stripped.startswith("["):
+            continue
+        keys = json.loads(stripped)
+        if not isinstance(keys, list):
+            continue
+        return [key for key in keys if isinstance(key, str)]
+    raise json.JSONDecodeError("no JSON array in discovery output", stdout, 0)
 
 
 def _function_name_from_mutant_key(mutant_key: str) -> str:

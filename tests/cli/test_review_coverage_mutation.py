@@ -286,6 +286,15 @@ def test_max_mutants_bound_is_enforced() -> None:
     assert DEFAULT_MAX_MUTANTS == 50
 
 
+def test_parse_discovered_mutmut_keys_tolerates_progress_noise() -> None:
+    local = _local()
+    stdout = '\n⠋ Running stats\n    done\n["mypkg.a.x_a__mutmut_1", "mypkg.a.x_a__mutmut_2"]\n'
+    assert local._parse_discovered_mutmut_keys(stdout) == [
+        "mypkg.a.x_a__mutmut_1",
+        "mypkg.a.x_a__mutmut_2",
+    ]
+
+
 def test_mutmut_python_executable_uses_tool_shebang(tmp_path: Path) -> None:
     local = _local()
     python = tmp_path / "python"
