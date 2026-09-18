@@ -76,20 +76,25 @@ async def test_artifacts_are_redacted_before_write(tmp_path: Path) -> None:
     )
 
 
-async def test_env_auth_suppresses_screenshots(
+@pytest.mark.parametrize("strategy", ["env", "manual"])
+async def test_auth_suppresses_screenshots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    strategy: str,
 ) -> None:
-    """env-auth runs skip screenshots until pixel redaction exists."""
+    """env- and manual-auth runs skip screenshots until pixel redaction exists."""
     fake = FakeBrowserDriver()
     artifacts_dir = tmp_path / "out"
     run = _run()
-    monkeypatch.setenv(SECRET_ENV_NAME, CANARY_TOKEN)
+    credential_env_names: list[str] = []
+    if strategy == "env":
+        monkeypatch.setenv(SECRET_ENV_NAME, CANARY_TOKEN)
+        credential_env_names = [SECRET_ENV_NAME]
     report = await run(
         make_input(
             artifacts_dir=str(artifacts_dir),
-            auth={"strategy": "env"},
-            credential_env_names=[SECRET_ENV_NAME],
+            auth={"strategy": strategy},
+            credential_env_names=credential_env_names,
         ),
         driver=fake,
         offline=True,
@@ -98,45 +103,6 @@ async def test_env_auth_suppresses_screenshots(
     assert not any(call[0] == "screenshot" for call in fake.calls)
     assert report.artifacts.screenshots == []
     assert not (artifacts_dir / "screenshot.png").exists()
-
-
-def _write_png_with_secret(dest: Path, secret: bytes) -> Path:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(b"\x89PNG\r\n\x1a\n" + secret)
-    return dest
-
-
-async def test_manual_auth_screenshots_pass_through_redact_hook(
-    tmp_path: Path,
-) -> None:
-    artifacts = import_verify("artifacts")
-    redact_shot = require_symbol(artifacts, "redact_screenshot")
-    token = CANARY_TOKEN.encode()
-    fake = FakeBrowserDriver()
-
-    async def _screenshot_with_secret(path: str | Path) -> Path:
-        dest = _write_png_with_secret(Path(path), token)
-        fake.last_screenshot = dest
-        fake.calls.append(("screenshot", (str(dest),)))
-        return dest
-
-    fake.screenshot = _screenshot_with_secret  # type: ignore[method-assign]
-    artifacts_dir = tmp_path / "out"
-    run = _run()
-    await run(
-        make_input(
-            artifacts_dir=str(artifacts_dir),
-            auth={"strategy": "manual"},
-            credential_env_names=[],
-        ),
-        driver=fake,
-        offline=True,
-    )
-    assert fake.last_screenshot is not None
-    redacted = redact_shot(fake.last_screenshot)
-    assert redacted == fake.last_screenshot
-    written = (artifacts_dir / "screenshot.png").read_bytes()
-    assert token in written
 
 
 async def test_run_without_artifacts_dir_writes_no_screenshot_to_cwd(

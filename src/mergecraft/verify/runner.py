@@ -203,11 +203,11 @@ def _missing_env_credentials(spec: VerificationInput) -> list[str]:
 def _screenshots_allowed(spec: VerificationInput) -> bool:
     """Return whether a post-run screenshot may be persisted.
 
-    Pixel redaction is not implemented yet. Runs that load credentials from the
-    environment can paint session tokens into the viewport, so screenshots are
-    suppressed until a real ``redact_screenshot`` lands.
+    Pixel redaction is not implemented yet. Runs that can load credentials
+    (``env`` or ``manual`` login) can paint secrets into the viewport, so
+    screenshots are suppressed until a real ``redact_screenshot`` lands.
     """
-    return spec.auth.strategy != "env"
+    return spec.auth.strategy not in ("env", "manual")
 
 
 def collect_skip_reasons(
