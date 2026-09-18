@@ -333,3 +333,41 @@ jobs:
         env:
           MUTATION_ESCAPE_THRESHOLD_PCT: "45"
         run: make mutation-test-decisions
+
+  # E2 / E-D2 / E-D3 — keyless structural replay + regression gate.
+  # The check summary (GITHUB_STEP_SUMMARY / format_pr_gate_summary) states
+  # that this proves structural replay, not live detection quality.
+  eval-gate:
+    name: Eval gate (structural replay, not live detection)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+      - name: Replay eval bank (candidate)
+        run: |
+          set -euo pipefail
+          uv run mergecraft eval replay-bank \
+            --results-dir "$RUNNER_TEMP/eval-gate" \
+            --json > "$RUNNER_TEMP/candidate.json"
+      - name: Structural replay regression gate
+        run: |
+          set -euo pipefail
+          {
+            echo "This check proves structural replay, not live detection quality."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          uv run mergecraft eval gate \
+            --baseline evals/results/latest.json \
+            --candidate "$RUNNER_TEMP/candidate.json" \
+            --tolerance 0.02
+        # NOTE: the committed baseline is currently perfect
+        # (unsafe_approval_rate 0.0 / clean_block_rate 0.0 over ~46 cases), so
+        # a single case flipping can exceed the 0.02 band. When the eval bank
+        # changes, regenerate the baseline from the same commit
+        # (`mergecraft eval replay-bank` → `evals/results/latest.json`) so the
+        # gate measures drift, not corpus edits.
