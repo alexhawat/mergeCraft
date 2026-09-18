@@ -7,12 +7,15 @@ continue. Inverted expectations below are ``xfail`` until **AP3** lands.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
 
+from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.mcp import shell as shell_mod
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -27,6 +30,18 @@ from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
 
 TrustTier = Literal["trusted", "untrusted"]
+
+
+def _no_backend_caps() -> sandbox_mod.SandboxCapabilities:
+    return sandbox_mod.SandboxCapabilities(
+        pid_namespace=False,
+        network_namespace=False,
+        read_only_bind=False,
+        tmpfs=False,
+        cgroup_memory=False,
+        rlimit_nproc=True,
+        pid_namespace_method="none",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +133,13 @@ def test_unshare_argv_skips_net_when_probe_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """MCB-10 inversion — isolate_network with no netns must fail closed, not omit ``--net``."""
+    # H2 treats Darwin sandbox-exec as a real backend; force the no-backend
+    # path (same as tests/mcp/test_shell_sandbox_honesty.py) so this sibling
+    # still proves the raise on stock macOS.
+    monkeypatch.setattr(shell_mod, "_detected_sandbox", None)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sandbox_mod, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(sandbox_mod, "probe_capabilities", _no_backend_caps)
     monkeypatch.setattr(shell_mod, "_network_namespace_available", lambda: False)
     with pytest.raises((RuntimeError, PermissionError, OSError)):
         _spawn_shell(

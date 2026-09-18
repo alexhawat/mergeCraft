@@ -18,6 +18,10 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "check_tracked_markdown.py"
 _ALLOWLIST = "docs/dev/changelog-archive.md"
+_H5_WAVE_DOT_XFAIL = pytest.mark.xfail(
+    reason="green after H5 remediations: checker W#.#",
+    strict=False,
+)
 
 
 def _load_checker() -> Any:
@@ -84,6 +88,27 @@ def test_scan_flags_decision_id_wave_plan_and_ignorelocal_citation() -> None:
     assert ".ignorelocal/waves/" in joined or any(
         kind in {"ignorelocal-waves", "ignorelocal"} for kind in kinds
     )
+
+
+@_H5_WAVE_DOT_XFAIL
+def test_scan_flags_wave_dot_tokens() -> None:
+    """DoD — word-boundary W#.# is an offense, same family as D##."""
+    module = _load_checker()
+    text = "See W4.4 and W12.7 in the tracing notes.\n"
+    offenses = module.scan_markdown(text, relpath="docs/TRACING.md")
+    joined = " ".join(str(item) for item in offenses)
+    assert "W4.4" in joined
+    assert "W12.7" in joined
+
+
+@_H5_WAVE_DOT_XFAIL
+def test_main_fails_on_tracked_wave_dot_token(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    (tmp_path / "README.md").write_text("# Title W4.4\nAlso W12.7.\n", encoding="utf-8")
+    _commit_all(tmp_path, "add readme")
+    module = _load_checker()
+    module.REPO = tmp_path
+    assert module.main() != 0
 
 
 def test_allowlisted_changelog_archive_is_not_an_offense() -> None:

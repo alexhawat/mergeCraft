@@ -73,3 +73,11 @@ Guard-deletion note: fail-closed tests assert the refusal when `_OVERRIDE` is un
 - `tests/analyzers/test_sandbox_platform.py` — existing Darwin skip of `subprocess.run` for the Linux probe
 - `tests/mcp/test_shell_sandbox_honesty.py` — forced onto the no-backend path so H2's Darwin backend does not change the `none` registration cases
 - Repo-config-wins markdownlint cases and the no-blanket-`tests/` trufflehog exclude case
+
+## H5 remediations (verifier `changes_required`)
+
+| Finding | Expected now | Primary test(s) |
+| --- | --- | --- |
+| F1 — Darwin `sandbox-exec` skipped the no-netns raise | Amend, must pass. Forces the honesty-suite no-backend path so the sibling still proves the raise on stock macOS. | `tests/mcp/test_network_namespace.py::test_unshare_argv_skips_net_when_probe_unavailable` |
+| F2 — checker does not scan word-boundary `W#.#` | RED until executor. `scan_markdown` / `main` treat `W4.4` and `W12.7` as the same family as `D##`. Allowlist stays as already tested. | `tests/scripts/test_check_tracked_markdown.py::test_scan_flags_wave_dot_tokens`, `…::test_main_fails_on_tracked_wave_dot_token` (`xfail`: `green after H5 remediations: checker W#.#`) |
+| F3 — CI SARIF emit skips named-fixture suppressions | RED until executor. `emit_trufflehog_sarif` drops the four named fixtures and still emits an unnamed `tests/` secret (no blanket `tests/**` skip). | `tests/analyzers/test_trufflehog_scope.py::test_emit_trufflehog_sarif_drops_named_fixture_findings`, `…::test_emit_trufflehog_sarif_named_suppressions_do_not_blanket_skip_tests` (`xfail`: `green after H5 remediations: CI SARIF named-fixture suppressions`) |
