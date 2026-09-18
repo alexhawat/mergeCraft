@@ -142,15 +142,17 @@ def _run_in_process_native_adapter(
 
 
 def _finalize_trufflehog_findings(findings: list[Finding], *, repo_root: Path) -> list[Finding]:
+    from mergecraft.analyzers.config import is_trufflehog_path_suppressed
     from mergecraft.analyzers.parsers.trufflehog_jsonl import _ROTATION_FIRST_REMEDIATION
 
     normalized: list[Finding] = []
     for finding in findings:
+        if is_trufflehog_path_suppressed(finding.path, repo_root=repo_root):
+            continue
         remediation = finding.remediation or _ROTATION_FIRST_REMEDIATION
         if "rotate" not in remediation.casefold():
             remediation = _ROTATION_FIRST_REMEDIATION
         normalized.append(finding.model_copy(update={"remediation": remediation}))
-    _ = repo_root
     return normalized
 
 

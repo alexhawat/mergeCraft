@@ -17,13 +17,14 @@ from rich.table import Table
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.tracing.trace_jsonl import (
     default_trace_dir,
     load_trace_jsonl_events,
     session_ids_in_trace_order,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="run",
     help="Inspect and compare stored review runs (not analyzer execution).",
     no_args_is_help=True,

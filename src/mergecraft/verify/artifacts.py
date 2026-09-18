@@ -54,17 +54,18 @@ def resolve_artifacts_dir(
 
 
 def redact_screenshot(path: Path) -> Path:
-    """Redact a screenshot taken after an authenticated step.
+    """Redact a screenshot before it is referenced in a report.
 
-    Pixels are not OCR'd in this version. The hook exists so every post-auth
-    shot is routed through one function; identity is correct when the image
-    contains no secret.
+    Pixel OCR is not implemented. ``run_verify_behavior`` suppresses
+    screenshots entirely when ``auth.strategy`` is ``env`` so credential-bearing
+    viewports are never written. For other strategies, the hook exists so a
+    future redactor can rewrite ``path`` in one place.
 
     Args:
         path (Path): Path written by ``BrowserDriver.screenshot``.
 
     Returns:
-        Path: The same path, or a rewritten file if a later redactor lands.
+        Path: The same path, or a rewritten file when redaction is available.
 
     Examples:
         >>> redact_screenshot(Path("shot.png")).name

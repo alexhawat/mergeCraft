@@ -11,6 +11,7 @@ import yaml
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import MODEL_ALIASES
@@ -23,7 +24,7 @@ from mergecraft.utils.agent_resolve import (
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
 
-app = typer.Typer(
+app = mergecraft_typer(
     help="Inspect and configure ordered model preferences.",
     no_args_is_help=True,
 )

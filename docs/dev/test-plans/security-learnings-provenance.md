@@ -100,12 +100,12 @@ Per D10, D11 of the wave plan. The test names below map to W5.1–W5.7.
   new entries into a staging section by default. Only entries whose
   provenance chain contains an `OWNER`/`MEMBER`/`COLLABORATOR` author
   may be promoted; promotion is a separate explicit step.
-- **W6.3** In `src/mergecraft/agents/post_run.py` (around the
-  `build_reflection_prompt()` block at 150-153), constrain the
-  reflection turn: learnings derive from maintainer review outcomes
-  and mergecraft's own findings, not from PR prose or contributor
-  comments (#74 proposal item 2). W0.4's evidence pin determines how
-  strong this needs to be.
+- **W6.3** In `src/mergecraft/agents/post_run.py` (`build_post_run_prompt`
+  plus `_LEARNINGS_PROVENANCE_NOTE`), constrain the reflection turn:
+  learnings derive from maintainer review outcomes and mergecraft's
+  own findings, not from PR prose or contributor comments (#74
+  proposal item 2). W0.4's evidence pin determines how strong this
+  needs to be.
 - **W6.4** Seed-time fencing: entries entering the prompt via
   `build_learnings_section()` (`src/mergecraft/utils/instructions.py:51-84`)
   pass through W4's `utils/fence.py`.

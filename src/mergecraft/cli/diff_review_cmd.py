@@ -51,13 +51,15 @@ _PANEL_TRUST = "Trust"
 # so example commands stay copy-pasteable in ``mergecraft review --help``.
 _REVIEW_COMMAND_HELP = """Review a local git diff offline (no GitHub Action / PR posting).
 
-No flags are required. The minimum invocation is:
+No flags are required. On a TTY, `mergecraft review` opens an interactive
+session (source, diff selection, dry-run, output). In scripts, CI, or when any
+flag is passed, it reviews the current git checkout immediately:
 
 \b
   mergecraft review
 
-That reviews the current git checkout: uncommitted edits plus commits since the
-detected base (upstream, else origin/main or origin/master). You need:
+That reviews uncommitted edits plus commits since the detected base (upstream,
+else origin/main or origin/master). You need:
 
 * a git repository here, or --cwd PATH, or --repo, or --diff FILE
 * a provider credential (`mergecraft auth …`) unless you pass --dry-run
@@ -486,8 +488,9 @@ def run(
             "Shell permission for this review: disabled (default), restricted, or enabled. "
             "Raising it lets analyzers execute tooling provided by the repository under "
             "review (ruff, mypy, bandit, vulture and the other repo-native analyzers, which "
-            "are withheld at disabled). Unsafe for untrusted code — an opt-in for repos you "
-            "trust. Operator flag only; never read from repo config."
+            "are withheld at disabled). --with-coverage / --with-mutation require enabled "
+            "(they execute repo-provided test commands). Unsafe for untrusted code — an "
+            "opt-in for repos you trust. Operator flag only; never read from repo config."
         ),
         rich_help_panel=_PANEL_TRUST,
     ),
@@ -519,9 +522,52 @@ def run(
         ),
         rich_help_panel=_PANEL_OUTPUT,
     ),
+    with_coverage: bool = typer.Option(
+        False,
+        "--with-coverage",
+        help=(
+            "Run coverage locally and emit CRAP findings on changed functions. "
+            "Requires --shell enabled. Trusted, sandboxed CLI only — refuses an "
+            "untrusted tier, a fork checkout, or when no sandbox wrap is available."
+        ),
+        rich_help_panel=_PANEL_TRUST,
+    ),
+    with_mutation: bool = typer.Option(
+        False,
+        "--with-mutation",
+        help=(
+            "Run a bounded mutation pass locally and emit survivor findings. "
+            "Requires --shell enabled. Trusted, sandboxed CLI only — refuses an "
+            "untrusted tier, a fork checkout, or when no sandbox wrap is available."
+        ),
+        rich_help_panel=_PANEL_TRUST,
+    ),
 ) -> None:
     if ctx.info_name == "diff-review":
         console.print(_DIFF_REVIEW_DEPRECATION)
+    from mergecraft.cli.interactive import (
+        command_was_invoked_bare,
+        is_interactive_session,
+        run_review_wizard,
+    )
+
+    if is_interactive_session() and command_was_invoked_bare(ctx):
+        wizard = run_review_wizard()
+        repo = wizard.repo
+        if wizard.cwd is not None:
+            cwd = wizard.cwd
+        diff = wizard.diff
+        staged = wizard.staged
+        unstaged = wizard.unstaged
+        base = wizard.base
+        head = wizard.head
+        commit_range = wizard.commit_range
+        dry_run = wizard.dry_run
+        agent_mode = wizard.agent_mode
+        if wizard.json_output is not None:
+            json_output = wizard.json_output
+        if wizard.prompt is not None:
+            prompt = wizard.prompt
     configure_logging()
     effective_output_format = _resolve_review_output_format(ctx, output_format=output_format)
     invocation_root = Path.cwd().resolve()
@@ -547,6 +593,25 @@ def run(
         trust_override = parse_cli_trust_override(trust)
     except ValueError as exc:
         _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
+
+    if with_coverage or with_mutation:
+        if shell != "enabled":
+            _exit_with_message(
+                "--with-coverage/--with-mutation require --shell enabled",
+                cli_exit_code_for_review(RunOutcome.configuration_error),
+            )
+        if trust_override == "untrusted":
+            _exit_with_message(
+                "--with-coverage/--with-mutation require a trusted review source",
+                cli_exit_code_for_review(RunOutcome.configuration_error),
+            )
+        from mergecraft.ci.local_evidence import checkout_is_fork_pr
+
+        if checkout_is_fork_pr(root):
+            _exit_with_message(
+                "--with-coverage/--with-mutation require a trusted review source",
+                cli_exit_code_for_review(RunOutcome.configuration_error),
+            )
 
     try:
         from mergecraft.cli.config_surface_cmd import validate_repo_config_or_raise
@@ -689,6 +754,8 @@ def run(
                     use_cache=read_cache,
                     engine=engine,
                     verification_report_path=verification_report,
+                    with_coverage=with_coverage,
+                    with_mutation=with_mutation,
                 )
             )
         except TimeoutError:

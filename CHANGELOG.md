@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bare CLI command names open a TTY interactive session. `mergecraft`,
+  `mergecraft review`, and groups such as `mergecraft provider` offer a menu
+  (or a review wizard) when stdin is a TTY. Scripts, CI, piped invocations,
+  and any invocation that already passes flags keep today's non-interactive
+  behaviour. Missing required arguments are prompted on a TTY instead of
+  failing with Click's "Missing argument". `mergecraft config set` writes
+  `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
+
 ### Changed
 
 - PR #742 drops Playwright as the behaviour-verification driver. Live browsing
@@ -33,10 +43,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the engine, so it moves 0.37.4 → 0.41.1. A markdownlint `warning` now grades
   **Minor** instead of Major — the parser reads the per-finding `severity` that
   0.49.1 emits rather than hardcoding `error`, and an unrecognised severity
-  grades as `error` with a log line instead of failing the whole run. Repo-root
-  `.markdownlint.json` disables `MD060` (`table-column-style`), which the engine
-  bump enables by default and which fires 493 times on this repo's docs tables;
-  consumer repos without their own config still inherit it.
+  grades as `error` with a log line instead of failing the whole run. The engine
+  bump also enables `MD060` (`table-column-style`) by default. This repo's
+  `.markdownlint.json` disables it; consumers with no markdownlint config get
+  the same MD060-only disable via the shipped `markdownlint-default-config.json`
+  fallback, and a run note records that the fallback applied so operators can
+  tell repo-rules-clean from fallback-clean. A consumer whose own config
+  enables MD060 still gets it (#704).
+
+- trufflehog no longer reports secrets from virtualenv trees (`.venv`,
+  `.venv-dev`, `site-packages`) or four named intentional fixtures; each
+  fixture suppression names why it is exempt, and a newly committed secret
+  under `tests/` still fires.
 
 ### Fixed
 
@@ -55,7 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft verify-behavior` can reproduce a bug or check a running app and
   write a versioned report under `.mergecraft/artifacts/`. It stays inert on an
   untrusted tier or when `shell: disabled`. Optional YAML `actions` drive
-  click / fill / type. This does not close #61.
+  click / fill / type (#61, #752)
 
 - A versioned behaviour-verification report (`schema_version` 1.0.0) records
   what was observed, which criteria passed, and what blocked the run — without
@@ -64,6 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behaviour-verification report, fences it before the prompt, and renders
   results in a separate section — not as code findings. A blocked report
   stays visible; no report leaves the review unchanged (#61)
+- Reviews can ingest declared coverage receipts and report change-risk scores on the functions the PR actually touched, advisory by default (#714)
+- Reviews can ingest declared mutation survivors the same way; local `mergecraft review --with-coverage` / `--with-mutation` require `--shell enabled`, wrap live tool runs in the existing sandbox backend (or refuse), and refuse a fork checkout (#714)
 
 - Opt-in Jev / System One client (`jev.enabled`, default off) with cost
   accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a
@@ -189,6 +209,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Local `--shell enabled` now refuses when no sandbox backend is available unless
+  `MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1` is set; on macOS, `sandbox-exec` is
+  the backend when present (#593)
+- Tracked public markdown is linted for decision-ledger tokens, wave-dot
+  citations, and pointers into gitignored wave plans; Priority 1 docs were
+  rewritten to stand alone (#709)
+- `trivy` on Apple Silicon provisions the native ARM64 build so the local
+  coverage gate does not hang under Rosetta
+- Action reviews no longer crash at startup with `infra_error` when loading
+  the shared token cap (#741)
 - Enabled Jev reviews now keep the shadow-judge record next to the evidence
   packet after the command finishes, so paid calibration rows are retrievable
   (#728)

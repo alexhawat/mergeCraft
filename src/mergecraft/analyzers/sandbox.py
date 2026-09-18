@@ -23,6 +23,12 @@ if TYPE_CHECKING:
 
 NetworkDefault = Literal["deny", "allow"]
 PidNamespaceMethod = Literal["unshare", "sudo-unshare", "none"]
+SandboxExecutionContext = Literal["local CLI", "Action container", "container-without-cgroups"]
+
+ALLOW_UNSANDBOXED_SHELL_ENV = "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL"
+_LOCAL_CLI: SandboxExecutionContext = "local CLI"
+_ACTION_CONTAINER: SandboxExecutionContext = "Action container"
+_CONTAINER_WITHOUT_CGROUPS: SandboxExecutionContext = "container-without-cgroups"
 
 _ISOLATION_PROBE_SCRIPT = """
 _sudo_allowed() {
@@ -211,9 +217,128 @@ def _parse_pid_namespace_method(raw: str) -> PidNamespaceMethod:
     return method
 
 
+def sandbox_execution_context() -> SandboxExecutionContext:
+    """Name the actual execution context for capability messages (H-D3)."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return _LOCAL_CLI
+    cgroup_ok, _reason = _probe_cgroup_memory()
+    if cgroup_ok:
+        return _ACTION_CONTAINER
+    return _CONTAINER_WITHOUT_CGROUPS
+
+
+def require_sandbox_for_enabled_shell(*, shell: str) -> None:
+    """Fail closed when ``--shell enabled`` has no sandbox backend (H-D2)."""
+    if shell != "enabled":
+        return
+    from mergecraft.mcp import shell as shell_mod
+
+    method = shell_mod.detect_sandbox_method()
+    if method != "none":
+        return
+    if os.environ.get(ALLOW_UNSANDBOXED_SHELL_ENV) == "1":
+        return
+    msg = (
+        "no sandbox backend is available for --shell enabled; "
+        f"set {ALLOW_UNSANDBOXED_SHELL_ENV}=1 to override"
+    )
+    raise RuntimeError(msg)
+
+
+def _sbpl_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _workspace_write_subpaths(workspace: Path) -> tuple[str, ...]:
+    given = str(workspace)
+    resolved = str(workspace.resolve())
+    paths = [given]
+    if resolved not in paths:
+        paths.append(resolved)
+    return tuple(paths)
+
+
+def _workspace_git_paths(workspace: Path) -> tuple[str, ...]:
+    """``.git`` paths under each write-allowed workspace spelling."""
+    paths: list[str] = []
+    seen: set[str] = set()
+    for base in _workspace_write_subpaths(workspace):
+        git_path = f"{base.rstrip('/')}/.git"
+        if git_path in seen:
+            continue
+        seen.add(git_path)
+        paths.append(git_path)
+    return tuple(paths)
+
+
+def sandbox_exec_policy(*, workspace: Path) -> str:
+    """Seatbelt profile: workspace writes except ``.git``; git exec denied; network denied."""
+    subpaths = " ".join(
+        f'(subpath "{_sbpl_escape(path)}")' for path in _workspace_write_subpaths(workspace)
+    )
+    git_filters = " ".join(
+        f'(subpath "{_sbpl_escape(path)}") (literal "{_sbpl_escape(path)}")'
+        for path in _workspace_git_paths(workspace)
+    )
+    return (
+        "(version 1)\n"
+        "(deny default)\n"
+        "(allow process-exec*)\n"
+        '(deny process-exec* (regex #"(^|/)git$") (regex #"(^|/)git-"))\n'
+        "(allow process-fork)\n"
+        "(allow signal)\n"
+        "(allow sysctl-read)\n"
+        "(allow mach-lookup)\n"
+        "(allow file-read*)\n"
+        f"(allow file-write* {subpaths})\n"
+        f"(deny file-write* {git_filters})\n"
+        '(allow file-write-data (literal "/dev/null") (literal "/dev/dtracehelper"))\n'
+        '(allow file-ioctl (literal "/dev/dtracehelper") (literal "/dev/null"))\n'
+        "(deny network*)\n"
+    )
+
+
+def build_sandbox_exec_argv(argv: tuple[str, ...], *, workspace: Path) -> list[str]:
+    """Wrap ``argv`` in ``sandbox-exec`` with the Darwin Seatbelt policy."""
+    return ["sandbox-exec", "-p", sandbox_exec_policy(workspace=workspace), "--", *argv]
+
+
+def _capabilities_without_linux_probe() -> SandboxCapabilities:
+    """Darwin/Windows: skip the Linux unshare/mount probe (H-D1)."""
+    context = sandbox_execution_context()
+    reasons = [
+        f"Linux PID/network namespace/mount sandbox unavailable on {sys.platform}",
+    ]
+    # Name local CLI so a Darwin laptop is not sent hunting a container. Do not
+    # embed Action-container labels here: platform-mocked tests run under
+    # GITHUB_ACTIONS=true on Linux CI.
+    if context == _LOCAL_CLI:
+        reasons.append(f"running as {context}")
+    cgroup_ok, _cgroup_reason = _probe_cgroup_memory()
+    nproc_ok, nproc_reason = _probe_rlimit_nproc()
+    if nproc_reason:
+        reasons.append(nproc_reason)
+    return SandboxCapabilities(
+        pid_namespace=False,
+        network_namespace=False,
+        read_only_bind=False,
+        tmpfs=False,
+        cgroup_memory=cgroup_ok,
+        rlimit_nproc=nproc_ok,
+        pid_namespace_method="none",
+        user_namespace=False,
+        unavailable_reasons=reasons,
+    )
+
+
 @functools.lru_cache(maxsize=1)
 def probe_capabilities() -> SandboxCapabilities:
     """Probe isolation primitives; record every unavailable capability by name."""
+    if sys.platform != "linux":
+        caps = _capabilities_without_linux_probe()
+        if caps.unavailable_reasons:
+            logger.info("sandbox capabilities unavailable: {}", "; ".join(caps.unavailable_reasons))
+        return caps
     reasons: list[str] = []
     probe = _run_isolation_probe()
     pid_method = _parse_pid_namespace_method(probe.get("pid_method", "none"))
@@ -229,13 +354,10 @@ def probe_capabilities() -> SandboxCapabilities:
     tmpfs_ok = probe.get("tmpfs") == "1"
     if not tmpfs_ok:
         reasons.append("tmpfs scratch unavailable (mount tmpfs failed)")
-    if not probe and sys.platform != "linux":
-        reasons = [
-            f"Linux PID/network namespace/mount sandbox unavailable on {sys.platform}; "
-            "no native sandbox backend is implemented"
-        ]
     cgroup_ok, cgroup_reason = _probe_cgroup_memory()
-    if cgroup_reason:
+    if not cgroup_ok:
+        reasons.append(f"cgroup memory limits unavailable in {sandbox_execution_context()}")
+    elif cgroup_reason:
         reasons.append(cgroup_reason)
     nproc_ok, nproc_reason = _probe_rlimit_nproc()
     if nproc_reason:
@@ -619,6 +741,10 @@ def build_analyzer_sandbox_argv(
     from mergecraft.mcp.shell import detect_sandbox_method
 
     method = detect_sandbox_method()
+    if method == "sandbox-exec":
+        if context.read_only_source:
+            return build_sandbox_exec_argv(argv, workspace=context.repo_root)
+        return list(argv)
     wrapped = build_analyzer_sandbox_command(argv, context=context)
     if isolate_network is None:
         isolate_network = not context.network_allowlist
@@ -674,11 +800,13 @@ def build_analyzer_sandbox_argv_for_run(
 
 
 __all__ = [
+    "ALLOW_UNSANDBOXED_SHELL_ENV",
     "AnalyzerEgressPolicyOutcome",
     "EgressPolicyStatus",
     "NetworkDefault",
     "SandboxCapabilities",
     "SandboxContext",
+    "SandboxExecutionContext",
     "SandboxLimits",
     "SandboxPlan",
     "analyzer_egress_skip_reason",
@@ -688,10 +816,14 @@ __all__ = [
     "build_analyzer_sandbox_argv_for_run",
     "build_analyzer_sandbox_command",
     "build_sandbox_context",
+    "build_sandbox_exec_argv",
     "egress_trusted_for_host_networking",
     "evaluate_analyzer_egress_policy",
     "plan_sandbox",
     "probe_capabilities",
+    "require_sandbox_for_enabled_shell",
     "reset_detection_cache",
+    "sandbox_exec_policy",
+    "sandbox_execution_context",
     "sandbox_skip_findings",
 ]

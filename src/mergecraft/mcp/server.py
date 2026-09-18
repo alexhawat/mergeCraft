@@ -122,9 +122,10 @@ def _shell_tools_available(ctx: ToolContext) -> bool:
     if ctx.payload.shell != "restricted":
         return False
     if ctx.trust_tier == "untrusted":
-        if detect_sandbox_method() == "none":
+        method = detect_sandbox_method()
+        if method == "none":
             return False
-        if not network_namespace_available():
+        if method != "sandbox-exec" and not network_namespace_available():
             return False
     return True
 

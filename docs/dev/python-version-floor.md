@@ -21,7 +21,7 @@ Issue #343 proposes two paths:
 
 ## Decision
 
-**Option A now, option B later** (plan D8).
+**Option A now, option B later.**
 
 1. **Parenthesize** every multi-type `except` under `src/mergecraft/` as
    `except (A, B):` — behaviour-neutral, no semantic change.
@@ -56,6 +56,5 @@ batch commit message.
 
 ## References
 
-- Wave plan: `.ignorelocal/waves/open-issues-sweep-2026-08-20-wave-plan.md`
 - Tests: `tests/test_python_version_floor_af.py`
 - Test plan: `docs/test-plans/open-issues-sweep-2026-08-20-af.md`

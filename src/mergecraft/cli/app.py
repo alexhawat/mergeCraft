@@ -95,7 +95,7 @@ _configure_typer_shell_detection()
 app = typer.Typer(
     name="mergecraft",
     help="Standalone BYOK GitHub Action runtime for coding agents (mergeCraft).",
-    no_args_is_help=True,
+    no_args_is_help=False,
     rich_markup_mode="rich",
     cls=MergecraftTyperGroup,
 )
@@ -142,6 +142,7 @@ app.add_typer(run_cmd.app, name="run")
 # W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.
 tracing_cmd.config_app.command("show")(config_surface_cmd.config_show)
 tracing_cmd.config_app.command("explain")(config_surface_cmd.config_explain)
+tracing_cmd.config_app.command("set")(config_surface_cmd.config_set)
 tracing_cmd.config_app.command("validate")(config_surface_cmd.config_validate)
 app.add_typer(tracing_cmd.config_app, name="config")
 app.add_typer(tracing_cmd.app, name="traces")
@@ -204,6 +205,15 @@ def _root(
         typer.echo(format_version_display(__version__, mergecraft.__commit__))
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if ctx.invoked_subcommand is None:
+        from mergecraft.cli.interactive import (
+            command_was_invoked_bare,
+            is_interactive_session,
+            run_group_session,
+        )
+
+        if is_interactive_session() and command_was_invoked_bare(ctx):
+            run_group_session(ctx)
+            return
         typer.echo(ctx.get_help())
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
 

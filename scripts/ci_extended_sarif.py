@@ -28,6 +28,8 @@ _SCAN_PATHS = ("src", "tests", "scripts", "action.yml")
 _TRUFFLEHOG_EXCLUDE_REGEXES = (
     r"\.git/",
     r"(^|/)\.venv/",
+    r"(^|/)\.venv-dev/",
+    r"site-packages/",
     r"\.mergecraft/analyzer-cache/",
     r"node_modules/",
     r"graphify-out/",
@@ -165,6 +167,67 @@ def _trufflehog_scan_argv(
     return argv
 
 
+def _sarif_result_uri(result: object) -> str:
+    """Return the first artifact URI on a SARIF result, or empty string."""
+    if not isinstance(result, dict):
+        return ""
+    locations = result.get("locations")
+    if not isinstance(locations, list) or not locations:
+        return ""
+    first = locations[0]
+    if not isinstance(first, dict):
+        return ""
+    physical = first.get("physicalLocation")
+    if not isinstance(physical, dict):
+        return ""
+    artifact = physical.get("artifactLocation")
+    if not isinstance(artifact, dict):
+        return ""
+    uri = artifact.get("uri")
+    return uri if isinstance(uri, str) else ""
+
+
+def _drop_suppressed_trufflehog_results(
+    document: object,
+    *,
+    repo_root: Path,
+) -> object:
+    """Drop SARIF results whose path is a named fixture or virtualenv tree.
+
+    Emit-path filtering — ``--exclude-paths`` alone does not apply the
+    named-fixture set. A newly committed secret under ``tests/`` still
+    remains; there is no blanket ``tests/**`` skip.
+
+    Args:
+        document: SARIF object from ``trufflehog_to_sarif``.
+
+    Returns:
+        object: The same document, with suppressed result rows removed.
+    """
+    from mergecraft.analyzers.config import is_trufflehog_path_suppressed
+
+    if not isinstance(document, dict):
+        return document
+    runs = document.get("runs")
+    if not isinstance(runs, list):
+        return document
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        results = run.get("results")
+        if not isinstance(results, list):
+            continue
+        run["results"] = [
+            result
+            for result in results
+            if not is_trufflehog_path_suppressed(
+                _sarif_result_uri(result),
+                repo_root=repo_root,
+            )
+        ]
+    return document
+
+
 def emit_trufflehog_sarif(*, out: Path, repo_root: Path | None = None) -> None:
     """Provision pinned trufflehog, scan, convert JSONL, and write SARIF to ``out``."""
     root = (repo_root or _repo_root()).resolve()
@@ -187,7 +250,10 @@ def emit_trufflehog_sarif(*, out: Path, repo_root: Path | None = None) -> None:
         tail = detail[-1] if detail else f"exit {completed.returncode}"
         msg = f"trufflehog scan failed: {tail}"
         raise EmitError(msg)
-    document = _trufflehog_to_sarif(completed.stdout)
+    document = _drop_suppressed_trufflehog_results(
+        _trufflehog_to_sarif(completed.stdout),
+        repo_root=root,
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 

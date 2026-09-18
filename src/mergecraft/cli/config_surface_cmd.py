@@ -16,7 +16,18 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
 )
+from mergecraft.config.io import (
+    append_config_mapping,
+    config_has_yaml_comments,
+    config_path_for_root,
+    load_config_dict,
+    write_config_dict,
+)
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
+
+_SETTABLE_KEYS = frozenset({"model", "models", "tracing.enabled", "tracing"})
+_TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
+_FALSE_VALUES = frozenset({"false", "0", "no", "off"})
 
 
 def _config_path(cwd: Path) -> Path | None:
@@ -103,6 +114,77 @@ def config_validate(
     console.print(f"[green]ok[/green] — {config_path}")
 
 
+def _parse_bool_value(value: str) -> bool:
+    lowered = value.strip().lower()
+    if lowered in _TRUE_VALUES:
+        return True
+    if lowered in _FALSE_VALUES:
+        return False
+    cli_bail(f"invalid boolean {value!r} — use true or false")
+    raise AssertionError("unreachable")
+
+
+def _split_model_slugs(value: str) -> list[str]:
+    slugs = [part.strip() for part in value.replace(",", " ").split() if part.strip()]
+    if not slugs:
+        cli_bail("provide at least one model slug")
+    return slugs
+
+
+def _write_config_data(path: Path, data: dict[str, object], *, patch: dict[str, object]) -> None:
+    if config_has_yaml_comments(path):
+        append_config_mapping(path, patch)
+        return
+    write_config_dict(path, data)
+
+
+def config_set(
+    key: str = typer.Argument(
+        ...,
+        help="Dotted config key to write (model, models, tracing.enabled).",
+    ),
+    value: str = typer.Argument(
+        ...,
+        help="Value to write into .mergecraft/config.yaml.",
+    ),
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+) -> None:
+    """Write a supported config key into ``.mergecraft/config.yaml``."""
+    root = cwd.resolve()
+    normalized = key.strip().lower()
+    if normalized not in _SETTABLE_KEYS:
+        supported = ", ".join(sorted(_SETTABLE_KEYS))
+        cli_bail(f"unsupported config key for set: {key!r} — supported: {supported}")
+
+    config_path = _config_path(root) or config_path_for_root(root)
+    data: dict[str, object] = load_config_dict(config_path)
+    patch: dict[str, object]
+    if normalized in {"model", "models"}:
+        slugs = _split_model_slugs(value)
+        data["models"] = slugs
+        data.pop("model", None)
+        patch = {"models": slugs}
+    else:
+        enabled = _parse_bool_value(value)
+        tracing_raw = data.get("tracing")
+        tracing = dict(tracing_raw) if isinstance(tracing_raw, dict) else {}
+        tracing["enabled"] = enabled
+        data["tracing"] = tracing
+        patch = {"tracing": tracing}
+
+    try:
+        RepoSettings.model_validate(data)
+    except ValidationError as exc:
+        cli_bail(f"config validation failed: {exc}")
+
+    _write_config_data(config_path, data, patch=patch)
+    try:
+        display = str(config_path.relative_to(root))
+    except ValueError:
+        display = str(config_path)
+    console.print(f"wrote [green]{display}[/green] {normalized}={value}")
+
+
 def validate_repo_config_or_raise(*, cwd: Path) -> None:
     """Raise ``ValueError`` when the workspace config fails validation."""
     config_path = _config_path(cwd)
@@ -123,6 +205,7 @@ def validate_repo_config_or_raise(*, cwd: Path) -> None:
 
 __all__ = [
     "config_explain",
+    "config_set",
     "config_show",
     "config_validate",
     "validate_repo_config_or_raise",

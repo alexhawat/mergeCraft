@@ -71,18 +71,6 @@ def get_unsubmitted_review(tool_state: ToolState) -> str | None:
     return None
 
 
-MAX_HOOK_OUTPUT_CHARS = 4096
-
-
-def truncate_hook_output(raw: str) -> str:
-    if len(raw) <= MAX_HOOK_OUTPUT_CHARS:
-        return raw
-    return (
-        f"...(truncated, showing last {MAX_HOOK_OUTPUT_CHARS} chars)\n"
-        f"{raw[-MAX_HOOK_OUTPUT_CHARS:]}"
-    )
-
-
 def build_stop_hook_prompt(failure: StopHookFailure) -> str:
     return "\n".join(
         [
@@ -204,12 +192,6 @@ _LEARNINGS_PROVENANCE_NOTE = (
     "If you cannot trace a candidate learning to a finding or a "
     "maintainer-acknowledged outcome, leave it out."
 )
-
-
-def build_reflection_prompt(issues: PostRunIssues) -> str:
-    """Prompt for a soft reflection turn after soft gates remain."""
-    base = build_post_run_prompt(issues)
-    return f"{base}\n\nThis is a reflection turn — address the issues above, then stop."
 
 
 def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None, dict[str, Any]]:

@@ -335,11 +335,30 @@ class AsyncJevClient:
         self._settings = settings
         self._api_key = _resolve_api_key(api_key)
         self.transport = transport
-        self._budget = (
-            budget if budget is not None else TokenBudget(max_tokens=_budget_tokens(settings))
-        )
         self._tracer = tracer
         self._model = settings.model if settings is not None else PINNED_MODEL
+        self._explicit_budget = budget
+        self._fallback_budget: TokenBudget | None = None
+
+    @property
+    def _budget(self) -> TokenBudget:
+        """Explicit constructor cap, else the bound run cap, else a local fallback.
+
+        ``current_run_budget`` is read at use time so a client built before
+        ``bind_run_budget`` still shares the per-run cap (E-D9).
+        """
+        from mergecraft.agents.token_budget import current_run_budget, token_budget_for
+
+        if self._explicit_budget is not None:
+            return self._explicit_budget
+        bound = current_run_budget()
+        if bound is not None:
+            return bound
+        if self._fallback_budget is None:
+            self._fallback_budget = token_budget_for(
+                model=self._model, max_tokens=_budget_tokens(self._settings)
+            )
+        return self._fallback_budget
 
     def availability_skip(self, *, pack_id: str | None = None) -> JevCallResult | None:
         """Return an honest skip when this client must not dispatch (D4).
@@ -356,7 +375,9 @@ class AsyncJevClient:
             return _skip("disabled")
         if self._api_key is None:
             return _skip("credential_absent")
-        if self._budget.should_stop():
+        from mergecraft.agents.token_budget import apply_kill_switch
+
+        if apply_kill_switch(self._budget) == "kill_switch":
             return _skip("kill_switch")
         return None
 
@@ -407,7 +428,10 @@ class AsyncJevClient:
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
         )
-        accepted = self._budget.record_usage(
+        from mergecraft.agents.token_budget import record_provider_usage
+
+        accepted = record_provider_usage(
+            self._budget,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
         )

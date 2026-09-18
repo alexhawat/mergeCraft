@@ -1036,6 +1036,8 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         ),
         ci_gate_checks=dict(settings.ci_evidence.gates),
         ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
+        ci_coverage_artifacts=list(settings.ci_evidence.coverage_artifacts),
+        ci_mutation_artifacts=list(settings.ci_evidence.mutation_artifacts),
         analyzers_mode=analyzers_mode,
         trust_tier=ctx.trust_tier,
         authority_trust=ctx.authority_trust,
@@ -1516,40 +1518,52 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         append_dispatched_lens(tool_state, str(agent.name))
         return selected_slug, result
 
-    agent_task = asyncio.create_task(_dispatch_selected_agent())
+    from mergecraft.agents.token_budget import (
+        bind_run_budget,
+        current_run_budget,
+        token_budget_for,
+    )
+    from mergecraft.jev.types import PINNED_MODEL
 
-    # S1 / F6 — deduct the setup-script elapsed time from the agent
-    # deadline. A slow setup must NOT silently extend the total run
-    # deadline. ``setup_elapsed_s`` is the wall-clock duration measured
-    # by the bounded setup block above; ``timeout_ms`` is the
-    # pre-deduction run budget.
-    timeout_ms = ctx.timeout_ms
-    setup_elapsed_s = ctx.setup_elapsed_s
-    agent_timeout_ms: int | None
-    if timeout_ms is None:
-        agent_timeout_ms = None
-    else:
-        agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
-        if agent_timeout_ms != timeout_ms:
-            logger.info(
-                "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
-                setup_elapsed_s,
-                timeout_ms / 1000,
-                agent_timeout_ms / 1000,
-            )
+    provider_budget = current_run_budget() or token_budget_for(
+        model=ctx.resolved_model or PINNED_MODEL,
+        max_tokens=ctx.run_bounds.token_budget if ctx.run_bounds is not None else 250_000,
+    )
+    with bind_run_budget(provider_budget):
+        agent_task = asyncio.create_task(_dispatch_selected_agent())
 
-    if agent_timeout_ms is None:
-        winning_slug, result = await agent_task
-    else:
-        try:
-            winning_slug, result = await asyncio.wait_for(
-                agent_task, timeout=agent_timeout_ms / 1000.0
-            )
-        except TimeoutError:
-            agent_task.cancel()
-            kill_all_active_process_groups()
-            msg = f"agent run timed out after {ctx.timeout_raw or '1h'}"
-            raise _AgentTimeoutError(msg) from None
+        # S1 / F6 — deduct the setup-script elapsed time from the agent
+        # deadline. A slow setup must NOT silently extend the total run
+        # deadline. ``setup_elapsed_s`` is the wall-clock duration measured
+        # by the bounded setup block above; ``timeout_ms`` is the
+        # pre-deduction run budget.
+        timeout_ms = ctx.timeout_ms
+        setup_elapsed_s = ctx.setup_elapsed_s
+        agent_timeout_ms: int | None
+        if timeout_ms is None:
+            agent_timeout_ms = None
+        else:
+            agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
+            if agent_timeout_ms != timeout_ms:
+                logger.info(
+                    "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
+                    setup_elapsed_s,
+                    timeout_ms / 1000,
+                    agent_timeout_ms / 1000,
+                )
+
+        if agent_timeout_ms is None:
+            winning_slug, result = await agent_task
+        else:
+            try:
+                winning_slug, result = await asyncio.wait_for(
+                    agent_task, timeout=agent_timeout_ms / 1000.0
+                )
+            except TimeoutError:
+                agent_task.cancel()
+                kill_all_active_process_groups()
+                msg = f"agent run timed out after {ctx.timeout_raw or '1h'}"
+                raise _AgentTimeoutError(msg) from None
 
     return winning_slug, result
 

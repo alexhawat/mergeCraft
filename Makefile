@@ -25,7 +25,8 @@ SHELL := /bin/bash
 	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare
+	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare \
+	tracked-markdown-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
@@ -73,13 +74,14 @@ npm-lockcheck: ## Fail when npm lockfiles drift from package.json
 	cd tools && npm ci --dry-run --ignore-scripts --no-audit --no-fund
 	cd docker/agent-clis && npm ci --dry-run --ignore-scripts --no-audit --no-fund
 
-lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check + privilege-drop chown + type-ignore reasons + called-workflow permissions
+lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + tracked-markdown + hook-pins-check + privilege-drop chown + type-ignore reasons + called-workflow permissions
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
 	$(UV) run python scripts/check_git_argv.py
 	$(UV) run python scripts/check_cli_consoles.py
 	$(MAKE) action-yml-hygiene-check
+	$(MAKE) tracked-markdown-check
 	$(MAKE) review-skill-taxonomy-check
 	$(MAKE) review-skill-spec-check
 	$(MAKE) hook-pins-check
@@ -95,6 +97,9 @@ lint-test-hygiene: ## Block on tautological test patterns (D16)
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py
+
+tracked-markdown-check: ## Fail when tracked markdown cites decision IDs or gitignored wave plans
+	$(UV) run python scripts/check_tracked_markdown.py
 
 review-skill-taxonomy-check: ## Drift gate: code-review skill names every taxonomy constant (D8)
 	$(UV) run python scripts/check_review_skill_taxonomy.py

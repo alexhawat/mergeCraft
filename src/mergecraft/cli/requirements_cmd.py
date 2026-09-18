@@ -12,6 +12,7 @@ import typer
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.requirements import (
     REQUIREMENT_STATES,
     IngestResult,
@@ -19,7 +20,7 @@ from mergecraft.requirements import (
     ingest_requirements,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="requirements",
     help="Inspect and explain requirements mapped from tickets and local specs.",
     no_args_is_help=True,

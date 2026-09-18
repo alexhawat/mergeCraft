@@ -13,13 +13,14 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.policy.exceptions import PolicyException, parse_exceptions_document
 from mergecraft.policy.lifecycle import simulate_rule
 from mergecraft.policy.packs import load_shipped_pack_rules
 from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rule, parse_rules_document
 from mergecraft.policy.scoping import EffectiveRule, ScopeContext, resolve_effective_rules
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="policy",
     help="Lint, test, explain, and simulate versioned policy-as-code rules.",
     no_args_is_help=True,

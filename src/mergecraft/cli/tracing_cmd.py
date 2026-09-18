@@ -33,13 +33,14 @@ from mergecraft.cli.exits import (
 )
 from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.tracing.redaction import redact_attrs
 from mergecraft.tracing.sinks import read_jsonl_events
 
 if TYPE_CHECKING:
     from rich.console import Console
 
-app = typer.Typer(
+app = mergecraft_typer(
     help="Trace inspection commands — show resolved config and read back local traces.",
     no_args_is_help=True,
 )
@@ -60,7 +61,7 @@ def _is_redacted(value: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
-config_app = typer.Typer(
+config_app = mergecraft_typer(
     help="Inspect resolved mergeCraft settings.",
     no_args_is_help=True,
 )

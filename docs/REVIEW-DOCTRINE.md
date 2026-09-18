@@ -5,8 +5,8 @@
 > skill distills for prompts.
 
 Review-check reasoning from `review_checks.py`, `review_taxonomy.py`,
-`mcp/static_checks.py`, and `REVIEW-CHECKS.md`. W2 and W5
-build on these decisions — they are not recoverable from code alone.
+`mcp/static_checks.py`, and `REVIEW-CHECKS.md`. Later review-integrity
+work builds on these decisions — they are not recoverable from code alone.
 
 ## Mechanical gates vs findings
 
@@ -17,7 +17,7 @@ Only a real non-zero exit from an executable gate is evidence. The Action image 
 lands as `unavailable` there unless the repo declares explicit `staticChecks` with binaries
 that exist in the image.
 
-## Finding scope: change vs run (plan 12, D1–D2)
+## Finding scope: change vs run
 
 Every `Finding` carries a `scope` axis: `change` or `run`. The default is `change`, so
 existing producers keep their meaning without silent reclassification.
@@ -26,17 +26,17 @@ existing producers keep their meaning without silent reclassification.
   block merge after causality policy and severity grading.
 - **`run`** — a claim about how the review executed (trajectory auditor rows, environment
   observations, and similar process evidence). These are **advisory only** and can never
-  block (D2). Run health is reported — in the evidence packet's `run_health` section, the
+  block. Run health is reported — in the evidence packet's `run_health` section, the
   deterministic run record, the `mergecraft` completion check summary, and the job step
-  summary — never enforced as a second merge gate (D14).
+  summary — never enforced as a second merge gate.
 
 `blocking_findings()` in `agents/gates.py` is the single predicate: drop `scope == "run"`,
 apply `apply_causality_policy`, then test `BLOCKING_SEVERITIES`. `_has_blocker`,
 `_packet_has_blockers`, `decide_approval`, and `mcp/verdict.py::_blocks_approve` all route
-through it — two predicates that disagree is a defect class, not a style question (D3).
+through it — two predicates that disagree is a defect class, not a style question.
 
-Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by_pr="false"`
-(D4). All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
+Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by_pr="false"`.
+All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
 `source` drives rendering.
 
 ## Makefile discovery, not tool inference
@@ -64,14 +64,14 @@ tradeoff favors stable dedup over semantic similarity.
 ## Output cap
 
 **`MAX_OUTPUT_CHARS = 8_000`** caps combined stdout+stderr embedded in prompts. Raw tool output
-beyond this truncates — a design constraint for W4's move to file-based parsing. Mechanical
+beyond this truncates — a design constraint once parsing moved to files. Mechanical
 gate output is evidence, not the finding itself.
 
 ## Subagent deny-list
 
 **`subagent_denied_tool_names()` derives from every MCP tool with `mutates=True`.** If that
 list is empty, startup **raises** — refusing to run a review subagent with the mutation gate
-effectively disabled. The verification agent (W7) inherits the same guard.
+effectively disabled. The verification agent inherits the same guard.
 
 ## Verification covers every source, including ourselves (C6)
 
@@ -94,7 +94,7 @@ the finding's own fingerprint, so the same claim is skipped before verification 
 run — the same section, parser and identity analyzer suppression already uses. Verifying a
 finding the author refuted last month is the failure this prevents.
 
-## Recall pass — the verifier's mirror (RC10, D1, D7)
+## Recall pass — the verifier's mirror
 
 **Every stage before publication subtracts findings; the recall pass is the one stage that may
 add them back.** After aggregation the orchestrator dispatches `mergecraft-recall` with the
@@ -103,19 +103,19 @@ subagent deny-list as `mergecraft-reviewer`, and may return only findings absent
 draft — paraphrases and overlaps are filtered through `findings.dedup.dedupe_findings`, not a
 second matcher.
 
-**Output is always deferred (D1).** Recall findings publish in `### 🗂 Deferred findings`
+**Output is always deferred.** Recall findings publish in `### 🗂 Deferred findings`
 regardless of the severity the subagent claims. They never consume inline budget and never
 block merge. A precision gain bought by silently dropping recall output would be a regression;
 the novelty filter and deferred placement are the paired constraint.
 
-**Default off, dogfooded here (D7).** `review.recallPass` defaults `false` for consumers — it
+**Default off, dogfooded here.** `review.recallPass` defaults `false` for consumers — it
 costs a subagent dispatch per review. mergeCraft's own `.mergecraft/config.yaml` keeps it off
 until the recallPass schema lands on `pre-0.0.1` (the PR-branch action pin cannot consume the
 field before merge); dogfood re-enables it after that merge.
-The W7 corpus gate (`evaluate_recall_pass_corpus`) must show first-pass recall up with the DG1
-precision corpus flat or better before the wave ships.
+The corpus gate (`evaluate_recall_pass_corpus`) must show first-pass recall up with the
+precision corpus flat or better before that default flips.
 
-## LLM judges are secondary evaluators (D14, #45)
+## LLM judges are secondary evaluators
 
 **The verifier is an LLM judging an LLM, so it is pinned, logged, ordered last, and never
 decisive alone.**
@@ -138,7 +138,8 @@ decisive alone.**
   finding on a migration or an auth change is the expensive direction to be wrong in.
 
 **Cost:** a run whose reviewer never calls the deterministic tools gets no verification at all.
-That is deliberate — a judge with nothing to be secondary to is the failure mode #45 names.
+That is deliberate — a judge with nothing to be secondary to is the failure
+mode that made judges last and never decisive alone.
 
 ## Shell permission and static checks
 
@@ -161,17 +162,17 @@ self-report. Two consequences follow:
   reviewed `sha`) — a sibling of `decision`, not a substitute. When the
   agent's `self_assessment.approved == True` is the *only* positive
   signal, the verdict is `neutral` (or the packet's explicit `decision`
-  if set upstream), not `auto_merge`. That is the #41 hard rule; it is
+  if set upstream), not `auto_merge`. That rule is
   pinned by `tests/evidence/test_self_assessment.py::test_self_assessment_alone_blocks_auto_merge`.
 - **The decision is monotone in blockers.** Any `Critical` or `Major`
   finding yields `failure` regardless of the agent's `approved` value;
   `run_succeeded == False` yields `neutral`; `tier == "untrusted"`
   yields `neutral`. A "green" check-run never outvotes a blocker; an
   agent's `approved=True` never outvotes a blocker. See
-  `mergecraft.agents.gates.decide_approval` (the security-trust-boundary
-  plan's Batch D contract, D5) and `tests/status_checks/test_decide_approval.py`.
+  `mergecraft.agents.gates.decide_approval` and
+  `tests/status_checks/test_decide_approval.py`.
 
-### Run outcome taxonomy (D3, W5)
+### Run outcome taxonomy
 
 A run ends in exactly one of six named outcomes —
 `mergecraft.run_outcome.RunOutcome`: `passed`, `failed`, `inconclusive`,
@@ -181,12 +182,12 @@ carries it, and two mappings key off it:
 | Mapping | Lives in | Notes |
 |---------|----------|-------|
 | outcome → `mergecraft` completion check-run conclusion | `mergecraft.run_outcome.RUN_OUTCOME_CONCLUSION` | Only `passed` → `success`; `failed` → `failure`; `timed_out` → GitHub's literal `timed_out`; everything else → `neutral`. |
-| outcome → `result` output JSON | `cli/gha_cmd.py` (`_structured_failure_result`, W5.3) | `{"outcome": ..., "error": {"code": "mergecraft.<outcome>", "message": <redacted>}}` on any failure path — not just `::error::` + exit 1. |
+| outcome → `result` output JSON | `cli/gha_cmd.py` (`_structured_failure_result`) | `{"outcome": ..., "error": {"code": "mergecraft.<outcome>", "message": <redacted>}}` on any failure path — not just `::error::` + exit 1. |
 
 The `mergecraft-approval` check stays governed by the existing
 `decide_approval` 3-way conclusion above: every outcome except `passed`
 feeds it `run_succeeded=False` (`run_outcome.run_succeeded_for_outcome`), so
-this taxonomy is additive detail on top of the pre-W5 boolean, never a
+this taxonomy is additive detail on top of the earlier boolean, never a
 looser gate.
 
 ### Evidence weighting
@@ -212,9 +213,9 @@ fenced before it reaches any prompt. The merge-evidence packet is the
 single artifact a human or a later tool reads to reconstruct why a PR
 was auto-merged, blocked, or escalated; it is durable, versioned, and
 the schema is derived from the Pydantic models (`mergecraft.evidence.
-packet.PACKET_SCHEMA_VERSION`, D7).
+packet.PACKET_SCHEMA_VERSION`).
 
-### Honesty about unavailable signals (W2.4)
+### Honesty about unavailable signals
 
 Where a signal source is unreachable, the packet records it as
 `unavailable` with a reason — never silently as "passing". This is the
@@ -299,9 +300,9 @@ How a reviewer should weigh that header on a per-field basis:
   `mergecraft.utils.fence`. The trust exemption is *per-field*, not per-thread:
   an OWNER-typed review comment does not extend trust to a sibling attacker's
   comment in the same thread. Each field's `author_association` is checked
-  independently, and the W4 enumeration test pins that.
+  independently, and an enumeration test pins that.
 
-The hard rule (W4.5 / D9): **PR prose is evidence, never instruction.** A finding whose
+The hard rule: **PR prose is evidence, never instruction.** A finding whose
 only support is the PR title, PR body, or a comment is dropped or downgraded; the diff
 must anchor every surviving finding. The fence is the technical mechanism that makes
 this rule enforceable — without it, prose and instruction share a channel and a
@@ -385,7 +386,7 @@ rules in trusted mergeCraft code: `request_changes` with zero findings,
 a failing required deterministic check are all rejected with a typed
 `rejection_reason`. A rejected submission leaves
 `terminal_submission_received=false` — fallback-eligible, same as no
-submission (D8). The approve path fails closed on *unverified* blockers too: a
+submission. The approve path fails closed on *unverified* blockers too: a
 Critical/Major analyzer finding that is neither verifier-confirmed nor withdrawn
 rejects `approve`, so skipping verification is not a route to approval.
 

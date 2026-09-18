@@ -1,0 +1,11 @@
+diff --git a/src/mod.py b/src/mod.py
+--- a/src/mod.py
++++ b/src/mod.py
+@@ -1,6 +1,6 @@
+ def fn_crap(value: int) -> int:
+     if value > 0:
+-        return 1
++        return 12
+     if value < -10:
+         return 2
+     if value == -5:

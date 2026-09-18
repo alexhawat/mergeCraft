@@ -200,6 +200,16 @@ def _missing_env_credentials(spec: VerificationInput) -> list[str]:
     return [name for name in spec.credential_env_names if not os.environ.get(name)]
 
 
+def _screenshots_allowed(spec: VerificationInput) -> bool:
+    """Return whether a post-run screenshot may be persisted.
+
+    Pixel redaction is not implemented yet. Runs that load credentials from the
+    environment can paint session tokens into the viewport, so screenshots are
+    suppressed until a real ``redact_screenshot`` lands.
+    """
+    return spec.auth.strategy != "env"
+
+
 def collect_skip_reasons(
     *,
     event: dict[str, Any] | None = None,
@@ -465,7 +475,7 @@ async def run_verify_behavior(
             return report
 
         page = await driver.extract_text()
-        if spec.artifacts_dir:
+        if spec.artifacts_dir and _screenshots_allowed(spec):
             dest_dir = Path(spec.artifacts_dir)
             shot_dest = dest_dir / "screenshot.png"
             shot = await driver.screenshot(shot_dest)
@@ -478,6 +488,7 @@ async def run_verify_behavior(
         console_errors = [part for part in log_parts if part]
         if spec.artifacts_dir and log_text:
             log_path = Path(spec.artifacts_dir) / "console.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
             log_path.write_text(_redact_truncate(log_text), encoding="utf-8")
             logs.append(str(log_path))
 
