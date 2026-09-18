@@ -61,10 +61,6 @@ _FRESH_RUN_MSG = (
     "on the same loop that started async_playwright (the run_async helper already "
     "used by run())"
 )
-_CLOSE_SAME_LOOP_XFAIL = pytest.mark.xfail(
-    reason="green after V6: Playwright close on the same loop",
-    strict=False,
-)
 
 
 def _force_extra_present(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -509,7 +505,6 @@ async def test_run_verify_behavior_completes_with_async_playwright_fakes(
     assert status != ""
 
 
-@_CLOSE_SAME_LOOP_XFAIL
 def test_sync_close_after_runner_loop_does_not_use_fresh_asyncio_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -538,7 +533,6 @@ def test_sync_close_after_runner_loop_does_not_use_fresh_asyncio_run(
     _assert_stopped_on_start_loop(bound)
 
 
-@_CLOSE_SAME_LOOP_XFAIL
 def test_close_driver_after_run_async_finishes_on_start_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -570,7 +564,6 @@ def test_close_driver_after_run_async_finishes_on_start_loop(
     _assert_stopped_on_start_loop(bound)
 
 
-@_CLOSE_SAME_LOOP_XFAIL
 def test_extra_present_cli_returns_after_playwright_teardown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

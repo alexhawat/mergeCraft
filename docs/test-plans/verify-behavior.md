@@ -26,16 +26,16 @@ real-browser smoke test, if added later, must be marked `integration` so
 ## Greening milestones
 
 The report, driver-protocol, command, review-consume, operator-path
-launch, CLI event-loop, and async Playwright runner milestones are
-green. Extra present calls `launch_playwright_driver` (never the CLI
-stub); adapter tests bind `PlaywrightBrowserDriver` to an in-process
-fake Page. Extra-present `verify-behavior` uses `run_async` after
-launch; launch does not leave a running loop that blocks
-`asyncio.run`. Launch does not call `sync_playwright`; `navigate`
-awaits async `page.goto` from inside `run_verify_behavior`. Sync
-`close()` after the runner loop ends must finish on the same loop that
-started `async_playwright` — not via `asyncio.run(_aclose())` on a
-fresh loop.
+launch, CLI event-loop, async Playwright runner, and Playwright close
+loop milestones are green. Extra present calls
+`launch_playwright_driver` (never the CLI stub); adapter tests bind
+`PlaywrightBrowserDriver` to an in-process fake Page. Extra-present
+`verify-behavior` uses `run_async` after launch; launch does not leave
+a running loop that blocks `asyncio.run`. Launch does not call
+`sync_playwright`; `navigate` awaits async `page.goto` from inside
+`run_verify_behavior`. Sync `close()` after the runner loop ends
+finishes on the same loop that started `async_playwright` — not via
+`asyncio.run(_aclose())` on a fresh loop.
 
 | Milestone | What lands | Suite |
 | --- | --- | --- |
@@ -46,7 +46,7 @@ fresh loop.
 | Operator-path launch | Extra present calls `launch_playwright_driver` (never the CLI stub); adapter against a fake Page; extra-absent still names `mergecraft[browser]` | `test_playwright_launch.py` |
 | CLI event loop | Extra-present `verify-behavior` uses `run_async` after launch; launch does not leave a running loop that blocks `asyncio.run` | `test_cli_event_loop.py` |
 | Async Playwright runner | Launch does not import or call `sync_playwright`; `navigate` / `inner_text` / `screenshot` await the async Page APIs; `run_verify_behavior` plus a launched driver returns a report when only `async_playwright` is faked | `test_async_playwright_runner.py` |
-| Playwright close loop | After Playwright starts on the `run_async` loop, sync `close()` / CLI `_close_driver` / extra-present `verify-behavior` must finish; teardown must not `asyncio.run(_aclose())` on a fresh loop; `stop()` runs on the start loop. Pending `_CLOSE_SAME_LOOP_XFAIL` | `test_async_playwright_runner.py` |
+| Playwright close loop | After Playwright starts on the `run_async` loop, sync `close()` / CLI `_close_driver` / extra-present `verify-behavior` finish; teardown does not `asyncio.run(_aclose())` on a fresh loop; `stop()` runs on the start loop | `test_async_playwright_runner.py` |
 
 Regression pins that must stay green:
 
@@ -187,10 +187,12 @@ launched driver fails
 
 Calling `asyncio.run(self._aclose())` from `PlaywrightBrowserDriver.close`
 after the runner loop has ended (or leaving CLI `_close_driver` on that
-path) fails the `_CLOSE_SAME_LOOP_XFAIL` cases in
-`test_async_playwright_runner.py`. The loop-bound fake hangs on a
-different loop than `start()`, and the timeout wrapper treats that hang
-as failure. In-loop `await closer()` alone does not cover this path.
+path) fails `test_sync_close_after_runner_loop_does_not_use_fresh_asyncio_run`,
+`test_close_driver_after_run_async_finishes_on_start_loop`, and
+`test_extra_present_cli_returns_after_playwright_teardown`. The
+loop-bound fake hangs on a different loop than `start()`, and the
+timeout wrapper treats that hang as failure. In-loop `await closer()`
+alone does not cover this path.
 
 ## Out of scope in this suite
 
