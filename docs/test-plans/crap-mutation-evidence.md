@@ -156,6 +156,7 @@ Under `tests/analyzers/fixtures/`:
 
 ## Escalation notes
 
+- **C5-F3:** K6 isolation pins harness-file loads (plus mutation AST imports), not a `sys.modules` name substring — full-suite collection already includes `tests.ci.test_mutate_decision_modules`.
 - **C5-F2 / C-D2 sibling:** `run_ci_intelligence` must call
   `list_check_runs_for_ref` (or equivalent) and pass `check_runs=` into
   `collect_ci_coverage_findings` / `collect_ci_mutation_findings`. A declared

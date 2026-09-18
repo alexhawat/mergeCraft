@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import json
-from typing import TYPE_CHECKING, Any
+import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,8 +28,9 @@ from tests.ci.support_crap import (
     zip_artifact,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
+_HARNESS_SCRIPT = (REPO_ROOT / "scripts" / "mutate_decision_modules.py").resolve()
+_HARNESS_SIBLING_LOADER = "mutate_decision_modules_test"
+_HARNESS_MODULE_NEEDLE = "mutate_decision_modules"
 
 
 class _ArtifactGitHub(GitHubClient):
@@ -200,12 +204,44 @@ def test_shadow_mutation_does_not_reach_has_blockers() -> None:
     assert _packet_has_blockers(packet_with_findings(result.findings)) is False
 
 
-def test_mutation_ingest_does_not_import_internal_harness() -> None:
-    import sys
+def _harness_file_loads(*, allow_preexisting_sibling: set[str]) -> list[str]:
+    """``sys.modules`` names backed by the internal harness script (K6)."""
+    loaded: list[str] = []
+    for name, module in sys.modules.items():
+        if name.startswith("tests."):
+            continue
+        if name == _HARNESS_SIBLING_LOADER and name in allow_preexisting_sibling:
+            continue
+        filename = getattr(module, "__file__", None)
+        if not isinstance(filename, str):
+            continue
+        if Path(filename).resolve() == _HARNESS_SCRIPT:
+            loaded.append(name)
+    return loaded
 
-    _mutation()
-    loaded = [name for name in sys.modules if "mutate_decision_modules" in name]
-    assert loaded == []
+
+def _harness_import_refs(tree: ast.AST) -> list[str]:
+    """Import module names / aliases that refer to the internal harness."""
+    refs: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            refs.extend(alias.name for alias in node.names if _HARNESS_MODULE_NEEDLE in alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            if _HARNESS_MODULE_NEEDLE in module_name:
+                refs.append(module_name)
+            refs.extend(alias.name for alias in node.names if _HARNESS_MODULE_NEEDLE in alias.name)
+    return refs
+
+
+def test_mutation_ingest_does_not_import_internal_harness() -> None:
+    before = set(sys.modules)
+    mutation = _mutation()
+    assert _harness_file_loads(allow_preexisting_sibling=before) == []
+
+    source_path = Path(mutation.__file__).resolve()
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    assert _harness_import_refs(tree) == []
 
 
 @pytest.mark.asyncio
