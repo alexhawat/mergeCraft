@@ -1036,6 +1036,8 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         ),
         ci_gate_checks=dict(settings.ci_evidence.gates),
         ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
+        ci_coverage_artifacts=list(settings.ci_evidence.coverage_artifacts),
+        ci_mutation_artifacts=list(settings.ci_evidence.mutation_artifacts),
         analyzers_mode=analyzers_mode,
         trust_tier=ctx.trust_tier,
         authority_trust=ctx.authority_trust,

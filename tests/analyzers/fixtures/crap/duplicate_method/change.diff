@@ -1,0 +1,10 @@
+diff --git a/src/mod.py b/src/mod.py
+--- a/src/mod.py
++++ b/src/mod.py
+@@ -8,5 +8,5 @@ class B:
+ class B:
+     def run(self) -> int:
+         if False:
+-            return 2
++            return 20
+         return 0

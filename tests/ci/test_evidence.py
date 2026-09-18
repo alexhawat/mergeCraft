@@ -34,6 +34,7 @@ from mergecraft.ci.evidence import (
     declared_check_run,
     declared_gate_findings,
     record_ci_findings,
+    record_ci_ingest_metadata,
     record_gate_substitutions,
     sarif_findings,
     substitute_declared_gates,
@@ -128,6 +129,9 @@ def test_successful_check_run_produces_no_finding() -> None:
     assert check_run_to_finding(_check_run(conclusion="success")) is None
     assert check_run_to_finding(_check_run(conclusion="skipped")) is None
     assert check_run_to_finding(_check_run(status="in_progress", conclusion="")) is None
+    cancelled = check_run_to_finding(_check_run(conclusion="cancelled"))
+    assert cancelled is not None
+    assert cancelled.rule_id == "check-run/cancelled"
 
 
 # ── W5.2 — SARIF artifacts reuse the existing parser ──────────────────────────
@@ -434,3 +438,17 @@ def test_gate_substitutions_are_recorded_for_audit() -> None:
     assert state.ci_evidence is not None
     assert state.ci_evidence.substitutions[0]["gate"] == "lint"
     assert state.ci_evidence.substitutions[0]["checkRun"] == "Verify (lint)"
+
+
+def test_ingest_metadata_records_run_notes_and_skip_reason() -> None:
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    record_ci_ingest_metadata(
+        state,
+        run_notes=["coverage_clean", "coverage_default_bands"],
+        skip_reason="unsupported_coverage_format",
+    )
+    record_ci_ingest_metadata(state, run_notes=["coverage_clean"])
+
+    assert state.ci_evidence is not None
+    assert state.ci_evidence.run_notes == ["coverage_clean", "coverage_default_bands"]
+    assert state.ci_evidence.skip_reasons == ["unsupported_coverage_format"]

@@ -474,8 +474,9 @@ def run(
             "Shell permission for this review: disabled (default), restricted, or enabled. "
             "Raising it lets analyzers execute tooling provided by the repository under "
             "review (ruff, mypy, bandit, vulture and the other repo-native analyzers, which "
-            "are withheld at disabled). Unsafe for untrusted code — an opt-in for repos you "
-            "trust. Operator flag only; never read from repo config."
+            "are withheld at disabled). --with-coverage / --with-mutation require enabled "
+            "(they execute repo-provided test commands). Unsafe for untrusted code — an "
+            "opt-in for repos you trust. Operator flag only; never read from repo config."
         ),
         rich_help_panel=_PANEL_TRUST,
     ),
@@ -506,6 +507,26 @@ def run(
             "(same policy as --resume; distinct from the `mergecraft cache` typer)."
         ),
         rich_help_panel=_PANEL_OUTPUT,
+    ),
+    with_coverage: bool = typer.Option(
+        False,
+        "--with-coverage",
+        help=(
+            "Run coverage locally and emit CRAP findings on changed functions. "
+            "Requires --shell enabled. Trusted, sandboxed CLI only — refuses an "
+            "untrusted tier, a fork checkout, or when no sandbox wrap is available."
+        ),
+        rich_help_panel=_PANEL_TRUST,
+    ),
+    with_mutation: bool = typer.Option(
+        False,
+        "--with-mutation",
+        help=(
+            "Run a bounded mutation pass locally and emit survivor findings. "
+            "Requires --shell enabled. Trusted, sandboxed CLI only — refuses an "
+            "untrusted tier, a fork checkout, or when no sandbox wrap is available."
+        ),
+        rich_help_panel=_PANEL_TRUST,
     ),
 ) -> None:
     if ctx.info_name == "diff-review":
@@ -558,6 +579,25 @@ def run(
         trust_override = parse_cli_trust_override(trust)
     except ValueError as exc:
         _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
+
+    if with_coverage or with_mutation:
+        if shell != "enabled":
+            _exit_with_message(
+                "--with-coverage/--with-mutation require --shell enabled",
+                cli_exit_code_for_review(RunOutcome.configuration_error),
+            )
+        if trust_override == "untrusted":
+            _exit_with_message(
+                "--with-coverage/--with-mutation require a trusted review source",
+                cli_exit_code_for_review(RunOutcome.configuration_error),
+            )
+        from mergecraft.ci.local_evidence import checkout_is_fork_pr
+
+        if checkout_is_fork_pr(root):
+            _exit_with_message(
+                "--with-coverage/--with-mutation require a trusted review source",
+                cli_exit_code_for_review(RunOutcome.configuration_error),
+            )
 
     try:
         from mergecraft.cli.config_surface_cmd import validate_repo_config_or_raise
@@ -699,6 +739,8 @@ def run(
                     on_finding=_on_finding if agent_mode else None,
                     use_cache=read_cache,
                     engine=engine,
+                    with_coverage=with_coverage,
+                    with_mutation=with_mutation,
                 )
             )
         except TimeoutError:

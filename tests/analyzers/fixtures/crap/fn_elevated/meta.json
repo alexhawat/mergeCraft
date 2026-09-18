@@ -1,0 +1,11 @@
+{
+  "name": "fn_elevated",
+  "path": "src/mod.py",
+  "complexity": 4,
+  "coverage": 0.0,
+  "crap": 20.0,
+  "band": "elevated",
+  "display_severity": "major",
+  "finding_severity": "Major",
+  "emits_finding": true
+}

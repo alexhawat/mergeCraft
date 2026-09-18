@@ -1,0 +1,11 @@
+{
+  "name": "fn_watch",
+  "path": "src/mod.py",
+  "complexity": 5,
+  "coverage": 0.5,
+  "crap": 8.125,
+  "band": "watch",
+  "display_severity": "minor",
+  "finding_severity": "Minor",
+  "emits_finding": true
+}

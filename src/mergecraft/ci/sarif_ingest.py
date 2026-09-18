@@ -47,7 +47,7 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
     if not head_sha.strip():
         return
 
-    from mergecraft.ci.evidence import record_ci_findings
+    from mergecraft.ci.evidence import record_ci_findings, record_ci_ingest_metadata
 
     client = github_client_from_scm(ctx.scm)
     if client is None:
@@ -74,6 +74,67 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
     findings = await collect_ci_sarif_findings(ctx, client=client, runs=listed.items)
     if findings:
         record_ci_findings(ctx.tool_state, findings)
+
+    coverage_names = [name.strip() for name in ctx.ci_coverage_artifacts if name.strip()]
+    mutation_names = [name.strip() for name in ctx.ci_mutation_artifacts if name.strip()]
+    if coverage_names or mutation_names:
+        from mergecraft.ci.coverage import coverage_inputs_from_context
+
+        diff, source_tree = coverage_inputs_from_context(ctx)
+        try:
+            listed_checks = await client.list_check_runs_for_ref(
+                ctx.repo.owner, ctx.repo.name, head_sha.strip()
+            )
+            if listed_checks.incomplete:
+                warn_ci_evidence(
+                    f"ci evidence: coverage check-run listing truncated for {head_sha[:7]} — "
+                    "not treating as complete"
+                )
+                check_runs = None
+            else:
+                check_runs = list(listed_checks.items)
+        except Exception as check_err:
+            warn_ci_evidence(
+                f"ci evidence: coverage check-run listing failed for {head_sha[:7]} — {check_err}"
+            )
+            check_runs = None
+        if coverage_names:
+            from mergecraft.ci.coverage import collect_ci_coverage_findings
+
+            coverage = await collect_ci_coverage_findings(
+                ctx,
+                client=client,
+                runs=listed.items,
+                artifacts=coverage_names,
+                diff=diff,
+                source_tree=source_tree,
+                check_runs=check_runs,
+            )
+            record_ci_ingest_metadata(
+                ctx.tool_state,
+                run_notes=coverage.run_notes,
+                skip_reason=coverage.skip_reason,
+            )
+            if coverage.findings:
+                record_ci_findings(ctx.tool_state, coverage.findings)
+        if mutation_names:
+            from mergecraft.ci.changed_functions import changed_functions_from_diff
+            from mergecraft.ci.mutation import collect_ci_mutation_findings
+
+            symbols = changed_functions_from_diff(diff, source_tree)
+            mutation = await collect_ci_mutation_findings(
+                ctx,
+                client=client,
+                runs=listed.items,
+                artifacts=mutation_names,
+                changed_functions=symbols,
+                diff=diff,
+                source_tree=source_tree,
+                check_runs=check_runs,
+            )
+            record_ci_ingest_metadata(ctx.tool_state, skip_reason=mutation.skip_reason)
+            if mutation.findings:
+                record_ci_findings(ctx.tool_state, mutation.findings)
 
 
 async def ingest_ci_sarif_after_ci_wait(

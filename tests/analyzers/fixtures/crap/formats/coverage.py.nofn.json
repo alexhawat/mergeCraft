@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "format": 3,
+    "version": "7.6.0",
+    "branch_coverage": false,
+    "show_contexts": false
+  },
+  "files": {
+    "src/mod.py": {
+      "executed_lines": [1, 2],
+      "missing_lines": [3, 4],
+      "excluded_lines": [],
+      "summary": {
+        "covered_lines": 2,
+        "num_statements": 4,
+        "percent_covered": 50.0,
+        "missing_lines": 2,
+        "excluded_lines": 0
+      }
+    }
+  },
+  "totals": {
+    "covered_lines": 2,
+    "num_statements": 4,
+    "percent_covered": 50.0
+  }
+}
