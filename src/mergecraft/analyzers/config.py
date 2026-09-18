@@ -64,15 +64,19 @@ def _normalize_trufflehog_path(path: str) -> str:
     return path.replace("\\", "/").lstrip("./")
 
 
-def is_trufflehog_path_suppressed(path: str) -> bool:
+def is_trufflehog_path_suppressed(path: str, *, repo_root: Path | None = None) -> bool:
     """Return True for named fixtures or virtualenv trees; never a blanket tests/ skip."""
-    normalized = _normalize_trufflehog_path(path)
+    from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
+
+    if repo_root is not None:
+        normalized = _normalize_trufflehog_path(
+            resolve_repo_relative_path(path, repo_root=repo_root)
+        )
+    else:
+        normalized = _normalize_trufflehog_path(path)
     suppressions = trufflehog_named_fixture_suppressions()
     if normalized in suppressions:
         return True
-    for named in suppressions:
-        if normalized.endswith("/" + named):
-            return True
     parts = [part for part in normalized.split("/") if part]
     return bool(_TRUFFLEHOG_VENV_MARKERS.intersection(parts))
 

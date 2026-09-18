@@ -83,6 +83,13 @@ def test_named_fixture_is_suppressed_and_a_new_test_secret_is_not() -> None:
     assert config.is_trufflehog_path_suppressed("tests/security/test_unrelated.py") is False
 
 
+def test_nested_lookalike_named_fixture_path_is_not_suppressed() -> None:
+    config = _config()
+    for path, _needle in _NAMED_FIXTURES:
+        lookalike = f"scratch/{path}"
+        assert config.is_trufflehog_path_suppressed(lookalike) is False
+
+
 def test_virtualenv_tree_is_out_of_trufflehog_scope() -> None:
     config = _config()
     assert (

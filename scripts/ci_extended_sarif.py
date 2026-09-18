@@ -187,7 +187,11 @@ def _sarif_result_uri(result: object) -> str:
     return uri if isinstance(uri, str) else ""
 
 
-def _drop_suppressed_trufflehog_results(document: object) -> object:
+def _drop_suppressed_trufflehog_results(
+    document: object,
+    *,
+    repo_root: Path,
+) -> object:
     """Drop SARIF results whose path is a named fixture or virtualenv tree.
 
     Emit-path filtering — ``--exclude-paths`` alone does not apply the
@@ -216,7 +220,10 @@ def _drop_suppressed_trufflehog_results(document: object) -> object:
         run["results"] = [
             result
             for result in results
-            if not is_trufflehog_path_suppressed(_sarif_result_uri(result))
+            if not is_trufflehog_path_suppressed(
+                _sarif_result_uri(result),
+                repo_root=repo_root,
+            )
         ]
     return document
 
@@ -243,7 +250,10 @@ def emit_trufflehog_sarif(*, out: Path, repo_root: Path | None = None) -> None:
         tail = detail[-1] if detail else f"exit {completed.returncode}"
         msg = f"trufflehog scan failed: {tail}"
         raise EmitError(msg)
-    document = _drop_suppressed_trufflehog_results(_trufflehog_to_sarif(completed.stdout))
+    document = _drop_suppressed_trufflehog_results(
+        _trufflehog_to_sarif(completed.stdout),
+        repo_root=root,
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
