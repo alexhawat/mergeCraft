@@ -263,6 +263,11 @@ async def _navigate_until_ready(driver: BrowserDriver, url: str, *, wait: bool) 
         try:
             await driver.navigate(url)
             return
+        except ConnectionRefusedError as exc:
+            if time.monotonic() >= deadline:
+                raise
+            logger.debug("verify-behavior waiting for app after {}", type(exc).__name__)
+            await asyncio.sleep(_NAVIGATE_RETRY_S)
         except ConnectionError:
             raise
         except (OSError, TimeoutError) as exc:

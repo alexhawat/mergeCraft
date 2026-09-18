@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
-from tests.verify.fake_driver import FakeBrowserDriver
+from tests.verify.fake_driver import FakeBrowserDriver, FakeUnreachableError
 from tests.verify.support import (
     CRITERION_STATUSES,
     REPRODUCE_STATUSES,
@@ -173,6 +172,33 @@ async def test_runner_calls_click_fill_and_type_from_actions() -> None:
     assert ("type_text", ("more",)) in fake.calls
     recorded = {step.action for step in report.steps}
     assert {"navigate", "click", "fill", "type"} <= recorded
+
+
+async def test_navigate_until_ready_retries_connection_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Startup readiness must retry ``ConnectionRefusedError``, not block immediately."""
+    monkeypatch.setattr("mergecraft.verify.runner._NAVIGATE_RETRY_S", 0.01)
+    navigate = require_symbol(import_verify("runner"), "_navigate_until_ready")
+    attempts = 0
+
+    class Driver(FakeBrowserDriver):
+        async def navigate(self, url: str) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise ConnectionRefusedError(url)
+            await super().navigate(url)
+
+    await navigate(Driver(), "http://127.0.0.1:8765/", wait=True)
+    assert attempts == 3
+
+
+async def test_navigate_until_ready_does_not_retry_other_connection_errors() -> None:
+    navigate = require_symbol(import_verify("runner"), "_navigate_until_ready")
+    fake = FakeBrowserDriver(unreachable_urls={"http://bad/"})
+    with pytest.raises(FakeUnreachableError):
+        await navigate(fake, "http://bad/", wait=True)
 
 
 async def test_concurrent_same_credential_records_name_not_value(
