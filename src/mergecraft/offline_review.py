@@ -734,6 +734,9 @@ class _OfflineDiffReviewRun:
         """Run opt-in local coverage/mutation when the trusted-sandbox gate passes."""
         if not (self.with_coverage or self.with_mutation):
             return
+        if self.shell == "disabled":
+            logger.info("local evidence skipped: shell disabled")
+            return
         if self.materialization is None:
             return
         from mergecraft.ci.local_evidence import run_local_coverage, run_local_mutation
@@ -993,11 +996,19 @@ async def _run_offline_diff_review(
     )
 
     try:
-        if (with_coverage or with_mutation) and trust_tier == "untrusted":
-            return _offline_failure(
-                error="--with-coverage/--with-mutation require a trusted review source",
-                outcome=RunOutcome.configuration_error,
-            )
+        if with_coverage or with_mutation:
+            from mergecraft.ci.local_evidence import checkout_is_fork_pr
+
+            if shell == "disabled":
+                return _offline_failure(
+                    error="--with-coverage/--with-mutation require --shell enabled",
+                    outcome=RunOutcome.configuration_error,
+                )
+            if trust_tier == "untrusted" or checkout_is_fork_pr(cwd):
+                return _offline_failure(
+                    error="--with-coverage/--with-mutation require a trusted review source",
+                    outcome=RunOutcome.configuration_error,
+                )
         try:
             staged = await runner.run(driver)
             published = staged.published_or(

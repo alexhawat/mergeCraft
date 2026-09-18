@@ -1,8 +1,9 @@
 """Local CLI coverage and bounded mutation execution (C-D1, C-D7, C-D8).
 
 The Action never runs a consumer's tests. This module is the trusted,
-sandboxed CLI path: it refuses an untrusted tier and refuses when no
-sandbox backend exists (C-D7 does **not** inherit #593 fail-open). Results
+sandboxed CLI path: it refuses an untrusted tier, a fork checkout, and
+refuses when no sandbox *wrap* exists (C-D7 does **not** inherit #593
+fail-open). ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL`` is ignored. Results
 flow through :func:`mergecraft.ci.coverage.coverage_findings` and
 :func:`mergecraft.ci.mutation.mutation_findings` unchanged, with
 ``source="analyzer"``. An absent toolchain is an honest skip, never a
@@ -10,7 +11,8 @@ silent pass.
 
 Module: mergecraft.ci.local_evidence
 Depends: mergecraft.analyzers.finding, mergecraft.analyzers.scope,
-    mergecraft.ci.{coverage,crap,mutation}, loguru
+    mergecraft.analyzers.sandbox, mergecraft.ci.{coverage,crap,mutation},
+    loguru
 
 Exports:
     Classes:
@@ -18,6 +20,7 @@ Exports:
         LocalEvidenceResult — Executed flag, skip reason, and findings.
     Functions:
         require_trusted_sandboxed_execution — Raise unless trusted + sandboxed.
+        checkout_is_fork_pr — True for ``gh pr checkout`` of a fork.
         run_local_coverage — Run or parse local coverage; skip honestly.
         run_local_mutation — Run or parse local mutation; skip honestly.
         SKIP_EXECUTION_FAILED — Timeout, no artifact, or failed tool run.
@@ -29,6 +32,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -59,6 +63,10 @@ DEFAULT_MAX_MUTANTS = 50
 
 _ABSENT_SANDBOX = frozenset({"", "none"})
 _SKIP_WALK_DIRS = frozenset({".git", ".venv", "node_modules", "__pycache__", ".tox", "dist"})
+_GITHUB_OWNER_REPO = re.compile(
+    r"github\.com(?::\d+)?[:/]+([^/]+)/([^/]+?)(?:\.git)?/?$",
+    re.IGNORECASE,
+)
 
 T = TypeVar("T")
 
@@ -86,25 +94,82 @@ def _sandbox_absent(sandbox_backend: str | None) -> bool:
     return sandbox_backend.strip().lower() in _ABSENT_SANDBOX
 
 
+def _github_owner(url: str | None) -> str | None:
+    if not url:
+        return None
+    match = _GITHUB_OWNER_REPO.search(url.strip())
+    if match is None:
+        return None
+    return match.group(1).lower()
+
+
+def _git_stdout(repo_root: Path, args: Sequence[str]) -> str | None:
+    from mergecraft.utils.git_hardening import git_argv
+
+    try:
+        result = subprocess.run(
+            git_argv(args),
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+def checkout_is_fork_pr(repo_root: Path) -> bool:
+    """Return True when this checkout tracks a fork remote.
+
+    ``gh pr checkout`` of a fork adds that fork as a named remote and points
+    the current branch at it. Same-repo checkouts keep ``origin``. This does
+    not change :func:`mergecraft.analyzers.trust.derive_source_trust_tier`.
+    A non-origin upstream whose owner cannot be proven same-repo is treated
+    as a fork (fail closed for this path only).
+    """
+    branch = _git_stdout(repo_root, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if not branch or branch == "HEAD":
+        return False
+    remote = _git_stdout(repo_root, ["config", "--get", f"branch.{branch}.remote"])
+    if not remote or remote == "origin":
+        return False
+    origin_url = _git_stdout(repo_root, ["config", "--get", "remote.origin.url"])
+    other_url = _git_stdout(repo_root, ["config", "--get", f"remote.{remote}.url"])
+    origin_owner = _github_owner(origin_url)
+    other_owner = _github_owner(other_url)
+    if origin_owner is None or other_owner is None:
+        return True
+    return origin_owner != other_owner
+
+
 def require_trusted_sandboxed_execution(
     *,
     trust_tier: str,
     sandbox_backend: str | None,
+    repo_root: Path | None = None,
 ) -> None:
-    """Refuse untrusted or unsandboxed local execution (C-D7).
+    """Refuse untrusted, fork, or unsandboxed local execution (C-D7).
 
     ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL`` is ignored — this plan does not
-    inherit #593 fail-open.
+    inherit #593 fail-open. A probe string is not a wrap; live runs still
+    go through :func:`_sandboxed_argv`.
 
     Args:
         trust_tier: ``trusted`` or ``untrusted``.
         sandbox_backend: Detected backend (``unshare``, ``sudo-unshare``), or
             ``none`` / absent when no isolation exists.
+        repo_root: Checkout to inspect for a fork upstream. Omitted skips
+            that check (tests that only pin the probe/tier).
 
     Raises:
         LocalEvidenceRefused: ``untrusted_tier`` or ``no_sandbox_backend``.
     """
-    if trust_tier == "untrusted":
+    if trust_tier == "untrusted" or (repo_root is not None and checkout_is_fork_pr(repo_root)):
         raise LocalEvidenceRefused(
             "local coverage/mutation requires a trusted review source",
             code=SKIP_UNTRUSTED_TIER,
@@ -114,6 +179,57 @@ def require_trusted_sandboxed_execution(
             "local coverage/mutation requires a sandbox backend",
             code=SKIP_NO_SANDBOX_BACKEND,
         )
+
+
+def _argv_is_wrapped(argv: Sequence[str], method: str) -> bool:
+    if not argv:
+        return False
+    if method == "unshare":
+        return argv[0] == "unshare"
+    if method == "sudo-unshare":
+        return argv[0] == "sudo" and "unshare" in argv[1:3]
+    return False
+
+
+def _sandboxed_argv(argv: Sequence[str], *, repo_root: Path) -> list[str]:
+    """Wrap *argv* in the real sandbox backend; refuse a no-op wrap.
+
+    Uses :func:`mergecraft.analyzers.sandbox.build_analyzer_sandbox_argv`.
+    A probe of ``unshare`` that still returns the raw argv is the #593
+    fail-open and is refused. The unsandboxed-shell env override is ignored.
+    """
+    from mergecraft.analyzers.sandbox import (
+        SandboxLimits,
+        build_analyzer_sandbox_argv,
+        build_sandbox_context,
+    )
+    from mergecraft.mcp.shell import detect_sandbox_method
+
+    method = detect_sandbox_method()
+    if method in _ABSENT_SANDBOX:
+        raise LocalEvidenceRefused(
+            "local coverage/mutation requires a sandbox backend",
+            code=SKIP_NO_SANDBOX_BACKEND,
+        )
+    scratch = Path(tempfile.mkdtemp(prefix="mergecraft-local-sbx-"))
+    context = build_sandbox_context(
+        repo_root=repo_root,
+        scratch_dir=scratch,
+        limits=SandboxLimits(
+            timeout_s=DEFAULT_TIMEOUT_SECONDS,
+            memory_mb=512,
+            max_processes=16,
+        ),
+        network_allowlist=[],
+        read_only_source=False,
+    )
+    wrapped = build_analyzer_sandbox_argv(tuple(argv), context=context)
+    if not _argv_is_wrapped(wrapped, method):
+        raise LocalEvidenceRefused(
+            "local coverage/mutation requires a sandbox wrap, not a probe",
+            code=SKIP_NO_SANDBOX_BACKEND,
+        )
+    return wrapped
 
 
 def _coverage_toolchain_available() -> bool:
@@ -173,19 +289,27 @@ def _execute_coverage(repo_root: Path, *, timeout_seconds: int) -> Path | None:
     dest = Path(tempfile.mkdtemp(prefix="mergecraft-local-cov-")) / "coverage.json"
     try:
         subprocess.run(
-            [sys.executable, "-m", "coverage", "run", "-m", "pytest", "-q"],
+            _sandboxed_argv(
+                [sys.executable, "-m", "coverage", "run", "-m", "pytest", "-q"],
+                repo_root=repo_root,
+            ),
             cwd=repo_root,
             timeout=timeout_seconds,
             capture_output=True,
             check=False,
         )
         json_run = subprocess.run(
-            [sys.executable, "-m", "coverage", "json", "-o", str(dest)],
+            _sandboxed_argv(
+                [sys.executable, "-m", "coverage", "json", "-o", str(dest)],
+                repo_root=repo_root,
+            ),
             cwd=repo_root,
             timeout=min(60, timeout_seconds),
             capture_output=True,
             check=False,
         )
+    except LocalEvidenceRefused:
+        raise
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("local coverage: execution failed — {}", exc)
         return None
@@ -213,12 +337,14 @@ def _execute_mutation(
         if max_mutants > 0:
             cmd.append(f"1-{max_mutants}")
         subprocess.run(
-            cmd,
+            _sandboxed_argv(cmd, repo_root=repo_root),
             cwd=repo_root,
             timeout=timeout_seconds,
             capture_output=True,
             check=False,
         )
+    except LocalEvidenceRefused:
+        raise
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("local mutation: execution failed — {}", exc)
         return None
@@ -267,10 +393,14 @@ def run_local_coverage(
     Returns:
         A :class:`LocalEvidenceResult`. ``executed`` is False on a named skip.
     """
-    if trust_tier == "untrusted":
-        return LocalEvidenceResult(executed=False, skip_reason=SKIP_UNTRUSTED_TIER)
-    if _sandbox_absent(sandbox_backend):
-        return LocalEvidenceResult(executed=False, skip_reason=SKIP_NO_SANDBOX_BACKEND)
+    try:
+        require_trusted_sandboxed_execution(
+            trust_tier=trust_tier,
+            sandbox_backend=sandbox_backend,
+            repo_root=repo_root,
+        )
+    except LocalEvidenceRefused as exc:
+        return LocalEvidenceResult(executed=False, skip_reason=exc.code)
     if toolchain_available is False:
         return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
 
@@ -278,7 +408,10 @@ def run_local_coverage(
     if artifact is None:
         if toolchain_available is None and not _coverage_toolchain_available():
             return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
-        artifact = _execute_coverage(repo_root, timeout_seconds=timeout_seconds)
+        try:
+            artifact = _execute_coverage(repo_root, timeout_seconds=timeout_seconds)
+        except LocalEvidenceRefused as exc:
+            return LocalEvidenceResult(executed=False, skip_reason=exc.code)
         if artifact is None:
             return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
@@ -340,10 +473,14 @@ def run_local_mutation(
     Returns:
         A :class:`LocalEvidenceResult`. ``executed`` is False on a named skip.
     """
-    if trust_tier == "untrusted":
-        return LocalEvidenceResult(executed=False, skip_reason=SKIP_UNTRUSTED_TIER)
-    if _sandbox_absent(sandbox_backend):
-        return LocalEvidenceResult(executed=False, skip_reason=SKIP_NO_SANDBOX_BACKEND)
+    try:
+        require_trusted_sandboxed_execution(
+            trust_tier=trust_tier,
+            sandbox_backend=sandbox_backend,
+            repo_root=repo_root,
+        )
+    except LocalEvidenceRefused as exc:
+        return LocalEvidenceResult(executed=False, skip_reason=exc.code)
     if toolchain_available is False:
         return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
 
@@ -356,12 +493,15 @@ def run_local_mutation(
             repo_paths=_repo_paths(repo_root),
             path_allowlist=list(path_allowlist or ()),
         )
-        artifact = _execute_mutation(
-            repo_root,
-            timeout_seconds=timeout_seconds,
-            paths=planned,
-            max_mutants=max_mutants,
-        )
+        try:
+            artifact = _execute_mutation(
+                repo_root,
+                timeout_seconds=timeout_seconds,
+                paths=planned,
+                max_mutants=max_mutants,
+            )
+        except LocalEvidenceRefused as exc:
+            return LocalEvidenceResult(executed=False, skip_reason=exc.code)
         if artifact is None:
             return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 

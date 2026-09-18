@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -21,6 +22,7 @@ from tests.ci.support_crap import (
 )
 from typer.testing import CliRunner
 
+from mergecraft.analyzers.trust import ReviewSource, derive_source_trust_tier
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 from mergecraft.offline_review import OfflineReviewResult
@@ -30,6 +32,42 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _fork_checkout(tmp_path: Path) -> Path:
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "README").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "init")
+    _git(repo, "remote", "add", "origin", "https://github.com/owner/repo.git")
+    _git(repo, "remote", "add", "contributor", "https://github.com/contributor/repo.git")
+    _git(repo, "checkout", "-b", "fork-pr")
+    _git(repo, "config", "branch.fork-pr.remote", "contributor")
+    _git(repo, "config", "branch.fork-pr.merge", "refs/heads/fork-pr")
+    return repo
+
+
+def _same_repo_checkout(tmp_path: Path) -> Path:
+    repo = tmp_path / "same"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "README").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "README")
+    _git(repo, "commit", "-m", "init")
+    _git(repo, "remote", "add", "origin", "https://github.com/owner/repo.git")
+    _git(repo, "config", "branch.main.remote", "origin")
+    _git(repo, "config", "branch.main.merge", "refs/heads/main")
+    return repo
 
 
 def _plain(text: str) -> str:
@@ -72,6 +110,7 @@ def test_review_help_documents_coverage_and_mutation_flags() -> None:
     out = " ".join(_plain(result.stdout).replace("│", " ").split())
     assert "--with-coverage" in out
     assert "--with-mutation" in out
+    assert "--shell enabled" in out
 
 
 def test_review_forwards_with_coverage_and_with_mutation(
@@ -84,6 +123,8 @@ def test_review_forwards_with_coverage_and_with_mutation(
             "--diff",
             str(diff_file),
             "--dry-run",
+            "--shell",
+            "enabled",
             "--with-coverage",
             "--with-mutation",
         ],
@@ -91,6 +132,25 @@ def test_review_forwards_with_coverage_and_with_mutation(
     assert result.exit_code == 0
     assert captured_kwargs["with_coverage"] is True
     assert captured_kwargs["with_mutation"] is True
+    assert captured_kwargs["shell"] == "enabled"
+
+
+def test_review_with_coverage_refuses_shell_disabled(
+    captured_kwargs: dict[str, Any], diff_file: Path
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "review",
+            "--diff",
+            str(diff_file),
+            "--dry-run",
+            "--with-coverage",
+        ],
+    )
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
+    assert captured_kwargs == {}
+    assert "require --shell enabled" in _plain(result.stdout + result.stderr)
 
 
 def test_untrusted_tier_refuses_local_coverage() -> None:
@@ -161,13 +221,15 @@ def test_review_with_coverage_refuses_untrusted_cli(
             "--diff",
             str(diff_file),
             "--dry-run",
+            "--shell",
+            "enabled",
             "--trust",
             "untrusted",
             "--with-coverage",
         ],
     )
     assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
-    assert captured_kwargs.get("with_coverage") in {True, None}
+    assert captured_kwargs == {}
 
 
 def test_empty_path_allowlist_uses_changed_paths_only() -> None:
@@ -298,10 +360,16 @@ def test_mutmut_run_receives_max_mutants_id_range(
     def fake_which(name: str) -> str | None:
         return "/usr/bin/mutmut" if name == "mutmut" else None
 
-    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
-        seen["cmd"] = list(cmd)
-        return type("Completed", (), {"returncode": 0})()
+    def fake_wrap(argv: list[str], *, repo_root: Path) -> list[str]:
+        return ["unshare", *argv]
 
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        if cmd and cmd[0] == "unshare":
+            seen["cmd"] = list(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
+    monkeypatch.setattr(local, "_sandboxed_argv", fake_wrap)
     monkeypatch.setattr(local.shutil, "which", fake_which)
     monkeypatch.setattr(local.subprocess, "run", fake_run)
     (tmp_path / "src").mkdir()
@@ -319,6 +387,144 @@ def test_mutmut_run_receives_max_mutants_id_range(
         max_mutants=50,
         path_allowlist=[],
     )
+    assert seen["cmd"][0] == "unshare"
     assert "1-50" in seen["cmd"]
     assert result.executed is False
     assert result.skip_reason == SKIP_EXECUTION_FAILED
+
+
+def test_live_execution_wraps_via_sandbox_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    wrapped_calls: list[list[str]] = []
+
+    def fake_wrap(argv: list[str], *, repo_root: Path) -> list[str]:
+        wrapped_calls.append(list(argv))
+        return ["unshare", *argv]
+
+    monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
+    monkeypatch.setattr(local, "_sandboxed_argv", fake_wrap)
+
+    ran: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        if cmd and cmd[0] == "unshare":
+            ran.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(local.subprocess, "run", fake_run)
+    result = local.run_local_coverage(
+        repo_root=tmp_path,
+        diff=load_diff("watch"),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+        toolchain_available=True,
+    )
+    assert wrapped_calls
+    assert all(cmd[0] == "unshare" for cmd in ran)
+    assert result.executed is False
+    assert result.skip_reason == SKIP_EXECUTION_FAILED
+
+
+def test_live_execution_refuses_when_wrap_is_noop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
+    monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
+    monkeypatch.setattr("mergecraft.mcp.shell.detect_sandbox_method", lambda: "unshare")
+    monkeypatch.setattr(
+        "mergecraft.analyzers.sandbox.build_analyzer_sandbox_argv",
+        lambda argv, **kwargs: list(argv),
+    )
+    ran: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        ran.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(local.subprocess, "run", fake_run)
+    result = local.run_local_coverage(
+        repo_root=tmp_path,
+        diff=load_diff("watch"),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+        toolchain_available=True,
+    )
+    assert result.executed is False
+    assert result.skip_reason == SKIP_NO_SANDBOX_BACKEND
+    assert not any("coverage" in " ".join(cmd) or "pytest" in " ".join(cmd) for cmd in ran)
+
+
+def test_live_execution_refuses_when_sandbox_method_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
+    monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
+    monkeypatch.setattr("mergecraft.mcp.shell.detect_sandbox_method", lambda: "none")
+    ran: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        ran.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(local.subprocess, "run", fake_run)
+    result = local.run_local_coverage(
+        repo_root=tmp_path,
+        diff=load_diff("watch"),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+        toolchain_available=True,
+    )
+    assert result.executed is False
+    assert result.skip_reason == SKIP_NO_SANDBOX_BACKEND
+    assert not any("coverage" in " ".join(cmd) or "pytest" in " ".join(cmd) for cmd in ran)
+
+
+def test_fork_checkout_is_untrusted_for_local_evidence(tmp_path: Path) -> None:
+    local = _local()
+    repo = _fork_checkout(tmp_path)
+    source = ReviewSource(kind="local_cwd", path=repo, invocation_root=repo)
+    assert derive_source_trust_tier(source) == "trusted"
+    assert local.checkout_is_fork_pr(repo) is True
+    result = local.run_local_coverage(
+        repo_root=repo,
+        diff=load_diff("watch"),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+    )
+    assert result.executed is False
+    assert result.skip_reason == SKIP_UNTRUSTED_TIER
+    assert result.findings == []
+
+
+def test_same_repo_origin_branch_is_not_a_fork_checkout(tmp_path: Path) -> None:
+    local = _local()
+    repo = _same_repo_checkout(tmp_path)
+    assert local.checkout_is_fork_pr(repo) is False
+
+
+def test_review_with_coverage_refuses_fork_checkout(
+    tmp_path: Path, captured_kwargs: dict[str, Any]
+) -> None:
+    repo = _fork_checkout(tmp_path)
+    diff_file = repo / "changes.patch"
+    diff_file.write_text(load_diff("watch"), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "review",
+            "--cwd",
+            str(repo),
+            "--diff",
+            str(diff_file),
+            "--dry-run",
+            "--shell",
+            "enabled",
+            "--with-coverage",
+        ],
+    )
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
+    assert captured_kwargs == {}
