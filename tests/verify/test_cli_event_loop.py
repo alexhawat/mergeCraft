@@ -278,10 +278,9 @@ def test_launch_playwright_driver_does_not_block_asyncio_run(
 
     from mergecraft.verify import playwright_driver as pw
 
-    assert callable(require_symbol(pw, "_release_caller_event_loop"))
     cls = require_symbol(pw, "PlaywrightBrowserDriver")
-    assert callable(cls._playwright_loop_bound)
-    assert callable(cls._playwright_call)
+    assert callable(cls._ensure_page)
+    assert callable(cls._aclose)
 
     driver = pw.launch_playwright_driver(width=1280, height=720)
     try:

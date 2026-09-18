@@ -39,10 +39,6 @@ _SCREENSHOT_DEADLOCK = (
     "run_verify_behavior() is being executed"
 )
 _SYNC_WRAPPER_NAMES = frozenset({"_playwright_call", "_playwright_loop_bound", "<lambda>"})
-_ASYNC_DRIVER_XFAIL = pytest.mark.xfail(
-    reason="green after V6 async driver",
-    strict=False,
-)
 _RUN_TIMEOUT_S = 5.0
 
 
@@ -247,7 +243,6 @@ async def _close_driver(driver: Any) -> None:
         await _maybe_await(closer())
 
 
-@_ASYNC_DRIVER_XFAIL
 async def test_launch_playwright_driver_does_not_use_sync_playwright(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -271,7 +266,6 @@ async def test_launch_playwright_driver_does_not_use_sync_playwright(
         await _close_driver(driver)
 
 
-@_ASYNC_DRIVER_XFAIL
 async def test_playwright_driver_navigate_awaits_async_goto_not_sync(
     tmp_path: Path,
 ) -> None:
@@ -306,7 +300,6 @@ async def test_playwright_driver_navigate_awaits_async_goto_not_sync(
     assert any(item.get("path") == dest for item in page.screenshot_kwargs)
 
 
-@_ASYNC_DRIVER_XFAIL
 async def test_run_verify_behavior_completes_with_async_playwright_fakes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
