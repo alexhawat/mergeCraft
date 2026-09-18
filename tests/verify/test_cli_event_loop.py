@@ -1,8 +1,8 @@
 """CLI ``run_async`` after Playwright launch — extra present must not crash.
 
-``launch_playwright_driver`` today calls ``sync_playwright().start()``, which
-leaves a running event loop. The CLI then calls ``asyncio.run`` and raises
-``RuntimeError: asyncio.run() cannot be called from a running event loop``.
+``launch_playwright_driver`` must not leave a running event loop that
+blocks ``asyncio.run``. The CLI must call ``run_async`` instead of
+``asyncio.run``.
 
 These cases call the real ``launch_playwright_driver`` (never a sentinel
 stand-in). Playwright start / launch / new_page are faked so Chromium is not
@@ -27,7 +27,6 @@ from typer.testing import CliRunner
 from mergecraft.cli.app import app
 from tests.verify.support import require_symbol
 
-_EVENT_LOOP_XFAIL = pytest.mark.xfail(reason="green after V6 event-loop", strict=False)
 _PNG = b"\x89PNG\r\n\x1a\n"
 _RUNNER = CliRunner()
 _LOOP_ERR = "cannot be called from a running event loop"
@@ -250,7 +249,6 @@ def _release_running_loop() -> Iterator[None]:
         asyncio.events._set_running_loop(None)
 
 
-@_EVENT_LOOP_XFAIL
 def test_run_async_returns_result_from_a_running_loop() -> None:
     """``run_async`` must nest; ``run`` must call it instead of ``asyncio.run``."""
     from mergecraft.cli import verify_behavior_cmd as cmd
@@ -271,7 +269,6 @@ def test_run_async_returns_result_from_a_running_loop() -> None:
     assert "asyncio.run(" not in source
 
 
-@_EVENT_LOOP_XFAIL
 def test_launch_playwright_driver_does_not_block_asyncio_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -279,9 +276,14 @@ def test_launch_playwright_driver_does_not_block_asyncio_run(
     _force_extra_present(monkeypatch)
     _install_playwright_fakes(monkeypatch)
 
-    from mergecraft.verify.playwright_driver import launch_playwright_driver
+    from mergecraft.verify import playwright_driver as pw
 
-    driver = launch_playwright_driver(width=1280, height=720)
+    assert callable(require_symbol(pw, "_release_caller_event_loop"))
+    cls = require_symbol(pw, "PlaywrightBrowserDriver")
+    assert callable(cls._playwright_loop_bound)
+    assert callable(cls._playwright_call)
+
+    driver = pw.launch_playwright_driver(width=1280, height=720)
     try:
         assert type(driver).__name__ == "PlaywrightBrowserDriver"
         _assert_asyncio_run_works()
@@ -289,7 +291,6 @@ def test_launch_playwright_driver_does_not_block_asyncio_run(
         _close(driver)
 
 
-@_EVENT_LOOP_XFAIL
 @pytest.mark.parametrize(
     "kind",
     ["verify", "reproduce", "input"],
@@ -364,7 +365,6 @@ def test_extra_present_cli_does_not_raise_running_loop_error(
     assert "No module named 'playwright'" not in combined
 
 
-@_EVENT_LOOP_XFAIL
 def test_optional_real_playwright_package_launch_allows_asyncio_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -19,11 +19,12 @@ stays green. A real-browser smoke test, if added later, must be marked
 
 ## Greening milestones
 
-The report, driver-protocol, command, review-consume, and operator-path
-launch milestones are green. Extra present calls `launch_playwright_driver`
-(never the CLI stub); adapter tests bind `PlaywrightBrowserDriver` to an
-in-process fake Page. The CLI event-loop milestone is still red until
-`run_async` lands and launch no longer blocks `asyncio.run`.
+The report, driver-protocol, command, review-consume, operator-path
+launch, and CLI event-loop milestones are green. Extra present calls
+`launch_playwright_driver` (never the CLI stub); adapter tests bind
+`PlaywrightBrowserDriver` to an in-process fake Page. Extra-present
+`verify-behavior` uses `run_async` after launch; launch does not leave
+a running loop that blocks `asyncio.run`.
 
 | Milestone | What lands | Suite |
 | --- | --- | --- |
@@ -122,6 +123,9 @@ Regression pins that must stay green:
 | `PlaywrightBrowserDriver.close` | `mergecraft.verify.playwright_driver` | `test_playwright_launch.py` |
 | `_close_driver` | `mergecraft.cli.verify_behavior_cmd` | `test_playwright_launch.py` |
 | `run_async` | `mergecraft.cli.verify_behavior_cmd` | `test_cli_event_loop.py` |
+| `_release_caller_event_loop` | `mergecraft.verify.playwright_driver` | `test_cli_event_loop.py` |
+| `_playwright_loop_bound` | `mergecraft.verify.playwright_driver` | `test_cli_event_loop.py` |
+| `_playwright_call` | `mergecraft.verify.playwright_driver` | `test_cli_event_loop.py` |
 | `run_verify_behavior` | `mergecraft.verify.runner` | `test_trust_gate.py`, `test_modes_and_inputs.py` |
 | `VerifyBehaviorSettings` | `mergecraft.config.settings` | `test_trust_gate.py` |
 | `resolve_artifacts_dir` / `redact_screenshot` | `mergecraft.verify.artifacts` | `test_artifacts_and_lifecycle.py` |
