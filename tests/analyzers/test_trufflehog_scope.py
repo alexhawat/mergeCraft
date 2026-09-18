@@ -8,11 +8,12 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from tests.analyzers.support import import_module
+
+if TYPE_CHECKING:
+    import pytest
 
 # Observed noise on run 34542726646 — each exemption names why, not a path glob.
 _NAMED_FIXTURES: tuple[tuple[str, str], ...] = (
@@ -34,10 +35,6 @@ _NAMED_FIXTURES: tuple[tuple[str, str], ...] = (
     ),
 )
 _UNNAMED_TEST_SECRET = "tests/new_committed_secret.env"
-_H5_EMIT_XFAIL = pytest.mark.xfail(
-    reason="green after H5 remediations: CI SARIF named-fixture suppressions",
-    strict=False,
-)
 
 
 def _config() -> object:
@@ -139,7 +136,6 @@ def _emit_trufflehog_with_paths(
     return loaded
 
 
-@_H5_EMIT_XFAIL
 def test_emit_trufflehog_sarif_drops_named_fixture_findings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -150,7 +146,6 @@ def test_emit_trufflehog_sarif_drops_named_fixture_findings(
         assert path not in uris, f"CI SARIF still emits named fixture {path}"
 
 
-@_H5_EMIT_XFAIL
 def test_emit_trufflehog_sarif_named_suppressions_do_not_blanket_skip_tests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -18,10 +18,6 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "check_tracked_markdown.py"
 _ALLOWLIST = "docs/dev/changelog-archive.md"
-_H5_WAVE_DOT_XFAIL = pytest.mark.xfail(
-    reason="green after H5 remediations: checker W#.#",
-    strict=False,
-)
 
 
 def _load_checker() -> Any:
@@ -90,7 +86,6 @@ def test_scan_flags_decision_id_wave_plan_and_ignorelocal_citation() -> None:
     )
 
 
-@_H5_WAVE_DOT_XFAIL
 def test_scan_flags_wave_dot_tokens() -> None:
     """DoD — word-boundary W#.# is an offense, same family as D##."""
     module = _load_checker()
@@ -101,7 +96,6 @@ def test_scan_flags_wave_dot_tokens() -> None:
     assert "W12.7" in joined
 
 
-@_H5_WAVE_DOT_XFAIL
 def test_main_fails_on_tracked_wave_dot_token(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     (tmp_path / "README.md").write_text("# Title W4.4\nAlso W12.7.\n", encoding="utf-8")

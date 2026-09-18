@@ -4,7 +4,7 @@ Authoring wave: **H1** (`test-creator`). Implementation: **H2** (sandbox), **H3*
 
 Public markdown in this file cites behaviour and test names only. It does not use opaque ledger tokens, a wave-plan preamble, or pointers into gitignored trees.
 
-H1 authored cross-wave reds as `H2` / `H3` / `H4` markers (`strict=False`). Reconciliation after each impl wave removes satisfied xfails. H2 xfails were stripped after the impl landed. H3 xfails were removed after `401a6a41`. H4 xfails were removed after `f212673b`. `_force_no_backend` sets `cache_clear` with `raising=False` because the empty-caps stand-in is not an `lru_cache` wrapper; pytest was raising before the fail-closed gate ran.
+H1 authored cross-wave reds as `H2` / `H3` / `H4` markers (`strict=False`). Reconciliation after each impl wave removes satisfied xfails. H2 xfails were stripped after the impl landed. H3 xfails were removed after `401a6a41`. H4 xfails were removed after `f212673b`. H5 remediations xfails (F2 checker `W#.#`, F3 CI SARIF named-fixture filter) were stripped after `6565b8b6`. `_force_no_backend` sets `cache_clear` with `raising=False` because the empty-caps stand-in is not an `lru_cache` wrapper; pytest was raising before the fail-closed gate ran.
 
 ## Contract matrix
 
@@ -79,5 +79,5 @@ Guard-deletion note: fail-closed tests assert the refusal when `_OVERRIDE` is un
 | Finding | Expected now | Primary test(s) |
 | --- | --- | --- |
 | F1 — Darwin `sandbox-exec` skipped the no-netns raise | Amend, must pass. Forces the honesty-suite no-backend path so the sibling still proves the raise on stock macOS. | `tests/mcp/test_network_namespace.py::test_unshare_argv_skips_net_when_probe_unavailable` |
-| F2 — checker does not scan word-boundary `W#.#` | RED until executor. `scan_markdown` / `main` treat `W4.4` and `W12.7` as the same family as `D##`. Allowlist stays as already tested. | `tests/scripts/test_check_tracked_markdown.py::test_scan_flags_wave_dot_tokens`, `…::test_main_fails_on_tracked_wave_dot_token` (`xfail`: `green after H5 remediations: checker W#.#`) |
-| F3 — CI SARIF emit skips named-fixture suppressions | RED until executor. `emit_trufflehog_sarif` drops the four named fixtures and still emits an unnamed `tests/` secret (no blanket `tests/**` skip). | `tests/analyzers/test_trufflehog_scope.py::test_emit_trufflehog_sarif_drops_named_fixture_findings`, `…::test_emit_trufflehog_sarif_named_suppressions_do_not_blanket_skip_tests` (`xfail`: `green after H5 remediations: CI SARIF named-fixture suppressions`) |
+| F2 — checker does not scan word-boundary `W#.#` | Green after `6565b8b6`. `scan_markdown` / `main` treat `W4.4` and `W12.7` as the same family as `D##`. Allowlist stays as already tested. | `tests/scripts/test_check_tracked_markdown.py::test_scan_flags_wave_dot_tokens`, `…::test_main_fails_on_tracked_wave_dot_token` |
+| F3 — CI SARIF emit skips named-fixture suppressions | Green after `6565b8b6`. `emit_trufflehog_sarif` drops the four named fixtures and still emits an unnamed `tests/` secret (no blanket `tests/**` skip). | `tests/analyzers/test_trufflehog_scope.py::test_emit_trufflehog_sarif_drops_named_fixture_findings`, `…::test_emit_trufflehog_sarif_named_suppressions_do_not_blanket_skip_tests` |
