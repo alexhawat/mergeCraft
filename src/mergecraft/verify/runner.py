@@ -424,20 +424,19 @@ async def run_verify_behavior(
 
         action_steps = await _apply_actions(driver, spec.actions)
         page = await driver.extract_text()
-        dest_dir = Path(spec.artifacts_dir) if spec.artifacts_dir else Path.cwd()
         if spec.artifacts_dir:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-        shot_dest = dest_dir / "screenshot.png"
-        shot = await driver.screenshot(shot_dest)
-        shot = redact_screenshot(shot)
-        screenshots.append(str(shot))
+            dest_dir = Path(spec.artifacts_dir)
+            shot_dest = dest_dir / "screenshot.png"
+            shot = await driver.screenshot(shot_dest)
+            shot = redact_screenshot(shot)
+            screenshots.append(str(shot))
 
         rows = await driver.console_messages()
         log_parts = [_redact_truncate(str(row.get("text", ""))) for row in rows]
         log_text = "\n".join(log_parts)
         console_errors = [part for part in log_parts if part]
         if spec.artifacts_dir and log_text:
-            log_path = dest_dir / "console.log"
+            log_path = Path(spec.artifacts_dir) / "console.log"
             log_path.write_text(_redact_truncate(log_text), encoding="utf-8")
             logs.append(str(log_path))
 

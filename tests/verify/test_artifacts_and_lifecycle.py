@@ -102,6 +102,28 @@ async def test_post_auth_screenshots_are_redacted(
     assert redacted == fake.last_screenshot or str(redacted)
 
 
+async def test_run_without_artifacts_dir_writes_no_screenshot_to_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without ``--artifacts-dir``, do not leave ``screenshot.png`` in the checkout."""
+    monkeypatch.chdir(tmp_path)
+    fake = FakeBrowserDriver(page_text="ok page")
+    run = _run()
+    report = await run(
+        make_input(
+            artifacts_dir="",
+            base_url="http://127.0.0.1:8765/",
+            credential_env_names=[],
+        ),
+        driver=fake,
+        offline=True,
+    )
+    assert not (tmp_path / "screenshot.png").exists()
+    assert not any(call[0] == "screenshot" for call in fake.calls)
+    assert report.artifacts.screenshots == []
+
+
 async def test_no_raw_browser_log_is_written_wholesale(tmp_path: Path) -> None:
     raw = ("CDP " + CANARY_TOKEN + "\n") * 5000
     fake = FakeBrowserDriver(console=[{"level": "debug", "text": raw}])
