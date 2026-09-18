@@ -7,7 +7,7 @@ CI, and piped invocations keep today's non-interactive behaviour.
 Exports:
     GroupMenuItem -- one visible subcommand in a group menu.
     ReviewWizardChoice -- options collected by the review wizard.
-    command_was_invoked_bare -- True when every command parameter is defaulted.
+    command_was_invoked_bare -- True when this command and its parents are defaulted.
     confirm -- yes/no prompt; cancel raises ``typer.Exit``.
     install_missing_param_prompts -- wrap ``parse_args`` so missing required
         parameters are prompted on a TTY.
@@ -74,15 +74,23 @@ def command_was_invoked_bare(
     *,
     ignore: frozenset[str] | None = None,
 ) -> bool:
-    """True when every parameter on *ctx* still has its declared default."""
+    """True when every parameter on *ctx* and parent contexts is still defaulted.
+
+    Root flags such as ``mergecraft --format json review`` live on the parent
+    context, so checking only ``ctx.command.params`` would still open a TTY
+    wizard.
+    """
     skipped = ignore or frozenset()
-    for param in ctx.command.params:
-        name = param.name
-        if name is None or name in skipped:
-            continue
-        source = ctx.get_parameter_source(name)
-        if source not in {None, ParameterSource.DEFAULT}:
-            return False
+    current: click.Context | None = ctx
+    while current is not None:
+        for param in current.command.params:
+            name = param.name
+            if name is None or name in skipped:
+                continue
+            source = current.get_parameter_source(name)
+            if source not in {None, ParameterSource.DEFAULT}:
+                return False
+        current = current.parent
     return True
 
 
@@ -221,8 +229,8 @@ def install_missing_param_prompts(command: click.Command) -> None:
     def parse_args(ctx: click.Context, args: list[str]) -> list[str]:
         return _parse_args_prompting_missing(original, ctx, args)
 
-    command.parse_args = parse_args  # type: ignore[method-assign]
-    command._mergecraft_missing_param_prompts = True  # type: ignore[attr-defined]
+    command.parse_args = parse_args  # type: ignore[method-assign]  # — wrap Click parse_args with TTY missing-arg prompts
+    command._mergecraft_missing_param_prompts = True  # type: ignore[attr-defined]  # — install-once flag is not on Click Command
 
 
 def _parse_args_prompting_missing(

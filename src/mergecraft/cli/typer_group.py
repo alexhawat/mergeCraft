@@ -56,9 +56,13 @@ class MergecraftTyperGroup(TyperGroup):
     def invoke(self, ctx: click.Context) -> Any:
         if _is_empty_group_invocation(self, ctx):
             from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
-            from mergecraft.cli.interactive import is_interactive_session, run_group_session
+            from mergecraft.cli.interactive import (
+                command_was_invoked_bare,
+                is_interactive_session,
+                run_group_session,
+            )
 
-            if is_interactive_session():
+            if is_interactive_session() and command_was_invoked_bare(ctx):
                 run_group_session(ctx)
                 return None
             if self.no_args_is_help:

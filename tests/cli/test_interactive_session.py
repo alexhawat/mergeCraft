@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 import typer
+from click.core import ParameterSource
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -64,6 +65,19 @@ def test_bare_mergecraft_without_tty_prints_help() -> None:
     assert "interactive session" not in output.lower()
 
 
+def test_root_format_flag_skips_interactive_menu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("mergecraft.cli.interactive.is_interactive_session", lambda: True)
+    monkeypatch.setattr(
+        "mergecraft.cli.interactive.typer.prompt",
+        lambda *_a, **_kw: pytest.fail("interactive menu must not open with --format"),
+    )
+    result = runner.invoke(app, ["--format", "json"], env=_FORCE)
+    output = _plain(result.stdout + result.stderr).lower()
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, output
+    assert "interactive session" not in output
+    assert "review" in output
+
+
 def test_bare_mergecraft_interactive_lists_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("mergecraft.cli.interactive.is_interactive_session", lambda: True)
     monkeypatch.setattr(
@@ -76,6 +90,22 @@ def test_bare_mergecraft_interactive_lists_commands(monkeypatch: pytest.MonkeyPa
     assert "interactive session" in output
     assert "review" in output
     assert "canceled" in output
+
+
+def test_provider_root_format_flag_skips_interactive_menu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("mergecraft.cli.interactive.is_interactive_session", lambda: True)
+    monkeypatch.setattr(
+        "mergecraft.cli.interactive.typer.prompt",
+        lambda *_a, **_kw: pytest.fail("provider menu must not open with --format"),
+    )
+    result = runner.invoke(app, ["--format", "json", "provider"], env=_FORCE)
+    output = _plain(result.stdout + result.stderr).lower()
+    assert result.exit_code == 0, output
+    assert "interactive session" not in output
+    assert "list" in output
+    assert "auth" in output
 
 
 def test_provider_without_tty_prints_help() -> None:
@@ -170,6 +200,33 @@ def test_review_skips_wizard_when_flag_passed(
     assert wizard_called["value"] is False
 
 
+def test_review_skips_wizard_when_root_format_passed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wizard_called = {"value": False}
+
+    def _wizard() -> ReviewWizardChoice:
+        wizard_called["value"] = True
+        return ReviewWizardChoice(dry_run=True)
+
+    monkeypatch.setattr("mergecraft.cli.interactive.run_review_wizard", _wizard)
+    monkeypatch.setattr("mergecraft.cli.interactive.is_interactive_session", lambda: True)
+    monkeypatch.chdir(tmp_path)
+
+    async def _fake_run(**kwargs: object) -> OfflineReviewResult:
+        return OfflineReviewResult(success=True, output="ok", outcome=RunOutcome.passed)
+
+    monkeypatch.setattr(
+        "mergecraft.cli.diff_review_cmd.run_offline_diff_review",
+        _fake_run,
+    )
+    result = runner.invoke(app, ["--format", "json", "review"], env=_FORCE)
+    output = _plain(result.stdout + result.stderr)
+    assert wizard_called["value"] is False, output
+    assert "interactive session" not in output.lower()
+
+
 def test_review_wizard_sets_dry_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -261,8 +318,40 @@ def test_command_was_invoked_bare_uses_parameter_source() -> None:
 
     class _Ctx:
         command = _Cmd()
+        parent = None
 
         def get_parameter_source(self, name: str) -> Any:
             return None
 
     assert command_was_invoked_bare(_Ctx()) is True  # type: ignore[arg-type]
+
+
+def test_command_was_invoked_bare_walks_parent_context() -> None:
+    class _Param:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _Cmd:
+        def __init__(self, names: list[str]) -> None:
+            self.params = [_Param(name) for name in names]
+
+    class _Ctx:
+        def __init__(
+            self,
+            names: list[str],
+            sources: dict[str, Any],
+            parent: _Ctx | None = None,
+        ) -> None:
+            self.command = _Cmd(names)
+            self.parent = parent
+            self._sources = sources
+
+        def get_parameter_source(self, name: str) -> Any:
+            return self._sources.get(name)
+
+    parent = _Ctx(["output_format"], {"output_format": ParameterSource.COMMANDLINE})
+    child = _Ctx(["dry_run"], {"dry_run": ParameterSource.DEFAULT}, parent=parent)
+    assert command_was_invoked_bare(child) is False  # type: ignore[arg-type]
+    bare_parent = _Ctx(["output_format"], {"output_format": ParameterSource.DEFAULT})
+    bare_child = _Ctx(["dry_run"], {"dry_run": ParameterSource.DEFAULT}, parent=bare_parent)
+    assert command_was_invoked_bare(bare_child) is True  # type: ignore[arg-type]

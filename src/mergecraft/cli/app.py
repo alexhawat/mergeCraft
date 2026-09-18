@@ -203,9 +203,13 @@ def _root(
         typer.echo(format_version_display(__version__, mergecraft.__commit__))
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     if ctx.invoked_subcommand is None:
-        from mergecraft.cli.interactive import is_interactive_session, run_group_session
+        from mergecraft.cli.interactive import (
+            command_was_invoked_bare,
+            is_interactive_session,
+            run_group_session,
+        )
 
-        if is_interactive_session():
+        if is_interactive_session() and command_was_invoked_bare(ctx):
             run_group_session(ctx)
             return
         typer.echo(ctx.get_help())
