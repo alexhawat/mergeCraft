@@ -397,17 +397,34 @@ def parse_coverage_artifact(text: str, filename: str = "") -> ParsedCoverage:
     return ParsedCoverage(skip_reason=SKIP_UNSUPPORTED_COVERAGE_FORMAT)
 
 
+def _source_has_duplicate_function_name(source: str, name: str) -> bool:
+    """Return True when ``source`` defines more than one function named ``name``."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return False
+    count = sum(
+        1
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+    )
+    return count > 1
+
+
 def _lookup_coverage(
     functions: Sequence[CoverageFunction],
     *,
     path: str,
     name: str,
     start_line: int,
+    source_text: str | None = None,
 ) -> CoverageFunction | None:
     """Match a changed function to a coverage row by path, name, and start line.
 
     When multiple rows share a name in one file, only an exact ``start_line``
     match is accepted. A single row with a mismatched ``start_line`` is skipped.
+    A single row without ``start_line`` is skipped when the source defines
+    duplicate symbols with that name.
     """
     want_path = _norm_path(path)
     candidates = [
@@ -418,6 +435,12 @@ def _lookup_coverage(
     if len(candidates) == 1:
         only = candidates[0]
         if only.start_line is not None and only.start_line != start_line:
+            return None
+        if (
+            only.start_line is None
+            and source_text is not None
+            and _source_has_duplicate_function_name(source_text, name)
+        ):
             return None
         return only
     matched = [item for item in candidates if item.start_line == start_line]
@@ -464,11 +487,13 @@ def coverage_findings(
     findings: list[Finding] = []
     scored_clean = False
     for symbol in symbols:
+        source_text = tree.get(symbol.path)
         record = _lookup_coverage(
             parsed.functions,
             path=symbol.path,
             name=symbol.name,
             start_line=symbol.start_line,
+            source_text=source_text,
         )
         if record is None:
             continue

@@ -43,6 +43,25 @@ def test_coverage_py_json_skips_wrong_duplicate_method() -> None:
     assert result.findings == []
 
 
+def test_coverage_py_json_skips_one_row_without_start_line_when_duplicates() -> None:
+    coverage = _coverage()
+    source = _load_duplicate("source.py")
+    diff = _load_duplicate("change.diff")
+    parsed = coverage.parse_coverage_py_json(_load_duplicate("coverage.nostart.json"))
+    rows = [row for row in parsed.functions if row.name == "run"]
+    assert len(rows) == 1
+    assert rows[0].start_line is None
+
+    result = coverage.coverage_findings(
+        parsed,
+        diff=diff,
+        source_tree={"src/mod.py": source},
+        source="ci",
+        mode="shadow",
+    )
+    assert result.findings == []
+
+
 def test_lcov_disambiguates_duplicate_method_by_start_line() -> None:
     coverage = _coverage()
     changed = _changed()
