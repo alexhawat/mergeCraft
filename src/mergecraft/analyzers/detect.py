@@ -45,6 +45,15 @@ _PRISMA_LINT_CONFIG_NAMES = (
     ".prismalintrc.yml",
     "prismalint.config.js",
 )
+# markdownlint-cli auto-loads these only. cli2 filenames are not read by the
+# binary we run, so they must not count as "configured" (MD060 fallback).
+_MARKDOWNLINT_CONFIG_NAMES = (
+    ".markdownlint.json",
+    ".markdownlint.yaml",
+    ".markdownlint.yml",
+    ".markdownlint.jsonc",
+    ".markdownlintrc",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +154,12 @@ def has_prisma_lint_config(repo_root: Path) -> bool:
     """Return True when a project-level prisma-lint config file is present."""
     repo_root = repo_root.resolve()
     return any((repo_root / name).is_file() for name in _PRISMA_LINT_CONFIG_NAMES)
+
+
+def has_markdownlint_config(repo_root: Path) -> bool:
+    """Return True when a project-level markdownlint config file is present."""
+    repo_root = repo_root.resolve()
+    return any((repo_root / name).is_file() for name in _MARKDOWNLINT_CONFIG_NAMES)
 
 
 def _package_json(repo_root: Path) -> dict[str, object]:
@@ -513,6 +528,7 @@ __all__ = [
     "has_biome_config",
     "has_ember_template_lint_config",
     "has_eslint_config",
+    "has_markdownlint_config",
     "has_mypy_config",
     "has_oxlint_config",
     "has_phpstan_config",

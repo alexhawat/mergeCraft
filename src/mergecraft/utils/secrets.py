@@ -7,6 +7,8 @@ import re
 
 from loguru import logger
 
+from mergecraft.config.runtime_provider_registry import provider_credential_env_names
+
 # Patterns for sensitive env var names (used by normalize_env / redaction).
 SENSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"_KEY$", re.IGNORECASE),
@@ -150,22 +152,10 @@ ALWAYS_STRIP_FROM_AGENT_ENV: frozenset[str] = frozenset(
     }
 )
 
-# Provider credential env vars — only the active agent's key is re-injected.
-PROVIDER_KEY_ENV_VARS: frozenset[str] = frozenset(
-    {
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GOOGLE_GENERATIVE_AI_API_KEY",
-        "CURSOR_API_KEY",
-        "NOUS_API_KEY",
-        "TOKENHUB_API_KEY",
-        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "CODEX_AUTH_JSON",
-    }
-)
+# Provider credential env vars — derived from the one credential authority
+# (``config.runtime_provider_registry``, D2), so this set and the fork invariant
+# cannot drift. Only the active agent's key is re-injected below.
+PROVIDER_KEY_ENV_VARS: frozenset[str] = provider_credential_env_names()
 
 ACTIVE_PROVIDER_KEY_BY_AGENT: dict[str, str | None] = {
     "claude": "ANTHROPIC_API_KEY",

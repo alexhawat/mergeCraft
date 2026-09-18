@@ -1,0 +1,11 @@
+{
+  "name": "fn_clean",
+  "path": "src/mod.py",
+  "complexity": 1,
+  "coverage": 1.0,
+  "crap": 1.0,
+  "band": "clean",
+  "display_severity": "note",
+  "finding_severity": "Trivial",
+  "emits_finding": false
+}

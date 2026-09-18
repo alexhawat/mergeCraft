@@ -51,6 +51,9 @@ async def run_offline_analyze(
     same diff. A run that failed carries no key — reusing a failure would deny the
     reviewing agent a retry that might succeed.
     """
+    from mergecraft.analyzers.sandbox import require_sandbox_for_enabled_shell
+
+    require_sandbox_for_enabled_shell(shell=shell)
     if not analyzers_enabled or materialization.empty:
         return None
     diff_text = materialization.path.read_text(encoding="utf-8")

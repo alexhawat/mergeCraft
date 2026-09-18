@@ -7,19 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Bare CLI command names open a TTY interactive session. `mergecraft`,
+  `mergecraft review`, and groups such as `mergecraft provider` offer a menu
+  (or a review wizard) when stdin is a TTY. Scripts, CI, piped invocations,
+  and any invocation that already passes flags keep today's non-interactive
+  behaviour. Missing required arguments are prompted on a TTY instead of
+  failing with Click's "Missing argument". `mergecraft config set` writes
+  `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
+
 ### Changed
+
+- `verify_candidate` verifies the commit that introduced an image digest rather
+  than whichever commit the candidate range happens to end at. It treated any
+  commit whose `action.yml` image differed from the base as a freshly minted
+  manifest, and `verify_manifest` requires such a commit to differ from its
+  image source in `action.yml` alone — so a forward-port, a sync, or the merge
+  commit a manifest PR lands as was rejected outright. The introducing commit is
+  substituted only when the candidate's `action.yml` is identical to it, so
+  neither a digest minted mid-branch nor a later Action change riding on a
+  legitimate digest escapes verification (#684).
 
 - markdownlint follows the `markdownlint-cli` 0.49.1 bump: the catalog pin tracks
   the engine, so it moves 0.37.4 → 0.41.1. A markdownlint `warning` now grades
   **Minor** instead of Major — the parser reads the per-finding `severity` that
   0.49.1 emits rather than hardcoding `error`, and an unrecognised severity
-  grades as `error` with a log line instead of failing the whole run. Repo-root
-  `.markdownlint.json` disables `MD060` (`table-column-style`), which the engine
-  bump enables by default and which fires 493 times on this repo's docs tables;
-  consumer repos without their own config still inherit it.
+  grades as `error` with a log line instead of failing the whole run. The engine
+  bump also enables `MD060` (`table-column-style`) by default. This repo's
+  `.markdownlint.json` disables it; consumers with no markdownlint config get
+  the same MD060-only disable via the shipped `markdownlint-default-config.json`
+  fallback, and a run note records that the fallback applied so operators can
+  tell repo-rules-clean from fallback-clean. A consumer whose own config
+  enables MD060 still gets it (#704).
+
+- trufflehog no longer reports secrets from virtualenv trees (`.venv`,
+  `.venv-dev`, `site-packages`) or four named intentional fixtures; each
+  fixture suppression names why it is exempt, and a newly committed secret
+  under `tests/` still fires.
 
 ### Added
 
+- Reviews can ingest declared coverage receipts and report change-risk scores on the functions the PR actually touched, advisory by default (#714)
+- Reviews can ingest declared mutation survivors the same way; local `mergecraft review --with-coverage` / `--with-mutation` require `--shell enabled`, wrap live tool runs in the existing sandbox backend (or refuse), and refuse a fork checkout (#714)
+
+- Opt-in Jev / System One client (`jev.enabled`, default off) with cost
+  accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a
+  skip and does not fail the review (#728)
+- Parallel shadow judge grades review findings and prose against their cited
+  evidence without replacing the reviewer (#728)
+
+- mergeCraft review loads `.github/skills/code-review/` as a self-contained
+  Agent Skills payload — `SKILL.md` plus one-level `references/` resolved into
+  the `REVIEW SKILLS` prompt section, with a 64 KiB instruction-bundle cap,
+  taxonomy/spec drift gates, and a small eval corpus that must beat the
+  366-byte pointer baseline; `review.instructionExtraFilenames` wires configured
+  extras through the CLI and Action review-context path
 - GitHub Copilot is a first-class Agent Skills harness: generated
   `skills/copilot/mergecraft/`, install path `.github/skills/mergecraft/`,
   a Copilot repo-MCP snippet with the six public tools, and a thin
@@ -99,6 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Transitive `soupsieve` 2.8.4→2.9.2 in `uv.lock` for `pip-audit`
+  (CVE-2026-85999, CVE-2026-86000) (#728)
 - Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
   tracing-content cap; export of prompt bodies on fork PRs requires the Action
   input, env, or trusted base settings
@@ -107,8 +152,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outbound egress stays open and ChatGPT subscription auth (`CODEX_AUTH_JSON`) is
   not brokered; clear that secret and use `OPENAI_API_KEY` when broker coverage
   matters (#553)
+- The fork-head credential invariant now rejects indexed OAuth, device-code and
+  cloud-chain credentials (`LLM_PROVIDER_<N>_CLAUDE_CODE_OAUTH_TOKEN`,
+  `_CODEX_AUTH_JSON`, `_AWS_*`, `_GOOGLE_APPLICATION_CREDENTIALS`) instead of only
+  flat names and `_API_KEY`; a fork PR can no longer carry a credential past the
+  pre-dispatch rejection boundary (N1)
+- Indexed Codex `device_code` credentials reach the isolated run home's
+  `auth.json` and the broker reports `subscription`; `_setup_codex_auth` consumes
+  the resolved child mapping instead of reading `os.environ` (N19)
+- The fork-credential allowlist and the agent-env strip set both derive from
+  `config.runtime_provider_registry`, the single credential authority across every
+  `authKind`, cloud suffix and spelling — the pinned drift that dropped
+  `GOOGLE_API_KEY` is gone, and `AWS_SESSION_TOKEN` is covered (N21)
+- Critical and Major security findings are no longer demoted when incidental
+  maintainability or documentation words appear in the same message; the security
+  lane takes absolute precedence and capping rules are inapplicable when impact
+  evidence supports the asserted severity (N4)
+- Security category inference now recognizes `auth`/`unauth` stems and the named
+  vulnerability classes (RCE, deserialization, pickle, path traversal, SSRF, CSRF,
+  XXE, privilege escalation, prototype pollution, open redirect, hardcoded key)
+  (N20)
 
 ### Fixed
+
+- Local `--shell enabled` now refuses when no sandbox backend is available unless
+  `MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1` is set; on macOS, `sandbox-exec` is
+  the backend when present (#593)
+- Tracked public markdown is linted for decision-ledger tokens, wave-dot
+  citations, and pointers into gitignored wave plans; Priority 1 docs were
+  rewritten to stand alone (#709)
+- `trivy` on Apple Silicon provisions the native ARM64 build so the local
+  coverage gate does not hang under Rosetta
+- Action reviews no longer crash at startup with `infra_error` when loading
+  the shared token cap (#741)
+- Enabled Jev reviews now keep the shadow-judge record next to the evidence
+  packet after the command finishes, so paid calibration rows are retrievable
+  (#728)
+- A TypeSafe connect, DNS, or timeout failure on the shadow judge records a
+  skip and leaves the completed review successful (#728)
+- `jev.model` accepts only the pinned `jev-1.13.0` id, so a configured newer
+  version cannot run while audit rows still claim the pin (#728)
+
+- Corroborating duplicates can no longer weaken a finding: clustering keeps the
+  strongest member's severity while the agent's prose stays canonical wording,
+  and semantic dedupe keeps the strongest paraphrase with the discarded members'
+  evidence — a weaker copy arriving first can no longer turn a CI blocker green
+  (N5)
+- A partial analyzer rerun no longer erases earlier blockers: results are
+  retained by covered scope, so a clean pass over a file the first pass did not
+  cover leaves the prior finding, the shared finding count and the
+  terminal-approve rejection intact (N2)
+- `get_commit_info` can no longer replace the canonical review scope with the
+  HEAD commit's patch; the single-commit diff stays an inspection artifact, so
+  admissible citations, inline anchors and blast radius remain bound to the
+  whole change under review (N3)
+- Default local review includes eligible untracked additions, so a brand-new
+  source file is reviewed without knowing an alternate flag; every exclusion —
+  gitignored, oversized, binary, symlink — is surfaced as a review-coverage
+  limitation, and an all-excluded diff can no longer render as a passed review
+  with "no changes to review" (N7)
 
 - The Action-pin staleness budget counts changes rather than landings. Without
   `--no-merges`, a PR touching `src/mergecraft/` scored twice — its own commit

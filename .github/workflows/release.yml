@@ -45,7 +45,7 @@ jobs:
       - name: Prepare release (Craft)
         id: craft
         # Pin: getsentry/craft@v2 → 2.30.1; dependabot owns bumps.
-        uses: getsentry/craft@cd1e8294061fd970b40d98b77aaa109cb1e00e78 # v2
+        uses: getsentry/craft@55694f8bf3a0fd051e21a877f57b4c0dd8e946bb # v2
         with:
           version: ${{ inputs.version }}
           force: ${{ inputs.force && 'true' || 'false' }}

@@ -18,12 +18,8 @@ REVIEW_SKILLS_HEADER = "************* REVIEW SKILLS *************"
 
 def test_prefers_github_code_review_skill(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
-    generic = repo / ".cursor" / "skills" / "demo"
-    generic.mkdir(parents=True)
-    (generic / "SKILL.md").write_text(
-        "---\nname: demo\n---\n\nGENERIC_SKILL\n",
-        encoding="utf-8",
-    )
+    repo.mkdir(parents=True)
+    (repo / "AGENTS.md").write_text("GENERIC_SKILL\n", encoding="utf-8")
     review = repo / ".github" / "skills" / "code-review"
     review.mkdir(parents=True)
     (review / "SKILL.md").write_text(

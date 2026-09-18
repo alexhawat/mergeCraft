@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import yaml
 from loguru import logger
@@ -143,10 +143,20 @@ class CiEvidenceSettings(_OptionalFeatureModel):
 
     ``sarifArtifacts`` lists workflow artifact names whose SARIF the reviewer may
     ingest as CI findings.
+
+    ``coverageArtifacts`` lists workflow artifact names whose coverage reports
+    (coverage.py JSON, lcov, or Cobertura) the reviewer may ingest as CRAP
+    findings. Empty means no ingest and no extra API call (C-D2).
+
+    ``mutationArtifacts`` lists workflow artifact names whose mutation reports
+    (mutmut or Stryker JSON) the reviewer may ingest as survivor findings.
+    Empty means no ingest and no extra API call (C-D2).
     """
 
     gates: dict[str, str] = Field(default_factory=dict)
     sarif_artifacts: list[str] = Field(default_factory=list, alias="sarifArtifacts")
+    coverage_artifacts: list[str] = Field(default_factory=list, alias="coverageArtifacts")
+    mutation_artifacts: list[str] = Field(default_factory=list, alias="mutationArtifacts")
 
 
 class AnalyzerOverride(_OptionalFeatureModel):
@@ -188,6 +198,33 @@ or enforce (apply the action as a gate). Every gate introduced by this
 plan defaults to ``shadow`` (D12)."""
 
 
+class CoverageBandSettings(_OptionalFeatureModel):
+    """Inclusive-lower CRAP band thresholds. ``severe`` has no exclusive upper bound."""
+
+    watch: float = 5
+    elevated: float = 15
+    crap: float = 30
+    severe: float = 50
+
+
+class CoverageSettings(_OptionalFeatureModel):
+    """CRAP coverage evidence. Ships in ``shadow`` so scores never reach ``has_blockers`` (C-D5)."""
+
+    mode: GateMode = "shadow"
+    bands: CoverageBandSettings = Field(default_factory=CoverageBandSettings)
+    timeout_seconds: int = Field(default=300, alias="timeoutSeconds", gt=0)
+
+
+class MutationSettings(_OptionalFeatureModel):
+    """Mutation survivor evidence. Ships in ``shadow`` so survivors never reach ``has_blockers`` (C-D5)."""
+
+    mode: GateMode = "shadow"
+    survivor_threshold: int = Field(default=0, alias="survivorThreshold", ge=0)
+    timeout_seconds: int = Field(default=300, alias="timeoutSeconds", gt=0)
+    max_mutants: int = Field(default=50, alias="maxMutants", ge=1)
+    path_allowlist: list[str] = Field(default_factory=list, alias="pathAllowlist")
+
+
 class GatesSettings(BaseModel):
     """Per-gate mode + override config (#46, #50, D12).
 
@@ -209,6 +246,7 @@ class GatesSettings(BaseModel):
     gate_action: GateMode = "shadow"
     thermostat: GateMode = "shadow"
     terminal_verdict: GateMode = "enforce"
+    jev: GateMode = "shadow"
     override: dict[str, str] = Field(default_factory=dict)
 
 
@@ -322,6 +360,23 @@ class ReviewSettings(BaseModel):
             "Optional read-only consumer MCP servers attached during trusted review "
             "(#620). Local stdio only; OAuth remotes, URL remotes, and write tools "
             "are rejected. Dropped on the untrusted tier."
+        ),
+    )
+    instruction_bundle_byte_cap: int = Field(
+        default=65536,
+        alias="instructionBundleByteCap",
+        description=(
+            "Maximum UTF-8 byte size for the rendered review instruction bundle "
+            "(review skills, references, and repo instructions). Review skills and "
+            "their references are retained first when truncation is required."
+        ),
+    )
+    instruction_extra_filenames: list[str] = Field(
+        default_factory=list,
+        alias="instructionExtraFilenames",
+        description=(
+            "Additional repo-root filenames to treat as discovered instruction "
+            "sources during review-context rendering (for example TEAM.md)."
         ),
     )
 
@@ -543,6 +598,72 @@ class RunBoundsSettings(BaseModel):
     )
 
 
+_JEV_PINNED_MODEL: Final[str] = "jev-1.13.0"
+_JEV_FLOATING_ALIASES: Final[frozenset[str]] = frozenset({"jev-latest", "jev-preview"})
+_JEV_PACK_IDS: Final[tuple[str, ...]] = (
+    "unit/v1",
+    "evidence/v1",
+    "claim/v1",
+    "align/v1",
+    "lens/v1",
+)
+_JEV_DEFAULT_BUDGET_TOKENS: Final[int] = 250_000
+
+
+def _default_jev_packs() -> dict[str, bool]:
+    return {pack_id: True for pack_id in _JEV_PACK_IDS}
+
+
+class JevSettings(BaseModel):
+    """Opt-in Jev / System One block. Off by default (D4, D8).
+
+    No credential, no config, and the default ``enabled: false`` change no
+    review behaviour and make no network call. Thresholds default to the
+    J1-calibrated ``unit/v1`` floors (D15).
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    model: str = _JEV_PINNED_MODEL
+    budget_tokens: int = Field(
+        default=_JEV_DEFAULT_BUDGET_TOKENS,
+        alias="budgetTokens",
+        gt=0,
+    )
+    packs: dict[str, bool] = Field(default_factory=_default_jev_packs)
+    # D15 — floors recorded beside pack version and the J1 corpus rows.
+    # Source of truth for corpus ids is ``jev.policy.iter_thresholds``.
+    thresholds: dict[str, float] = Field(
+        default_factory=lambda: {
+            "unit/v1.certain": 0.9,
+            "unit/v1.likely": 0.6,
+            "lens/v1.likely": 0.6,
+            "align/v1.same_defect": 0.6,
+            "align/v1.is_withdrawn_reraise": 0.5,
+        }
+    )
+
+    @field_validator("model")
+    @classmethod
+    def _require_pinned_model(cls, value: str) -> str:
+        pinned = value.strip()
+        if pinned in _JEV_FLOATING_ALIASES:
+            msg = "jev.model must be a versioned id (jev-1.13.0), not a floating alias"
+            raise ValueError(msg)
+        if pinned != _JEV_PINNED_MODEL:
+            msg = f"jev.model must be the pinned id {_JEV_PINNED_MODEL}"
+            raise ValueError(msg)
+        return pinned
+
+    @field_validator("packs")
+    @classmethod
+    def _fill_known_packs(cls, value: dict[str, bool]) -> dict[str, bool]:
+        filled = _default_jev_packs()
+        filled.update(value)
+        return filled
+
+
 class RepoSettings(BaseModel):
     """Per-repo runtime settings — local equivalent of upstream ``RepoSettings``.
 
@@ -599,6 +720,8 @@ class RepoSettings(BaseModel):
     # #36 / D10 — declared-only reuse of the repo's finished CI. Default empty:
     # no declaration, no substitution, no extra API call.
     ci_evidence: CiEvidenceSettings = Field(default_factory=CiEvidenceSettings, alias="ciEvidence")
+    coverage: CoverageSettings = Field(default_factory=CoverageSettings)
+    mutation: MutationSettings = Field(default_factory=MutationSettings)
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
     review: ReviewSettings = Field(default_factory=ReviewSettings)
     agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)
@@ -640,6 +763,7 @@ class RepoSettings(BaseModel):
         default_factory=list, alias="xrepoLearningsHeadings"
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
+    jev: JevSettings = Field(default_factory=JevSettings)
     run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
     enterprise: EnterpriseSettings = Field(default_factory=EnterpriseSettings)
     # #477 / BA — operator provider registry (structure only; secrets in ``.env``).

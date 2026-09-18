@@ -10,13 +10,14 @@ from rich.table import Table
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.context.change_graph import ChangedSymbol, resolve_change_graph
 from mergecraft.context.operator import lazy_retrieve, score_relevance
 from mergecraft.context.provenance import ContextItem, inspect_context
 from mergecraft.context.repo_paths import git_blob_sha, git_show_text
 from mergecraft.context.symbol_index import index_symbols
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="context",
     help="Inspect repository context retrieval for a scope.",
     no_args_is_help=True,

@@ -1,7 +1,7 @@
 # Sync hook revisions with dev tooling (see pyproject.toml optional dev deps).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.6
+    rev: v0.16.7
     hooks:
       - id: ruff
         args: [--fix]
@@ -30,6 +30,13 @@ repos:
         language: system
         pass_filenames: false
         files: (^|/)action\.ya?ml$
+
+      - id: mergecraft-tracked-markdown
+        name: tracked markdown (no decision IDs or gitignored wave paths)
+        entry: uv run python scripts/check_tracked_markdown.py
+        language: system
+        pass_filenames: false
+        files: \.md$
 
       - id: conventional-commit
         name: Conventional Commits

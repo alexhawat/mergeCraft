@@ -50,7 +50,7 @@ def test_discovers_gemini_copilot_windsurf_and_custom_list(tmp_path: Path) -> No
 def test_skill_md_remains_a_controlled_context_source(tmp_path: Path) -> None:
     """#357 — SKILL.md stays a controlled context source."""
     repo = tmp_path / "repo"
-    skill = repo / ".cursor" / "skills" / "demo"
+    skill = repo / "team-skills" / "demo"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: demo\n---\n\nbody\n", encoding="utf-8")
     git_init_repo(repo)

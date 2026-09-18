@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "2.0",
+  "thresholds": {"high": 80, "low": 60, "break": null},
+  "files": {
+    "src/mod.py": {
+      "language": "python",
+      "source": "class A:\n    def run(self) -> int:\n        if True:\n            return 1\n        return 0\n\n\nclass B:\n    def run(self) -> int:\n        if False:\n            return 2\n        return 0\n",
+      "mutants": [
+        {
+          "id": "0",
+          "mutatorName": "BooleanLiteral",
+          "replacement": "False",
+          "status": "Survived",
+          "location": {
+            "start": {"line": 3, "column": 12},
+            "end": {"line": 3, "column": 16}
+          }
+        },
+        {
+          "id": "1",
+          "mutatorName": "BooleanLiteral",
+          "replacement": "True",
+          "status": "Killed",
+          "location": {
+            "start": {"line": 10, "column": 12},
+            "end": {"line": 10, "column": 17}
+          }
+        }
+      ]
+    }
+  }
+}

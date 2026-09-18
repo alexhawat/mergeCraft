@@ -18,8 +18,9 @@ from mergecraft.cli.exits import (
     RunOutcome,
     error_code_for_outcome,
 )
+from mergecraft.cli.typer_group import mergecraft_typer
 
-app = typer.Typer(
+app = mergecraft_typer(
     help="Run the GitHub Action runtime flow.",
     invoke_without_command=True,
     no_args_is_help=False,

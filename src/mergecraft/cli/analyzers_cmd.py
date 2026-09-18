@@ -19,12 +19,13 @@ from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="analyzers",
     help="Inspect and run the mergeCraft analyzer catalog.",
     no_args_is_help=True,

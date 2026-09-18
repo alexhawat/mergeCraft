@@ -6,9 +6,10 @@ import json
 
 import typer
 
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.enterprise.health import health_payload
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="health",
     help="Enterprise health check (emits JSON).",
     no_args_is_help=False,

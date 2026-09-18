@@ -1,0 +1,23 @@
+{
+  "http": {
+    "status": 200,
+    "headers": { "content-type": "application/json" }
+  },
+  "body": {
+    "request_id": "req_lens_privilege_drop",
+    "model": "jev-1.13.0",
+    "usage": { "input_tokens": 200, "output_tokens": 6 },
+    "answers": {
+      "privilege-drop-ordering": {
+        "choice": "apply",
+        "confidence": 0.91,
+        "probabilities": { "apply": 0.91, "skip": 0.09 }
+      },
+      "security": {
+        "choice": "skip",
+        "confidence": 0.62,
+        "probabilities": { "apply": 0.38, "skip": 0.62 }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "skill-e1-doctrine-reaches-reviewer",
+  "title": "Rendered prompt carries grading doctrine under the real skill",
+  "scenario": "e1",
+  "fixture_repo": "e1-severity-cap",
+  "skill_variants": {
+    "baseline": "baseline-pointer",
+    "tip": "tip-doctrine"
+  },
+  "prompt_assertions": {
+    "baseline_must_not_contain": ["## 1. Code correctness", "collateral damage"],
+    "tip_must_contain": ["## 1. Code correctness", "collateral damage"]
+  },
+  "review_assertions": {
+    "must_cite_grading_rule": true
+  },
+  "notes": "F1 executable — baseline is the 366-byte pointer skill; tip must carry doctrine."
+}

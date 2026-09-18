@@ -45,6 +45,7 @@ from mergecraft.cli.exits import (
     CLI_FAILED_EXIT_CODE,
 )
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config import load_repo_settings
 from mergecraft.evals import (
     CASE_FILE_SUFFIX,
@@ -79,7 +80,7 @@ from mergecraft.models import get_model_provider
 from mergecraft.utils.agent_resolve import resolve_effective_model_slug, resolve_model
 from mergecraft.utils.learnings import LearningProvenance
 
-app = typer.Typer(
+app = mergecraft_typer(
     help=(
         "Manage the file-backed Failure Memory and Eval Bank. "
         "Cases live under evals/cases/ by default (D13)."
@@ -402,7 +403,7 @@ def promote(
         help="Overwrite an existing permanent test for the same case.",
     ),
 ) -> None:
-    """Promote a case into a permanent pytest test file (#44, W12.1).
+    """Promote a case into a permanent pytest test file (#44).
 
     The promoted test re-runs the case against the current code via
     ``mergecraft.evals.store.replay_case`` and fails when the replay

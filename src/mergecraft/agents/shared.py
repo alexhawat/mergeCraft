@@ -148,12 +148,6 @@ class AgentUsage:
 
 
 @dataclass(slots=True)
-class AgentToolUseEvent:
-    tool_name: str
-    input: Any
-
-
-@dataclass(slots=True)
 class AgentResult:
     success: bool
     output: str | None = None
@@ -200,8 +194,6 @@ class AgentRunContext:
     secret_deny_paths: list[str] | None = None
     todo_tracker: Any = None
     stop_script: str | None = None
-    on_activity_timeout: Callable[[], None] | None = None
-    on_tool_use: Callable[[AgentToolUseEvent], None] | None = None
 
 
 def mcp_auth_headers(ctx: AgentRunContext) -> dict[str, str]:
@@ -276,7 +268,28 @@ class AgentImpl:
 
     async def run(self, ctx: AgentRunContext) -> AgentResult:
         logger.debug("payload: {}", ctx.payload)
-        return await self._run(ctx)
+        from mergecraft.agents.token_budget import (
+            apply_kill_switch,
+            current_run_budget,
+            record_provider_usage,
+        )
+
+        budget = current_run_budget()
+        if budget is not None and apply_kill_switch(budget) == "kill_switch":
+            logger.warning("provider kill-switch armed agent={}", self.name)
+            return AgentResult(
+                success=False,
+                error="kill_switch",
+                diagnostics={"reason": "kill_switch"},
+            )
+        result = await self._run(ctx)
+        if budget is not None and result.usage is not None:
+            record_provider_usage(
+                budget,
+                input_tokens=result.usage.input_tokens,
+                output_tokens=result.usage.output_tokens,
+            )
+        return result
 
     @property
     def __file__(self) -> str:

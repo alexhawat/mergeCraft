@@ -1,0 +1,14 @@
+{
+  "id": "jev-lens-copy-vs-code-help-string",
+  "pack_id": "lens/v1",
+  "title": "Help string overclaims restart survival versus daemon-only docs",
+  "shipped_defect": {
+    "kind": "lens-catalog",
+    "ref": "copy-vs-code",
+    "citation": "src/mergecraft/agents/lenses/_definitions.py copy-vs-code: help says survives restart while description requires daemon install"
+  },
+  "expected": {
+    "selected": ["copy-vs-code"]
+  },
+  "calibrates": ["lens/v1.copy-vs-code"]
+}

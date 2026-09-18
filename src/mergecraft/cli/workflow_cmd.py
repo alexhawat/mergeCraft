@@ -23,6 +23,7 @@ from mergecraft.cli.provider_cmd import (
     load_provider_registry,
     resolve_provider_harness,
 )
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.cli.workflow_wf_yaml import (
     DEFAULT_WORKFLOW_RELATIVE_PATH,
     WorkflowChange,
@@ -49,16 +50,18 @@ from mergecraft.workflow.auth_manifest import (
     parse_auth_manifest as _parse_auth_manifest_core,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     help="Author provider and model wiring in the consumer GitHub Actions workflow.",
     no_args_is_help=True,
 )
 
-provider_app = typer.Typer(
+provider_app = mergecraft_typer(
     help="Provider env wiring for mergeCraft workflow steps.", no_args_is_help=True
 )
-model_app = typer.Typer(help="Model wiring for mergeCraft workflow steps.", no_args_is_help=True)
-agents_app = typer.Typer(
+model_app = mergecraft_typer(
+    help="Model wiring for mergeCraft workflow steps.", no_args_is_help=True
+)
+agents_app = mergecraft_typer(
     help="Agent model wiring for mergeCraft workflow steps.", no_args_is_help=True
 )
 

@@ -26,6 +26,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.init_cmd import _ensure_gitignore_line
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.agent_roster import (
     AgentRosterError,
     add_model,
@@ -78,7 +79,7 @@ def _validate_role(role: str) -> str:
 
 def _validate_agent_name(name: str) -> str:
     if not _AGENT_NAME_RE.match(name):
-        cli_bail(f"invalid agent name {name!r}: must match pattern ^[a-z][a-z0-9_-]{{0,31}}$ (D11)")
+        cli_bail(f"invalid agent name {name!r}: must match pattern ^[a-z][a-z0-9_-]{{0,31}}$")
     return name
 
 
@@ -344,7 +345,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         if target == AgentRosterTarget.COMMITTED
         else "Author local-only agent roster overrides (gitignored, not read in CI)."
     )
-    roster_app = typer.Typer(
+    roster_app = mergecraft_typer(
         name="agent-local" if target == AgentRosterTarget.LOCAL else "agent",
         help=help_suffix,
         no_args_is_help=True,
@@ -417,12 +418,15 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
 
     @roster_app.command("create")
     def create_cmd(
-        name: str = typer.Argument(..., help="New agent name (D11 pattern)."),
+        name: str = typer.Argument(
+            ...,
+            help="New agent name (lowercase letter first, up to 32 chars).",
+        ),
         role: str = typer.Option(..., "--role", help="Agent role for the new binding."),
         after: str | None = typer.Option(
             None,
             "--after",
-            help="Run after this agent finishes (D15); omit for parallel dispatch.",
+            help="Run after this agent finishes; omit for parallel dispatch.",
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
@@ -496,7 +500,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
-        """Assign a registered model to a positional slot (idempotent, D4)."""
+        """Assign a registered model to a positional slot (idempotent)."""
         agent_name = _validate_agent_name(name)
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)
@@ -535,7 +539,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
-        """Append a registered model to an agent's chain (no-op when duplicate, D4)."""
+        """Append a registered model to an agent's chain (no-op when duplicate)."""
         agent_name = _validate_agent_name(name)
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)
@@ -594,7 +598,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
-        """Change dispatch ordering after agent creation (D15)."""
+        """Change dispatch ordering after agent creation."""
         agent_name = _validate_agent_name(name)
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)

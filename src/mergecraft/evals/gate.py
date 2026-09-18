@@ -31,6 +31,9 @@ Gated metrics:
 Pure core: no I/O except in :func:`load_result_set`, which the caller hands
 an explicit path; no ``os.environ`` reads; nothing at import time (§W11.6).
 The CLI shell is ``mergecraft eval gate --baseline … --candidate …``.
+The PR-check helper is :func:`format_pr_gate_summary`: it states the
+structural-replay scope (not live detection) and names each
+:attr:`GateReport.regressed_metrics` row with baseline / candidate / delta.
 """
 
 from __future__ import annotations
@@ -244,11 +247,51 @@ def load_result_set(path: Path) -> BenchmarkResultSet:
     return BenchmarkResultSet.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
+def format_pr_gate_summary(report: GateReport) -> str:
+    """Render the PR-check summary: structural scope plus a metric ledger.
+
+    The check proves structural replay, not live detection quality (E-D3).
+    On failure each :attr:`GateReport.regressed_metrics` row is named with
+    its baseline, candidate, and delta.
+
+    Args:
+        report: Outcome of :func:`eval_gate`.
+
+    Returns:
+        Markdown suitable for ``GITHUB_STEP_SUMMARY``.
+
+    Raises:
+        TypeError: ``report`` is not a :class:`GateReport`.
+    """
+    if not isinstance(report, GateReport):
+        msg = "format_pr_gate_summary requires a GateReport"
+        raise TypeError(msg)
+
+    outcome = "passed" if report.passed else "failed"
+    lines = [
+        "This check proves structural replay, not live detection quality.",
+        "",
+        f"Eval regression gate: {outcome} (tolerance {report.tolerance:.2%}).",
+    ]
+    if report.regressed_metrics:
+        lines.append("")
+        lines.append("Regressed metrics:")
+        by_name = {delta.metric: delta for delta in report.deltas}
+        for metric in report.regressed_metrics:
+            delta = by_name[metric]
+            lines.append(
+                f"- {delta.metric}: baseline {delta.baseline:.2%} / "
+                f"candidate {delta.candidate:.2%} / delta {delta.delta:+.2%}"
+            )
+    return "\n".join(lines)
+
+
 __all__ = [
     "DEFAULT_GATE_TOLERANCE",
     "Direction",
     "GateReport",
     "MetricDelta",
     "eval_gate",
+    "format_pr_gate_summary",
     "load_result_set",
 ]

@@ -1,0 +1,16 @@
+{
+  "id": "jev-unit-mcp-config-root",
+  "pack_id": "unit/v1",
+  "title": "MCP config written as root before privilege drop",
+  "shipped_defect": {
+    "kind": "shipped-twice",
+    "ref": "write_mcp_config root-owned",
+    "citation": "src/mergecraft/agents/lenses/_definitions.py privilege-drop-ordering (write_mcp_config into CODEX_HOME/.gemini/.claude while still root)"
+  },
+  "expected": {
+    "triage": "defective",
+    "severity_min": "Major",
+    "noul_high": ["security", "untrusted_input"]
+  },
+  "calibrates": ["unit/v1.triage.defective", "unit/v1.security"]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "jev-claim-summary-authz-no-row",
+  "pack_id": "claim/v1",
+  "title": "Summary asserts an authz bypass with an empty findings array",
+  "shipped_defect": {
+    "kind": "plan-21",
+    "ref": "D6-rule-3",
+    "citation": "plan 21 D6 rule 3 / G10: every blocking concern in the summary exists as a findings row"
+  },
+  "review_fixture": "blocker_summary_no_findings.md",
+  "findings_rows": [],
+  "expected": {
+    "backed_by_row_low": true,
+    "blocking_language_high": true
+  },
+  "calibrates": ["claim/v1.backed_by_row", "claim/v1.blocking_language"]
+}

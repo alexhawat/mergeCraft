@@ -1,0 +1,15 @@
+{
+  "id": "skill-e4-withdrawn-finding",
+  "title": "Withdrawn finding fingerprint is not re-raised",
+  "scenario": "e4",
+  "fixture_repo": "e4-withdrawn-finding",
+  "skill_variants": {
+    "baseline": "baseline-pointer",
+    "tip": "tip-doctrine"
+  },
+  "review_assertions": {
+    "must_not_raise_withdrawn_fingerprint": true,
+    "withdrawn_heading": "## Withdrawn review findings (known non-issues)"
+  },
+  "notes": "D6 rule (2) — never re-raise anything under the withdrawn-findings heading."
+}

@@ -110,7 +110,10 @@ VERIFIER_RUBRIC: Final[tuple[tuple[str, str], ...]] = (
 # different family from the Opus-class orchestrator, per #45. Providers absent
 # here run the judge on the run's own model; the verdict records that the model
 # was not pinned rather than pretending otherwise.
-PINNED_JUDGE_MODELS: Final[dict[str, str]] = {"claude": "claude-sonnet-5"}
+PINNED_JUDGE_MODELS: Final[dict[str, str]] = {
+    "claude": "claude-sonnet-5",
+    "jev": "jev-1.13.0",
+}
 
 # Lanes where one LLM judge is not enough to retire a finding (D14). A ``drop``
 # here is recorded and escalated, never written to the withdrawn section — the

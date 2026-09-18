@@ -1,0 +1,11 @@
+{
+  "name": "fn_severe",
+  "path": "src/mod.py",
+  "complexity": 10,
+  "coverage": 0.0,
+  "crap": 110.0,
+  "band": "severe",
+  "display_severity": "critical",
+  "finding_severity": "Critical",
+  "emits_finding": true
+}

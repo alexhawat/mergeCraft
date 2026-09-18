@@ -21,10 +21,12 @@ SHELL := /bin/bash
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	mutation-test-decisions \
-	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-gate eval-replay eval-convergence \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-gate eval-replay eval-convergence \
+	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
-	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare
+	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare \
+	tracked-markdown-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
@@ -72,13 +74,16 @@ npm-lockcheck: ## Fail when npm lockfiles drift from package.json
 	cd tools && npm ci --dry-run --ignore-scripts --no-audit --no-fund
 	cd docker/agent-clis && npm ci --dry-run --ignore-scripts --no-audit --no-fund
 
-lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + hook-pins-check + privilege-drop chown + type-ignore reasons + called-workflow permissions
+lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + tracked-markdown + hook-pins-check + privilege-drop chown + type-ignore reasons + called-workflow permissions
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
 	$(UV) run python scripts/check_git_argv.py
 	$(UV) run python scripts/check_cli_consoles.py
 	$(MAKE) action-yml-hygiene-check
+	$(MAKE) tracked-markdown-check
+	$(MAKE) review-skill-taxonomy-check
+	$(MAKE) review-skill-spec-check
 	$(MAKE) hook-pins-check
 	$(MAKE) action-image-structure-check
 	$(UV) run python scripts/check_privilege_drop_chown.py
@@ -92,6 +97,15 @@ lint-test-hygiene: ## Block on tautological test patterns (D16)
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py
+
+tracked-markdown-check: ## Fail when tracked markdown cites decision IDs or gitignored wave plans
+	$(UV) run python scripts/check_tracked_markdown.py
+
+review-skill-taxonomy-check: ## Drift gate: code-review skill names every taxonomy constant (D8)
+	$(UV) run python scripts/check_review_skill_taxonomy.py
+
+review-skill-spec-check: ## Agent Skills portability gate for .github/skills/code-review (D15)
+	$(UV) run python scripts/check_review_skill_spec.py
 
 hook-pins-check: ## Fail when .pre-commit-config.yaml hook revs drift from pyproject.toml pins
 	$(UV) run python scripts/check_hook_pins.py
@@ -311,6 +325,9 @@ bench-review: ## Run ReviewBench via Harbor (set REVIEWBENCH_DIR to an external 
 	  exit 2; \
 	fi
 	$(UV) run --extra harbor harbor run -d "$(REVIEWBENCH_DIR)" --agent mergecraft.harbor.agent:MergecraftReviewAgent
+
+eval-skill-corpus: ## Review-skill eval corpus gate — fixture-only, no live provider (D11/F9)
+	$(UV) run python -m mergecraft.evals.skill
 
 eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
 	$(UV) run mergecraft eval gate

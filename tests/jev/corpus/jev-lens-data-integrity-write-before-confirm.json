@@ -1,0 +1,14 @@
+{
+  "id": "jev-lens-data-integrity-write-before-confirm",
+  "pack_id": "lens/v1",
+  "title": "Persistent write before confirm is data-integrity, not generic correctness",
+  "shipped_defect": {
+    "kind": "lens-catalog",
+    "ref": "data-integrity",
+    "citation": "src/mergecraft/agents/lenses/_definitions.py data-integrity: flag persisted before the operation confirmed — generic correctness misses it"
+  },
+  "expected": {
+    "selected": ["data-integrity"]
+  },
+  "calibrates": ["lens/v1.data-integrity"]
+}

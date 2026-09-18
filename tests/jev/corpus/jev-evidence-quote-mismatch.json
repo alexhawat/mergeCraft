@@ -1,0 +1,18 @@
+{
+  "id": "jev-evidence-quote-mismatch",
+  "pack_id": "evidence/v1",
+  "title": "Finding quotes an addition helper as shell=True evidence",
+  "shipped_defect": {
+    "kind": "doctrine",
+    "ref": "plan-21-D6-rule-1",
+    "citation": "plan 21 D6 rule 1 / G10: no finding without evidence you can point at"
+  },
+  "claim": "Untrusted input is executed via shell=True",
+  "section": "def add(left, right): return left + right",
+  "expected": {
+    "relation": "says_nothing",
+    "falsifiable_low": true,
+    "located_low": true
+  },
+  "calibrates": ["evidence/v1.relation.says_nothing", "evidence/v1.falsifiable"]
+}

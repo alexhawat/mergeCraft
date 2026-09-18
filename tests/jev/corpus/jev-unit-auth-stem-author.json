@@ -1,0 +1,17 @@
+{
+  "id": "jev-unit-auth-stem-author",
+  "pack_id": "unit/v1",
+  "title": "auth stem matches the author word family",
+  "shipped_defect": {
+    "kind": "commit",
+    "ref": "2f39b221",
+    "citation": "fix(findings): stop auth stem matching the author word family"
+  },
+  "fixture_diff": "auth_stem_author.diff",
+  "expected": {
+    "triage": "defective",
+    "severity_min": "Minor",
+    "noul_high": ["contract_break"]
+  },
+  "calibrates": ["unit/v1.triage.defective", "unit/v1.contract_break"]
+}

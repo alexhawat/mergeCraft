@@ -29,6 +29,7 @@ from mergecraft.cli.provider_cmd import (
     _provider_entries,
 )
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.agent_roster import model_chain_from_entry
 from mergecraft.config.io import write_config_dict
 from mergecraft.config.model_registry import normalize_model_id
@@ -44,7 +45,7 @@ from mergecraft.modes import compute_modes
 from mergecraft.types import XrepoConfig
 from mergecraft.utils.github import GitHubClient
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="agents",
     help="Inspect and override the mergeCraft agent registry.",
     no_args_is_help=True,
@@ -325,7 +326,7 @@ def setmodel_cmd(
     ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
 ) -> None:
-    """Replace the primary model for an agent role; backups are preserved (D8)."""
+    """Replace the primary model for an agent role; backups are preserved."""
     _warn_agents_model_deprecation("setmodel", "assign-model <name> p0 <slug>")
     if all_agents and agent is not None:
         cli_bail("pass either --agent or --all, not both")

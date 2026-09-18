@@ -5,7 +5,7 @@ the failures a run should have caught (and did not). Each case is a
 markdown file with a YAML front matter that gets validated against the
 locked `LearningProvenance` record from the security Batch C plan.
 
-The bank is **local** (D13). There is no database, no hosted service,
+The bank is **local**. There is no database, no hosted service,
 no sync. The bank lives under `evals/cases/` in the repo, and the CLI
 walks the directory directly. The CLI is the only I/O surface.
 
@@ -44,7 +44,7 @@ front matter is the **metadata**; the body is the **description**.
 
 ### Front matter
 
-The front matter is validated against `LearningProvenance` (D5). The
+The front matter is validated against `LearningProvenance`. The
 record is the same one the security Batch C plan pinned, so the audit
 tooling can grep on a stable shape:
 
@@ -67,7 +67,7 @@ guarantee that the case's metadata cannot silently drift from the
 security plan's contract. The store imports the type from
 `mergecraft.utils.learnings` and uses it as-is.
 
-### `provenance` (D5)
+### `provenance`
 
 The provenance record is the same shape the security Batch C plan
 ships for the learnings file:
@@ -356,11 +356,11 @@ is for *operator review*, not auto-capture.
 
 ## Governance rules
 
-The wave plan pins the following rules (D5, D13, D11):
+The following rules are pinned:
 
 1. **Local + file-backed.** No database, no hosted service. Cases
    live under `evals/cases/`. The merge-evidence **packet does not
-   auto-merge** (D11); the eval bank is for *reviewer learning*, not
+   auto-merge**; the eval bank is for *reviewer learning*, not
    auto-merge. The replay output is a structured diff, not a merge
    action.
 2. **Provenance is mandatory.** Every case carries a
@@ -385,9 +385,9 @@ The wave plan pins the following rules (D5, D13, D11):
 - `src/mergecraft/cli/eval_cmd.py` — the I/O shell (`add`, `list`,
   `replay`, `promote`).
 - `src/mergecraft/evidence/packet.py` — the typed `EvalMetadata`
-  breadcrumb on `MergeEvidencePacket.evals` (W12.2; schema `1.2.0`).
+  breadcrumb on `MergeEvidencePacket.evals` (schema `1.2.0`).
 - `src/mergecraft/mcp/review.py` — the `create_pull_request_review` MCP
-  tool + the `_maybe_suggest_eval_add` auto-prompt (W12.4).
+  tool + the `_maybe_suggest_eval_add` auto-prompt.
 - `tests/evals/test_store.py`, `tests/evals/test_replay.py`,
   `tests/evals/test_promote.py` — the pinned tests for the store,
   the replay diff, and the promote-to-permanent-test workflow.

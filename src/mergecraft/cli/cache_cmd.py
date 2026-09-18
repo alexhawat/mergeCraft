@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import os
 
-import typer
 from rich.table import Table
 
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.run_cache import RunCache, default_cache_root, open_run_cache
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="cache",
     help="Inspect and maintain the mergeCraft run cache.",
     no_args_is_help=True,

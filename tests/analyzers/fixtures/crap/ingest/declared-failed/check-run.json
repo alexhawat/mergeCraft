@@ -1,0 +1,11 @@
+{
+  "id": 91,
+  "name": "coverage-json",
+  "status": "completed",
+  "conclusion": "failure",
+  "html_url": "https://github.com/acme/demo/runs/91",
+  "output": {
+    "title": "coverage failed",
+    "summary": "pytest --cov exited 1"
+  }
+}

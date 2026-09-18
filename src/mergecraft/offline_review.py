@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from mergecraft.analyzers.finding import (
     STRUCTURED_OUTPUT_REQUIRED_MSG,
@@ -23,6 +25,7 @@ from mergecraft.analyzers.trust import (
     derive_source_trust_tier,
 )
 from mergecraft.config import load_repo_settings
+from mergecraft.jev.client import AsyncJevClient, TypeSafeAPIError
 from mergecraft.mcp.checkout import changed_paths_in_diff
 from mergecraft.review.offline_agent import run_offline_agent_review
 from mergecraft.review.offline_result import (
@@ -55,7 +58,7 @@ from mergecraft.utils.source_resolve import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from mergecraft.config.settings import CliTrustOverride
+    from mergecraft.config.settings import CliTrustOverride, RepoSettings
     from mergecraft.mcp.tool_state import AnalyzerRunState
     from mergecraft.review.engine import ReviewEngine
     from mergecraft.tracing.review_context import ReviewContext
@@ -394,6 +397,8 @@ async def run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     engine: ReviewEngine[OfflineReviewResult] | None = None,
+    with_coverage: bool = False,
+    with_mutation: bool = False,
 ) -> OfflineReviewResult:
     """Materialize a local diff and optionally run the Review agent against it."""
     spec = source_spec or SourceResolverSpec(cwd=cwd, invocation_root=invocation_root or cwd)
@@ -438,6 +443,8 @@ async def run_offline_diff_review(
             on_finding=on_finding,
             use_cache=use_cache,
             engine=engine,
+            with_coverage=with_coverage,
+            with_mutation=with_mutation,
         )
 
 
@@ -474,6 +481,170 @@ def _offline_review_context(
     )
 
 
+def _construct_review_jev(
+    settings: RepoSettings,
+) -> tuple[AsyncJevClient | None, str | None]:
+    """Construct ``AsyncJevClient`` when ``jev.enabled``; record skip, never fail (D4)."""
+    if not settings.jev.enabled:
+        return None, None
+    client = AsyncJevClient(settings=settings.jev)
+    skipped = client.availability_skip()
+    if skipped is None:
+        return client, None
+    return client, skipped.reason
+
+
+def _stamp_jev_skip(result: OfflineReviewResult, reason: str | None) -> OfflineReviewResult:
+    if reason:
+        result.jev_skip_reason = reason
+    return result
+
+
+def _record_shadow_jev_skip(result: OfflineReviewResult, reason: str) -> None:
+    """Record a shadow skip without changing the review result (D4, D6)."""
+    logger.info("jev shadow skip code={}", reason)
+    if not result.jev_skip_reason:
+        result.jev_skip_reason = reason
+
+
+def _shadow_provider_skip_code(exc: BaseException) -> str:
+    """Skip code for a shadow-path provider or transport failure (D6)."""
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and code:
+        return code
+    return "transport_error"
+
+
+def _jev_shadow_artifact_path(
+    review_out: OfflineReviewResult,
+    driver: _OfflineDiffReviewRun,
+) -> Path:
+    """Prefer the packet sibling ``emit_run_packet`` already writes (D6)."""
+    packet = review_out.evidence_packet_path
+    if packet:
+        return Path(packet).with_name("merge-evidence-shadow.jsonl")
+    return driver.out_dir / "jev-shadow.jsonl"
+
+
+def _persist_shadow_jev_artifacts(
+    review_out: OfflineReviewResult,
+    *,
+    packet: Any,
+    shadow_path: Path,
+    judge: Any,
+    change_id: str,
+) -> None:
+    """Write judge + unit rows to the durable shadow log and stamp the result."""
+    from mergecraft.jev.judge import record_parallel_judge
+
+    try:
+        if judge is not None:
+            record_parallel_judge(
+                packet,
+                judge,
+                output_path=shadow_path,
+                run_id="offline-review",
+                change_id=change_id,
+            )
+            review_out.jev_judge = judge.model_dump(mode="json")
+        if shadow_path.is_file():
+            review_out.jev_shadow_path = str(shadow_path)
+    except Exception as exc:  # an audit artifact never fails the review (D6)
+        logger.warning("jev shadow persist failed — {}", exc)
+
+
+def _findings_for_shadow_judge(
+    driver: _OfflineDiffReviewRun,
+    review_out: OfflineReviewResult,
+) -> list[Finding]:
+    """Merge review findings with analyzer rows; review rows win on fingerprint."""
+    review_findings = parse_offline_review_findings(review_out)
+    analyzer_findings = findings_from_analyzer_run(driver.analyzer_run)
+    seen = {row.fingerprint for row in review_findings}
+    merged = list(review_findings)
+    for finding in analyzer_findings:
+        if finding.fingerprint in seen:
+            continue
+        merged.append(finding)
+        seen.add(finding.fingerprint)
+    return merged
+
+
+async def _run_shadow_jev_review(
+    *,
+    client: AsyncJevClient,
+    driver: _OfflineDiffReviewRun,
+    review_out: OfflineReviewResult,
+    settings: RepoSettings,
+) -> None:
+    """Run residual dispatch, parallel judge, and lens fallback as shadow (D6)."""
+    from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION, AgentMetadata, MergeEvidencePacket
+    from mergecraft.jev.judge import run_parallel_judge
+    from mergecraft.jev.policy import dispatch_residual_units
+    from mergecraft.jev.questions import select_lenses, select_lenses_or_fallback
+    from mergecraft.jev.segment import segment_hunks
+    from mergecraft.jev.types import PINNED_MODEL, JevError
+
+    materialization = driver.materialization
+    if materialization is None or materialization.empty:
+        return
+    diff_text = materialization.path.read_text(encoding="utf-8")
+    findings = _findings_for_shadow_judge(driver, review_out)
+    change_id = f"local/{driver.cwd.name}"
+    packet = MergeEvidencePacket(
+        schema_version=PACKET_SCHEMA_VERSION,
+        change_id=change_id,
+        agent=AgentMetadata(id="jev", version="0.0.0", model=PINNED_MODEL),
+        files_changed=[],
+        findings=[],
+        deterministic_checks=[],
+    )
+    shadow_path = _jev_shadow_artifact_path(review_out, driver)
+    try:
+        units = segment_hunks(diff_text)
+        await dispatch_residual_units(
+            units,
+            findings,
+            client=client,
+            trust_tier=driver.trust_tier,
+            packet=packet,
+            output_path=shadow_path,
+            run_id="offline-review",
+            change_id=change_id,
+            settings=settings,
+        )
+        body = review_out.output or ""
+        judge = None
+        if body:
+            judge = await run_parallel_judge(
+                findings=findings,
+                review_body=body,
+                client=client,
+            )
+        _persist_shadow_jev_artifacts(
+            review_out,
+            packet=packet,
+            shadow_path=shadow_path,
+            judge=judge,
+            change_id=change_id,
+        )
+        selected = await select_lenses(state={"diff": diff_text}, client=client)
+        select_lenses_or_fallback(
+            enabled=True,
+            trigger_ids=(),
+            confidence=selected.confidence,
+            selected_ids=selected.lens_ids,
+            settings=settings,
+        )
+    except (JevError, TypeSafeAPIError) as exc:
+        _record_shadow_jev_skip(review_out, exc.code)
+    except Exception as exc:
+        # Status-less SDK/network failures (DNS/connect/timeout) must not
+        # fail an otherwise completed review (D6).
+        logger.warning("jev shadow provider failure type={} — {}", type(exc).__name__, exc)
+        _record_shadow_jev_skip(review_out, _shadow_provider_skip_code(exc))
+
+
 @dataclass(slots=True)
 class _OfflineDiffReviewRun:
     """Typed stage driver for one offline CLI review (no closed-over locals)."""
@@ -497,6 +668,9 @@ class _OfflineDiffReviewRun:
     # caller that omits it keeps the pre-flag behaviour: repo-native analyzers
     # stay withheld unless `mergecraft review --shell` explicitly raises this.
     shell: ShellPermission = "disabled"
+    with_coverage: bool = False
+    with_mutation: bool = False
+    local_findings: list[Finding] = field(default_factory=list)
     materialization: DiffMaterialization | None = None
     scope_reduction: ScopeReduction | None = None
     cache_key: str | None = None
@@ -522,6 +696,7 @@ class _OfflineDiffReviewRun:
                     base_ref=built.base_ref,
                     line_count=0 if not filtered.strip() else filtered.count("\n"),
                     empty=not filtered.strip(),
+                    coverage_limitations=built.coverage_limitations,
                 )
         diff_text = built.path.read_text(encoding="utf-8")
         reduced_text, self.scope_reduction = apply_diff_line_budget(
@@ -535,6 +710,7 @@ class _OfflineDiffReviewRun:
                 base_ref=built.base_ref,
                 line_count=self.scope_reduction.kept_lines,
                 empty=not reduced_text.strip(),
+                coverage_limitations=built.coverage_limitations,
             )
         self.materialization = built
         return built
@@ -543,6 +719,7 @@ class _OfflineDiffReviewRun:
         assert self.materialization is not None
         if self.dry_run:
             return
+        self._collect_local_evidence()
         from mergecraft.review.offline_stages import run_offline_analyze
 
         self.analyzer_run = await run_offline_analyze(
@@ -553,9 +730,92 @@ class _OfflineDiffReviewRun:
             analyzers_enabled=self.analyzers_enabled,
         )
 
+    def _collect_local_evidence(self) -> None:
+        """Run opt-in local coverage/mutation when the trusted-sandbox gate passes."""
+        if not (self.with_coverage or self.with_mutation):
+            return
+        if self.shell != "enabled":
+            logger.info("local evidence skipped: shell {}", self.shell)
+            return
+        if self.materialization is None:
+            return
+        from mergecraft.ci.local_evidence import run_local_coverage, run_local_mutation
+        from mergecraft.mcp.shell import detect_sandbox_method
+
+        settings = load_repo_settings(root=self.cwd, load_learnings_files=False)
+        backend = detect_sandbox_method()
+        try:
+            diff = self.materialization.path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning("local evidence: failed to read diff: {}", exc)
+            return
+        if self.with_coverage:
+            from mergecraft.ci.crap import DEFAULT_CRAP_BANDS
+
+            bands = settings.coverage.bands
+            band_arg = None
+            if (
+                bands.watch != DEFAULT_CRAP_BANDS.watch
+                or bands.elevated != DEFAULT_CRAP_BANDS.elevated
+                or bands.crap != DEFAULT_CRAP_BANDS.crap
+                or bands.severe != DEFAULT_CRAP_BANDS.severe
+            ):
+                band_arg = {
+                    "watch": bands.watch,
+                    "elevated": bands.elevated,
+                    "crap": bands.crap,
+                    "severe": bands.severe,
+                }
+            coverage = run_local_coverage(
+                repo_root=self.cwd,
+                diff=diff,
+                trust_tier=self.trust_tier,
+                sandbox_backend=backend,
+                timeout_seconds=settings.coverage.timeout_seconds,
+                mode=settings.coverage.mode,
+                bands=band_arg,
+            )
+            if coverage.skip_reason:
+                logger.info("local coverage skip reason={}", coverage.skip_reason)
+            self.local_findings.extend(coverage.findings)
+        if self.with_mutation:
+            mutation = run_local_mutation(
+                repo_root=self.cwd,
+                diff=diff,
+                trust_tier=self.trust_tier,
+                sandbox_backend=backend,
+                timeout_seconds=settings.mutation.timeout_seconds,
+                max_mutants=settings.mutation.max_mutants,
+                path_allowlist=settings.mutation.path_allowlist,
+                mode=settings.mutation.mode,
+                survivor_threshold=settings.mutation.survivor_threshold,
+            )
+            if mutation.skip_reason:
+                logger.info("local mutation skip reason={}", mutation.skip_reason)
+            self.local_findings.extend(mutation.findings)
+
     async def review(self) -> OfflineReviewResult:
         assert self.materialization is not None
+        limitations = self.materialization.coverage_limitations
         if self.materialization.empty:
+            if limitations:
+                # "empty because we did not look" must not masquerade as
+                # "empty because there is nothing" (D12). Name every excluded
+                # path and refuse to report a pass.
+                detail = "; ".join(limitations)
+                message = (
+                    "no changes to review: every change was excluded from coverage "
+                    f"({detail}); this is not a clean pass."
+                )
+                return OfflineReviewResult(
+                    success=False,
+                    error=message,
+                    output=message,
+                    diff_path=str(self.materialization.path),
+                    empty_diff=True,
+                    outcome=RunOutcome.inconclusive,
+                    scope_reduction=self.scope_reduction,
+                )
             if self.json_path is not None:
                 try:
                     write_findings_json(self.json_path, [])
@@ -571,6 +831,13 @@ class _OfflineDiffReviewRun:
                 empty_diff=True,
                 outcome=outcome_with_scope_reduction(RunOutcome.passed, self.scope_reduction),
                 scope_reduction=self.scope_reduction,
+            )
+
+        if limitations:
+            logger.warning(
+                "review coverage limited: {} path(s) excluded — {}",
+                len(limitations),
+                "; ".join(limitations),
             )
 
         output_schema = findings_output_schema() if self.json_path is not None else None
@@ -613,7 +880,8 @@ class _OfflineDiffReviewRun:
                     cached.diff_path = str(self.materialization.path)
                 self.from_cache = True
                 return merge_analyzer_findings_into_result(
-                    cached, findings_from_analyzer_run(self.analyzer_run)
+                    cached,
+                    findings_from_analyzer_run(self.analyzer_run) + self.local_findings,
                 )
 
         reviewed = await run_offline_agent_review(
@@ -631,7 +899,8 @@ class _OfflineDiffReviewRun:
             analyzer_run=self.analyzer_run,
         )
         return merge_analyzer_findings_into_result(
-            reviewed, findings_from_analyzer_run(self.analyzer_run)
+            reviewed,
+            findings_from_analyzer_run(self.analyzer_run) + self.local_findings,
         )
 
     async def publish(self, review_out: OfflineReviewResult) -> OfflineReviewResult:
@@ -666,6 +935,8 @@ async def _run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     engine: ReviewEngine[OfflineReviewResult] | None = None,
+    with_coverage: bool = False,
+    with_mutation: bool = False,
 ) -> OfflineReviewResult:
     """Body of :func:`run_offline_diff_review`, run under the bound review context."""
     cwd = cwd.resolve()
@@ -692,6 +963,16 @@ async def _run_offline_diff_review(
     trust_env_previous = apply_cli_trust_tier_env(trust_tier)
     settings = load_repo_settings(root=cwd, load_learnings_files=False)
     run_bounds = resolve_run_bounds(settings=settings)
+    from mergecraft.agents.token_budget import (
+        bind_run_budget,
+        current_run_budget,
+        token_budget_for,
+    )
+
+    provider_budget = current_run_budget() or token_budget_for(
+        model=settings.jev.model,
+        max_tokens=run_bounds.token_budget,
+    )
 
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
     from mergecraft.review.engine import ReviewEngine
@@ -719,29 +1000,68 @@ async def _run_offline_diff_review(
         evidence_packet_path=evidence_packet_path,
         on_finding=on_finding,
         read_cache=use_cache,
+        with_coverage=with_coverage,
+        with_mutation=with_mutation,
     )
 
     try:
-        try:
-            staged = await runner.run(driver)
-            return staged.published_or(
-                _offline_failure(
-                    error="review engine returned no result",
-                    outcome=RunOutcome.infra_error,
+        if with_coverage or with_mutation:
+            from mergecraft.ci.local_evidence import checkout_is_fork_pr
+
+            if shell != "enabled":
+                return _offline_failure(
+                    error="--with-coverage/--with-mutation require --shell enabled",
+                    outcome=RunOutcome.configuration_error,
                 )
-            )
-        except TimeoutError:
-            return _offline_failure(
-                error="review timed out",
-                outcome=RunOutcome.timed_out,
-            )
-        except BudgetExhausted as exc:
-            return _offline_failure(
-                error=str(exc),
-                outcome=budget_exhaustion_outcome(exc),
-            )
-        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-            return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
+            if trust_tier == "untrusted" or checkout_is_fork_pr(cwd):
+                return _offline_failure(
+                    error="--with-coverage/--with-mutation require a trusted review source",
+                    outcome=RunOutcome.configuration_error,
+                )
+        with bind_run_budget(provider_budget):
+            jev_client, jev_skip_reason = _construct_review_jev(settings)
+            try:
+                staged = await runner.run(driver)
+                published = staged.published_or(
+                    _offline_failure(
+                        error="review engine returned no result",
+                        outcome=RunOutcome.infra_error,
+                    )
+                )
+                if (
+                    jev_client is not None
+                    and jev_skip_reason is None
+                    and not dry_run
+                    and driver.materialization is not None
+                ):
+                    await _run_shadow_jev_review(
+                        client=jev_client,
+                        driver=driver,
+                        review_out=published,
+                        settings=settings,
+                    )
+                return _stamp_jev_skip(published, jev_skip_reason)
+            except TimeoutError:
+                return _stamp_jev_skip(
+                    _offline_failure(
+                        error="review timed out",
+                        outcome=RunOutcome.timed_out,
+                    ),
+                    jev_skip_reason,
+                )
+            except BudgetExhausted as exc:
+                return _stamp_jev_skip(
+                    _offline_failure(
+                        error=str(exc),
+                        outcome=budget_exhaustion_outcome(exc),
+                    ),
+                    jev_skip_reason,
+                )
+            except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                return _stamp_jev_skip(
+                    _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc)),
+                    jev_skip_reason,
+                )
     finally:
         # Restore the operator's ``.env`` tracing vars so the ``diff-review``
         # overrides never leak into the caller's environment.

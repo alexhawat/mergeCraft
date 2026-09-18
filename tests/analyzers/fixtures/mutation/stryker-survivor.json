@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "2.0",
+  "thresholds": {"high": 80, "low": 60, "break": null},
+  "files": {
+    "src/mod.py": {
+      "language": "javascript",
+      "source": "function fnWatch(value) { return value == 1; }",
+      "mutants": [
+        {
+          "id": "0",
+          "mutatorName": "EqualityOperator",
+          "replacement": "!=",
+          "status": "Survived",
+          "location": {
+            "start": {"line": 1, "column": 36},
+            "end": {"line": 1, "column": 38}
+          }
+        },
+        {
+          "id": "1",
+          "mutatorName": "BooleanLiteral",
+          "replacement": "false",
+          "status": "Killed",
+          "location": {
+            "start": {"line": 1, "column": 40},
+            "end": {"line": 1, "column": 44}
+          }
+        }
+      ]
+    }
+  }
+}
