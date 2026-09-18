@@ -91,6 +91,7 @@ class CoverageFunction:
     path: str
     coverage: float
     complexity: int | None = None
+    start_line: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,12 +208,19 @@ def parse_coverage_py_json(text: str) -> ParsedCoverage:
                 complexity = int(complexity_raw) if complexity_raw is not None else None
             except (TypeError, ValueError):
                 complexity = None
+            start_line_raw = record.get("start_line")
+            start_line: int | None
+            try:
+                start_line = int(start_line_raw) if start_line_raw is not None else None
+            except (TypeError, ValueError):
+                start_line = None
             functions.append(
                 CoverageFunction(
                     name=str(raw_name),
                     path=path,
                     coverage=ratio,
                     complexity=complexity,
+                    start_line=start_line,
                 )
             )
     if not saw_functions_key:
@@ -245,7 +253,14 @@ def parse_lcov(text: str) -> ParsedCoverage:
                 if count > 0:
                     covered += 1
             ratio = covered / statements if statements else (1.0 if hits.get(name, 0) > 0 else 0.0)
-            functions.append(CoverageFunction(name=name, path=current_path, coverage=ratio))
+            functions.append(
+                CoverageFunction(
+                    name=name,
+                    path=current_path,
+                    coverage=ratio,
+                    start_line=start,
+                )
+            )
 
     saw_fn = False
     for raw_line in text.splitlines():
@@ -328,12 +343,27 @@ def parse_cobertura(text: str) -> ParsedCoverage:
                     complexity = int(float(complexity_raw)) if complexity_raw is not None else None
                 except (TypeError, ValueError):
                     complexity = None
+                start_line: int | None = None
+                for line_el in method:
+                    if _xml_local(line_el.tag) != "lines":
+                        continue
+                    for line_row in line_el:
+                        if _xml_local(line_row.tag) != "line":
+                            continue
+                        number_raw = line_row.get("number")
+                        try:
+                            number = int(number_raw) if number_raw is not None else None
+                        except (TypeError, ValueError):
+                            number = None
+                        if number is not None and (start_line is None or number < start_line):
+                            start_line = number
                 functions.append(
                     CoverageFunction(
                         name=name,
                         path=path,
                         coverage=ratio,
                         complexity=complexity,
+                        start_line=start_line,
                     )
                 )
     if not saw_method:
@@ -372,11 +402,27 @@ def _lookup_coverage(
     *,
     path: str,
     name: str,
+    start_line: int,
 ) -> CoverageFunction | None:
+    """Match a changed function to a coverage row by path, name, and start line.
+
+    When multiple rows share a name in one file, only an exact ``start_line``
+    match is accepted. A single row with a mismatched ``start_line`` is skipped.
+    """
     want_path = _norm_path(path)
-    for item in functions:
-        if item.name == name and _norm_path(item.path) == want_path:
-            return item
+    candidates = [
+        item for item in functions if item.name == name and _norm_path(item.path) == want_path
+    ]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        only = candidates[0]
+        if only.start_line is not None and only.start_line != start_line:
+            return None
+        return only
+    matched = [item for item in candidates if item.start_line == start_line]
+    if len(matched) == 1:
+        return matched[0]
     return None
 
 
@@ -418,7 +464,12 @@ def coverage_findings(
     findings: list[Finding] = []
     scored_clean = False
     for symbol in symbols:
-        record = _lookup_coverage(parsed.functions, path=symbol.path, name=symbol.name)
+        record = _lookup_coverage(
+            parsed.functions,
+            path=symbol.path,
+            name=symbol.name,
+            start_line=symbol.start_line,
+        )
         if record is None:
             continue
         complexity = record.complexity

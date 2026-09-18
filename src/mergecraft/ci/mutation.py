@@ -40,7 +40,11 @@ from loguru import logger
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.ci.archive_bounds import extract_zip_texts
-from mergecraft.ci.changed_functions import changed_functions_from_diff
+from mergecraft.ci.changed_functions import (
+    ChangedFunction,
+    changed_functions_from_diff,
+    resolve_enclosing_symbol,
+)
 from mergecraft.ci.evidence import CI_TOOL, GateSubstitution, artifact_ingest_failures
 
 if TYPE_CHECKING:
@@ -282,29 +286,58 @@ def _shadow_scope(mode: str) -> Literal["run", "change"]:
     return "run" if mode == "shadow" else "change"
 
 
-def _changed_pairs(
+def _changed_symbols(
     changed_functions: Sequence[tuple[str, str] | Any],
     *,
     diff: str,
     source_tree: Mapping[str, str] | None,
-) -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
+) -> list[ChangedFunction]:
+    symbols: list[ChangedFunction] = []
     for item in changed_functions:
-        if isinstance(item, tuple) and len(item) >= 2:
-            pairs.append((str(item[0]), str(item[1])))
+        if isinstance(item, ChangedFunction):
+            symbols.append(item)
             continue
         path = getattr(item, "path", None)
         name = getattr(item, "name", None)
+        start_line = getattr(item, "start_line", None)
         if path is not None and name is not None:
-            pairs.append((str(path), str(name)))
-    if pairs:
-        return pairs
+            symbols.append(
+                ChangedFunction(
+                    name=str(name),
+                    path=str(path),
+                    start_line=int(start_line) if start_line is not None else 0,
+                )
+            )
+            continue
+        if isinstance(item, tuple) and len(item) >= 2:
+            symbols.append(ChangedFunction(name=str(item[1]), path=str(item[0]), start_line=0))
+    if symbols:
+        return symbols
     if not diff.strip():
         return []
-    return [
-        (symbol.path, symbol.name)
-        for symbol in changed_functions_from_diff(diff, dict(source_tree or {}))
-    ]
+    return changed_functions_from_diff(diff, dict(source_tree or {}))
+
+
+def _survivor_matches_changed(
+    survivor: MutationSurvivor,
+    symbol: ChangedFunction,
+    *,
+    source_tree: Mapping[str, str] | None,
+) -> bool:
+    if _norm_path(survivor.path) != _norm_path(symbol.path):
+        return False
+    if survivor.function != symbol.name:
+        return False
+    if symbol.start_line <= 0:
+        return True
+    if survivor.line is not None:
+        source = (source_tree or {}).get(symbol.path)
+        if source is not None:
+            enclosing = resolve_enclosing_symbol(symbol.path, survivor.line, source)
+            if enclosing is not None:
+                return enclosing.name == symbol.name and enclosing.start_line == symbol.start_line
+        return survivor.line == symbol.start_line
+    return False
 
 
 def mutation_findings(
@@ -326,18 +359,32 @@ def mutation_findings(
     if parsed.skip_reason is not None:
         return MutationIngestResult(skip_reason=parsed.skip_reason)
 
-    pairs = _changed_pairs(
+    symbols = _changed_symbols(
         changed_functions or [],
         diff=diff,
         source_tree=source_tree,
     )
-    wanted = {(_norm_path(path), name) for path, name in pairs}
     attributed: list[tuple[str, MutationSurvivor]] = []
     for item in parsed.survivors:
-        key = (_norm_path(item.path), item.function)
-        if key not in wanted:
+        path = _norm_path(item.path)
+        candidates = [
+            symbol
+            for symbol in symbols
+            if _norm_path(symbol.path) == path and symbol.name == item.function
+        ]
+        if not candidates:
             continue
-        attributed.append((key[0], item))
+        if len(candidates) == 1:
+            if _survivor_matches_changed(item, candidates[0], source_tree=source_tree):
+                attributed.append((path, item))
+            continue
+        matched = [
+            symbol
+            for symbol in candidates
+            if _survivor_matches_changed(item, symbol, source_tree=source_tree)
+        ]
+        if len(matched) == 1:
+            attributed.append((path, item))
 
     if len(attributed) < survivor_threshold or not attributed:
         return MutationIngestResult()

@@ -352,7 +352,7 @@ async def run_ci_intelligence(
                     client=client,
                     runs=runs,
                     artifacts=mutation_names,
-                    changed_functions=[(symbol.path, symbol.name) for symbol in symbols],
+                    changed_functions=symbols,
                     diff=diff,
                     source_tree=source_tree,
                     check_runs=check_runs,

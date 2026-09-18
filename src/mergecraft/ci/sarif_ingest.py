@@ -127,7 +127,7 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
                 client=client,
                 runs=listed.items,
                 artifacts=mutation_names,
-                changed_functions=[(symbol.path, symbol.name) for symbol in symbols],
+                changed_functions=symbols,
                 diff=diff,
                 source_tree=source_tree,
                 check_runs=check_runs,
