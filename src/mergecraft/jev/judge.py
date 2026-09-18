@@ -317,7 +317,7 @@ async def run_parallel_judge(
     claims = await judge_prose_claims(review_body, findings=findings, client=client)
     attestations = [row for item in evidence_results for row in item.findings]
     attestations.extend(claims.findings)
-    return ParallelJudgeResult(
+    result = ParallelJudgeResult(
         replaces_verifier=False,
         mode="parallel",
         evidence=evidence_results,
@@ -325,6 +325,8 @@ async def run_parallel_judge(
         pin=pin,
         findings=attestations,
     )
+    _emit_faithfulness_alerts(result, findings_total=len(findings))
+    return result
 
 
 def record_parallel_judge(
@@ -511,6 +513,22 @@ def _stated_terminal_verdict(review_body: str) -> str:
 def _claim_unit_id(text: str) -> str:
     digest = hashlib.sha256(text.encode()).hexdigest()[:16]
     return f"claim:{digest}"
+
+
+def _emit_faithfulness_alerts(result: ParallelJudgeResult, *, findings_total: int) -> None:
+    """Collect J4 signals and emit Logfire attrs. Tracing must not fail the judge."""
+    try:
+        from mergecraft.evals.faithfulness import (
+            collect_faithfulness_signals,
+            emit_faithfulness_alerts,
+        )
+        from mergecraft.tracing import Tracer, current_tracer
+
+        signals = collect_faithfulness_signals(result, findings_total=findings_total)
+        live = current_tracer()
+        emit_faithfulness_alerts(signals, tracer=live if isinstance(live, Tracer) else None)
+    except Exception as exc:
+        logger.warning("faithfulness alert emit failed: {}", exc)
 
 
 __all__ = [
