@@ -9,6 +9,7 @@ tests and for ``--artifacts-dir`` / ``--input`` runs.
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +26,7 @@ from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
 )
 from mergecraft.config.settings import load_repo_settings
+from mergecraft.utils.payload import read_github_event
 from mergecraft.verify.extra import BrowserExtraMissingError, require_browser_extra
 from mergecraft.verify.models import (
     AuthSpec,
@@ -141,6 +143,29 @@ def _extra_missing() -> bool:
     except BrowserExtraMissingError:
         return True
     return False
+
+
+def _cli_trust_context() -> tuple[bool, dict[str, Any] | None, str | None]:
+    """Local operator machine is offline; Actions events go through the gate.
+
+    No ``GITHUB_EVENT_PATH`` or ``GITHUB_EVENT_NAME`` means a developer
+    machine. Either variable means ``run_verify_behavior`` must call
+    ``derive_trust_tier`` so a fork or ``pull_request_target`` workflow
+    cannot run ``startup_command``.
+
+    Returns:
+        tuple[bool, dict[str, Any] | None, str | None]: ``offline``, event
+        payload, and event name.
+
+    Examples:
+        >>> offline, event, name = _cli_trust_context()
+        >>> isinstance(offline, bool)
+        True
+    """
+    event_name = os.environ.get("GITHUB_EVENT_NAME") or None
+    if not os.environ.get("GITHUB_EVENT_PATH") and event_name is None:
+        return True, None, None
+    return False, read_github_event(), event_name
 
 
 def run_async(
@@ -307,12 +332,15 @@ def run(
         raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
     settings = load_repo_settings(root=Path.cwd())
+    offline, event, event_name = _cli_trust_context()
     try:
         report = run_async(
             run_verify_behavior(
                 spec,
                 driver=driver,
-                offline=True,
+                offline=offline,
+                event=event,
+                event_name=event_name,
                 settings=settings,
                 shell=settings.shell,
             )

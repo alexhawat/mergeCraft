@@ -9,11 +9,14 @@ not a typed finding: a behavioural mismatch has no diff line to anchor to.
 ## Command
 
 `mergecraft verify-behavior` reproduces a bug or verifies acceptance criteria
-against a running app. It is trusted-tier only: on an untrusted checkout
-(typically a fork pull request) or when `shell: disabled`, the command is
-inert and the report status is `skipped`. Setting `verify_behavior.enabled`
-in `.mergecraft/config.yaml` cannot re-enable it on an untrusted tier. The
-setting defaults to off and is not a blocking review gate.
+against a running app. Invoking the CLI is the opt-in; `verify_behavior.enabled`
+in `.mergecraft/config.yaml` is not a kill switch and is not a blocking review
+gate. The command is trusted-tier only. On a local operator machine (no
+`GITHUB_EVENT_PATH` / `GITHUB_EVENT_NAME`) it runs. In GitHub Actions it
+reads those variables: a fork `pull_request` or `pull_request_target` is
+inert and the report status is `skipped`, so a PR-authored
+`startup_command` does not run. `shell: disabled` is also inert.
+`enabled: true` cannot re-enable an untrusted tier.
 
 The Playwright implementation lives behind the optional `mergecraft[browser]`
 extra. `--help` works without that extra. When the extra is installed, the
@@ -50,6 +53,11 @@ mergecraft verify-behavior \
 
 `criteria.md` is one criterion per line (`- Clear button removes the image`).
 The run writes `report.json` and redacted console logs under `--artifacts-dir`.
+This version opens the URL, captures page text and a screenshot, and scores
+each criterion from that text (`unverified` when empty; `fail` when the page
+contains `still visible` or `mismatch`; otherwise `pass`). The driver protocol
+exposes click, fill, and type; free-text criteria are not turned into those
+actions.
 
 ### Reproduce a bug
 
@@ -136,9 +144,11 @@ There is no video recording pipeline.
 ## Trust
 
 Behaviour verification is **trusted-tier only**. On an untrusted checkout
-(typically a fork pull request) the capability is inert and reports `skipped`
-with the reason. The same skip applies when `shell: disabled`. Configuration
-cannot re-enable it on an untrusted tier.
+(typically a fork pull request, including when the CLI sees that event via
+`GITHUB_EVENT_PATH`) the capability is inert and reports `skipped` with the
+reason. The same skip applies when `shell: disabled`. Configuration cannot
+re-enable it on an untrusted tier. A `--verification-report` is not consumed
+on an untrusted tier (the consume default is fail-closed).
 
 The report body is derived from application output the change under review
 controls — page text, console messages, logs. That content must be fenced

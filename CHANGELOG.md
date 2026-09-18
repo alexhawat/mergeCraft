@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `mergecraft verify-behavior` stays inert on a fork or `pull_request_target`
+  Actions event instead of always skipping the trust gate (#61)
+
+- `mergecraft review --verification-report` does not load a report on an
+  untrusted checkout, including when a workflow treats the workspace as trusted
+  (#61)
+
 - Live `mergecraft verify-behavior` no longer hangs when opening a page with
   `mergecraft[browser]` installed (#61)
 

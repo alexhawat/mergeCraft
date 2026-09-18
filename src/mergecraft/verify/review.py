@@ -13,11 +13,14 @@ Exports:
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from mergecraft.analyzers.trust import derive_trust_tier
 from mergecraft.utils.fence import Fence, render_untrusted
+from mergecraft.utils.payload import read_github_event
 from mergecraft.verify.models import VerificationReport, render_verification_markdown
 
 if TYPE_CHECKING:
@@ -73,14 +76,19 @@ def render_behavior_section(report: VerificationReport | None) -> str:
 def consume_verification_report(
     path: Path | None,
     *,
-    trust_tier: str = "trusted",
+    trust_tier: str = "untrusted",
 ) -> VerificationReport | None:
     """Load a report JSON unless the path is missing or the tier is untrusted.
 
+    Default ``trust_tier`` is ``untrusted`` so a caller that forgets the
+    kwarg does not load a PR-authored report. When ``GITHUB_EVENT_PATH`` or
+    ``GITHUB_EVENT_NAME`` is set, ``derive_trust_tier`` can still skip even
+    if the caller passed ``trusted`` (a GHA workspace is not a trust signal).
+
     Args:
         path (Path | None): Report JSON path. ``None`` means no report.
-        trust_tier (str): ``derive_trust_tier`` result. ``untrusted`` neither
-            produces nor consumes a report.
+        trust_tier (str): Caller tier. ``untrusted`` neither produces nor
+            consumes a report. Defaults to ``untrusted``.
 
     Returns:
         VerificationReport | None: The validated report, or ``None``.
@@ -91,6 +99,12 @@ def consume_verification_report(
     """
     if path is None:
         return None
+    event_name = os.environ.get("GITHUB_EVENT_NAME") or None
+    if os.environ.get("GITHUB_EVENT_PATH") or event_name is not None:
+        event_tier = derive_trust_tier(read_github_event(), event_name=event_name)
+        if event_tier == "untrusted":
+            logger.info("verification report not consumed — trust tier is untrusted")
+            return None
     if trust_tier == "untrusted":
         logger.info("verification report not consumed — trust tier is untrusted")
         return None

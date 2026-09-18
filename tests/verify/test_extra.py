@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import sys
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
-from tests.verify.support import import_verify, require_symbol
+from tests.verify.support import import_verify, require_symbol, untrusted_fork_event
 
 _RUNNER = CliRunner()
 
@@ -74,3 +76,43 @@ def test_verify_behavior_cli_errors_when_extra_absent() -> None:
     combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
     assert result.exit_code != 0
     assert "mergecraft[browser]" in combined
+
+
+def test_cli_fork_event_does_not_run_start_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fork ``GITHUB_EVENT_PATH`` must not execute ``--start-command``."""
+    sentinel = tmp_path / "started"
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(untrusted_fork_event()), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    artifacts = tmp_path / "arts"
+    hidden = {
+        name: sys.modules.pop(name)
+        for name in list(sys.modules)
+        if name == "playwright" or name.startswith("playwright.")
+    }
+    sys.modules["playwright"] = None  # type: ignore[assignment]
+    try:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "verify-behavior",
+                "--mode",
+                "verify",
+                "--url",
+                "http://127.0.0.1:8765/",
+                "--artifacts-dir",
+                str(artifacts),
+                "--start-command",
+                f"touch {sentinel}",
+            ],
+        )
+    finally:
+        sys.modules.pop("playwright", None)
+        sys.modules.update(hidden)
+    combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
+    assert not sentinel.exists()
+    assert "skipped" in combined.lower() or "untrusted" in combined.lower()
+    assert result.exit_code != 0

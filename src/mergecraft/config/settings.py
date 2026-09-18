@@ -578,10 +578,10 @@ def _default_jev_packs() -> dict[str, bool]:
 
 
 class VerifyBehaviorSettings(BaseModel):
-    """Opt-in browser behaviour verification. Off by default.
+    """Reserved verify-behavior config. Invoking the CLI is the opt-in.
 
-    This is not a blocking review gate. ``enabled: true`` cannot re-enable
-    the capability on an untrusted tier.
+    ``enabled`` is not a kill switch and is not a blocking review gate.
+    ``enabled: true`` cannot re-enable the capability on an untrusted tier.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.trust import derive_trust_tier
@@ -16,6 +17,9 @@ from tests.verify.support import (
     require_symbol,
     untrusted_fork_event,
 )
+
+if TYPE_CHECKING:
+    import pytest
 
 _DIFF = "diff --git a/demo.py b/demo.py\n--- a/demo.py\n+++ b/demo.py\n@@ -0,0 +1 @@\n+print(1)\n"
 
@@ -86,6 +90,29 @@ def test_skipped_when_no_report_supplied() -> None:
     assert consume(None) is None
     render = require_symbol(review, "render_behavior_section")
     assert render(None) == ""
+
+
+def test_consume_defaults_to_untrusted(tmp_path: Path) -> None:
+    review = _review()
+    consume = require_symbol(review, "consume_verification_report")
+    report_path = tmp_path / "report.json"
+    report_path.write_text(make_report().model_dump_json(), encoding="utf-8")
+    assert consume(report_path) is None
+    assert consume(report_path, trust_tier="trusted") is not None
+
+
+def test_consume_skips_when_fork_event_env_overrides_trusted_kwarg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(untrusted_fork_event()), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    review = _review()
+    consume = require_symbol(review, "consume_verification_report")
+    report_path = tmp_path / "report.json"
+    report_path.write_text(make_report().model_dump_json(), encoding="utf-8")
+    assert consume(report_path, trust_tier="trusted") is None
 
 
 def test_behavioural_results_do_not_become_findings() -> None:

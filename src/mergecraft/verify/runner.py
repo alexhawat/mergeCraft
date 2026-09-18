@@ -196,8 +196,6 @@ async def run_verify_behavior(
         True
     """
     skipped: list[str] = []
-    if settings is not None and settings.verify_behavior.enabled:
-        logger.debug("verify_behavior.enabled is set; it cannot override an untrusted tier")
     if not offline:
         tier = derive_trust_tier(event, event_name=event_name)
         if tier == "untrusted":

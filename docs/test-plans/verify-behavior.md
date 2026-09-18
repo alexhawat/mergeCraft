@@ -102,6 +102,8 @@ Regression pins that must stay green:
 | Extra-present `verify-behavior` returns after teardown; Chromium is not required | Playwright close loop | `test_async_playwright_runner.py::test_extra_present_cli_returns_after_playwright_teardown` |
 | Untrusted tier (`derive_trust_tier` → `untrusted`) is inert and reports `skipped` | Command | `test_trust_gate.py::test_untrusted_tier_is_inert_and_reports_skipped`, `…::test_pull_request_target_is_inert` |
 | Trust guard deletion: startup command must not run | Command | `test_trust_gate.py::test_untrusted_does_not_execute_startup_command` |
+| CLI with fork `GITHUB_EVENT_PATH` does not run `--start-command` | Command | `test_extra.py::test_cli_fork_event_does_not_run_start_command` |
+| Consume defaults to untrusted; a fork Actions event skips even when the caller passes trusted | Review | `test_review_integration.py::test_consume_defaults_to_untrusted`, `…::test_consume_skips_when_fork_event_env_overrides_trusted_kwarg` |
 | `shell: disabled` is inert on a trusted tier and names `shell` | Command | `test_trust_gate.py::test_shell_disabled_is_inert_even_when_trusted` |
 | Config cannot re-enable on untrusted | Command | `test_trust_gate.py::test_config_cannot_reenable_on_untrusted` |
 | Verify mode: per-criterion status + evidence paths | Command | `test_modes_and_inputs.py::test_verify_mode_produces_per_criterion_status` |
