@@ -101,7 +101,12 @@ def prompt_text(
     required: bool = True,
 ) -> str:
     """Prompt for a line of text. Empty input with no default cancels when required."""
-    raw = typer.prompt(message, default=default or "", show_default=bool(default))
+    raw = typer.prompt(
+        message,
+        default=default or "",
+        show_default=bool(default),
+        err=True,
+    )
     value = str(raw).strip()
     if value:
         return value
@@ -116,7 +121,7 @@ def prompt_text(
 def confirm(message: str, *, default: bool = True) -> bool:
     """Return a yes/no answer. ``typer.Abort`` becomes a clean cancel."""
     try:
-        return bool(typer.confirm(message, default=default))
+        return bool(typer.confirm(message, default=default, err=True))
     except typer.Abort:
         console.print("canceled.")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
@@ -174,6 +179,7 @@ def prompt_choice(
             "Selection (Enter for default, 0 to cancel)",
             default=str(default_index),
             show_default=False,
+            err=True,
         )
     ).strip()
     if raw.lower() in _CANCEL_TOKENS:

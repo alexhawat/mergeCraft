@@ -260,6 +260,32 @@ def test_review_wizard_sets_dry_run(
     assert seen.get("diff_file") == patch
 
 
+def test_run_review_wizard_prompts_go_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    answers = iter(["1", "1", "1", "3", ""])
+
+    def _prompt(message: str, **kwargs: Any) -> str:
+        assert kwargs.get("err") is True
+        return next(answers)
+
+    def _confirm(message: str, **kwargs: Any) -> bool:
+        assert kwargs.get("err") is True
+        return True
+
+    monkeypatch.setattr("mergecraft.cli.interactive.typer.prompt", _prompt)
+    monkeypatch.setattr("mergecraft.cli.interactive.typer.confirm", _confirm)
+    choice = run_review_wizard()
+    assert choice.agent_mode is True
+    captured = capsys.readouterr()
+    combined_out = _plain(captured.out).lower()
+    combined_err = _plain(captured.err).lower()
+    assert "interactive session" in combined_err
+    assert "interactive session" not in combined_out
+    assert combined_out.strip() == ""
+
+
 def test_run_review_wizard_collects_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     answers = iter(["1", "1", "2", "1", ""])
 
