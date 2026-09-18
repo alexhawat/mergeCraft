@@ -7,6 +7,11 @@ Live Chromium deadlocks when the driver calls sync Playwright
     RuntimeError: Cannot enter into task Page.goto() while another task
     run_verify_behavior() is being executed
 
+CLI teardown is a different failure: after Playwright starts on the
+``run_async`` loop, sync ``close()`` must finish without
+``asyncio.run(_aclose())`` on a fresh loop. A hang-on-wrong-loop fake
+makes that path fail here without downloading Chromium.
+
 These cases never launch Chromium. ``sync_playwright`` is patched to raise;
 ``async_playwright`` is an in-process fake.
 """
@@ -17,12 +22,16 @@ import asyncio
 import importlib.util
 import inspect
 import sys
+import threading
 import types
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
+from typer.testing import CliRunner
 
+from mergecraft.cli.app import app
 from tests.verify.support import import_verify, make_input, require_symbol
 
 _PNG = b"\x89PNG\r\n\x1a\n"
@@ -40,6 +49,22 @@ _SCREENSHOT_DEADLOCK = (
 )
 _SYNC_WRAPPER_NAMES = frozenset({"_playwright_call", "_playwright_loop_bound", "<lambda>"})
 _RUN_TIMEOUT_S = 5.0
+_CLOSE_TIMEOUT_S = 2.0
+_CLI_CLOSE_TIMEOUT_S = 5.0
+_CLOSE_HANG_MSG = (
+    "sync close() hung after the runner loop ended; Playwright must be closed "
+    "on the same loop that started async_playwright, not via asyncio.run(_aclose()) "
+    "on a fresh loop"
+)
+_FRESH_RUN_MSG = (
+    "sync close() called asyncio.run(_aclose()) on a fresh loop; close Playwright "
+    "on the same loop that started async_playwright (the run_async helper already "
+    "used by run())"
+)
+_CLOSE_SAME_LOOP_XFAIL = pytest.mark.xfail(
+    reason="green after V6: Playwright close on the same loop",
+    strict=False,
+)
 
 
 def _force_extra_present(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,6 +224,60 @@ class _AsyncPlaywright:
         return None
 
 
+class _LoopBoundBrowser:
+    """Async Chromium stand-in that hangs when closed on the wrong loop."""
+
+    def __init__(self, page: _LaunchedPage, *, owner: _LoopBoundAsyncPlaywright) -> None:
+        self._page = page
+        self._owner = owner
+        self.close_loop: asyncio.AbstractEventLoop | None = None
+        self.close_calls = 0
+
+    async def launch(self, **_kwargs: object) -> _LoopBoundBrowser:
+        return self
+
+    async def new_page(self, **_kwargs: object) -> _LaunchedPage:
+        return self._page
+
+    async def close(self) -> None:
+        self.close_loop = asyncio.get_running_loop()
+        self.close_calls += 1
+        start = self._owner.start_loop
+        if start is not None and self.close_loop is not start:
+            await asyncio.Event().wait()
+
+
+class _LoopBoundAsyncPlaywright:
+    """``async_playwright`` fake that hangs ``stop()`` on a different loop.
+
+    Live Playwright's ``cli.js run-driver`` stays bound to the loop that
+    called ``start()``. ``asyncio.run(_aclose())`` after that loop ends
+    hangs the same way.
+    """
+
+    def __init__(self, page: _LaunchedPage) -> None:
+        self.chromium = _LoopBoundBrowser(page, owner=self)
+        self.start_loop: asyncio.AbstractEventLoop | None = None
+        self.stop_loop: asyncio.AbstractEventLoop | None = None
+        self.stop_calls = 0
+
+    async def start(self) -> _LoopBoundAsyncPlaywright:
+        self.start_loop = asyncio.get_running_loop()
+        return self
+
+    async def stop(self) -> None:
+        self.stop_loop = asyncio.get_running_loop()
+        self.stop_calls += 1
+        if self.start_loop is not None and self.stop_loop is not self.start_loop:
+            await asyncio.Event().wait()
+
+    async def __aenter__(self) -> _LoopBoundAsyncPlaywright:
+        return await self.start()
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.stop()
+
+
 def _install_async_only_playwright(monkeypatch: pytest.MonkeyPatch) -> _LaunchedPage:
     """Install async Playwright fakes. ``sync_playwright`` always raises."""
     page = _LaunchedPage()
@@ -229,6 +308,102 @@ def _install_async_only_playwright(monkeypatch: pytest.MonkeyPatch) -> _Launched
     monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
     monkeypatch.setitem(sys.modules, "playwright.async_api", async_api)
     return page
+
+
+def _install_loop_bound_playwright(monkeypatch: pytest.MonkeyPatch) -> _LoopBoundAsyncPlaywright:
+    """Install async Playwright that hangs teardown on a different loop."""
+    page = _LaunchedPage()
+    bound = _LoopBoundAsyncPlaywright(page)
+
+    def _async_playwright() -> _LoopBoundAsyncPlaywright:
+        return bound
+
+    if importlib.util.find_spec("playwright") is not None:
+        monkeypatch.setattr(
+            "playwright.sync_api.sync_playwright",
+            _sync_playwright_forbidden,
+        )
+        monkeypatch.setattr(
+            "playwright.async_api.async_playwright",
+            _async_playwright,
+            raising=False,
+        )
+        return bound
+
+    sync_api = types.ModuleType("playwright.sync_api")
+    sync_api.sync_playwright = _sync_playwright_forbidden  # type: ignore[attr-defined]
+    async_api = types.ModuleType("playwright.async_api")
+    async_api.async_playwright = _async_playwright  # type: ignore[attr-defined]
+    package = types.ModuleType("playwright")
+    package.sync_api = sync_api  # type: ignore[attr-defined]
+    package.async_api = async_api  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "playwright", package)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", async_api)
+    return bound
+
+
+def _invoke_sync_with_timeout(fn: Callable[[], Any], *, timeout: float) -> Any:
+    """Run ``fn`` on a daemon thread so a hung ``close()`` cannot block pytest."""
+    box: list[tuple[str, Any]] = []
+
+    def _run() -> None:
+        try:
+            box.append(("ok", fn()))
+        except Exception as exc:
+            box.append(("err", exc))
+
+    thread = threading.Thread(target=_run, name="verify-close-timeout", daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise AssertionError(_CLOSE_HANG_MSG)
+    if not box:
+        msg = "sync close() returned no result"
+        raise AssertionError(msg)
+    kind, payload = box[0]
+    if kind == "err":
+        raise payload
+    return payload
+
+
+def _spy_asyncio_run(monkeypatch: pytest.MonkeyPatch, *module_paths: str) -> list[object]:
+    """Record ``asyncio.run`` calls on ``asyncio`` and the given module paths."""
+    calls: list[object] = []
+    real_run = asyncio.run
+
+    def _spy(coro: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append(coro)
+        return real_run(coro, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "run", _spy)
+    for path in module_paths:
+        monkeypatch.setattr(path, _spy, raising=False)
+    return calls
+
+
+def _assert_sync_close_finished(result: Any, *, fresh_runs: list[object]) -> None:
+    """CLI ``_close_driver`` is sync and must not leave an undriven coroutine."""
+    if fresh_runs:
+        raise AssertionError(_FRESH_RUN_MSG)
+    if inspect.isawaitable(result):
+        result.close()
+        msg = (
+            "sync close() returned an awaitable with no running loop; "
+            "CLI _close_driver does not await"
+        )
+        raise AssertionError(msg)
+    if result is not None:
+        msg = f"sync close() must return None, got {type(result).__name__}"
+        raise AssertionError(msg)
+
+
+def _assert_stopped_on_start_loop(bound: _LoopBoundAsyncPlaywright) -> None:
+    assert bound.start_loop is not None
+    assert bound.stop_calls >= 1
+    assert bound.stop_loop is bound.start_loop
+    assert bound.chromium.close_calls >= 1
+    assert bound.chromium.close_loop is bound.start_loop
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -332,3 +507,95 @@ async def test_run_verify_behavior_completes_with_async_playwright_fakes(
     status = getattr(report, "status", None)
     assert status is not None
     assert status != ""
+
+
+@_CLOSE_SAME_LOOP_XFAIL
+def test_sync_close_after_runner_loop_does_not_use_fresh_asyncio_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After bind on ``run_async``, sync ``close()`` must not ``asyncio.run(_aclose())``."""
+    _force_extra_present(monkeypatch)
+    bound = _install_loop_bound_playwright(monkeypatch)
+    from mergecraft.cli.verify_behavior_cmd import run_async
+    from mergecraft.verify import playwright_driver as pw
+
+    driver = pw.launch_playwright_driver(width=1280, height=720)
+
+    async def _bind() -> None:
+        await driver.navigate("http://127.0.0.1:8765/ready")
+
+    run_async(_bind())
+    assert bound.start_loop is not None
+    assert bound.stop_calls == 0
+
+    fresh_runs = _spy_asyncio_run(
+        monkeypatch,
+        "mergecraft.verify.playwright_driver.asyncio.run",
+        "mergecraft.cli.verify_behavior_cmd.asyncio.run",
+    )
+    result = _invoke_sync_with_timeout(driver.close, timeout=_CLOSE_TIMEOUT_S)
+    _assert_sync_close_finished(result, fresh_runs=fresh_runs)
+    _assert_stopped_on_start_loop(bound)
+
+
+@_CLOSE_SAME_LOOP_XFAIL
+def test_close_driver_after_run_async_finishes_on_start_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI ``_close_driver`` after ``run_async`` is the teardown that hung live."""
+    _force_extra_present(monkeypatch)
+    bound = _install_loop_bound_playwright(monkeypatch)
+    from mergecraft.cli import verify_behavior_cmd as cmd
+    from mergecraft.verify import playwright_driver as pw
+
+    driver = pw.launch_playwright_driver(width=1280, height=720)
+
+    async def _bind() -> None:
+        await driver.navigate("http://127.0.0.1:8765/ready")
+
+    cmd.run_async(_bind())
+    assert bound.start_loop is not None
+    assert bound.stop_calls == 0
+
+    fresh_runs = _spy_asyncio_run(
+        monkeypatch,
+        "mergecraft.verify.playwright_driver.asyncio.run",
+        "mergecraft.cli.verify_behavior_cmd.asyncio.run",
+    )
+    result = _invoke_sync_with_timeout(
+        lambda: cmd._close_driver(driver),
+        timeout=_CLOSE_TIMEOUT_S,
+    )
+    _assert_sync_close_finished(result, fresh_runs=fresh_runs)
+    _assert_stopped_on_start_loop(bound)
+
+
+@_CLOSE_SAME_LOOP_XFAIL
+def test_extra_present_cli_returns_after_playwright_teardown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Extra-present ``verify-behavior`` must return after sync teardown close."""
+    _force_extra_present(monkeypatch)
+    bound = _install_loop_bound_playwright(monkeypatch)
+
+    artifacts = tmp_path / "arts"
+    argv = [
+        "verify-behavior",
+        "--mode",
+        "verify",
+        "--url",
+        "http://127.0.0.1:8765/ready",
+        "--artifacts-dir",
+        str(artifacts),
+    ]
+
+    result = _invoke_sync_with_timeout(
+        lambda: CliRunner().invoke(app, argv),
+        timeout=_CLI_CLOSE_TIMEOUT_S,
+    )
+    assert bound.start_loop is not None
+    _assert_stopped_on_start_loop(bound)
+    combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
+    assert "cannot be called from a running event loop" not in combined
+    assert "No module named 'playwright'" not in combined
