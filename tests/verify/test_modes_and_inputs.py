@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -172,6 +174,35 @@ async def test_runner_calls_click_fill_and_type_from_actions() -> None:
     assert ("type_text", ("more",)) in fake.calls
     recorded = {step.action for step in report.steps}
     assert {"navigate", "click", "fill", "type"} <= recorded
+
+
+async def test_action_failure_writes_report_with_failed_step(tmp_path: Path) -> None:
+    class FailingDriver(FakeBrowserDriver):
+        async def click(self, selector: str) -> None:
+            if selector == "#missing":
+                raise RuntimeError("Element not found")
+            await super().click(selector)
+
+    run = _run()
+    artifacts = tmp_path / "arts"
+    report = await run(
+        make_input(
+            mode="verify",
+            acceptance_criteria=["done"],
+            credential_env_names=[],
+            artifacts_dir=str(artifacts),
+            actions=[{"action": "click", "selector": "#missing"}],
+        ),
+        driver=FailingDriver(),
+        offline=True,
+    )
+    assert report.status == "blocked"
+    assert any(step.result.startswith("error:") for step in report.steps)
+    report_path = artifacts / "report.json"
+    assert report_path.is_file()
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "blocked"
+    assert any(item.get("result", "").startswith("error:") for item in payload["steps"])
 
 
 async def test_navigate_until_ready_retries_connection_refused(

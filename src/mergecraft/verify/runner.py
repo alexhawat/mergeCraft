@@ -47,6 +47,17 @@ _NAVIGATE_RETRY_S = 0.25
 _NAVIGATE_READY_S = 15.0
 _REAP_WAIT_S = 3.0
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+class ActionStepFailure(Exception):
+    """Partial action steps were recorded before an interaction failed."""
+
+    def __init__(self, steps: list[VerificationStep], cause: BaseException) -> None:
+        self.steps = steps
+        super().__init__(str(cause))
+        self.__cause__ = cause
+
+
 _STOPWORDS = frozenset(
     {
         "a",
@@ -299,7 +310,7 @@ async def _apply_actions(
             recorded.append(
                 VerificationStep(action=item.action, target=target, result=f"error: {exc}")
             )
-            raise
+            raise ActionStepFailure(recorded, exc) from exc
         recorded.append(VerificationStep(action=item.action, target=target, result="ok"))
     return recorded
 
@@ -427,7 +438,31 @@ async def run_verify_behavior(
                 _write_artifacts(Path(spec.artifacts_dir), report, "")
             return report
 
-        action_steps = await _apply_actions(driver, spec.actions)
+        try:
+            action_steps = await _apply_actions(driver, spec.actions)
+        except ActionStepFailure as exc:
+            failed = exc.steps[-1]
+            label = f"{failed.action}:{failed.target}"
+            logger.info(
+                "verify-behavior blocked action={} target={}",
+                failed.action,
+                failed.target,
+            )
+            steps = [
+                VerificationStep(action="navigate", target=spec.base_url, result="loaded"),
+                *exc.steps,
+            ]
+            report = _build_report(
+                spec,
+                status="blocked",
+                steps=steps,
+                blocked=BlockedDetails(missing=[label]),
+                credential_names=credential_names,
+            )
+            if spec.artifacts_dir:
+                _write_artifacts(Path(spec.artifacts_dir), report, "")
+            return report
+
         page = await driver.extract_text()
         if spec.artifacts_dir:
             dest_dir = Path(spec.artifacts_dir)

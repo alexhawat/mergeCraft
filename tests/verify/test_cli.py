@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from typer.testing import CliRunner
 
+from mergecraft.cli import verify_behavior_cmd
 from mergecraft.cli.app import app
+from tests.verify.fake_driver import FakeBrowserDriver
 from tests.verify.support import CLI_FLAGS, SAMPLE_YAML_INPUT
 
 if TYPE_CHECKING:
@@ -131,3 +134,52 @@ def test_cli_accepts_yaml_input(tmp_path: Path) -> None:
     combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
     assert result.exit_code != 0
     assert "mergecraft[browser]" in combined
+
+
+def test_cli_action_failure_writes_report_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failed browser actions must still write ``report.json`` under artifacts."""
+
+    class FailingDriver(FakeBrowserDriver):
+        async def click(self, selector: str) -> None:
+            _ = selector
+            raise RuntimeError("selector timeout")
+
+    def fake_resolve(*, allow_stub: bool, viewport: Any) -> FakeBrowserDriver:
+        _ = allow_stub
+        _ = viewport
+        return FailingDriver()
+
+    monkeypatch.setattr(verify_behavior_cmd, "_resolve_driver", fake_resolve)
+    artifacts = tmp_path / "arts"
+    input_yaml = tmp_path / "spec.yaml"
+    yaml_body = (
+        SAMPLE_YAML_INPUT.replace(
+            "artifacts_dir: .mergecraft/artifacts/manual/fixture",
+            f"artifacts_dir: {artifacts}",
+        )
+        .replace(
+            "credential_env_names:\n  - APP_TEST_PASSWORD",
+            "credential_env_names: []",
+        )
+        .replace(
+            "startup_command: python -m http.server 8765",
+            "startup_command: ''",
+        )
+    )
+    input_yaml.write_text(yaml_body, encoding="utf-8")
+    result = _RUNNER.invoke(
+        app,
+        [
+            "verify-behavior",
+            "--input",
+            str(input_yaml),
+        ],
+    )
+    assert result.exit_code != 0
+    report_path = artifacts / "report.json"
+    assert report_path.is_file()
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "blocked"
+    assert any(item.get("result", "").startswith("error:") for item in payload["steps"])
