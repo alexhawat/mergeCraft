@@ -48,6 +48,7 @@ _NAVIGATE_RETRY_S = 0.25
 _NAVIGATE_READY_S = 15.0
 _REAP_WAIT_S = 3.0
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_TYPE_ACTION_TARGET = "<focused element>"
 
 
 class ActionStepFailure(Exception):
@@ -311,7 +312,7 @@ async def _apply_actions(
 ) -> list[VerificationStep]:
     recorded: list[VerificationStep] = []
     for item in actions:
-        target = item.selector or item.text
+        target = _TYPE_ACTION_TARGET if item.action == "type" else item.selector
         try:
             if item.action == "click":
                 await driver.click(item.selector)

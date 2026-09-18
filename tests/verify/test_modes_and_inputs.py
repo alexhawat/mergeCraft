@@ -174,6 +174,37 @@ async def test_runner_calls_click_fill_and_type_from_actions() -> None:
     assert ("type_text", ("more",)) in fake.calls
     recorded = {step.action for step in report.steps}
     assert {"navigate", "click", "fill", "type"} <= recorded
+    type_steps = [step for step in report.steps if step.action == "type"]
+    assert len(type_steps) == 1
+    assert type_steps[0].target == "<focused element>"
+    assert "more" not in report.model_dump_json()
+
+
+async def test_type_action_does_not_record_typed_secret_in_report(
+    tmp_path: Path,
+) -> None:
+    """Short typed passwords must not appear in report steps or report.json."""
+    short_canary = "s3cr3t"
+    fake = FakeBrowserDriver(page_text="signed in")
+    artifacts = tmp_path / "arts"
+    run = _run()
+    report = await run(
+        make_input(
+            mode="verify",
+            acceptance_criteria=["signed in"],
+            credential_env_names=[],
+            artifacts_dir=str(artifacts),
+            actions=[{"action": "type", "text": short_canary}],
+        ),
+        driver=fake,
+        offline=True,
+    )
+    type_steps = [step for step in report.steps if step.action == "type"]
+    assert len(type_steps) == 1
+    assert type_steps[0].target == "<focused element>"
+    assert short_canary not in report.model_dump_json()
+    payload = json.loads((artifacts / "report.json").read_text(encoding="utf-8"))
+    assert short_canary not in json.dumps(payload)
 
 
 async def test_action_failure_writes_report_with_failed_step(tmp_path: Path) -> None:
