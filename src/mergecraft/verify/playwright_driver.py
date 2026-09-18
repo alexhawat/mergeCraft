@@ -16,16 +16,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from loguru import logger
 
 from mergecraft.verify.extra import require_browser_extra
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
 
 
 async def _await_if_needed(value: Any) -> Any:
@@ -48,21 +44,6 @@ async def _await_if_needed(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
-
-
-def _release_caller_event_loop() -> None:
-    """Clear a leftover running-loop flag on this thread, if any.
-
-    Lazy launch does not start Playwright, so the normal path has no flag.
-
-    Returns:
-        None: This thread has no running loop.
-
-    Examples:
-        >>> callable(_release_caller_event_loop)
-        True
-    """
-    asyncio.events._set_running_loop(None)
 
 
 def _cookie_names(cookies: list[dict[str, Any]]) -> list[str]:
@@ -146,29 +127,10 @@ class PlaywrightBrowserDriver:
         self._height = height
         self._playwright = playwright
         self._browser = browser
+        self._start_loop: asyncio.AbstractEventLoop | None = None
         self._console: list[dict[str, str]] = []
         if page is not None:
             page.on("console", self._on_console)
-
-    @contextmanager
-    def _playwright_loop_bound(self) -> Iterator[None]:
-        """No-op: async page calls already run on the caller's loop.
-
-        Yields:
-            None: The caller loop is unchanged.
-        """
-        yield
-
-    async def _playwright_call(self, op: Callable[[], Any]) -> Any:
-        """Await ``op`` when needed. Page methods do not call this.
-
-        Args:
-            op (Callable[[], Any]): Sync or async page call.
-
-        Returns:
-            Any: The operation result, awaited when needed.
-        """
-        return await _await_if_needed(op())
 
     async def _ensure_page(self) -> Any:
         """Return the bound page, starting async Playwright on first use.
@@ -186,6 +148,7 @@ class PlaywrightBrowserDriver:
         from playwright.async_api import async_playwright
 
         playwright = await async_playwright().start()
+        self._start_loop = asyncio.get_running_loop()
         browser: Any = None
         try:
             browser = await playwright.chromium.launch(headless=True)
@@ -227,13 +190,15 @@ class PlaywrightBrowserDriver:
         finally:
             if playwright is not None:
                 await _await_if_needed(playwright.stop())
+            self._start_loop = None
 
     def close(self) -> Any:
         """Close a launched Chromium and stop Playwright when we own them.
 
         When this instance owns async Playwright and no loop is running,
-        drives ``_aclose`` with ``asyncio.run``. When a loop is running,
-        returns the ``_aclose`` coroutine so callers can ``await`` it.
+        drives ``_aclose`` with ``run_async`` on the same loop that started
+        ``async_playwright``. When a loop is running, returns the ``_aclose``
+        coroutine so callers can ``await`` it.
 
         Returns:
             Any: ``None`` after a sync close, or an awaitable ``_aclose``.
@@ -247,7 +212,9 @@ class PlaywrightBrowserDriver:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            asyncio.run(self._aclose())
+            from mergecraft.cli.verify_behavior_cmd import run_async
+
+            run_async(self._aclose(), loop=self._start_loop)
             return None
         return self._aclose()
 

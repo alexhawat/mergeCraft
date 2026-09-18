@@ -9,6 +9,7 @@ tests and for ``--artifacts-dir`` / ``--input`` runs.
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -40,6 +41,28 @@ if TYPE_CHECKING:
 
 _PNG_HEADER = b"\x89PNG\r\n\x1a\n"
 T = TypeVar("T")
+_runners = threading.local()
+
+
+def _thread_runner() -> asyncio.Runner:
+    """Return this thread's ``asyncio.Runner``, creating it on first use.
+
+    ``Runner.run`` reuses one loop. ``asyncio.run`` would create and close a
+    fresh loop, which hangs Playwright after ``async_playwright`` started on
+    a previous ``run_async`` call.
+
+    Returns:
+        asyncio.Runner: The thread-local runner.
+
+    Examples:
+        >>> isinstance(_thread_runner(), asyncio.Runner)
+        True
+    """
+    runner = getattr(_runners, "runner", None)
+    if runner is None:
+        runner = asyncio.Runner()
+        _runners.runner = runner
+    return runner
 
 
 class _StubBrowserDriver:
@@ -120,15 +143,24 @@ def _extra_missing() -> bool:
     return False
 
 
-def run_async(coro: Coroutine[Any, Any, T]) -> T:
-    """Run ``coro`` even when this thread already has a running loop.
+def run_async(
+    coro: Coroutine[Any, Any, T],
+    *,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> T:
+    """Run ``coro`` on ``loop``, this thread's runner, or a worker.
 
-    Playwright's sync ``start()`` can leave ``asyncio`` marked running on
-    the caller thread, so a nested ``asyncio.run`` would raise. When a loop
-    is already running, drive the coroutine on a worker thread.
+    Reuses one ``asyncio.Runner`` per thread so Playwright teardown can close
+    on the same loop that started ``async_playwright``. ``asyncio.run`` would
+    create a fresh loop and hang ``cli.js run-driver``. Pass ``loop`` to drive
+    a specific start loop (including from another thread after that loop has
+    stopped). When a loop is already running and ``loop`` is omitted, drive
+    the coroutine on a worker thread.
 
     Args:
         coro (Coroutine[Any, Any, T]): Awaitable to drive to completion.
+        loop (asyncio.AbstractEventLoop | None): Loop that started Playwright.
+            Used when it is open and not running. Defaults to ``None``.
 
     Returns:
         T: The coroutine's result.
@@ -139,10 +171,12 @@ def run_async(coro: Coroutine[Any, Any, T]) -> T:
         >>> run_async(_one())
         1
     """
+    if loop is not None and not loop.is_closed() and not loop.is_running():
+        return loop.run_until_complete(coro)
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return _thread_runner().run(coro)
     with ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(asyncio.run, coro).result()
 
