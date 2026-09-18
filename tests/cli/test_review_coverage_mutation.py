@@ -286,6 +286,32 @@ def test_max_mutants_bound_is_enforced() -> None:
     assert DEFAULT_MAX_MUTANTS == 50
 
 
+def test_export_mutmut_json_ignores_stale_meta(tmp_path: Path) -> None:
+    local = _local()
+    meta_dir = tmp_path / "mutants" / "mypkg"
+    meta_dir.mkdir(parents=True)
+    meta_path = meta_dir / "a.py.meta"
+    meta_path.write_text(
+        json.dumps(
+            {
+                "exit_code_by_key": {
+                    "mypkg.a.x_a__mutmut_1": 1,
+                    "mypkg.a.x_a__mutmut_99": 0,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = local._export_mutmut_json(
+        tmp_path,
+        selected_keys=frozenset({"mypkg.a.x_a__mutmut_1"}),
+    )
+    assert artifact is not None
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert len(payload["mutants"]) == 1
+    assert payload["mutants"][0]["function"] == "a"
+
+
 def test_parse_discovered_mutmut_keys_tolerates_progress_noise() -> None:
     local = _local()
     stdout = '\n⠋ Running stats\n    done\n["mypkg.a.x_a__mutmut_1", "mypkg.a.x_a__mutmut_2"]\n'
@@ -353,7 +379,8 @@ def test_execute_mutation_bounds_discovered_keys(
             seen["cmd"] = list(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    def fake_export(repo_root: Path) -> Path:
+    def fake_export(repo_root: Path, *, selected_keys: frozenset[str]) -> Path:
+        seen["selected_keys"] = selected_keys
         dest = repo_root / "mutmut-results.json"
         dest.write_text('{"schema_version":1,"mutants":[]}', encoding="utf-8")
         return dest
@@ -384,6 +411,7 @@ def test_execute_mutation_bounds_discovered_keys(
     assert "mod.x_fn__mutmut_0" in cmd
     assert "mod.x_fn__mutmut_11" in cmd
     assert "mod.x_fn__mutmut_12" not in cmd
+    assert seen["selected_keys"] == frozenset(f"mod.x_fn__mutmut_{index}" for index in range(12))
 
 
 def test_timeout_seconds_default_is_300() -> None:
@@ -496,7 +524,7 @@ def test_mutmut_run_uses_supported_selection_and_config(
                 seen["setup_cfg"] = (cwd / "setup.cfg").read_text(encoding="utf-8")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    def fake_export(repo_root: Path) -> Path:
+    def fake_export(repo_root: Path, *, selected_keys: frozenset[str]) -> Path:
         dest = repo_root / "mutmut-results.json"
         dest.write_text('{"schema_version":1,"mutants":[]}', encoding="utf-8")
         return dest

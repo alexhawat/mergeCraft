@@ -583,7 +583,11 @@ def _mutmut_status_from_exit_code(exit_code: int | None) -> str | None:
     return None
 
 
-def _export_mutmut_json(repo_root: Path) -> Path | None:
+def _export_mutmut_json(
+    repo_root: Path,
+    *,
+    selected_keys: frozenset[str],
+) -> Path | None:
     mutants_dir = repo_root / "mutants"
     if not mutants_dir.is_dir():
         return None
@@ -602,6 +606,8 @@ def _export_mutmut_json(repo_root: Path) -> Path | None:
             continue
         for mutant_key, exit_code in exit_codes.items():
             if not isinstance(mutant_key, str):
+                continue
+            if mutant_key not in selected_keys:
                 continue
             status = _mutmut_status_from_exit_code(
                 exit_code if isinstance(exit_code, int) else None
@@ -706,7 +712,7 @@ def _execute_mutation(
     if run_result.returncode != 0:
         logger.warning("local mutation: mutmut exited {}", run_result.returncode)
         return None
-    artifact = _export_mutmut_json(repo_root)
+    artifact = _export_mutmut_json(repo_root, selected_keys=frozenset(selection))
     if artifact is None:
         logger.warning("local mutation: mutmut produced no exportable results")
     return artifact
