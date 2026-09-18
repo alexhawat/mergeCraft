@@ -45,17 +45,14 @@ _PRISMA_LINT_CONFIG_NAMES = (
     ".prismalintrc.yml",
     "prismalint.config.js",
 )
+# markdownlint-cli auto-loads these only. cli2 filenames are not read by the
+# binary we run, so they must not count as "configured" (MD060 fallback).
 _MARKDOWNLINT_CONFIG_NAMES = (
     ".markdownlint.json",
     ".markdownlint.yaml",
     ".markdownlint.yml",
     ".markdownlint.jsonc",
     ".markdownlintrc",
-    ".markdownlint-cli2.jsonc",
-    ".markdownlint-cli2.json",
-    ".markdownlint-cli2.yaml",
-    ".markdownlint-cli2.cjs",
-    ".markdownlint-cli2.mjs",
 )
 
 

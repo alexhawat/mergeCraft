@@ -130,6 +130,27 @@ def test_enabled_shell_proceeds_when_sandbox_exec_backend_exists(
     sandbox_mod.require_sandbox_for_enabled_shell(shell="enabled")
 
 
+def test_trusted_darwin_analyzer_argv_is_not_wrapped_by_sandbox_exec(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """sandbox-exec satisfies the gate and wraps MCP shell; trusted analyzers stay bare.
+
+    Wrapping would apply ``(deny network*)`` to tools that declare egress.
+    Untrusted analyzers still skip via ``plan_sandbox``.
+    """
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "sandbox-exec")
+    context = sandbox_mod.build_sandbox_context(
+        repo_root=tmp_path,
+        scratch_dir=tmp_path / "scratch",
+        limits=sandbox_mod.SandboxLimits(timeout_s=60, memory_mb=512, max_processes=16),
+        network_allowlist=[],
+        read_only_source=False,
+    )
+    argv = sandbox_mod.build_analyzer_sandbox_argv(("ruff", "check", "."), context=context)
+    assert argv == ["ruff", "check", "."]
+    assert argv[0] != "sandbox-exec"
+
+
 async def test_offline_analyze_enabled_shell_does_not_start_pipeline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -249,6 +270,11 @@ def test_sandbox_exec_policy_denies_network_and_writes_outside_workspace(
     assert "deny" in lowered
     assert str(workspace) in policy
     assert "file-write" in lowered or "file-write*" in lowered
+    git_dir = str(workspace / ".git")
+    assert git_dir in policy
+    assert "(deny file-write*" in policy
+    assert "(deny process-exec*" in policy
+    assert "git$" in policy or "/git" in policy
 
 
 def test_build_sandbox_exec_argv_invokes_sandbox_exec(tmp_path: Path) -> None:
@@ -290,3 +316,60 @@ def test_sandbox_exec_blocks_network(tmp_path: Path) -> None:
     )
     completed = subprocess.run(argv, cwd=workspace, capture_output=True, check=False, timeout=10)
     assert completed.returncode != 0
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="sandbox-exec is a Darwin backend")
+@pytest.mark.skipif(shutil.which("sandbox-exec") is None, reason="sandbox-exec not on PATH")
+def test_sandbox_exec_allows_write_inside_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    inside = workspace / "ok.txt"
+    argv = sandbox_mod.build_sandbox_exec_argv(
+        ("/bin/bash", "-c", f"echo ok > {inside}"),
+        workspace=workspace,
+    )
+    completed = subprocess.run(argv, cwd=workspace, capture_output=True, check=False, timeout=10)
+    assert completed.returncode == 0
+    assert inside.read_text(encoding="utf-8") == "ok\n"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="sandbox-exec is a Darwin backend")
+@pytest.mark.skipif(shutil.which("sandbox-exec") is None, reason="sandbox-exec not on PATH")
+def test_sandbox_exec_blocks_write_inside_git_dir(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    git_dir = workspace / ".git"
+    git_dir.mkdir(parents=True)
+    target = git_dir / "evil"
+    argv = sandbox_mod.build_sandbox_exec_argv(
+        ("/bin/bash", "-c", f"echo leaked > {target}"),
+        workspace=workspace,
+    )
+    completed = subprocess.run(argv, cwd=workspace, capture_output=True, check=False, timeout=10)
+    assert completed.returncode != 0
+    assert not target.exists()
+
+
+def test_spawn_shell_sandbox_exec_passes_git_deny_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "sandbox-exec")
+    captured: list[str] = []
+
+    def _popen(argv: list[str], **_kwargs: object) -> SimpleNamespace:
+        captured.extend(argv)
+        return SimpleNamespace(pid=1)
+
+    monkeypatch.setattr(shell_mod.subprocess, "Popen", _popen)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    shell_mod._spawn_shell(
+        "echo ok",
+        env={},
+        cwd=str(workspace),
+        stdout=None,
+        stderr=None,
+    )
+    assert captured[0] == "sandbox-exec"
+    policy = captured[captured.index("-p") + 1]
+    assert str(workspace / ".git") in policy
+    assert "(deny file-write*" in policy

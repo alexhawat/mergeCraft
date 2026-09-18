@@ -258,21 +258,40 @@ def _workspace_write_subpaths(workspace: Path) -> tuple[str, ...]:
     return tuple(paths)
 
 
+def _workspace_git_paths(workspace: Path) -> tuple[str, ...]:
+    """``.git`` paths under each write-allowed workspace spelling."""
+    paths: list[str] = []
+    seen: set[str] = set()
+    for base in _workspace_write_subpaths(workspace):
+        git_path = f"{base.rstrip('/')}/.git"
+        if git_path in seen:
+            continue
+        seen.add(git_path)
+        paths.append(git_path)
+    return tuple(paths)
+
+
 def sandbox_exec_policy(*, workspace: Path) -> str:
-    """Seatbelt profile: read-only outside ``workspace``; network denied (H-D4)."""
+    """Seatbelt profile: workspace writes except ``.git``; git exec denied; network denied."""
     subpaths = " ".join(
         f'(subpath "{_sbpl_escape(path)}")' for path in _workspace_write_subpaths(workspace)
+    )
+    git_filters = " ".join(
+        f'(subpath "{_sbpl_escape(path)}") (literal "{_sbpl_escape(path)}")'
+        for path in _workspace_git_paths(workspace)
     )
     return (
         "(version 1)\n"
         "(deny default)\n"
         "(allow process-exec*)\n"
+        '(deny process-exec* (regex #"(^|/)git$") (regex #"(^|/)git-"))\n'
         "(allow process-fork)\n"
         "(allow signal)\n"
         "(allow sysctl-read)\n"
         "(allow mach-lookup)\n"
         "(allow file-read*)\n"
         f"(allow file-write* {subpaths})\n"
+        f"(deny file-write* {git_filters})\n"
         '(allow file-write-data (literal "/dev/null") (literal "/dev/dtracehelper"))\n'
         '(allow file-ioctl (literal "/dev/dtracehelper") (literal "/dev/null"))\n'
         "(deny network*)\n"

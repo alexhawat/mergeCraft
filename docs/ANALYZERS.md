@@ -139,9 +139,11 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   untrusted-only`. Enforced by `evaluate_manifest_for_mode()` plus
   `resolve_selection_tier()`.
 
-On macOS no native analyzer isolation backend exists. Linux capability
-probes are skipped, and untrusted analyzers are refused before launch.
-Trusted local shell execution is an explicit execution permission, not
+On macOS, `sandbox-exec` is the MCP-shell backend (workspace-only writes,
+`.git` write denied, network denied). It is not an analyzer isolation
+backend: Linux capability probes are skipped, untrusted analyzers are
+refused before launch, and trusted analyzer argv is not wrapped.
+Trusted local `--shell enabled` is an explicit execution permission, not
 an isolation guarantee; incomplete isolation produces a warning.
 Use `MERGECRAFT_DISPOSABLE_LINUX=1 make test-filtered-egress` as root
 only on a disposable Linux runner to exercise the real kernel boundary.

@@ -15,12 +15,15 @@ from tests.analyzers.support import import_module
 _CATALOG_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "analyzers" / "catalog"
 _FALLBACK_NAME = "markdownlint-default-config.json"
 
-# Decision 6 — every filename family markdownlint reads.
+# Filename families markdownlint-cli auto-loads. cli2 configs are not among them.
 _MARKDOWNLINT_CONFIG_NAMES: tuple[str, ...] = (
     ".markdownlint.json",
     ".markdownlint.yaml",
+    ".markdownlint.yml",
     ".markdownlint.jsonc",
     ".markdownlintrc",
+)
+_MARKDOWNLINT_CLI2_ONLY_NAMES: tuple[str, ...] = (
     ".markdownlint-cli2.jsonc",
     ".markdownlint-cli2.json",
     ".markdownlint-cli2.yaml",
@@ -51,6 +54,25 @@ def test_has_markdownlint_config_recognises_each_filename_family(tmp_path: Path,
     detect = _detect()
     (tmp_path / name).write_text("{}\n", encoding="utf-8")
     assert detect.has_markdownlint_config(tmp_path) is True
+
+
+@pytest.mark.parametrize("name", _MARKDOWNLINT_CLI2_ONLY_NAMES)
+def test_has_markdownlint_config_ignores_cli2_only_filenames(tmp_path: Path, name: str) -> None:
+    """markdownlint-cli does not auto-load cli2 configs, so fallback must still attach."""
+    detect = _detect()
+    (tmp_path / name).write_text("{}\n", encoding="utf-8")
+    assert detect.has_markdownlint_config(tmp_path) is False
+
+
+def test_cli2_only_config_still_gets_md060_fallback(tmp_path: Path) -> None:
+    resolve = _resolve()
+    (tmp_path / ".markdownlint-cli2.jsonc").write_text("{}\n", encoding="utf-8")
+    argv = ("markdownlint", "--json", resolve.FILES_TOKEN)
+    patched, note = resolve._apply_config_absent_patches("markdownlint", tmp_path, argv)
+    assert "--config" in patched
+    assert _FALLBACK_NAME in patched[patched.index("--config") + 1]
+    assert note is not None
+    assert "fallback" in note.casefold()
 
 
 def test_has_markdownlint_config_ignores_a_directory_with_the_same_name(tmp_path: Path) -> None:
