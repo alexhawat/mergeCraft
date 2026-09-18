@@ -556,7 +556,7 @@ def run(
         _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
 
     if with_coverage or with_mutation:
-        if shell == "disabled":
+        if shell != "enabled":
             _exit_with_message(
                 "--with-coverage/--with-mutation require --shell enabled",
                 cli_exit_code_for_review(RunOutcome.configuration_error),

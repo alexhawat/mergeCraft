@@ -153,6 +153,26 @@ def test_review_with_coverage_refuses_shell_disabled(
     assert "require --shell enabled" in _plain(result.stdout + result.stderr)
 
 
+def test_review_with_coverage_refuses_shell_restricted(
+    captured_kwargs: dict[str, Any], diff_file: Path
+) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "review",
+            "--diff",
+            str(diff_file),
+            "--dry-run",
+            "--shell",
+            "restricted",
+            "--with-coverage",
+        ],
+    )
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
+    assert captured_kwargs == {}
+    assert "require --shell enabled" in _plain(result.stdout + result.stderr)
+
+
 def test_untrusted_tier_refuses_local_coverage() -> None:
     local = _local()
     with pytest.raises(local.LocalEvidenceRefused) as exc_info:
