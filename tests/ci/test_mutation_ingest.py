@@ -306,3 +306,60 @@ async def test_declared_successful_mutmut_artifact_attributes_survivor(
         check_runs=[{"name": "mutmut-json", "conclusion": "success", "status": "completed"}],
     )
     assert any(item.rule_id == "survivor" and item.source == "ci" for item in result.findings)
+
+
+def test_stryker_without_function_or_location_is_unattributable() -> None:
+    report = json.dumps(
+        {
+            "schemaVersion": "2.0",
+            "files": {
+                "src/mod.py": {
+                    "source": "def helper():\n    return 1\n\ndef fn_watch():\n    return 2\n",
+                    "mutants": [
+                        {
+                            "id": "0",
+                            "status": "Survived",
+                            "mutatorName": "NumberLiteral",
+                            "replacement": "0",
+                        }
+                    ],
+                }
+            },
+        }
+    )
+    parsed = _mutation().parse_stryker_json(report)
+    assert parsed.survivors
+    assert parsed.survivors[0].function == ""
+    result = _mutation().mutation_findings(
+        parsed,
+        changed_functions=[("src/mod.py", "fn_watch")],
+        source="ci",
+        mode="shadow",
+    )
+    assert result.findings == []
+
+
+@pytest.mark.asyncio
+async def test_mismatched_failed_job_name_does_not_download_mutation(
+    tmp_path: Path,
+) -> None:
+    document = load_mutation("mutmut-survivor.json")
+    github = _ArtifactGitHub(
+        artifacts=[{"id": 11, "name": "mutmut-json"}],
+        archives={11: zip_artifact("mutmut-survivor.json", document)},
+    )
+    ctx = _ctx(tmp_path, github=github)
+    result = await _mutation().collect_ci_mutation_findings(
+        ctx,
+        client=github,
+        runs=[{"id": 88}],
+        artifacts=["mutmut-json"],
+        changed_functions=[("src/mod.py", "fn_watch")],
+        check_runs=[
+            {"name": "CI / test", "conclusion": "failure", "status": "completed"},
+        ],
+    )
+    assert github.download_calls == 0
+    assert result.findings
+    assert all(item.rule_id == "check-run/failure" for item in result.findings)
+    assert result.substitutions == []

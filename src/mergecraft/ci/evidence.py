@@ -40,6 +40,7 @@ Exports:
     record_gate_substitutions: Record substitutions for audit.
     sarif_findings: Parse a CI SARIF artifact into CI-sourced findings.
     substitute_declared_gates: Replace unavailable rows CI already proved.
+    artifact_ingest_failures: Block declared-artifact download on failed CI.
 """
 
 from __future__ import annotations
@@ -86,7 +87,7 @@ _REPLACEABLE: frozenset[str] = frozenset({"unavailable", "declared-but-cannot-ru
 
 # GitHub check-run conclusions that mean "this gate did not pass".
 _FAILING_CONCLUSIONS: frozenset[str] = frozenset(
-    {"failure", "timed_out", "action_required", "startup_failure"}
+    {"failure", "timed_out", "action_required", "startup_failure", "cancelled"}
 )
 
 # The only conclusion that may stand in for a gate mergeCraft could not run.
@@ -197,7 +198,8 @@ def check_run_to_finding(
 
     ``None`` for anything that is not a completed failure: a green, skipped, or
     still-running check run is *evidence*, and manufacturing a finding from it
-    would put noise where the issue asked for signal.
+    would put noise where the issue asked for signal. ``cancelled`` is a
+    failure: the gate did not pass.
 
     The finding is deliberately unblamed — ``Minor`` / ``unknown`` — because a
     bare check run carries no retry history and no base-branch comparison, so
@@ -241,6 +243,38 @@ def check_run_to_finding(
         evidence=evidence,
         introduced_by_pr="unknown",
     )
+
+
+def artifact_ingest_failures(
+    check_runs: Sequence[Mapping[str, Any]] | None,
+    wanted: set[str],
+) -> tuple[list[Finding], set[str]]:
+    """Return findings and artifact names that must not be downloaded (C-D2).
+
+    ``check_runs is None`` means the listing failed — every wanted name is
+    blocked. A listing error is not success. A completed failing check
+    (including ``cancelled``) blocks every declared artifact, not only when
+    ``check_run.name`` equals the artifact name: a job named ``CI / test``
+    routinely uploads ``coverage-json``.
+
+    Args:
+        check_runs: Listed check runs, or ``None`` when listing failed.
+        wanted: Declared artifact names for this ingest.
+
+    Returns:
+        Findings for blocking checks, and the artifact names to skip.
+    """
+    if check_runs is None:
+        return [], set(wanted)
+    findings: list[Finding] = []
+    blocked: set[str] = set()
+    for check_run in check_runs:
+        finding = check_run_to_finding(check_run)
+        if finding is None:
+            continue
+        findings.append(finding)
+        blocked.update(wanted)
+    return findings, blocked
 
 
 # ── declared gate mapping (D10) ───────────────────────────────────────────────
@@ -479,6 +513,7 @@ __all__ = [
     "CI_TOOL",
     "SATISFIED_BY_CI",
     "GateSubstitution",
+    "artifact_ingest_failures",
     "check_run_to_finding",
     "ci_evidence_findings",
     "ci_evidence_lines",

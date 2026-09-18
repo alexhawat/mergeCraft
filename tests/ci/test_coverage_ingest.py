@@ -356,3 +356,103 @@ async def test_concurrent_same_token_coverage_ingest(tmp_path: Path) -> None:
     assert first.findings
     assert second.findings
     assert all(item.source == "ci" for item in [*first.findings, *second.findings])
+
+
+def test_cobertura_does_not_copy_class_complexity_onto_method() -> None:
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<coverage line-rate="0.5" version="2.0">
+  <packages><package name="src" line-rate="0.5">
+    <classes>
+      <class name="mod" filename="src/mod.py" line-rate="0.5" complexity="20">
+        <methods>
+          <method name="fn_watch" signature="()" line-rate="0.5">
+            <lines><line number="1" hits="1"/></lines>
+          </method>
+        </methods>
+      </class>
+    </classes>
+  </package></packages>
+</coverage>
+"""
+    parsed = _coverage().parse_cobertura(xml)
+    assert parsed.functions
+    assert parsed.functions[0].complexity is None
+
+
+@pytest.mark.asyncio
+async def test_mismatched_failed_job_name_does_not_download_coverage(
+    tmp_path: Path,
+) -> None:
+    document = load_band_coverage("watch")
+    github = _ArtifactGitHub(
+        artifacts=[{"id": 7, "name": "coverage-json"}],
+        archives={7: zip_artifact("coverage.json", document)},
+    )
+    ctx = _ctx(tmp_path, github=github)
+    result = await _coverage().collect_ci_coverage_findings(
+        ctx,
+        client=github,
+        runs=[{"id": 88}],
+        artifacts=["coverage-json"],
+        diff=load_diff("watch"),
+        source_tree={"src/mod.py": load_source("watch")},
+        check_runs=[
+            {
+                "name": "CI / test",
+                "conclusion": "failure",
+                "status": "completed",
+            }
+        ],
+    )
+    assert github.download_calls == 0
+    assert result.findings
+    assert all(item.rule_id == "check-run/failure" for item in result.findings)
+    assert result.substitutions == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_check_blocks_coverage_download(tmp_path: Path) -> None:
+    document = load_band_coverage("watch")
+    github = _ArtifactGitHub(
+        artifacts=[{"id": 7, "name": "coverage-json"}],
+        archives={7: zip_artifact("coverage.json", document)},
+    )
+    ctx = _ctx(tmp_path, github=github)
+    result = await _coverage().collect_ci_coverage_findings(
+        ctx,
+        client=github,
+        runs=[{"id": 88}],
+        artifacts=["coverage-json"],
+        diff=load_diff("watch"),
+        check_runs=[
+            {
+                "name": "CI / test",
+                "conclusion": "cancelled",
+                "status": "completed",
+            }
+        ],
+    )
+    assert github.download_calls == 0
+    assert any(item.rule_id == "check-run/cancelled" for item in result.findings)
+
+
+@pytest.mark.asyncio
+async def test_check_run_listing_failure_does_not_download_coverage(
+    tmp_path: Path,
+) -> None:
+    document = load_band_coverage("watch")
+    github = _ArtifactGitHub(
+        artifacts=[{"id": 7, "name": "coverage-json"}],
+        archives={7: zip_artifact("coverage.json", document)},
+    )
+    ctx = _ctx(tmp_path, github=github)
+    result = await _coverage().collect_ci_coverage_findings(
+        ctx,
+        client=github,
+        runs=[{"id": 88}],
+        artifacts=["coverage-json"],
+        diff=load_diff("watch"),
+        check_runs=None,
+    )
+    assert github.download_calls == 0
+    assert result.substitutions == []

@@ -34,6 +34,7 @@ SKIP_UNSUPPORTED_MUTATION_FORMAT: Final[str] = "unsupported_mutation_format"
 SKIP_UNTRUSTED_TIER: Final[str] = "untrusted_tier"
 SKIP_NO_SANDBOX_BACKEND: Final[str] = "no_sandbox_backend"
 SKIP_TOOLCHAIN_ABSENT: Final[str] = "toolchain_absent"
+SKIP_EXECUTION_FAILED: Final[str] = "execution_failed"
 
 NOTE_COVERAGE_UNDECLARED: Final[str] = "coverage_undeclared"
 NOTE_COVERAGE_CLEAN: Final[str] = "coverage_clean"

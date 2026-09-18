@@ -311,7 +311,7 @@ async def run_ci_intelligence(
                 warn_ci_evidence(
                     f"ci evidence: coverage check-run listing failed for {head_sha[:7]} — {check_err}"
                 )
-                check_runs = []
+                check_runs = None
             if coverage_names:
                 from mergecraft.ci.coverage import collect_ci_coverage_findings
 

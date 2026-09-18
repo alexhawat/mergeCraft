@@ -51,7 +51,7 @@ from mergecraft.ci.crap import (
     crap_finding_severity,
     crap_score,
 )
-from mergecraft.ci.evidence import CI_TOOL, GateSubstitution, check_run_to_finding
+from mergecraft.ci.evidence import CI_TOOL, GateSubstitution, artifact_ingest_failures
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -309,7 +309,6 @@ def parse_cobertura(text: str) -> ParsedCoverage:
         if _xml_local(class_el.tag) != "class":
             continue
         path = _norm_path(str(class_el.get("filename") or ""))
-        class_complexity = class_el.get("complexity")
         for child in class_el:
             if _xml_local(child.tag) != "methods":
                 continue
@@ -323,7 +322,7 @@ def parse_cobertura(text: str) -> ParsedCoverage:
                 ratio = _coverage_ratio(method.get("line-rate"))
                 if ratio is None:
                     ratio = 0.0
-                complexity_raw = method.get("complexity", class_complexity)
+                complexity_raw = method.get("complexity")
                 complexity: int | None
                 try:
                     complexity = int(float(complexity_raw)) if complexity_raw is not None else None
@@ -586,18 +585,7 @@ async def collect_ci_coverage_findings(
         return CoverageIngestResult(run_notes=[NOTE_COVERAGE_UNDECLARED])
 
     wanted_set = set(wanted)
-    findings: list[Finding] = []
-    failed_names: set[str] = set()
-    for check_run in check_runs or []:
-        name = str(check_run.get("name") or "").strip()
-        if name not in wanted_set:
-            continue
-        finding = check_run_to_finding(check_run)
-        if finding is None:
-            continue
-        findings.append(finding)
-        failed_names.add(name)
-
+    findings, failed_names = artifact_ingest_failures(check_runs, wanted_set)
     download_names = wanted_set - failed_names
     parsed_rows: list[ParsedCoverage] = []
     if download_names:

@@ -20,6 +20,7 @@ Exports:
         require_trusted_sandboxed_execution — Raise unless trusted + sandboxed.
         run_local_coverage — Run or parse local coverage; skip honestly.
         run_local_mutation — Run or parse local mutation; skip honestly.
+        SKIP_EXECUTION_FAILED — Timeout, no artifact, or failed tool run.
         plan_local_mutation_paths — Changed-path ∩ allowlist (empty = changed).
         bound_mutants — Cap a mutant list at ``max_mutants``.
 """
@@ -51,6 +52,7 @@ if TYPE_CHECKING:
 SKIP_UNTRUSTED_TIER = "untrusted_tier"
 SKIP_NO_SANDBOX_BACKEND = "no_sandbox_backend"
 SKIP_TOOLCHAIN_ABSENT = "toolchain_absent"
+SKIP_EXECUTION_FAILED = "execution_failed"
 
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_MAX_MUTANTS = 50
@@ -198,6 +200,7 @@ def _execute_mutation(
     *,
     timeout_seconds: int,
     paths: Sequence[str],
+    max_mutants: int = DEFAULT_MAX_MUTANTS,
 ) -> Path | None:
     """Best-effort mutmut run. Returns a JSON artifact when one appears."""
     mutmut = shutil.which("mutmut")
@@ -207,6 +210,8 @@ def _execute_mutation(
         cmd = [mutmut, "run"]
         if paths:
             cmd.extend(["--paths-to-mutate", ",".join(paths)])
+        if max_mutants > 0:
+            cmd.append(f"1-{max_mutants}")
         subprocess.run(
             cmd,
             cwd=repo_root,
@@ -275,11 +280,11 @@ def run_local_coverage(
             return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
         artifact = _execute_coverage(repo_root, timeout_seconds=timeout_seconds)
         if artifact is None:
-            return LocalEvidenceResult(executed=True, findings=[])
+            return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
     text = _read_artifact(artifact)
     if text is None:
-        return LocalEvidenceResult(executed=True, findings=[])
+        return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
     tree = dict(source_tree) if source_tree is not None else _load_source_tree(repo_root, diff)
     parsed = parse_coverage_artifact(text, artifact.name)
@@ -351,18 +356,18 @@ def run_local_mutation(
             repo_paths=_repo_paths(repo_root),
             path_allowlist=list(path_allowlist or ()),
         )
-        planned = bound_mutants(planned, max_mutants=max_mutants)
         artifact = _execute_mutation(
             repo_root,
             timeout_seconds=timeout_seconds,
             paths=planned,
+            max_mutants=max_mutants,
         )
         if artifact is None:
-            return LocalEvidenceResult(executed=True, findings=[])
+            return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
     text = _read_artifact(artifact)
     if text is None:
-        return LocalEvidenceResult(executed=True, findings=[])
+        return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
     tree = dict(source_tree) if source_tree is not None else _load_source_tree(repo_root, diff)
     parsed = parse_mutation_artifact(text, artifact.name)

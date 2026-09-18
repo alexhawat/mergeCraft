@@ -128,6 +128,9 @@ def test_successful_check_run_produces_no_finding() -> None:
     assert check_run_to_finding(_check_run(conclusion="success")) is None
     assert check_run_to_finding(_check_run(conclusion="skipped")) is None
     assert check_run_to_finding(_check_run(status="in_progress", conclusion="")) is None
+    cancelled = check_run_to_finding(_check_run(conclusion="cancelled"))
+    assert cancelled is not None
+    assert cancelled.rule_id == "check-run/cancelled"
 
 
 # ── W5.2 — SARIF artifacts reuse the existing parser ──────────────────────────

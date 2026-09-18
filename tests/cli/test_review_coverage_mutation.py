@@ -9,6 +9,7 @@ import pytest
 from tests.ci.support_crap import (
     DEFAULT_MAX_MUTANTS,
     DEFAULT_TIMEOUT_SECONDS,
+    SKIP_EXECUTION_FAILED,
     SKIP_NO_SANDBOX_BACKEND,
     SKIP_TOOLCHAIN_ABSENT,
     SKIP_UNTRUSTED_TIER,
@@ -252,3 +253,72 @@ def test_local_mutation_findings_are_analyzer_source(tmp_path: Path) -> None:
     )
     assert result.findings
     assert all(item.source == "analyzer" for item in result.findings)
+
+
+def test_coverage_timeout_is_honest_skip_not_silent_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    monkeypatch.setattr(local, "_execute_coverage", lambda *args, **kwargs: None)
+    result = local.run_local_coverage(
+        repo_root=tmp_path,
+        diff=load_diff("watch"),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+        toolchain_available=True,
+    )
+    assert result.executed is False
+    assert result.skip_reason == SKIP_EXECUTION_FAILED
+    assert result.findings == []
+
+
+def test_mutation_missing_json_is_honest_skip_not_silent_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    monkeypatch.setattr(local, "_execute_mutation", lambda *args, **kwargs: None)
+    result = local.run_local_mutation(
+        repo_root=tmp_path,
+        diff=load_diff("watch"),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+        toolchain_available=True,
+    )
+    assert result.executed is False
+    assert result.skip_reason == SKIP_EXECUTION_FAILED
+    assert result.findings == []
+
+
+def test_mutmut_run_receives_max_mutants_id_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    seen: dict[str, Any] = {}
+
+    def fake_which(name: str) -> str | None:
+        return "/usr/bin/mutmut" if name == "mutmut" else None
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        seen["cmd"] = list(cmd)
+        return type("Completed", (), {"returncode": 0})()
+
+    monkeypatch.setattr(local.shutil, "which", fake_which)
+    monkeypatch.setattr(local.subprocess, "run", fake_run)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("def a():\n    return 1\n", encoding="utf-8")
+    result = local.run_local_mutation(
+        repo_root=tmp_path,
+        diff=(
+            "diff --git a/src/a.py b/src/a.py\n"
+            "--- a/src/a.py\n+++ b/src/a.py\n"
+            "@@ -1,2 +1,2 @@\n def a():\n-    return 1\n+    return 0\n"
+        ),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+        toolchain_available=True,
+        max_mutants=50,
+        path_allowlist=[],
+    )
+    assert "1-50" in seen["cmd"]
+    assert result.executed is False
+    assert result.skip_reason == SKIP_EXECUTION_FAILED

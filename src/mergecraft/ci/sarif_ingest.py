@@ -90,7 +90,7 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
             warn_ci_evidence(
                 f"ci evidence: coverage check-run listing failed for {head_sha[:7]} — {check_err}"
             )
-            check_runs = []
+            check_runs = None
         if coverage_names:
             from mergecraft.ci.coverage import collect_ci_coverage_findings
 

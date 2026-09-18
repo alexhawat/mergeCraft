@@ -41,7 +41,7 @@ from loguru import logger
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.ci.archive_bounds import extract_zip_texts
 from mergecraft.ci.changed_functions import changed_functions_from_diff
-from mergecraft.ci.evidence import CI_TOOL, GateSubstitution, check_run_to_finding
+from mergecraft.ci.evidence import CI_TOOL, GateSubstitution, artifact_ingest_failures
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -122,14 +122,12 @@ def escape_rate(killed: int, total: int) -> float | None:
 
 
 def _function_from_source(source: str, line: int | None) -> str:
-    if not source.strip():
+    if not source.strip() or line is None:
         return ""
     lines = source.splitlines()
     if not lines:
         return ""
-    start = len(lines) - 1
-    if line is not None:
-        start = min(max(line - 1, 0), len(lines) - 1)
+    start = min(max(line - 1, 0), len(lines) - 1)
     for index in range(start, -1, -1):
         match = _FUNCTION_DECL.search(lines[index])
         if match:
@@ -436,18 +434,7 @@ async def collect_ci_mutation_findings(
         return MutationIngestResult()
 
     wanted_set = set(wanted)
-    findings: list[Finding] = []
-    failed_names: set[str] = set()
-    for check_run in check_runs or []:
-        name = str(check_run.get("name") or "").strip()
-        if name not in wanted_set:
-            continue
-        finding = check_run_to_finding(check_run)
-        if finding is None:
-            continue
-        findings.append(finding)
-        failed_names.add(name)
-
+    findings, failed_names = artifact_ingest_failures(check_runs, wanted_set)
     download_names = wanted_set - failed_names
     parsed_rows: list[ParsedMutation] = []
     if download_names:
