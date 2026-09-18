@@ -295,13 +295,25 @@ async def run_offline_agent_review(
             record_agent_usage(budget_tracker, result.usage, phase="reviewer_dispatch")
             return result
 
-        winning_slug, result = await run_with_model_chain(
-            settings=settings,
-            run_once=run_once,
-            head=model,
-            pin=settings.model_pin,
-            tool_state=tool_state,
+        from mergecraft.agents.token_budget import (
+            bind_run_budget,
+            current_run_budget,
+            token_budget_for,
         )
+        from mergecraft.jev.types import PINNED_MODEL
+
+        provider_budget = current_run_budget() or token_budget_for(
+            model=resolved_model or PINNED_MODEL,
+            max_tokens=bounds.token_budget,
+        )
+        with bind_run_budget(provider_budget):
+            winning_slug, result = await run_with_model_chain(
+                settings=settings,
+                run_once=run_once,
+                head=model,
+                pin=settings.model_pin,
+                tool_state=tool_state,
+            )
         promote_model_evidence(
             tool_state,
             requested_model=chain[0] if chain else model,

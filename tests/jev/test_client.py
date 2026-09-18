@@ -192,6 +192,36 @@ async def test_kill_switch_stops_dispatch_and_records_the_stop() -> None:
     assert client.transport.calls == 1
 
 
+async def test_client_constructed_unbound_uses_later_bound_run_budget() -> None:
+    """The shared per-run cap includes Jev when the client is built before bind."""
+    from mergecraft.agents.token_budget import bind_run_budget
+
+    cost_mod = import_jev("cost")
+    bound = cost_mod.TokenBudget(max_tokens=10_000)
+    client = _recorded_client("unit_happy.json")
+    with bind_run_budget(bound):
+        result = await client.call(state={"hunk": "a"}, pack_id="unit/v1", unit_id="a")
+    assert result.skipped is False
+    used = result.response.usage.input_tokens + result.response.usage.output_tokens
+    assert bound.tokens_used == used
+    assert bound.tokens_used <= bound.max_tokens
+
+
+async def test_explicit_budget_wins_over_bound_run_budget() -> None:
+    """Constructor ``budget=`` stays the cap even when a run budget is bound."""
+    from mergecraft.agents.token_budget import bind_run_budget
+
+    cost_mod = import_jev("cost")
+    explicit = cost_mod.TokenBudget(max_tokens=10_000)
+    bound = cost_mod.TokenBudget(max_tokens=10_000)
+    client = _recorded_client("unit_happy.json", budget=explicit)
+    with bind_run_budget(bound):
+        result = await client.call(state={"hunk": "a"}, pack_id="unit/v1", unit_id="a")
+    assert result.skipped is False
+    assert explicit.tokens_used > 0
+    assert bound.tokens_used == 0
+
+
 async def test_concurrent_same_api_key_shares_one_budget() -> None:
     cost_mod = import_jev("cost")
     budget = cost_mod.TokenBudget(max_tokens=10_000)

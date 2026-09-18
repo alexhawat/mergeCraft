@@ -886,8 +886,17 @@ async def _run_offline_diff_review(
     )
     trust_env_previous = apply_cli_trust_tier_env(trust_tier)
     settings = load_repo_settings(root=cwd, load_learnings_files=False)
-    jev_client, jev_skip_reason = _construct_review_jev(settings)
     run_bounds = resolve_run_bounds(settings=settings)
+    from mergecraft.agents.token_budget import (
+        bind_run_budget,
+        current_run_budget,
+        token_budget_for,
+    )
+
+    provider_budget = current_run_budget() or token_budget_for(
+        model=settings.jev.model,
+        max_tokens=run_bounds.token_budget,
+    )
 
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
     from mergecraft.review.engine import ReviewEngine
@@ -918,48 +927,50 @@ async def _run_offline_diff_review(
     )
 
     try:
-        try:
-            staged = await runner.run(driver)
-            published = staged.published_or(
-                _offline_failure(
-                    error="review engine returned no result",
-                    outcome=RunOutcome.infra_error,
+        with bind_run_budget(provider_budget):
+            jev_client, jev_skip_reason = _construct_review_jev(settings)
+            try:
+                staged = await runner.run(driver)
+                published = staged.published_or(
+                    _offline_failure(
+                        error="review engine returned no result",
+                        outcome=RunOutcome.infra_error,
+                    )
                 )
-            )
-            if (
-                jev_client is not None
-                and jev_skip_reason is None
-                and not dry_run
-                and driver.materialization is not None
-            ):
-                await _run_shadow_jev_review(
-                    client=jev_client,
-                    driver=driver,
-                    review_out=published,
-                    settings=settings,
+                if (
+                    jev_client is not None
+                    and jev_skip_reason is None
+                    and not dry_run
+                    and driver.materialization is not None
+                ):
+                    await _run_shadow_jev_review(
+                        client=jev_client,
+                        driver=driver,
+                        review_out=published,
+                        settings=settings,
+                    )
+                return _stamp_jev_skip(published, jev_skip_reason)
+            except TimeoutError:
+                return _stamp_jev_skip(
+                    _offline_failure(
+                        error="review timed out",
+                        outcome=RunOutcome.timed_out,
+                    ),
+                    jev_skip_reason,
                 )
-            return _stamp_jev_skip(published, jev_skip_reason)
-        except TimeoutError:
-            return _stamp_jev_skip(
-                _offline_failure(
-                    error="review timed out",
-                    outcome=RunOutcome.timed_out,
-                ),
-                jev_skip_reason,
-            )
-        except BudgetExhausted as exc:
-            return _stamp_jev_skip(
-                _offline_failure(
-                    error=str(exc),
-                    outcome=budget_exhaustion_outcome(exc),
-                ),
-                jev_skip_reason,
-            )
-        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-            return _stamp_jev_skip(
-                _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc)),
-                jev_skip_reason,
-            )
+            except BudgetExhausted as exc:
+                return _stamp_jev_skip(
+                    _offline_failure(
+                        error=str(exc),
+                        outcome=budget_exhaustion_outcome(exc),
+                    ),
+                    jev_skip_reason,
+                )
+            except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                return _stamp_jev_skip(
+                    _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc)),
+                    jev_skip_reason,
+                )
     finally:
         # Restore the operator's ``.env`` tracing vars so the ``diff-review``
         # overrides never leak into the caller's environment.
