@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
@@ -286,11 +287,23 @@ def _read_artifact(path: Path) -> str | None:
 
 def _execute_coverage(repo_root: Path, *, timeout_seconds: int) -> Path | None:
     """Best-effort ``coverage run`` + ``coverage json``. Returns the artifact or None."""
-    dest = Path(tempfile.mkdtemp(prefix="mergecraft-local-cov-")) / "coverage.json"
+    workdir = Path(tempfile.mkdtemp(prefix="mergecraft-local-cov-"))
+    data_file = workdir / ".coverage"
+    dest = workdir / "coverage.json"
     try:
-        subprocess.run(
+        run_result = subprocess.run(
             _sandboxed_argv(
-                [sys.executable, "-m", "coverage", "run", "-m", "pytest", "-q"],
+                [
+                    sys.executable,
+                    "-m",
+                    "coverage",
+                    "run",
+                    "--data-file",
+                    str(data_file),
+                    "-m",
+                    "pytest",
+                    "-q",
+                ],
                 repo_root=repo_root,
             ),
             cwd=repo_root,
@@ -298,9 +311,24 @@ def _execute_coverage(repo_root: Path, *, timeout_seconds: int) -> Path | None:
             capture_output=True,
             check=False,
         )
+        if run_result.returncode != 0:
+            logger.warning(
+                "local coverage: pytest run failed with exit {}",
+                run_result.returncode,
+            )
+            return None
         json_run = subprocess.run(
             _sandboxed_argv(
-                [sys.executable, "-m", "coverage", "json", "-o", str(dest)],
+                [
+                    sys.executable,
+                    "-m",
+                    "coverage",
+                    "json",
+                    "--data-file",
+                    str(data_file),
+                    "-o",
+                    str(dest),
+                ],
                 repo_root=repo_root,
             ),
             cwd=repo_root,
@@ -330,13 +358,20 @@ def _execute_mutation(
     mutmut = shutil.which("mutmut")
     if mutmut is None:
         return None
+    candidates = (
+        repo_root / "mutmut-results.json",
+        repo_root / "mutmut-survivor.json",
+        repo_root / "mutation-report.json",
+    )
+    preexisting = {path: path.is_file() for path in candidates}
+    started = time.time()
     try:
         cmd = [mutmut, "run"]
         if paths:
             cmd.extend(["--paths-to-mutate", ",".join(paths)])
         if max_mutants > 0:
             cmd.append(f"1-{max_mutants}")
-        subprocess.run(
+        run_result = subprocess.run(
             _sandboxed_argv(cmd, repo_root=repo_root),
             cwd=repo_root,
             timeout=timeout_seconds,
@@ -348,14 +383,15 @@ def _execute_mutation(
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("local mutation: execution failed — {}", exc)
         return None
-    for candidate in (
-        repo_root / "mutmut-results.json",
-        repo_root / "mutmut-survivor.json",
-        repo_root / "mutation-report.json",
-    ):
-        if candidate.is_file():
+    if run_result.returncode != 0:
+        logger.warning("local mutation: mutmut exited {}", run_result.returncode)
+        return None
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        if not preexisting.get(candidate, False) or candidate.stat().st_mtime >= started:
             return candidate
-    logger.warning("local mutation: mutmut produced no JSON artifact")
+    logger.warning("local mutation: mutmut produced no fresh JSON artifact")
     return None
 
 

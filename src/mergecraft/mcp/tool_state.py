@@ -302,10 +302,15 @@ class CiEvidenceState:
     ``AnalyzerRunState.findings`` uses, so the packet's loader reads one shape.
     ``substitutions`` records every gate outcome a declared CI check run
     changed, so a reader can audit *why* a gate stopped saying ``unavailable``.
+    ``run_notes`` / ``skip_reasons`` carry coverage and mutation ingest
+    tokens (for example ``coverage_undeclared`` vs ``coverage_clean``) when
+    no finding row would otherwise explain the outcome.
     """
 
     findings: list[dict[str, Any]] = field(default_factory=list)
     substitutions: list[dict[str, Any]] = field(default_factory=list)
+    run_notes: list[str] = field(default_factory=list)
+    skip_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

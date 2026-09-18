@@ -184,3 +184,43 @@ async def test_run_ci_intelligence_declared_failed_check_emits_finding_never_dow
     assert github.download_calls == 0
     assert artifact_id not in github.downloaded_ids
     assert github.check_run_refs, "intelligence must list check runs like sarif ingest"
+
+
+@pytest.mark.asyncio
+async def test_run_ci_intelligence_incomplete_check_run_listing_blocks_ingest(
+    tmp_path: Path,
+) -> None:
+    """Truncated check-run pages must not download declared coverage receipts."""
+
+    class _IncompleteCheckRuns(_IntelligenceGitHub):
+        async def list_check_runs_for_ref(
+            self,
+            owner: str,
+            repo: str,
+            ref: str,
+            **kwargs: Any,
+        ) -> ListedItems:
+            _ = (owner, repo, kwargs)
+            self.check_run_refs.append(ref)
+            return ListedItems(
+                items=[{"name": "coverage-json", "conclusion": "success", "status": "completed"}],
+                incomplete=True,
+                total_count=500,
+            )
+
+    document = (CRAP_FIXTURES / "ingest" / "declared-success" / "coverage.json").read_text(
+        encoding="utf-8"
+    )
+    github = _IncompleteCheckRuns(
+        artifacts=[{"id": 7, "name": "coverage-json"}],
+        archives={7: zip_artifact("coverage.json", document)},
+        check_runs=[],
+    )
+    ctx = _ctx(tmp_path, github=github, ci_coverage_artifacts=["coverage-json"])
+
+    await run_ci_intelligence(ctx, check_suite_id=9)
+
+    assert github.download_calls == 0
+    assert not any(
+        item.rule_id.startswith("crap-") for item in ci_evidence_findings(ctx.tool_state)
+    )

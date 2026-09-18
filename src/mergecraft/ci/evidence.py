@@ -452,6 +452,24 @@ def _evidence_state(state: ToolState) -> CiEvidenceState:
     return state.ci_evidence
 
 
+def record_ci_ingest_metadata(
+    state: ToolState,
+    *,
+    run_notes: Iterable[str] = (),
+    skip_reason: str | None = None,
+) -> None:
+    """Record coverage/mutation ingest tokens when findings alone are ambiguous."""
+    evidence = _evidence_state(state)
+    for note in run_notes:
+        stripped = str(note).strip()
+        if stripped and stripped not in evidence.run_notes:
+            evidence.run_notes.append(stripped)
+    if skip_reason:
+        stripped = skip_reason.strip()
+        if stripped and stripped not in evidence.skip_reasons:
+            evidence.skip_reasons.append(stripped)
+
+
 def record_ci_findings(state: ToolState, findings: Iterable[Finding]) -> list[Finding]:
     """Record CI findings on the run, deduplicated on ``finding_dedupe_key``.
 
@@ -520,6 +538,7 @@ __all__ = [
     "declared_check_run",
     "declared_gate_findings",
     "record_ci_findings",
+    "record_ci_ingest_metadata",
     "record_gate_substitutions",
     "sarif_findings",
     "substitute_declared_gates",

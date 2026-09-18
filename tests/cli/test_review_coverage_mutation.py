@@ -393,6 +393,69 @@ def test_mutmut_run_receives_max_mutants_id_range(
     assert result.skip_reason == SKIP_EXECUTION_FAILED
 
 
+def test_leftover_mutation_report_is_not_treated_as_live_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    stale = tmp_path / "mutation-report.json"
+    stale.write_text('{"files":[]}', encoding="utf-8")
+
+    def fake_which(name: str) -> str | None:
+        return "/usr/bin/mutmut" if name == "mutmut" else None
+
+    def fake_wrap(argv: list[str], *, repo_root: Path) -> list[str]:
+        return ["unshare", *argv]
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
+    monkeypatch.setattr(local, "_sandboxed_argv", fake_wrap)
+    monkeypatch.setattr(local.shutil, "which", fake_which)
+    monkeypatch.setattr(local.subprocess, "run", fake_run)
+    result = local.run_local_mutation(
+        repo_root=tmp_path,
+        diff=load_diff("watch"),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+        toolchain_available=True,
+    )
+    assert result.executed is False
+    assert result.skip_reason == SKIP_EXECUTION_FAILED
+    assert result.findings == []
+
+
+def test_failed_coverage_run_ignores_stale_data_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local = _local()
+    calls: list[list[str]] = []
+
+    def fake_wrap(argv: list[str], *, repo_root: Path) -> list[str]:
+        return ["unshare", *argv]
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> Any:
+        calls.append(list(cmd))
+        if any(part == "run" for part in cmd):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
+    monkeypatch.setattr(local, "_sandboxed_argv", fake_wrap)
+    monkeypatch.setattr(local.subprocess, "run", fake_run)
+    result = local.run_local_coverage(
+        repo_root=tmp_path,
+        diff=load_diff("watch"),
+        trust_tier="trusted",
+        sandbox_backend="unshare",
+        toolchain_available=True,
+    )
+    assert result.executed is False
+    assert result.skip_reason == SKIP_EXECUTION_FAILED
+    assert any(part == "run" for cmd in calls for part in cmd)
+    assert not any(part == "json" for cmd in calls for part in cmd)
+
+
 def test_live_execution_wraps_via_sandbox_api(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

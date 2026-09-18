@@ -261,7 +261,11 @@ async def run_ci_intelligence(
     flaky failure stays ``Minor`` / ``introduced_by_pr="false"`` and cannot block
     (D11).
     """
-    from mergecraft.ci.evidence import ci_evidence_findings, record_ci_findings
+    from mergecraft.ci.evidence import (
+        ci_evidence_findings,
+        record_ci_findings,
+        record_ci_ingest_metadata,
+    )
     from mergecraft.ci.providers.github_actions import unbound_check_suite_logs
     from mergecraft.ci.review import analyze_ci_failures
 
@@ -306,7 +310,14 @@ async def run_ci_intelligence(
                 listed_checks = await client.list_check_runs_for_ref(
                     ctx.repo.owner, ctx.repo.name, head_sha
                 )
-                check_runs = list(listed_checks.items)
+                if listed_checks.incomplete:
+                    warn_ci_evidence(
+                        f"ci evidence: coverage check-run listing truncated for {head_sha[:7]} — "
+                        "not treating as complete"
+                    )
+                    check_runs = None
+                else:
+                    check_runs = list(listed_checks.items)
             except Exception as check_err:
                 warn_ci_evidence(
                     f"ci evidence: coverage check-run listing failed for {head_sha[:7]} — {check_err}"
@@ -323,6 +334,11 @@ async def run_ci_intelligence(
                     diff=diff,
                     source_tree=source_tree,
                     check_runs=check_runs,
+                )
+                record_ci_ingest_metadata(
+                    ctx.tool_state,
+                    run_notes=coverage.run_notes,
+                    skip_reason=coverage.skip_reason,
                 )
                 if coverage.findings:
                     record_ci_findings(ctx.tool_state, coverage.findings)
@@ -341,6 +357,7 @@ async def run_ci_intelligence(
                     source_tree=source_tree,
                     check_runs=check_runs,
                 )
+                record_ci_ingest_metadata(ctx.tool_state, skip_reason=mutation.skip_reason)
                 if mutation.findings:
                     record_ci_findings(ctx.tool_state, mutation.findings)
         suite = await _GITHUB_PROVIDER.fetch_check_suite_logs(
