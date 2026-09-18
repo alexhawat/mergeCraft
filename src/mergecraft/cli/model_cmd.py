@@ -16,6 +16,7 @@ from mergecraft.cli.provider_cmd import (
     _provider_entries,
     load_provider_registry,
 )
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.io import write_config_dict
 from mergecraft.config.model_registry import (
     allocate_model_index,
@@ -23,7 +24,7 @@ from mergecraft.config.model_registry import (
     normalize_model_id,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     help="Add, list, and delete models on registered LLM providers.",
     no_args_is_help=True,
 )

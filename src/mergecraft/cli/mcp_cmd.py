@@ -19,11 +19,12 @@ from mergecraft.cli.mcp_serve import (
     tool_specs_for_role,
 )
 from mergecraft.cli.profiles import apply_profile_env, resolve_profile
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.settings import parse_cli_trust_override
 from mergecraft.mcp.ports import MCP_HOST, read_env_port, select_port
 from mergecraft.mcp.stdio import run_public_stdio_server
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="mcp",
     help="Serve mergeCraft MCP tools to external clients.",
     no_args_is_help=True,

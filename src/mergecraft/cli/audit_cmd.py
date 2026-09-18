@@ -8,6 +8,7 @@ import typer
 
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_AUDIT_VERIFY_FAILED_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.enterprise.audit import (
     export_audit_log,
     load_audit_events,
@@ -15,7 +16,7 @@ from mergecraft.enterprise.audit import (
     verify_audit_chain,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="audit",
     help="Audit-log and usage/cost export.",
     no_args_is_help=True,
