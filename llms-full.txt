@@ -446,6 +446,7 @@ scheduled runs: [`docs/workflows.md`](docs/workflows.md).
 | 📡 **[SARIF](docs/glossary.md#sarif) upload (opt-in)** | Publish analyzer findings to GitHub code scanning |
 | 📈 **Tracing (opt-in)** | Span trees to JSONL, Logfire, or OTLP — [`docs/TRACING.md`](docs/TRACING.md) |
 | 💻 **Offline mode** | `mergecraft review` on local diffs, worktrees, or cloned repos |
+| 🌐 **Behaviour verification** | `mergecraft verify-behavior` writes a versioned report; `mergecraft review --verification-report` consumes it (fenced, separate from code findings; blocked stays visible; no report leaves the review unchanged); trusted-tier only; custom browser-use + JEV driver — [`docs/verify-behavior.md`](docs/verify-behavior.md) |
 
 **Terminal verdict (default: enforce).** A run without a validated
 `submit_review_verdict` reports `inconclusive`. Set `gates.terminal_verdict: shadow`
@@ -485,6 +486,7 @@ When `harness:` is unset, mergeCraft infers the runtime from the model slug — 
 | [`docs/agent-roster.md`](docs/agent-roster.md) | Agent roster, `provider status`, multi-reviewer merge, trust snapshot |
 | [`docs/workflows.md`](docs/workflows.md) | Examples 2–6, trust tiers, `pull_request_target` gotchas |
 | [`docs/cli.md`](docs/cli.md) | Full `mergecraft` command reference |
+| [`docs/verify-behavior.md`](docs/verify-behavior.md) | `mergecraft verify-behavior` and `review --verification-report`: flags, trust rule, artifact layout |
 | [`docs/trust-policy.md`](docs/trust-policy.md) | Operator trust knobs (`selfReview`, `agentSandbox`) |
 | [`docs/action-reference.md`](docs/action-reference.md) | Every Action `with:` input and output |
 | [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) | Contractual CLI exit codes |
@@ -699,6 +701,15 @@ check-run summary or in the agent's prose:
 - A "green" status with no underlying typed finding — `unavailable` /
   `declared-but-cannot-run` / `timed_out` are explicit and visible; the
   absence of evidence is itself evidence the verdict must surface.
+
+A behaviour-verification report (from `mergecraft verify-behavior`, consumed
+via `--verification-report`) is **not** a typed `Finding` and is **not**
+mechanical evidence for the approval gate. It is a separate artifact: page
+text and console output the change under review can control, so it is fenced
+before any prompt. Treat it as evidence about the running app, not a
+substitute for reading the diff. `skipped` and `blocked` are not a pass —
+`blocked` names the missing input and stays visible; omitting the report
+leaves the review unchanged.
 
 The merge-evidence packet's `decision` row is computed by
 `mergecraft.agents.gates.decide_approval(findings, *, run_succeeded,
@@ -1637,7 +1648,11 @@ What the merge-evidence packet carries, and how each signal weights:
 What is **never** an input to the verdict: the agent's prose narrative,
 the PR title / body / comment text (fenced), `result.output`, the model
 slag in tool output, or any other string that was not produced by a
-deterministic check on the diff. The merge-evidence packet is the
+deterministic check on the diff. A behaviour-verification report is
+evidence about a running app, not a substitute for diff review and not a
+typed `Finding`. `skipped` or `blocked` is not a pass: blocked names the
+missing input; skipped means the run did not execute. The report is
+fenced before it reaches any prompt. The merge-evidence packet is the
 single artifact a human or a later tool reads to reconstruct why a PR
 was auto-merged, blocked, or escalated; it is durable, versioned, and
 the schema is derived from the Pydantic models (`mergecraft.evidence.

@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- PR #742 drops Playwright as the behaviour-verification driver. Live browsing
+  binds to `mergecraft.browser` (custom browser-use + JEV) and fails closed
+  until the CDP driver is wired (#752). The `mergecraft[browser]` extra and
+  `playwright==1.63.0` pin are removed (#752, #61)
+- `mergecraft verify-behavior` fails closed when the browser-use stack is
+  unavailable, even with `--artifacts-dir` / `--input`; `--allow-stub` is the only
+  stub opt-in (#61, #752)
+- `verify_behavior.enabled: false` skips the run (kill switch); default remains
+  enabled so invoking the CLI still runs on a trusted checkout (#61)
+
 - `verify_candidate` verifies the commit that introduced an image digest rather
   than whichever commit the candidate range happens to end at. It treated any
   commit whose `action.yml` image differed from the base as a freshly minted
@@ -46,8 +56,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture suppression names why it is exempt, and a newly committed secret
   under `tests/` still fires.
 
+### Fixed
+
+- `mergecraft verify-behavior` stays inert on a fork or `pull_request_target`
+  Actions event instead of always skipping the trust gate (#61)
+
+- `mergecraft review --verification-report` does not load a report on an
+  untrusted checkout, including when a workflow treats the workspace as trusted
+  (#61)
+
+- Verify criteria are scored per criterion; reproduce matches page text to
+  repro notes; `--start-command` retries navigate while the app comes up (#61)
+
 ### Added
 
+- `mergecraft verify-behavior` can reproduce a bug or check a running app and
+  write a versioned report under `.mergecraft/artifacts/`. It stays inert on an
+  untrusted tier or when `shell: disabled`. Optional YAML `actions` drive
+  click / fill / type (#61, #752)
+
+- A versioned behaviour-verification report (`schema_version` 1.0.0) records
+  what was observed, which criteria passed, and what blocked the run — without
+  turning those results into code findings (#61)
+- `mergecraft review --verification-report` (also `diff-review`) consumes a
+  behaviour-verification report, fences it before the prompt, and renders
+  results in a separate section — not as code findings. A blocked report
+  stays visible; no report leaves the review unchanged (#61)
 - Reviews can ingest declared coverage receipts and report change-risk scores on the functions the PR actually touched, advisory by default (#714)
 - Reviews can ingest declared mutation survivors the same way; local `mergecraft review --with-coverage` / `--with-mutation` require `--shell enabled`, wrap live tool runs in the existing sandbox backend (or refuse), and refuse a fork checkout (#714)
 

@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from mergecraft.tracing.review_context import ReviewContext
     from mergecraft.types import ShellPermission
     from mergecraft.utils.source_resolve import ResolvedWorkspace
+    from mergecraft.verify.models import VerificationReport
 
 
 def parse_offline_review_findings(result: OfflineReviewResult) -> list[Finding]:
@@ -139,6 +140,7 @@ def build_offline_review_prompt(
     base_ref: str | None,
     extra: str | None = None,
     json_mode: bool = False,
+    verification_report: VerificationReport | None = None,
 ) -> str:
     """Build the user prompt for an offline Review-mode run."""
     summary = summarize_diff(diff_path.read_text(encoding="utf-8"))
@@ -148,6 +150,16 @@ def build_offline_review_prompt(
         if extra and extra.strip()
         else ""
     )
+    if verification_report is None:
+        behavior_block = ""
+    else:
+        from mergecraft.verify.review import prepare_verification_report_for_prompt
+
+        behavior_block = (
+            "\n## Behavior verification\n\n"
+            + prepare_verification_report_for_prompt(verification_report)
+            + "\n"
+        )
     if json_mode:
         step_four = (
             "4. Call `set_output` with structured findings — **required**. Each item must "
@@ -181,6 +193,7 @@ def build_offline_review_prompt(
         f"Diff path: `{diff_path}`\n\n"
         f"## Diff summary\n\n{summary}\n"
         f"{extra_block}"
+        f"{behavior_block}"
     )
 
 
@@ -397,6 +410,7 @@ async def run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     engine: ReviewEngine[OfflineReviewResult] | None = None,
+    verification_report_path: Path | None = None,
     with_coverage: bool = False,
     with_mutation: bool = False,
 ) -> OfflineReviewResult:
@@ -443,6 +457,7 @@ async def run_offline_diff_review(
             on_finding=on_finding,
             use_cache=use_cache,
             engine=engine,
+            verification_report_path=verification_report_path,
             with_coverage=with_coverage,
             with_mutation=with_mutation,
         )
@@ -664,6 +679,7 @@ class _OfflineDiffReviewRun:
     evidence_packet_path: Path | None
     on_finding: Callable[[dict[str, Any]], None] | None
     read_cache: bool
+    verification_report_path: Path | None = None
     # Operator opt-in (#1). Defaults to the historical hardcoded value so any
     # caller that omits it keeps the pre-flag behaviour: repo-native analyzers
     # stay withheld unless `mergecraft review --shell` explicitly raises this.
@@ -841,11 +857,27 @@ class _OfflineDiffReviewRun:
             )
 
         output_schema = findings_output_schema() if self.json_path is not None else None
+        from pydantic import ValidationError
+
+        from mergecraft.verify.review import consume_verification_report
+
+        try:
+            verification_report = consume_verification_report(
+                self.verification_report_path,
+                trust_tier=self.trust_tier,
+            )
+        except (OSError, ValidationError, ValueError) as exc:
+            return _offline_failure(
+                error=f"failed to load verification report: {exc}",
+                outcome=RunOutcome.configuration_error,
+                diff_path=str(self.materialization.path),
+            )
         prompt = build_offline_review_prompt(
             diff_path=self.materialization.path,
             base_ref=self.materialization.base_ref,
             extra=self.prompt_extra,
             json_mode=output_schema is not None,
+            verification_report=verification_report,
         )
 
         if self.dry_run:
@@ -863,6 +895,7 @@ class _OfflineDiffReviewRun:
             from mergecraft.utils.review_result_cache import (
                 cache_key_for_diff_path,
                 load_review_result,
+                verification_report_cache_digest,
             )
 
             self.cache_key = cache_key_for_diff_path(
@@ -873,6 +906,7 @@ class _OfflineDiffReviewRun:
                 json_mode=self.json_path is not None,
                 base_ref=self.materialization.base_ref,
                 cwd=self.cwd,
+                verification_report_digest=verification_report_cache_digest(verification_report),
             )
             cached = load_review_result(self.cache_key)
             if cached is not None:
@@ -935,6 +969,7 @@ async def _run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     engine: ReviewEngine[OfflineReviewResult] | None = None,
+    verification_report_path: Path | None = None,
     with_coverage: bool = False,
     with_mutation: bool = False,
 ) -> OfflineReviewResult:
@@ -1000,6 +1035,7 @@ async def _run_offline_diff_review(
         evidence_packet_path=evidence_packet_path,
         on_finding=on_finding,
         read_cache=use_cache,
+        verification_report_path=verification_report_path,
         with_coverage=with_coverage,
         with_mutation=with_mutation,
     )

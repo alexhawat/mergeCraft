@@ -614,6 +614,18 @@ def _default_jev_packs() -> dict[str, bool]:
     return {pack_id: True for pack_id in _JEV_PACK_IDS}
 
 
+class VerifyBehaviorSettings(BaseModel):
+    """Verify-behavior kill switch. Invoking the CLI still requires trust.
+
+    ``enabled: false`` refuses the run. ``enabled: true`` cannot re-enable the
+    capability on an untrusted tier.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = True
+
+
 class JevSettings(BaseModel):
     """Opt-in Jev / System One block. Off by default (D4, D8).
 
@@ -764,6 +776,10 @@ class RepoSettings(BaseModel):
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
     jev: JevSettings = Field(default_factory=JevSettings)
+    verify_behavior: VerifyBehaviorSettings = Field(
+        default_factory=VerifyBehaviorSettings,
+        alias="verifyBehavior",
+    )
     run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
     enterprise: EnterpriseSettings = Field(default_factory=EnterpriseSettings)
     # #477 / BA — operator provider registry (structure only; secrets in ``.env``).

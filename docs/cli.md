@@ -139,6 +139,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft trust set-self-review <level>` | Write `trust.selfReview` to the committed config at `--cwd`. |
 | `mergecraft trust show` | Show the effective trust policy, level, and resolution source. |
 | `mergecraft update` | Reinstall mergecraft from GitHub using `uv tool install --reinstall`. |
+| `mergecraft verify-behavior` | Reproduce a bug or verify acceptance criteria in a running app. |
 | `mergecraft version` | Show the mergeCraft package version. |
 | `mergecraft watch --pr N` | Stream a PR/issue timeline as one JSON line per new event. |
 | `mergecraft workflow agents setmodel --agent AGENT` | Wire an agent's primary model into a mergeCraft workflow step. |

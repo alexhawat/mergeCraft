@@ -442,6 +442,7 @@ scheduled runs: [`docs/workflows.md`](docs/workflows.md).
 | 📡 **[SARIF](docs/glossary.md#sarif) upload (opt-in)** | Publish analyzer findings to GitHub code scanning |
 | 📈 **Tracing (opt-in)** | Span trees to JSONL, Logfire, or OTLP — [`docs/TRACING.md`](docs/TRACING.md) |
 | 💻 **Offline mode** | `mergecraft review` on local diffs, worktrees, or cloned repos |
+| 🌐 **Behaviour verification** | `mergecraft verify-behavior` writes a versioned report; `mergecraft review --verification-report` consumes it (fenced, separate from code findings; blocked stays visible; no report leaves the review unchanged); trusted-tier only; custom browser-use + JEV driver — [`docs/verify-behavior.md`](docs/verify-behavior.md) |
 
 **Terminal verdict (default: enforce).** A run without a validated
 `submit_review_verdict` reports `inconclusive`. Set `gates.terminal_verdict: shadow`
@@ -481,6 +482,7 @@ When `harness:` is unset, mergeCraft infers the runtime from the model slug — 
 | [`docs/agent-roster.md`](docs/agent-roster.md) | Agent roster, `provider status`, multi-reviewer merge, trust snapshot |
 | [`docs/workflows.md`](docs/workflows.md) | Examples 2–6, trust tiers, `pull_request_target` gotchas |
 | [`docs/cli.md`](docs/cli.md) | Full `mergecraft` command reference |
+| [`docs/verify-behavior.md`](docs/verify-behavior.md) | `mergecraft verify-behavior` and `review --verification-report`: flags, trust rule, artifact layout |
 | [`docs/trust-policy.md`](docs/trust-policy.md) | Operator trust knobs (`selfReview`, `agentSandbox`) |
 | [`docs/action-reference.md`](docs/action-reference.md) | Every Action `with:` input and output |
 | [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) | Contractual CLI exit codes |
