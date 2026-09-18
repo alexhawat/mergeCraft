@@ -117,7 +117,8 @@ Regression pins that must stay green:
 | Post-auth screenshots pass redaction | Command | `test_artifacts_and_lifecycle.py::test_post_auth_screenshots_are_redacted` |
 | App process terminated on success, failure, and blocked | Command | `test_artifacts_and_lifecycle.py::test_app_process_is_terminated_on_every_path` |
 | CLI flags: `--mode`, `--base`, `--start-command`, `--url`, `--criteria-file`, `--artifacts-dir`, `--issue-file`, `--input`, `--viewport` | Command | `test_cli.py::test_cli_exposes_issue_61_flags_plus_absorbed_extras` |
-| Extra-absent CLI verify / reproduce / `--input` still use the stub path | Command | `test_cli.py` (module fixture hides Playwright) |
+| Extra-absent CLI with `--artifacts-dir` names `mergecraft[browser]` and is not a pass | Command | `test_extra.py::test_cli_artifacts_dir_without_playwright_is_not_a_pass` |
+| Extra-absent CLI verify / reproduce / `--input` fail closed unless `--allow-stub` | Command | `test_cli.py` (module fixture hides Playwright) |
 | Report is nonce-fenced via `utils/fence.py` before any prompt | Review consume | `test_review_integration.py::test_report_enters_the_prompt_fenced` |
 | Review output has a distinct behaviour section | Review consume | `test_review_integration.py::test_review_includes_a_behavior_section` |
 | Blocked report is surfaced, not swallowed | Review consume | `test_review_integration.py::test_blocked_report_is_surfaced_not_swallowed` |

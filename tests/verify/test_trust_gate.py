@@ -102,6 +102,26 @@ async def test_config_cannot_reenable_on_untrusted() -> None:
     assert any("untrusted" in item.lower() for item in report.skipped_or_unverified)
 
 
+async def test_enabled_false_skips_even_when_offline(tmp_path: Path) -> None:
+    """``verify_behavior.enabled: false`` is a kill switch."""
+    from mergecraft.config.settings import RepoSettings, VerifyBehaviorSettings
+
+    settings = RepoSettings.model_validate({"verify_behavior": {"enabled": False}})
+    assert isinstance(settings.verify_behavior, VerifyBehaviorSettings)
+    assert settings.verify_behavior.enabled is False
+    sentinel = tmp_path / "started"
+    run = _runner()
+    report = await run(
+        make_input(startup_command=f"touch {sentinel}", credential_env_names=[]),
+        driver=FakeBrowserDriver(),
+        offline=True,
+        settings=settings,
+    )
+    assert report.status == "skipped"
+    assert any("enabled" in item.lower() for item in report.skipped_or_unverified)
+    assert not sentinel.exists()
+
+
 async def test_trusted_offline_is_not_skipped_for_trust() -> None:
     """A trusted local run may proceed (fake driver); skip reason is not untrusted."""
     run = _runner()

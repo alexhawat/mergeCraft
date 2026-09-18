@@ -9,21 +9,23 @@ not a typed finding: a behavioural mismatch has no diff line to anchor to.
 ## Command
 
 `mergecraft verify-behavior` reproduces a bug or verifies acceptance criteria
-against a running app. Invoking the CLI is the opt-in; `verify_behavior.enabled`
-in `.mergecraft/config.yaml` is not a kill switch and is not a blocking review
-gate. The command is trusted-tier only. On a local operator machine (no
-`GITHUB_EVENT_PATH` / `GITHUB_EVENT_NAME`) it runs. In GitHub Actions it
-reads those variables: a fork `pull_request` or `pull_request_target` is
-inert and the report status is `skipped`, so a PR-authored
-`startup_command` does not run. `shell: disabled` is also inert.
+against a running app. Invoking the CLI is the opt-in.
+`verify_behavior.enabled: false` in `.mergecraft/config.yaml` is a kill
+switch and refuses the run (report status `skipped`). The command is
+trusted-tier only. On a local operator machine (no `GITHUB_EVENT_PATH` /
+`GITHUB_EVENT_NAME`) it runs unless that kill switch is set. In GitHub
+Actions it reads those variables: a fork `pull_request` or
+`pull_request_target` is inert and the report status is `skipped`, so a
+PR-authored `startup_command` does not run. `shell: disabled` is also inert.
 `enabled: true` cannot re-enable an untrusted tier.
 
 The Playwright implementation lives behind the optional `mergecraft[browser]`
 extra. `--help` works without that extra. When the extra is installed, the
 command launches headless Chromium with async Playwright inside the runner
-(no sync `Page.goto`); the stub driver is used only when the extra is absent.
-A run that needs a real browser names `mergecraft[browser]` when the extra is
-absent.
+(no sync `Page.goto`). Without the extra the command fails closed and names
+`mergecraft[browser]` — including when `--artifacts-dir` or `--input` is set.
+`--allow-stub` is the only way to use the non-browser stub (tests). The
+production Action image does not include Playwright.
 
 Flags:
 
@@ -38,6 +40,7 @@ Flags:
 | `--issue-file` | Issue or repro notes (reproduce) |
 | `--input` | YAML verification input |
 | `--viewport` | Pixel size, for example `1280x720` |
+| `--allow-stub` | Tests only: permit the non-browser stub when the extra is absent |
 
 ### Verify a feature
 
@@ -53,11 +56,29 @@ mergecraft verify-behavior \
 
 `criteria.md` is one criterion per line (`- Clear button removes the image`).
 The run writes `report.json` and redacted console logs under `--artifacts-dir`.
-This version opens the URL, captures page text and a screenshot, and scores
-each criterion from that text (`unverified` when empty; `fail` when the page
-contains `still visible` or `mismatch`; otherwise `pass`). The driver protocol
-exposes click, fill, and type; free-text criteria are not turned into those
-actions.
+The extra is required for this command; skipping `pip install` with
+`--artifacts-dir` still names `mergecraft[browser]` and does not exit 0 as a
+pass.
+
+After navigate, optional YAML `actions` (`click` / `fill` / `type`) are
+driven through the Playwright protocol. Each acceptance criterion is scored
+from the page text against that criterion's own wording (`unverified` when
+empty; a criterion that names `still visible` or `mismatch` fails only when
+that phrase is on the page; otherwise pass when the criterion's significant
+tokens all appear). Verify with no criteria is `partial`, not `pass`. When
+`--start-command` is set, navigate retries for up to 15s on connection
+refused so a slow app can come up.
+
+YAML `actions` example:
+
+```yaml
+actions:
+  - action: fill
+    selector: "#email"
+    text: user@example.com
+  - action: click
+    selector: "#submit"
+```
 
 ### Reproduce a bug
 
@@ -71,8 +92,9 @@ mergecraft verify-behavior \
   --artifacts-dir .mergecraft/artifacts/issues/61/repro
 ```
 
-`issue.md` holds the repro steps. The report records observed versus expected
-and a step list. Credentials are env-var **names** only (`credential_env_names`
+`issue.md` holds the repro notes. Reproduce is `reproduced` only when those
+notes' significant tokens appear in the page text — a non-empty homepage is
+not a hit. Credentials are env-var **names** only (`credential_env_names`
 in YAML); values never appear in the report JSON.
 
 `schema_version` is required and pinned to **`1.0.0`**. The JSON Schema is
@@ -96,7 +118,7 @@ pip install 'merge-craft[browser]'
 The extra installs the Playwright Python package only. It does not download
 browser binaries, and the production Action image does not include a browser.
 When the extra is absent, the gate names `mergecraft[browser]` rather than
-raising a raw import error.
+raising a raw import error, including when `--artifacts-dir` is set.
 
 CI (`make ci` / `make test`) never launches a live browser. Unit tests drive
 an in-process fake. A real-browser smoke test, if added later, must be marked
@@ -184,6 +206,7 @@ are absorbed into the same contract.
 | `prior_screenshots` | 63 |
 | `repro_notes` | 63 |
 | `yaml_input` | 62 |
+| `actions` | click / fill / type steps (this CLI) |
 
 ### Output
 

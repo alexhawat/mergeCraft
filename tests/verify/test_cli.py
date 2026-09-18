@@ -48,7 +48,7 @@ def test_cli_exposes_issue_61_flags_plus_absorbed_extras() -> None:
         assert flag in text, flag
 
 
-def test_cli_verify_mode_writes_a_report(tmp_path: Path) -> None:
+def test_cli_verify_mode_errors_when_extra_absent(tmp_path: Path) -> None:
     artifacts = tmp_path / "arts"
     criteria = tmp_path / "criteria.md"
     criteria.write_text("- Clear button removes the image\n", encoding="utf-8")
@@ -68,9 +68,33 @@ def test_cli_verify_mode_writes_a_report(tmp_path: Path) -> None:
             "true",
         ],
     )
-    assert result.exit_code == 0 or result.exit_code == 1
-    written = list(artifacts.rglob("*.json"))
-    assert written
+    combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
+    assert result.exit_code != 0
+    assert "mergecraft[browser]" in combined
+    assert "pass" not in result.stdout.lower()
+
+
+def test_cli_allow_stub_writes_a_report(tmp_path: Path) -> None:
+    artifacts = tmp_path / "arts"
+    criteria = tmp_path / "criteria.md"
+    criteria.write_text("- stub page is visible\n", encoding="utf-8")
+    result = _RUNNER.invoke(
+        app,
+        [
+            "verify-behavior",
+            "--mode",
+            "verify",
+            "--url",
+            "http://127.0.0.1:8765/",
+            "--criteria-file",
+            str(criteria),
+            "--artifacts-dir",
+            str(artifacts),
+            "--allow-stub",
+        ],
+    )
+    assert result.exit_code in {0, 1}
+    assert list(artifacts.rglob("*.json"))
 
 
 def test_cli_reproduce_mode_accepts_issue_file(tmp_path: Path) -> None:
@@ -93,6 +117,7 @@ def test_cli_reproduce_mode_accepts_issue_file(tmp_path: Path) -> None:
             "origin/main",
             "--viewport",
             "1280x720",
+            "--allow-stub",
         ],
     )
     assert result.exit_code in {0, 1}
@@ -103,10 +128,6 @@ def test_cli_accepts_yaml_input(tmp_path: Path) -> None:
     yaml_path = tmp_path / "spec.yaml"
     yaml_path.write_text(SAMPLE_YAML_INPUT, encoding="utf-8")
     result = _RUNNER.invoke(app, ["verify-behavior", "--input", str(yaml_path)])
-    assert result.exit_code in {0, 1}
-    combined = f"{result.stdout}\n{result.stderr}"
-    assert (
-        "blocked" in combined.lower()
-        or "verify" in combined.lower()
-        or list(tmp_path.rglob("*.json"))
-    )
+    combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
+    assert result.exit_code != 0
+    assert "mergecraft[browser]" in combined

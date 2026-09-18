@@ -2,8 +2,9 @@
 
 Never imports Playwright. When ``mergecraft[browser]`` is present this module
 calls ``launch_playwright_driver`` (Playwright is imported only inside that
-function). When the extra is absent, a stub driver writes a report for unit
-tests and for ``--artifacts-dir`` / ``--input`` runs.
+function). When the extra is absent, the command fails closed unless
+``--allow-stub`` is set (unit tests). ``--artifacts-dir`` does not opt into
+the stub.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from mergecraft.verify.models import (
     load_verification_input,
 )
 from mergecraft.verify.playwright_driver import launch_playwright_driver
-from mergecraft.verify.runner import run_verify_behavior
+from mergecraft.verify.runner import collect_skip_reasons, run_verify_behavior
 
 if TYPE_CHECKING:
     from mergecraft.verify.driver import BrowserDriver
@@ -228,8 +229,9 @@ def _resolve_driver(
     """Return a live Playwright driver, a stub, or raise when the extra is required.
 
     Extra missing + ``allow_stub=False`` raises ``BrowserExtraMissingError``.
-    Extra missing + ``allow_stub=True`` returns ``_StubBrowserDriver``.
-    Extra present always calls ``launch_playwright_driver`` — never the stub.
+    Extra missing + ``allow_stub=True`` (``--allow-stub``) returns
+    ``_StubBrowserDriver``. Extra present always calls
+    ``launch_playwright_driver`` — never the stub.
     """
     if _extra_missing():
         if not allow_stub:
@@ -307,9 +309,13 @@ def run(
         help="YAML verification input (union fields).",
     ),
     viewport: str | None = typer.Option(None, "--viewport", help="Pixel size, e.g. 1280x720."),
+    allow_stub: bool = typer.Option(
+        False,
+        "--allow-stub",
+        help="Permit the non-browser stub when mergecraft[browser] is absent.",
+    ),
 ) -> None:
     """Reproduce a bug or verify acceptance criteria in a running app."""
-    allow_stub = artifacts_dir is not None or input_path is not None
     if input_path is not None:
         spec = load_verification_input(input_path)
     else:
@@ -324,15 +330,24 @@ def run(
             viewport=viewport,
         )
 
-    try:
-        driver = _resolve_driver(allow_stub=allow_stub, viewport=spec.viewport)
-    except BrowserExtraMissingError as exc:
-        # Plain echo: Rich would treat ``[browser]`` as a markup tag.
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
-
     settings = load_repo_settings(root=Path.cwd())
     offline, event, event_name = _cli_trust_context()
+    skip = collect_skip_reasons(
+        event=event,
+        event_name=event_name,
+        shell=settings.shell,
+        settings=settings,
+        offline=offline,
+    )
+    driver: BrowserDriver | None = None
+    if not skip:
+        try:
+            driver = _resolve_driver(allow_stub=allow_stub, viewport=spec.viewport)
+        except BrowserExtraMissingError as exc:
+            # Plain echo: Rich would treat ``[browser]`` as a markup tag.
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
+
     try:
         report = run_async(
             run_verify_behavior(
@@ -346,7 +361,8 @@ def run(
             )
         )
     finally:
-        _close_driver(driver)
+        if driver is not None:
+            _close_driver(driver)
     typer.echo(f"{report.mode} {report.status}")
     if report.blocked is not None:
         typer.echo("blocked: " + ", ".join(report.blocked.missing))

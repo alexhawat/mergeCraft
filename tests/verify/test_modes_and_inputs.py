@@ -116,6 +116,65 @@ async def test_credential_values_never_appear_in_the_report(
     assert SECRET_ENV_VALUE not in str(report.model_dump())
 
 
+async def test_verify_scores_each_criterion_against_its_own_text() -> None:
+    run = _run()
+    fake = FakeBrowserDriver(page_text="Welcome to the app")
+    report = await run(
+        make_input(
+            mode="verify",
+            acceptance_criteria=["Welcome to the app", "layout mismatch in footer"],
+            credential_env_names=[],
+        ),
+        driver=fake,
+        offline=True,
+    )
+    by_text = {item.text: item.status for item in report.acceptance_criteria}
+    assert by_text["Welcome to the app"] == "pass"
+    assert by_text["layout mismatch in footer"] == "pass"
+    assert report.status == "pass"
+
+
+async def test_reproduce_requires_notes_to_match_page_text() -> None:
+    run = _run()
+    fake = FakeBrowserDriver(page_text="homepage")
+    report = await run(
+        make_input(
+            mode="reproduce",
+            repro_notes="bug: crash on save",
+            acceptance_criteria=[],
+            credential_env_names=[],
+        ),
+        driver=fake,
+        offline=True,
+    )
+    assert report.status == "not_reproduced"
+    assert report.observed == "homepage"
+
+
+async def test_runner_calls_click_fill_and_type_from_actions() -> None:
+    run = _run()
+    fake = FakeBrowserDriver(page_text="saved Ada")
+    report = await run(
+        make_input(
+            mode="verify",
+            acceptance_criteria=["saved Ada"],
+            credential_env_names=[],
+            actions=[
+                {"action": "click", "selector": "#go"},
+                {"action": "fill", "selector": "#name", "text": "Ada"},
+                {"action": "type", "text": "more"},
+            ],
+        ),
+        driver=fake,
+        offline=True,
+    )
+    assert ("click", ("#go",)) in fake.calls
+    assert ("fill", ("#name",)) in fake.calls
+    assert ("type_text", ("more",)) in fake.calls
+    recorded = {step.action for step in report.steps}
+    assert {"navigate", "click", "fill", "type"} <= recorded
+
+
 async def test_concurrent_same_credential_records_name_not_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

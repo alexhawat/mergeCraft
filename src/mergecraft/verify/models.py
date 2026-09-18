@@ -14,6 +14,7 @@ Exports:
     VerificationStep: One recorded action.
     CriterionResult: Per-criterion status and evidence paths.
     ReportArtifacts: Screenshot, log, and nullable video/trace paths.
+    InteractionAction: Optional click / fill / type step on the input spec.
     VerificationInput: Union input from issues 61, 62, and 63.
     VerificationReport: Versioned report artifact (not a Finding).
     verification_report_schema: JSON Schema derived from ``VerificationReport``.
@@ -92,6 +93,29 @@ class VerificationStep(BaseModel):
     result: str
 
 
+class InteractionAction(BaseModel):
+    """One optional click / fill / type step on the input spec."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["click", "fill", "type"]
+    selector: str = ""
+    text: str = ""
+
+    @model_validator(mode="after")
+    def _require_selector_or_text(self) -> Self:
+        if self.action == "click" and not self.selector.strip():
+            msg = "click requires selector"
+            raise ValueError(msg)
+        if self.action == "fill" and (not self.selector.strip() or not self.text):
+            msg = "fill requires selector and text"
+            raise ValueError(msg)
+        if self.action == "type" and not self.text:
+            msg = "type requires text"
+            raise ValueError(msg)
+        return self
+
+
 class CriterionResult(BaseModel):
     """One acceptance criterion with a closed status and evidence paths."""
 
@@ -141,6 +165,7 @@ class VerificationInput(BaseModel):
     prior_screenshots: list[str]
     repro_notes: str
     yaml_input: str | None = None
+    actions: list[InteractionAction] = Field(default_factory=list)
 
 
 class VerificationReport(BaseModel):

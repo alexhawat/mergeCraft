@@ -78,6 +78,41 @@ def test_verify_behavior_cli_errors_when_extra_absent() -> None:
     assert "mergecraft[browser]" in combined
 
 
+def test_cli_artifacts_dir_without_playwright_is_not_a_pass(tmp_path: Path) -> None:
+    """``--artifacts-dir`` must not stub-pass when Playwright is hidden."""
+    hidden = {
+        name: sys.modules.pop(name)
+        for name in list(sys.modules)
+        if name == "playwright" or name.startswith("playwright.")
+    }
+    sys.modules["playwright"] = None  # type: ignore[assignment]
+    artifacts = tmp_path / "arts"
+    try:
+        result = _RUNNER.invoke(
+            app,
+            [
+                "verify-behavior",
+                "--mode",
+                "verify",
+                "--url",
+                "http://127.0.0.1:8765/",
+                "--artifacts-dir",
+                str(artifacts),
+            ],
+        )
+    finally:
+        sys.modules.pop("playwright", None)
+        sys.modules.update(hidden)
+    combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
+    assert result.exit_code != 0
+    assert "pass" not in result.stdout.lower()
+    assert "mergecraft[browser]" in combined
+    report = artifacts / "report.json"
+    if report.exists():
+        payload = json.loads(report.read_text(encoding="utf-8"))
+        assert payload.get("status") != "pass"
+
+
 def test_cli_fork_event_does_not_run_start_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

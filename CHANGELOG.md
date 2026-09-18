@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `mergecraft verify-behavior` fails closed when `mergecraft[browser]` is
+  missing, even with `--artifacts-dir` / `--input`; `--allow-stub` is the only
+  stub opt-in (#61)
+- `verify_behavior.enabled: false` skips the run (kill switch); default remains
+  enabled so invoking the CLI still runs on a trusted checkout (#61)
+
 - `mergecraft verify-behavior` launches headless Chromium when
   `mergecraft[browser]` is installed; the stub driver is used only when that
   extra is absent (#61)
@@ -47,12 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft verify-behavior` no longer crashes after launching Chromium when
   `mergecraft[browser]` is installed (#61)
 
+- Verify criteria are scored per criterion; reproduce matches page text to
+  repro notes; `--start-command` retries navigate while the app comes up (#61)
+
 ### Added
 
-- `mergecraft verify-behavior` reproduces a bug or verifies acceptance
-  criteria in a running app, writes a versioned report under
-  `.mergecraft/artifacts/`, and stays inert on an untrusted tier or when
-  `shell: disabled` (#61)
+- `mergecraft verify-behavior` can reproduce a bug or check a running app and
+  write a versioned report under `.mergecraft/artifacts/`. It stays inert on an
+  untrusted tier or when `shell: disabled`. Optional YAML `actions` drive
+  click / fill / type. This does not close #61.
 - Optional `mergecraft[browser]` extra for Playwright-backed behaviour
   verification; the base install and `make ci` stay browser-free (#61)
 

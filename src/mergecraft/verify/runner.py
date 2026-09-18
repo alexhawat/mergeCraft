@@ -4,6 +4,7 @@ This module never imports Playwright. Tests inject ``FakeBrowserDriver``;
 the CLI injects a non-Playwright stub when the optional extra is absent.
 
 Exports:
+    collect_skip_reasons: Trust, shell, and enabled:false skip list.
     run_verify_behavior: Trusted-tier gate, process lifecycle, report write.
 """
 
@@ -11,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shlex
 import signal
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -26,6 +29,7 @@ from mergecraft.verify.models import (
     BlockedDetails,
     CriterionResult,
     CriterionStatus,
+    InteractionAction,
     ReportArtifacts,
     ReportStatus,
     VerificationInput,
@@ -39,7 +43,44 @@ if TYPE_CHECKING:
 
 _MAX_LOG_CHARS = 4000
 _STARTUP_SETTLE_S = 0.15
+_NAVIGATE_RETRY_S = 0.25
+_NAVIGATE_READY_S = 15.0
 _REAP_WAIT_S = 3.0
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "to",
+        "of",
+        "in",
+        "on",
+        "for",
+        "with",
+        "that",
+        "this",
+        "from",
+        "into",
+        "then",
+        "when",
+        "does",
+        "must",
+        "should",
+        "will",
+        "not",
+        "are",
+        "was",
+        "is",
+        "be",
+        "it",
+        "as",
+        "at",
+        "by",
+    }
+)
 
 
 def _now() -> str:
@@ -147,15 +188,131 @@ def _missing_env_credentials(spec: VerificationInput) -> list[str]:
     return [name for name in spec.credential_env_names if not os.environ.get(name)]
 
 
+def collect_skip_reasons(
+    *,
+    event: dict[str, Any] | None = None,
+    event_name: str | None = None,
+    shell: str | None = None,
+    settings: RepoSettings | None = None,
+    offline: bool = False,
+) -> list[str]:
+    """Return skip reasons that must run before a browser or start-command.
+
+    Args:
+        event (dict[str, Any] | None): GitHub event payload.
+        event_name (str | None): Event name for ``derive_trust_tier``.
+        shell (str | None): Effective ``shell`` permission.
+        settings (RepoSettings | None): Repo config; ``enabled: false`` skips.
+        offline (bool): Local operator machine; skip the Actions trust gate.
+
+    Returns:
+        list[str]: Empty when the run may proceed.
+
+    Examples:
+        >>> collect_skip_reasons(offline=True)
+        []
+    """
+    skipped: list[str] = []
+    if not offline:
+        tier = derive_trust_tier(event, event_name=event_name)
+        if tier == "untrusted":
+            skipped.append("untrusted: behaviour verification is trusted-tier only")
+    effective_shell = _effective_shell(shell, settings)
+    if effective_shell == "disabled":
+        skipped.append("shell disabled: behaviour verification does not run when shell is disabled")
+    if settings is not None and settings.verify_behavior.enabled is False:
+        skipped.append("verify_behavior.enabled is false")
+    return skipped
+
+
+def _significant_tokens(text: str) -> list[str]:
+    return [
+        token
+        for token in _TOKEN_RE.findall(text.lower())
+        if len(token) > 2 and token not in _STOPWORDS
+    ]
+
+
+def _page_matches_expected(expected: str, page: str) -> bool:
+    tokens = _significant_tokens(expected)
+    if not tokens:
+        return bool(page.strip())
+    lowered = page.lower()
+    return all(token in lowered for token in tokens)
+
+
+def _is_transient_nav_error(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError | OSError):
+        return True
+    text = str(exc).lower()
+    needles = (
+        "econnrefused",
+        "connection refused",
+        "err_connection_refused",
+        "net::err_connection_refused",
+    )
+    return any(needle in text for needle in needles)
+
+
+async def _navigate_until_ready(driver: BrowserDriver, url: str, *, wait: bool) -> None:
+    if not wait:
+        await driver.navigate(url)
+        return
+    deadline = time.monotonic() + _NAVIGATE_READY_S
+    while True:
+        try:
+            await driver.navigate(url)
+            return
+        except (OSError, TimeoutError) as exc:
+            if time.monotonic() >= deadline:
+                raise
+            logger.debug("verify-behavior waiting for app after {}", type(exc).__name__)
+            await asyncio.sleep(_NAVIGATE_RETRY_S)
+        except ConnectionError:
+            raise
+        except Exception as exc:
+            if not _is_transient_nav_error(exc) or time.monotonic() >= deadline:
+                raise
+            logger.debug("verify-behavior waiting for app after {}", type(exc).__name__)
+            await asyncio.sleep(_NAVIGATE_RETRY_S)
+
+
+async def _apply_actions(
+    driver: BrowserDriver, actions: list[InteractionAction]
+) -> list[VerificationStep]:
+    recorded: list[VerificationStep] = []
+    for item in actions:
+        target = item.selector or item.text
+        try:
+            if item.action == "click":
+                await driver.click(item.selector)
+            elif item.action == "fill":
+                await driver.fill(item.selector, item.text)
+            else:
+                await driver.type_text(item.text)
+        except (ConnectionError, OSError, TimeoutError, RuntimeError) as exc:
+            recorded.append(
+                VerificationStep(action=item.action, target=target, result=f"error: {exc}")
+            )
+            raise
+        recorded.append(VerificationStep(action=item.action, target=target, result="ok"))
+    return recorded
+
+
 def _criterion_status(text: str, page: str, evidence: list[str]) -> CriterionResult:
     lowered = page.lower()
+    criterion = text.lower()
     status: CriterionStatus
-    if not page:
+    if not page.strip():
         status = "unverified"
-    elif "still visible" in lowered or "mismatch" in lowered:
-        status = "fail"
-    else:
+    elif "still visible" in criterion:
+        status = "fail" if "still visible" in lowered else "pass"
+    elif "mismatch" in criterion:
+        status = "fail" if "mismatch" in lowered else "pass"
+    elif _page_matches_expected(text, page):
         status = "pass"
+    else:
+        status = "fail"
     return CriterionResult(
         id=text[:48] or "criterion",
         text=text,
@@ -183,8 +340,8 @@ async def run_verify_behavior(
         event (dict[str, Any] | None, optional): GitHub event payload.
         event_name (str | None, optional): Event name for ``derive_trust_tier``.
         shell (str | None, optional): Effective ``shell`` permission.
-        settings (RepoSettings | None, optional): Repo config. ``enabled``
-            cannot re-enable an untrusted run.
+        settings (RepoSettings | None, optional): Repo config. ``enabled: false``
+            skips the run; ``enabled: true`` cannot override an untrusted tier.
         offline (bool, optional): Local/trusted CLI. Not skipped for trust.
 
     Returns:
@@ -195,14 +352,13 @@ async def run_verify_behavior(
         >>> inspect.iscoroutinefunction(run_verify_behavior)
         True
     """
-    skipped: list[str] = []
-    if not offline:
-        tier = derive_trust_tier(event, event_name=event_name)
-        if tier == "untrusted":
-            skipped.append("untrusted: behaviour verification is trusted-tier only")
-    effective_shell = _effective_shell(shell, settings)
-    if effective_shell == "disabled":
-        skipped.append("shell disabled: behaviour verification does not run when shell is disabled")
+    skipped = collect_skip_reasons(
+        event=event,
+        event_name=event_name,
+        shell=shell,
+        settings=settings,
+        offline=offline,
+    )
     if skipped:
         logger.info("verify-behavior skipped reasons={}", skipped)
         report = _build_report(spec, status="skipped", skipped_or_unverified=skipped)
@@ -245,7 +401,11 @@ async def run_verify_behavior(
             return report
 
         try:
-            await driver.navigate(spec.base_url)
+            await _navigate_until_ready(
+                driver,
+                spec.base_url,
+                wait=bool(spec.startup_command.strip()),
+            )
         except (ConnectionError, OSError, TimeoutError) as exc:
             logger.info("verify-behavior blocked unreachable url={}", spec.base_url)
             named = spec.base_url or str(exc)
@@ -262,6 +422,7 @@ async def run_verify_behavior(
                 _write_artifacts(Path(spec.artifacts_dir), report, "")
             return report
 
+        action_steps = await _apply_actions(driver, spec.actions)
         page = await driver.extract_text()
         dest_dir = Path(spec.artifacts_dir) if spec.artifacts_dir else Path.cwd()
         if spec.artifacts_dir:
@@ -282,6 +443,7 @@ async def run_verify_behavior(
 
         steps = [
             VerificationStep(action="navigate", target=spec.base_url, result="loaded"),
+            *action_steps,
         ]
         artifacts = ReportArtifacts(
             screenshots=screenshots,
@@ -297,7 +459,9 @@ async def run_verify_behavior(
                 spec.acceptance_criteria[0] if spec.acceptance_criteria else "expected behaviour"
             )
             observed = page or "no page text"
-            status: ReportStatus = "reproduced" if page else "not_reproduced"
+            status: ReportStatus = (
+                "reproduced" if _page_matches_expected(expected, page) else "not_reproduced"
+            )
             report = _build_report(
                 spec,
                 status=status,
@@ -311,12 +475,14 @@ async def run_verify_behavior(
             )
         else:
             statuses = {item.status for item in criteria}
-            if statuses == {"pass"}:
-                verify_status: ReportStatus = "pass"
+            skipped_criteria: list[str] = []
+            if not criteria:
+                verify_status: ReportStatus = "partial"
+                skipped_criteria.append("no acceptance criteria")
+            elif statuses == {"pass"}:
+                verify_status = "pass"
             elif statuses == {"fail"}:
                 verify_status = "fail"
-            elif not criteria:
-                verify_status = "pass"
             else:
                 verify_status = "partial"
             report = _build_report(
@@ -326,6 +492,7 @@ async def run_verify_behavior(
                 criteria=criteria,
                 observed=page,
                 expected="; ".join(spec.acceptance_criteria),
+                skipped_or_unverified=skipped_criteria,
                 artifacts=artifacts,
                 console_errors=console_errors,
                 credential_names=credential_names,

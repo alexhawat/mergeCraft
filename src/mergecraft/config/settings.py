@@ -578,15 +578,15 @@ def _default_jev_packs() -> dict[str, bool]:
 
 
 class VerifyBehaviorSettings(BaseModel):
-    """Reserved verify-behavior config. Invoking the CLI is the opt-in.
+    """Verify-behavior kill switch. Invoking the CLI still requires trust.
 
-    ``enabled`` is not a kill switch and is not a blocking review gate.
-    ``enabled: true`` cannot re-enable the capability on an untrusted tier.
+    ``enabled: false`` refuses the run. ``enabled: true`` cannot re-enable the
+    capability on an untrusted tier.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
-    enabled: bool = False
+    enabled: bool = True
 
 
 class JevSettings(BaseModel):

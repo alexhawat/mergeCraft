@@ -39,6 +39,7 @@ PINNED_INPUT_FIELDS: Final[frozenset[str]] = frozenset(
         "prior_screenshots",
         "repro_notes",
         "yaml_input",
+        "actions",
     }
 )
 PINNED_REPORT_FIELDS: Final[frozenset[str]] = frozenset(
@@ -223,6 +224,7 @@ def sample_input_payload(**overrides: Any) -> dict[str, Any]:
         "prior_screenshots": ["prior.png"],
         "repro_notes": "click Clear after upload",
         "yaml_input": None,
+        "actions": [],
     }
     payload.update(overrides)
     return payload
@@ -321,4 +323,7 @@ forbidden_network:
 prior_screenshots:
   - prior.png
 repro_notes: click Clear after upload
+actions:
+  - action: click
+    selector: "#clear"
 """
