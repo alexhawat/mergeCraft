@@ -1,7 +1,8 @@
 """Run reproduce / verify against an injected browser driver.
 
-This module never imports Playwright. Tests inject ``FakeBrowserDriver``;
-the CLI injects a non-Playwright stub when the optional extra is absent.
+This module never imports a browser automation library. Tests inject
+``FakeBrowserDriver``; the CLI uses ``--allow-stub`` or
+``mergecraft.browser.launch_browser_driver``.
 
 Exports:
     collect_skip_reasons: Trust, shell, and enabled:false skip list.
@@ -352,7 +353,7 @@ async def run_verify_behavior(
     Args:
         spec (VerificationInput): Union input from issues 61, 62, and 63.
         driver (BrowserDriver | None, optional): Injected protocol. Tests pass
-            a fake; the CLI passes a stub when Playwright is unavailable.
+            a fake; the CLI binds browser-use or ``--allow-stub``.
         event (dict[str, Any] | None, optional): GitHub event payload.
         event_name (str | None, optional): Event name for ``derive_trust_tier``.
         shell (str | None, optional): Effective ``shell`` permission.

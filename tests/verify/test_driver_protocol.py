@@ -119,7 +119,7 @@ async def test_unreachable_url_raises_on_protocol_navigate() -> None:
 
 
 def test_protocol_module_does_not_import_playwright() -> None:
-    """Nothing outside the Playwright implementation module may import Playwright."""
+    """Nothing in the verify seam may import Playwright."""
     import sys
 
     existing = {name for name in sys.modules if name.split(".", 1)[0] == "playwright"}

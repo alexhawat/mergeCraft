@@ -1,8 +1,8 @@
 """Thin, swappable browser-driver protocol for behaviour verification.
 
-Every unit test targets this protocol with an in-process fake. The Playwright
-implementation lives in ``mergecraft.verify.playwright_driver`` and is the only
-module allowed to import Playwright.
+Every unit test targets this protocol with an in-process fake. Live browsing
+binds to ``mergecraft.browser.launch_browser_driver`` (custom browser-use +
+JEV stack — not Playwright).
 
 Exports:
     BrowserDriver: Runtime-checkable async protocol (navigate, extract, click,
@@ -106,7 +106,7 @@ class BrowserDriver(Protocol):
         """Press a single named key (for example ``Enter``).
 
         Args:
-            key (str): Playwright / DOM key name.
+            key (str): DOM key name (for example ``Enter``).
 
         Returns:
             None: The key event is sent to the page.

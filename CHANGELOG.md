@@ -9,15 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `mergecraft verify-behavior` fails closed when `mergecraft[browser]` is
-  missing, even with `--artifacts-dir` / `--input`; `--allow-stub` is the only
-  stub opt-in (#61)
+- PR #742 drops Playwright as the behaviour-verification driver. Live browsing
+  binds to `mergecraft.browser` (custom browser-use + JEV) and fails closed
+  until the CDP driver is wired (#752). The `mergecraft[browser]` extra and
+  `playwright==1.63.0` pin are removed (#752, #61)
+- `mergecraft verify-behavior` fails closed when the browser-use stack is
+  unavailable, even with `--artifacts-dir` / `--input`; `--allow-stub` is the only
+  stub opt-in (#61, #752)
 - `verify_behavior.enabled: false` skips the run (kill switch); default remains
   enabled so invoking the CLI still runs on a trusted checkout (#61)
-
-- `mergecraft verify-behavior` launches headless Chromium when
-  `mergecraft[browser]` is installed; the stub driver is used only when that
-  extra is absent (#61)
 
 - `verify_candidate` verifies the commit that introduced an image digest rather
   than whichever commit the candidate range happens to end at. It treated any
@@ -47,12 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   untrusted checkout, including when a workflow treats the workspace as trusted
   (#61)
 
-- Live `mergecraft verify-behavior` no longer hangs when opening a page with
-  `mergecraft[browser]` installed (#61)
-
-- `mergecraft verify-behavior` no longer crashes after launching Chromium when
-  `mergecraft[browser]` is installed (#61)
-
 - Verify criteria are scored per criterion; reproduce matches page text to
   repro notes; `--start-command` retries navigate while the app comes up (#61)
 
@@ -62,8 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write a versioned report under `.mergecraft/artifacts/`. It stays inert on an
   untrusted tier or when `shell: disabled`. Optional YAML `actions` drive
   click / fill / type. This does not close #61.
-- Optional `mergecraft[browser]` extra for Playwright-backed behaviour
-  verification; the base install and `make ci` stay browser-free (#61)
 
 - A versioned behaviour-verification report (`schema_version` 1.0.0) records
   what was observed, which criteria passed, and what blocked the run — without

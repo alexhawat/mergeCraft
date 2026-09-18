@@ -19,13 +19,12 @@ Actions it reads those variables: a fork `pull_request` or
 PR-authored `startup_command` does not run. `shell: disabled` is also inert.
 `enabled: true` cannot re-enable an untrusted tier.
 
-The Playwright implementation lives behind the optional `mergecraft[browser]`
-extra. `--help` works without that extra. When the extra is installed, the
-command launches headless Chromium with async Playwright inside the runner
-(no sync `Page.goto`). Without the extra the command fails closed and names
-`mergecraft[browser]` — including when `--artifacts-dir` or `--input` is set.
-`--allow-stub` is the only way to use the non-browser stub (tests). The
-production Action image does not include Playwright.
+Live browsing binds to the **custom browser-use stack** under
+`mergecraft.browser` (CDP host Chrome — not Playwright). JEV modules
+(`mergecraft.jev.*`) will score verification judgments once the CDP driver is
+wired (#752). Until then the CLI **fails closed** when the stack is
+unavailable. `--allow-stub` is the only way to use the non-browser stub
+(tests). The production Action image does not include a browser.
 
 Flags:
 
@@ -40,12 +39,13 @@ Flags:
 | `--issue-file` | Issue or repro notes (reproduce) |
 | `--input` | YAML verification input |
 | `--viewport` | Pixel size, for example `1280x720` |
-| `--allow-stub` | Tests only: permit the non-browser stub when the extra is absent |
+| `--allow-stub` | Tests only: permit the non-browser stub when live browsing is unavailable |
 
 ### Verify a feature
 
 ```bash
-pip install 'merge-craft[browser]'
+# Start Chrome with remote debugging, then:
+export MERGECRAFT_CDP_URL=http://127.0.0.1:9222
 mergecraft verify-behavior \
   --mode verify \
   --url http://127.0.0.1:8765/ \
@@ -56,12 +56,11 @@ mergecraft verify-behavior \
 
 `criteria.md` is one criterion per line (`- Clear button removes the image`).
 The run writes `report.json` and redacted console logs under `--artifacts-dir`.
-The extra is required for this command; skipping `pip install` with
-`--artifacts-dir` still names `mergecraft[browser]` and does not exit 0 as a
-pass.
+Without a reachable CDP endpoint (or until #752 wires the driver), the command
+does not exit 0 as a pass — including when `--artifacts-dir` is set.
 
 After navigate, optional YAML `actions` (`click` / `fill` / `type`) are
-driven through the Playwright protocol. Each acceptance criterion is scored
+driven through the `BrowserDriver` protocol. Each acceptance criterion is scored
 from the page text against that criterion's own wording (`unverified` when
 empty; a criterion that names `still visible` or `mismatch` fails only when
 that phrase is on the page; otherwise pass when the criterion's significant
@@ -101,33 +100,27 @@ in YAML); values never appear in the report JSON.
 derived from the Pydantic models. Markdown is a **view** of that JSON, not a
 second source of truth.
 
-## Optional extra and driver
+## Driver stack
 
 The driver is a thin protocol (`BrowserDriver`): navigate, extract text, click,
 fill, type, press key, scroll, screenshot, read/set cookies, and read console.
-Playwright is the one implementation, isolated in
-`mergecraft.verify.playwright_driver`. Nothing else in mergeCraft imports
+Live browsing binds to `mergecraft.browser.launch_browser_driver` (custom
+browser-use over CDP plus JEV — not Playwright). Nothing in mergeCraft imports
 Playwright.
 
-Install the optional extra to use that implementation:
-
-```text
-pip install 'merge-craft[browser]'
-```
-
-The extra installs the Playwright Python package only. It does not download
-browser binaries, and the production Action image does not include a browser.
-When the extra is absent, the gate names `mergecraft[browser]` rather than
-raising a raw import error, including when `--artifacts-dir` is set.
+Start Chrome with remote debugging and set `MERGECRAFT_CDP_URL` when the default
+`http://127.0.0.1:9222` is wrong. When the stack is unavailable the CLI fails
+closed rather than raising a raw import error, including when `--artifacts-dir`
+is set.
 
 CI (`make ci` / `make test`) never launches a live browser. Unit tests drive
 an in-process fake. A real-browser smoke test, if added later, must be marked
 `integration` so those targets exclude it.
 
 Cookie handling on the protocol uses name/value dicts. Reports and logs record
-credential **names** only — never values. Playwright tracing may fill the
-nullable `artifacts.trace` field at no extra pipeline cost; there is no video
-recording pipeline.
+credential **names** only — never values. A nullable `artifacts.trace` field
+may be filled when the driver records tracing at no extra pipeline cost; there
+is no video recording pipeline.
 
 ## Status vocabulary
 

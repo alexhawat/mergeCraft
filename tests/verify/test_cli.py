@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -22,19 +22,10 @@ _RUNNER = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def _extra_absent_stub_path() -> Iterator[None]:
-    """These cases pin the extra-absent stub path, not a live Playwright launch."""
-    hidden = {
-        name: sys.modules.pop(name)
-        for name in list(sys.modules)
-        if name == "playwright" or name.startswith("playwright.")
-    }
-    sys.modules["playwright"] = None  # type: ignore[assignment]
-    try:
+def _browser_stack_unavailable() -> Iterator[None]:
+    """These cases pin the fail-closed path, not a live browser-use launch."""
+    with patch("mergecraft.browser.launch.browser_stack_available", return_value=False):
         yield
-    finally:
-        sys.modules.pop("playwright", None)
-        sys.modules.update(hidden)
 
 
 def test_verify_behavior_is_registered() -> None:
@@ -51,7 +42,7 @@ def test_cli_exposes_issue_61_flags_plus_absorbed_extras() -> None:
         assert flag in text, flag
 
 
-def test_cli_verify_mode_errors_when_extra_absent(tmp_path: Path) -> None:
+def test_cli_verify_mode_errors_when_browser_stack_unavailable(tmp_path: Path) -> None:
     artifacts = tmp_path / "arts"
     criteria = tmp_path / "criteria.md"
     criteria.write_text("- Clear button removes the image\n", encoding="utf-8")
@@ -73,7 +64,7 @@ def test_cli_verify_mode_errors_when_extra_absent(tmp_path: Path) -> None:
     )
     combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
     assert result.exit_code != 0
-    assert "mergecraft[browser]" in combined
+    assert "browser-use" in combined.lower() or "cdp" in combined.lower()
     assert "pass" not in result.stdout.lower()
 
 
@@ -133,7 +124,7 @@ def test_cli_accepts_yaml_input(tmp_path: Path) -> None:
     result = _RUNNER.invoke(app, ["verify-behavior", "--input", str(yaml_path)])
     combined = f"{result.stdout}\n{result.stderr}\n{result.exception}"
     assert result.exit_code != 0
-    assert "mergecraft[browser]" in combined
+    assert "browser-use" in combined.lower() or "cdp" in combined.lower()
 
 
 def test_cli_action_failure_writes_report_json(

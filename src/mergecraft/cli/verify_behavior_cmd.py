@@ -1,10 +1,9 @@
 """``mergecraft verify-behavior`` — reproduce a bug or verify acceptance criteria.
 
-Never imports Playwright. When ``mergecraft[browser]`` is present this module
-calls ``launch_playwright_driver`` (Playwright is imported only inside that
-function). When the extra is absent, the command fails closed unless
-``--allow-stub`` is set (unit tests). ``--artifacts-dir`` does not opt into
-the stub.
+Never imports Playwright. Live browsing binds to ``mergecraft.browser`` (custom
+browser-use + JEV). When the stack is unavailable the command fails closed unless
+``--allow-stub`` is set (unit tests). ``--artifacts-dir`` does not opt into the
+stub.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 import typer
 from loguru import logger
 
+from mergecraft.browser import BrowserStackUnavailableError, launch_browser_driver
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_AUDIT_VERIFY_FAILED_EXIT_CODE,
@@ -28,7 +28,6 @@ from mergecraft.cli.exits import (
 )
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.utils.payload import read_github_event
-from mergecraft.verify.extra import BrowserExtraMissingError, require_browser_extra
 from mergecraft.verify.models import (
     AuthSpec,
     VerificationInput,
@@ -36,7 +35,6 @@ from mergecraft.verify.models import (
     is_successful,
     load_verification_input,
 )
-from mergecraft.verify.playwright_driver import launch_playwright_driver
 from mergecraft.verify.runner import collect_skip_reasons, run_verify_behavior
 
 if TYPE_CHECKING:
@@ -49,10 +47,6 @@ _runners = threading.local()
 
 def _thread_runner() -> asyncio.Runner:
     """Return this thread's ``asyncio.Runner``, creating it on first use.
-
-    ``Runner.run`` reuses one loop. ``asyncio.run`` would create and close a
-    fresh loop, which hangs Playwright after ``async_playwright`` started on
-    a previous ``run_async`` call.
 
     Returns:
         asyncio.Runner: The thread-local runner.
@@ -69,7 +63,7 @@ def _thread_runner() -> asyncio.Runner:
 
 
 class _StubBrowserDriver:
-    """Non-Playwright driver so the CLI can write a report without a browser."""
+    """Non-browser driver so tests can write a report without live browsing."""
 
     def __init__(self) -> None:
         self.current_url: str | None = None
@@ -138,14 +132,6 @@ def _parse_viewport(value: str) -> Viewport:
         cli_bail("viewport must look like 1280x720")
 
 
-def _extra_missing() -> bool:
-    try:
-        require_browser_extra()
-    except BrowserExtraMissingError:
-        return True
-    return False
-
-
 def _cli_trust_context() -> tuple[bool, dict[str, Any] | None, str | None]:
     """Local operator machine is offline; Actions events go through the gate.
 
@@ -176,17 +162,10 @@ def run_async(
 ) -> T:
     """Run ``coro`` on ``loop``, this thread's runner, or a worker.
 
-    Reuses one ``asyncio.Runner`` per thread so Playwright teardown can close
-    on the same loop that started ``async_playwright``. ``asyncio.run`` would
-    create a fresh loop and hang ``cli.js run-driver``. Pass ``loop`` to drive
-    a specific start loop (including from another thread after that loop has
-    stopped). When a loop is already running and ``loop`` is omitted, drive
-    the coroutine on a worker thread.
-
     Args:
         coro (Coroutine[Any, Any, T]): Awaitable to drive to completion.
-        loop (asyncio.AbstractEventLoop | None): Loop that started Playwright.
-            Used when it is open and not running. Defaults to ``None``.
+        loop (asyncio.AbstractEventLoop | None): Optional loop override.
+            Defaults to ``None``.
 
     Returns:
         T: The coroutine's result.
@@ -226,22 +205,14 @@ def _resolve_driver(
     allow_stub: bool,
     viewport: Viewport | None = None,
 ) -> BrowserDriver:
-    """Return a live Playwright driver, a stub, or raise when the extra is required.
-
-    Extra missing + ``allow_stub=False`` raises ``BrowserExtraMissingError``.
-    Extra missing + ``allow_stub=True`` (``--allow-stub``) returns
-    ``_StubBrowserDriver``. Extra present always calls
-    ``launch_playwright_driver`` — never the stub.
-    """
-    if _extra_missing():
-        if not allow_stub:
-            require_browser_extra()
-        logger.debug("verify-behavior using stub driver; extra absent")
+    """Return a live browser-use driver, a stub, or raise when unavailable."""
+    if allow_stub:
+        logger.debug("verify-behavior using stub driver; --allow-stub")
         return _StubBrowserDriver()
-    logger.debug("verify-behavior extra present; launching Playwright")
+    logger.debug("verify-behavior binding browser-use stack")
     if viewport is not None:
-        return launch_playwright_driver(width=viewport.width, height=viewport.height)
-    return launch_playwright_driver()
+        return launch_browser_driver(width=viewport.width, height=viewport.height)
+    return launch_browser_driver()
 
 
 def _spec_from_flags(
@@ -312,7 +283,7 @@ def run(
     allow_stub: bool = typer.Option(
         False,
         "--allow-stub",
-        help="Permit the non-browser stub when mergecraft[browser] is absent.",
+        help="Permit the non-browser stub when the browser-use stack is unavailable.",
     ),
 ) -> None:
     """Reproduce a bug or verify acceptance criteria in a running app."""
@@ -343,8 +314,7 @@ def run(
     if not skip:
         try:
             driver = _resolve_driver(allow_stub=allow_stub, viewport=spec.viewport)
-        except BrowserExtraMissingError as exc:
-            # Plain echo: Rich would treat ``[browser]`` as a markup tag.
+        except BrowserStackUnavailableError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 

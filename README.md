@@ -442,7 +442,7 @@ scheduled runs: [`docs/workflows.md`](docs/workflows.md).
 | 📡 **[SARIF](docs/glossary.md#sarif) upload (opt-in)** | Publish analyzer findings to GitHub code scanning |
 | 📈 **Tracing (opt-in)** | Span trees to JSONL, Logfire, or OTLP — [`docs/TRACING.md`](docs/TRACING.md) |
 | 💻 **Offline mode** | `mergecraft review` on local diffs, worktrees, or cloned repos |
-| 🌐 **Behaviour verification** | `mergecraft verify-behavior` writes a versioned report; `mergecraft review --verification-report` consumes it (fenced, separate from code findings; blocked stays visible; no report leaves the review unchanged); trusted-tier only; optional `mergecraft[browser]` extra — [`docs/verify-behavior.md`](docs/verify-behavior.md) |
+| 🌐 **Behaviour verification** | `mergecraft verify-behavior` writes a versioned report; `mergecraft review --verification-report` consumes it (fenced, separate from code findings; blocked stays visible; no report leaves the review unchanged); trusted-tier only; custom browser-use + JEV driver — [`docs/verify-behavior.md`](docs/verify-behavior.md) |
 
 **Terminal verdict (default: enforce).** A run without a validated
 `submit_review_verdict` reports `inconclusive`. Set `gates.terminal_verdict: shadow`

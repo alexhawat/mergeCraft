@@ -2,7 +2,7 @@
 
 Exports:
     BrowserDriver: Runtime-checkable browser protocol (Playwright-free).
-    BrowserExtraMissingError: Raised when ``mergecraft[browser]`` is absent.
+    BrowserStackUnavailableError: Raised when the browser-use stack is unavailable.
     CRITERION_STATUSES: Closed per-criterion statuses.
     REPRODUCE_STATUSES: Closed reproduce-mode report statuses.
     ReportArtifacts: Screenshot, log, and nullable video/trace paths.
@@ -13,7 +13,7 @@ Exports:
     is_successful: True only for verify ``pass`` or reproduce ``reproduced``.
     load_verification_input: YAML file → ``VerificationInput``.
     render_verification_markdown: Markdown view of a report's JSON.
-    require_browser_extra: Gate that names ``mergecraft[browser]`` when missing.
+    require_browser_stack: Gate that fails closed when live browsing is unavailable.
     verification_report_schema: JSON Schema derived from ``VerificationReport``.
     prepare_verification_report_for_prompt: Fence a report before any prompt.
     render_behavior_section: Markdown behaviour section, or empty if none.
@@ -24,7 +24,7 @@ Exports:
 from __future__ import annotations
 
 from mergecraft.verify.driver import BrowserDriver
-from mergecraft.verify.extra import BrowserExtraMissingError, require_browser_extra
+from mergecraft.verify.extra import BrowserStackUnavailableError, require_browser_stack
 from mergecraft.verify.models import (
     CRITERION_STATUSES,
     REPRODUCE_STATUSES,
@@ -51,7 +51,7 @@ __all__ = [
     "VERIFICATION_SCHEMA_VERSION",
     "VERIFY_STATUSES",
     "BrowserDriver",
-    "BrowserExtraMissingError",
+    "BrowserStackUnavailableError",
     "ReportArtifacts",
     "VerificationInput",
     "VerificationReport",
@@ -61,7 +61,7 @@ __all__ = [
     "prepare_verification_report_for_prompt",
     "render_behavior_section",
     "render_verification_markdown",
-    "require_browser_extra",
+    "require_browser_stack",
     "verification_report_schema",
     "verification_report_to_findings",
 ]
