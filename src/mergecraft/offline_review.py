@@ -823,6 +823,7 @@ class _OfflineDiffReviewRun:
             from mergecraft.utils.review_result_cache import (
                 cache_key_for_diff_path,
                 load_review_result,
+                verification_report_cache_digest,
             )
 
             self.cache_key = cache_key_for_diff_path(
@@ -833,6 +834,7 @@ class _OfflineDiffReviewRun:
                 json_mode=self.json_path is not None,
                 base_ref=self.materialization.base_ref,
                 cwd=self.cwd,
+                verification_report_digest=verification_report_cache_digest(verification_report),
             )
             cached = load_review_result(self.cache_key)
             if cached is not None:

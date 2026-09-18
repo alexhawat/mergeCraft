@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mergecraft import __version__
 from mergecraft.config import load_repo_settings
@@ -13,6 +14,9 @@ from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.run_bounds import ScopeReduction, resolve_run_bounds
 from mergecraft.utils.run_cache import RunCache, default_cache_root, open_run_cache
 from mergecraft.utils.workspace import git_repo_root
+
+if TYPE_CHECKING:
+    from mergecraft.verify.models import VerificationReport
 
 _KEY_PREFIX = "review-result:"
 
@@ -35,6 +39,13 @@ def review_cache_settings_digest(*, cwd: Path | str | None = None) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def verification_report_cache_digest(report: VerificationReport | None) -> str:
+    """Return a stable digest of report JSON for ``--use-cache`` / ``--resume`` keys."""
+    if report is None:
+        return ""
+    return hashlib.sha256(report.model_dump_json().encode("utf-8")).hexdigest()
+
+
 def review_result_cache_key(
     diff_bytes: bytes,
     *,
@@ -47,6 +58,7 @@ def review_result_cache_key(
     cwd: Path | str | None = None,
     version: str | None = None,
     settings_digest: str | None = None,
+    verification_report_digest: str | None = None,
 ) -> str:
     """Return a cache key for a materialized review, including inputs that change it."""
     identity = repo_identity if repo_identity is not None else review_cache_repo_identity(cwd=cwd)
@@ -71,6 +83,8 @@ def review_result_cache_key(
     hasher.update((version if version is not None else __version__).encode("utf-8"))
     hasher.update(b"\0settings=")
     hasher.update(digest.encode("utf-8"))
+    hasher.update(b"\0vreport=")
+    hasher.update((verification_report_digest or "").encode("utf-8"))
     return f"{_KEY_PREFIX}{hasher.hexdigest()}"
 
 
@@ -197,6 +211,7 @@ def cache_key_for_diff_path(
     cwd: Path | str | None = None,
     version: str | None = None,
     settings_digest: str | None = None,
+    verification_report_digest: str | None = None,
 ) -> str:
     """Hash an on-disk unified diff plus review-changing inputs into a result-cache key."""
     return review_result_cache_key(
@@ -210,6 +225,7 @@ def cache_key_for_diff_path(
         cwd=cwd,
         version=version,
         settings_digest=settings_digest,
+        verification_report_digest=verification_report_digest,
     )
 
 
@@ -220,4 +236,5 @@ __all__ = [
     "review_cache_settings_digest",
     "review_result_cache_key",
     "store_review_result",
+    "verification_report_cache_digest",
 ]

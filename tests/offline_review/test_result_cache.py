@@ -322,6 +322,73 @@ async def test_offline_cache_hit_rewrites_findings_json(
     assert json.loads(second_path.read_text(encoding="utf-8"))["findings"]
 
 
+@pytest.mark.asyncio
+async def test_offline_cache_misses_when_verification_report_added(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Integration: a cached no-report run must not satisfy ``--verification-report``."""
+    from tests.verify.support import make_report
+
+    _isolate_cache(tmp_path, monkeypatch)
+    _patch_offline_harness(monkeypatch)
+    repo = _real_git_repo(tmp_path)
+    payload = _valid_structured_output()
+    agent_runs = 0
+
+    def _materialize(
+        workspace: ResolvedWorkspace,
+        *,
+        spec: SourceResolverSpec,
+        out_dir: Path,
+        diff_file: Path | None = None,
+    ) -> DiffMaterialization:
+        return _nonempty_materialization(out_dir)
+
+    monkeypatch.setattr(offline_mod, "materialize_resolved_diff", _materialize)
+
+    async def _agent_ok(**kwargs: object) -> OfflineReviewResult:
+        nonlocal agent_runs
+        agent_runs += 1
+        return OfflineReviewResult(
+            success=True,
+            output="review",
+            structured_output=payload,
+            outcome=RunOutcome.passed,
+        )
+
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_ok)
+
+    workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
+    spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
+    json_path = tmp_path / "findings.json"
+    first = await offline_mod._run_offline_diff_review(
+        cwd=repo,
+        workspace=workspace,
+        spec=spec,
+        review_root=repo,
+        json_path=json_path,
+        use_cache=True,
+        model="test-model",
+    )
+    assert first.success is True
+    assert agent_runs == 1
+
+    report_path = tmp_path / "report.json"
+    report_path.write_text(make_report(observed="Clear button removes the image").model_dump_json())
+    second = await offline_mod._run_offline_diff_review(
+        cwd=repo,
+        workspace=workspace,
+        spec=spec,
+        review_root=repo,
+        json_path=tmp_path / "with-report.json",
+        use_cache=True,
+        model="test-model",
+        verification_report_path=report_path,
+    )
+    assert second.success is True
+    assert agent_runs == 2
+
+
 def _capture_cache_and_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[list[object], list[object]]:
