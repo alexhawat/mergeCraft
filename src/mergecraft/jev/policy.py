@@ -26,6 +26,11 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.evidence.merge import _severity_rank
+from mergecraft.jev.architecture import (
+    build_system_one_questions,
+    route_choice,
+    route_noul,
+)
 from mergecraft.jev.types import (
     ALIGN_PACK_ID,
     ALIGN_THRESHOLD_CORPUS_IDS,
@@ -351,7 +356,7 @@ async def unit_battery(
         unit_id=unit.unit_id,
         trust_tier=trust_tier,
         ratchet_applied=trust_tier == "untrusted",
-        questions=pack.as_system_one(),
+        questions=build_system_one_questions(pack),
     )
     if result.skipped or result.response is None:
         return result
@@ -502,7 +507,12 @@ async def semantic_dedupe_pair(
         },
         unit_id=first.fingerprint or first.path or "align",
     )
-    if alignment.same_defect != _SAME_DEFECT or alignment.confidence < _align_same_floor():
+    if not route_choice(
+        choice=alignment.same_defect,
+        confidence=alignment.confidence,
+        act_on=frozenset({_SAME_DEFECT}),
+        floor=_align_same_floor(),
+    ):
         return first
     kept = _stronger_member(first, second)
     logger.info(
@@ -572,7 +582,7 @@ async def _align_call(
         state=state,
         pack_id=pack.pack_id,
         unit_id=unit_id,
-        questions=pack.as_system_one(),
+        questions=build_system_one_questions(pack),
     )
     response = _require_align_response(result)
     same = _choice(response, "same_defect")
@@ -580,7 +590,7 @@ async def _align_call(
     return AlignResult(
         pack_id=pack.pack_id,
         same_defect=same,
-        is_withdrawn_reraise=noul >= _align_noul_floor(),
+        is_withdrawn_reraise=route_noul(noul=noul, floor=_align_noul_floor()),
         confidence=_choice_confidence(response, "same_defect"),
         scope="run",
         blocking=False,

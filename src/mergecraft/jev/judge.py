@@ -29,6 +29,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mergecraft.agents.verifier import JudgePin, pinned_judge_model
 from mergecraft.analyzers.finding import Finding, make_finding
+from mergecraft.jev.architecture import (
+    build_system_one_questions,
+    confidence_floor,
+    route_choice,
+    route_noul,
+)
 from mergecraft.jev.claims import extract_claims
 from mergecraft.jev.policy import bucket_confidence
 from mergecraft.jev.questions import claim_pack, evidence_pack
@@ -160,7 +166,7 @@ async def judge_finding_evidence(
         },
         pack_id=pack.pack_id,
         unit_id=finding.fingerprint or finding.path or "finding",
-        questions=pack.as_system_one(),
+        questions=build_system_one_questions(pack),
     )
     if result.skipped or result.response is None:
         return EvidenceJudgeResult(
@@ -172,10 +178,20 @@ async def judge_finding_evidence(
         )
     response = result.response
     relation = _choice(response, "relation")
+    relation_confidence = _choice_confidence(response, "relation")
     falsifiable = _noul(response, "falsifiable")
     located = _noul(response, "located")
     attestations: list[Finding] = []
-    if relation in {"says_nothing", "contradicts"}:
+    relation_floor = confidence_floor(
+        stakes="read_only",
+        threshold_key="evidence/v1.relation",
+    )
+    if route_choice(
+        choice=relation,
+        confidence=relation_confidence,
+        act_on=frozenset({"says_nothing", "contradicts"}),
+        floor=relation_floor,
+    ):
         attestations.append(
             _attest(
                 rule_id="jev-evidence-unsupported",
@@ -232,7 +248,7 @@ async def judge_prose_claims(
             },
             pack_id=pack.pack_id,
             unit_id=_claim_unit_id(claim.text),
-            questions=pack.as_system_one(),
+            questions=build_system_one_questions(pack),
         )
         if result.skipped or result.response is None:
             return ClaimJudgeResult(
@@ -248,7 +264,9 @@ async def judge_prose_claims(
         backed.append(backed_by_row)
         blocking.append(blocking_language)
         contradicts.append(contradicts_verdict)
-        if blocking_language >= _ACT_FLOOR and backed_by_row < _ACT_FLOOR:
+        if route_noul(noul=blocking_language, floor=_ACT_FLOOR) and not route_noul(
+            noul=backed_by_row, floor=_ACT_FLOOR
+        ):
             attestations.append(
                 _attest(
                     rule_id="jev-claim-unbacked-blocker",
@@ -257,7 +275,7 @@ async def judge_prose_claims(
                     confidence=blocking_language,
                 )
             )
-        if contradicts_verdict >= _ACT_FLOOR:
+        if route_noul(noul=contradicts_verdict, floor=_ACT_FLOOR):
             attestations.append(
                 _attest(
                     rule_id="jev-claim-verdict-mismatch",

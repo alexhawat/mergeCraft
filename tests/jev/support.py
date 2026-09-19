@@ -36,6 +36,7 @@ UNIT_QUESTION_NAMES: Final[tuple[str, ...]] = (
     "contract_break",
     "untrusted_input",
     "missing_tests",
+    "style_nit",
 )
 EVIDENCE_QUESTION_NAMES: Final[tuple[str, ...]] = ("relation", "falsifiable", "located")
 CLAIM_QUESTION_NAMES: Final[tuple[str, ...]] = (

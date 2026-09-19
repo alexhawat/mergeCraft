@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from loguru import logger
 from tenacity import AsyncRetrying, retry_if_exception
 
+from mergecraft.jev.architecture import filter_state_for_pack
 from mergecraft.jev.cost import TokenBudget, compute_cost
 from mergecraft.jev.types import (
     PINNED_MODEL,
@@ -38,6 +39,7 @@ from mergecraft.tracing.genai import (
     usage_attrs,
     usage_unavailable_attrs,
 )
+from mergecraft.utils.fence import Fence
 from mergecraft.utils.provider_failure import ProviderFailureClass
 from mergecraft.utils.retry_policy import DEFAULT_STOP, DEFAULT_WAIT
 
@@ -413,13 +415,19 @@ class AsyncJevClient:
         transport = self._require_transport()
         started = time.perf_counter()
         call_questions = questions or {}
+        call_state = filter_state_for_pack(
+            pack_id,
+            state,
+            trust_tier=trust_tier,
+            fence=Fence() if trust_tier == "untrusted" else None,
+        )
         if isinstance(transport, LiveTypeSafeTransport):
             response = await transport.system_one(
-                state=state, questions=call_questions, model=self._model
+                state=call_state, questions=call_questions, model=self._model
             )
         else:
             response = await self._dispatch(
-                transport, state=state, questions=call_questions, model=self._model
+                transport, state=call_state, questions=call_questions, model=self._model
             )
         latency_ms = (time.perf_counter() - started) * 1000.0
         usage = response.usage
@@ -439,6 +447,14 @@ class AsyncJevClient:
             logger.warning(
                 "jev kill-switch armed after call unit_id={} pack_id={}", unit_id, pack_id
             )
+        logger.info(
+            "jev call complete model={} pack_id={} unit_id={} input_tokens={} output_tokens={}",
+            response.model,
+            pack_id,
+            unit_id,
+            usage.input_tokens,
+            usage.output_tokens,
+        )
         self._emit_span(
             pack_id=pack_id,
             unit_id=unit_id,
