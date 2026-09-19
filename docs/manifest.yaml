@@ -175,6 +175,12 @@ pages:
     generator: null
     purpose: Demo capture path and rules — omit broken GIF/MP4 until a real asset exists.
 
+  - path: docs/jev-gate-patterns.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: "Pre-LLM Jev gate: dimension question packs, funnel thresholds, layering, and calibration status."
+
   - path: docs/install.md
     audience: consumer
     template: consumer
