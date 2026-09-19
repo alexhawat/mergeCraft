@@ -15,8 +15,8 @@ PR / local diff
   → analyzers (unchanged)
   → segment units
   → Jev screen + funnel        ← this document
-  → policy: skip LLM / prioritise / fail closed
-  → generative reviewer (residue)
+  → policy: rank and annotate (shadow only — see below)
+  → generative reviewer (always runs)
   → verifier on Critical/Major
   → publish
 ```
@@ -109,6 +109,19 @@ comments, the Critical/Major verifier, or multi-language symbol extraction.
 
 Findings from this stage are structured signals, not proof of a defect, until
 analyzers or the verifier corroborate them.
+
+## Current enforcement status
+
+Nothing in this document describes a gate that can block or skip work today.
+
+`predict_jev_action` in `jev/policy.py` returns `enforced=False` unconditionally,
+and its docstring states that the reviewer is never skipped. The configured gate
+mode (`shadow` or `enforce`) is recorded in the prediction's metadata but is not
+acted on — setting `enforce` does not enforce.
+
+So the thresholds above govern ranking and annotation only. Treat any suppression,
+skip, or fail-closed behaviour as future work, and do not configure a repository on
+the assumption that this stage withholds anything from the reviewer.
 
 ## Calibration status
 
