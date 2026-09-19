@@ -747,3 +747,82 @@ class TestFailedCaseStillCounts:
         assert metrics.calibration is not None
         assert metrics.calibration.counts["none"] == 1
         assert metrics.calibration.eligible is False
+
+
+class TestBaselineInputShapes:
+    """Every shape `read_json_or_jsonl` can hand back must round-trip.
+
+    A one-row JSONL file is the trap: it is also valid JSON, so the loader
+    returns a bare dict that is a row rather than an envelope. A compact
+    single-line array is the mirror trap — it parses on one line but is not
+    a JSONL row.
+    """
+
+    @staticmethod
+    def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, body: str, row_id: str):
+        path = tmp_path / name
+        path.write_text(body, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(path), "--id", row_id, "--by", "human"]
+        )
+        return result, path
+
+    def test_envelope_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        body = json.dumps({"closed_world": False, "issues": [{"id": "1", "path": "a.py"}]})
+        result, path = self._run(tmp_path, monkeypatch, "b.json", body, "1")
+        assert result.exit_code == 0, result.output
+        payload = json.loads(path.read_text())
+        assert payload["issues"][0]["provenance"] == "human"
+        assert payload["closed_world"] is False
+
+    def test_bare_list_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        result, path = self._run(
+            tmp_path, monkeypatch, "b.json", json.dumps([{"id": "1", "path": "a.py"}]), "1"
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(path.read_text())[0]["provenance"] == "human"
+
+    def test_one_row_jsonl_stays_one_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = json.dumps({"id": "1", "path": "a.py"}) + "\n"
+        result, path = self._run(tmp_path, monkeypatch, "b.jsonl", body, "1")
+        assert result.exit_code == 0, result.output
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
+        assert len(lines) == 1, "a JSONL input must not be rewritten as indented JSON"
+        assert json.loads(lines[0])["provenance"] == "human"
+
+    def test_multi_row_jsonl_keeps_every_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = (
+            json.dumps({"id": "1", "path": "a.py"})
+            + "\n"
+            + json.dumps({"id": "2", "path": "b.py"})
+            + "\n"
+        )
+        result, path = self._run(tmp_path, monkeypatch, "b.jsonl", body, "2")
+        assert result.exit_code == 0, result.output
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
+        assert len(lines) == 2
+        assert json.loads(lines[0]).get("provenance") is None
+        assert json.loads(lines[1])["provenance"] == "human"
+
+    def test_pretty_printed_list_is_not_mistaken_for_jsonl(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = json.dumps([{"id": "1", "path": "a.py"}], indent=2) + "\n"
+        result, path = self._run(tmp_path, monkeypatch, "b.json", body, "1")
+        assert result.exit_code == 0, result.output
+        assert json.loads(path.read_text())[0]["provenance"] == "human"
+
+    def test_single_object_row_document(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = json.dumps({"id": "1", "path": "a.py"}, indent=2) + "\n"
+        result, path = self._run(tmp_path, monkeypatch, "b.json", body, "1")
+        assert result.exit_code == 0, result.output
+        decoded = json.loads(path.read_text())
+        rows = decoded if isinstance(decoded, list) else [decoded]
+        assert rows[0]["provenance"] == "human"

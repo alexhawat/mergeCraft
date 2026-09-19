@@ -687,6 +687,21 @@ def bench_cmd(
 # ── score ──────────────────────────────────────────────────────────────
 
 
+def _every_line_is_json_object(lines: list[str]) -> bool:
+    """True when each line parses alone *into an object* — the JSONL test.
+
+    Three shapes have to come apart here, and requiring an object is what
+    separates them. A pretty-printed document fails because its lines are
+    fragments. A compact single-line array (``[{...}]``) parses but is a list,
+    so it is JSON, not a JSONL row. A one-row JSONL file passes even though the
+    whole file is also valid JSON, which is the case that made this necessary.
+    """
+    try:
+        return all(isinstance(json.loads(line), dict) for line in lines)
+    except json.JSONDecodeError:
+        return False
+
+
 @app.command("adjudicate")
 def adjudicate_cmd(
     baseline: Path = typer.Argument(..., help="Baseline JSON/JSONL to update in place."),
@@ -711,20 +726,41 @@ def adjudicate_cmd(
     if not baseline.is_file():
         cli_bail(f"{baseline} is not a file")
     try:
+        raw_text = baseline.read_text(encoding="utf-8")
         payload = read_json_or_jsonl(baseline)
     except (OSError, json.JSONDecodeError) as exc:
         cli_bail(f"could not read {baseline}: {exc}")
 
-    # Every shipped corpus baseline is an envelope — {"closed_world": ...,
-    # "issues": [...]} — not a bare list. Bind `rows` to the list *inside* the
-    # payload so the mutation below reaches it and the envelope's other keys
-    # survive the rewrite; a bare list is still accepted for ad-hoc files.
+    # Four shapes reach here, and a one-row JSONL file is the subtle one: it is
+    # also valid JSON, so `read_json_or_jsonl` returns a bare dict that is a
+    # *row*, not an envelope. Detect the on-disk format from the raw text
+    # rather than the decoded value, so the file is written back in the form it
+    # arrived in.
+    jsonl_lines = [
+        line
+        for line in raw_text.splitlines()
+        if line.strip() and not line.lstrip().startswith("//")
+    ]
+    was_jsonl = bool(jsonl_lines) and _every_line_is_json_object(jsonl_lines)
+
+    # Structure is decided before format, because a compact envelope is also a
+    # single line that parses as an object and would otherwise be mistaken for
+    # a JSONL row.
     if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
+        # The envelope every shipped corpus baseline uses. Bind to the list
+        # inside the payload so the rewrite reaches it and the other keys live.
+        was_jsonl = False
         rows = payload["issues"]
+    elif was_jsonl:
+        rows = [json.loads(line) for line in jsonl_lines]
+        payload = rows
     elif isinstance(payload, list):
         rows = payload
+    elif isinstance(payload, dict):
+        rows = [payload]
+        payload = rows
     else:
-        cli_bail(f"{baseline} is neither a list of rows nor an object with 'issues'")
+        cli_bail(f"{baseline}: expected baseline rows, an 'issues' envelope, or JSONL")
 
     settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
     try:
@@ -750,7 +786,11 @@ def adjudicate_cmd(
     if not matched:
         cli_bail(f"no baseline row with id {issue_id!r} in {baseline}")
 
-    baseline.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    if was_jsonl:
+        rendered = "\n".join(json.dumps(row) for row in rows) + "\n"
+    else:
+        rendered = json.dumps(payload, indent=2) + "\n"
+    baseline.write_text(rendered, encoding="utf-8")
     console.print(
         f"adjudicated {issue_id} by {by} — provenance {provenance_for(record)} "
         f"(tier {record.independence})"
