@@ -159,21 +159,37 @@ def resolve_adjudicator(
 
 
 def assert_independent(record: AdjudicationRecord) -> None:
-    """Refuse an adjudication whose adjudicator produced the label itself.
+    """Refuse an adjudication that cannot be shown independent of the label.
 
     Configuration cannot waive this: a model scoring its own output yields a
     circular label no matter which block approved the run.
+
+    Fails closed on missing identity. A model adjudicator with no ``model`` or
+    no ``produced_by`` is refused rather than allowed, because an unknown
+    producer cannot be *shown* to differ from the adjudicator — permitting it
+    would let the invariant be bypassed by omitting an argument. A human
+    adjudicator carries no model identity and is exempt.
 
     Args:
         record: The adjudication about to be recorded.
 
     Raises:
         SelfAdjudicationRefused: When adjudicator and producer are the same
-            non-empty model id.
+            model, or when a model adjudicator's identities are unknown.
     """
+    if record.adjudicated_by == "human":
+        return
     adjudicator = record.model.strip()
     producer = record.produced_by.strip()
-    if adjudicator and producer and adjudicator == producer:
+    if not adjudicator or not producer:
+        msg = (
+            f"refusing {record.adjudicated_by} adjudication without auditable "
+            "identities: both the adjudicating model and the model that produced "
+            "the label are required, so independence can be checked rather than "
+            "assumed"
+        )
+        raise SelfAdjudicationRefused(msg)
+    if adjudicator == producer:
         msg = (
             f"refusing self-adjudication: {adjudicator!r} produced this label "
             "and cannot also adjudicate it"

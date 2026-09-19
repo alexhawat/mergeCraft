@@ -35,6 +35,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from mergecraft.evals.adjudication import IndependenceTier
 
+from mergecraft.evals.adjudication import calibration_status
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
@@ -195,6 +196,8 @@ def run_live_detection(
     reports = []
     case_results: list[DetectionCaseResult] = []
     failed_case_ids: list[str] = []
+    # Provenance of every scored label, folded into one corpus verdict below.
+    all_provenances: list[str] = []
     for case in cases:
         try:
             raw_rows = review_fn(case)
@@ -205,6 +208,7 @@ def run_live_detection(
 
         baseline_payload = json.loads(case.baseline_path.read_text(encoding="utf-8"))
         issues = load_baseline_issues(baseline_payload)
+        all_provenances.extend(issue.provenance for issue in issues)
 
         (raw_dir / f"{case.case_id}.json").write_text(
             json.dumps({"findings": raw_rows}, indent=2, sort_keys=True) + "\n",
@@ -267,6 +271,9 @@ def run_live_detection(
         aggregate=fold_score_reports(reports),
         case_results=case_results,
         raw_findings_dir=str(raw_dir),
+        # Fold the per-case label provenance into one corpus-level verdict so
+        # the persisted artifact carries it, not just the transient reports.
+        calibration=calibration_status(all_provenances, required=required_provenance),
     )
 
 

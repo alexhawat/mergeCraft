@@ -30,6 +30,7 @@ from mergecraft.evals.adjudication import (
     resolve_adjudicator,
     tier_for_provenance,
 )
+from mergecraft.evals.benchmark import DetectionCase, DetectionMetrics
 from mergecraft.evals.live_run import (
     run_detection,
     run_full_benchmark,
@@ -95,9 +96,20 @@ class TestSelfAdjudication:
         record = AdjudicationRecord(adjudicated_by="llm", model="judge-2", produced_by="judge-1")
         assert_independent(record)
 
-    def test_unknown_producer_does_not_block(self) -> None:
-        record = AdjudicationRecord(adjudicated_by="human", model="", produced_by="")
-        assert_independent(record)
+    def test_human_needs_no_model_identity(self) -> None:
+        assert_independent(AdjudicationRecord(adjudicated_by="human", model="", produced_by=""))
+
+    @pytest.mark.parametrize(
+        ("model", "produced_by", "case"),
+        [("judge-1", "", "producer omitted"), ("", "judge-1", "adjudicator omitted")],
+    )
+    def test_model_adjudication_fails_closed_on_missing_identity(
+        self, model: str, produced_by: str, case: str
+    ) -> None:
+        """Omitting an argument must not be a way past the independence check."""
+        record = AdjudicationRecord(adjudicated_by="llm", model=model, produced_by=produced_by)
+        with pytest.raises(SelfAdjudicationRefused, match="auditable identities"):
+            assert_independent(record)
 
 
 class TestProvenance:
@@ -356,10 +368,36 @@ class TestAdjudicateCommand:
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(
             app,
-            ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "llm", "--model", "j1"],
+            [
+                "eval",
+                "adjudicate",
+                str(baseline),
+                "--id",
+                "1",
+                "--by",
+                "llm",
+                "--model",
+                "judge-2",
+                "--produced-by",
+                "judge-1",
+            ],
         )
         assert result.exit_code == 0, result.output
         assert json.loads(baseline.read_text())[0]["provenance"] == "llm-adjudicated"
+
+    def test_model_adjudicator_without_producer_is_refused_through_the_cli(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Omitting --produced-by must not be a way past the independence check."""
+        baseline = self._baseline(tmp_path)
+        self._enable_llm(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app,
+            ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "llm", "--model", "j1"],
+        )
+        assert result.exit_code != 0
+        assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
 
     def test_self_adjudication_refused_even_when_enabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -405,3 +443,97 @@ class TestBenchmarkChainThreadsTheBar:
     def test_each_hop_accepts_required_provenance(self, func: Callable[..., object]) -> None:
         signature = inspect.signature(func)
         assert "required_provenance" in signature.parameters
+
+
+class TestBenchmarkCarriesCalibration:
+    """A published benchmark artifact must carry its calibration verdict."""
+
+    def test_detection_metrics_has_a_calibration_field(self) -> None:
+        assert "calibration" in DetectionMetrics.model_fields
+
+    def test_field_defaults_to_none_so_older_artifacts_are_not_eligible(self) -> None:
+        assert DetectionMetrics.model_fields["calibration"].default is None
+
+    def test_live_detection_folds_case_provenance_into_the_metrics(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        case_dir = tmp_path / "case-1"
+        case_dir.mkdir()
+        baseline = case_dir / "baseline.json"
+        baseline.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "1",
+                        "path": "a.py",
+                        "startLine": 1,
+                        "endLine": 2,
+                        "provenance": "agent-seeded",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        patch = case_dir / "change.patch"
+        patch.write_text("", encoding="utf-8")
+        case = DetectionCase(
+            case_id="case-1",
+            patch_path=patch,
+            baseline_path=baseline,
+            closed_world=False,
+        )
+        metrics = run_live_detection(
+            [case],
+            provider="p",
+            model="m",
+            review_fn=lambda _case: [{"path": "a.py", "startLine": 1, "endLine": 2}],
+            results_dir=tmp_path / "results",
+        )
+        assert metrics.calibration is not None
+        assert metrics.calibration.eligible is False
+        assert metrics.calibration.counts["none"] == 1
+
+
+class TestScoreJsonCarriesCalibration:
+    """The --json path must not drop what the human path states."""
+
+    @staticmethod
+    def _corpus(tmp_path: Path, provenance: str) -> tuple[Path, Path]:
+        expected = tmp_path / "baseline.json"
+        expected.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "1",
+                        "path": "a.py",
+                        "startLine": 1,
+                        "endLine": 2,
+                        "provenance": provenance,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        actual = tmp_path / "findings.json"
+        actual.write_text(
+            json.dumps([{"path": "a.py", "startLine": 1, "endLine": 2}]), encoding="utf-8"
+        )
+        return actual, expected
+
+    def test_ineligible_corpus_is_marked_in_json(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        actual, expected = self._corpus(tmp_path, "agent-seeded")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected), "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["calibration"]["eligible"] is False
+
+    def test_eligible_corpus_is_marked_in_json(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        actual, expected = self._corpus(tmp_path, "human")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected), "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["calibration"]["eligible"] is True

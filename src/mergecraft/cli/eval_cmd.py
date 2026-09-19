@@ -674,6 +674,11 @@ def bench_cmd(
         console.print(f"  recall          : {det.aggregate.recall:.2%}")
         console.print(f"  precision       : {det.aggregate.corpus_confirmed_precision:.2%}")
         console.print(f"  f1              : {det.aggregate.f1:.2%}")
+        # Printed beside the numbers, not below the artifact path: a reader
+        # who stops at f1 must still have seen whether it is calibrated.
+        if det.calibration is not None:
+            verdict = "calibrated" if det.calibration.eligible else "NOT calibrated"
+            console.print(f"  calibration     : {verdict} — {det.calibration.reason}")
         console.print(f"  raw findings @  : {det.raw_findings_dir}")
     else:
         console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
@@ -801,6 +806,12 @@ def score(
                 "severity_agreement": report.severity_agreement,
                 "missed_issue_ids": report.missed_issue_ids,
                 "matches": [m.model_dump() for m in report.matches],
+                # Automation reading only JSON must still learn whether these
+                # numbers rest on adjudicated labels; without it an
+                # agent-seeded score can be published as if it were calibrated.
+                "calibration": (
+                    report.calibration.model_dump() if report.calibration is not None else None
+                ),
             }
         )
     else:

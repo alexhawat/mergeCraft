@@ -86,6 +86,11 @@ mergecraft eval adjudicate baseline.json --id ISSUE-1 --by llm --model judge-2 \
 An unapproved adjudicator exits non-zero and writes nothing. The row's
 `provenance` is derived from the resulting record, never supplied by the caller.
 
+A model adjudicator must name both `--model` and `--produced-by`. The check
+fails closed on a missing identity: an unknown producer cannot be *shown* to
+differ from the adjudicator, so omitting the argument is refused rather than
+allowed. A human adjudicator carries no model identity and needs neither.
+
 **Self-adjudication is refused regardless of configuration.** A model may not
 score labels its own pinned model produced; that is the circularity the corpus
 already suffers from, and no config key waives it.
