@@ -30,6 +30,7 @@ Exports:
     tier_for_provenance: Map a stored ``provenance`` string to its tier.
     CalibrationStatus: Whether a label set may back a calibration claim.
     calibration_status: Partition labels by tier and decide eligibility.
+    adjudicate_label: Approve, check independence, and build one record.
 """
 
 from __future__ import annotations
@@ -93,11 +94,13 @@ class AdjudicationRecord(BaseModel):
     adjudication, and is what ``assert_independent`` compares against.
     """
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # Internal record: only the derived ``provenance`` string is persisted,
+    # so no camelCase wire alias is needed here.
+    model_config = ConfigDict(extra="forbid")
 
-    adjudicated_by: AdjudicatorKind = Field(alias="adjudicatedBy")
+    adjudicated_by: AdjudicatorKind
     model: str = ""
-    produced_by: str = Field(default="", alias="producedBy")
+    produced_by: str = ""
     independence: IndependenceTier = "none"
     at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -245,6 +248,45 @@ def calibration_status(
     )
 
 
+def adjudicate_label(
+    kind: AdjudicatorKind,
+    *,
+    settings: Mapping[str, object] | None,
+    model: str = "",
+    produced_by: str = "",
+) -> AdjudicationRecord:
+    """Approve, check independence, and build the record for one label.
+
+    This is the single entry point a label-writing path must use. It is what
+    makes ``enabled`` and the self-adjudication ban real rather than advisory:
+    a caller that bypasses it can still write any ``provenance`` string it
+    likes, so writers go through here.
+
+    Args:
+        kind: The adjudicator assigning the label.
+        settings: The ``adjudicators`` mapping from repo configuration.
+        model: Pinned model id of the adjudicator, empty for a human.
+        produced_by: Model that produced the label being adjudicated.
+
+    Returns:
+        AdjudicationRecord: The record to attach, carrying the resolved tier.
+
+    Raises:
+        AdjudicatorNotApproved: Configuration does not approve ``kind``.
+        SelfAdjudicationRefused: ``model`` produced the label itself.
+    """
+    tier = resolve_adjudicator(kind, settings=settings)
+    record = AdjudicationRecord(
+        adjudicated_by=kind,
+        model=model,
+        produced_by=produced_by,
+        independence=tier,
+    )
+    assert_independent(record)
+    logger.info("label adjudicated by {} at tier {}", kind, tier)
+    return record
+
+
 __all__ = [
     "AdjudicationRecord",
     "AdjudicatorKind",
@@ -252,6 +294,7 @@ __all__ = [
     "CalibrationStatus",
     "IndependenceTier",
     "SelfAdjudicationRefused",
+    "adjudicate_label",
     "approved_kinds",
     "assert_independent",
     "calibration_status",

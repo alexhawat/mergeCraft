@@ -74,6 +74,18 @@ asserted by hand:
 An unrecognised `provenance` string resolves to `none`, so a label can never
 satisfy the bar by accident.
 
+Labels are written through `mergecraft eval adjudicate`, which is where the
+policy is enforced:
+
+```bash
+mergecraft eval adjudicate baseline.json --id ISSUE-1 --by human
+mergecraft eval adjudicate baseline.json --id ISSUE-1 --by llm --model judge-2 \
+  --produced-by judge-1
+```
+
+An unapproved adjudicator exits non-zero and writes nothing. The row's
+`provenance` is derived from the resulting record, never supplied by the caller.
+
 **Self-adjudication is refused regardless of configuration.** A model may not
 score labels its own pinned model produced; that is the circularity the corpus
 already suffers from, and no config key waives it.

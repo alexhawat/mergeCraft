@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,11 @@ from mergecraft.evals.adjudication import (
     resolve_adjudicator,
     tier_for_provenance,
 )
-from mergecraft.evals.live_run import run_live_detection
+from mergecraft.evals.live_run import (
+    run_detection,
+    run_full_benchmark,
+    run_live_detection,
+)
 from mergecraft.evals.scoring import (
     BaselineIssue,
     ReportedFinding,
@@ -75,23 +80,23 @@ class TestSelfAdjudication:
     """Refused regardless of configuration — this is not an approval question."""
 
     def test_same_model_producing_and_adjudicating_is_refused(self) -> None:
-        record = AdjudicationRecord(adjudicatedBy="llm", model="judge-1", producedBy="judge-1")
+        record = AdjudicationRecord(adjudicated_by="llm", model="judge-1", produced_by="judge-1")
         with pytest.raises(SelfAdjudicationRefused, match="produced this label"):
             assert_independent(record)
 
     def test_enabling_the_adjudicator_does_not_waive_the_refusal(self) -> None:
         cfg = _settings(llm={"enabled": True, "independence": "model"})
         assert resolve_adjudicator("llm", settings=cfg.adjudicators) == "model"
-        record = AdjudicationRecord(adjudicatedBy="llm", model="judge-1", producedBy="judge-1")
+        record = AdjudicationRecord(adjudicated_by="llm", model="judge-1", produced_by="judge-1")
         with pytest.raises(SelfAdjudicationRefused):
             assert_independent(record)
 
     def test_different_models_are_allowed(self) -> None:
-        record = AdjudicationRecord(adjudicatedBy="llm", model="judge-2", producedBy="judge-1")
+        record = AdjudicationRecord(adjudicated_by="llm", model="judge-2", produced_by="judge-1")
         assert_independent(record)
 
     def test_unknown_producer_does_not_block(self) -> None:
-        record = AdjudicationRecord(adjudicatedBy="human", model="", producedBy="")
+        record = AdjudicationRecord(adjudicated_by="human", model="", produced_by="")
         assert_independent(record)
 
 
@@ -103,7 +108,7 @@ class TestProvenance:
         [("human", "human"), ("jev", "jev-adjudicated"), ("llm", "llm-adjudicated")],
     )
     def test_provenance_is_derived_from_the_adjudicator(self, kind: str, expected: str) -> None:
-        record = AdjudicationRecord.model_validate({"adjudicatedBy": kind})
+        record = AdjudicationRecord.model_validate({"adjudicated_by": kind})
         assert provenance_for(record) == expected
 
     @pytest.mark.parametrize(
@@ -280,3 +285,123 @@ class TestConfigReachesScoring:
         signature = inspect.signature(run_live_detection)
         assert "required_provenance" in signature.parameters
         assert signature.parameters["required_provenance"].default == "independent"
+
+
+class TestAdjudicateCommand:
+    """The production label-writing path enforces approval and independence.
+
+    Without a writer that calls ``adjudicate_label``, ``enabled`` guards
+    nothing and the self-adjudication ban is advisory. These drive the CLI.
+    """
+
+    @staticmethod
+    def _baseline(tmp_path: Path, provenance: str = "agent-seeded") -> Path:
+        path = tmp_path / "baseline.json"
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "1",
+                        "path": "a.py",
+                        "startLine": 1,
+                        "endLine": 2,
+                        "provenance": provenance,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    @staticmethod
+    def _enable_llm(tmp_path: Path) -> None:
+        config_dir = tmp_path / ".mergecraft"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.yaml").write_text(
+            "adjudication:\n"
+            "  adjudicators:\n"
+            "    llm:\n"
+            "      enabled: true\n"
+            "      independence: model\n",
+            encoding="utf-8",
+        )
+
+    def test_unapproved_adjudicator_cannot_write_a_label(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "llm"]
+        )
+        assert result.exit_code != 0
+        assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
+
+    def test_approved_adjudicator_writes_derived_provenance(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(baseline.read_text())[0]["provenance"] == "human"
+
+    def test_enabling_llm_in_config_lets_it_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        self._enable_llm(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app,
+            ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "llm", "--model", "j1"],
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(baseline.read_text())[0]["provenance"] == "llm-adjudicated"
+
+    def test_self_adjudication_refused_even_when_enabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        self._enable_llm(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app,
+            [
+                "eval",
+                "adjudicate",
+                str(baseline),
+                "--id",
+                "1",
+                "--by",
+                "llm",
+                "--model",
+                "j1",
+                "--produced-by",
+                "j1",
+            ],
+        )
+        assert result.exit_code != 0
+        assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
+
+    def test_unknown_issue_id_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(baseline), "--id", "nope", "--by", "human"]
+        )
+        assert result.exit_code != 0
+        assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
+
+
+class TestBenchmarkChainThreadsTheBar:
+    """Every hop from the benchmark CLI down to scoring must carry the bar."""
+
+    @pytest.mark.parametrize("func", [run_live_detection, run_detection, run_full_benchmark])
+    def test_each_hop_accepts_required_provenance(self, func: Callable[..., object]) -> None:
+        signature = inspect.signature(func)
+        assert "required_provenance" in signature.parameters

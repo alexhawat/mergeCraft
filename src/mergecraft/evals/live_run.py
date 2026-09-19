@@ -326,6 +326,7 @@ def run_detection(
     corpus_dir: Path = DEFAULT_DETECTION_CORPUS_DIR,
     results_dir: Path,
     review_fn: ReviewFn | None = None,
+    required_provenance: IndependenceTier = "independent",
 ) -> tuple[DetectionMetrics | None, str | None]:
     """Run detection if possible, or report exactly why it was skipped.
 
@@ -346,6 +347,7 @@ def run_detection(
         model=model,
         review_fn=resolved_review_fn,
         results_dir=results_dir,
+        required_provenance=required_provenance,
     )
     return metrics, None
 
@@ -359,6 +361,7 @@ def run_full_benchmark(
     detection_provider: str,
     detection_model: str,
     review_fn: ReviewFn | None = None,
+    required_provenance: IndependenceTier = "independent",
 ) -> BenchmarkResultSet:
     """Join structural decision replay with the live detection run.
 
@@ -383,6 +386,7 @@ def run_full_benchmark(
         corpus_dir=detection_corpus_dir,
         results_dir=results_dir,
         review_fn=review_fn,
+        required_provenance=required_provenance,
     )
     return structural.model_copy(update={"detection": metrics, "skipped_reason": skipped_reason})
 

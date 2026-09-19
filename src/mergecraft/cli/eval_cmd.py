@@ -57,6 +57,13 @@ from mergecraft.evals import (
     replay_case,
     write_permanent_test,
 )
+from mergecraft.evals.adjudication import (
+    AdjudicatorKind,
+    AdjudicatorNotApproved,
+    SelfAdjudicationRefused,
+    adjudicate_label,
+    provenance_for,
+)
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
@@ -636,6 +643,12 @@ def bench_cmd(
 
     bank_dir = _bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
+    # `settings` above is loaded only on the config-resolution branch, so read
+    # the calibration bar unconditionally here — a benchmark run must honour
+    # `requireForCalibration` whether or not the model came from config.
+    required = load_repo_settings(
+        root=Path.cwd(), load_learnings_files=False
+    ).adjudication.require_for_calibration
     result = run_full_benchmark(
         bank_dir,
         detection_corpus_dir=detection_corpus,
@@ -643,6 +656,7 @@ def bench_cmd(
         providers=DEFAULT_BENCHMARK_PROVIDERS,
         detection_provider=detection_provider,
         detection_model=resolved_model,
+        required_provenance=required,
     )
     # update_latest=False: a single-provider detection result must not
     # silently become "latest.json" — see write_result_set's docstring (D12).
@@ -666,6 +680,62 @@ def bench_cmd(
 
 
 # ── score ──────────────────────────────────────────────────────────────
+
+
+@app.command("adjudicate")
+def adjudicate_cmd(
+    baseline: Path = typer.Argument(..., help="Baseline JSON/JSONL to update in place."),
+    issue_id: str = typer.Option(..., "--id", help="Baseline issue id to adjudicate."),
+    by: str = typer.Option("human", "--by", help="Adjudicator: human, jev, or llm."),
+    model: str = typer.Option("", "--model", help="Pinned model id of the adjudicator."),
+    produced_by: str = typer.Option(
+        "", "--produced-by", help="Model that produced the label being adjudicated."
+    ),
+) -> None:
+    """Record who adjudicated one baseline label, enforcing repo policy.
+
+    Approval comes from ``adjudication.adjudicators.<kind>.enabled``; an
+    unapproved adjudicator cannot write a label. Self-adjudication is refused
+    regardless of configuration. The row's ``provenance`` is derived from the
+    resulting record rather than supplied by the caller.
+    """
+    kinds: dict[str, AdjudicatorKind] = {"human": "human", "jev": "jev", "llm": "llm"}
+    kind = kinds.get(by)
+    if kind is None:
+        cli_bail(f"unknown adjudicator {by!r} — expected human, jev, or llm")
+    if not baseline.is_file():
+        cli_bail(f"{baseline} is not a file")
+    try:
+        rows = read_json_or_jsonl(baseline)
+    except (OSError, json.JSONDecodeError) as exc:
+        cli_bail(f"could not read {baseline}: {exc}")
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    try:
+        record = adjudicate_label(
+            kind,
+            settings=settings.adjudication.adjudicators,
+            model=model,
+            produced_by=produced_by,
+        )
+    except (AdjudicatorNotApproved, SelfAdjudicationRefused) as exc:
+        cli_bail(str(exc))
+
+    if not isinstance(rows, list):
+        cli_bail(f"{baseline} does not contain a list of baseline rows")
+    matched = False
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("id") or "") == issue_id:
+            row["provenance"] = provenance_for(record)
+            matched = True
+    if not matched:
+        cli_bail(f"no baseline row with id {issue_id!r} in {baseline}")
+
+    baseline.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    console.print(
+        f"adjudicated {issue_id} by {by} — provenance {provenance_for(record)} "
+        f"(tier {record.independence})"
+    )
 
 
 @app.command("score")
