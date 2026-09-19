@@ -39,6 +39,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [findings-carryover](findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
 | [glossary](glossary.md) | consumer | Plain-language definitions for landing-page jargon — trust tier, typed findings, and related terms. |
 | [install](install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
+| [jev-gate-patterns](jev-gate-patterns.md) | contributor | Pre-LLM Jev gate: dimension question packs, funnel thresholds, layering, and calibration status. |
 | [mcp-tools](mcp-tools.md) | consumer | Generated public MCP tool reference from ToolSpec schemas. |
 | [mcp](mcp.md) | consumer | Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries. |
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
