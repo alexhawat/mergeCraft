@@ -36,6 +36,7 @@ def test_unit_pack_v1_names_and_types() -> None:
         "contract_break",
         "untrusted_input",
         "missing_tests",
+        "style_nit",
     ):
         assert pack.question_type(name) == "noul"
 
