@@ -74,6 +74,11 @@ asserted by hand:
 An unrecognised `provenance` string resolves to `none`, so a label can never
 satisfy the bar by accident.
 
+`requireForCalibration` accepts `independent` or `model` only. There is no
+"no bar" setting: a zero bar would clear every provenance including
+`agent-seeded`, which is precisely the claim configuration must not be able to
+make.
+
 Labels are written through `mergecraft eval adjudicate`, which is where the
 policy is enforced:
 

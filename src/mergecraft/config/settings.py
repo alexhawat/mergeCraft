@@ -663,7 +663,10 @@ class AdjudicationSettings(BaseModel):
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     adjudicators: dict[str, AdjudicatorSettings] = Field(default_factory=_default_adjudicators)
-    require_for_calibration: Literal["independent", "model", "none"] = Field(
+    # ``none`` is deliberately not offered: a bar of "no independence" would
+    # let the existing agent-seeded corpus be published as calibrated, which is
+    # exactly the claim this block exists to prevent configuration from making.
+    require_for_calibration: Literal["independent", "model"] = Field(
         default="independent",
         alias="requireForCalibration",
     )

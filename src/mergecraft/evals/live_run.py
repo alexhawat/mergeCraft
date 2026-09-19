@@ -199,16 +199,20 @@ def run_live_detection(
     # Provenance of every scored label, folded into one corpus verdict below.
     all_provenances: list[str] = []
     for case in cases:
+        # Read labels before the review, so a case whose review fails still
+        # contributes its provenance. The contract is that *every* corpus label
+        # meets the bar; collecting only from successful cases would let a run
+        # with a failed agent-seeded case report itself calibrated.
+        baseline_payload = json.loads(case.baseline_path.read_text(encoding="utf-8"))
+        issues = load_baseline_issues(baseline_payload)
+        all_provenances.extend(issue.provenance for issue in issues)
+
         try:
             raw_rows = review_fn(case)
         except ReviewRunFailed as exc:
             logger.warning("detection case {} review failed: {}", case.case_id, exc)
             failed_case_ids.append(case.case_id)
             continue
-
-        baseline_payload = json.loads(case.baseline_path.read_text(encoding="utf-8"))
-        issues = load_baseline_issues(baseline_payload)
-        all_provenances.extend(issue.provenance for issue in issues)
 
         (raw_dir / f"{case.case_id}.json").write_text(
             json.dumps({"findings": raw_rows}, indent=2, sort_keys=True) + "\n",

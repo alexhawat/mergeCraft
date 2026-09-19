@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -32,6 +33,7 @@ from mergecraft.evals.adjudication import (
 )
 from mergecraft.evals.benchmark import DetectionCase, DetectionMetrics
 from mergecraft.evals.live_run import (
+    ReviewRunFailed,
     run_detection,
     run_full_benchmark,
     run_live_detection,
@@ -638,3 +640,110 @@ class TestScoreJsonCarriesCalibration:
         result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected), "--json"])
         assert result.exit_code == 0, result.output
         assert json.loads(result.output)["calibration"]["eligible"] is True
+
+
+class TestNoBarCannotBeConfigured:
+    """`requireForCalibration` must not be able to admit unadjudicated labels."""
+
+    def test_config_rejects_none_as_a_bar(self) -> None:
+        with pytest.raises(ValidationError):
+            AdjudicationSettings.model_validate({"requireForCalibration": "none"})
+
+    def test_calibration_status_refuses_a_none_bar_programmatically(self) -> None:
+        status = calibration_status(["agent-seeded"], required="none")
+        assert status.eligible is False
+        assert "not a calibration bar" in status.reason
+
+    def test_none_bar_does_not_admit_unknown_provenance_either(self) -> None:
+        assert calibration_status(["made-up-string"], required="none").eligible is False
+
+    def test_config_to_cli_agent_seeded_stays_uncalibrated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The end-to-end regression: no config makes the shipped corpus calibrated."""
+        expected = tmp_path / "baseline.json"
+        expected.write_text(
+            json.dumps(
+                {
+                    "closed_world": False,
+                    "issues": [
+                        {
+                            "id": "1",
+                            "path": "a.py",
+                            "startLine": 1,
+                            "endLine": 2,
+                            "provenance": "agent-seeded",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        actual = tmp_path / "findings.json"
+        actual.write_text(
+            json.dumps([{"path": "a.py", "startLine": 1, "endLine": 2}]), encoding="utf-8"
+        )
+        config_dir = tmp_path / ".mergecraft"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text(
+            "adjudication:\n  requireForCalibration: model\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
+        assert result.exit_code == 0, result.output
+        assert "NOT calibrated" in result.output
+
+
+class TestFailedCaseStillCounts:
+    """A failed review must not remove its labels from the corpus verdict."""
+
+    @staticmethod
+    def _case(tmp_path: Path, case_id: str, provenance: str) -> DetectionCase:
+        case_dir = tmp_path / case_id
+        case_dir.mkdir()
+        baseline = case_dir / "baseline.json"
+        baseline.write_text(
+            json.dumps(
+                {
+                    "closed_world": False,
+                    "issues": [
+                        {
+                            "id": f"{case_id}-1",
+                            "path": "a.py",
+                            "startLine": 1,
+                            "endLine": 2,
+                            "provenance": provenance,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        patch = case_dir / "change.patch"
+        patch.write_text("", encoding="utf-8")
+        return DetectionCase(
+            case_id=case_id, patch_path=patch, baseline_path=baseline, closed_world=False
+        )
+
+    def test_agent_seeded_label_on_a_failed_case_still_sinks_the_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        good = self._case(tmp_path, "ok", "human")
+        bad = self._case(tmp_path, "boom", "agent-seeded")
+
+        def review(case: DetectionCase) -> list[dict[str, object]]:
+            if case.case_id == "boom":
+                raise ReviewRunFailed("simulated")
+            return [{"path": "a.py", "startLine": 1, "endLine": 2}]
+
+        metrics = run_live_detection(
+            [good, bad],
+            provider="p",
+            model="m",
+            review_fn=review,
+            results_dir=tmp_path / "results",
+        )
+        assert metrics.failed_case_ids == ["boom"]
+        assert metrics.calibration is not None
+        assert metrics.calibration.counts["none"] == 1
+        assert metrics.calibration.eligible is False

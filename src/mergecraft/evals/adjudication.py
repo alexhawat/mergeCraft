@@ -245,6 +245,17 @@ def calibration_status(
     for provenance in provenances:
         counts[tier_for_provenance(provenance)] += 1
     total = sum(counts.values())
+    if required == "none":
+        # Refused even though the type admits it: every provenance clears a
+        # zero bar, so honouring it would publish unadjudicated labels as
+        # calibrated. Configuration cannot reach here, and a programmatic
+        # caller does not get a different answer than an operator would.
+        return CalibrationStatus(
+            counts={str(tier): count for tier, count in counts.items()},
+            required=required,
+            eligible=False,
+            reason="'none' is not a calibration bar — no label independence is required",
+        )
     bar = _TIER_RANK[required]
     below = sum(count for tier, count in counts.items() if _TIER_RANK[tier] < bar)
     if total == 0:
