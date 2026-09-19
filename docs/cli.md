@@ -65,6 +65,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
+| `mergecraft eval adjudicate <baseline>` | Record who adjudicated one baseline label, enforcing repo policy. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
 | `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |

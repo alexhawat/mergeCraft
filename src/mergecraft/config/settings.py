@@ -626,17 +626,43 @@ class VerifyBehaviorSettings(BaseModel):
     enabled: bool = True
 
 
-class AdjudicationSettings(BaseModel):
-    """The calibration bar eval corpus labels must clear (#736).
+class AdjudicatorSettings(BaseModel):
+    """One adjudicator kind: whether it may run, and how independent it is.
 
-    Scoring reports recall and precision for any corpus. This decides whether
-    those numbers may be described as calibrated: every label in the set must
-    meet ``require_for_calibration``. Configuration cannot lower the bar to
-    nothing — see the field's comment.
+    ``enabled`` is the approval gate — an adjudicator that is not enabled
+    cannot assign corpus labels. ``independence`` describes how far the
+    adjudicator stands from the labels it scores, and feeds the calibration
+    bar; it never grants permission by itself.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
+    enabled: bool = False
+    independence: Literal["independent", "model", "none"] = "none"
+
+
+def _default_adjudicators() -> dict[str, AdjudicatorSettings]:
+    """Human approved and independent; model adjudicators off until opted in."""
+    return {
+        "human": AdjudicatorSettings(enabled=True, independence="independent"),
+        "jev": AdjudicatorSettings(enabled=False, independence="model"),
+        "llm": AdjudicatorSettings(enabled=False, independence="model"),
+    }
+
+
+class AdjudicationSettings(BaseModel):
+    """Who may adjudicate eval corpus labels, and what that entitles (#736).
+
+    Approval and claim strength are separate on purpose. Enabling ``jev`` or
+    ``llm`` lets those adjudicators label cases, but
+    ``require_for_calibration`` still decides whether the resulting labels can
+    back a calibration claim. Self-adjudication is refused by
+    ``mergecraft.evals.adjudication`` regardless of what this block says.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    adjudicators: dict[str, AdjudicatorSettings] = Field(default_factory=_default_adjudicators)
     # ``none`` is deliberately not offered: a bar of "no independence" would
     # let the existing agent-seeded corpus be published as calibrated, which is
     # exactly the claim this block exists to prevent configuration from making.
@@ -644,6 +670,19 @@ class AdjudicationSettings(BaseModel):
         default="independent",
         alias="requireForCalibration",
     )
+
+    @field_validator("adjudicators")
+    @classmethod
+    def _known_kinds_only(
+        cls, value: dict[str, AdjudicatorSettings]
+    ) -> dict[str, AdjudicatorSettings]:
+        unknown = sorted(set(value) - {"human", "jev", "llm"})
+        if unknown:
+            msg = f"unknown adjudicator kind(s): {', '.join(unknown)}"
+            raise ValueError(msg)
+        filled = _default_adjudicators()
+        filled.update(value)
+        return filled
 
 
 class JevSettings(BaseModel):

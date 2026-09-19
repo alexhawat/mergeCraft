@@ -57,6 +57,13 @@ from mergecraft.evals import (
     replay_case,
     write_permanent_test,
 )
+from mergecraft.evals.adjudication import (
+    AdjudicatorKind,
+    AdjudicatorNotApproved,
+    SelfAdjudicationRefused,
+    adjudicate_label,
+    provenance_for,
+)
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
@@ -678,6 +685,116 @@ def bench_cmd(
 
 
 # ── score ──────────────────────────────────────────────────────────────
+
+
+def _every_line_is_json_object(lines: list[str]) -> bool:
+    """True when each line parses alone *into an object* — the JSONL test.
+
+    Three shapes have to come apart here, and requiring an object is what
+    separates them. A pretty-printed document fails because its lines are
+    fragments. A compact single-line array (``[{...}]``) parses but is a list,
+    so it is JSON, not a JSONL row. A one-row JSONL file passes even though the
+    whole file is also valid JSON, which is the case that made this necessary.
+    """
+    try:
+        return all(isinstance(json.loads(line), dict) for line in lines)
+    except json.JSONDecodeError:
+        return False
+
+
+@app.command("adjudicate")
+def adjudicate_cmd(
+    baseline: Path = typer.Argument(..., help="Baseline JSON/JSONL to update in place."),
+    issue_id: str = typer.Option(..., "--id", help="Baseline issue id to adjudicate."),
+    by: str = typer.Option("human", "--by", help="Adjudicator: human, jev, or llm."),
+    model: str = typer.Option("", "--model", help="Pinned model id of the adjudicator."),
+    produced_by: str = typer.Option(
+        "", "--produced-by", help="Model that produced the label being adjudicated."
+    ),
+) -> None:
+    """Record who adjudicated one baseline label, enforcing repo policy.
+
+    Approval comes from ``adjudication.adjudicators.<kind>.enabled``; an
+    unapproved adjudicator cannot write a label. Self-adjudication is refused
+    regardless of configuration. The row's ``provenance`` is derived from the
+    resulting record rather than supplied by the caller.
+    """
+    kinds: dict[str, AdjudicatorKind] = {"human": "human", "jev": "jev", "llm": "llm"}
+    kind = kinds.get(by)
+    if kind is None:
+        cli_bail(f"unknown adjudicator {by!r} — expected human, jev, or llm")
+    if not baseline.is_file():
+        cli_bail(f"{baseline} is not a file")
+    try:
+        raw_text = baseline.read_text(encoding="utf-8")
+        payload = read_json_or_jsonl(baseline)
+    except (OSError, json.JSONDecodeError) as exc:
+        cli_bail(f"could not read {baseline}: {exc}")
+
+    # Four shapes reach here, and a one-row JSONL file is the subtle one: it is
+    # also valid JSON, so `read_json_or_jsonl` returns a bare dict that is a
+    # *row*, not an envelope. Detect the on-disk format from the raw text
+    # rather than the decoded value, so the file is written back in the form it
+    # arrived in.
+    jsonl_lines = [
+        line
+        for line in raw_text.splitlines()
+        if line.strip() and not line.lstrip().startswith("//")
+    ]
+    was_jsonl = bool(jsonl_lines) and _every_line_is_json_object(jsonl_lines)
+
+    # Structure is decided before format, because a compact envelope is also a
+    # single line that parses as an object and would otherwise be mistaken for
+    # a JSONL row.
+    if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
+        # The envelope every shipped corpus baseline uses. Bind to the list
+        # inside the payload so the rewrite reaches it and the other keys live.
+        was_jsonl = False
+        rows = payload["issues"]
+    elif was_jsonl:
+        rows = [json.loads(line) for line in jsonl_lines]
+        payload = rows
+    elif isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = [payload]
+        payload = rows
+    else:
+        cli_bail(f"{baseline}: expected baseline rows, an 'issues' envelope, or JSONL")
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    try:
+        record = adjudicate_label(
+            kind,
+            settings=settings.adjudication.adjudicators,
+            model=model,
+            produced_by=produced_by,
+        )
+    except (AdjudicatorNotApproved, SelfAdjudicationRefused) as exc:
+        cli_bail(str(exc))
+
+    matched = False
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("id") or "") == issue_id:
+            row["provenance"] = provenance_for(record)
+            # Persist the identities the independence check ran against. Without
+            # them `llm-adjudicated` is an unfalsifiable claim: a later reader
+            # cannot tell whether the adjudicating and producing models actually
+            # differed, which is the whole basis for trusting the label.
+            row["adjudication"] = record.model_dump(mode="json")
+            matched = True
+    if not matched:
+        cli_bail(f"no baseline row with id {issue_id!r} in {baseline}")
+
+    if was_jsonl:
+        rendered = "\n".join(json.dumps(row) for row in rows) + "\n"
+    else:
+        rendered = json.dumps(payload, indent=2) + "\n"
+    baseline.write_text(rendered, encoding="utf-8")
+    console.print(
+        f"adjudicated {issue_id} by {by} — provenance {provenance_for(record)} "
+        f"(tier {record.independence})"
+    )
 
 
 @app.command("score")
