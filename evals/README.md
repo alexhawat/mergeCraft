@@ -86,6 +86,24 @@ mergecraft eval adjudicate baseline.json --id ISSUE-1 --by llm --model judge-2 \
 An unapproved adjudicator exits non-zero and writes nothing. The row's
 `provenance` is derived from the resulting record, never supplied by the caller.
 
+The command writes the adjudication record beside the derived `provenance`, so
+the independence check leaves durable evidence rather than an unfalsifiable
+claim:
+
+```json
+{
+  "id": "ISSUE-1",
+  "provenance": "llm-adjudicated",
+  "adjudication": {
+    "adjudicated_by": "llm",
+    "model": "judge-2",
+    "produced_by": "judge-1",
+    "independence": "model",
+    "at": "2026-09-19T15:04:21Z"
+  }
+}
+```
+
 A model adjudicator must name both `--model` and `--produced-by`. The check
 fails closed on a missing identity: an unknown producer cannot be *shown* to
 differ from the adjudicator, so omitting the argument is refused rather than

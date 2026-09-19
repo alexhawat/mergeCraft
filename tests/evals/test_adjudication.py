@@ -41,6 +41,7 @@ from mergecraft.evals.scoring import (
     ReportedFinding,
     ScoreReport,
     format_report,
+    load_baseline_issues,
     score_findings,
 )
 
@@ -423,6 +424,49 @@ class TestAdjudicateCommand:
         )
         assert result.exit_code != 0
         assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
+
+    def test_record_round_trips_so_independence_is_auditable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`llm-adjudicated` is unfalsifiable unless the identities persist."""
+        baseline = self._baseline(tmp_path)
+        self._enable_llm(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app,
+            [
+                "eval",
+                "adjudicate",
+                str(baseline),
+                "--id",
+                "1",
+                "--by",
+                "llm",
+                "--model",
+                "judge-2",
+                "--produced-by",
+                "judge-1",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        row = json.loads(baseline.read_text())[0]
+        record = row["adjudication"]
+        assert record["adjudicated_by"] == "llm"
+        assert record["model"] == "judge-2"
+        assert record["produced_by"] == "judge-1"
+        assert record["independence"] == "model"
+        assert record["at"]
+        # The persisted identities must show the check could actually pass.
+        assert record["model"] != record["produced_by"]
+
+    def test_persisted_record_does_not_break_baseline_loading(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        CliRunner().invoke(app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"])
+        issues = load_baseline_issues(json.loads(baseline.read_text()))
+        assert [issue.provenance for issue in issues] == ["human"]
 
     def test_unknown_issue_id_writes_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

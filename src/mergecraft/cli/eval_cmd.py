@@ -732,6 +732,11 @@ def adjudicate_cmd(
     for row in rows:
         if isinstance(row, dict) and str(row.get("id") or "") == issue_id:
             row["provenance"] = provenance_for(record)
+            # Persist the identities the independence check ran against. Without
+            # them `llm-adjudicated` is an unfalsifiable claim: a later reader
+            # cannot tell whether the adjudicating and producing models actually
+            # differed, which is the whole basis for trusting the label.
+            row["adjudication"] = record.model_dump(mode="json")
             matched = True
     if not matched:
         cli_bail(f"no baseline row with id {issue_id!r} in {baseline}")
