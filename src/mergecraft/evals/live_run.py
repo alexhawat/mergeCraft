@@ -28,10 +28,14 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 
+if TYPE_CHECKING:
+    from mergecraft.evals.adjudication import IndependenceTier
+
+from mergecraft.evals.adjudication import calibration_status
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
@@ -161,6 +165,7 @@ def run_live_detection(
     review_fn: ReviewFn,
     results_dir: Path,
     slack: int = DEFAULT_LINE_SLACK,
+    required_provenance: IndependenceTier = "independent",
 ) -> DetectionMetrics:
     """Drive every case through ``review_fn``, score it, and fold the results.
 
@@ -191,7 +196,17 @@ def run_live_detection(
     reports = []
     case_results: list[DetectionCaseResult] = []
     failed_case_ids: list[str] = []
+    # Provenance of every scored label, folded into one corpus verdict below.
+    all_provenances: list[str] = []
     for case in cases:
+        # Read labels before the review, so a case whose review fails still
+        # contributes its provenance. The contract is that *every* corpus label
+        # meets the bar; collecting only from successful cases would let a run
+        # with a failed agent-seeded case report itself calibrated.
+        baseline_payload = json.loads(case.baseline_path.read_text(encoding="utf-8"))
+        issues = load_baseline_issues(baseline_payload)
+        all_provenances.extend(issue.provenance for issue in issues)
+
         try:
             raw_rows = review_fn(case)
         except ReviewRunFailed as exc:
@@ -199,16 +214,19 @@ def run_live_detection(
             failed_case_ids.append(case.case_id)
             continue
 
-        baseline_payload = json.loads(case.baseline_path.read_text(encoding="utf-8"))
-        issues = load_baseline_issues(baseline_payload)
-
         (raw_dir / f"{case.case_id}.json").write_text(
             json.dumps({"findings": raw_rows}, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         findings = load_reported_findings({"findings": raw_rows})
 
-        report = score_findings(issues, findings, slack=slack, closed_world=case.closed_world)
+        report = score_findings(
+            issues,
+            findings,
+            slack=slack,
+            closed_world=case.closed_world,
+            required_provenance=required_provenance,
+        )
         # D12 (OB4) — eval scores are spans AND files: the span inherits the
         # active review.id via the OB1 close-time merge, making the
         # eval↔trace join free. Best-effort; scoring never depends on it.
@@ -257,6 +275,9 @@ def run_live_detection(
         aggregate=fold_score_reports(reports),
         case_results=case_results,
         raw_findings_dir=str(raw_dir),
+        # Fold the per-case label provenance into one corpus-level verdict so
+        # the persisted artifact carries it, not just the transient reports.
+        calibration=calibration_status(all_provenances, required=required_provenance),
     )
 
 
@@ -316,6 +337,7 @@ def run_detection(
     corpus_dir: Path = DEFAULT_DETECTION_CORPUS_DIR,
     results_dir: Path,
     review_fn: ReviewFn | None = None,
+    required_provenance: IndependenceTier = "independent",
 ) -> tuple[DetectionMetrics | None, str | None]:
     """Run detection if possible, or report exactly why it was skipped.
 
@@ -336,6 +358,7 @@ def run_detection(
         model=model,
         review_fn=resolved_review_fn,
         results_dir=results_dir,
+        required_provenance=required_provenance,
     )
     return metrics, None
 
@@ -349,6 +372,7 @@ def run_full_benchmark(
     detection_provider: str,
     detection_model: str,
     review_fn: ReviewFn | None = None,
+    required_provenance: IndependenceTier = "independent",
 ) -> BenchmarkResultSet:
     """Join structural decision replay with the live detection run.
 
@@ -373,6 +397,7 @@ def run_full_benchmark(
         corpus_dir=detection_corpus_dir,
         results_dir=results_dir,
         review_fn=review_fn,
+        required_provenance=required_provenance,
     )
     return structural.model_copy(update={"detection": metrics, "skipped_reason": skipped_reason})
 

@@ -26,6 +26,7 @@ from mergecraft.agents.verifier import (
     judge_pin,
     pinned_judge_model,
 )
+from mergecraft.evals.adjudication import CalibrationStatus  # noqa: TC001 — Pydantic field type
 from mergecraft.evals.convergence import ConvergenceCaseResult, ConvergenceMetrics, ConvergenceRound
 from mergecraft.evals.lens_capability import (
     LensRoutingCapabilityReport,  # noqa: TC001 — Pydantic field type
@@ -269,6 +270,13 @@ class DetectionMetrics(BaseModel):
     aggregate: AggregateScoreReport
     case_results: list[DetectionCaseResult]
     raw_findings_dir: str
+    # Corpus-level calibration status for this run, carrying the bar that was
+    # applied. Without it a published result artifact shows recall and
+    # precision with no way to tell whether the labels were adjudicated, which
+    # is the one thing the calibration gate exists to prevent. ``None`` on a
+    # result set written before this field, so an older artifact is not read
+    # as eligible.
+    calibration: CalibrationStatus | None = None
 
 
 class BenchmarkResultSet(BaseModel):

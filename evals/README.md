@@ -42,6 +42,52 @@ which it would then trivially rediscover. Every baseline row carries a mandatory
 `provenance` field for exactly this reason. Keep `provenance: human` as the
 primary corpus and report scores with and without the rest.
 
+## Calibration bar
+
+Scoring reports recall and precision for any corpus. Whether those numbers may
+be called *calibrated* is a separate question, decided by label provenance
+against a configured bar.
+
+```yaml
+adjudication:
+  requireForCalibration: independent
+```
+
+Each label's `provenance` maps to an independence tier:
+
+| `provenance` | Tier |
+|--------------|------|
+| `human` | `independent` |
+| `jev-adjudicated` | `model` |
+| `llm-adjudicated` | `model` |
+| `agent-seeded` | `none` |
+
+An unrecognised `provenance` string resolves to `none`, so a label can never
+satisfy the bar by accident.
+
+`requireForCalibration` accepts `independent` or `model` only. There is no
+"no bar" setting: a zero bar would clear every provenance including
+`agent-seeded`, which is precisely the claim configuration must not be able to
+make.
+
+Scoring still reports recall and precision for an agent-seeded corpus — the
+numbers are real and useful for regression detection. What it withholds is the
+word *calibrated*: `ScoreReport.calibration.eligible` stays `False` unless every
+label in the set meets `requireForCalibration`. One unadjudicated row is enough
+to sink a corpus-wide claim, because a claim about the corpus is only as good as
+its weakest label.
+
+```text
+  calibration      : NOT calibrated — 1 of 3 labels below the 'independent' bar
+```
+
+The same verdict is carried on `DetectionMetrics` so a persisted benchmark
+result cannot show scores without it, and appears in `eval score --json`.
+
+Writing adjudicated labels — who is allowed to assign `human`,
+`jev-adjudicated` or `llm-adjudicated`, and the independence rules that govern
+it — is a separate concern and not yet implemented here.
+
 ## Scoring
 
 Score a run's findings against a baseline:
