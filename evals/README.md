@@ -42,6 +42,53 @@ which it would then trivially rediscover. Every baseline row carries a mandatory
 `provenance` field for exactly this reason. Keep `provenance: human` as the
 primary corpus and report scores with and without the rest.
 
+## Adjudication
+
+Who may assign a label is repo configuration. What that label entitles you to
+claim is not — those are answered separately so that enabling an adjudicator can
+never by itself upgrade a calibration claim.
+
+```yaml
+adjudication:
+  adjudicators:
+    human: { enabled: true,  independence: independent }
+    jev:   { enabled: false, independence: model }
+    llm:   { enabled: false, independence: model }
+  requireForCalibration: independent
+```
+
+`enabled` is the approval gate: an adjudicator that is not enabled cannot label
+cases. `independence` describes how far the adjudicator stands from the labels
+it scores, and feeds the calibration bar — it never grants permission.
+
+Each label records who adjudicated it, so `provenance` is derived rather than
+asserted by hand:
+
+| Adjudicator | `provenance` | Tier |
+|-------------|--------------|------|
+| human | `human` | `independent` |
+| jev | `jev-adjudicated` | `model` |
+| llm | `llm-adjudicated` | `model` |
+| — (seeded, unadjudicated) | `agent-seeded` | `none` |
+
+An unrecognised `provenance` string resolves to `none`, so a label can never
+satisfy the bar by accident.
+
+**Self-adjudication is refused regardless of configuration.** A model may not
+score labels its own pinned model produced; that is the circularity the corpus
+already suffers from, and no config key waives it.
+
+Scoring still reports recall and precision for an agent-seeded corpus — the
+numbers are real and useful for regression detection. What it withholds is the
+word *calibrated*: `ScoreReport.calibration.eligible` stays `False` unless every
+label in the set meets `requireForCalibration`. One unadjudicated row is enough
+to sink a corpus-wide claim, because a claim about the corpus is only as good as
+its weakest label.
+
+```text
+  calibration      : NOT calibrated — 1 of 3 labels below the 'independent' bar
+```
+
 ## Scoring
 
 Score a run's findings against a baseline:
