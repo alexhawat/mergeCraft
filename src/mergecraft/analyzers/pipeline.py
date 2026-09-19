@@ -231,8 +231,10 @@ def run_analyzer_pipeline(
     withholds those needing repo-provided tooling. Execution still uses the
     derived ``tier``, so a mode can never widen what a run may see (#38).
     """
+    from mergecraft.analyzers.sandbox import require_sandbox_for_enabled_shell
     from mergecraft.tracing.tracer import get_tracer_from_settings
 
+    require_sandbox_for_enabled_shell(shell=shell)
     full_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
     tracer = get_tracer_from_settings(full_settings)
     settings = _analyzers_settings(repo_root)

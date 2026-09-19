@@ -63,11 +63,11 @@ worked example at the end.
 The packet is defined in `src/mergecraft/evidence/packet.py` and exposed
 via `mergecraft.evidence.packet_output_schema()`. The JSON Schema is
 **derived from the Pydantic models** — there is no hand-written schema
-dict in parallel (D3). The precedent is
+dict in parallel. The precedent is
 `mergecraft.analyzers.finding.findings_output_schema()`
 (`src/mergecraft/analyzers/finding.py:138`).
 
-## Versioning (D7)
+## Versioning
 
 The packet is versioned from day one. The version is asserted in a test
 (`test_packet_schema_version_is_pinned`), and the literal lives at
@@ -97,7 +97,7 @@ not move.
 ### Version history
 
 - `1.0.0` — initial schema (#47, W1). Required top-level fields, nullable
-  `blast_radius` / `trajectory` / `evals` (D4), `Decision` row shape.
+  `blast_radius` / `trajectory` / `evals`, `Decision` row shape.
 - `1.1.0` — W2 (#41). Adds the `self_assessment: SelfAssessment | None`
   section as a sibling of `decision`. Additive — the wire shape is
   backwards-compatible; the verdict function reads the new field but a
@@ -109,8 +109,8 @@ not move.
 - `1.2.0` — W5 (#42). Replaces the nullable untyped `blast_radius`
   placeholder with `BlastRadiusClassification | None`. Populated packets now
   validate the lane, lane policy, reason, next action, and detected categories.
-  The field remains optional, but its existing type changed, so D7 requires a
-  minor bump.
+  The field remains optional, but its existing type changed, so the
+  versioning rule requires a minor bump.
 
 - `1.3.0` — W12 (#44). Promotes the `evals` section from `dict[str, Any]` to
   `list[EvalMetadata] | None`. Additive — a packet that previously set `evals`
@@ -133,7 +133,7 @@ not move.
 
 The pinned `PACKET_SCHEMA_VERSION` literal. Versioned at the top level
 so downstream tooling can refuse packets whose schema version it does
-not understand (D7).
+not understand.
 
 ### `change_id` — required
 
@@ -171,7 +171,7 @@ is the per-PR evidence record; this list is its scope.
 Change-scoped findings only. Run-scoped trajectory and environment
 observations live under `run_health` instead (plan 12 W7). The packet
 **composes** the existing `Finding` model from
-`mergecraft.analyzers.finding`, not a parallel finding model (D3). The
+`mergecraft.analyzers.finding`, not a parallel finding model. The
 wire shape is governed by the [`Finding` schema](ANALYZERS.md); the
 packet's `findings` field inlines that schema entirely into its emitted
 JSON Schema, so a packet consumer never has to look at `$defs` to validate
@@ -189,7 +189,7 @@ published review or the run-record preamble, not `findings[]`.
 
 Run-scoped findings and their advisory conclusion. Trajectory auditor rows
 and other `scope="run"` observations are partitioned here at assembly
-time; they never block merge (D2). When no run-scoped findings exist the
+time; they never block merge. When no run-scoped findings exist the
 section is omitted (`null`).
 
 | Field | Type | Notes |
@@ -213,7 +213,7 @@ this is the **mechanical evidence** that backs the merge verdict.
 
 The evidence verdict. W1 ships the **shape**; W2 (#41) populates this
 field from `decide_approval()` (the function the security plan's Batch D
-lands — D5). Until W2 the field is typically `{"verdict": "neutral",
+lands). Until W2 the field is typically `{"verdict": "neutral",
 "reason": "self-assessment-only run", "decided_by": "..."}`.
 
 | Field | Type | Notes |
@@ -245,19 +245,19 @@ the only positive signal, the verdict is `neutral`, never `auto_merge`.
 ### `blast_radius` — `dict[str, Any] | None` (nullable until Batch B)
 
 Placeholder; populated by Batch B's lane classifier. The field is
-typed `| None` from W1 (D4) so the wire schema is fixed even though
+typed `| None` from the first schema so the wire schema is fixed even though
 the implementation lands later.
 
 ### `trajectory` — `dict[str, Any] | None` (nullable until Batch C)
 
 Placeholder; populated by Batch C's `TrajectoryRecord` and the
-trajectory auditor. Built from the MCP tool-call layer (D8) — no
+trajectory auditor. Built from the MCP tool-call layer — no
 external trace dependency.
 
 ### `evals` — `dict[str, Any] | None` (nullable until Batch E)
 
 Placeholder; populated by Batch E's eval bank. The case store lives
-under the existing `evals/` tree (D13).
+under the existing `evals/` tree.
 
 ## Worked example
 
@@ -324,8 +324,7 @@ also the canonical fixture used by the WA-T round-trip tests:
 `extra="forbid"` is enforced at the model level; any unknown
 top-level field, or any unknown field on a nested model, is rejected
 at validation. There is no second finding model: the packet's
-`findings` items are exactly the [`Finding`](ANALYZERS.md) model
-(D3).
+`findings` items are exactly the [`Finding`](ANALYZERS.md) model.
 
 ## Reading the packet
 
@@ -341,21 +340,21 @@ and the gate layer. Consumers of the packet should:
    evidence verdict.
 4. Treat the packet as immutable. Downstream code that needs to
    annotate, score, or transform the packet should produce a new
-   packet (with a new `schema_version` if the shape changes — D7).
+   packet (with a new `schema_version` if the shape changes).
 
 ## Where the packet is emitted
 
 - **Schema & model:** `src/mergecraft/evidence/packet.py`
-- **Pure assembly:** `src/mergecraft/evidence/build.py` (D3, convention 5)
-- **I/O shell:** `src/mergecraft/evidence/emit.py` (W1.4)
-- **Tests:** `tests/evidence/` (WA-T; W1.6 un-xfails the schema, round-trip, and sections)
+- **Pure assembly:** `src/mergecraft/evidence/build.py` (convention 5)
+- **I/O shell:** `src/mergecraft/evidence/emit.py`
+- **Tests:** `tests/evidence/` (WA-T; covers the schema, round-trip, and sections)
 - **Test plan:** `docs/dev/test-plans/merge-evidence-gating.md`
 
 ## Cross-references
 
-- D3 — the packet composes `Finding`; JSON Schema derived from the models.
-- D7 — the packet is versioned from day one; the version is asserted in a test.
-- D4 — nullable-until-later sections are typed `| None`, not omitted.
-- D5 — `decision` is the W2 surface and consumes `decide_approval()`.
-- D8 — `trajectory` is built from MCP tool state without external trace.
-- D13 — `evals` is file-backed under `evals/`.
+- The packet composes `Finding`; JSON Schema is derived from the models.
+- The packet is versioned from day one; the version is asserted in a test.
+- Nullable-until-later sections are typed `| None`, not omitted.
+- `decision` consumes `decide_approval()`.
+- `trajectory` is built from MCP tool state without an external trace.
+- `evals` is file-backed under `evals/`.

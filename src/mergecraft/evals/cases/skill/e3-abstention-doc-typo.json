@@ -1,0 +1,15 @@
+{
+  "id": "skill-e3-abstention-doc-typo",
+  "title": "Genuine doc typo produces approve with zero findings",
+  "scenario": "e3",
+  "fixture_repo": "e3-doc-typo",
+  "skill_variants": {
+    "baseline": "baseline-pointer",
+    "tip": "tip-doctrine"
+  },
+  "review_assertions": {
+    "verdict": "approve",
+    "max_findings": 0
+  },
+  "notes": "D7 precision half — silence is a valid recorded outcome."
+}

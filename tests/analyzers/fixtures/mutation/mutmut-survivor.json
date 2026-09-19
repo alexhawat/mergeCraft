@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "mutants": [
+    {
+      "id": "1",
+      "filename": "src/mod.py",
+      "line": 3,
+      "column": 16,
+      "operator": "Eq",
+      "status": "survived",
+      "function": "fn_watch"
+    },
+    {
+      "id": "2",
+      "filename": "src/mod.py",
+      "line": 5,
+      "column": 8,
+      "operator": "Lt",
+      "status": "killed",
+      "function": "fn_watch"
+    },
+    {
+      "id": "3",
+      "filename": "src/other.py",
+      "line": 4,
+      "column": 8,
+      "operator": "Eq",
+      "status": "survived",
+      "function": "untouched"
+    }
+  ]
+}

@@ -704,7 +704,7 @@ def render_deterministic_review_block(
         )
     if review_skills:
         header_lines.append(
-            "- **Review skills:** " + ", ".join(f"`{item}`" for item in review_skills)
+            "- **Review skills (injected):** " + ", ".join(f"`{item}`" for item in review_skills)
         )
     if review_mcp_servers:
         header_lines.append(

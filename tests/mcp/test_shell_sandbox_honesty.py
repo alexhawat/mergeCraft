@@ -13,11 +13,14 @@ keeps the tool (cwd confinement + ``resolve_env("restricted")``).
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal
 
 import pytest
 
+from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.mcp import shell as shell_mod
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -34,10 +37,25 @@ from mergecraft.utils.github import GitHubClient
 TrustTier = Literal["trusted", "untrusted"]
 
 
+def _no_backend_caps() -> sandbox_mod.SandboxCapabilities:
+    return sandbox_mod.SandboxCapabilities(
+        pid_namespace=False,
+        network_namespace=False,
+        read_only_bind=False,
+        tmpfs=False,
+        cgroup_memory=False,
+        rlimit_nproc=True,
+        pid_namespace_method="none",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _reset_sandbox_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    """W4.2 — module global at ``shell.py`` must not leak across cases."""
+    """Keep these cases on the no-backend path after H2 adds Darwin sandbox-exec."""
     monkeypatch.setattr(shell_mod, "_detected_sandbox", None)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sandbox_mod, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(sandbox_mod, "probe_capabilities", _no_backend_caps)
 
 
 def _tool_ctx(

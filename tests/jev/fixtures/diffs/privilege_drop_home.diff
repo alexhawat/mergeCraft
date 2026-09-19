@@ -1,0 +1,13 @@
+diff --git a/src/mergecraft/utils/privilege.py b/src/mergecraft/utils/privilege.py
+--- a/src/mergecraft/utils/privilege.py
++++ b/src/mergecraft/utils/privilege.py
+@@ -1,8 +1,12 @@
+ def wrap_agent_command(argv: list[str]) -> list[str]:
+-    return list(argv)
++    return [
++        "setpriv",
++        "--reuid=agent",
++        "--regid=agent",
++        "--",
++        *argv,
++    ]

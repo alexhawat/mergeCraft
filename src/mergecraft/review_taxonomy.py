@@ -29,7 +29,7 @@ FINDING_EFFORTS: Final[tuple[str, ...]] = ("Quick win", "Heavy lift", "Low value
 
 FINDING_CONFIDENCES: Final[tuple[str, ...]] = ("certain", "likely", "possible")
 
-FindingSource = Literal["analyzer", "agent", "ci", "trajectory"]
+FindingSource = Literal["analyzer", "agent", "ci", "trajectory", "classifier"]
 
 FindingScope = Literal["change", "run"]
 

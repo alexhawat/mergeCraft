@@ -13,6 +13,7 @@ import typer
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.evidence.audit import (
     FALSIFICATION_RUBRIC,
     VERIFIER_STATES,
@@ -20,7 +21,7 @@ from mergecraft.evidence.audit import (
     replay_verification,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="evidence",
     help="Show and verify evidence packets for a finding.",
     no_args_is_help=True,

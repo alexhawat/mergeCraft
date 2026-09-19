@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "format": 3,
+    "version": "7.6.0",
+    "branch_coverage": false,
+    "show_contexts": false
+  },
+  "files": {
+    "src/mod.py": {
+      "executed_lines": [1, 2],
+      "missing_lines": [],
+      "excluded_lines": [],
+      "summary": {
+        "covered_lines": 2,
+        "num_statements": 2,
+        "percent_covered": 100.0,
+        "missing_lines": 0,
+        "excluded_lines": 0
+      },
+      "functions": {
+        "fn_clean": {
+          "executed_count": 1,
+          "start_line": 1,
+          "executed_lines": [1, 2],
+          "missing_lines": [],
+          "summary": {
+            "covered_lines": 2,
+            "num_statements": 2,
+            "percent_covered": 100.0,
+            "missing_lines": 0,
+            "excluded_lines": 0
+          }
+        }
+      }
+    }
+  },
+  "totals": {
+    "covered_lines": 2,
+    "num_statements": 2,
+    "percent_covered": 100.0
+  }
+}

@@ -27,7 +27,7 @@ inputs:
     required: false
   model_pin:
     description: >-
-      #37 / W4 / D8 — opt into the legacy "use exactly this model" semantics
+      #37 — opt into the legacy "use exactly this model" semantics
       for the `model:` input. Default `disabled`: `model:` becomes the chain
       head; the configured `models:` / `modelFallbacks:` tail is walked on
       credential miss or retryable failure. Set to `enabled` to collapse the
@@ -74,7 +74,7 @@ inputs:
     required: false
     default: disabled
   allow_pr_target_comments:
-    description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72 / D6."
+    description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72."
     required: false
     default: "false"
   codex_sandbox:
@@ -90,7 +90,7 @@ inputs:
   provider_base_url:
     description: >-
       Custom OpenAI-compatible base URL for the singleton provider
-      (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`, PR #79 / D7). Use this to point
+      (`MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`, PR #79). Use this to point
       Codex or OpenCode at a third-party OpenAI-compatible gateway without
       committing env-var names in workflow YAML. The indexed multi-provider
       form (`MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>` for `N >= 1`)
@@ -120,7 +120,7 @@ inputs:
     default: ${{ github.token }}
   suggest_eval_add:
     description: |
-      Opt-in (W12.4 / #44): when enabled, log a logger.info suggestion to add
+      Opt-in (#44): when enabled, log a logger.info suggestion to add
       the run to the eval bank when the run produced no positive
       findings, the trust tier is trusted, and the trigger is a re-review
       (not a fresh PR). Accepts disabled|enabled (also true/false aliases).
@@ -129,14 +129,14 @@ inputs:
     default: "disabled"
   tracing:
     description: |
-      Tracing enablement (W8.5 / W7.7): true / false. Wins over the
+      Tracing enablement: true / false. Wins over the
       .mergecraft/config.yaml ``tracing.enabled`` block when set. Unset
       defers to the config (default off).
     required: false
     default: ""
   tracing-to:
     description: |
-      Tracing shorthand (W8.5 / W7.7): ``local_files`` / ``logfire`` /
+      Tracing shorthand: ``local_files`` / ``logfire`` /
       ``otel``. Wins over the config block. ``logfire`` requires the
       optional ``[tracing]`` extra plus a `LOGFIRE_TOKEN` secret wired via
       `logfire-token` below; ``otel`` requires an ``otel-endpoint``.
@@ -144,7 +144,7 @@ inputs:
     default: ""
   logfire-token:
     description: |
-      Direct logfire token (W8.5 / W7.7). Wire from a `LOGFIRE_TOKEN`
+      Direct logfire token. Wire from a `LOGFIRE_TOKEN`
       GitHub Actions secret (interpolated in your workflow YAML, not written
       literally here) so the secret never appears in the workflow file.
       Held at runtime only; never inlined into config dumps.
@@ -152,7 +152,7 @@ inputs:
     default: ""
   otel-endpoint:
     description: |
-      OTLP collector URL (W8.5 / W7.7): e.g.
+      OTLP collector URL: e.g.
       ``http://127.0.0.1:4318/v1/traces``. Wins over the config block.
     required: false
     default: ""
@@ -176,7 +176,7 @@ inputs:
     default: ""
   setup_failure_policy:
     description: >-
-      S1 / D10 — what happens when a trusted-tier ``setupScript`` fails (non-zero
+      What happens when a trusted-tier ``setupScript`` fails (non-zero
       exit) or times out. ``inconclusive`` (default) maps the run to
       ``RunOutcome.inconclusive`` (a ``neutral`` check conclusion) — the run is
       treated as no-verdict, never a passing review of an under-provisioned tree.
@@ -230,7 +230,7 @@ runs:
   # Slim image published by ci-cd.yml (SHA tag + digest retag). Pin by digest, never
   # :latest / :rc. Bump with scripts/check_action_image_digest.py after each
   # build-images push for the workflow Action SHA (#526).
-  image: "docker://ghcr.io/alexhawat/mergecraft@sha256:429091afb4fb1975ca915c5014e4f42753500917c50aee0ba989c0d311138f53"
+  image: "docker://ghcr.io/alexhawat/mergecraft@sha256:b2c716aa42457027a1a854160a0e31778a4f73c0d069f9f9c2ee86be5c5577ac"
   entrypoint: "/entrypoint.sh"
   args:
     - "gha"

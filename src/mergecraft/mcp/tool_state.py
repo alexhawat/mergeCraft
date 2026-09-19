@@ -274,6 +274,12 @@ class AnalyzerRunState:
     # else — including on the GitHub Action path, which has no pre-pass — so an
     # unkeyed run is never reused by ``run_analyzers``.
     key: AnalyzerRunKey | None = None
+    # N2 / D9 — the covered file selection this run's evidence belongs to.
+    # ``run_analyzers`` stamps it from the request key; the offline pre-pass
+    # leaves it ``None`` and records the same identity in ``key``. Evidence is
+    # retained per covered scope, so a partial rerun cannot erase a finding
+    # produced for a file it did not cover.
+    covered_scope: AnalyzerRunKey | None = None
 
     def all_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row held on this analyzer run."""
@@ -296,10 +302,15 @@ class CiEvidenceState:
     ``AnalyzerRunState.findings`` uses, so the packet's loader reads one shape.
     ``substitutions`` records every gate outcome a declared CI check run
     changed, so a reader can audit *why* a gate stopped saying ``unavailable``.
+    ``run_notes`` / ``skip_reasons`` carry coverage and mutation ingest
+    tokens (for example ``coverage_undeclared`` vs ``coverage_clean``) when
+    no finding row would otherwise explain the outcome.
     """
 
     findings: list[dict[str, Any]] = field(default_factory=list)
     substitutions: list[dict[str, Any]] = field(default_factory=list)
+    run_notes: list[str] = field(default_factory=list)
+    skip_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -390,6 +401,7 @@ class ToolState:
     # #620 — Copilot-style review skills and read-only consumer MCP attached
     # to this run (attribution in the sticky record).
     review_skill_paths: tuple[str, ...] = ()
+    review_skills_ledger: tuple[str, ...] = ()
     review_mcp_names: tuple[str, ...] = ()
     # The resolved server objects behind ``review_mcp_names``. Agents must build
     # their mcpServers block from this rather than re-reading config.yaml: a
@@ -439,8 +451,16 @@ class ToolState:
     agent_diagnostic: Any = None
     browser_daemon: Any = None
     analyzer_run: AnalyzerRunState | None = None
-    # Session-scoped verifier confirms. ``run_analyzers`` replaces
-    # ``analyzer_run`` wholesale, so confirmations must not live only there.
+    # N2 / D9 — analyzer evidence retained per covered scope. ``analyzer_run``
+    # is the merged view over these segments; a rerun supersedes only the
+    # segment(s) whose covered scope is equivalent to the request, so evidence
+    # for files the rerun did not cover survives. The key is the analyzer
+    # request key (immutable run inputs + covered file selection), or ``None``
+    # for a run that recorded no scope.
+    analyzer_evidence: dict[AnalyzerRunKey | None, AnalyzerRunState] = field(default_factory=dict)
+    # Session-scoped verifier confirms. ``analyzer_run`` is rebuilt from the
+    # retained segments on every ``run_analyzers`` call, so confirmations must
+    # not live only there.
     verified_ids: set[str] = field(default_factory=set)
     # Fingerprints a verifier ``drop`` retired during this run. This set is
     # authoritative within the run — only canonical fingerprints survive the
@@ -461,8 +481,10 @@ class ToolState:
     # ref is not checked out locally; ``None`` means full local scope.
     review_scope: str | None = None
     # How review scope was established (``checkout_pr`` api fallback,
-    # ``establish_review_scope``, or ``get_commit_info`` at PR head).
-    scope_provenance: Literal["api", "checkout", "local-diff", "commit-info"] | None = None
+    # ``establish_review_scope``, or the offline ``local-diff`` path).
+    # ``get_commit_info`` is deliberately not a value (N3 / D10): a metadata
+    # read may not register canonical scope.
+    scope_provenance: Literal["api", "checkout", "local-diff"] | None = None
     # Memoized ``git show <rev>:<path>`` output paths keyed ``rev\\0path``.
     git_show_cache: dict[str, str] = field(default_factory=dict)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
@@ -494,6 +516,13 @@ class ToolState:
         rows.extend(row for row in self.agent_findings if isinstance(row, dict))
         rows.extend(row for row in self.confirmed_findings if isinstance(row, dict))
         return rows
+
+
+def loaded_review_skills_for_ledger(tool_state: ToolState) -> list[str]:
+    """Review skills for the sticky record, preferring the honest ledger."""
+    if tool_state.review_skills_ledger:
+        return list(tool_state.review_skills_ledger)
+    return list(tool_state.review_skill_paths)
 
 
 def record_lens_routing_decision(

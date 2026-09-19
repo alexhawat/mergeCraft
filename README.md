@@ -484,9 +484,11 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 | MiniMax | — | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` |
 | Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` |
 | OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `<your-prefix>/<your-model>` |
+| [LiteLLM](https://docs.litellm.ai/) proxy | — | same custom-provider env pair — [`examples/config-litellm.yaml`](examples/config-litellm.yaml) | `default/<model>` or `<label>/<model>` |
 | Logfire tracing | `mergecraft auth logfire` | see [`docs/TRACING.md`](docs/TRACING.md) | — |
 
-Custom OpenAI-compatible endpoints, multi-provider indexed env vars, and
+Custom OpenAI-compatible endpoints (including [LiteLLM](https://docs.litellm.ai/)
+proxies — no native `litellm` provider id), multi-provider indexed env vars, and
 `model:` chain semantics: [`docs/authentication.md`](docs/authentication.md).
 
 When `harness:` is unset, mergeCraft infers the runtime from the model slug — see

@@ -1,0 +1,6 @@
+diff --git a/src/unresolvable.py b/src/unresolvable.py
+--- a/src/unresolvable.py
++++ b/src/unresolvable.py
+@@ -1 +1 @@
+-VALUE = 1
++VALUE = 2

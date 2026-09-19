@@ -1,0 +1,6 @@
+name: demo-action
+description: Example secret reference ${{ secrets.FOO }} in prose
+runs:
+  using: composite
+  steps:
+    - run: echo hello

@@ -30,18 +30,21 @@ def get_commit_info_tool(ctx: ToolContext):
         diff_file = str(Path(temp) / f"commit-{sha[:7]}.diff")
         Path(diff_file).write_text(content, encoding="utf-8")
         logger.debug("wrote commit diff to {} ({} bytes)", diff_file, len(content))
+        # N3 / D10 — ``get_commit_info`` is a REPOSITORY_READ. The patch above is
+        # an *inspection artifact*: it is written to disk and returned as
+        # ``diffFile``, but it must never become the canonical review scope.
+        # Registering it used to overwrite ``primary.diff_path`` with the HEAD
+        # commit's patch, silently shrinking a whole-PR review to its last
+        # commit and corrupting admissible citations, inline anchors and blast
+        # radius downstream. Validate the artifact still (head binding + shape)
+        # but leave scope registration to the paths that legitimately own it
+        # (``checkout`` / ``api`` / ``local-diff``).
         primary = primary_repo_state(ctx.tool_state)
         pr_head = (primary.checkout_sha or "").strip().lower()
         if pr_head and sha.strip().lower() == pr_head:
-            from mergecraft.mcp.verdict import register_review_scope, validate_review_scope_evidence
+            from mergecraft.mcp.verdict import validate_review_scope_evidence
 
             await validate_review_scope_evidence(ctx, diff_path=diff_file, head_sha=sha)
-            register_review_scope(
-                ctx.tool_state,
-                diff_path=diff_file,
-                provenance="commit-info",
-                review_scope=ctx.tool_state.review_scope,
-            )
         stats = data.get("stats") or {}
         return {
             "sha": data.get("sha"),

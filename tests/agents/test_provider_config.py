@@ -26,6 +26,8 @@ import pytest
 
 from mergecraft.agents.openai_compatible_gateways import (
     CAPABILITY_VALUES,
+    SINGLETON_PROVIDER_ID,
+    resolve_gateway_endpoint,
     resolve_gateway_endpoints,
 )
 from mergecraft.agents.opencode import _custom_provider_ids, build_custom_provider
@@ -516,3 +518,46 @@ def test_custom_base_url_validates() -> None:
 
     with pytest.raises(ValidationError):
         _make_typed_config(base_url="not a url")
+
+
+@pytest.mark.parametrize(
+    "litellm_base_url",
+    [
+        "https://litellm.example.test/v1",
+        "http://127.0.0.1:4000/v1",
+    ],
+)
+def test_litellm_shaped_base_url_is_accepted_by_provider_config(
+    monkeypatch: pytest.MonkeyPatch,
+    litellm_base_url: str,
+) -> None:
+    """LiteLLM exposes OpenAI-compatible http(s) …/v1 — same discovery as other gateways."""
+    provider_config_cls = _provider_config_type()
+    monkeypatch.setenv(SINGLETON_BASE_URL_ENV, litellm_base_url)
+    monkeypatch.setenv(SINGLETON_API_KEY_ENV, "litellm-proxy-key-placeholder")
+
+    records = resolve_gateway_endpoints()
+    assert set(records) == {SINGLETON_PROVIDER_ID}
+
+    record = records[SINGLETON_PROVIDER_ID]
+    assert isinstance(record, provider_config_cls)
+    assert record.provider_id == SINGLETON_PROVIDER_ID
+    assert record.base_url == litellm_base_url
+    assert record.api_key_env == SINGLETON_API_KEY_ENV
+    assert "openai_compatible" in record.capabilities
+
+    endpoint = resolve_gateway_endpoint("default/gpt-4o")
+    assert endpoint == (SINGLETON_PROVIDER_ID, litellm_base_url, "litellm-proxy-key-placeholder")
+
+    emitted = build_custom_provider("default/gpt-4o")
+    assert emitted == {
+        SINGLETON_PROVIDER_ID: {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": SINGLETON_PROVIDER_ID,
+            "options": {
+                "baseURL": litellm_base_url,
+                "apiKey": "litellm-proxy-key-placeholder",
+            },
+            "models": {"gpt-4o": {"name": "gpt-4o"}},
+        }
+    }

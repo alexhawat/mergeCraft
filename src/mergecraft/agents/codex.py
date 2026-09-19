@@ -55,6 +55,8 @@ from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
@@ -220,8 +222,17 @@ def _setup_codex_auth(
     ctx: AgentRunContext,
     *,
     codex_home: Path,
+    credential_env: Mapping[str, str] | None = None,
 ) -> None:
-    raw = os.environ.get(CODEX_AUTH_ENV, "").strip()
+    """Write the isolated run home's ``auth.json`` from resolved credentials.
+
+    ``credential_env`` is the resolved child mapping (registry credential
+    outranks the legacy flat spelling); only when a caller omits it — the
+    direct-call contract used by the credential tests — is ``os.environ`` read.
+    Never mutates ``os.environ`` (D4).
+    """
+    source: Mapping[str, str] = credential_env if credential_env is not None else os.environ
+    raw = source.get(CODEX_AUTH_ENV, "").strip()
     if raw and subscription_auth_usable(raw):
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
@@ -235,6 +246,29 @@ def _setup_codex_auth(
         )
     if _has_openai_api_key():
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
+
+
+def _with_flat_codex_auth(env: dict[str, str]) -> dict[str, str]:
+    """Carry the legacy flat ``CODEX_AUTH_JSON`` into *env* when the registry did not.
+
+    Registry-backed credentials outrank the flat spelling (``build_agent_env``
+    maps them first); this only fills the gap so ``_setup_codex_auth`` and the
+    broker-posture selection consume one resolved mapping (D4).
+    """
+    if CODEX_AUTH_ENV not in env:
+        flat = os.environ.get(CODEX_AUTH_ENV, "").strip()
+        if flat:
+            env[CODEX_AUTH_ENV] = flat
+    return env
+
+
+def _resolved_parent_credentials(ctx: AgentRunContext) -> dict[str, str]:
+    """Return Codex's resolved parent credentials, excluding any broker token.
+
+    The per-run broker throwaway is injected later by :func:`_build_env`; posture
+    must be decided by what the parent actually holds.
+    """
+    return _with_flat_codex_auth(build_agent_env("codex", model=ctx.resolved_model))
 
 
 def _codex_mcp_tool_preamble() -> str:
@@ -573,6 +607,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
         # in build_agent_env so the real parent key never reaches the agent.
         extra[OPENAI_API_KEY_ENV] = handle.token
     env = build_agent_env("codex", extra, model=ctx.resolved_model)
+    _with_flat_codex_auth(env)
     if broker_active:
         # Respect the filtered child env: never restore denied parent variables.
         bypass: dict[str, str] = {}
@@ -582,7 +617,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
                 if entry:
                     bypass.setdefault(entry.casefold(), entry)
         env["NO_PROXY"] = env["no_proxy"] = ",".join(bypass.values())
-    _setup_codex_auth(ctx, codex_home=codex_home)
+    _setup_codex_auth(ctx, codex_home=codex_home, credential_env=env)
     # write_mcp_config() and _setup_codex_auth() both write into $CODEX_HOME
     # (config.toml, mergecraft-instructions.md, auth.json) while this process
     # still runs as root. wrap_agent_command()'s setpriv drops the actual
@@ -772,7 +807,11 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
 
-    initial_posture = resolve_codex_broker_posture()
+    credential_env = _resolved_parent_credentials(ctx)
+    initial_posture = resolve_codex_broker_posture(
+        codex_auth_json=credential_env.get(CODEX_AUTH_ENV, ""),
+        openai_api_key=credential_env.get(OPENAI_API_KEY_ENV, ""),
+    )
     try:
         broker_session = begin_broker_session(posture=initial_posture)
     except RuntimeError as err:

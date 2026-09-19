@@ -25,6 +25,7 @@ from mergecraft.cli.exits import (
     CLI_USAGE_EXIT_CODE,
 )
 from mergecraft.cli.local_env import local_env_path_for_process_cwd
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 
 _LEGACY_AUTH_WARNED = False
 
-app = typer.Typer(
+app = mergecraft_typer(
     help="Manage provider credentials for the current repository.", no_args_is_help=True
 )
 

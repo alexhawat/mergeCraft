@@ -22,6 +22,7 @@ from mergecraft.cli.local_env import (
     local_env_path_for_cwd,
     local_env_path_for_process_cwd,
 )
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.io import load_config_dict as _load_config_dict_raw
 from mergecraft.config.io import patch_config_dict
 from mergecraft.config.io import write_config_dict as _write_config_dict
@@ -105,7 +106,7 @@ _PROVIDER_AUTH_SCOPE_OPTION: str | None = typer.Option(
     ),
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     help="Add, list, edit, and delete LLM providers in the operator registry.",
     no_args_is_help=True,
 )
@@ -1181,7 +1182,7 @@ def migrate_cmd(
     ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
-    """Migrate legacy ``*_API_KEY`` env vars into indexed provider registry layout (D2 / #483)."""
+    """Migrate legacy ``*_API_KEY`` env vars into indexed provider registry layout (#483)."""
     repo_root = cwd.resolve()
     config_path = _config_path(repo_root)
     env_path = _env_path(cwd)

@@ -1,0 +1,20 @@
+{
+  "http": {
+    "status": 200,
+    "headers": { "content-type": "application/json" }
+  },
+  "body": {
+    "request_id": "req_evidence_says_nothing",
+    "model": "jev-1.13.0",
+    "usage": { "input_tokens": 80, "output_tokens": 4 },
+    "answers": {
+      "relation": {
+        "choice": "says_nothing",
+        "confidence": 0.91,
+        "probabilities": { "supports": 0.04, "contradicts": 0.05, "says_nothing": 0.91 }
+      },
+      "falsifiable": { "noul": 0.22 },
+      "located": { "noul": 0.18 }
+    }
+  }
+}

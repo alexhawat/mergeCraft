@@ -2,8 +2,7 @@
 
 How mergeCraft measures review quality. **This page does not replace #140.**
 Issue #140 owns publishing precision, recall, and F1; this page documents the
-wider metric set, the ablation harness, and the corpora those numbers are
-computed against.
+wider metric set and the corpora those numbers are computed against.
 
 Scores are **not** published on the landing `README.md` (file 7 RD4 /
 `test_no_eval_scores_on_landing_readme`). Live-provider numbers belong here
@@ -26,12 +25,7 @@ performance, dependency, and **clean** PRs (expected empty blocker set).
 Extra benchmark kinds (also packaged): historical PR, cross-repo (`xrepo`),
 requirements, large-PR, and incremental-review.
 
-The analyzer-contribution ablation uses the **current** shipped analyzer
-catalog as its baseline inventory. The #339 coverage sweep added analyzers;
-do not freeze a pre-sweep count.
-
-APIs: `mergecraft.evals.corpora`, `mergecraft.evals.quality_metrics`,
-`mergecraft.evals.ablation`.
+APIs: `mergecraft.evals.corpora`, `mergecraft.evals.quality_metrics`.
 
 ## Metric set
 
@@ -56,23 +50,6 @@ Release *targets* (not yet measured here): blocker precision above 95%, a
 materially higher recall than a strong single-agent baseline, a low duplicate
 rate, and a demonstrable verifier/judge contribution. Those targets are
 hypotheses until a live result set fills them.
-
-## Ablations
-
-`mergecraft.evals.ablation.run_ablation` names these dimensions:
-
-- multi-agent vs single-agent
-- verifier contribution
-- judge contribution
-- context-engine contribution
-- analyzer contribution (current catalog baseline)
-- memory contribution
-
-Each specialist can be evaluated independently by requesting that dimension.
-Adversarial corpora are not an ablation dimension.
-
-Unmeasured deltas stay at `0.0` with `measured=False`. A zero is "not yet
-run", not "no contribution".
 
 ## What this page will not do
 

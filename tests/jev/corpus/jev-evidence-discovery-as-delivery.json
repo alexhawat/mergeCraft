@@ -1,0 +1,17 @@
+{
+  "id": "jev-evidence-discovery-as-delivery",
+  "pack_id": "evidence/v1",
+  "title": "Run record quotes rglob discovery as injection evidence",
+  "shipped_defect": {
+    "kind": "plan-21",
+    "ref": "F5",
+    "citation": "plan 21 F5: run record reports discovery, not injection"
+  },
+  "claim": "Review skills were injected into the reviewer prompt",
+  "section": "Review skills: .github/skills/code-review/SKILL.md (rglob listing)",
+  "expected": {
+    "relation": "says_nothing",
+    "located_low": true
+  },
+  "calibrates": ["evidence/v1.relation.says_nothing", "evidence/v1.located"]
+}

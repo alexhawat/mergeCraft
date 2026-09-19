@@ -1,0 +1,19 @@
+{
+  "id": "jev-align-auth-author-paraphrase",
+  "pack_id": "align/v1",
+  "title": "Two phrasings of the auth-stem/author collision are the same defect",
+  "shipped_defect": {
+    "kind": "commit",
+    "ref": "2f39b221",
+    "citation": "fix(findings): stop auth stem matching the author word family"
+  },
+  "pair": {
+    "first": { "severity": "Major", "message": "auth prefix matches author" },
+    "second": { "severity": "Minor", "message": "author tokens are classified as security" }
+  },
+  "expected": {
+    "same_defect": "same",
+    "kept_severity": "Major"
+  },
+  "calibrates": ["align/v1.same_defect"]
+}

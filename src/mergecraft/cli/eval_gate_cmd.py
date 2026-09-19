@@ -14,12 +14,18 @@ from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.evals import permanent_test_path
 from mergecraft.evals.adversarial_corpora import eval_adversarial_gate
-from mergecraft.evals.gate import DEFAULT_GATE_TOLERANCE, eval_gate, load_result_set
+from mergecraft.evals.gate import (
+    DEFAULT_GATE_TOLERANCE,
+    eval_gate,
+    format_pr_gate_summary,
+    load_result_set,
+)
 from mergecraft.evals.store import (
     CASE_FILE_SUFFIX,
     DEFAULT_BANK_DIR,
     load_case,
 )
+from mergecraft.utils.step_summary import append_step_summary
 
 
 def _bank_dir(bank: Path | None) -> Path:
@@ -101,6 +107,7 @@ def register_gate_command(app: typer.Typer) -> None:
                 baseline=load_result_set(baseline),
                 tolerance=tolerance,
             )
+            append_step_summary(format_pr_gate_summary(gate_report))
 
         bank_dir = _bank_dir(bank)
         permanent_dir = default_permanent_dir()

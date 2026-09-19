@@ -1,0 +1,17 @@
+{
+  "id": "jev-unit-privilege-drop-home",
+  "pack_id": "unit/v1",
+  "title": "setpriv drop without HOME redirect",
+  "shipped_defect": {
+    "kind": "shipped-twice",
+    "ref": "wrap_agent_command HOME",
+    "citation": "src/mergecraft/agents/lenses/_definitions.py privilege-drop-ordering; src/mergecraft/utils/privilege.py"
+  },
+  "fixture_diff": "privilege_drop_home.diff",
+  "expected": {
+    "triage": "defective",
+    "severity_min": "Major",
+    "noul_high": ["security"]
+  },
+  "calibrates": ["unit/v1.triage.defective", "unit/v1.severity.major"]
+}

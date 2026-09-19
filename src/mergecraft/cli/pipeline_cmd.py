@@ -14,6 +14,7 @@ from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.orchestrator.executor import PipelineExecutor
 from mergecraft.orchestrator.pipeline import (
@@ -22,7 +23,7 @@ from mergecraft.orchestrator.pipeline import (
     parse_pipeline,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="pipeline",
     help="Lint and preview declarative review pipelines.",
     no_args_is_help=True,

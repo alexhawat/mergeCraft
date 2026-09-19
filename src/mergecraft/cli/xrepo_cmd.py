@@ -12,13 +12,14 @@ import typer
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.xrepo.review import (
     XrepoFinding,
     XrepoReview,
     review_linked_repos,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="xrepo",
     help="Explain cross-repo contract findings from SHA-pinned linked repositories.",
     no_args_is_help=True,

@@ -305,6 +305,96 @@ def _quote_user(prompt: str) -> str:
     return "\n".join(f"> {line}" for line in prompt.split("\n"))
 
 
+def _load_review_instruction_settings(repo_root: Any) -> tuple[int, tuple[str, ...]]:
+    from pathlib import Path as PathType
+
+    from mergecraft.config import load_repo_settings
+    from mergecraft.context.instruction_discovery import DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP
+
+    root = PathType(repo_root)
+    try:
+        settings = load_repo_settings(root=root, load_learnings_files=False)
+    except (OSError, ValueError):
+        return DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP, ()
+    return (
+        settings.review.instruction_bundle_byte_cap,
+        tuple(settings.review.instruction_extra_filenames),
+    )
+
+
+def _join_prompt_parts(*parts: str) -> str:
+    raw = "\n\n".join(part for part in parts if part)
+    while "\n\n\n" in raw:
+        raw = raw.replace("\n\n\n", "\n\n")
+    return raw
+
+
+def _render_review_context_bundle(
+    root: Any,
+    *,
+    trust_tier: str,
+    repo: str,
+    commit_sha: str,
+    byte_cap: int,
+    extra_filenames: tuple[str, ...],
+) -> tuple[str, list[str], list[str]]:
+    from pathlib import Path as PathType
+
+    from mergecraft.context.instruction_discovery import assemble_review_instruction_bundle
+
+    rendered, record = assemble_review_instruction_bundle(
+        repo_root=PathType(root),
+        trust_tier=trust_tier,
+        repo=repo,
+        commit_sha=commit_sha,
+        byte_cap=byte_cap,
+        extra_filenames=extra_filenames,
+    )
+    return rendered, list(record.injected), list(record.ledger_review_skills)
+
+
+def _assemble_full_prompt(
+    *,
+    toc_entries: list[tuple[str, str]],
+    task: str,
+    review_ctx: str,
+    mcp_note: str,
+    standing: str,
+    xrepo_section: str,
+    setup_failure: str,
+    setup_skip: str,
+    procedure: str,
+    learnings_section: str,
+    event_context: str,
+    system: str,
+    runtime_section: str,
+) -> str:
+    review_toc_entries = list(toc_entries)
+    if review_ctx and not any(label == "REVIEW SKILLS" for label, _ in review_toc_entries):
+        review_toc_entries.insert(
+            1 if task else 0,
+            ("REVIEW SKILLS", "Copilot-style review skills from the reviewed tree"),
+        )
+    prompt_toc = "This prompt contains the following sections:\n" + "\n".join(
+        f"- {label} — {desc}" for label, desc in review_toc_entries
+    )
+    return _join_prompt_parts(
+        prompt_toc,
+        task,
+        review_ctx,
+        mcp_note,
+        standing,
+        xrepo_section,
+        setup_failure,
+        setup_skip,
+        procedure,
+        learnings_section,
+        event_context,
+        system,
+        runtime_section,
+    )
+
+
 def _fence_user_prompt(user: str, *, fence: Fence, payload: dict[str, Any]) -> str:
     """Fence the user's ``prompt`` payload field for the YOUR TASK section.
 
@@ -666,25 +756,23 @@ Trust the tools — do not repeatedly verify after successful operations. Except
 
     review_context = ""
     review_skill_paths: list[str] = []
+    review_skill_ledger: list[str] = []
+    instruction_extra_filenames: tuple[str, ...] = ()
     if repo_root is not None:
-        from pathlib import Path as PathType
+        from mergecraft.context.instruction_discovery import DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP
 
-        from mergecraft.context.instruction_discovery import (
-            discover_review_skill_paths,
-            render_review_context,
+        instruction_bundle_byte_cap, instruction_extra_filenames = (
+            _load_review_instruction_settings(repo_root)
         )
-
-        root = PathType(repo_root)
         commit_sha = str(event.get("headSha") or event.get("head_sha") or "")
-        review_context = render_review_context(
-            repo_root=root,
+        review_context, review_skill_paths, review_skill_ledger = _render_review_context_bundle(
+            repo_root,
             trust_tier=trust_tier,
             repo=f"{repo.owner}/{repo.name}",
             commit_sha=commit_sha,
+            byte_cap=instruction_bundle_byte_cap or DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP,
+            extra_filenames=instruction_extra_filenames,
         )
-        review_skill_paths = [
-            path.relative_to(root).as_posix() for path in discover_review_skill_paths(root)
-        ]
     mcp_note = ""
     if review_mcp_names:
         listed = ", ".join(f"`{name}`" for name in review_mcp_names)
@@ -717,40 +805,21 @@ Trust the tools — do not repeatedly verify after successful operations. Except
         toc_entries.append(("LEARNINGS", "repo-specific knowledge file path + heading TOC"))
     toc_entries.append(("RUNTIME", "environment metadata"))
 
-    toc = "This prompt contains the following sections:\n" + "\n".join(
-        f"- {label} — {desc}" for label, desc in toc_entries
+    raw_full = _assemble_full_prompt(
+        toc_entries=toc_entries,
+        task=task,
+        review_ctx=review_context,
+        mcp_note=mcp_note,
+        standing=standing,
+        xrepo_section=xrepo_section,
+        setup_failure=setup_failure,
+        setup_skip=setup_skip,
+        procedure=procedure,
+        learnings_section=learnings_section,
+        event_context=event_context,
+        system=system,
+        runtime_section=runtime_section,
     )
-
-    raw_full = "\n\n".join(
-        part
-        for part in (
-            toc,
-            task,
-            review_context,
-            mcp_note,
-            standing,
-            xrepo_section,
-            setup_failure,
-            setup_skip,
-            procedure,
-            # W6.4 — place learnings BEFORE event_context so the
-            # seed-time fence for active entries is the first fence
-            # the model encounters in the prompt. This pins the W5.6
-            # test's invariant that a forged delimiter inside an entry
-            # cannot restructure the instruction block, since the entry
-            # is already enclosed before the model reads the event
-            # metadata (which contains its own pr_title / pr_body
-            # fences).
-            learnings_section,
-            event_context,
-            system,
-            runtime_section,
-        )
-        if part
-    )
-    # collapse excessive blank lines
-    while "\n\n\n" in raw_full:
-        raw_full = raw_full.replace("\n\n\n", "\n\n")
 
     event_blob = "\n\n---\n\n".join(p for p in (event_title, event_metadata) if p)
 
@@ -782,6 +851,7 @@ Trust the tools — do not repeatedly verify after successful operations. Except
                 else {}
             ),
             **({"review_skills": review_skill_paths} if review_skill_paths else {}),
+            **({"review_skills_ledger": review_skill_ledger} if review_skill_ledger else {}),
             **({"review_mcp": list(review_mcp_names or [])} if review_mcp_names else {}),
         },
     )

@@ -1,9 +1,9 @@
 # Compatibility matrix
 
 Supported Action runtime combinations for mergeCraft (production-readiness
-`#36` / W11.3). The PR E2E gate exercises the **security-relevant slice**; a
+`#36`). The PR E2E gate exercises the **security-relevant slice**; a
 scheduled nightly job covers the **broad slice** plus live providers
-(secrets-gated, D6).
+(secrets-gated).
 
 ## Axes
 
@@ -16,7 +16,7 @@ scheduled nightly job covers the **broad slice** plus live providers
 | **Push** | `disabled`, `restricted`, `enabled` | Default runtime resolve is `restricted`; default branch protected under `restricted` |
 | **Arch** | `linux/amd64`, `linux/arm64` | Images built multi-arch where the release pipeline publishes them; PR E2E runs on `ubuntu-latest` (amd64) |
 
-## Harness × model (HA3 / D11)
+## Harness × model
 
 OpenCode = generic multi-provider harness · Codex = OpenAI-native harness ·
 Nous = provider · DeepSeek = model family. When `harness:` is unset in
@@ -37,7 +37,7 @@ configuration errors naming both halves.
 
 ## Security-relevant slice (PR gate — `.github/workflows/e2e.yml`)
 
-Runs on every pull request. **No live LLMs** (D6): fixture event payloads +
+Runs on every pull request. **No live LLMs**: fixture event payloads +
 fake provider CLI shims under `docker/e2e/fake-provider-cli/`.
 
 | Cell | Coverage |

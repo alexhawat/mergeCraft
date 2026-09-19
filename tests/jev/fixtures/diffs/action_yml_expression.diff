@@ -1,0 +1,9 @@
+diff --git a/action.yml b/action.yml
+--- a/action.yml
++++ b/action.yml
+@@ -10,6 +10,8 @@
+ inputs:
+   typesafe-api-key:
+     required: false
++    description: "Pass ${{ secrets.TYPESAFE_API_KEY }} as the credential"
+     default: ""

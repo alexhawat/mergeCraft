@@ -1,0 +1,9 @@
+diff --git a/src/mergecraft/findings/category.py b/src/mergecraft/findings/category.py
+--- a/src/mergecraft/findings/category.py
++++ b/src/mergecraft/findings/category.py
+@@ -4,6 +4,9 @@
+ def infer_security_category(token: str) -> bool:
+     lowered = token.casefold()
++    if lowered.startswith("auth") or "author" in lowered:
++        return True
+     return "secret" in lowered

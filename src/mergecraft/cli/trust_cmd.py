@@ -16,6 +16,7 @@ from mergecraft.agents.codex import CODEX_SANDBOX_ENV, CODEX_SANDBOX_UNSANDBOXED
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.io import config_has_yaml_comments, write_config_dict
 from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
 from mergecraft.config.trust_policy import (
@@ -26,7 +27,7 @@ from mergecraft.config.trust_policy import (
     resolve_trust_policy,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     name="trust",
     help="Inspect and configure mergeCraft trust policy for this repository.",
     no_args_is_help=True,

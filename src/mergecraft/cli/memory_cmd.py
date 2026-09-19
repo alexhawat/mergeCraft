@@ -12,6 +12,7 @@ from loguru import logger
 
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
+from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.memory.store import MemoryStoreError, validate_memory_store
 from mergecraft.utils.learnings import repo_memory_paths
 from mergecraft.utils.memory import (
@@ -23,7 +24,7 @@ from mergecraft.utils.memory import (
     remove_memory_entry_from_learnings,
 )
 
-app = typer.Typer(
+app = mergecraft_typer(
     help="Manage repo-scoped review memory (active learnings, feedback, negative rules).",
     no_args_is_help=True,
 )
