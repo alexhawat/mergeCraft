@@ -28,9 +28,12 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from mergecraft.evals.adjudication import IndependenceTier
 
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
@@ -161,6 +164,7 @@ def run_live_detection(
     review_fn: ReviewFn,
     results_dir: Path,
     slack: int = DEFAULT_LINE_SLACK,
+    required_provenance: IndependenceTier = "independent",
 ) -> DetectionMetrics:
     """Drive every case through ``review_fn``, score it, and fold the results.
 
@@ -208,7 +212,13 @@ def run_live_detection(
         )
         findings = load_reported_findings({"findings": raw_rows})
 
-        report = score_findings(issues, findings, slack=slack, closed_world=case.closed_world)
+        report = score_findings(
+            issues,
+            findings,
+            slack=slack,
+            closed_world=case.closed_world,
+            required_provenance=required_provenance,
+        )
         # D12 (OB4) — eval scores are spans AND files: the span inherits the
         # active review.id via the OB1 close-time merge, making the
         # eval↔trace join free. Best-effort; scoring never depends on it.

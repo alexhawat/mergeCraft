@@ -9,8 +9,14 @@ is the circularity the corpus already suffers from.
 
 from __future__ import annotations
 
-import pytest
+import inspect
+import json
+from pathlib import Path
 
+import pytest
+from typer.testing import CliRunner
+
+from mergecraft.cli.app import app
 from mergecraft.config.settings import AdjudicationSettings, RepoSettings
 from mergecraft.evals.adjudication import (
     AdjudicationRecord,
@@ -23,6 +29,7 @@ from mergecraft.evals.adjudication import (
     resolve_adjudicator,
     tier_for_provenance,
 )
+from mergecraft.evals.live_run import run_live_detection
 from mergecraft.evals.scoring import (
     BaselineIssue,
     ReportedFinding,
@@ -202,3 +209,74 @@ class TestScoringIntegration:
             unmatched_finding_indexes=[],
         )
         assert report.calibration is None
+
+
+class TestConfigReachesScoring:
+    """The config block must change real behaviour, not merely validate.
+
+    A settings field no production path reads is worse than no field: it
+    advertises a policy the tool does not apply. These drive the operator
+    entry points through a real ``.mergecraft/config.yaml``.
+    """
+
+    @staticmethod
+    def _write_corpus(tmp_path: Path, provenance: str) -> tuple[Path, Path]:
+        expected = tmp_path / "baseline.json"
+        expected.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "1",
+                        "path": "a.py",
+                        "startLine": 1,
+                        "endLine": 2,
+                        "provenance": provenance,
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        actual = tmp_path / "findings.json"
+        actual.write_text(
+            json.dumps([{"path": "a.py", "startLine": 1, "endLine": 2}]), encoding="utf-8"
+        )
+        return actual, expected
+
+    @staticmethod
+    def _write_config(tmp_path: Path, bar: str) -> None:
+        config_dir = tmp_path / ".mergecraft"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.yaml").write_text(
+            "adjudication:\n"
+            "  adjudicators:\n"
+            "    llm:\n"
+            "      enabled: true\n"
+            "      independence: model\n"
+            f"  requireForCalibration: {bar}\n",
+            encoding="utf-8",
+        )
+
+    def test_default_bar_rejects_model_labels_through_the_cli(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        actual, expected = self._write_corpus(tmp_path, "llm-adjudicated")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
+        assert result.exit_code == 0, result.output
+        assert "NOT calibrated" in result.output
+
+    def test_lowering_the_bar_in_config_changes_the_cli_verdict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        actual, expected = self._write_corpus(tmp_path, "llm-adjudicated")
+        self._write_config(tmp_path, "model")
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
+        assert result.exit_code == 0, result.output
+        assert "NOT calibrated" not in result.output
+        assert "calibrated" in result.output
+
+    def test_live_detection_accepts_and_applies_the_bar(self) -> None:
+        signature = inspect.signature(run_live_detection)
+        assert "required_provenance" in signature.parameters
+        assert signature.parameters["required_provenance"].default == "independent"

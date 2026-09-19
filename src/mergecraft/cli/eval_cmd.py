@@ -711,7 +711,14 @@ def score(
 
     issues = load_baseline_issues(expected_payload)
     findings = load_reported_findings(actual_payload)
-    report = score_findings(issues, findings, slack=slack)
+    # The calibration bar is repo configuration, so scoring must read it here
+    # rather than fall back to the signature default — otherwise
+    # `requireForCalibration` is inert and the block advertises a policy it
+    # does not apply.
+    required = load_repo_settings(
+        root=Path.cwd(), load_learnings_files=False
+    ).adjudication.require_for_calibration
+    report = score_findings(issues, findings, slack=slack, required_provenance=required)
 
     if wants_json_output(ctx, json_flag=json_output):
         emit_cli_json(
