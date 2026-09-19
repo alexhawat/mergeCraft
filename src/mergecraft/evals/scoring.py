@@ -17,7 +17,8 @@ Exports:
     ReportedFinding: One finding a review run produced.
     Match: A baseline issue paired with the finding that located it.
     Breakdown: Per-category/per-severity issue and match counts.
-    ScoreReport: Recall, precision, F1, the FP ledger and the per-issue breakdown.
+    ScoreReport: Recall, precision, F1, the FP ledger, the per-issue breakdown,
+        and whether the labels may back a calibration claim.
     AggregateScoreReport: Many per-case ScoreReports folded into one corpus-wide report.
     load_baseline_issues: Parse baseline rows from a JSON payload.
     load_reported_findings: Parse review output from a JSON payload.
@@ -31,6 +32,11 @@ from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from mergecraft.evals.adjudication import (
+    CalibrationStatus,
+    IndependenceTier,
+    calibration_status,
+)
 from mergecraft.evals.finding_rows import finding_line_bounds, normalize_finding_path
 from mergecraft.review_taxonomy import FINDING_CATEGORIES, FINDING_SEVERITIES
 
@@ -154,6 +160,12 @@ class ScoreReport(BaseModel):
     # `DetectionCaseResult.strict_precision`). Defaulted so reports scored
     # before EV2 still validate.
     blocker_precision: float | None = None
+    # Whether this case's baseline labels are independent enough of the
+    # system under test to back a calibration claim. ``None`` when scoring
+    # did not evaluate it, so a report predating this field is not silently
+    # read as "eligible". Enabling an adjudicator never sets this — only
+    # the provenance actually recorded on the labels does.
+    calibration: CalibrationStatus | None = None
     # EV2: indexes of findings that repeat an earlier finding — same
     # normalized path and line ranges overlapping within the scoring slack
     # (the locality rule `score_findings` already uses). The first occurrence
@@ -572,6 +584,7 @@ def score_findings(
     *,
     slack: int = DEFAULT_LINE_SLACK,
     closed_world: bool = False,
+    required_provenance: IndependenceTier = "independent",
 ) -> ScoreReport:
     """Match reported findings against baseline issues by file and line overlap.
 
@@ -585,6 +598,12 @@ def score_findings(
     confirmed false positive rather than merely unadjudicated (D4/D5). It
     lives here, not on ``BaselineIssue``, because a clean closed-world case
     has zero baseline issues to carry a per-issue flag.
+
+    ``required_provenance`` is the independence bar every baseline label must
+    meet before the resulting numbers may be described as calibrated. It is
+    reported, never enforced: scoring still returns recall and precision for
+    an agent-seeded corpus, but ``calibration.eligible`` stays ``False`` so a
+    caller cannot present them as calibrated.
     """
     claimed: set[int] = set()
     matches: list[Match] = []
@@ -655,6 +674,9 @@ def score_findings(
         by_severity=by_severity,
         blocker_precision=blocker_precision,
         duplicate_finding_indexes=duplicate_finding_indexes,
+        calibration=calibration_status(
+            (issue.provenance for issue in issues), required=required_provenance
+        ),
     )
 
 
@@ -674,6 +696,10 @@ def format_report(report: ScoreReport, *, corpus: Path | str = "") -> str:
         lines.append(f"  severity agree   : {agreement:.2%}")
     if report.missed_issue_ids:
         lines.append(f"  missed           : {', '.join(report.missed_issue_ids)}")
+    calibration = report.calibration
+    if calibration is not None:
+        verdict = "calibrated" if calibration.eligible else "NOT calibrated"
+        lines.append(f"  calibration      : {verdict} — {calibration.reason}")
     return "\n".join(lines)
 
 

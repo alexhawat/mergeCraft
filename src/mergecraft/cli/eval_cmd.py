@@ -636,6 +636,12 @@ def bench_cmd(
 
     bank_dir = _bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
+    # `settings` above is loaded only on the config-resolution branch, so read
+    # the calibration bar unconditionally here — a benchmark run must honour
+    # `requireForCalibration` whether or not the model came from config.
+    required = load_repo_settings(
+        root=Path.cwd(), load_learnings_files=False
+    ).adjudication.require_for_calibration
     result = run_full_benchmark(
         bank_dir,
         detection_corpus_dir=detection_corpus,
@@ -643,6 +649,7 @@ def bench_cmd(
         providers=DEFAULT_BENCHMARK_PROVIDERS,
         detection_provider=detection_provider,
         detection_model=resolved_model,
+        required_provenance=required,
     )
     # update_latest=False: a single-provider detection result must not
     # silently become "latest.json" — see write_result_set's docstring (D12).
@@ -660,6 +667,11 @@ def bench_cmd(
         console.print(f"  recall          : {det.aggregate.recall:.2%}")
         console.print(f"  precision       : {det.aggregate.corpus_confirmed_precision:.2%}")
         console.print(f"  f1              : {det.aggregate.f1:.2%}")
+        # Printed beside the numbers, not below the artifact path: a reader
+        # who stops at f1 must still have seen whether it is calibrated.
+        if det.calibration is not None:
+            verdict = "calibrated" if det.calibration.eligible else "NOT calibrated"
+            console.print(f"  calibration     : {verdict} — {det.calibration.reason}")
         console.print(f"  raw findings @  : {det.raw_findings_dir}")
     else:
         console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
@@ -711,7 +723,14 @@ def score(
 
     issues = load_baseline_issues(expected_payload)
     findings = load_reported_findings(actual_payload)
-    report = score_findings(issues, findings, slack=slack)
+    # The calibration bar is repo configuration, so scoring must read it here
+    # rather than fall back to the signature default — otherwise
+    # `requireForCalibration` is inert and the block advertises a policy it
+    # does not apply.
+    required = load_repo_settings(
+        root=Path.cwd(), load_learnings_files=False
+    ).adjudication.require_for_calibration
+    report = score_findings(issues, findings, slack=slack, required_provenance=required)
 
     if wants_json_output(ctx, json_flag=json_output):
         emit_cli_json(
@@ -724,6 +743,12 @@ def score(
                 "severity_agreement": report.severity_agreement,
                 "missed_issue_ids": report.missed_issue_ids,
                 "matches": [m.model_dump() for m in report.matches],
+                # Automation reading only JSON must still learn whether these
+                # numbers rest on adjudicated labels; without it an
+                # agent-seeded score can be published as if it were calibrated.
+                "calibration": (
+                    report.calibration.model_dump() if report.calibration is not None else None
+                ),
             }
         )
     else:

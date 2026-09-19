@@ -626,6 +626,26 @@ class VerifyBehaviorSettings(BaseModel):
     enabled: bool = True
 
 
+class AdjudicationSettings(BaseModel):
+    """The calibration bar eval corpus labels must clear (#736).
+
+    Scoring reports recall and precision for any corpus. This decides whether
+    those numbers may be described as calibrated: every label in the set must
+    meet ``require_for_calibration``. Configuration cannot lower the bar to
+    nothing — see the field's comment.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    # ``none`` is deliberately not offered: a bar of "no independence" would
+    # let the existing agent-seeded corpus be published as calibrated, which is
+    # exactly the claim this block exists to prevent configuration from making.
+    require_for_calibration: Literal["independent", "model"] = Field(
+        default="independent",
+        alias="requireForCalibration",
+    )
+
+
 class JevSettings(BaseModel):
     """Opt-in Jev / System One block. Off by default (D4, D8).
 
@@ -776,6 +796,7 @@ class RepoSettings(BaseModel):
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
     jev: JevSettings = Field(default_factory=JevSettings)
+    adjudication: AdjudicationSettings = Field(default_factory=AdjudicationSettings)
     verify_behavior: VerifyBehaviorSettings = Field(
         default_factory=VerifyBehaviorSettings,
         alias="verifyBehavior",
