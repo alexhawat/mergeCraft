@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from mergecraft.config.settings import default_settings
+
+if TYPE_CHECKING:
+    import pytest
 from tests.jev.support import (
     PINNED_MODEL,
     TEST_API_KEY,
     TRANSPORT_DIR,
     import_jev,
     loguru_lines,
+    make_agent_finding,
     make_hunk_unit,
 )
 
@@ -132,8 +137,6 @@ async def test_evidence_attestation_requires_relation_confidence_floor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Low-confidence relation must not emit attestation even when choice matches."""
-    from mergecraft.config.settings import default_settings
-
     base = default_settings()
     configured = base.model_copy(
         update={
@@ -153,8 +156,6 @@ async def test_evidence_attestation_requires_relation_confidence_floor(
     transport = client_mod.RecordedTransport.from_fixture(
         TRANSPORT_DIR / "evidence_says_nothing.json"
     )
-    from tests.jev.support import make_agent_finding
-
     finding = make_agent_finding(
         message="claim",
         evidence=["def add(left, right): return left + right"],
