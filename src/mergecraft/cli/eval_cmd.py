@@ -711,9 +711,20 @@ def adjudicate_cmd(
     if not baseline.is_file():
         cli_bail(f"{baseline} is not a file")
     try:
-        rows = read_json_or_jsonl(baseline)
+        payload = read_json_or_jsonl(baseline)
     except (OSError, json.JSONDecodeError) as exc:
         cli_bail(f"could not read {baseline}: {exc}")
+
+    # Every shipped corpus baseline is an envelope — {"closed_world": ...,
+    # "issues": [...]} — not a bare list. Bind `rows` to the list *inside* the
+    # payload so the mutation below reaches it and the envelope's other keys
+    # survive the rewrite; a bare list is still accepted for ad-hoc files.
+    if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
+        rows = payload["issues"]
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        cli_bail(f"{baseline} is neither a list of rows nor an object with 'issues'")
 
     settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
     try:
@@ -726,8 +737,6 @@ def adjudicate_cmd(
     except (AdjudicatorNotApproved, SelfAdjudicationRefused) as exc:
         cli_bail(str(exc))
 
-    if not isinstance(rows, list):
-        cli_bail(f"{baseline} does not contain a list of baseline rows")
     matched = False
     for row in rows:
         if isinstance(row, dict) and str(row.get("id") or "") == issue_id:
@@ -741,7 +750,7 @@ def adjudicate_cmd(
     if not matched:
         cli_bail(f"no baseline row with id {issue_id!r} in {baseline}")
 
-    baseline.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    baseline.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     console.print(
         f"adjudicated {issue_id} by {by} — provenance {provenance_for(record)} "
         f"(tier {record.independence})"

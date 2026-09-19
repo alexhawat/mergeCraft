@@ -83,6 +83,10 @@ mergecraft eval adjudicate baseline.json --id ISSUE-1 --by llm --model judge-2 \
   --produced-by judge-1
 ```
 
+Baselines are envelopes — `{"closed_world": ..., "issues": [...]}` — and the
+command rewrites the row in place, preserving every other key. A bare list of
+rows is also accepted for ad-hoc files.
+
 An unapproved adjudicator exits non-zero and writes nothing. The row's
 `provenance` is derived from the resulting record, never supplied by the caller.
 

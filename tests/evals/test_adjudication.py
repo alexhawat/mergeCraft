@@ -309,22 +309,31 @@ class TestAdjudicateCommand:
 
     @staticmethod
     def _baseline(tmp_path: Path, provenance: str = "agent-seeded") -> Path:
+        """Envelope shape — every baseline under ``evals/bench/`` looks like this."""
         path = tmp_path / "baseline.json"
         path.write_text(
             json.dumps(
-                [
-                    {
-                        "id": "1",
-                        "path": "a.py",
-                        "startLine": 1,
-                        "endLine": 2,
-                        "provenance": provenance,
-                    }
-                ]
+                {
+                    "closed_world": False,
+                    "issues": [
+                        {
+                            "id": "1",
+                            "path": "a.py",
+                            "startLine": 1,
+                            "endLine": 2,
+                            "provenance": provenance,
+                        }
+                    ],
+                }
             ),
             encoding="utf-8",
         )
         return path
+
+    @staticmethod
+    def _rows(baseline: Path) -> list[dict[str, object]]:
+        payload = json.loads(baseline.read_text())
+        return payload["issues"] if isinstance(payload, dict) else payload
 
     @staticmethod
     def _enable_llm(tmp_path: Path) -> None:
@@ -348,7 +357,7 @@ class TestAdjudicateCommand:
             app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "llm"]
         )
         assert result.exit_code != 0
-        assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
+        assert self._rows(baseline)[0]["provenance"] == "agent-seeded"
 
     def test_approved_adjudicator_writes_derived_provenance(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -359,7 +368,7 @@ class TestAdjudicateCommand:
             app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"]
         )
         assert result.exit_code == 0, result.output
-        assert json.loads(baseline.read_text())[0]["provenance"] == "human"
+        assert self._rows(baseline)[0]["provenance"] == "human"
 
     def test_enabling_llm_in_config_lets_it_write(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -384,7 +393,7 @@ class TestAdjudicateCommand:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert json.loads(baseline.read_text())[0]["provenance"] == "llm-adjudicated"
+        assert self._rows(baseline)[0]["provenance"] == "llm-adjudicated"
 
     def test_model_adjudicator_without_producer_is_refused_through_the_cli(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -398,7 +407,7 @@ class TestAdjudicateCommand:
             ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "llm", "--model", "j1"],
         )
         assert result.exit_code != 0
-        assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
+        assert self._rows(baseline)[0]["provenance"] == "agent-seeded"
 
     def test_self_adjudication_refused_even_when_enabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -423,7 +432,7 @@ class TestAdjudicateCommand:
             ],
         )
         assert result.exit_code != 0
-        assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
+        assert self._rows(baseline)[0]["provenance"] == "agent-seeded"
 
     def test_record_round_trips_so_independence_is_auditable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -449,7 +458,7 @@ class TestAdjudicateCommand:
             ],
         )
         assert result.exit_code == 0, result.output
-        row = json.loads(baseline.read_text())[0]
+        row = self._rows(baseline)[0]
         record = row["adjudication"]
         assert record["adjudicated_by"] == "llm"
         assert record["model"] == "judge-2"
@@ -468,6 +477,54 @@ class TestAdjudicateCommand:
         issues = load_baseline_issues(json.loads(baseline.read_text()))
         assert [issue.provenance for issue in issues] == ["human"]
 
+    def test_envelope_other_keys_survive_the_rewrite(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        CliRunner().invoke(app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"])
+        payload = json.loads(baseline.read_text())
+        assert payload["closed_world"] is False
+        assert payload["issues"][0]["provenance"] == "human"
+
+    def test_bare_list_baseline_is_still_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = tmp_path / "adhoc.json"
+        baseline.write_text(
+            json.dumps([{"id": "1", "path": "a.py", "provenance": "agent-seeded"}]),
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"]
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(baseline.read_text())[0]["provenance"] == "human"
+
+    def test_adjudicates_a_real_shipped_corpus_baseline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Guards the regression this class missed: synthetic shapes only."""
+        repo_root = Path(__file__).resolve().parents[2]
+        shipped = sorted((repo_root / "evals" / "bench" / "mergecraft").glob("*/baseline.json"))
+        # Clean closed-world cases carry zero issues by design, so pick the
+        # first baseline that actually has a row to adjudicate.
+        source = next(
+            path for path in shipped if json.loads(path.read_text(encoding="utf-8")).get("issues")
+        )
+        target = tmp_path / "baseline.json"
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        issue_id = json.loads(target.read_text())["issues"][0]["id"]
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(target), "--id", issue_id, "--by", "human"]
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(target.read_text())
+        assert payload["issues"][0]["provenance"] == "human"
+        assert "closed_world" in payload
+
     def test_unknown_issue_id_writes_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -477,7 +534,7 @@ class TestAdjudicateCommand:
             app, ["eval", "adjudicate", str(baseline), "--id", "nope", "--by", "human"]
         )
         assert result.exit_code != 0
-        assert json.loads(baseline.read_text())[0]["provenance"] == "agent-seeded"
+        assert self._rows(baseline)[0]["provenance"] == "agent-seeded"
 
 
 class TestBenchmarkChainThreadsTheBar:
