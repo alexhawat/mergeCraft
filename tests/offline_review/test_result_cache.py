@@ -46,6 +46,15 @@ def _real_git_repo(tmp_path: Path) -> Path:
 
 def _isolate_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MERGECRAFT_CACHE_DIR", str(tmp_path / "run-cache"))
+    # These tests model a local CLI run, so the ambient GitHub event must not
+    # reach trust derivation. `consume_verification_report` consults
+    # GITHUB_EVENT_NAME / GITHUB_EVENT_PATH, and `derive_trust_tier` resolves
+    # `push` to `untrusted` (analyzers/trust.py fall-through) while same-repo
+    # `pull_request` resolves to `trusted`. Inheriting those made the
+    # verification-report cache-key test pass on every PR and fail on every
+    # push to main, where it blocked image publication and the pin cycle.
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
 
 
 def _nonempty_materialization(out_dir: Path) -> DiffMaterialization:
