@@ -6,6 +6,8 @@ import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from mergecraft.evidence.packet import MergeEvidencePacket
 
 _STEP_SUMMARY_MAX_BYTES = 1_048_576
@@ -23,8 +25,15 @@ def render_step_summary(
     agent_summary: str | None = None,
     trust_tier: str | None = None,
     token_summary: str | None = None,
+    credential_degradations: Sequence[str] | None = None,
 ) -> str:
-    """Render the step summary body: header table plus the W5 record sections."""
+    """Render the step summary body: header table plus the W5 record sections.
+
+    ``credential_degradations`` is threaded through to the record renderer so
+    the step summary carries the same #775 posture as the sticky comment: when
+    a reviewer slot was skipped for a missing credential, the embedded record
+    reports ``inconclusive`` and names that no credentialed reviewer ran.
+    """
     from mergecraft.findings.ledger import render_deterministic_review_block
 
     decision = packet.decision
@@ -36,6 +45,17 @@ def render_step_summary(
             if hasattr(verdict_diagnostic, "value")
             else str(verdict_diagnostic)
         )
+
+    # #775 / G-D9 — a skipped credentialed reviewer slot makes the coarse header
+    # cells match the embedded record: the approval-shaped `success` / `approved`
+    # labels become `inconclusive`, never an approval-shaped claim. A `failure` /
+    # `no_verdict` label and the structural `Verdict` cell are left as-is, exactly
+    # as the record leaves a genuine `failed` outcome and its `Decision`.
+    if any(str(line).strip() for line in (credential_degradations or ())):
+        if outcome_label == "success":
+            outcome_label = "inconclusive"
+        if diagnostic == "approved":
+            diagnostic = "inconclusive"
 
     header_lines = [
         "# mergeCraft step summary",
@@ -64,6 +84,7 @@ def render_step_summary(
         agent_summary=agent_summary,
         trust_tier=trust_tier,
         token_summary=token_summary,
+        credential_degradations=credential_degradations,
         action_pin_sha=action_pin_sha,
         image_source_sha=image_source_sha,
     )
