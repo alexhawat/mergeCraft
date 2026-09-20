@@ -1,21 +1,34 @@
 # SPDX-License-Identifier: MIT
-# Automates the mechanical half of the S -> D -> C -> P pin cycle (#641).
-#
-# The cycle is two commits and they cannot be one PR: the consumer pin P must
-# name manifest commit C, and C's SHA is not known until it merges. Each stage
-# here prepares one of them.
+# The S -> D -> C -> P pin cycle (#641). It is two commits and they cannot be
+# one PR: the consumer pin P must name manifest commit C, and C's SHA is not
+# known until it merges. This workflow automates C and prepares P for a human.
 #
 #   stage=manifest  Resolve main's tip as source S, verify the published image D
 #                   against GHCR, run `make action-manifest-prepare`, and push
-#                   the one-line action.yml change on a branch.
+#                   the one-line action.yml change on a branch. This stage can
+#                   push — action.yml is not a workflow file, so the job's
+#                   `contents: write` scope is sufficient.
 #   stage=pin       Given the merged MANIFEST_COMMIT, run `make
-#                   action-pin-prepare` and push the four-reference change.
+#                   action-pin-prepare`, verify and rewrite the four consumer
+#                   references, keep the preparation in the runner, and print
+#                   the exact local command for a human to land.
 #
-# This deliberately stops at pushing a branch. A PR opened with GITHUB_TOKEN
+# stage=pin cannot push, by construction. It must edit `.github/workflows/
+# mergecraft.yml`, and GitHub refuses a GITHUB_TOKEN push that touches
+# `.github/workflows/`:
+#
+#   (refusing to allow a GitHub App to create or update workflow
+#    `.github/workflows/mergecraft.yml` without `workflows` permission)
+#
+# `workflows` is not a GITHUB_TOKEN `permissions:` scope, so adding it to the
+# block changes nothing; and a `uses:` reference cannot read a variable, so the
+# rungs must carry literal SHAs. Advertising a push GitHub rejects would fail at
+# the last step after looking like it worked, so this stage documents the manual
+# step instead. No PAT is introduced to route around it.
+#
+# The manifest branch is left for a human too: a PR opened with GITHUB_TOKEN
 # does not trigger `pull_request` workflows, so it would arrive carrying zero
 # required checks — the pin is exactly the change that must not merge unchecked.
-# The job summary prints the `gh pr create` command for a human to run, and no
-# PAT is introduced to work around it.
 #
 # What this removes is the error-prone part, not the judgement: resolving the
 # digest, keeping S/D/C consistent, and retyping 40-hex SHAs by hand. Merging
@@ -115,7 +128,10 @@ jobs:
           if [ "$STAGE" = "manifest" ]; then
             branch="chore/action-manifest-$SHORT"
             make action-manifest-prepare
-            title="chore(action): prepare verified image manifest ${IMAGE_DIGEST#sha256:}"
+            # Keep the Conventional-Commit subject inside the 72-character cap;
+            # the full 64-hex digest would make it 111 characters.
+            digest_short="${IMAGE_DIGEST#sha256:}"
+            title="chore(action): prepare verified image manifest ${digest_short:0:8}"
           else
             if [ -z "$MANIFEST_COMMIT" ]; then
               echo "::error::stage=pin requires manifest_commit (the SHA C landed as on main)"
@@ -132,7 +148,11 @@ jobs:
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "title=$title" >> "$GITHUB_OUTPUT"
 
+      # stage=manifest only. Only C can be pushed: stage=pin rewrites
+      # `.github/workflows/` files, which GitHub refuses to accept from a
+      # GITHUB_TOKEN push.
       - name: Push the branch
+        if: inputs.stage == 'manifest'
         env:
           BRANCH: ${{ steps.prepare.outputs.branch }}
           TITLE: ${{ steps.prepare.outputs.title }}
@@ -154,7 +174,11 @@ jobs:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           {
-            echo "### Branch pushed: \`$BRANCH\`"
+            if [ "$STAGE" = "manifest" ]; then
+              echo "### Branch pushed: \`$BRANCH\` (manifest C)"
+            else
+              echo "### Prepared locally — no push (pin P)"
+            fi
             echo
             echo "| | |"
             echo "| --- | --- |"
@@ -166,15 +190,43 @@ jobs:
               echo "| manifest C | \`$MANIFEST_COMMIT\` |"
             fi
             echo
-            echo "Open the PR yourself — a GITHUB_TOKEN-opened PR carries no required checks:"
-            echo
-            echo '```bash'
-            echo "gh pr create --base main --head $BRANCH --title \"$TITLE\""
-            echo '```'
             if [ "$STAGE" = "manifest" ]; then
+              echo "Open the PR yourself — a GITHUB_TOKEN-opened PR carries no required checks:"
+              echo
+              echo '```bash'
+              echo "gh pr create --base main --head $BRANCH --title \"$TITLE\""
+              echo '```'
               echo
               echo "**Merge it with a merge commit, not a squash** — a squash orphans the"
               echo "manifest commit and leaves nothing for the pin stage to name (#684)."
               echo "Then re-run this workflow with \`stage=pin\` and that commit's SHA."
+            else
+              echo "No branch was pushed and no PR was opened, because this stage cannot"
+              echo "push. Run the exact preparation in a clean isolated worktree, then"
+              echo "review and merge it yourself:"
+              echo
+              echo '```bash'
+              echo "MANIFEST_COMMIT=$MANIFEST_COMMIT RELEASE_BASE_BRANCH=main make action-pin-prepare"
+              echo '```'
+              echo
+              echo "The worktree must be clean: \`_prepared_state\` rejects **any** untracked"
+              echo "file, not just the files it expects to change, and it also rejects staged"
+              echo "or mode-changing edits. An untracked scratch file in the checkout is"
+              echo "enough for the preparation to refuse."
+              echo
+              echo "**Why the push cannot happen here.** The pin rewrites the \`uses:\` rungs"
+              echo "and \`MERGECRAFT_ACTION_SHA\` in \`.github/workflows/mergecraft.yml\`, and"
+              echo "GitHub refuses a \`GITHUB_TOKEN\` push that touches \`.github/workflows/\`:"
+              echo
+              echo '```'
+              echo "(refusing to allow a GitHub App to create or update workflow"
+              echo " \`.github/workflows/mergecraft.yml\` without \`workflows\` permission)"
+              echo '```'
+              echo
+              echo "\`workflows\` is not a \`GITHUB_TOKEN\` \`permissions:\` scope, so widening the"
+              echo "block changes nothing, and a \`uses:\` reference cannot read a variable, so"
+              echo "the rungs must carry literal SHAs. This stage does everything it can — it"
+              echo "runs \`verify_manifest\`, rewrites the four references and shows the diff —"
+              echo "and stops where GitHub stops it."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -42,6 +42,18 @@ def _reset_run_scope_settings_snapshot() -> Iterator[None]:
     reset_gateway_settings_cache()
 
 
+@pytest.fixture(autouse=True)
+def _clear_ambient_github_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear the runner's ``GITHUB_EVENT_*`` so no test inherits it (#760, F3).
+
+    A test that wants an event opts in with ``monkeypatch.setenv`` after this
+    fixture has run; that explicit value still wins, and ``monkeypatch``
+    restores the original environment at teardown.
+    """
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+
+
 # ---------------------------------------------------------------------------
 # B — live opt-in once (CQ-2): skip ``live``-marked tests unless opted in
 # ---------------------------------------------------------------------------

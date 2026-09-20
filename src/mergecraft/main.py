@@ -540,6 +540,7 @@ async def _publish(
                     tool_context.tool_state.usage_entries,
                     budget_tracker=tool_context.budget_tracker,
                 ),
+                credential_degradations=list(tool_context.tool_state.credential_degradations),
             )
             append_step_summary(summary_body)
 

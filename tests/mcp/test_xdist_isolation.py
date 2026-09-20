@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import importlib
 import json
+import socket
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -85,32 +86,50 @@ def _find_reset_mcp_process_state() -> Callable[[], object] | None:
     return None
 
 
-def _start_and_probe(tmp_path: Path) -> tuple[int, str, str]:
+def _start_and_probe(tmp_path: Path) -> tuple[int, str, str, Callable[[], None]]:
+    """Start a probed MCP server, leave it listening, and return its disposer.
+
+    The server is deliberately *not* stopped before returning: the caller owns
+    its lifetime, so it can assert over a set of *simultaneously live* servers
+    and dispose of them in its own ``finally``. Stopping here would only permit
+    uniqueness across sequential lifetimes, and the OS may legitimately reissue
+    a released ephemeral port.
+    """
     ctx = _tool_ctx(tmp_path)
     url, stop = start_mcp_http_server(ctx)
+    parsed = urlparse(url)
+    assert parsed.port is not None
+    agent_token = getattr(ctx, "mcp_auth_token", None)
+    orchestrator_token = getattr(ctx, "mcp_orchestrator_auth_token", None)
+    if not isinstance(agent_token, str) or not agent_token:
+        stop()
+        pytest.fail("per-run MCP agent token missing after server start")
+    if not isinstance(orchestrator_token, str) or not orchestrator_token:
+        stop()
+        pytest.fail("per-run MCP orchestrator token missing after server start")
+    list_body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {orchestrator_token}",
+    }
     try:
-        parsed = urlparse(url)
-        assert parsed.port is not None
-        agent_token = getattr(ctx, "mcp_auth_token", None)
-        orchestrator_token = getattr(ctx, "mcp_orchestrator_auth_token", None)
-        if not isinstance(agent_token, str) or not agent_token:
-            pytest.fail("per-run MCP agent token missing after server start")
-        if not isinstance(orchestrator_token, str) or not orchestrator_token:
-            pytest.fail("per-run MCP orchestrator token missing after server start")
-        list_body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {orchestrator_token}",
-        }
         with urlopen(
             Request(url, data=list_body, headers=headers, method="POST"), timeout=5
         ) as resp:
             payload = json.loads(resp.read().decode())
-        assert isinstance(payload.get("result"), dict)
-        assert isinstance(payload["result"].get("tools"), list)
-        return parsed.port, agent_token, orchestrator_token
-    finally:
+    except BaseException:
         stop()
+        raise
+    assert isinstance(payload.get("result"), dict)
+    assert isinstance(payload["result"].get("tools"), list)
+    return parsed.port, agent_token, orchestrator_token, stop
+
+
+def _port_is_listening(port: int) -> bool:
+    """Return whether a TCP connect to ``port`` on loopback succeeds right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1.0)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
 def test_reset_mcp_process_state_is_public_api() -> None:
@@ -135,8 +154,11 @@ def test_start_mcp_http_server_uses_os_assigned_port_when_env_unset(
 ) -> None:
     """D4 / #421 — unset MERGECRAFT_MCP_PORT must bind an ephemeral listen port."""
     monkeypatch.delenv("MERGECRAFT_MCP_PORT", raising=False)
-    port, _, _ = _start_and_probe(tmp_path)
-    assert port > 0
+    port, _agent_token, _orchestrator_token, stop = _start_and_probe(tmp_path)
+    try:
+        assert port > 0
+    finally:
+        stop()
 
 
 def test_reset_mcp_process_state_clears_shell_detection_cache(
@@ -167,28 +189,72 @@ def test_reset_detection_cache_is_public_shell_api() -> None:
 
 
 def test_parallel_server_starts_have_unique_ports_and_tokens(tmp_path: Path) -> None:
-    """D4 — concurrent starts in one worker must not share port or bearer secrets."""
+    """F1 (#774) — concurrent starts in one worker must not share port or bearer secrets.
+
+    The property is *two simultaneously live servers never share a port*, so
+    every server is held open until the assertion has run and disposed in a
+    ``finally``. An earlier form stopped each server before returning, which
+    only asserted uniqueness across sequential lifetimes — the OS is
+    documented to reuse a released ephemeral port.
+    """
     workdirs = [tmp_path / f"worker-{index}" for index in range(_PARALLEL_STARTS)]
     for workdir in workdirs:
         workdir.mkdir()
 
-    ports: list[int] = []
-    agent_tokens: list[str] = []
-    orchestrator_tokens: list[str] = []
+    handles: list[tuple[int, str, str, Callable[[], None]]] = []
+    failures: list[BaseException] = []
+    try:
+        with ThreadPoolExecutor(max_workers=_PARALLEL_STARTS) as pool:
+            futures = [pool.submit(_start_and_probe, workdir) for workdir in workdirs]
+            for future in as_completed(futures):
+                try:
+                    handles.append(future.result())
+                except BaseException as exc:  # re-raised after the finally-block cleanup
+                    failures.append(exc)
+        if failures:
+            raise failures[0]
 
-    with ThreadPoolExecutor(max_workers=_PARALLEL_STARTS) as pool:
-        futures = [pool.submit(_start_and_probe, workdir) for workdir in workdirs]
-        for future in as_completed(futures):
-            port, agent_token, orchestrator_token = future.result()
-            ports.append(port)
-            agent_tokens.append(agent_token)
-            orchestrator_tokens.append(orchestrator_token)
+        assert len(handles) == _PARALLEL_STARTS
+        ports = [handle[0] for handle in handles]
+        agent_tokens = [handle[1] for handle in handles]
+        orchestrator_tokens = [handle[2] for handle in handles]
 
-    assert len(set(ports)) == len(ports), f"duplicate MCP ports under concurrency: {ports}"
-    assert len(set(agent_tokens)) == len(agent_tokens), "duplicate agent bearer tokens"
-    assert len(set(orchestrator_tokens)) == len(orchestrator_tokens), (
-        "duplicate orchestrator bearer tokens"
+        still_listening = [port for port in ports if _port_is_listening(port)]
+        assert still_listening == ports, (
+            "every started server must still be listening when uniqueness is asserted; "
+            f"stopped before the assertion: {sorted(set(ports) - set(still_listening))}"
+        )
+        assert len(set(ports)) == len(ports), f"duplicate MCP ports under concurrency: {ports}"
+        assert len(set(agent_tokens)) == len(agent_tokens), "duplicate agent bearer tokens"
+        assert len(set(orchestrator_tokens)) == len(orchestrator_tokens), (
+            "duplicate orchestrator bearer tokens"
+        )
+    finally:
+        for _port, _agent_token, _orchestrator_token, stop in handles:
+            stop()
+
+
+def test_parallel_start_helper_holds_servers_open_until_stop(tmp_path: Path) -> None:
+    """F1 (#774) — the parallel helper must not dispose a server before returning.
+
+    ``_start_and_probe`` is the helper the concurrency test builds on. If it
+    stops the server in a ``finally``, the uniqueness it can assert is only
+    across sequential lifetimes: a stopped server has released its port and the
+    OS may legitimately reissue it. The helper must return its disposer so the
+    caller owns the lifetime.
+    """
+    result = _start_and_probe(tmp_path)
+    assert len(result) == 4, (
+        "hold-open contract: _start_and_probe must return "
+        f"(port, agent_token, orchestrator_token, stop); got {len(result)} values"
     )
+    port, _agent_token, _orchestrator_token, stop = result
+    try:
+        assert _port_is_listening(port), (
+            "server must still be listening when the parallel helper returns"
+        )
+    finally:
+        stop()
 
 
 def _function_has_xdist_group_marker(function_def: ast.FunctionDef) -> bool:

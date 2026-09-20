@@ -2,6 +2,15 @@
 # See docs/trust-policy.md for trust knobs and docs/REVIEW-DOCTRINE.md for review posture.
 # Review publication remains COMMENT; the isolated App approval job is the
 # only self-review path that should submit APPROVE.
+# G5 (#775): the reviewer roster must name a model whose provider the workflow
+# actually wires a credential for. Left unset, the registry default falls back to
+# the synthetic `auto/efficient` AutoTier, whose `auto` provider has no credential
+# step in mergecraft.yml, so the credentialed reviewer slot was reported skipped on
+# every run. `nous/tencent/hy3` is the workflow's primary rung and NOUS_API_KEY is
+# already configured as a repo secret.
+models:
+- nous/tencent/hy3
+
 prApproveEnabled: false
 
 runBounds:
