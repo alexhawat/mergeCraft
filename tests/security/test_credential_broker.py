@@ -7,6 +7,7 @@ redaction, and parent->upstream Authorization forwarding (#553 option 3 / D1-D4)
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 import time
 from http import HTTPStatus
@@ -25,6 +26,7 @@ from tests.security.support_agent_isolation import (
     MockModelUpstream,
     SlowModelUpstream,
     StreamingSSEUpstream,
+    assert_chunks_observed_before_next_emit,
     assert_credential_absent,
     broker_config_for_upstream,
     capture_loguru_messages,
@@ -459,36 +461,81 @@ def test_broker_survives_slow_upstream_beyond_thirty_seconds() -> None:
     assert body["choices"][0]["message"]["content"] == "slow-ok"
 
 
+def _client_chunk_arrivals(response: httpx.Response) -> dict[int, float]:
+    """F2 — map each ``data: {"chunk": n}`` SSE event to its client arrival time."""
+    observed: dict[int, float] = {}
+    buffer = b""
+    for piece in response.iter_bytes():
+        if not piece:
+            continue
+        buffer += piece
+        while b"\n\n" in buffer:
+            frame, buffer = buffer.split(b"\n\n", 1)
+            text = frame.decode("utf-8", "replace").strip()
+            if not text.startswith("data:"):
+                continue
+            payload = json.loads(text[len("data:") :].strip())
+            observed[int(payload["chunk"])] = time.monotonic()
+    return observed
+
+
 def test_broker_streams_sse_incrementally_to_client() -> None:
-    """PR #594 — broker must relay upstream SSE chunks as they arrive, not one blob."""
+    """PR #594 / F2 (#759) — chunks reach the client as the upstream emits them.
+
+    The property is ordering, not wall clock: chunk ``n`` is observed before
+    the upstream emits ``n+1``. Both sides are read from one monotonic clock,
+    so a slow runner slows both observations instead of moving one past a
+    fixed 0.85x-duration constant.
+    """
     module = load_broker_module()
     with (
         StreamingSSEUpstream(chunk_count=5, inter_chunk_delay=0.15) as upstream,
         _start_broker(module, upstream) as handle,
+        httpx.Client(
+            base_url=getattr(handle, "base_url", f"http://{handle.host}:{handle.port}"),
+            timeout=30.0,
+        ) as client,
+        client.stream(
+            "POST",
+            MODEL_PATH,
+            json={"model": "gpt-stub", "stream": True, "messages": []},
+            headers=_auth_headers(handle.token),
+        ) as response,
     ):
-        chunk_times: list[float] = []
-        start = time.monotonic()
-        with (
-            httpx.Client(
-                base_url=getattr(handle, "base_url", f"http://{handle.host}:{handle.port}"),
-                timeout=30.0,
-            ) as client,
-            client.stream(
-                "POST",
-                MODEL_PATH,
-                json={"model": "gpt-stub", "stream": True, "messages": []},
-                headers=_auth_headers(handle.token),
-            ) as response,
-        ):
-            assert response.status_code == HTTPStatus.OK
-            for chunk in response.iter_bytes():
-                if chunk:
-                    chunk_times.append(time.monotonic() - start)
-    assert len(chunk_times) >= 2, "client must observe multiple body chunks"
-    assert chunk_times[0] < upstream.expected_stream_duration * 0.85, (
-        "first chunk must arrive before upstream finishes streaming"
-    )
+        assert response.status_code == HTTPStatus.OK
+        observed = _client_chunk_arrivals(response)
+
+    assert len(observed) >= 2, "client must observe multiple body chunks"
     assert upstream.chunks_sent >= 2
+    assert_chunks_observed_before_next_emit(
+        observed_monotonic=observed,
+        emit_monotonic=list(upstream.chunk_emit_monotonic),
+    )
+
+
+def test_incrementality_assertion_rejects_a_buffering_relay() -> None:
+    """F2 (#759) — the ordering assertion must fail a relay that holds the stream.
+
+    The replaced assertion compared the first arrival against the
+    ``expected_stream_duration * 0.85`` constant (0.51 s for this fixture). A
+    relay that holds the first chunk for 0.40 s and then flushes the rest —
+    buffering, but under the constant — would have slipped past it. The
+    ordering relation catches exactly that shape.
+    """
+    upstream_emits = [0.0, 0.15, 0.30, 0.45, 0.60]
+    buffered_arrivals = {index: 0.40 + index * 0.005 for index in range(5)}
+
+    expected_stream_duration = 0.15 * (len(upstream_emits) - 1)
+    old_bound = expected_stream_duration * 0.85
+    assert buffered_arrivals[0] < old_bound, (
+        "fixture is wrong: the old constant-margin assertion would have rejected this shape"
+    )
+
+    with pytest.raises(AssertionError, match=r"buffered the stream"):
+        assert_chunks_observed_before_next_emit(
+            observed_monotonic=buffered_arrivals,
+            emit_monotonic=upstream_emits,
+        )
 
 
 @pytest.mark.parametrize(
