@@ -736,11 +736,16 @@ def adjudicate_cmd(
     # *row*, not an envelope. Detect the on-disk format from the raw text
     # rather than the decoded value, so the file is written back in the form it
     # arrived in.
-    jsonl_lines = [
-        line
-        for line in raw_text.splitlines()
+    raw_lines = raw_text.splitlines()
+    # Keep each data line's position, so comment and blank lines survive the
+    # rewrite. `read_json_or_jsonl` accepts `//` comments, and serialising only
+    # the parsed rows would silently delete every annotation in the file.
+    data_line_indexes = [
+        index
+        for index, line in enumerate(raw_lines)
         if line.strip() and not line.lstrip().startswith("//")
     ]
+    jsonl_lines = [raw_lines[index] for index in data_line_indexes]
     was_jsonl = bool(jsonl_lines) and _every_line_is_json_object(jsonl_lines)
 
     # Structure is decided before format, because a compact envelope is also a
@@ -787,7 +792,12 @@ def adjudicate_cmd(
         cli_bail(f"no baseline row with id {issue_id!r} in {baseline}")
 
     if was_jsonl:
-        rendered = "\n".join(json.dumps(row) for row in rows) + "\n"
+        # Rewrite only the data lines, in place, leaving everything else byte
+        # for byte as it was found.
+        rendered_lines = list(raw_lines)
+        for index, row in zip(data_line_indexes, rows, strict=True):
+            rendered_lines[index] = json.dumps(row)
+        rendered = "\n".join(rendered_lines) + "\n"
     else:
         rendered = json.dumps(payload, indent=2) + "\n"
     baseline.write_text(rendered, encoding="utf-8")

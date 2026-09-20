@@ -112,6 +112,9 @@ mergecraft eval adjudicate baseline.json --id ISSUE-1 --by llm --model judge-2 \
   --produced-by judge-1
 ```
 
+Comment (`//`) and blank lines in a JSONL baseline are preserved: only the data
+lines are rewritten, in place.
+
 Baselines are envelopes — `{"closed_world": ..., "issues": [...]}` — and the
 command rewrites the row in place, preserving every other key. Bare lists,
 single-object documents, and JSONL are also accepted, and a JSONL input is

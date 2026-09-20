@@ -809,6 +809,37 @@ class TestBaselineInputShapes:
         assert json.loads(lines[0]).get("provenance") is None
         assert json.loads(lines[1])["provenance"] == "human"
 
+    def test_jsonl_comment_lines_survive_the_rewrite(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`read_json_or_jsonl` accepts `//` comments, so the writer must keep them."""
+        body = (
+            "// corpus notes: seeded 2026-01\n"
+            + json.dumps({"id": "1", "path": "a.py"})
+            + "\n"
+            + "\n"
+            + "// second row below\n"
+            + json.dumps({"id": "2", "path": "b.py"})
+            + "\n"
+        )
+        result, path = self._run(tmp_path, monkeypatch, "c.jsonl", body, "1")
+        assert result.exit_code == 0, result.output
+        lines = path.read_text().splitlines()
+        assert lines[0] == "// corpus notes: seeded 2026-01"
+        assert lines[2] == ""
+        assert lines[3] == "// second row below"
+        assert json.loads(lines[1])["provenance"] == "human"
+        assert json.loads(lines[4]).get("provenance") is None
+
+    def test_jsonl_row_order_is_preserved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = "".join(json.dumps({"id": str(n), "path": f"{n}.py"}) + "\n" for n in range(1, 4))
+        result, path = self._run(tmp_path, monkeypatch, "c.jsonl", body, "2")
+        assert result.exit_code == 0, result.output
+        ids = [json.loads(line)["id"] for line in path.read_text().splitlines() if line.strip()]
+        assert ids == ["1", "2", "3"]
+
     def test_pretty_printed_list_is_not_mistaken_for_jsonl(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
