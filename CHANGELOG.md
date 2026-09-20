@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Order-dependent test coupling now surfaces on a scheduled, non-blocking
+  unit-suite run whose seed is the per-run `github.run_id`, so a pinned seed
+  no longer hides it. `MERGECRAFT_PYTEST_RANDOM_SEED` is set only on the
+  `schedule` / `workflow_dispatch` path; PR runs keep the pinned `424242` and
+  the job adds no required check (#776).
+
 - Jev architecture checklist helpers (`jev/architecture.py`, `jev/pack_registry.py`):
   fan-out question merge, answer+confidence routing, per-pack state filtering with
   untrusted nonce fencing, and model/usage logging on every System One call.
@@ -23,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
 
 ### Changed
+
+- The action-pin bump workflow no longer advertises a push it cannot perform.
+  `stage=pin` rewrites `.github/workflows/`, which GitHub refuses from a
+  `GITHUB_TOKEN` push by construction, so it prepares the four consumer
+  references in the runner and prints the exact local `make action-pin-prepare`
+  command instead; `stage=manifest` keeps its push but emits a Conventional
+  Commit subject inside the 72-character cap, and the workflow header drops the
+  claim that it automates the cycle's mechanical half (#749, #750).
 
 - PR #742 drops Playwright as the behaviour-verification driver. Live browsing
   binds to `mergecraft.browser` (custom browser-use + JEV) and fails closed
@@ -62,6 +76,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `tests/` still fires.
 
 ### Fixed
+
+- The deterministic run record no longer publishes an approval-shaped verdict
+  when no credentialed reviewer ran: a skipped reviewer credential renders the
+  record `inconclusive` (the GitHub check conclusion stays `neutral`),
+  `Outcome` / `Verdict diagnostic` / `Decision` are reconciled so they cannot
+  disagree, and the record names which analyzers ran or were withheld and
+  whether a credentialed reviewer participated. The self-review roster points
+  at the workflow-wired `nous/tencent/hy3` provider instead of the unwired
+  synthetic `auto/efficient` (#775).
+
+- Resetting the MCP shell sandbox cache tolerates a patched capability probe —
+  it clears the probe cache only when a callable `cache_clear` is present — so
+  test-isolation teardown no longer errors.
 
 - `mergecraft verify-behavior` stays inert on a fork or `pull_request_target`
   Actions event instead of always skipping the trust gate (#61)
