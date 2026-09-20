@@ -84,9 +84,71 @@ its weakest label.
 The same verdict is carried on `DetectionMetrics` so a persisted benchmark
 result cannot show scores without it, and appears in `eval score --json`.
 
-Writing adjudicated labels — who is allowed to assign `human`,
-`jev-adjudicated` or `llm-adjudicated`, and the independence rules that govern
-it — is a separate concern and not yet implemented here.
+## Adjudication
+
+Who may assign a label is repo configuration; what the label is worth is the
+calibration bar above. The two are answered separately so that enabling an
+adjudicator can never by itself upgrade a claim.
+
+```yaml
+adjudication:
+  adjudicators:
+    human: { enabled: true,  independence: independent }
+    jev:   { enabled: false, independence: model }
+    llm:   { enabled: false, independence: model }
+  requireForCalibration: independent
+```
+
+`enabled` is the approval gate: an adjudicator that is not enabled cannot label
+cases. `independence` is recorded on the audit record; the tier used for
+calibration comes from the derived `provenance`, never from this field.
+
+Labels are written through `mergecraft eval adjudicate`, which is where the
+policy is enforced:
+
+```bash
+mergecraft eval adjudicate baseline.json --id ISSUE-1 --by human
+mergecraft eval adjudicate baseline.json --id ISSUE-1 --by llm --model judge-2 \
+  --produced-by judge-1
+```
+
+Comment (`//`) and blank lines in a JSONL baseline are preserved: only the data
+lines are rewritten, in place.
+
+Baselines are envelopes — `{"closed_world": ..., "issues": [...]}` — and the
+command rewrites the row in place, preserving every other key. Bare lists,
+single-object documents, and JSONL are also accepted, and a JSONL input is
+written back as JSONL rather than reindented.
+
+An unapproved adjudicator exits non-zero and writes nothing. The row's
+`provenance` is derived from the resulting record, never supplied by the caller.
+
+A model adjudicator must name both `--model` and `--produced-by`. The check
+fails closed on a missing identity: an unknown producer cannot be *shown* to
+differ from the adjudicator, so omitting the argument is refused rather than
+allowed. A human adjudicator carries no model identity and needs neither.
+
+The command writes the adjudication record beside the derived `provenance`, so
+the independence check leaves durable evidence rather than an unfalsifiable
+claim:
+
+```json
+{
+  "id": "ISSUE-1",
+  "provenance": "llm-adjudicated",
+  "adjudication": {
+    "adjudicated_by": "llm",
+    "model": "judge-2",
+    "produced_by": "judge-1",
+    "independence": "model",
+    "at": "2026-09-19T15:04:21Z"
+  }
+}
+```
+
+**Self-adjudication is refused regardless of configuration.** A model may not
+score labels its own pinned model produced; that is the circularity the corpus
+already suffers from, and no config key waives it.
 
 ## Scoring
 
