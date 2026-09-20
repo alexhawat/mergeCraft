@@ -32,25 +32,43 @@ def _run(tool_id: str, repo_root: Path, changed_files: list[str], *, tier: str =
     )
 
 
+def _cve_run_is_transient(tool_id: str, result: Any) -> bool:
+    """Whether a fixture CVE run may be retried — this helper is fixture-only.
+
+    Production scans must not treat every empty or skipped result as
+    transient, so the two retryable modes stay here:
+
+    * ``trivy`` fetches its vulnerability DB over the network; a slow download
+      can yield valid JSON with zero findings before the DB is ready (see
+      ``supply_chain._run_trivy_and_parse``).
+    * either tool self-skips when the userspace egress probe
+      (``unshare --user --map-root-user --net``) fails transiently on a loaded
+      runner (see ``analyzers.egress_userspace.probe_userspace_egress``).
+    """
+    if result.skipped:
+        return True
+    return tool_id == "trivy" and not result.findings
+
+
 def _run_expecting_cve(
     tool_id: str, repo_root: Path, changed_files: list[str], *, tier: str = "trusted"
 ) -> Any:
     """Run a supply-chain adapter that must report the planted CVE.
 
-    Trivy fetches its vulnerability DB over the network; a slow download can
-    yield valid JSON with zero findings before the DB is ready (see
-    ``supply_chain._run_trivy_and_parse``). Retry only in this fixture test —
-    production scans must not treat every empty result as transient.
+    Both tools are retried on a transient skip, and ``trivy`` also on the
+    live-DB race that yields zero findings (see ``_cve_run_is_transient``).
+    Retry only in this fixture test — production scans must not treat every
+    empty or skipped result as transient. Retries are bounded by the same
+    attempt/delay shape trivy's parse retry uses, and a persistent skip is
+    returned to the caller's ``assert not result.skipped``.
     """
     supply_chain = import_module("mergecraft.analyzers.supply_chain")
     result = _run(tool_id, repo_root, changed_files, tier=tier)
-    if tool_id != "trivy" or result.skipped or result.findings:
-        return result
     for _ in range(1, supply_chain._TRIVY_MAX_ATTEMPTS):
+        if not _cve_run_is_transient(tool_id, result):
+            return result
         time.sleep(supply_chain._TRIVY_RETRY_DELAY_S)
         result = _run(tool_id, repo_root, changed_files, tier=tier)
-        if result.skipped or result.findings:
-            return result
     return result
 
 
@@ -91,6 +109,97 @@ def test_pre_existing_cve_stays_silent(tool_id: str, adapter_fixture_repo: Path)
     )
     cve_findings = [f for f in result.findings if "CVE" in f.rule_id or "GHSA" in f.rule_id]
     assert not cve_findings, f"{tool_id} must not flood pre-existing CVEs on unchanged base"
+
+
+def _skipped_egress_result(tool_id: str) -> Any:
+    """The self-skip ``probe_userspace_egress`` produces on a transient failure."""
+    adapters = import_module("mergecraft.analyzers.adapters")
+    return adapters.AdapterRunResult(
+        findings=[],
+        skipped=True,
+        skip_reason=(
+            f"egress policy — {tool_id} declares network hosts but filtered egress "
+            "could not be applied (userspace filtered egress unavailable: "
+            "unshare --user --map-root-user --net)"
+        ),
+    )
+
+
+def _cve_result(tool_id: str) -> Any:
+    """A successful run carrying one analyzer finding."""
+    adapters = import_module("mergecraft.analyzers.adapters")
+    finding_mod = import_module("mergecraft.analyzers.finding")
+    return adapters.AdapterRunResult(
+        findings=[
+            finding_mod.Finding(
+                tool=tool_id,
+                rule_id="CVE-2024-0001",
+                category="Security & Privacy",
+                severity="Major",
+                confidence="certain",
+                message="planted CVE",
+                path="requirements.txt",
+                start_line=1,
+                end_line=1,
+                fingerprint="cve-fixture",
+                evidence=["direct dependency"],
+                remediation="upgrade to 2.0.0",
+                autofix=None,
+                introduced_by_pr="true",
+                source="analyzer",
+                cluster_id=None,
+            )
+        ]
+    )
+
+
+@pytest.mark.parametrize("tool_id", ["osv-scanner", "trivy"])
+def test_run_expecting_cve_retries_a_transient_egress_skip(
+    tool_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A first-attempt skip must be retried, for osv-scanner as well as trivy."""
+    adapters = import_module("mergecraft.analyzers.adapters")
+    supply_chain = import_module("mergecraft.analyzers.supply_chain")
+    monkeypatch.setattr(supply_chain, "_TRIVY_RETRY_DELAY_S", 0.0)
+
+    calls: list[int] = []
+
+    def _fake_run_adapter(**_kwargs: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 1:
+            return _skipped_egress_result(tool_id)
+        return _cve_result(tool_id)
+
+    monkeypatch.setattr(adapters, "run_adapter", _fake_run_adapter)
+
+    result = _run_expecting_cve(tool_id, tmp_path, ["requirements.txt"], tier="trusted")
+
+    assert len(calls) == 2, "a transient skip must be retried exactly once"
+    assert not result.skipped, result.skip_reason
+    assert result.findings, f"{tool_id} must report the CVE once egress is available"
+
+
+def test_run_expecting_cve_persistent_skip_still_fails_the_assertion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Retries must not paper over a genuine skip: it survives to the assertion."""
+    adapters = import_module("mergecraft.analyzers.adapters")
+    supply_chain = import_module("mergecraft.analyzers.supply_chain")
+    monkeypatch.setattr(supply_chain, "_TRIVY_RETRY_DELAY_S", 0.0)
+
+    calls: list[int] = []
+
+    def _fake_run_adapter(**_kwargs: Any) -> Any:
+        calls.append(1)
+        return _skipped_egress_result("osv-scanner")
+
+    monkeypatch.setattr(adapters, "run_adapter", _fake_run_adapter)
+
+    result = _run_expecting_cve("osv-scanner", tmp_path, ["requirements.txt"], tier="trusted")
+
+    assert len(calls) == supply_chain._TRIVY_MAX_ATTEMPTS
+    assert result.skipped, "a persistent skip must reach `assert not result.skipped`"
+    assert result.skip_reason, "the skip reason must be preserved for diagnosis"
 
 
 def test_trufflehog_reports_secret_by_type_and_location(adapter_fixture_repo: Path) -> None:

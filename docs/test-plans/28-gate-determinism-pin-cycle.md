@@ -255,3 +255,25 @@ the helper form; the third is the F2 ordering assertion, which was not modified.
 - The credential-gap posture belongs to the record renderer, which is the
   human-readable surface where the operator moved the weight; the GitHub check
   conclusion stays `neutral`.
+
+## Flake fix: transient egress skip in the CVE fixture
+
+The `osv-scanner` parameter of
+`tests/analyzers/test_adapters_supply_chain.py::test_newly_introduced_cve_reported_with_fix_and_transitive_status`
+self-skipped on one CI shard when the userspace egress probe
+(`unshare --user --map-root-user --net`) failed transiently, while the same
+test passed on the other three shards and locally. The fixture helper
+`_run_expecting_cve` already retried the transient case, but only `trivy`'s
+empty-findings live-DB race. It now retries a transient skip for either tool,
+still bounded by `supply_chain._TRIVY_MAX_ATTEMPTS` / `_TRIVY_RETRY_DELAY_S`
+and still fixture-only: production scans keep treating empty or skipped
+results as final. The caller's `assert not result.skipped` is unchanged, so a
+persistent skip still fails.
+
+Regression coverage, both patching `adapters.run_adapter` (no real network or
+namespaces):
+
+| Node id | Pins |
+|---------|------|
+| `tests/analyzers/test_adapters_supply_chain.py::test_run_expecting_cve_retries_a_transient_egress_skip` | first-attempt skip is retried for `osv-scanner` and `trivy` |
+| `tests/analyzers/test_adapters_supply_chain.py::test_run_expecting_cve_persistent_skip_still_fails_the_assertion` | retries exhaust and the skip survives to `assert not result.skipped` |
