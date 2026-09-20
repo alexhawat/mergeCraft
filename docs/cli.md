@@ -83,6 +83,10 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
 | `mergecraft health run` | Emit JSON health status for the running mergeCraft installation. |
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` and an example workflow (local, no API). |
+| `mergecraft jev disable` | Write `jev.enabled: false` to the committed config. |
+| `mergecraft jev enable` | Write `jev.enabled: true` to the committed config. No other key is written. |
+| `mergecraft jev set <key> <value>` | Write one Jev parameter, validated through `JevSettings` before writing. |
+| `mergecraft jev status` | Show config, credential presence, and effective Jev values. |
 | `mergecraft learnings active` | List only the active (promoted) learning entries. |
 | `mergecraft learnings influence` | List active + staging learning entries with their provenance. |
 | `mergecraft learnings staging` | List only the staging (quarantined) learning entries. |
