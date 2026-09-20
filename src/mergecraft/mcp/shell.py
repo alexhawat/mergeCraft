@@ -51,7 +51,9 @@ def reset_detection_cache() -> None:
     _reset_shell_detection_globals()
     from mergecraft.analyzers.sandbox import probe_capabilities
 
-    probe_capabilities.cache_clear()
+    clear = getattr(probe_capabilities, "cache_clear", None)
+    if callable(clear):
+        clear()
 
 
 def get_sandbox_method() -> SandboxMethod:
