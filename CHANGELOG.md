@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Jev architecture checklist helpers (`jev/architecture.py`, `jev/pack_registry.py`):
+  fan-out question merge, answer+confidence routing, per-pack state filtering with
+  untrusted nonce fencing, and model/usage logging on every System One call.
+  Maintainer doc: `docs/jev-architecture-checklist.md`.
+
 - Bare CLI command names open a TTY interactive session. `mergecraft`,
   `mergecraft review`, and groups such as `mergecraft provider` offer a menu
   (or a review wizard) when stdin is a TTY. Scripts, CI, piped invocations,

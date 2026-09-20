@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from tests.jev.support import (
@@ -36,6 +37,7 @@ def test_unit_pack_v1_names_and_types() -> None:
         "contract_break",
         "untrusted_input",
         "missing_tests",
+        "style_nit",
     ):
         assert pack.question_type(name) == "noul"
 
@@ -93,3 +95,43 @@ def test_parse_choice_score_and_noul_from_recorded_unit_body() -> None:
     assert severity.legend[3] == "Critical"
     assert security.noul == 0.81
     assert getattr(security, "confidence", None) is None
+
+
+class _RecordingClient:
+    """Capture the kwargs ``select_lenses`` hands to ``AsyncJevClient.call``."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict[str, Any] = {}
+
+    async def call(self, **kwargs: Any) -> Any:
+        self.kwargs = kwargs
+        return SimpleNamespace(skipped=True, response=None, confidence=None, reason=None)
+
+
+async def test_select_lenses_forwards_the_untrusted_tier() -> None:
+    """The PR diff is attacker controlled; the tier must reach the fence decision."""
+    questions_mod = import_jev("questions")
+    client = _RecordingClient()
+
+    await questions_mod.select_lenses(state={"diff": "x"}, client=client, trust_tier="untrusted")
+
+    assert client.kwargs.get("trust_tier") == "untrusted"
+
+
+async def test_select_lenses_defaults_to_untrusted() -> None:
+    """Omitting the tier must keep the fence rather than silently dropping it."""
+    questions_mod = import_jev("questions")
+    client = _RecordingClient()
+
+    await questions_mod.select_lenses(state={"diff": "x"}, client=client)
+
+    assert client.kwargs.get("trust_tier") == "untrusted"
+
+
+async def test_select_lenses_passes_a_trusted_tier_through() -> None:
+    questions_mod = import_jev("questions")
+    client = _RecordingClient()
+
+    await questions_mod.select_lenses(state={"diff": "x"}, client=client, trust_tier="trusted")
+
+    assert client.kwargs.get("trust_tier") == "trusted"

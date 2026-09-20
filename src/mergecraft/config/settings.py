@@ -712,6 +712,7 @@ class JevSettings(BaseModel):
             "lens/v1.likely": 0.6,
             "align/v1.same_defect": 0.6,
             "align/v1.is_withdrawn_reraise": 0.5,
+            "evidence/v1.relation": 0.5,
         }
     )
 

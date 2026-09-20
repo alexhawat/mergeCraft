@@ -181,6 +181,12 @@ pages:
     generator: null
     purpose: "Pre-LLM Jev gate: dimension question packs, funnel thresholds, layering, and calibration status."
 
+  - path: docs/jev-architecture-checklist.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: "TypeSafe System One checklist — fan-out routing, state filtering, stakes floors, and jaggedness constraints for Jev call sites."
+
   - path: docs/install.md
     audience: consumer
     template: consumer
