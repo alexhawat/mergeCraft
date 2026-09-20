@@ -17,6 +17,10 @@ verdict" posture (F10, F11, F12).
 - F1 is greened: `_start_and_probe` was converted to the hold-open form and the
   parallel helper guard passes. F2 was already green and is unchanged.
   Twenty-run repetition evidence is recorded below.
+- F3 is greened by the ambient-event guard's own commit: the autouse fixture
+  landed in `tests/conftest.py` and all seven guard/probe/opt-in nodes pass.
+  The blast-radius enumeration is **zero**, so no test needed an explicit event
+  pin; the three-run, zero-change evidence is recorded in the F3 section.
 - F8 (the `tests/jev` ordering bug) is **out of scope** here: the operator
   could not reproduce it and refuted the original hypothesis, so no test is
   written for it.
@@ -29,9 +33,10 @@ verdict" posture (F10, F11, F12).
 | F1 | The parallel helper returns its disposer and leaves the server listening | unit | `tests/mcp/test_xdist_isolation.py::test_parallel_start_helper_holds_servers_open_until_stop` | green (helper converted to the hold-open form) |
 | F2 | Broker relays SSE chunks in emitted order, asserted on one monotonic clock | integration | `tests/security/test_credential_broker.py::test_broker_streams_sse_incrementally_to_client` | no (rewrite is green; implementation is sound) |
 | F2 | The ordering assertion catches a buffering relay the old constant slipped past | unit | `tests/security/test_credential_broker.py::test_incrementality_assertion_rejects_a_buffering_relay` | no (strength proof; strictness guard) |
-| F3 | The autouse guard clears both event variables in a child process | functional | `tests/test_conftest_ambient_event_guard.py::test_autouse_guard_clears_ambient_github_event_in_a_child_process` | **yes** — assertion (child reports 2 failed) |
-| F3 | A cleared default derives fail-closed `untrusted` | unit | `tests/test_conftest_ambient_event_guard.py::test_cleared_default_derives_fail_closed_untrusted` | environment-dependent |
+| F3 | The autouse guard clears both event variables in a child process | functional | `tests/test_conftest_ambient_event_guard.py::test_autouse_guard_clears_ambient_github_event_in_a_child_process` | no (green — fixture landed) |
+| F3 | A cleared default derives fail-closed `untrusted` | unit | `tests/test_conftest_ambient_event_guard.py::test_cleared_default_derives_fail_closed_untrusted` | no (green — fixture landed) |
 | F3 | An explicit opt-in still wins over the cleared default | unit | `tests/test_conftest_ambient_event_guard.py::test_explicit_event_opt_in_overrides_the_cleared_default` | no (guards against an over-broad fix) |
+| F3 | Both variables are cleared in this process, and the probe child agrees | unit | `tests/probe/test_ambient_event_probe.py` | no (green — fixture landed) |
 | F4 | `stage=manifest` emits a Conventional-Commit subject <= 72 chars | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_manifest_stage_subject_is_within_the_commit_cap` | **yes** — assertion (111 chars) |
 | F4 | `stage=pin` keeps its subject within the cap | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_pin_stage_subject_is_within_the_commit_cap` | no (regression pin) |
 | F5 | `stage=pin` never attempts a `git push` | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_pin_stage_does_not_attempt_a_git_push` | **yes** — assertion |
@@ -90,9 +95,14 @@ buffering regression is caught by the ordering relation.
 
 ## F3 — the ambient-event guard
 
-`tests/conftest.py` has no `GITHUB_EVENT_*` guard today, so any test reaching
-`derive_trust_tier` inherits the runner's event: green on every
-`pull_request`, red on the first `push` to `main`.
+`tests/conftest.py` had no `GITHUB_EVENT_*` guard, so any test reaching
+`derive_trust_tier` inherited the runner's event: green on every
+`pull_request`, red on the first `push` to `main`. The guard is an autouse
+fixture, `_clear_ambient_github_event`, that deletes both variables through
+`monkeypatch` before every test. `monkeypatch.setenv` in a test body is the
+opt-in and still wins, because the fixture and the test share one
+`monkeypatch` instance and the fixture runs first; the original environment is
+restored at teardown.
 
 Two artifacts encode the contract:
 
@@ -101,16 +111,40 @@ Two artifacts encode the contract:
   main suite and from a child process.
 - `tests/test_conftest_ambient_event_guard.py` — runs the probe in a child
   process with `GITHUB_EVENT_NAME=push` and `GITHUB_EVENT_PATH` deliberately
-  exported, and requires the child to report three passes. This makes the RED
-  independent of the ambient environment of whoever runs the suite.
+  exported, and requires the child to report three passes. This makes the
+  proof independent of the ambient environment of whoever runs the suite.
 
 The explicit-opt-in test sets the variable through `monkeypatch.setenv` after
 the guard has run and asserts the trusted tier, so a guard that clobbered a
 test's own opt-in would fail.
 
-Deferred to the guard's own commit: pinning an event explicitly in every test
-the operator's blast-radius enumeration lists. That enumeration is still
-running and the guard's commit is where its two counts are recorded.
+### Enumeration: zero, recorded
+
+Pinning an event explicitly in the tests the blast-radius enumeration lists is
+**vacuous — the list is empty**, and that number is the evidence, not a skipped
+step. The operator ran three full-suite passes on the base revision with
+randomization disabled so collection was identical across runs, one per ambient
+event state: `push`, `pull_request`, and both variables unset (the state the
+fixture creates). All three states reported 9309 passed / 0 failed, and all
+three `derive_trust_tier` maps were byte-identical — same 179 callers, same
+tier per caller, none appearing under one event only. Therefore:
+
+- 0 tests changed behaviour under an ambient event, and
+- 0 tests needed an explicit event pin.
+
+The guard still lands, purely preventively. It closes the shape #742 exposed —
+a whole-suite ambient-event leak that no pull-request gate can catch by
+construction, because the leak only fires on the post-merge push. With the
+fixture, CI behaves the way a local checkout already does.
+
+### Explicit-opt-in regression check
+
+The 26 pre-existing test files that set `GITHUB_EVENT_NAME` themselves were run
+with the guard active, once with no ambient event and once with
+`GITHUB_EVENT_NAME=push` and `GITHUB_EVENT_PATH` exported. Both runs:
+**399 passed, 9 skipped** (8 live-credential skips, 1 missing-`meat`-binary
+skip) — identical, so no explicit setter regressed and the ambient value no
+longer reaches any test process.
 
 ## F4 / F5 — the pin automation says only what it can do
 
