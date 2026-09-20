@@ -7,7 +7,7 @@ path = "hatch_build.py"
 
 [project]
 name = "merge-craft"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Standalone BYOK GitHub Action for AI-powered PR review (mergeCraft)"
 readme = "README.md"
 requires-python = ">=3.11"
