@@ -29,12 +29,19 @@ def render_step_summary(
 ) -> str:
     """Render the step summary body: header table plus the W5 record sections.
 
-    ``credential_degradations`` is threaded through to the record renderer so
-    the step summary carries the same #775 posture as the sticky comment: when
-    a reviewer slot was skipped for a missing credential, the embedded record
-    reports ``inconclusive`` and names that no credentialed reviewer ran.
+    The coarse header table and the embedded record share one #775 posture: when
+    the review could not produce an approval — a reviewer slot skipped for a
+    missing credential, or a ``request_changes`` terminal verdict — the
+    approval-shaped positive cells become ``inconclusive`` and the record names
+    that no credentialed reviewer ran.
     """
-    from mergecraft.findings.ledger import render_deterministic_review_block
+    from mergecraft.findings.ledger import (
+        _APPROVAL_SHAPED_DIAGNOSTIC,
+        _APPROVAL_SHAPED_OUTCOME_LABELS,
+        reconcile_outcome,
+        record_is_not_an_approval,
+        render_deterministic_review_block,
+    )
 
     decision = packet.decision
     verdict = decision.verdict if decision is not None else "(none)"
@@ -46,16 +53,26 @@ def render_step_summary(
             else str(verdict_diagnostic)
         )
 
-    # #775 / G-D9 — a skipped credentialed reviewer slot makes the coarse header
-    # cells match the embedded record: the approval-shaped `success` / `approved`
-    # labels become `inconclusive`, never an approval-shaped claim. A `failure` /
-    # `no_verdict` label and the structural `Verdict` cell are left as-is, exactly
-    # as the record leaves a genuine `failed` outcome and its `Decision`.
-    if any(str(line).strip() for line in (credential_degradations or ())):
-        if outcome_label == "success":
-            outcome_label = "inconclusive"
-        if diagnostic == "approved":
-            diagnostic = "inconclusive"
+    # #775 / G-D9 — the coarse header cells must match the embedded record. The
+    # shared predicate covers both signals (a skipped credentialed reviewer slot
+    # and a `request_changes` terminal verdict), so the two surfaces cannot
+    # disagree. Only the approval-shaped positives are demoted; a genuine
+    # `failure` / `no_verdict` label and the structural `Verdict` cell are left
+    # as-is, exactly as the record leaves a real failure and its `Decision`.
+    not_an_approval = record_is_not_an_approval(
+        packet=packet, credential_degradations=credential_degradations
+    )
+    outcome_label = reconcile_outcome(
+        value=outcome_label,
+        not_an_approval=not_an_approval,
+        positive=_APPROVAL_SHAPED_OUTCOME_LABELS,
+    )
+    if diagnostic:
+        diagnostic = reconcile_outcome(
+            value=diagnostic,
+            not_an_approval=not_an_approval,
+            positive=_APPROVAL_SHAPED_DIAGNOSTIC,
+        )
 
     header_lines = [
         "# mergeCraft step summary",
