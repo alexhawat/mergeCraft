@@ -89,9 +89,13 @@ After an approved CI/CD run completes, prepare **two separate reviewed changes**
 
 Preparation never commits, pushes, creates a PR, or claims checks ran. Repeating
 an already satisfied phase reports that state without creating new changes.
-An exact, unstaged preparation patch can be repeated; staged files, unexpected
-untracked files, and unrelated changes are rejected. An uncommitted manifest
-reports `manifest_commit: null`; an already committed manifest reports its actual C.
+An exact, unstaged preparation patch can be repeated; staged files, unrelated
+changes, and **any** untracked file are rejected — `_prepared_state` tests the
+whole checkout with `git ls-files --others --exclude-standard`, so a single
+untracked scratch file makes the preparation refuse. Run phase 2 (`make
+action-pin-prepare`) only in a clean isolated worktree for that reason. An
+uncommitted manifest reports `manifest_commit: null`; an already committed
+manifest reports its actual C.
 Consumer preparation supports both literal `uses` references and
 `MERGECRAFT_ACTION_SHA` markers, including marker-only workflows.
 C may differ from S only in `action.yml`'s `runs.image`; changing entrypoint,
