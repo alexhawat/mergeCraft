@@ -142,6 +142,7 @@ async def judge_finding_evidence(
     *,
     cited_section: str,
     client: AsyncJevClient,
+    trust_tier: str = "untrusted",
 ) -> EvidenceJudgeResult:
     """Run ``evidence/v1`` over one finding (T12 citation-check).
 
@@ -157,6 +158,7 @@ async def judge_finding_evidence(
     pack = evidence_pack()
     pin = _registered_pin()
     result = await client.call(
+        trust_tier=trust_tier,
         state={
             "claim": finding.message,
             "section": cited_section,
@@ -217,6 +219,7 @@ async def judge_prose_claims(
     *,
     findings: Sequence[Finding],
     client: AsyncJevClient,
+    trust_tier: str = "untrusted",
 ) -> ClaimJudgeResult:
     """Run ``claim/v1`` once per extracted prose claim (D12, plan 21 D6 1/3/4).
 
@@ -241,6 +244,7 @@ async def judge_prose_claims(
 
     for claim in claims:
         result = await client.call(
+            trust_tier=trust_tier,
             state={
                 "claim": claim.text,
                 "findings_table": table,
@@ -314,6 +318,7 @@ async def run_parallel_judge(
     findings: Sequence[Finding],
     review_body: str,
     client: AsyncJevClient,
+    trust_tier: str = "untrusted",
 ) -> ParallelJudgeResult:
     """Run the Jev judge beside the verifier. Never replaces ``should_verify``.
 
@@ -330,9 +335,13 @@ async def run_parallel_judge(
     for finding in findings:
         cited = finding.evidence[0] if finding.evidence else ""
         evidence_results.append(
-            await judge_finding_evidence(finding, cited_section=cited, client=client)
+            await judge_finding_evidence(
+                finding, cited_section=cited, client=client, trust_tier=trust_tier
+            )
         )
-    claims = await judge_prose_claims(review_body, findings=findings, client=client)
+    claims = await judge_prose_claims(
+        review_body, findings=findings, client=client, trust_tier=trust_tier
+    )
     attestations = [row for item in evidence_results for row in item.findings]
     attestations.extend(claims.findings)
     result = ParallelJudgeResult(

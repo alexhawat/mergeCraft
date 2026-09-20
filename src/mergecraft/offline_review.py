@@ -635,6 +635,7 @@ async def _run_shadow_jev_review(
                 findings=findings,
                 review_body=body,
                 client=client,
+                trust_tier=driver.trust_tier,
             )
         _persist_shadow_jev_artifacts(
             review_out,
@@ -643,7 +644,9 @@ async def _run_shadow_jev_review(
             judge=judge,
             change_id=change_id,
         )
-        selected = await select_lenses(state={"diff": diff_text}, client=client)
+        selected = await select_lenses(
+            state={"diff": diff_text}, client=client, trust_tier=driver.trust_tier
+        )
         select_lenses_or_fallback(
             enabled=True,
             trigger_ids=(),

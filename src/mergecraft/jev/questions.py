@@ -334,12 +334,16 @@ async def select_lenses(
     *,
     state: dict[str, Any],
     client: AsyncJevClient,
+    trust_tier: str = "untrusted",
 ) -> LensSelection:
     """Ask ``lens/v1`` which catalog families apply to this PR.
 
     Args:
         state: Structured PR payload (diff text, paths).
         client: Pinned Jev client (recorded transport in CI).
+        trust_tier: Tier of the content in ``state``. The PR diff is attacker
+            controlled on an untrusted run, so this must be threaded from the
+            caller; the default fails closed.
 
     Returns:
         LensSelection: Catalog ids Jev marked ``apply``. ``source`` is ``jev``,
@@ -351,6 +355,7 @@ async def select_lenses(
         pack_id=pack.pack_id,
         unit_id="pr",
         questions=build_system_one_questions(pack),
+        trust_tier=trust_tier,
     )
     if result.skipped or result.response is None:
         return LensSelection(

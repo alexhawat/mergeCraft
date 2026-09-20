@@ -179,9 +179,16 @@ async def test_agent_only_finding_reaches_shadow_judge(
     seen: list[list[Any]] = []
     original = judge_mod.run_parallel_judge
 
-    async def _watch(*, findings: Any, review_body: str, client: Any) -> Any:
+    async def _watch(
+        *, findings: Any, review_body: str, client: Any, trust_tier: str = "untrusted"
+    ) -> Any:
         seen.append(list(findings))
-        return await original(findings=findings, review_body=review_body, client=client)
+        return await original(
+            findings=findings,
+            review_body=review_body,
+            client=client,
+            trust_tier=trust_tier,
+        )
 
     monkeypatch.setattr(judge_mod, "run_parallel_judge", _watch)
     result = await run_offline_diff_review(

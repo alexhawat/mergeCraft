@@ -389,7 +389,7 @@ class AsyncJevClient:
         state: dict[str, Any] | None,
         pack_id: str,
         unit_id: str,
-        trust_tier: str = "trusted",
+        trust_tier: str = "untrusted",
         ratchet_applied: bool = False,
         questions: dict[str, Any] | None = None,
     ) -> JevCallResult:
@@ -399,7 +399,9 @@ class AsyncJevClient:
             state: Structured unit payload. ``None`` is ``invalid_state``.
             pack_id: Versioned question-pack id recorded on the span.
             unit_id: Stable unit id recorded on the span.
-            trust_tier: ``trusted`` or ``untrusted`` (D5 / D9).
+            trust_tier: ``trusted`` or ``untrusted`` (D5 / D9). Defaults to
+                ``untrusted`` so a caller that omits it keeps the nonce
+                fence rather than silently losing it.
             ratchet_applied: Whether the one-way ratchet is in force (D9).
             questions: Optional question dict; recorded transport ignores it.
 

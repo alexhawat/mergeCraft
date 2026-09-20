@@ -574,6 +574,7 @@ async def _align_call(
     *,
     state: dict[str, Any],
     unit_id: str,
+    trust_tier: str = "untrusted",
 ) -> AlignResult:
     from mergecraft.jev.questions import align_pack
 
@@ -583,6 +584,7 @@ async def _align_call(
         pack_id=pack.pack_id,
         unit_id=unit_id,
         questions=build_system_one_questions(pack),
+        trust_tier=trust_tier,
     )
     response = _require_align_response(result)
     same = _choice(response, "same_defect")
