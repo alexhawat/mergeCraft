@@ -169,3 +169,91 @@ def test_gh_apply_opens_default_branch_pr_for_enable() -> None:
 
     assert url == "https://github.com/acme/demo/pull/786"
     assert any(call[:2] == ["pr", "create"] for call in calls)
+
+
+# --- MC-24045d: a commented config must never gain a second ``jev:`` key -------
+#
+# `append_config_mapping` appends a new top-level mapping. PyYAML keeps the
+# last duplicate key, so appending silently discarded every Jev setting the
+# consumer already had. These pin the in-place behaviour for both write paths.
+
+
+_COMMENTED_CONFIG = """# repo config with a comment
+model: sonnet
+
+jev:
+  # why this budget
+  budgetTokens: 123456
+  enabled: false
+
+# trailing comment belongs to tracing
+tracing:
+  enabled: true
+"""
+
+
+def _write_commented_config(tmp_path: Path) -> Path:
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(_COMMENTED_CONFIG, encoding="utf-8")
+    return config
+
+
+def test_enable_on_commented_config_keeps_existing_jev_keys(tmp_path: Path) -> None:
+    """A commented config with existing Jev keys must not lose them on enable."""
+    config = _write_commented_config(tmp_path)
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.stdout
+    raw = config.read_text(encoding="utf-8")
+    assert raw.count("\njev:") + raw.startswith("jev:") == 1, f"duplicate jev key:\n{raw}"
+    loaded = yaml.safe_load(raw)
+    assert loaded["jev"]["enabled"] is True
+    assert loaded["jev"]["budgetTokens"] == 123456, "existing Jev settings were discarded"
+    assert loaded["model"] == "sonnet"
+    assert loaded["tracing"] == {"enabled": True}
+
+
+def test_enable_on_commented_config_preserves_comments(tmp_path: Path) -> None:
+    """The in-block and trailing comments survive an enable."""
+    config = _write_commented_config(tmp_path)
+
+    runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+
+    raw = config.read_text(encoding="utf-8")
+    assert "# repo config with a comment" in raw
+    assert "# why this budget" in raw
+    assert "# trailing comment belongs to tracing" in raw
+
+
+def test_set_on_commented_config_keeps_existing_jev_keys(tmp_path: Path) -> None:
+    """``set`` rewrites the block in place rather than appending a second one."""
+    config = _write_commented_config(tmp_path)
+
+    result = runner.invoke(app, ["jev", "set", "budgetTokens", "999", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.stdout
+    raw = config.read_text(encoding="utf-8")
+    assert raw.count("\njev:") + raw.startswith("jev:") == 1, f"duplicate jev key:\n{raw}"
+    loaded = yaml.safe_load(raw)
+    assert loaded["jev"]["budgetTokens"] == 999
+    assert loaded["jev"]["enabled"] is False, "the untouched key was discarded"
+    assert loaded["model"] == "sonnet"
+    assert loaded["tracing"] == {"enabled": True}
+    assert "# trailing comment belongs to tracing" in raw
+
+
+def test_repeated_writes_never_accumulate_jev_keys(tmp_path: Path) -> None:
+    """Enable, disable and set in sequence leave exactly one ``jev:`` mapping."""
+    config = _write_commented_config(tmp_path)
+
+    runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+    runner.invoke(app, ["jev", "disable", "--cwd", str(tmp_path)])
+    runner.invoke(app, ["jev", "set", "budgetTokens", "777", "--cwd", str(tmp_path)])
+    runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+
+    raw = config.read_text(encoding="utf-8")
+    assert raw.count("\njev:") + raw.startswith("jev:") == 1, f"duplicate jev key:\n{raw}"
+    loaded = yaml.safe_load(raw)
+    assert loaded["jev"] == {"budgetTokens": 777, "enabled": True}

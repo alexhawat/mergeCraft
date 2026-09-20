@@ -46,10 +46,69 @@ _JEV_HEADER = re.compile(r"^([ \t]*)jev:\s*(?:#.*)?$")
 _ENABLED_LINE = re.compile(r"^([ \t]+)enabled:[ \t]*(?:true|false)([ \t]*(?:#.*)?)?\s*$")
 
 
+def _jev_block_span(lines: list[str]) -> tuple[int, int, int] | None:
+    """Return ``(start, end, indent)`` of the ``jev:`` block, or None when absent.
+
+    ``end`` is exclusive and covers the header plus every line that belongs to
+    the mapping — deeper-indented entries, and the blank or comment lines
+    between them. Trailing blanks are handed back to the caller so a replacement
+    does not swallow the separator before the next top-level key.
+    """
+    for index, line in enumerate(lines):
+        header = _JEV_HEADER.match(line)
+        if not header:
+            continue
+        indent = len(header.group(1))
+        end = index + 1
+        last_content = end
+        for offset in range(index + 1, len(lines)):
+            candidate = lines[offset]
+            stripped = candidate.strip()
+            if not stripped:
+                end = offset + 1
+                continue
+            candidate_indent = len(candidate) - len(candidate.lstrip(" \t"))
+            if candidate_indent <= indent:
+                # A comment at or left of the header's column introduces
+                # whatever comes next, so it is not part of this mapping.
+                break
+            end = offset + 1
+            last_content = end
+        return index, last_content, indent
+    return None
+
+
+def patch_jev_block_yaml(text: str, block: dict[str, Any]) -> str:
+    """Replace the whole ``jev:`` mapping in place, preserving surrounding comments.
+
+    ``append_config_mapping`` appends a second top-level ``jev:`` key, and
+    PyYAML keeps the last one — so appending silently discards every Jev
+    setting already in the file. This rewrites the existing block instead, and
+    only appends when the file has no ``jev:`` mapping at all.
+    """
+    rendered = yaml.safe_dump({"jev": block}, sort_keys=False, default_flow_style=False)
+    lines = text.splitlines(keepends=True)
+    span = _jev_block_span(lines)
+    if span is None:
+        suffix = "" if text.endswith("\n") or not text else "\n"
+        return f"{text}{suffix}{rendered}"
+    start, end, _ = span
+    return "".join(lines[:start]) + rendered + "".join(lines[end:])
+
+
 def _write_jev_data(path: Path, data: dict[str, Any], *, patch: dict[str, Any]) -> None:
-    """Write *patch* into *path*, preserving comments when present (D-comment)."""
+    """Write *patch* into *path*, preserving comments when present (D-comment).
+
+    Never appends a second ``jev:`` key: an appended mapping wins under PyYAML
+    and drops every setting the consumer already had.
+    """
     if config_has_yaml_comments(path):
-        append_config_mapping(path, patch)
+        block = patch.get("jev")
+        if not isinstance(block, dict):
+            append_config_mapping(path, patch)
+            return
+        current = path.read_text(encoding="utf-8") if path.is_file() else ""
+        path.write_text(patch_jev_block_yaml(current, block), encoding="utf-8")
         return
     write_config_dict(path, data)
 
@@ -76,7 +135,13 @@ def _set_jev_enabled(cwd: Path, *, enabled: bool) -> Path:
     updated = {**existing, "enabled": enabled}
     _validate_jev_block(updated)
     data["jev"] = updated
-    _write_jev_data(config_path, data, patch={"jev": {"enabled": enabled}})
+    if config_has_yaml_comments(config_path) and config_path.is_file():
+        # Finer-grained than a block rewrite: flips the one line and keeps
+        # every in-block comment the consumer wrote.
+        current = config_path.read_text(encoding="utf-8")
+        config_path.write_text(patch_jev_enabled_yaml(current, enabled=enabled), encoding="utf-8")
+        return config_path
+    _write_jev_data(config_path, data, patch={"jev": updated})
     return config_path
 
 
