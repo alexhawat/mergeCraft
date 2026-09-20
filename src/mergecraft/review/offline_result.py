@@ -49,6 +49,9 @@ class OfflineReviewResult:
     # material the Jev review summary section renders from (#786). ``None``
     # when Jev did not run this call at all (disabled, or a skip).
     jev_predictions: list[dict[str, Any]] | None = None
+    #: Skip codes for units Jev did not screen at dispatch time. An
+    #: all-skipped run must not render as a clean screen (#786).
+    jev_dispatch_skips: list[str] | None = None
 
 
 def _offline_failure(

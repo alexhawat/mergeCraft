@@ -158,3 +158,61 @@ def test_never_uses_the_word_enforced_true() -> None:
     assert "enforced: true" not in lowered
     assert "enforced" in lowered
     assert "false" in lowered
+
+
+# --- dispatch-time skips must not render as a clean screen --------------------
+#
+# `dispatch_residual_units` produces no prediction for a unit it skipped
+# (kill switch, absent credential, transport error). Without the skip codes an
+# all-skipped run rendered as "0 units, 0 flagged" — a clean result that never
+# happened.
+
+
+def test_all_units_skipped_is_not_reported_as_a_clean_screen() -> None:
+    """Every unit skipped at dispatch must not read as a successful empty screen."""
+    section = render_jev_review_section(
+        enabled=True,
+        skip_reason=None,
+        predictions=[],
+        dispatch_skips=["kill_switch", "kill_switch", "credential_absent"],
+        model="jev-1.13.0",
+    )
+
+    assert section is not None
+    assert "0 units, 0 flagged" not in section, "an all-skipped run claimed a clean screen"
+    assert "did not screen" in section
+    assert "3 unit(s) were not screened" in section
+    assert "not a clean result" in section
+    assert "`kill_switch` x2" in section
+    assert "`credential_absent` x1" in section
+
+
+def test_partial_skip_reports_both_screened_and_skipped() -> None:
+    """A run that screened some units and skipped others reports both counts."""
+    section = render_jev_review_section(
+        enabled=True,
+        skip_reason=None,
+        predictions=[{"unit_id": "u1", "choice": "likely", "confidence": 0.8}],
+        dispatch_skips=["kill_switch"],
+        model="jev-1.13.0",
+    )
+
+    assert section is not None
+    assert "1 units, 1 flagged, 1 skipped" in section
+    assert "1 unit(s) were not screened" in section
+
+
+def test_no_units_to_screen_still_reads_as_clean() -> None:
+    """Nothing to screen is genuinely clean and must keep saying so."""
+    section = render_jev_review_section(
+        enabled=True,
+        skip_reason=None,
+        predictions=[],
+        dispatch_skips=None,
+        model="jev-1.13.0",
+    )
+
+    assert section is not None
+    assert "0 units, 0 flagged" in section
+    assert "were not screened" not in section
+    assert "not a clean result" not in section

@@ -23,6 +23,7 @@ Exports:
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -58,6 +59,7 @@ def render_jev_review_section(
     skip_reason: str | None,
     predictions: Sequence[Mapping[str, Any]] | None,
     model: str,
+    dispatch_skips: Sequence[str] | None = None,
 ) -> str | None:
     """Render the collapsed Jev summary section, or ``None`` when it must be absent.
 
@@ -70,6 +72,10 @@ def render_jev_review_section(
         predictions: Per-unit ``JevPrediction`` dumps from
             ``dispatch_residual_units``, when Jev ran to completion.
         model: The pinned Jev model id, for the section footer.
+        dispatch_skips: Skip codes for units Jev did not screen at dispatch
+            time — a kill switch, an absent credential discovered mid-run, or
+            a transport error. These produce no prediction, so without them an
+            all-skipped run is indistinguishable from a clean screen (#786).
 
     Returns:
         str | None: Markdown ``<details>`` block, or ``None`` when Jev is
@@ -93,8 +99,19 @@ def render_jev_review_section(
         return "\n".join(lines)
 
     rows = list(predictions or [])
+    skips = list(dispatch_skips or [])
     flagged = [row for row in rows if str(row.get("choice", "")).lower() not in {"", "clean"}]
-    summary = f"Jev screening — {len(rows)} units, {len(flagged)} flagged (shadow, advisory)"
+    if skips and not rows:
+        # Every unit skipped. Reporting "0 units, 0 flagged" here would be a
+        # clean screen that never happened.
+        summary = f"Jev screening — did not screen ({len(skips)} units skipped)"
+    elif skips:
+        summary = (
+            f"Jev screening — {len(rows)} units, {len(flagged)} flagged, "
+            f"{len(skips)} skipped (shadow, advisory)"
+        )
+    else:
+        summary = f"Jev screening — {len(rows)} units, {len(flagged)} flagged (shadow, advisory)"
 
     lines = ["<details>", f"<summary>{summary}</summary>", ""]
     if rows:
@@ -106,8 +123,19 @@ def render_jev_review_section(
         )
         lines.extend(_prediction_row(row) for row in rows)
         lines.append("")
-    else:
+    elif not skips:
         lines.append("_No residual units were screened this run._")
+        lines.append("")
+    if skips:
+        counts = Counter(skips)
+        lines.append(
+            f"**{len(skips)} unit(s) were not screened.** This is not a clean result — "
+            "Jev never assessed them."
+        )
+        lines.append("")
+        for code, count in sorted(counts.items()):
+            label = JEV_SKIP_REASON_LABELS.get(code, code)
+            lines.append(f"- `{code}` x{count} — {label}")
         lines.append("")
     lines.append(f"Model `{model}`.")
     lines.append("")
