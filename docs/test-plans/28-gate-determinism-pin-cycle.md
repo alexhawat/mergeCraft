@@ -47,6 +47,11 @@ verdict" posture (F10, F11, F12).
 | F10/F11 | A complete run still reports `passed` and `approved` | unit | `tests/review_record/test_credential_gap_verdict_775.py::test_a_complete_run_still_reports_passed_and_approved` | no (anti-weakening guard) |
 | F12 | One record cannot carry `passed`, `approved` and a `request_changes` terminal verdict | unit | `tests/review_record/test_credential_gap_verdict_775.py::test_record_cannot_carry_passed_approved_and_request_changes_at_once` | **yes** — assertion |
 | F12 | `passed` cannot sit beside a `request_changes` terminal verdict | unit | `tests/review_record/test_credential_gap_verdict_775.py::test_record_does_not_report_passed_beside_a_request_changes_terminal_verdict` | **yes** — assertion |
+| F13 | A `request_changes` terminal verdict demotes the header table and the record together | unit | `tests/review_record/test_step_summary_reconciliation_775.py::test_header_and_record_agree_on_a_request_changes_terminal_verdict` | no (regression; product fix already applied) |
+| F13 | A credential gap demotes the header table and the record together | unit | `tests/review_record/test_step_summary_reconciliation_775.py::test_header_and_record_agree_on_a_credential_gap` | no (regression pin) |
+| F13 | A clean success is not demoted | unit | `tests/review_record/test_step_summary_reconciliation_775.py::test_header_and_record_keep_a_clean_success` | no (anti-weakening guard) |
+| F13 | A genuine failure is left intact | unit | `tests/review_record/test_step_summary_reconciliation_775.py::test_header_and_record_leave_a_genuine_failure_intact` | no (guard against masking failures) |
+| F13 | A `no_verdict` label is left intact | unit | `tests/review_record/test_step_summary_reconciliation_775.py::test_header_and_record_leave_no_verdict_intact` | no (guard against over-broad demotion) |
 
 ## F1 — simultaneous, not sequential, port uniqueness
 
@@ -186,6 +191,41 @@ reconcile them.
 
 An anti-weakening test asserts that a complete run still reports `passed` and
 `approved`, so the posture change cannot demote every run.
+
+## F13 — the step-summary header table matches the embedded record
+
+`render_step_summary` renders a coarse header table (`| Outcome | … |`,
+`| Diagnostic | … |`) **plus** the embedded deterministic record. It used to
+demote the header cells only on a credential gap, so a completed run that
+submitted a `request_changes` terminal verdict with no credential degradation
+kept `Outcome: success` / `Diagnostic: approved` in the outer table while the
+embedded record demoted to `inconclusive` — two postures in one summary. This
+was found in review on the change that landed the credential-gap posture.
+
+The fix extracts one shared predicate (`record_is_not_an_approval`) and one
+reconciler (`reconcile_outcome`) in `findings/ledger.py`; `step_summary.py`
+threads both through. The record's approval-shaped positive is `passed`, the
+step table's is `success`, so the reconciler takes a sequence of positives.
+
+`tests/review_record/test_step_summary_reconciliation_775.py` parses the header
+table lines and the embedded record lines out of the rendered text and asserts
+they agree:
+
+- `request_changes` terminal verdict, no credential gap: both surfaces report
+  `inconclusive`, and neither the header `Outcome`/`Diagnostic` nor the record
+  `Outcome`/`Verdict diagnostic` lines claim `success`/`approved`.
+- credential gap: the same joint demotion.
+- clean success: `success` / `approved` in the header and `passed` / `approved`
+  in the record are left intact, and `inconclusive` does not appear.
+- genuine failure: `failure` / `provider_failure` (header) and `failed` /
+  `provider_failure` (record) are left intact — the guard against the
+  reconciliation masking a real failure.
+- `no_verdict` with no decision: the header `Outcome` stays `no_verdict` and
+  the negative diagnostic is untouched.
+
+The suite passes against the fixed tree. Stashing the `step_summary.py` fix
+reproduces the exact reported bug (`assert 'success' == 'inconclusive'` on the
+first case), so the regression is pinned rather than assumed.
 
 ## Repetition evidence
 
