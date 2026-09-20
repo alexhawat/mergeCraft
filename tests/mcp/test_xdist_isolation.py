@@ -86,47 +86,14 @@ def _find_reset_mcp_process_state() -> Callable[[], object] | None:
     return None
 
 
-def _start_and_probe(tmp_path: Path) -> tuple[int, str, str]:
-    ctx = _tool_ctx(tmp_path)
-    url, stop = start_mcp_http_server(ctx)
-    try:
-        parsed = urlparse(url)
-        assert parsed.port is not None
-        agent_token = getattr(ctx, "mcp_auth_token", None)
-        orchestrator_token = getattr(ctx, "mcp_orchestrator_auth_token", None)
-        if not isinstance(agent_token, str) or not agent_token:
-            pytest.fail("per-run MCP agent token missing after server start")
-        if not isinstance(orchestrator_token, str) or not orchestrator_token:
-            pytest.fail("per-run MCP orchestrator token missing after server start")
-        list_body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {orchestrator_token}",
-        }
-        with urlopen(
-            Request(url, data=list_body, headers=headers, method="POST"), timeout=5
-        ) as resp:
-            payload = json.loads(resp.read().decode())
-        assert isinstance(payload.get("result"), dict)
-        assert isinstance(payload["result"].get("tools"), list)
-        return parsed.port, agent_token, orchestrator_token
-    finally:
-        stop()
+def _start_and_probe(tmp_path: Path) -> tuple[int, str, str, Callable[[], None]]:
+    """Start a probed MCP server, leave it listening, and return its disposer.
 
-
-def _port_is_listening(port: int) -> bool:
-    """Return whether a TCP connect to ``port`` on loopback succeeds right now."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(1.0)
-        return sock.connect_ex(("127.0.0.1", port)) == 0
-
-
-def _start_held_open(tmp_path: Path) -> tuple[int, str, str, Callable[[], None]]:
-    """F1 (#774) — start a probed server and hand the disposer back to the caller.
-
-    Unlike :func:`_start_and_probe`, this does not stop the server before
-    returning, so a caller can assert over a set of *simultaneously live*
-    servers and dispose of them itself.
+    The server is deliberately *not* stopped before returning: the caller owns
+    its lifetime, so it can assert over a set of *simultaneously live* servers
+    and dispose of them in its own ``finally``. Stopping here would only permit
+    uniqueness across sequential lifetimes, and the OS may legitimately reissue
+    a released ephemeral port.
     """
     ctx = _tool_ctx(tmp_path)
     url, stop = start_mcp_http_server(ctx)
@@ -158,6 +125,13 @@ def _start_held_open(tmp_path: Path) -> tuple[int, str, str, Callable[[], None]]
     return parsed.port, agent_token, orchestrator_token, stop
 
 
+def _port_is_listening(port: int) -> bool:
+    """Return whether a TCP connect to ``port`` on loopback succeeds right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1.0)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
 def test_reset_mcp_process_state_is_public_api() -> None:
     """D4 — module-level MCP caches must expose a process reset hook."""
     reset = _find_reset_mcp_process_state()
@@ -180,8 +154,11 @@ def test_start_mcp_http_server_uses_os_assigned_port_when_env_unset(
 ) -> None:
     """D4 / #421 — unset MERGECRAFT_MCP_PORT must bind an ephemeral listen port."""
     monkeypatch.delenv("MERGECRAFT_MCP_PORT", raising=False)
-    port, _, _ = _start_and_probe(tmp_path)
-    assert port > 0
+    port, _agent_token, _orchestrator_token, stop = _start_and_probe(tmp_path)
+    try:
+        assert port > 0
+    finally:
+        stop()
 
 
 def test_reset_mcp_process_state_clears_shell_detection_cache(
@@ -228,7 +205,7 @@ def test_parallel_server_starts_have_unique_ports_and_tokens(tmp_path: Path) -> 
     failures: list[BaseException] = []
     try:
         with ThreadPoolExecutor(max_workers=_PARALLEL_STARTS) as pool:
-            futures = [pool.submit(_start_held_open, workdir) for workdir in workdirs]
+            futures = [pool.submit(_start_and_probe, workdir) for workdir in workdirs]
             for future in as_completed(futures):
                 try:
                     handles.append(future.result())

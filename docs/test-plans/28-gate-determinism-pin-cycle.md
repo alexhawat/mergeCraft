@@ -14,6 +14,9 @@ verdict" posture (F10, F11, F12).
 
 - `make lint`, `make typecheck`: clean.
 - New/changed tests are RED against the current tree except where noted below.
+- F1 is greened: `_start_and_probe` was converted to the hold-open form and the
+  parallel helper guard passes. F2 was already green and is unchanged.
+  Twenty-run repetition evidence is recorded below.
 - F8 (the `tests/jev` ordering bug) is **out of scope** here: the operator
   could not reproduce it and refuted the original hypothesis, so no test is
   written for it.
@@ -23,7 +26,7 @@ verdict" posture (F10, F11, F12).
 | ID | Contract | Layer | Test node id | RED today |
 |----|----------|-------|--------------|-----------|
 | F1 | Two *simultaneously live* MCP servers never share a port | integration | `tests/mcp/test_xdist_isolation.py::test_parallel_server_starts_have_unique_ports_and_tokens` | no (rewrite is green; implementation is sound) |
-| F1 | The parallel helper returns its disposer and leaves the server listening | unit | `tests/mcp/test_xdist_isolation.py::test_parallel_start_helper_holds_servers_open_until_stop` | **yes** — assertion |
+| F1 | The parallel helper returns its disposer and leaves the server listening | unit | `tests/mcp/test_xdist_isolation.py::test_parallel_start_helper_holds_servers_open_until_stop` | green (helper converted to the hold-open form) |
 | F2 | Broker relays SSE chunks in emitted order, asserted on one monotonic clock | integration | `tests/security/test_credential_broker.py::test_broker_streams_sse_incrementally_to_client` | no (rewrite is green; implementation is sound) |
 | F2 | The ordering assertion catches a buffering relay the old constant slipped past | unit | `tests/security/test_credential_broker.py::test_incrementality_assertion_rejects_a_buffering_relay` | no (strength proof; strictness guard) |
 | F3 | The autouse guard clears both event variables in a child process | functional | `tests/test_conftest_ambient_event_guard.py::test_autouse_guard_clears_ambient_github_event_in_a_child_process` | **yes** — assertion (child reports 2 failed) |
@@ -42,22 +45,27 @@ verdict" posture (F10, F11, F12).
 
 ## F1 — simultaneous, not sequential, port uniqueness
 
-Current form: `_start_and_probe` ends `finally: stop()`, so the sixteen starts
-are near-sequential and each assertion sees released ports. The OS may
+Original form: `_start_and_probe` ended `finally: stop()`, so the sixteen starts
+were near-sequential and each assertion saw released ports. The OS may
 legitimately reissue a released ephemeral port, so the failure the test
-occasionally reported is the system behaving as documented.
+occasionally reported was the system behaving as documented.
 
-The rewrite holds all sixteen servers open, probes each, asserts every port is
-still listening at assertion time, checks port and both bearer-token sets for
-uniqueness, and stops everything in a `finally`. Token uniqueness is unchanged
-and still asserted exactly.
+Final form (greened): `_start_and_probe` is the single hold-open helper. It
+returns `(port, agent_token, orchestrator_token, stop)` and leaves the server
+listening; the caller owns the lifetime. It disposes the server itself only on
+an error path, so a failed start cannot leak a port. The property test holds
+all sixteen servers open through the assertion, probes each, asserts every port
+is still listening at assertion time, checks port and both bearer-token sets for
+uniqueness, and stops everything in a `finally`. Token uniqueness is asserted
+exactly as before, and the helper's other caller (the OS-assigned-port test)
+stops its server in a `finally`.
 
-The RED guard is `..._holds_servers_open_until_stop`: it pins the helper's
-return contract (`port, agent_token, orchestrator_token, stop`) and that the
-server is still listening when the helper returns. It fails today because the
-helper returns three values after disposing the server. The greening wave
-changes `_start_and_probe` to the hold-open form; the property test already
-uses the hold-open helper, so no assertion weakens.
+The guard `..._holds_servers_open_until_stop` pins the helper's return contract
+and that the server is still listening when the helper returns, so a future edit
+cannot reintroduce the stop-before-return form. It failed while the helper
+returned three values after disposing the server; it is green now that the
+helper is in the hold-open form, and it is the direct test of the helper the
+property test builds on.
 
 ## F2 — ordering, not a stopwatch
 
@@ -145,10 +153,29 @@ reconcile them.
 An anti-weakening test asserts that a complete run still reports `passed` and
 `approved`, so the posture change cannot demote every run.
 
+## Repetition evidence
+
+Both rewritten tests were run twenty consecutive times each, serialised through
+the single-worker path so the measurements are not distorted by parallel
+collection:
+
+```bash
+for i in $(seq 1 20); do MERGECRAFT_PYTEST_JOBS=0 uv run pytest '<node-id>' -q || echo "FAIL run $i"; done
+```
+
+| Node id | Pass count |
+|---------|------------|
+| `tests/mcp/test_xdist_isolation.py::test_parallel_server_starts_have_unique_ports_and_tokens` | 20/20 |
+| `tests/mcp/test_xdist_isolation.py::test_parallel_start_helper_holds_servers_open_until_stop` | 20/20 |
+| `tests/security/test_credential_broker.py::test_broker_streams_sse_incrementally_to_client` | 20/20 |
+
+The second row is the parallel-helper guard, kept green as the structural pin on
+the helper form; the third is the F2 ordering assertion, which was not modified.
+
 ## Notes for the greening waves
 
-- `_start_and_probe` in `tests/mcp/test_xdist_isolation.py` must become the
-  hold-open form; this is the only test-side change F1 needs.
+- `_start_and_probe` in `tests/mcp/test_xdist_isolation.py` is now the
+  hold-open form; this was the only test-side change F1 needed.
 - SSE ordering uses one process's monotonic clock and no fixed margin; do not
   reintroduce `expected_stream_duration` into the assertion.
 - The credential-gap posture belongs to the record renderer, which is the
