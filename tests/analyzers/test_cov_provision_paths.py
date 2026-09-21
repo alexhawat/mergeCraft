@@ -30,6 +30,8 @@ from mergecraft.analyzers import provision
 from mergecraft.analyzers.manifest import AnalyzerManifest
 from mergecraft.security.egress import GuardedUrl, SsrfBlockedError
 
+pytestmark = pytest.mark.coverage
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 

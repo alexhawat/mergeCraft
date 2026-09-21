@@ -200,6 +200,7 @@ testpaths = ["tests"]
 markers = [
     "integration: opt-in tests that need network, credentials, or real binaries",
     "live: real-provider / live-credential integration (scheduled + release precondition)",
+    "coverage: branch-walking tests that inflate coverage; excluded from the default make test read",
 ]
 
 [tool.coverage.run]

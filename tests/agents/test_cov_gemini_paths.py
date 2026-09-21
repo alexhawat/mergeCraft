@@ -20,6 +20,8 @@ from mergecraft.agents import gemini as gemini_mod
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
+pytestmark = pytest.mark.coverage
+
 if TYPE_CHECKING:
     from pathlib import Path
 
