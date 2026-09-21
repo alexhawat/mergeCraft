@@ -191,8 +191,6 @@ class AgentRunContext:
     mcp_auth_token: str = ""
     resolved_model: str | None = None
     verifier_denied_tools: Sequence[str] = ()
-    secret_deny_paths: list[str] | None = None
-    todo_tracker: Any = None
     stop_script: str | None = None
 
 
