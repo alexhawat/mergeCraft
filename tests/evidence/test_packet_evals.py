@@ -140,6 +140,30 @@ def test_eval_metadata_rejects_decision_typed_literal_mismatch() -> None:
         )
 
 
+def test_eval_metadata_rejects_out_of_vocabulary_expected_decision() -> None:
+    """``expected_decision`` outside the verdict vocabulary is rejected.
+
+    The sibling check on ``Case.expected_decision`` already exists in
+    ``tests/evals/test_store.py``; the packet-side validator is the second
+    consumer of the vocabulary and previously had no rejection test. ``"ship-it"``
+    mirrors the sibling case's out-of-vocabulary value.
+    """
+    with pytest.raises(ValidationError, match="verdict vocabulary") as exc_info:
+        EvalMetadata(
+            case_id="synthetic-001",
+            run_id="synthetic",
+            title="t",
+            category="missed_finding",
+            failure_mode="missed_finding",
+            expected_finding="f",
+            expected_decision="ship-it",
+            replay_decision="blocked",
+            replay_at=datetime(2026, 8, 9, 10, 0, 0, tzinfo=UTC),
+            status="blocked",
+        )
+    assert "ship-it" in str(exc_info.value)
+
+
 # ── build_eval_metadata ──────────────────────────────────────────────
 
 
