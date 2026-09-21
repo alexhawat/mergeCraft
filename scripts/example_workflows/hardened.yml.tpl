@@ -367,6 +367,11 @@ jobs:
           # upload is logged rather than failing the review.
           # sarif_upload: enabled
         env:
+          # The pin this job runs (#641). The container cannot read the
+          # `uses:` line above, so it learns the pin only from here — omit it and
+          # the run records an empty Action pin and cannot report a pin/image
+          # mismatch. Keep it equal to the `uses:` ref.
+          MERGECRAFT_ACTION_SHA: __ACTION_PIN__
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # Add a second provider's credentials here to extend the chain —
