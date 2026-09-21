@@ -524,6 +524,33 @@ def test_enable_github_leaves_existing_secret(
     assert "already present" in result.output
 
 
+def test_enable_github_does_not_write_when_secret_lookup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed ``gh secret list`` must not be treated as absent (#804 review)."""
+    _write_config(tmp_path, "jev:\n  enabled: false\n")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-from-env")
+    monkeypatch.setattr(
+        jev_cmd, "apply_jev_enabled_on_default_branch", lambda **_kw: "https://example/pr/1"
+    )
+    monkeypatch.setattr(jev_cmd, "_current_repo_slug", lambda: "acme/demo")
+    monkeypatch.setattr(jev_cmd, "_github_secret_present", lambda **_kw: None)
+    monkeypatch.setattr(
+        jev_cmd,
+        "_set_gh_secret",
+        lambda **_kw: (_ for _ in ()).throw(
+            AssertionError("must not write when secret presence is unknown")
+        ),
+    )
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path), "--github"])
+
+    assert result.exit_code == 0, result.output
+    assert "unknown" in result.output.lower()
+    assert "lookup failed" in result.output.lower()
+    assert "ts-from-env" not in result.output
+
+
 def test_enable_github_prints_set_command_when_key_and_secret_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

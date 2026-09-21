@@ -543,7 +543,11 @@ def _missing_key_note() -> None:
 
 
 def _maybe_persist_github_secret(*, key: str | None) -> None:
-    """Store ``TYPESAFE_API_KEY`` as an Actions secret when it is missing and *key* is known."""
+    """Store ``TYPESAFE_API_KEY`` as an Actions secret when it is missing and *key* is known.
+
+    Fail-closed on an indeterminate ``gh secret list``: do not write, so a
+    transient lookup cannot overwrite a credential that is already set.
+    """
     repo_slug = _current_repo_slug()
     if repo_slug is None:
         console.print(
@@ -553,6 +557,12 @@ def _maybe_persist_github_secret(*, key: str | None) -> None:
     present = _github_secret_present(name=TYPESAFE_API_KEY_ENV, repo_slug=repo_slug)
     if present is True:
         console.print(f"{TYPESAFE_API_KEY_ENV} secret on {repo_slug}: already present")
+        return
+    if present is None:
+        console.print(
+            f"{TYPESAFE_API_KEY_ENV} secret on {repo_slug}: "
+            "[yellow]unknown (gh lookup failed)[/yellow] — secret not written"
+        )
         return
     if not key:
         console.print(
