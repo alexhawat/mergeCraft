@@ -318,6 +318,12 @@ class StreamingSSEUpstream:
         self.authorization_headers: list[str] = []
         self.request_header_maps: list[dict[str, str]] = []
         self.chunks_sent = 0
+        # F2 (#759) — emit-time channel. Each chunk's departure time on this
+        # process's monotonic clock, appended in emission order. The
+        # incrementality assertion compares a client-observed arrival against
+        # the *next* upstream emission, so a buffering relay is caught
+        # structurally instead of by racing a wall-clock constant.
+        self.chunk_emit_monotonic: list[float] = []
         self._lock = threading.Lock()
 
     @property
@@ -364,8 +370,10 @@ class StreamingSSEUpstream:
                     chunk = f'data: {{"chunk": {index}}}\n\n'.encode()
                     self.wfile.write(chunk)
                     self.wfile.flush()
+                    emitted_at = time.monotonic()
                     with upstream._lock:
                         upstream.chunks_sent += 1
+                        upstream.chunk_emit_monotonic.append(emitted_at)
 
         self._httpd = ThreadingHTTPServer((self._host, 0), _Handler)
         self._port = self._httpd.server_address[1]
@@ -387,6 +395,41 @@ class StreamingSSEUpstream:
 
     def __exit__(self, *exc: object) -> None:
         self.stop()
+
+
+def assert_chunks_observed_before_next_emit(
+    *,
+    observed_monotonic: dict[int, float],
+    emit_monotonic: list[float],
+) -> None:
+    """F2 (#759) — structural SSE incrementality assertion.
+
+    Chunk ``n`` must reach the client before the upstream emits chunk ``n+1``.
+    Both sides are observed times on one monotonic clock, so there is no
+    constant margin to race: a buffering relay that holds the stream until the
+    upstream finishes makes every client arrival fall after the later
+    emissions, while a relay that forwards as it reads keeps every arrival
+    ahead of the next emission.
+
+    Raises:
+        AssertionError: When any observed chunk arrived after the next chunk
+            was emitted, or when no ordered pair could be checked.
+    """
+    assert len(emit_monotonic) >= 2, "upstream must emit at least two chunks"
+    checked = 0
+    for index in sorted(observed_monotonic):
+        if index + 1 >= len(emit_monotonic):
+            continue
+        observed_at = observed_monotonic[index]
+        next_emitted_at = emit_monotonic[index + 1]
+        assert observed_at < next_emitted_at, (
+            f"client observed chunk {index} at {observed_at:.4f} but upstream emitted "
+            f"chunk {index + 1} at {next_emitted_at:.4f} — the broker buffered the stream"
+        )
+        checked += 1
+    assert checked >= 1, (
+        "no ordered chunk pair was observable; the relay may have coalesced every chunk"
+    )
 
 
 def codex_provider_base_url(handle: Any) -> str:

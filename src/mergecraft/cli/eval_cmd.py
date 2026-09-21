@@ -57,6 +57,13 @@ from mergecraft.evals import (
     replay_case,
     write_permanent_test,
 )
+from mergecraft.evals.adjudication import (
+    AdjudicatorKind,
+    AdjudicatorNotApproved,
+    SelfAdjudicationRefused,
+    adjudicate_label,
+    provenance_for,
+)
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
     DEFAULT_RESULTS_DIR,
@@ -636,6 +643,12 @@ def bench_cmd(
 
     bank_dir = _bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
+    # `settings` above is loaded only on the config-resolution branch, so read
+    # the calibration bar unconditionally here — a benchmark run must honour
+    # `requireForCalibration` whether or not the model came from config.
+    required = load_repo_settings(
+        root=Path.cwd(), load_learnings_files=False
+    ).adjudication.require_for_calibration
     result = run_full_benchmark(
         bank_dir,
         detection_corpus_dir=detection_corpus,
@@ -643,6 +656,7 @@ def bench_cmd(
         providers=DEFAULT_BENCHMARK_PROVIDERS,
         detection_provider=detection_provider,
         detection_model=resolved_model,
+        required_provenance=required,
     )
     # update_latest=False: a single-provider detection result must not
     # silently become "latest.json" — see write_result_set's docstring (D12).
@@ -660,12 +674,137 @@ def bench_cmd(
         console.print(f"  recall          : {det.aggregate.recall:.2%}")
         console.print(f"  precision       : {det.aggregate.corpus_confirmed_precision:.2%}")
         console.print(f"  f1              : {det.aggregate.f1:.2%}")
+        # Printed beside the numbers, not below the artifact path: a reader
+        # who stops at f1 must still have seen whether it is calibrated.
+        if det.calibration is not None:
+            verdict = "calibrated" if det.calibration.eligible else "NOT calibrated"
+            console.print(f"  calibration     : {verdict} — {det.calibration.reason}")
         console.print(f"  raw findings @  : {det.raw_findings_dir}")
     else:
         console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
 
 
 # ── score ──────────────────────────────────────────────────────────────
+
+
+def _every_line_is_json_object(lines: list[str]) -> bool:
+    """True when each line parses alone *into an object* — the JSONL test.
+
+    Three shapes have to come apart here, and requiring an object is what
+    separates them. A pretty-printed document fails because its lines are
+    fragments. A compact single-line array (``[{...}]``) parses but is a list,
+    so it is JSON, not a JSONL row. A one-row JSONL file passes even though the
+    whole file is also valid JSON, which is the case that made this necessary.
+    """
+    try:
+        return all(isinstance(json.loads(line), dict) for line in lines)
+    except json.JSONDecodeError:
+        return False
+
+
+@app.command("adjudicate")
+def adjudicate_cmd(
+    baseline: Path = typer.Argument(..., help="Baseline JSON/JSONL to update in place."),
+    issue_id: str = typer.Option(..., "--id", help="Baseline issue id to adjudicate."),
+    by: str = typer.Option("human", "--by", help="Adjudicator: human, jev, or llm."),
+    model: str = typer.Option("", "--model", help="Pinned model id of the adjudicator."),
+    produced_by: str = typer.Option(
+        "", "--produced-by", help="Model that produced the label being adjudicated."
+    ),
+) -> None:
+    """Record who adjudicated one baseline label, enforcing repo policy.
+
+    Approval comes from ``adjudication.adjudicators.<kind>.enabled``; an
+    unapproved adjudicator cannot write a label. Self-adjudication is refused
+    regardless of configuration. The row's ``provenance`` is derived from the
+    resulting record rather than supplied by the caller.
+    """
+    kinds: dict[str, AdjudicatorKind] = {"human": "human", "jev": "jev", "llm": "llm"}
+    kind = kinds.get(by)
+    if kind is None:
+        cli_bail(f"unknown adjudicator {by!r} — expected human, jev, or llm")
+    if not baseline.is_file():
+        cli_bail(f"{baseline} is not a file")
+    try:
+        raw_text = baseline.read_text(encoding="utf-8")
+        payload = read_json_or_jsonl(baseline)
+    except (OSError, json.JSONDecodeError) as exc:
+        cli_bail(f"could not read {baseline}: {exc}")
+
+    # Four shapes reach here, and a one-row JSONL file is the subtle one: it is
+    # also valid JSON, so `read_json_or_jsonl` returns a bare dict that is a
+    # *row*, not an envelope. Detect the on-disk format from the raw text
+    # rather than the decoded value, so the file is written back in the form it
+    # arrived in.
+    raw_lines = raw_text.splitlines()
+    # Keep each data line's position, so comment and blank lines survive the
+    # rewrite. `read_json_or_jsonl` accepts `//` comments, and serialising only
+    # the parsed rows would silently delete every annotation in the file.
+    data_line_indexes = [
+        index
+        for index, line in enumerate(raw_lines)
+        if line.strip() and not line.lstrip().startswith("//")
+    ]
+    jsonl_lines = [raw_lines[index] for index in data_line_indexes]
+    was_jsonl = bool(jsonl_lines) and _every_line_is_json_object(jsonl_lines)
+
+    # Structure is decided before format, because a compact envelope is also a
+    # single line that parses as an object and would otherwise be mistaken for
+    # a JSONL row.
+    if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
+        # The envelope every shipped corpus baseline uses. Bind to the list
+        # inside the payload so the rewrite reaches it and the other keys live.
+        was_jsonl = False
+        rows = payload["issues"]
+    elif was_jsonl:
+        rows = [json.loads(line) for line in jsonl_lines]
+        payload = rows
+    elif isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = [payload]
+        payload = rows
+    else:
+        cli_bail(f"{baseline}: expected baseline rows, an 'issues' envelope, or JSONL")
+
+    settings = load_repo_settings(root=Path.cwd(), load_learnings_files=False)
+    try:
+        record = adjudicate_label(
+            kind,
+            settings=settings.adjudication.adjudicators,
+            model=model,
+            produced_by=produced_by,
+        )
+    except (AdjudicatorNotApproved, SelfAdjudicationRefused) as exc:
+        cli_bail(str(exc))
+
+    matched = False
+    for row in rows:
+        if isinstance(row, dict) and str(row.get("id") or "") == issue_id:
+            row["provenance"] = provenance_for(record)
+            # Persist the identities the independence check ran against. Without
+            # them `llm-adjudicated` is an unfalsifiable claim: a later reader
+            # cannot tell whether the adjudicating and producing models actually
+            # differed, which is the whole basis for trusting the label.
+            row["adjudication"] = record.model_dump(mode="json")
+            matched = True
+    if not matched:
+        cli_bail(f"no baseline row with id {issue_id!r} in {baseline}")
+
+    if was_jsonl:
+        # Rewrite only the data lines, in place, leaving everything else byte
+        # for byte as it was found.
+        rendered_lines = list(raw_lines)
+        for index, row in zip(data_line_indexes, rows, strict=True):
+            rendered_lines[index] = json.dumps(row)
+        rendered = "\n".join(rendered_lines) + "\n"
+    else:
+        rendered = json.dumps(payload, indent=2) + "\n"
+    baseline.write_text(rendered, encoding="utf-8")
+    console.print(
+        f"adjudicated {issue_id} by {by} — provenance {provenance_for(record)} "
+        f"(tier {record.independence})"
+    )
 
 
 @app.command("score")
@@ -711,7 +850,14 @@ def score(
 
     issues = load_baseline_issues(expected_payload)
     findings = load_reported_findings(actual_payload)
-    report = score_findings(issues, findings, slack=slack)
+    # The calibration bar is repo configuration, so scoring must read it here
+    # rather than fall back to the signature default — otherwise
+    # `requireForCalibration` is inert and the block advertises a policy it
+    # does not apply.
+    required = load_repo_settings(
+        root=Path.cwd(), load_learnings_files=False
+    ).adjudication.require_for_calibration
+    report = score_findings(issues, findings, slack=slack, required_provenance=required)
 
     if wants_json_output(ctx, json_flag=json_output):
         emit_cli_json(
@@ -724,6 +870,12 @@ def score(
                 "severity_agreement": report.severity_agreement,
                 "missed_issue_ids": report.missed_issue_ids,
                 "matches": [m.model_dump() for m in report.matches],
+                # Automation reading only JSON must still learn whether these
+                # numbers rest on adjudicated labels; without it an
+                # agent-seeded score can be published as if it were calibrated.
+                "calibration": (
+                    report.calibration.model_dump() if report.calibration is not None else None
+                ),
             }
         )
     else:

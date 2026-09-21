@@ -42,6 +42,114 @@ which it would then trivially rediscover. Every baseline row carries a mandatory
 `provenance` field for exactly this reason. Keep `provenance: human` as the
 primary corpus and report scores with and without the rest.
 
+## Calibration bar
+
+Scoring reports recall and precision for any corpus. Whether those numbers may
+be called *calibrated* is a separate question, decided by label provenance
+against a configured bar.
+
+```yaml
+adjudication:
+  requireForCalibration: independent
+```
+
+Each label's `provenance` maps to an independence tier:
+
+| `provenance` | Tier |
+|--------------|------|
+| `human` | `independent` |
+| `jev-adjudicated` | `model` |
+| `llm-adjudicated` | `model` |
+| `agent-seeded` | `none` |
+
+An unrecognised `provenance` string resolves to `none`, so a label can never
+satisfy the bar by accident.
+
+`requireForCalibration` accepts `independent` or `model` only. There is no
+"no bar" setting: a zero bar would clear every provenance including
+`agent-seeded`, which is precisely the claim configuration must not be able to
+make.
+
+Scoring still reports recall and precision for an agent-seeded corpus — the
+numbers are real and useful for regression detection. What it withholds is the
+word *calibrated*: `ScoreReport.calibration.eligible` stays `False` unless every
+label in the set meets `requireForCalibration`. One unadjudicated row is enough
+to sink a corpus-wide claim, because a claim about the corpus is only as good as
+its weakest label.
+
+```text
+  calibration      : NOT calibrated — 1 of 3 labels below the 'independent' bar
+```
+
+The same verdict is carried on `DetectionMetrics` so a persisted benchmark
+result cannot show scores without it, and appears in `eval score --json`.
+
+## Adjudication
+
+Who may assign a label is repo configuration; what the label is worth is the
+calibration bar above. The two are answered separately so that enabling an
+adjudicator can never by itself upgrade a claim.
+
+```yaml
+adjudication:
+  adjudicators:
+    human: { enabled: true,  independence: independent }
+    jev:   { enabled: false, independence: model }
+    llm:   { enabled: false, independence: model }
+  requireForCalibration: independent
+```
+
+`enabled` is the approval gate: an adjudicator that is not enabled cannot label
+cases. `independence` is recorded on the audit record; the tier used for
+calibration comes from the derived `provenance`, never from this field.
+
+Labels are written through `mergecraft eval adjudicate`, which is where the
+policy is enforced:
+
+```bash
+mergecraft eval adjudicate baseline.json --id ISSUE-1 --by human
+mergecraft eval adjudicate baseline.json --id ISSUE-1 --by llm --model judge-2 \
+  --produced-by judge-1
+```
+
+Comment (`//`) and blank lines in a JSONL baseline are preserved: only the data
+lines are rewritten, in place.
+
+Baselines are envelopes — `{"closed_world": ..., "issues": [...]}` — and the
+command rewrites the row in place, preserving every other key. Bare lists,
+single-object documents, and JSONL are also accepted, and a JSONL input is
+written back as JSONL rather than reindented.
+
+An unapproved adjudicator exits non-zero and writes nothing. The row's
+`provenance` is derived from the resulting record, never supplied by the caller.
+
+A model adjudicator must name both `--model` and `--produced-by`. The check
+fails closed on a missing identity: an unknown producer cannot be *shown* to
+differ from the adjudicator, so omitting the argument is refused rather than
+allowed. A human adjudicator carries no model identity and needs neither.
+
+The command writes the adjudication record beside the derived `provenance`, so
+the independence check leaves durable evidence rather than an unfalsifiable
+claim:
+
+```json
+{
+  "id": "ISSUE-1",
+  "provenance": "llm-adjudicated",
+  "adjudication": {
+    "adjudicated_by": "llm",
+    "model": "judge-2",
+    "produced_by": "judge-1",
+    "independence": "model",
+    "at": "2026-09-19T15:04:21Z"
+  }
+}
+```
+
+**Self-adjudication is refused regardless of configuration.** A model may not
+score labels its own pinned model produced; that is the circularity the corpus
+already suffers from, and no config key waives it.
+
 ## Scoring
 
 Score a run's findings against a baseline:

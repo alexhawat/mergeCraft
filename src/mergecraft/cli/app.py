@@ -32,6 +32,7 @@ from mergecraft.cli import (
     gha_cmd,
     health_cmd,
     init_cmd,
+    jev_cmd,
     learnings_cmd,
     lens_cmd,
     mcp_cmd,
@@ -51,6 +52,7 @@ from mergecraft.cli import (
     tracing_logfire_cmd,
     trust_cmd,
     update_cmd,
+    verify_behavior_cmd,
     watch_cmd,
     workflow_cmd,
     xrepo_cmd,
@@ -110,6 +112,7 @@ app.add_typer(context_cmd.app, name="context")
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(provider_cmd.app, name="provider")
 app.add_typer(trust_cmd.app, name="trust")
+app.add_typer(jev_cmd.app, name="jev")
 app.add_typer(model_cmd.app, name="model")
 app.add_typer(workflow_cmd.app, name="workflow")
 app.add_typer(models_cmd.app, name="models")
@@ -118,6 +121,7 @@ app.command("init")(init_cmd.run)
 app.command("watch")(watch_cmd.run)
 app.command("doctor")(doctor_cmd.run)
 app.command("update")(update_cmd.run)
+app.command("verify-behavior")(verify_behavior_cmd.run)
 app.command("capabilities")(capabilities_cmd.run)
 app.command("describe")(describe_cmd.run)
 app.command("explain")(explain_cmd.run)

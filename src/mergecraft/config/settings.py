@@ -614,6 +614,77 @@ def _default_jev_packs() -> dict[str, bool]:
     return {pack_id: True for pack_id in _JEV_PACK_IDS}
 
 
+class VerifyBehaviorSettings(BaseModel):
+    """Verify-behavior kill switch. Invoking the CLI still requires trust.
+
+    ``enabled: false`` refuses the run. ``enabled: true`` cannot re-enable the
+    capability on an untrusted tier.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = True
+
+
+class AdjudicatorSettings(BaseModel):
+    """One adjudicator kind: whether it may run, and how independent it is.
+
+    ``enabled`` is the approval gate — an adjudicator that is not enabled
+    cannot assign corpus labels. ``independence`` describes how far the
+    adjudicator stands from the labels it scores, and feeds the calibration
+    bar; it never grants permission by itself.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    independence: Literal["independent", "model", "none"] = "none"
+
+
+def _default_adjudicators() -> dict[str, AdjudicatorSettings]:
+    """Human approved and independent; model adjudicators off until opted in."""
+    return {
+        "human": AdjudicatorSettings(enabled=True, independence="independent"),
+        "jev": AdjudicatorSettings(enabled=False, independence="model"),
+        "llm": AdjudicatorSettings(enabled=False, independence="model"),
+    }
+
+
+class AdjudicationSettings(BaseModel):
+    """Who may adjudicate eval corpus labels, and what that entitles (#736).
+
+    Approval and claim strength are separate on purpose. Enabling ``jev`` or
+    ``llm`` lets those adjudicators label cases, but
+    ``require_for_calibration`` still decides whether the resulting labels can
+    back a calibration claim. Self-adjudication is refused by
+    ``mergecraft.evals.adjudication`` regardless of what this block says.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    adjudicators: dict[str, AdjudicatorSettings] = Field(default_factory=_default_adjudicators)
+    # ``none`` is deliberately not offered: a bar of "no independence" would
+    # let the existing agent-seeded corpus be published as calibrated, which is
+    # exactly the claim this block exists to prevent configuration from making.
+    require_for_calibration: Literal["independent", "model"] = Field(
+        default="independent",
+        alias="requireForCalibration",
+    )
+
+    @field_validator("adjudicators")
+    @classmethod
+    def _known_kinds_only(
+        cls, value: dict[str, AdjudicatorSettings]
+    ) -> dict[str, AdjudicatorSettings]:
+        unknown = sorted(set(value) - {"human", "jev", "llm"})
+        if unknown:
+            msg = f"unknown adjudicator kind(s): {', '.join(unknown)}"
+            raise ValueError(msg)
+        filled = _default_adjudicators()
+        filled.update(value)
+        return filled
+
+
 class JevSettings(BaseModel):
     """Opt-in Jev / System One block. Off by default (D4, D8).
 
@@ -641,6 +712,7 @@ class JevSettings(BaseModel):
             "lens/v1.likely": 0.6,
             "align/v1.same_defect": 0.6,
             "align/v1.is_withdrawn_reraise": 0.5,
+            "evidence/v1.relation": 0.5,
         }
     )
 
@@ -764,6 +836,11 @@ class RepoSettings(BaseModel):
     )
     tracing: TracingSettings = Field(default_factory=TracingSettings)
     jev: JevSettings = Field(default_factory=JevSettings)
+    adjudication: AdjudicationSettings = Field(default_factory=AdjudicationSettings)
+    verify_behavior: VerifyBehaviorSettings = Field(
+        default_factory=VerifyBehaviorSettings,
+        alias="verifyBehavior",
+    )
     run_bounds: RunBoundsSettings = Field(default_factory=RunBoundsSettings, alias="runBounds")
     enterprise: EnterpriseSettings = Field(default_factory=EnterpriseSettings)
     # #477 / BA — operator provider registry (structure only; secrets in ``.env``).

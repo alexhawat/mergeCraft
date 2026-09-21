@@ -26,6 +26,11 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.evidence.merge import _severity_rank
+from mergecraft.jev.architecture import (
+    build_system_one_questions,
+    route_choice,
+    route_noul,
+)
 from mergecraft.jev.types import (
     ALIGN_PACK_ID,
     ALIGN_THRESHOLD_CORPUS_IDS,
@@ -351,7 +356,7 @@ async def unit_battery(
         unit_id=unit.unit_id,
         trust_tier=trust_tier,
         ratchet_applied=trust_tier == "untrusted",
-        questions=pack.as_system_one(),
+        questions=build_system_one_questions(pack),
     )
     if result.skipped or result.response is None:
         return result
@@ -374,6 +379,7 @@ async def dispatch_residual_units(
     run_id: str = "jev",
     change_id: str | None = None,
     settings: RepoSettings | None = None,
+    skipped_out: list[JevCallResult] | None = None,
 ) -> list[JevPrediction]:
     """Run the unit battery only on analyzer-residual hunks, then order them.
 
@@ -391,6 +397,9 @@ async def dispatch_residual_units(
 
     Returns:
         list[JevPrediction]: Ordered residual predictions. Never suppresses.
+        Units skipped at dispatch time yield no prediction; pass
+        ``skipped_out`` to collect their ``JevCallResult`` rather than lose
+        the fact that they were skipped at all.
     """
     from mergecraft.jev.segment import residual_units
 
@@ -400,6 +409,12 @@ async def dispatch_residual_units(
     for unit in residual:
         assessment = await unit_battery(unit, client=client, trust_tier=trust_tier)
         if isinstance(assessment, JevCallResult):
+            # A skip at dispatch time (kill switch, absent credential, transport
+            # error) produces no prediction. Dropping it silently made an
+            # all-skipped run indistinguishable from a clean screen, so hand the
+            # result back to the caller when it asked for them (#786).
+            if skipped_out is not None:
+                skipped_out.append(assessment)
             continue
         prior = None if prior_by_unit is None else prior_by_unit.get(unit.unit_id)
         prediction = predict_jev_action(
@@ -502,7 +517,12 @@ async def semantic_dedupe_pair(
         },
         unit_id=first.fingerprint or first.path or "align",
     )
-    if alignment.same_defect != _SAME_DEFECT or alignment.confidence < _align_same_floor():
+    if not route_choice(
+        choice=alignment.same_defect,
+        confidence=alignment.confidence,
+        act_on=frozenset({_SAME_DEFECT}),
+        floor=_align_same_floor(),
+    ):
         return first
     kept = _stronger_member(first, second)
     logger.info(
@@ -564,6 +584,7 @@ async def _align_call(
     *,
     state: dict[str, Any],
     unit_id: str,
+    trust_tier: str = "untrusted",
 ) -> AlignResult:
     from mergecraft.jev.questions import align_pack
 
@@ -572,7 +593,8 @@ async def _align_call(
         state=state,
         pack_id=pack.pack_id,
         unit_id=unit_id,
-        questions=pack.as_system_one(),
+        questions=build_system_one_questions(pack),
+        trust_tier=trust_tier,
     )
     response = _require_align_response(result)
     same = _choice(response, "same_defect")
@@ -580,7 +602,7 @@ async def _align_call(
     return AlignResult(
         pack_id=pack.pack_id,
         same_defect=same,
-        is_withdrawn_reraise=noul >= _align_noul_floor(),
+        is_withdrawn_reraise=route_noul(noul=noul, floor=_align_noul_floor()),
         confidence=_choice_confidence(response, "same_defect"),
         scope="run",
         blocking=False,

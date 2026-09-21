@@ -397,6 +397,20 @@ def run(
         help="Extra instructions appended to the offline Review prompt.",
         rich_help_panel=_PANEL_AGENT,
     ),
+    verification_report: Path | None = typer.Option(
+        None,
+        "--verification-report",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help=(
+            "Path to a behaviour-verification report JSON. Fenced before it "
+            "reaches the review prompt. Rendered in its own section, not as a "
+            "code finding. A blocked report is shown; omitting this flag leaves "
+            "the review unchanged."
+        ),
+        rich_help_panel=_PANEL_AGENT,
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -739,6 +753,7 @@ def run(
                     on_finding=_on_finding if agent_mode else None,
                     use_cache=read_cache,
                     engine=engine,
+                    verification_report_path=verification_report,
                     with_coverage=with_coverage,
                     with_mutation=with_mutation,
                 )

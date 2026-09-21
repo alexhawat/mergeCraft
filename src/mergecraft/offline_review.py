@@ -59,11 +59,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.config.settings import CliTrustOverride, RepoSettings
+    from mergecraft.jev.types import JevCallResult
     from mergecraft.mcp.tool_state import AnalyzerRunState
     from mergecraft.review.engine import ReviewEngine
     from mergecraft.tracing.review_context import ReviewContext
     from mergecraft.types import ShellPermission
     from mergecraft.utils.source_resolve import ResolvedWorkspace
+    from mergecraft.verify.models import VerificationReport
 
 
 def parse_offline_review_findings(result: OfflineReviewResult) -> list[Finding]:
@@ -139,6 +141,7 @@ def build_offline_review_prompt(
     base_ref: str | None,
     extra: str | None = None,
     json_mode: bool = False,
+    verification_report: VerificationReport | None = None,
 ) -> str:
     """Build the user prompt for an offline Review-mode run."""
     summary = summarize_diff(diff_path.read_text(encoding="utf-8"))
@@ -148,6 +151,16 @@ def build_offline_review_prompt(
         if extra and extra.strip()
         else ""
     )
+    if verification_report is None:
+        behavior_block = ""
+    else:
+        from mergecraft.verify.review import prepare_verification_report_for_prompt
+
+        behavior_block = (
+            "\n## Behavior verification\n\n"
+            + prepare_verification_report_for_prompt(verification_report)
+            + "\n"
+        )
     if json_mode:
         step_four = (
             "4. Call `set_output` with structured findings — **required**. Each item must "
@@ -181,6 +194,7 @@ def build_offline_review_prompt(
         f"Diff path: `{diff_path}`\n\n"
         f"## Diff summary\n\n{summary}\n"
         f"{extra_block}"
+        f"{behavior_block}"
     )
 
 
@@ -397,6 +411,7 @@ async def run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     engine: ReviewEngine[OfflineReviewResult] | None = None,
+    verification_report_path: Path | None = None,
     with_coverage: bool = False,
     with_mutation: bool = False,
 ) -> OfflineReviewResult:
@@ -443,6 +458,7 @@ async def run_offline_diff_review(
             on_finding=on_finding,
             use_cache=use_cache,
             engine=engine,
+            verification_report_path=verification_report_path,
             with_coverage=with_coverage,
             with_mutation=with_mutation,
         )
@@ -497,6 +513,32 @@ def _construct_review_jev(
 def _stamp_jev_skip(result: OfflineReviewResult, reason: str | None) -> OfflineReviewResult:
     if reason:
         result.jev_skip_reason = reason
+    return result
+
+
+def _append_jev_review_section(
+    result: OfflineReviewResult, *, settings: RepoSettings
+) -> OfflineReviewResult:
+    """Append the Jev summary section onto ``result.output`` (#786).
+
+    A no-op when there is no rendered body to attach it to (a failed or empty
+    review), and — via ``render_jev_review_section`` — a no-op when Jev is
+    disabled for this run. Disabled must stay byte-identical to a run with no
+    Jev at all, so this never appends an empty section or a "disabled" line.
+    """
+    if not result.output:
+        return result
+    from mergecraft.jev.summary import render_jev_review_section
+
+    section = render_jev_review_section(
+        enabled=settings.jev.enabled,
+        skip_reason=result.jev_skip_reason,
+        predictions=result.jev_predictions,
+        dispatch_skips=result.jev_dispatch_skips,
+        model=settings.jev.model,
+    )
+    if section:
+        result.output = f"{result.output.rstrip()}\n\n{section}\n"
     return result
 
 
@@ -602,7 +644,8 @@ async def _run_shadow_jev_review(
     shadow_path = _jev_shadow_artifact_path(review_out, driver)
     try:
         units = segment_hunks(diff_text)
-        await dispatch_residual_units(
+        dispatch_skips: list[JevCallResult] = []
+        predictions = await dispatch_residual_units(
             units,
             findings,
             client=client,
@@ -612,7 +655,17 @@ async def _run_shadow_jev_review(
             run_id="offline-review",
             change_id=change_id,
             settings=settings,
+            skipped_out=dispatch_skips,
         )
+        review_out.jev_dispatch_skips = [
+            str(skip.reason or "unknown") for skip in dispatch_skips
+        ] or None
+        # Predictions were computed, logged to the shadow JSONL, and then
+        # discarded — nothing rendered them into the review a human reads
+        # (#786). Stash the dumps so the caller can build the summary section.
+        review_out.jev_predictions = [
+            prediction.model_dump(mode="json") for prediction in predictions
+        ]
         body = review_out.output or ""
         judge = None
         if body:
@@ -620,6 +673,7 @@ async def _run_shadow_jev_review(
                 findings=findings,
                 review_body=body,
                 client=client,
+                trust_tier=driver.trust_tier,
             )
         _persist_shadow_jev_artifacts(
             review_out,
@@ -628,7 +682,9 @@ async def _run_shadow_jev_review(
             judge=judge,
             change_id=change_id,
         )
-        selected = await select_lenses(state={"diff": diff_text}, client=client)
+        selected = await select_lenses(
+            state={"diff": diff_text}, client=client, trust_tier=driver.trust_tier
+        )
         select_lenses_or_fallback(
             enabled=True,
             trigger_ids=(),
@@ -664,6 +720,7 @@ class _OfflineDiffReviewRun:
     evidence_packet_path: Path | None
     on_finding: Callable[[dict[str, Any]], None] | None
     read_cache: bool
+    verification_report_path: Path | None = None
     # Operator opt-in (#1). Defaults to the historical hardcoded value so any
     # caller that omits it keeps the pre-flag behaviour: repo-native analyzers
     # stay withheld unless `mergecraft review --shell` explicitly raises this.
@@ -841,11 +898,27 @@ class _OfflineDiffReviewRun:
             )
 
         output_schema = findings_output_schema() if self.json_path is not None else None
+        from pydantic import ValidationError
+
+        from mergecraft.verify.review import consume_verification_report
+
+        try:
+            verification_report = consume_verification_report(
+                self.verification_report_path,
+                trust_tier=self.trust_tier,
+            )
+        except (OSError, ValidationError, ValueError) as exc:
+            return _offline_failure(
+                error=f"failed to load verification report: {exc}",
+                outcome=RunOutcome.configuration_error,
+                diff_path=str(self.materialization.path),
+            )
         prompt = build_offline_review_prompt(
             diff_path=self.materialization.path,
             base_ref=self.materialization.base_ref,
             extra=self.prompt_extra,
             json_mode=output_schema is not None,
+            verification_report=verification_report,
         )
 
         if self.dry_run:
@@ -863,6 +936,7 @@ class _OfflineDiffReviewRun:
             from mergecraft.utils.review_result_cache import (
                 cache_key_for_diff_path,
                 load_review_result,
+                verification_report_cache_digest,
             )
 
             self.cache_key = cache_key_for_diff_path(
@@ -873,6 +947,7 @@ class _OfflineDiffReviewRun:
                 json_mode=self.json_path is not None,
                 base_ref=self.materialization.base_ref,
                 cwd=self.cwd,
+                verification_report_digest=verification_report_cache_digest(verification_report),
             )
             cached = load_review_result(self.cache_key)
             if cached is not None:
@@ -935,6 +1010,7 @@ async def _run_offline_diff_review(
     on_finding: Callable[[dict[str, Any]], None] | None = None,
     use_cache: bool = False,
     engine: ReviewEngine[OfflineReviewResult] | None = None,
+    verification_report_path: Path | None = None,
     with_coverage: bool = False,
     with_mutation: bool = False,
 ) -> OfflineReviewResult:
@@ -1000,6 +1076,7 @@ async def _run_offline_diff_review(
         evidence_packet_path=evidence_packet_path,
         on_finding=on_finding,
         read_cache=use_cache,
+        verification_report_path=verification_report_path,
         with_coverage=with_coverage,
         with_mutation=with_mutation,
     )
@@ -1040,7 +1117,9 @@ async def _run_offline_diff_review(
                         review_out=published,
                         settings=settings,
                     )
-                return _stamp_jev_skip(published, jev_skip_reason)
+                return _append_jev_review_section(
+                    _stamp_jev_skip(published, jev_skip_reason), settings=settings
+                )
             except TimeoutError:
                 return _stamp_jev_skip(
                     _offline_failure(

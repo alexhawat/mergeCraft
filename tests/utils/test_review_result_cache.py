@@ -13,6 +13,7 @@ from mergecraft.utils.review_result_cache import (
     load_review_result,
     review_result_cache_key,
     store_review_result,
+    verification_report_cache_digest,
 )
 from mergecraft.utils.run_cache import RunCache, open_run_cache
 
@@ -32,6 +33,7 @@ def _isolate_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ("prompt_extra", "--focus security", "--focus tests"),
         ("json_mode", False, True),
         ("base_ref", "main", "HEAD"),
+        ("verification_report_digest", "", "deadbeef"),
     ],
 )
 def test_review_result_cache_key_differs_when_inputs_change(
@@ -59,6 +61,7 @@ def test_review_result_cache_key_differs_when_inputs_change(
         ("prompt_extra", "alpha", "beta"),
         ("json_mode", False, True),
         ("base_ref", "origin/main", "HEAD~1"),
+        ("verification_report_digest", "", "cafebabe"),
     ],
 )
 def test_cache_key_for_diff_path_differs_when_inputs_change(
@@ -126,6 +129,26 @@ def test_review_result_cache_key_identical_with_same_version_and_digest() -> Non
         "settings_digest": "deadbeef",
     }
     assert review_result_cache_key(_DIFF, **kwargs) == review_result_cache_key(_DIFF, **kwargs)
+
+
+def test_verification_report_cache_digest_differs_for_distinct_reports() -> None:
+    """Unit: different report JSON must produce different cache digests."""
+    from tests.verify.support import make_report
+
+    digest_a = verification_report_cache_digest(make_report(observed="alpha"))
+    digest_b = verification_report_cache_digest(make_report(observed="beta"))
+    assert digest_a != digest_b
+    assert verification_report_cache_digest(None) == ""
+
+
+def test_review_result_cache_key_differs_when_verification_report_changes() -> None:
+    """Unit: same diff without vs with a report digest must not share a cache entry."""
+    from tests.verify.support import make_report
+
+    digest = verification_report_cache_digest(make_report(observed="button works"))
+    key_none = review_result_cache_key(_DIFF, model="m", verification_report_digest="")
+    key_with = review_result_cache_key(_DIFF, model="m", verification_report_digest=digest)
+    assert key_none != key_with
 
 
 def test_load_review_result_returns_none_for_corrupt_json(
