@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft verify-behavior` now drives a real Chrome over the DevTools
+  Protocol and scores each acceptance criterion and reproduction claim through
+  Jev, instead of refusing every run. A reachable host Chrome yields a live
+  driver; an unreachable endpoint still fails closed, with a named, readable
+  skip in both the test run and the report. The report states what a green
+  verify does and does not prove (#752).
+
 - `mergecraft jev enable|disable|status|set` configures the Jev advisory
   screening gate. `enable` writes only `jev.enabled: true` — every other
   value keeps coming from `JevSettings` defaults, so a later default change
