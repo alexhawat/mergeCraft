@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from mergecraft.jev.architecture import build_system_one_questions
 from mergecraft.jev.types import (
     ALIGN_PACK_ID,
     CLAIM_PACK_ID,
@@ -195,6 +196,13 @@ def unit_pack() -> QuestionPack:
                 kind="noul",
                 instructions="The risk this change introduces is untested.",
             ),
+            QuestionSpec(
+                name="style_nit",
+                kind="noul",
+                instructions=(
+                    "This change is only a formatting or naming nit with no runtime effect."
+                ),
+            ),
         ),
     )
 
@@ -326,12 +334,16 @@ async def select_lenses(
     *,
     state: dict[str, Any],
     client: AsyncJevClient,
+    trust_tier: str = "untrusted",
 ) -> LensSelection:
     """Ask ``lens/v1`` which catalog families apply to this PR.
 
     Args:
         state: Structured PR payload (diff text, paths).
         client: Pinned Jev client (recorded transport in CI).
+        trust_tier: Tier of the content in ``state``. The PR diff is attacker
+            controlled on an untrusted run, so this must be threaded from the
+            caller; the default fails closed.
 
     Returns:
         LensSelection: Catalog ids Jev marked ``apply``. ``source`` is ``jev``,
@@ -342,7 +354,8 @@ async def select_lenses(
         state=state,
         pack_id=pack.pack_id,
         unit_id="pr",
-        questions=pack.as_system_one(),
+        questions=build_system_one_questions(pack),
+        trust_tier=trust_tier,
     )
     if result.skipped or result.response is None:
         return LensSelection(

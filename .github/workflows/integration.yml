@@ -4,7 +4,9 @@
 # PR: mocked / self-skipping ``@pytest.mark.integration`` suite + coverage
 # ratchet + npm audit + actionlint/zizmor.
 # Schedule / dispatch: live-provider integration with secrets (release
-# precondition — see CONTRIBUTING.md §Cut a release).
+# precondition — see CONTRIBUTING.md §Cut a release), plus a non-blocking
+# unit-suite run with a per-run random seed (#776 / F9): a pinned seed fixes
+# the permutation of a collection, not the collection itself.
 name: Integration
 
 on:
@@ -165,3 +167,37 @@ jobs:
           NOUS_API_KEY: ${{ matrix.provider == 'nous' && secrets.NOUS_API_KEY || '' }}
           GITHUB_TOKEN: ${{ matrix.provider == 'github' && secrets.GITHUB_TOKEN || '' }}
         run: make test-integration-live
+
+  # #776 / F9 — a pinned seed does not pin order. pytest-randomly shuffles the
+  # *collected* set, and the collection changes with sharding, xdist placement,
+  # platform skips and any added or deleted test, so order-dependent coupling is
+  # only visible under a seed that varies.
+  #
+  # This job runs on the nightly cron only, which is what makes it non-blocking:
+  # it adds no required PR check and cannot stop a merge. A coupling it surfaces
+  # is a red nightly run — the signal, not a silenced pass. PR runs stay
+  # deterministic: MERGECRAFT_PYTEST_RANDOM_SEED is set here and on no path a
+  # pull_request run reaches, so `make test` keeps inheriting the pinned 424242.
+  random-order:
+    name: Unit tests (nightly / random order, non-blocking)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Unique per run, so each night shuffles the collected set differently.
+      MERGECRAFT_PYTEST_RANDOM_SEED: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Ref-resolution checks ask git whether a tag or branch exists
+          # (README Action pin D25, tests/docs/support.py). A shallow fetch
+          # has neither, so those answers are untruthful without full history.
+          fetch-depth: 0
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+        env:
+          # Exporter unit tests need the tracing extra (ci.yml test job, D14 / TH8).
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Unit tests (random order)
+        run: make test

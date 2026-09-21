@@ -608,6 +608,87 @@ def merge_deterministic_record_into_comment(body: str, *, record_block: str) -> 
     return f"{block}\n\n{cleaned}\n"
 
 
+_INCONCLUSIVE_OUTCOME = "inconclusive"
+# The two approval-shaped positive values G0 item 4 forbids when no credentialed
+# reviewer ran. Only these are demoted; every other outcome / diagnostic is left
+# intact so the reconciliation cannot mask a real failure (F11 / #775).
+_APPROVAL_SHAPED_OUTCOME = "passed"
+# The coarse step-summary table renders `success` where the record renders
+# `passed`; both are the approval-shaped positive the posture must demote.
+_APPROVAL_SHAPED_OUTCOME_LABELS: tuple[str, ...] = (_APPROVAL_SHAPED_OUTCOME, "success")
+_APPROVAL_SHAPED_DIAGNOSTIC = "approved"
+# #775 — posture lines. G0 item 4 fixes the mapping: `inconclusive` is mergeCraft's
+# internal outcome (GitHub's check conclusion stays `neutral`, which it already is).
+# When no credentialed reviewer ran, the record may not read as an approval.
+_NO_CREDENTIALED_REVIEWER_NOTE = (
+    "no credentialed reviewer ran — the review is `inconclusive`; the analyzers "
+    "that ran and were withheld are listed above, and this record is not an approval"
+)
+_TERMINAL_REQUEST_CHANGES_NOTE = (
+    "the reviewer's terminal verdict was `request_changes` — the review is "
+    "`inconclusive`; this record is not an approval"
+)
+
+
+def _record_value(value: Any) -> str:
+    """Render a ``StrEnum`` / plain value as its wire string (empty when unset)."""
+    if value is None:
+        return ""
+    return str(getattr(value, "value", value))
+
+
+def _credential_gap_present(credential_degradations: Sequence[str] | None) -> bool:
+    """Return whether any roster reviewer slot was skipped for missing credentials."""
+    return any(str(line).strip() for line in (credential_degradations or ()))
+
+
+def _terminal_request_changes(packet: Any, decision: Any) -> bool:
+    """Return whether the run's recorded terminal verdict was ``request_changes``.
+
+    ``decide_approval`` (agents/gates.py) wraps the agent's terminal verdict in a
+    ``neutral`` structural conclusion and names it in the decision reason; the
+    typed ``packet.agent_terminal_verdict`` is the authoritative copy, and the
+    reason is the fallback for a packet assembled without it (F12 / #775).
+    """
+    terminal = getattr(packet, "agent_terminal_verdict", None)
+    if _record_value(terminal).strip().lower() == "request_changes":
+        return True
+    reason = str(getattr(decision, "reason", "") or "").lower()
+    return "request_changes" in reason
+
+
+def record_is_not_an_approval(
+    *, packet: Any, credential_degradations: Sequence[str] | None = None
+) -> bool:
+    """Return whether the record must demote its approval-shaped positive claims.
+
+    The two signals are a skipped credentialed reviewer slot and a
+    ``request_changes`` terminal verdict. Both surfaces — the embedded
+    deterministic record and the coarse step-summary header table — must agree,
+    so this single predicate is the authority for both (#775 / G-D9).
+    """
+    decision = getattr(packet, "decision", None)
+    return _credential_gap_present(credential_degradations) or _terminal_request_changes(
+        packet, decision
+    )
+
+
+def reconcile_outcome(*, value: Any, not_an_approval: bool, positive: str | Sequence[str]) -> str:
+    """Demote an approval-shaped positive value to ``inconclusive``.
+
+    ``positive`` is the surface's approval-shaped label(s): the deterministic
+    record renders ``passed``, while the coarse step-summary table renders
+    ``success``. Only those positives are demoted; a genuine negative outcome or
+    diagnostic is left intact so the reconciliation never hides a real failure
+    (F11 / #775).
+    """
+    rendered = _record_value(value)
+    positives = (positive,) if isinstance(positive, str) else tuple(positive)
+    if not_an_approval and rendered in positives:
+        return _INCONCLUSIVE_OUTCOME
+    return rendered
+
+
 def render_deterministic_review_block(
     *,
     packet: Any,
@@ -656,6 +737,20 @@ def render_deterministic_review_block(
         run_findings = [finding for finding in findings if finding.scope == "run"]
     deterministic_checks = list(getattr(packet, "deterministic_checks", []) or [])
 
+    # #775 / G-D9 — reconcile the record so a positive claim (`Outcome: passed`,
+    # `Verdict diagnostic: approved`) is never rendered beside a signal that the
+    # review could not produce an approval. The two negative signals are a
+    # skipped credentialed reviewer slot and a `request_changes` terminal
+    # verdict; either maps the internal outcome to `inconclusive` (GitHub
+    # `neutral`, per G0 item 4). Only the approval-shaped positive values are
+    # demoted — a genuine `failed` / `infra_error` / `timed_out` outcome (or a
+    # negative diagnostic such as `provider_failure`) is left intact, so the
+    # reconciliation never hides a real failure.
+    credential_gap = _credential_gap_present(credential_degradations)
+    terminal_request_changes = _terminal_request_changes(packet, decision)
+    not_an_approval = record_is_not_an_approval(
+        packet=packet, credential_degradations=credential_degradations
+    )
     model = ""
     if agent_meta is not None:
         executed = str(getattr(agent_meta, "executed_model", "") or "").strip()
@@ -671,12 +766,17 @@ def render_deterministic_review_block(
         "",
     ]
     if run_outcome is not None:
-        header_lines.append(f"- **Outcome:** `{run_outcome}`")
+        outcome = reconcile_outcome(
+            value=run_outcome,
+            not_an_approval=not_an_approval,
+            positive=_APPROVAL_SHAPED_OUTCOME,
+        )
+        header_lines.append(f"- **Outcome:** `{outcome}`")
     if verdict_diagnostic is not None:
-        diagnostic = (
-            verdict_diagnostic.value
-            if hasattr(verdict_diagnostic, "value")
-            else str(verdict_diagnostic)
+        diagnostic = reconcile_outcome(
+            value=verdict_diagnostic,
+            not_an_approval=not_an_approval,
+            positive=_APPROVAL_SHAPED_DIAGNOSTIC,
         )
         header_lines.append(f"- **Verdict diagnostic:** `{diagnostic}`")
     if decision is not None:
@@ -725,6 +825,10 @@ def render_deterministic_review_block(
         )
 
     pre_merge_lines = ["", "### Pre-merge checks", ""]
+    if credential_gap:
+        pre_merge_lines.append(f"- **Review integrity:** {_NO_CREDENTIALED_REVIEWER_NOTE}")
+    elif terminal_request_changes:
+        pre_merge_lines.append(f"- **Review integrity:** {_TERMINAL_REQUEST_CHANGES_NOTE}")
     if analyzer_summary:
         pre_merge_lines.append(f"- **Analyzers:** {analyzer_summary}")
     elif agent_meta is not None and getattr(agent_meta, "dispatched_lens_ids", None):

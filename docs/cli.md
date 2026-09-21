@@ -65,6 +65,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
+| `mergecraft eval adjudicate <baseline>` | Record who adjudicated one baseline label, enforcing repo policy. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
 | `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
@@ -82,6 +83,10 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
 | `mergecraft health run` | Emit JSON health status for the running mergeCraft installation. |
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` and an example workflow (local, no API). |
+| `mergecraft jev disable` | Write `jev.enabled: false` to the committed config. |
+| `mergecraft jev enable` | Write `jev.enabled: true` to the committed config. No other key is written. |
+| `mergecraft jev set <key> <value>` | Write one Jev parameter, validated through `JevSettings` before writing. |
+| `mergecraft jev status` | Show config, credential presence, and effective Jev values. |
 | `mergecraft learnings active` | List only the active (promoted) learning entries. |
 | `mergecraft learnings influence` | List active + staging learning entries with their provenance. |
 | `mergecraft learnings staging` | List only the staging (quarantined) learning entries. |
@@ -139,6 +144,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft trust set-self-review <level>` | Write `trust.selfReview` to the committed config at `--cwd`. |
 | `mergecraft trust show` | Show the effective trust policy, level, and resolution source. |
 | `mergecraft update` | Reinstall mergecraft from GitHub using `uv tool install --reinstall`. |
+| `mergecraft verify-behavior` | Reproduce a bug or verify acceptance criteria in a running app. |
 | `mergecraft version` | Show the mergeCraft package version. |
 | `mergecraft watch --pr N` | Stream a PR/issue timeline as one JSON line per new event. |
 | `mergecraft workflow agents setmodel --agent AGENT` | Wire an agent's primary model into a mergeCraft workflow step. |

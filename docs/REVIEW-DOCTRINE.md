@@ -205,7 +205,11 @@ What the merge-evidence packet carries, and how each signal weights:
 What is **never** an input to the verdict: the agent's prose narrative,
 the PR title / body / comment text (fenced), `result.output`, the model
 slag in tool output, or any other string that was not produced by a
-deterministic check on the diff. The merge-evidence packet is the
+deterministic check on the diff. A behaviour-verification report is
+evidence about a running app, not a substitute for diff review and not a
+typed `Finding`. `skipped` or `blocked` is not a pass: blocked names the
+missing input; skipped means the run did not execute. The report is
+fenced before it reaches any prompt. The merge-evidence packet is the
 single artifact a human or a later tool reads to reconstruct why a PR
 was auto-merged, blocked, or escalated; it is durable, versioned, and
 the schema is derived from the Pydantic models (`mergecraft.evidence.

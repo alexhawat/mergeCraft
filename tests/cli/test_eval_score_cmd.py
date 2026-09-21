@@ -71,6 +71,9 @@ def test_eval_score_json_output_keeps_its_existing_key_set(tmp_path: Path) -> No
         "severity_agreement",
         "missed_issue_ids",
         "matches",
+        # Added deliberately: a JSON consumer that cannot see calibration
+        # status can publish an unadjudicated score as calibrated.
+        "calibration",
     }
 
 

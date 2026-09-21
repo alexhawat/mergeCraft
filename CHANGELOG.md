@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft jev enable|disable|status|set` configures the Jev advisory
+  screening gate. `enable` writes only `jev.enabled: true` — every other
+  value keeps coming from `JevSettings` defaults, so a later default change
+  still reaches repos that never pinned their own. `enable --github` /
+  `disable --github` open a PR against the default branch, mirroring
+  `trust set-self-review --gh-apply`, and `status --github` reports whether
+  the default branch has it on and whether the `TYPESAFE_API_KEY` Actions
+  secret is present. `set` round-trips any single value through
+  `JevSettings` and refuses an invalid one (a floating model alias, a
+  non-positive budget) before writing. YAML comments in an existing config
+  survive every write (#786).
+
+- Offline reviews now render a Jev summary section when Jev is enabled: a
+  collapsed table of per-unit predictions when it ran, or the recorded
+  `jev_skip_reason` (`credential_absent`, `kill_switch`) when it did not —
+  previously nothing surfaced that gap, so a missing credential looked
+  identical to a clean run. The section always states Jev is advisory
+  (`enforced` is always `false`) and never implies its thresholds are
+  calibrated. With Jev disabled, review output is unchanged (#786).
+
+- Order-dependent test coupling now surfaces on a scheduled, non-blocking
+  unit-suite run whose seed is the per-run `github.run_id`, so a pinned seed
+  no longer hides it. `MERGECRAFT_PYTEST_RANDOM_SEED` is set only on the
+  `schedule` / `workflow_dispatch` path; PR runs keep the pinned `424242` and
+  the job adds no required check (#776).
+
+- Jev architecture checklist helpers (`jev/architecture.py`, `jev/pack_registry.py`):
+  fan-out question merge, answer+confidence routing, per-pack state filtering with
+  untrusted nonce fencing, and model/usage logging on every System One call.
+  Maintainer doc: `docs/jev-architecture-checklist.md`.
+
 - Bare CLI command names open a TTY interactive session. `mergecraft`,
   `mergecraft review`, and groups such as `mergecraft provider` offer a menu
   (or a review wizard) when stdin is a TTY. Scripts, CI, piped invocations,
@@ -18,6 +49,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
 
 ### Changed
+
+- The action-pin bump workflow no longer advertises a push it cannot perform.
+  `stage=pin` rewrites `.github/workflows/`, which GitHub refuses from a
+  `GITHUB_TOKEN` push by construction, so it prepares the four consumer
+  references in the runner and prints the exact local `make action-pin-prepare`
+  command instead; `stage=manifest` keeps its push but emits a Conventional
+  Commit subject inside the 72-character cap, and the workflow header drops the
+  claim that it automates the cycle's mechanical half (#749, #750).
+
+- PR #742 drops Playwright as the behaviour-verification driver. Live browsing
+  binds to `mergecraft.browser` (custom browser-use + JEV) and fails closed
+  until the CDP driver is wired (#752). The `mergecraft[browser]` extra and
+  `playwright==1.63.0` pin are removed (#752, #61)
+- `mergecraft verify-behavior` fails closed when the browser-use stack is
+  unavailable, even with `--artifacts-dir` / `--input`; `--allow-stub` is the only
+  stub opt-in (#61, #752)
+- `verify_behavior.enabled: false` skips the run (kill switch); default remains
+  enabled so invoking the CLI still runs on a trusted checkout (#61)
 
 - `verify_candidate` verifies the commit that introduced an image digest rather
   than whichever commit the candidate range happens to end at. It treated any
@@ -46,8 +95,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixture suppression names why it is exempt, and a newly committed secret
   under `tests/` still fires.
 
+### Fixed
+
+- The deterministic run record no longer publishes an approval-shaped verdict
+  when no credentialed reviewer ran: a skipped reviewer credential renders the
+  record `inconclusive` (the GitHub check conclusion stays `neutral`),
+  `Outcome` / `Verdict diagnostic` / `Decision` are reconciled so they cannot
+  disagree, and the record names which analyzers ran or were withheld and
+  whether a credentialed reviewer participated. The self-review roster points
+  at the workflow-wired `nous/tencent/hy3` provider instead of the unwired
+  synthetic `auto/efficient` (#775).
+
+- Resetting the MCP shell sandbox cache tolerates a patched capability probe —
+  it clears the probe cache only when a callable `cache_clear` is present — so
+  test-isolation teardown no longer errors.
+
+- `mergecraft verify-behavior` stays inert on a fork or `pull_request_target`
+  Actions event instead of always skipping the trust gate (#61)
+
+- `mergecraft review --verification-report` does not load a report on an
+  untrusted checkout, including when a workflow treats the workspace as trusted
+  (#61)
+
+- Verify criteria are scored per criterion; reproduce matches page text to
+  repro notes; `--start-command` retries navigate while the app comes up (#61)
+
 ### Added
 
+- `mergecraft verify-behavior` can reproduce a bug or check a running app and
+  write a versioned report under `.mergecraft/artifacts/`. It stays inert on an
+  untrusted tier or when `shell: disabled`. Optional YAML `actions` drive
+  click / fill / type (#61, #752)
+
+- A versioned behaviour-verification report (`schema_version` 1.0.0) records
+  what was observed, which criteria passed, and what blocked the run — without
+  turning those results into code findings (#61)
+- `mergecraft review --verification-report` (also `diff-review`) consumes a
+  behaviour-verification report, fences it before the prompt, and renders
+  results in a separate section — not as code findings. A blocked report
+  stays visible; no report leaves the review unchanged (#61)
 - Reviews can ingest declared coverage receipts and report change-risk scores on the functions the PR actually touched, advisory by default (#714)
 - Reviews can ingest declared mutation survivors the same way; local `mergecraft review --with-coverage` / `--with-mutation` require `--shell enabled`, wrap live tool runs in the existing sandbox backend (or refuse), and refuse a fork checkout (#714)
 
