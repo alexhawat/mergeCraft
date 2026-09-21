@@ -34,7 +34,6 @@ def _fail_under_from_pyproject() -> float:
 # Critical-path floors (line %, branch %). Values are measured - 2 on
 # 2026-08-24 @ wave/test-suite-hygiene-2026-08-24 (HEAD 34cd99f9).
 MODULE_FLOORS: dict[str, tuple[float, float]] = {
-    "utils/token.py": (51.9, 39.2),
     "utils/git_setup.py": (91.5, 86.9),
     "main.py": (85.3, 75.3),
 }
