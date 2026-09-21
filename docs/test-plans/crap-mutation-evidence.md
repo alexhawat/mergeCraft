@@ -58,10 +58,10 @@ sibling (`run_ci_intelligence` must list check runs and pass them into
 | Clean band is not a finding; `coverage_clean` | C2 | `test_coverage_ingest.py::test_clean_band_does_not_emit_a_finding` |
 | Watch+ findings on changed functions, `introduced_by_pr="true"` | C2 | `…::test_watch_and_above_emit_changed_function_finding` |
 | Ingested findings `source="ci"` (C-D3) | C2 | `…::test_ingested_coverage_findings_are_ci_source` |
-| `shadow` severe CRAP does not trip `has_blockers` (C-D5) | C2 | `…::test_shadow_severe_does_not_reach_has_blockers` |
+| `shadow` severe CRAP does not trip `has_blockers`; `enforce` does (C-D5) | C2 | `…::test_severe_coverage_findings_gate_action_and_reaches_by_mode` (parametrized `shadow` / `enforce`) |
 | `coverage_default_bands` vs `coverage_consumer_bands` (C-D6) | C2 | `…::test_default_bands_run_note`, `…::test_consumer_bands_run_note` |
 | Undeclared = no API call, `coverage_undeclared` (C-D2) | C2 | `…::test_undeclared_coverage_makes_no_api_call` |
-| Declared success → changed-function finding | C2 | `…::test_declared_successful_coverage_artifact_emits_changed_function_finding` |
+| Declared success → changed-function finding, gate action + `reaches` per mode | C2 | `…::test_declared_successful_coverage_artifact_gate_action_and_reaches_by_mode` (parametrized `shadow` / `enforce`) |
 | Declared-failed → finding, never substitution (C-D2) | C2 | `…::test_declared_failed_coverage_check_emits_finding_never_substitution` |
 | Intelligence sibling lists check runs and passes them into collect (C5-F2 / C-D2) | C5 | `test_intelligence_coverage_mutation.py::test_run_ci_intelligence_declared_failed_check_emits_finding_never_downloads` |
 | Concurrent same-token ingest | C2 | `…::test_concurrent_same_token_coverage_ingest` |
@@ -76,12 +76,13 @@ sibling (`run_ci_intelligence` must list check runs and pass them into
 | Kill / escape rate; `total=0` is None | C3 | `…::test_kill_and_escape_rate` |
 | `survivorThreshold: 0` default | C3 | `…::test_survivor_threshold_zero_emits_any_changed_survivor` |
 | Threshold 2 suppresses a single survivor | C3 | `…::test_survivor_threshold_two_suppresses_single_survivor` |
-| `shadow` mutation does not trip `has_blockers` (C-D5) | C3 | `…::test_shadow_mutation_does_not_reach_has_blockers` |
+| `shadow` mutation does not trip `has_blockers`; `enforce` does (C-D5) | C3 | `…::test_mutation_findings_gate_action_and_reaches_by_mode` (parametrized `shadow` / `enforce`) |
 | Ingest does not import internal harness (K6) | C3 | `…::test_mutation_ingest_does_not_import_internal_harness` |
 | Undeclared mutation = no API call | C3 | `…::test_undeclared_mutation_makes_no_api_call` |
 | Declared-failed mutation → finding, never substitution | C3 | `…::test_declared_failed_mutation_check_emits_finding_never_substitution` |
 | Intelligence sibling, declared-failed mutation (C5-F2 / C-D2) | C5 | `test_intelligence_coverage_mutation.py` (parametrize `mutation-json`) |
-| Declared mutmut artifact | C3 | `…::test_declared_successful_mutmut_artifact_attributes_survivor` |
+| Declared mutmut artifact, gate action + `reaches` per mode | C3 | `…::test_declared_successful_mutmut_artifact_gate_action_and_reaches_by_mode` (parametrized `shadow` / `enforce`) |
+| Cancelled check blocks mutation download (parity with coverage ingest) | C3 | `…::test_cancelled_check_blocks_mutation_download` |
 | Config `mutationArtifacts` / `survivorThreshold` | C3 | `test_coverage_mutation_settings.py` |
 | Internal harness still present (K6) | C1 green | `test_mutation_ingest.py::test_internal_harness_script_still_exists`, `…::test_makefile_still_has_mutation_test_decisions_target` |
 | CLI `--with-coverage` / `--with-mutation` | C4 | `test_review_coverage_mutation.py::test_review_help_documents_coverage_and_mutation_flags`, `…::test_review_forwards_with_coverage_and_with_mutation` |
