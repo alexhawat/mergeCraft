@@ -248,14 +248,25 @@ def _setup_codex_auth(
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
 
 
-def _with_flat_codex_auth(env: dict[str, str]) -> dict[str, str]:
-    """Carry the legacy flat ``CODEX_AUTH_JSON`` into *env* when the registry did not.
+def _with_flat_codex_auth(env: dict[str, str], *, model: str | None) -> dict[str, str]:
+    """Carry the legacy flat ``CODEX_AUTH_JSON`` into *env* when the registry resolved none.
 
     Registry-backed credentials outrank the flat spelling (``build_agent_env``
-    maps them first); this only fills the gap so ``_setup_codex_auth`` and the
-    broker-posture selection consume one resolved mapping (D4).
+    maps them first), and a *resolved* registry credential is authoritative even
+    when it lands on a different env name — an ``api_key`` row maps to
+    ``OPENAI_API_KEY``, not ``CODEX_AUTH_JSON``. Injecting the ambient flat
+    ``CODEX_AUTH_JSON`` on top of that would make the broker posture prefer the
+    stale subscription and overwrite the selected key, so the fallback only
+    fills the gap when :func:`harness_env_for_active_provider` supplies no
+    non-empty credential for *model*. That keeps ``_setup_codex_auth`` and the
+    broker-posture selection consuming one resolved mapping (D4).
     """
-    if CODEX_AUTH_ENV not in env:
+    from mergecraft.config.runtime_provider_registry import harness_env_for_active_provider
+
+    registry_resolved = any(
+        value.strip() for value in harness_env_for_active_provider(model, "codex").values()
+    )
+    if not registry_resolved and CODEX_AUTH_ENV not in env:
         flat = os.environ.get(CODEX_AUTH_ENV, "").strip()
         if flat:
             env[CODEX_AUTH_ENV] = flat
@@ -268,7 +279,10 @@ def _resolved_parent_credentials(ctx: AgentRunContext) -> dict[str, str]:
     The per-run broker throwaway is injected later by :func:`_build_env`; posture
     must be decided by what the parent actually holds.
     """
-    return _with_flat_codex_auth(build_agent_env("codex", model=ctx.resolved_model))
+    return _with_flat_codex_auth(
+        build_agent_env("codex", model=ctx.resolved_model),
+        model=ctx.resolved_model,
+    )
 
 
 def _codex_mcp_tool_preamble() -> str:
@@ -607,7 +621,7 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
         # in build_agent_env so the real parent key never reaches the agent.
         extra[OPENAI_API_KEY_ENV] = handle.token
     env = build_agent_env("codex", extra, model=ctx.resolved_model)
-    _with_flat_codex_auth(env)
+    _with_flat_codex_auth(env, model=ctx.resolved_model)
     if broker_active:
         # Respect the filtered child env: never restore denied parent variables.
         bypass: dict[str, str] = {}

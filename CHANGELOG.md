@@ -120,6 +120,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verify criteria are scored per criterion; reproduce matches page text to
   repro notes; `--start-command` retries navigate while the app comes up (#61)
 
+- Codex no longer lets a stale ambient `CODEX_AUTH_JSON` override a resolved
+  registry API key: the flat subscription fallback applies only when the
+  registry resolved no Codex credential, so the broker stays active and the
+  selected key is used instead of a stale `auth.json` (#711)
+
 ### Added
 
 - `mergecraft verify-behavior` can reproduce a bug or check a running app and
