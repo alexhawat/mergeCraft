@@ -118,6 +118,10 @@ pass; without one it reports a **named skip** in the `-rs` summary — never a
 quiet deselect. Reconciled state: `180 passed, 0 xfail, 0 xpass` and the
 session xpass ratchet green.
 
+**Evidence.** Reconciliation verified in the driver/seam wave run space:
+`mergecraft-dev` · `run.id=af876d36-2968-49bd-919e-af98d0dfa3b4`,
+filter `attributes->>'run.id' = 'af876d36-2968-49bd-919e-af98d0dfa3b4'`.
+
 ## Out of scope for this suite
 
 - A live TypeSafe call. The seam tests replay recorded envelopes only.
