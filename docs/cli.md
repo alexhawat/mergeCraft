@@ -162,6 +162,15 @@ entry point — it is a Typer group callback, not a `registered_commands` leaf
 itself, so it is described here in prose rather than as its own table row;
 `mergecraft gha token` above is the one real leaf command under that group.
 
+## JSON output schema
+
+Every CLI `--json` payload carries a top-level `schema_version` field, currently
+`"1.0.0"`. That value is versioned independently of the review snapshot model
+and of the agent JSONL protocol: bumping it announces a change to the shape of
+CLI JSON output only, and does **not** by itself mean the review snapshot or the
+agent wire format changed. The converse also holds — a change to either of those
+contracts does not move the CLI stamp.
+
 ## See also
 
 - [Action reference](action-reference.md)

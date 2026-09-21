@@ -179,10 +179,60 @@ fixed a pre-existing `I001` import-order offense in the default-bank test body
 
 ## R6 — CLI JSON schema version (#777)
 
-Reserved. The RED suite and contract matrix land with the R6 `test-creator`
-dispatch. `CLI_JSON_SCHEMA_VERSION` is defined in `cli/`, independent of the
-review snapshot version, at the same value, with no payload moved and `review/`
-still not importing `cli/`.
+Wave outcome: `CLI_JSON_SCHEMA_VERSION` is **defined in** `cli/` rather than
+aliased from `mergecraft.review.snapshot`, so the CLI JSON payload contract and
+the frozen `ReviewSnapshot` contract can move independently. The decoupling
+happens **at the same value** (`"1.0.0"`): no payload moves, no consumer sees a
+bump, and `review/` still does not import `cli/`. This is a deliberate runtime
+no-op — the value is that the *next* payload addition is a one-line decision.
+
+### Contract matrix
+
+| Contract | Layer | Test node(s) | Status |
+| --- | --- | --- | --- |
+| `CLI_JSON_SCHEMA_VERSION` is a module-level literal assignment in `cli/global_surface.py`, not an alias of the review constant | Unit (structural) | `tests/cli/test_cli_json_schema_version.py::test_cli_json_schema_version_is_assigned_in_global_surface` | 🔴 red (alias) |
+| The name is absent from the module's imported bindings (no `from mergecraft.review.snapshot import REVIEW_SCHEMA_VERSION as CLI_JSON_SCHEMA_VERSION`) | Unit (structural) | `…::test_cli_json_schema_version_is_not_an_imported_binding` | 🔴 red (alias) |
+| Bumping `REVIEW_SCHEMA_VERSION` does not change what `cli_json_dumps` stamps | Unit / integration | `…::test_mutating_review_schema_version_does_not_move_the_cli_stamp` | ✅ pass (guard) |
+| Bumping the CLI constant does not move `REVIEW_SCHEMA_VERSION` | Unit | `…::test_mutating_cli_json_schema_version_does_not_move_the_review_version` | ✅ pass (guard) |
+| Both constants hold `"1.0.0"`; no payload moves and no consumer sees a bump | Unit (green guard) | `…::test_both_schema_versions_hold_the_same_value` | ✅ pass |
+| `cli_json_dumps` still stamps `"1.0.0"` after decoupling | Unit / integration | `…::test_cli_json_dumps_still_stamps_1_0_0` | ✅ pass |
+| No module under `src/mergecraft/review/` imports `mergecraft.cli` (AST walk, every import form) | Structural layering | `…::test_review_package_does_not_import_cli` | ✅ pass (guard) |
+
+The existing literal pin `tests/cli/test_da_protocol_negotiation.py:50`
+(`assert CLI_JSON_SCHEMA_VERSION == "1.0.0"`) is left untouched and stays green.
+
+### Pinned contracts (where the wave plan left a choice)
+
+- **Definition site** — the constant must be a **literal** module-level
+  assignment in `cli/global_surface.py`. A re-assignment from the review name
+  (`CLI_JSON_SCHEMA_VERSION = REVIEW_SCHEMA_VERSION`) is rejected: it would keep
+  the two contracts coupled while looking decoupled.
+- **Import shape** — the local binding name `CLI_JSON_SCHEMA_VERSION` must not
+  appear in the module's imported bindings, in any alias position.
+- **Independence** — monkeypatching either constant must not move the other;
+  the CLI stamp is read from `cli/`'s own module global at call time.
+- **Layering** — the check walks every `*.py` under `src/mergecraft/review/`
+  and rejects `from mergecraft.cli …`, `import mergecraft.cli`, and
+  `from mergecraft import cli`.
+
+### Red / green inventory at authoring time
+
+Authored RED by `test-creator` (trace run.id
+`f8c575d3-5a2f-433a-9e6a-8c978fcd25d9`). The two structural pins are red for
+exactly one reason: `cli/global_surface.py:18` still carries
+`from mergecraft.review.snapshot import REVIEW_SCHEMA_VERSION as
+CLI_JSON_SCHEMA_VERSION`. The five remaining tests are real green guards and
+stay green through the decoupling — they assert independence, the shared value,
+the unchanged stamp, and the layering rule. The pins are deliberately **not**
+`xfail`; the R6 implementation wave greens them in the same wave.
+
+### What this suite does not do
+
+- It does not bump either schema version, and it does not assert a version
+  change: the wave is a decoupling at the same value.
+- It does not invert the dependency: `review/` must not import `cli/`, and the
+  layering test asserts exactly that.
+- It does not touch `src/` or the existing literal pin in the DA protocol suite.
 
 ## Commands
 
