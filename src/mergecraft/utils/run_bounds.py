@@ -298,14 +298,52 @@ def resolve_run_bounds(
     )
 
 
-def format_token_budget_summary(tracker: BudgetTracker) -> str:
-    """Render token usage with target, ceiling, phase attribution, and over-target flag."""
+def _usage_input_output(usage_entries: list[Any]) -> tuple[int, int] | None:
+    """Sum input and output tokens from usage rows that report the split."""
+    input_total = 0
+    output_total = 0
+    found = False
+    for row in usage_entries:
+        inp = getattr(row, "input_tokens", None)
+        out = getattr(row, "output_tokens", None)
+        if isinstance(inp, int):
+            found = True
+            input_total += inp
+        if isinstance(out, int):
+            found = True
+            output_total += out
+    if not found:
+        return None
+    return input_total, output_total
+
+
+def _format_input_output(input_tokens: int, output_tokens: int) -> str:
+    return f"{input_tokens:,} input / {output_tokens:,} output"
+
+
+def format_token_budget_summary(
+    tracker: BudgetTracker,
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> str:
+    """Render token usage with target, ceiling, phase attribution, and over-target flag.
+
+    When input and output counts are supplied, the published figure names both
+    instead of a single combined total (#801).
+    """
     bounds = tracker.bounds
+    used = tracker.tokens_used
+    if input_tokens is not None and output_tokens is not None:
+        split = _format_input_output(input_tokens, output_tokens)
+        if used == input_tokens + output_tokens:
+            head = f"{split} used"
+        else:
+            head = f"{split}; {used:,} used"
+    else:
+        head = f"{used:,} used"
     parts = [
-        (
-            f"{tracker.tokens_used:,} used "
-            f"(target {bounds.token_budget:,}, ceiling {bounds.token_ceiling:,})"
-        ),
+        f"{head} (target {bounds.token_budget:,}, ceiling {bounds.token_ceiling:,})",
     ]
     if tracker.over_target:
         parts.append("over target")
@@ -322,11 +360,20 @@ def token_summary_from_usage(
     *,
     budget_tracker: BudgetTracker | None = None,
 ) -> str | None:
-    """Prefer budget-tracker band summary; fall back to raw usage entry totals."""
+    """Prefer budget-tracker band summary; fall back to usage-entry input/output."""
+    split = _usage_input_output(usage_entries)
     if isinstance(budget_tracker, BudgetTracker) and (
         budget_tracker.tokens_used > 0 or budget_tracker.over_target
     ):
+        if split is not None:
+            return format_token_budget_summary(
+                budget_tracker,
+                input_tokens=split[0],
+                output_tokens=split[1],
+            )
         return format_token_budget_summary(budget_tracker)
+    if split is not None:
+        return _format_input_output(split[0], split[1])
     totals = [
         str(row.total_tokens)
         for row in usage_entries

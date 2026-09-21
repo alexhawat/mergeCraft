@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Review records, sticky progress comments, and the Actions step summary now
+  show input and output token counts separately instead of one combined total
+  (#801)
+
 - The action-pin bump workflow no longer advertises a push it cannot perform.
   `stage=pin` rewrites `.github/workflows/`, which GitHub refuses from a
   `GITHUB_TOKEN` push by construction, so it prepares the four consumer
