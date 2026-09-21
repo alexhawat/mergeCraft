@@ -18,6 +18,7 @@ from typer.testing import CliRunner
 
 from mergecraft.browser import BrowserStackUnavailableError, launch_browser_driver
 from mergecraft.browser.availability import browser_stack_available, cdp_base_url
+from mergecraft.browser.cdp import CdpBrowserDriver
 from mergecraft.cli import verify_behavior_cmd
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
@@ -62,6 +63,11 @@ def test_launch_browser_driver_returns_live_driver_when_cdp_reachable(
     Construction must be lazy: it may probe the endpoint but must not require a
     live browser session to build the driver object. ``fake_cdp_endpoint``
     answers the discovery routes so the probe is deterministic.
+
+    The concrete-type assertion is the no-op detector: an empty class that merely
+    satisfies the ``BrowserDriver`` protocol (so ``isinstance`` and the stub-name
+    check both pass) is still not the CDP driver, and this fails against it
+    without needing a real Chrome.
     """
     assert browser_stack_available() is True
     driver_mod = import_verify("driver")
@@ -70,6 +76,7 @@ def test_launch_browser_driver_returns_live_driver_when_cdp_reachable(
     try:
         assert isinstance(driver, protocol)
         assert driver.__class__.__name__ != "_StubBrowserDriver"
+        assert type(driver) is CdpBrowserDriver
     finally:
         _close_quietly(driver)
 
@@ -91,6 +98,7 @@ def test_resolve_driver_binds_live_driver_when_cdp_reachable(fake_cdp_endpoint: 
     try:
         assert isinstance(driver, protocol)
         assert driver.__class__.__name__ != "_StubBrowserDriver"
+        assert type(driver) is CdpBrowserDriver
     finally:
         _close_quietly(driver)
 

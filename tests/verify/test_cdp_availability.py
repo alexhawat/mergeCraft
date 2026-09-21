@@ -70,6 +70,8 @@ def test_browser_stack_available_false_on_non_200(
     status_code: int,
 ) -> None:
     seen: list[str] = []
+    # Pin the endpoint so an ambient MERGECRAFT_CDP_URL cannot change the probe.
+    monkeypatch.setenv("MERGECRAFT_CDP_URL", _DEFAULT_URL)
     monkeypatch.setattr(
         "mergecraft.browser.availability.httpx.Client",
         _client_factory(status_code, seen),
@@ -80,6 +82,8 @@ def test_browser_stack_available_false_on_non_200(
 
 def test_browser_stack_available_false_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
+    # Pin the endpoint so an ambient MERGECRAFT_CDP_URL cannot change the probe.
+    monkeypatch.setenv("MERGECRAFT_CDP_URL", _DEFAULT_URL)
     monkeypatch.setattr(
         "mergecraft.browser.availability.httpx.Client",
         _client_factory(200, seen, error=True),

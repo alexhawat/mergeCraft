@@ -8,7 +8,8 @@ implementation existed; the driver and seam wave landed, every cross-wave
 
 - **Branch:** `wave/browser-cdp-driver`
 - **Suite:** `tests/verify/` (`test_cdp_availability.py`, `test_browser_stack.py`,
-  `test_driver_protocol.py`, `test_jev_seam.py`)
+  `test_driver_protocol.py`, `test_jev_seam.py`,
+  `test_runner_jev_composition.py`)
 - **Fixtures:** `tests/verify/fixtures/transport/*.json` (recorded Jev
   envelopes — CI makes zero live TypeSafe calls), `tests/verify/conftest.py`
   (`fake_cdp_endpoint`)
@@ -62,6 +63,29 @@ Wire rules the tests enforce:
 | Jev scores, Python counts: no numeric field on a judgment | property | `test_jev_seam.py::test_judgment_models_carry_no_numeric_rate_or_count` |
 | Jev scores, Python counts: no counting symbol in the seam | property | `test_jev_seam.py::test_seam_module_exposes_no_counting_symbol` |
 | Jev scores, Python counts: no count/rate name sent to Jev | property | `test_jev_seam.py::test_seam_never_asks_jev_to_count_or_aggregate` |
+| Runner composes a scored Jev verdict into the observable report status (verify pass) | integration | `test_runner_jev_composition.py::test_scored_criterion_pass_reaches_report_status` |
+| Runner composes a below-floor Jev verdict into `fail` | integration | `test_runner_jev_composition.py::test_scored_criterion_fail_reaches_report_status` |
+| Runner composes a scored repro verdict into `reproduced` | integration | `test_runner_jev_composition.py::test_scored_repro_claim_reaches_report_status` |
+
+## Hermetic env and no-op driver detection
+
+Two R7 verification findings tightened the suite without changing any
+assertion's meaning:
+
+- **`MERGECRAFT_CDP_URL` is isolated.** The default-URL assertions in
+  `test_cdp_availability.py` pin `MERGECRAFT_CDP_URL` with
+  `monkeypatch.setenv`, so they cannot inherit the operator/CI value from the
+  shell. The autouse `_isolate_github_event_env` fixture deliberately leaves the
+  CDP variable alone: the named live test must honour the configured endpoint,
+  and its `skipif` probes that same ambient value at collection. The suite passes
+  identically under default env and under any ambient value;
+  `MERGECRAFT_CDP_URL=http://127.0.0.1:9777` yields `182 passed, 1 skipped`.
+- **A protocol-satisfying no-op driver is detected.** The reachable-CDP cases
+  (`test_launch_browser_driver_returns_live_driver_when_cdp_reachable`,
+  `test_resolve_driver_binds_live_driver_when_cdp_reachable`) now also assert
+  `type(driver) is CdpBrowserDriver`. `isinstance` against the protocol and the
+  `_StubBrowserDriver` name check both accept an empty class; the concrete-type
+  assertion does not, and needs no real Chrome.
 
 ## Skip policy
 
@@ -115,8 +139,10 @@ guard the fail-closed contract and stay passing.
 `@pytest.mark.skipif(not browser_stack_available(), reason=_CDP_SKIP_REASON)`
 after its `xfail` was removed. On a host with a reachable endpoint it is a real
 pass; without one it reports a **named skip** in the `-rs` summary — never a
-quiet deselect. Reconciled state: `180 passed, 0 xfail, 0 xpass` and the
-session xpass ratchet green.
+quiet deselect. Reconciled state after the R7 fix: `183 passed` on a host with a
+reachable Chrome devtools endpoint, or `182 passed, 1 skipped` when the probed
+`MERGECRAFT_CDP_URL` is unreachable (this includes the ambient-value proof with
+`http://127.0.0.1:9777`), 0 xfail, 0 xpass, and the session xpass ratchet green.
 
 **Evidence.** Reconciliation verified in the driver/seam wave run space:
 `mergecraft-dev` · `run.id=af876d36-2968-49bd-919e-af98d0dfa3b4`,

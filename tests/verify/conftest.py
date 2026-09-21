@@ -13,7 +13,14 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _isolate_github_event_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unit tests are local unless they set the Actions event themselves."""
+    """Unit tests are local unless they set the Actions event themselves.
+
+    ``MERGECRAFT_CDP_URL`` is deliberately *not* cleared here: the named live
+    test must honour the operator's configured endpoint, and its ``skipif``
+    probes that same ambient value at collection. Tests that assert the default
+    endpoint isolate it themselves with ``monkeypatch.setenv`` /
+    ``monkeypatch.delenv``, which runs after this fixture.
+    """
     monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
     monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
 
