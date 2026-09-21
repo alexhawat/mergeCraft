@@ -9,21 +9,19 @@ never become a required PR blocker. ``continue-on-error: true`` is the repo's
 established non-blocking mechanism (``mutation-advisory``); a job that needs a
 provider key is a job that gets disabled.
 
-RED until R4 adds the job: collection stays clean because these tests only read
-existing workflow files.
+The R4 implementation wave (``bbb1e3aa``) landed the job; the reconciliation
+run (``f8c575d3-5a2f-433a-9e6a-8c978fcd25d9``) removed the non-strict ``xfail``
+marker so this is a real pass.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import WORKFLOWS, load_workflow
 from tests.evals.support_eval_calibration import PROVIDER_SECRET_ENV
-
-_R4 = "green after R4: "
 
 
 def _shadow_jobs() -> list[tuple[str, str, dict[str, Any]]]:
@@ -39,7 +37,6 @@ def _shadow_jobs() -> list[tuple[str, str, dict[str, Any]]]:
     return found
 
 
-@pytest.mark.xfail(reason=_R4 + "optional keyless shadow-comparison CI job", strict=False)
 def test_shadow_comparison_job_is_non_blocking_and_keyless() -> None:
     """The shadow-comparison job is advisory and needs no provider credential."""
     jobs = _shadow_jobs()

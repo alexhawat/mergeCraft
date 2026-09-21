@@ -30,9 +30,9 @@ House style matches ``tests/evidence/test_gate_actions.py`` and
 ``tests/evidence/test_verdict_shadow.py``: helpers at the top, one behaviour
 per test, lazy imports for symbols the R4 implementation wave lands.
 
-Cross-wave reds use non-strict ``xfail`` (``strict=False``) so a marker that
-starts passing after R4 is an ``XPASS``, never a hard failure in a file the
-implementation wave is forbidden to touch.
+The R4 implementation wave (``bbb1e3aa``) satisfied every contract below; the
+reconciliation run (``f8c575d3-5a2f-433a-9e6a-8c978fcd25d9``) removed the
+non-strict ``xfail`` markers so these are real passes.
 """
 
 from __future__ import annotations
@@ -46,8 +46,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from mergecraft.evidence.packet import MergeEvidencePacket
-
-_R4 = "green after R4: "
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -116,9 +114,6 @@ def _ctx(tmp_path: Path) -> Any:
 # ── a second target runs through the existing recorder ───────────────────────
 
 
-@pytest.mark.xfail(
-    reason=_R4 + "ShadowTarget + additive target= on the existing recorder", strict=False
-)
 def test_second_target_records_through_the_existing_recorder(tmp_path: Path) -> None:
     """A different pinned model id/prompt version is stamped on the same JSONL row.
 
@@ -156,7 +151,6 @@ def test_second_target_records_through_the_existing_recorder(tmp_path: Path) -> 
     assert rows[0].target_prompt_version is None
 
 
-@pytest.mark.xfail(reason=_R4 + "target identity fields on ShadowRecord", strict=False)
 def test_recording_without_a_target_leaves_target_fields_unset(tmp_path: Path) -> None:
     """The target is optional: a legacy call records a row with no target identity."""
     from mergecraft.evidence.shadow import load_shadow_records, record_shadow_prediction
@@ -178,7 +172,6 @@ def test_recording_without_a_target_leaves_target_fields_unset(tmp_path: Path) -
 # ── the disagreement table distinguishes targets by lane and by rule ─────────
 
 
-@pytest.mark.xfail(reason=_R4 + "target identity on disagreement_report rows", strict=False)
 def test_disagreement_report_distinguishes_targets_by_lane_and_rule(tmp_path: Path) -> None:
     """Two targets, same change, different lanes/rules/actions → distinguishable rows."""
     from mergecraft.evidence.shadow import (
@@ -340,12 +333,10 @@ def test_live_emit_swallows_a_shadow_recording_failure(
 # ── the comparison job: records both targets, fails closed on a write error ──
 
 
-@pytest.mark.xfail(reason=_R4 + "evidence/shadow_compare.py comparison job", strict=False)
 def test_comparison_job_records_every_target_and_publishes_the_table(tmp_path: Path) -> None:
     """The keyless comparison records one row per (target, change) and returns the table."""
-    from mergecraft.evidence.shadow_compare import compare_shadow_targets
-
     from mergecraft.evidence.shadow import load_shadow_records
+    from mergecraft.evidence.shadow_compare import compare_shadow_targets
 
     targets = [
         _make_target("live", "claude-sonnet-4-5"),
@@ -388,7 +379,6 @@ def test_comparison_job_records_every_target_and_publishes_the_table(tmp_path: P
     assert shadow_flags == {"r3": False, "r4": False}
 
 
-@pytest.mark.xfail(reason=_R4 + "fail-closed comparison job", strict=False)
 def test_comparison_job_fails_closed_when_recording_fails(tmp_path: Path) -> None:
     """A recording failure must surface as a job error — never as agreement."""
     from mergecraft.evidence.shadow_compare import compare_shadow_targets
@@ -408,7 +398,6 @@ def test_comparison_job_fails_closed_when_recording_fails(tmp_path: Path) -> Non
 # ── Logfire span on the recorder; JSONL stays the audit trail ────────────────
 
 
-@pytest.mark.xfail(reason=_R4 + "span on record_shadow_prediction (tracer=)", strict=False)
 def test_recording_emits_a_shadow_span_and_keeps_the_jsonl_audit_trail(tmp_path: Path) -> None:
     """A span lands on the tracer while the JSONL row is still written."""
     from mergecraft.evidence.shadow import record_shadow_prediction

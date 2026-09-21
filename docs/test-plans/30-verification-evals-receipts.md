@@ -18,19 +18,19 @@ closed. The recorder is not rebuilt.
 
 ### Contract matrix
 
-| Contract | Layer | Test node(s) |
-| --- | --- | --- |
-| A second target (distinct pinned model id and/or prompt version) records through the existing recorder; no second JSONL writer | Unit | `tests/evidence/test_shadow_second_target.py::test_second_target_records_through_the_existing_recorder` |
-| The target is optional; a legacy call records a row with no target identity | Unit / edge | `…::test_recording_without_a_target_leaves_target_fields_unset` |
-| `disagreement_report` distinguishes targets and groups by lane and by rule | Integration | `…::test_disagreement_report_distinguishes_targets_by_lane_and_rule` |
-| A record without an outcome stays in the table with `disagreement=None` | Unit / edge | `…::test_report_keeps_a_record_without_an_outcome` |
-| Silent live path: the recorder never calls `enforce_action` | Unit (structural) | `…::test_recording_never_calls_enforce_action` |
-| Silent live path: a recorded disagreement never flips `decide_approval()` and never mutates the packet | Integration (structural) | `…::test_shadow_recording_does_not_flip_decide_approval` |
-| Silent live path: a shadow-record failure never fails the live run/PR | Integration (structural) | `…::test_live_emit_swallows_a_shadow_recording_failure` |
-| The comparison job records every (target, change) pair and publishes the table | Integration | `…::test_comparison_job_records_every_target_and_publishes_the_table` |
-| The comparison job fails closed when recording fails — missing data is not agreement | Integration / error | `…::test_comparison_job_fails_closed_when_recording_fails` |
-| A Logfire span is emitted on the recorder while the JSONL row is still written (JSONL remains the audit trail) | Integration | `…::test_recording_emits_a_shadow_span_and_keeps_the_jsonl_audit_trail` |
-| The shadow-comparison CI job is optional and keyless — never a required PR check | CI structural | `tests/ci/test_shadow_comparison_job.py::test_shadow_comparison_job_is_non_blocking_and_keyless` |
+| Contract | Layer | Test node(s) | Status |
+| --- | --- | --- | --- |
+| A second target (distinct pinned model id and/or prompt version) records through the existing recorder; no second JSONL writer | Unit | `tests/evidence/test_shadow_second_target.py::test_second_target_records_through_the_existing_recorder` | ✅ pass |
+| The target is optional; a legacy call records a row with no target identity | Unit / edge | `…::test_recording_without_a_target_leaves_target_fields_unset` | ✅ pass |
+| `disagreement_report` distinguishes targets and groups by lane and by rule | Integration | `…::test_disagreement_report_distinguishes_targets_by_lane_and_rule` | ✅ pass |
+| A record without an outcome stays in the table with `disagreement=None` | Unit / edge | `…::test_report_keeps_a_record_without_an_outcome` | ✅ pass |
+| Silent live path: the recorder never calls `enforce_action` | Unit (structural) | `…::test_recording_never_calls_enforce_action` | ✅ pass |
+| Silent live path: a recorded disagreement never flips `decide_approval()` and never mutates the packet | Integration (structural) | `…::test_shadow_recording_does_not_flip_decide_approval` | ✅ pass |
+| Silent live path: a shadow-record failure never fails the live run/PR | Integration (structural) | `…::test_live_emit_swallows_a_shadow_recording_failure` | ✅ pass |
+| The comparison job records every (target, change) pair and publishes the table | Integration | `…::test_comparison_job_records_every_target_and_publishes_the_table` | ✅ pass |
+| The comparison job fails closed when recording fails — missing data is not agreement | Integration / error | `…::test_comparison_job_fails_closed_when_recording_fails` | ✅ pass |
+| A Logfire span is emitted on the recorder while the JSONL row is still written (JSONL remains the audit trail) | Integration | `…::test_recording_emits_a_shadow_span_and_keeps_the_jsonl_audit_trail` | ✅ pass |
+| The shadow-comparison CI job is optional and keyless — never a required PR check | CI structural | `tests/ci/test_shadow_comparison_job.py::test_shadow_comparison_job_is_non_blocking_and_keyless` | ✅ pass |
 
 ### Pinned contracts (where the wave plan left a choice)
 
@@ -59,15 +59,17 @@ model id and/or prompt version") but not the symbols. The suite pins these:
   `mergecraft.shadow.change_id`, `mergecraft.shadow.target_id`, and
   `mergecraft.shadow.disagreement` attributes. The JSONL row is still written.
 
-### Red / green inventory at authoring time
+### Red / green inventory at reconciliation time
 
-Six R4 contracts are RED under non-strict `xfail` markers (reason prefix
-`green after R4:`). Four are green regression guards that must stay green:
-`test_report_keeps_a_record_without_an_outcome`,
-`test_recording_never_calls_enforce_action`,
-`test_shadow_recording_does_not_flip_decide_approval`, and
-`test_live_emit_swallows_a_shadow_recording_failure`. The CI structural test is
-RED until the optional job lands. No marker uses `strict=True`.
+R4.2 (implementation `bbb1e3aa`) satisfied every contract, so the reconciliation
+run (`f8c575d3-5a2f-433a-9e6a-8c978fcd25d9`) removed all seven non-strict
+`xfail` markers — six in `tests/evidence/test_shadow_second_target.py` and one
+in `tests/ci/test_shadow_comparison_job.py`. All eleven R4 tests are now real
+passes (11 passed, 0 xfail, 0 xpass), and the four regression guards stayed
+green throughout. **Rationale:** the markers were `strict=False` by design, so
+the implementation wave made them `XPASS`; the session-level XPASS ratchet
+(`tests/conftest.py` + `scripts/check_xpass.py`) cannot go green until the
+satisfied markers are removed, and only `test-creator` may edit `tests/`.
 
 ### What this suite does not do
 
