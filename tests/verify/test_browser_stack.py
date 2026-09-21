@@ -1,8 +1,9 @@
 """CDP bind and fail-closed behaviour for the live browser driver.
 
-The live-driver cases are RED until the driver wave replaces the unconditional
-``#752`` raise with a real CDP-backed ``BrowserDriver``. The refusal cases and
-the "never a passing report" guard pass today and must keep passing.
+The live-driver cases are real passes now that the CDP-backed
+``BrowserDriver`` exists; the refusal cases guard the fail-closed contract
+that must not regress. The one case needing a real Chrome is skip-gated and
+named (R-D11) — never a quiet deselect.
 """
 
 from __future__ import annotations
@@ -53,10 +54,6 @@ def test_launch_browser_driver_fails_closed_when_cdp_unreachable() -> None:
     assert "MERGECRAFT_CDP_URL" in message
 
 
-@pytest.mark.xfail(
-    reason="green after R3: live CDP driver replaces the #752 placeholder raise",
-    strict=False,
-)
 def test_launch_browser_driver_returns_live_driver_when_cdp_reachable(
     fake_cdp_endpoint: str,
 ) -> None:
@@ -82,10 +79,6 @@ def test_resolve_driver_uses_stub_only_with_allow_stub() -> None:
     assert driver.__class__.__name__ == "_StubBrowserDriver"
 
 
-@pytest.mark.xfail(
-    reason="green after R3: _resolve_driver binds the live CDP driver",
-    strict=False,
-)
 def test_resolve_driver_binds_live_driver_when_cdp_reachable(fake_cdp_endpoint: str) -> None:
     """Removing the live bind from ``_resolve_driver`` must fail this test."""
     assert browser_stack_available() is True
@@ -154,10 +147,6 @@ def test_unreachable_cdp_artifacts_run_is_never_a_passing_report(
 
 
 @pytest.mark.skipif(not browser_stack_available(), reason=_CDP_SKIP_REASON)
-@pytest.mark.xfail(
-    reason="green after R3: live CDP driver navigates and extracts",
-    strict=False,
-)
 async def test_live_cdp_driver_navigates_and_extracts() -> None:
     """Real Chrome check, gated and named — never a quiet deselect."""
     driver = launch_browser_driver()

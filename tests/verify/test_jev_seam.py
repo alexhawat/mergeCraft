@@ -2,8 +2,8 @@
 
 This module pins the seam's public surface because the plan names the seam but
 not its symbol: ``mergecraft.verify.jev_seam`` exposes ``judge_criteria`` and
-``judge_repro_claim``. Every test here is RED until the driver/seam wave builds
-that module — see ``docs/test-plans/30-verification-evals-receipts.md``.
+``judge_repro_claim``. These are real passes now that the seam exists — see
+``docs/test-plans/30-verification-evals-receipts.md``.
 
 The property under test in the last section is the "Jev scores, Python counts"
 decision: the seam asks Jev one qualitative question per criterion and maps the
@@ -18,17 +18,10 @@ import re
 from pathlib import Path
 from typing import Any, get_origin
 
-import pytest
-
 from mergecraft.jev.client import AsyncJevClient, RecordedTransport
 from mergecraft.jev.types import JevCallResult, parse_system_one_response
 from tests.jev.support import FORBIDDEN_COUNT_NAMES
 from tests.verify.support import import_verify, require_symbol
-
-pytestmark = pytest.mark.xfail(
-    reason="green after R3: the verify → Jev criterion/repro seam is not built yet",
-    strict=False,
-)
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "transport"
 _TEST_API_KEY = "mc-test-verify-seam"

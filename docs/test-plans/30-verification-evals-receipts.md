@@ -1,9 +1,10 @@
-# Test plan — CDP driver and JEV seam (RED suite)
+# Test plan — CDP driver and JEV seam (reconciled)
 
-The RED suite for the wave pair that replaces the fail-closed browser
-placeholder with a live CDP-backed `BrowserDriver`, then wires `mergecraft.jev`
-into the verify path for criterion and repro scoring. Authored before the
-implementation exists; every red test is tagged for the wave that greens it.
+The suite for the wave pair that replaces the fail-closed browser placeholder
+with a live CDP-backed `BrowserDriver`, then wires `mergecraft.jev` into the
+verify path for criterion and repro scoring. Authored RED before the
+implementation existed; the driver and seam wave landed, every cross-wave
+`xfail` marker has been removed, and these are now real passes.
 
 - **Branch:** `wave/browser-cdp-driver`
 - **Suite:** `tests/verify/` (`test_cdp_availability.py`, `test_browser_stack.py`,
@@ -14,8 +15,9 @@ implementation exists; every red test is tagged for the wave that greens it.
 
 ## Pinned seam surface
 
-The plan names the seam but not its symbol, so R2 pins it here and in
-`tests/verify/test_jev_seam.py`. The green wave must build exactly this surface.
+The plan named the seam but not its symbol, so the RED wave pinned it here and
+in `tests/verify/test_jev_seam.py`. The driver/seam wave built exactly this
+surface.
 
 | Symbol | Module | Contract |
 | --- | --- | --- |
@@ -74,20 +76,47 @@ and the fix. The suite runs with `-ra`, so the skip is surfaced in the run
 summary — a quiet deselect is not acceptable. Verify with
 `uv run pytest -rs tests/verify/test_browser_stack.py`.
 
-## Cross-wave RED inventory
+## Cross-wave RED inventory — reconciled
 
-Everything gated by a later wave uses `xfail(..., strict=False)`; the repo's
-global `xfail_strict = true` is overridden deliberately, and the session-level
-xpass ratchet will flag them once they start passing so R2 can drop the markers.
+The RED suite used non-strict `xfail` for every contract a later wave would
+satisfy, because the repo's global `xfail_strict = true` would otherwise turn an
+early pass into a hard failure. The session-level xpass ratchet in
+`tests/conftest.py` flagged all 14 of them the moment the driver/seam wave
+landed, and the markers were then stripped in a `test-creator` reconciliation.
 
-| Marker count | Reason tag | Greens when |
-| --- | --- | --- |
-| 2 | live CDP driver replaces the placeholder raise | the CDP driver wave |
-| 11 | verify → Jev criterion/repro seam built | the JEV seam wave |
+| Marker declarations removed | Test instances | Reason tag | Greens when |
+| --- | --- | --- | --- |
+| 1 (module-level `pytestmark`) | 11 in `test_jev_seam.py` | verify → Jev criterion/repro seam | driver/seam wave |
+| 2 (per-test decorators) | 2 in `test_browser_stack.py` | live CDP driver replaces the placeholder raise | driver/seam wave |
+| 1 (per-test decorator) | 1 live CDP case | live CDP driver navigates and extracts | driver/seam wave |
 
-The three refusal cases (unreachable raise + message, `_resolve_driver` raise,
-CLI never a pass) pass today and stay passing — they are the part of the
-placeholder contract that must not regress.
+Four `xfail` declarations covering fourteen test instances were removed. Every
+assertion is unchanged; only the marker lines came out. The seam module's
+`pytest` import was removed with its module-level marker (it had no other use).
+Nothing was weakened, and no `xfail` or `skip` was added — a real pass that a
+marker would have hidden is now a real pass in the summary.
+
+| Contract now a real pass | Tests |
+| --- | --- |
+| Reachable CDP returns a live `BrowserDriver`, not a stub | `test_browser_stack.py::test_launch_browser_driver_returns_live_driver_when_cdp_reachable` |
+| `_resolve_driver` binds the live driver when CDP is reachable | `test_browser_stack.py::test_resolve_driver_binds_live_driver_when_cdp_reachable` |
+| The seam exists and both judges are async | `test_jev_seam.py::test_seam_module_exposes_async_criterion_and_repro_judges` |
+| One judgment per criterion, criterion name preserved, one Jev call each | `test_jev_seam.py::test_judge_criteria_returns_one_judgment_per_criterion`, `::test_judge_criteria_asks_jev_once_per_criterion` |
+| Below-floor answer is `fail`; honest skip and blank page are `unverified` | `test_jev_seam.py::test_judge_criteria_below_floor_is_fail`, `::test_judge_criteria_skip_is_unverified_with_named_reason`, `::test_judge_criteria_empty_page_is_unverified_without_dispatching`, `::test_judge_repro_claim_empty_page_is_unverified` |
+| Repro claim is judged | `test_jev_seam.py::test_judge_repro_claim_returns_reproduced_verdict` |
+| No numeric rate/count on a judgment; no counting symbol; no count reaches Jev | `test_jev_seam.py::test_judgment_models_carry_no_numeric_rate_or_count`, `::test_seam_module_exposes_no_counting_symbol`, `::test_seam_never_asks_jev_to_count_or_aggregate` |
+
+The three refusal cases (unreachable raise with the named endpoint, the
+`_resolve_driver` raise, and the CLI never a pass) never carried a marker; they
+guard the fail-closed contract and stay passing.
+
+**The named CDP skip stays honest.** One live case needs a real Chrome, so
+`test_live_cdp_driver_navigates_and_extracts` remains gated with
+`@pytest.mark.skipif(not browser_stack_available(), reason=_CDP_SKIP_REASON)`
+after its `xfail` was removed. On a host with a reachable endpoint it is a real
+pass; without one it reports a **named skip** in the `-rs` summary — never a
+quiet deselect. Reconciled state: `180 passed, 0 xfail, 0 xpass` and the
+session xpass ratchet green.
 
 ## Out of scope for this suite
 
