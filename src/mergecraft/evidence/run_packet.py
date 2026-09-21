@@ -601,6 +601,24 @@ def prepare_run_packet(
         return None
 
 
+def _resolve_shadow_tracer(ctx: ToolContext) -> Any | None:
+    """Resolve a tracer for the shadow span, or ``None`` when unavailable.
+
+    Best-effort by construction: tracing must never fail the run, so every
+    resolution failure degrades to ``None`` (a silent no-op span). The shadow
+    recorder still writes its JSONL row either way — the row is the audit trail
+    and the span is the optional second surface (#737).
+    """
+    try:
+        from mergecraft.config.settings_snapshot import repo_settings_from_context
+        from mergecraft.tracing.tracer import get_tracer_from_settings
+
+        return get_tracer_from_settings(repo_settings_from_context(ctx))
+    except Exception as tracer_err:  # pragma: no cover — tracing is non-fatal
+        logger.debug("shadow record: tracer resolution failed — {}", tracer_err)
+        return None
+
+
 def emit_run_packet(
     ctx: ToolContext,
     *,
@@ -650,6 +668,7 @@ def emit_run_packet(
                     run_id=_shadow_run_id(ctx),
                     policy_id="default",
                     output_path=shadow_path,
+                    tracer=_resolve_shadow_tracer(ctx),
                 )
             except Exception as shadow_err:  # a shadow record never fails the run
                 logger.warning("shadow record: emission failed — {}", shadow_err)
@@ -666,6 +685,7 @@ def emit_run_packet(
                     output_path=shadow_path,
                     prediction=verdict_prediction,
                     actual_outcome=actual_outcome,
+                    tracer=_resolve_shadow_tracer(ctx),
                 )
             except Exception as shadow_err:  # a shadow record never fails the run
                 logger.warning("verdict-protocol shadow record: emission failed — {}", shadow_err)

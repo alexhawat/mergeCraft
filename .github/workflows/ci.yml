@@ -371,3 +371,22 @@ jobs:
         # changes, regenerate the baseline from the same commit
         # (`mergecraft eval replay-bank` → `evals/results/latest.json`) so the
         # gate measures drift, not corpus edits.
+
+  # R-D10 — optional, keyless shadow-target comparison (#737, M4). It diffs two
+  # pinned shadow targets and publishes the disagreement table. It is
+  # deliberately NOT a required PR check: continue-on-error keeps it advisory,
+  # and it reads no provider secret, so a keyless checkout can always run it.
+  # The job fails closed on a recording failure (missing data is not agreement)
+  # while the live review path stays silent.
+  shadow-comparison:
+    name: Shadow comparison (advisory, keyless)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+      - name: Compare pinned shadow targets
+        run: make shadow-compare
