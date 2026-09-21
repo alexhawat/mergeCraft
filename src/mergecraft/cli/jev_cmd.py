@@ -24,6 +24,7 @@ from typing import Any
 
 import typer
 import yaml
+from loguru import logger
 from pydantic import ValidationError
 
 from mergecraft.cli.consoles import err_console as console
@@ -43,7 +44,12 @@ app = mergecraft_typer(
 
 _CONFIG_REL = ".mergecraft/config.yaml"
 _JEV_HEADER = re.compile(r"^([ \t]*)jev:\s*(?:#.*)?$")
-_ENABLED_LINE = re.compile(r"^([ \t]+)enabled:[ \t]*(?:true|false)([ \t]*(?:#.*)?)?\s*$")
+# Any scalar value, not just unquoted lowercase true/false. YAML 1.1 spells a
+# boolean as true/True/TRUE/yes/on/... and a consumer may also have quoted it.
+# Matching only `true|false` let a valid `enabled: True` fall through to the
+# insert path, which appended a second `enabled` key that PyYAML then lost to
+# the original — so `disable` reported success while Jev stayed enabled.
+_ENABLED_LINE = re.compile(r"^([ \t]+)enabled:[ \t]*([^#\n]*?)[ \t]*((?:#.*)?)$")
 
 
 def _jev_block_span(lines: list[str]) -> tuple[int, int, int] | None:
@@ -113,6 +119,23 @@ def _write_jev_data(path: Path, data: dict[str, Any], *, patch: dict[str, Any]) 
     write_config_dict(path, data)
 
 
+def _reloaded_jev_enabled(path: Path) -> bool | None:
+    """Re-read *path* and return what ``jev.enabled`` actually resolves to.
+
+    The write paths are text transforms, so the only trustworthy check that a
+    write took effect is parsing the file back the way the loader will.
+    """
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    block = loaded.get("jev") if isinstance(loaded, dict) else None
+    if not isinstance(block, dict):
+        return None
+    value = block.get("enabled")
+    return value if isinstance(value, bool) else None
+
+
 def _existing_jev_block(data: dict[str, Any]) -> dict[str, Any]:
     raw = data.get("jev")
     return dict(raw) if isinstance(raw, dict) else {}
@@ -140,6 +163,17 @@ def _set_jev_enabled(cwd: Path, *, enabled: bool) -> Path:
         # every in-block comment the consumer wrote.
         current = config_path.read_text(encoding="utf-8")
         config_path.write_text(patch_jev_enabled_yaml(current, enabled=enabled), encoding="utf-8")
+        if _reloaded_jev_enabled(config_path) is not enabled:
+            # The line patcher did not take. Never report success on a file
+            # that still disagrees: fall back to rewriting the whole mapping,
+            # which cannot leave a stale duplicate behind.
+            logger.warning("jev enabled patch did not take on {}; rewriting the block", config_path)
+            config_path.write_text(
+                patch_jev_block_yaml(config_path.read_text(encoding="utf-8"), updated),
+                encoding="utf-8",
+            )
+            if _reloaded_jev_enabled(config_path) is not enabled:
+                cli_bail(f"could not set jev.enabled={enabled} in {config_path}")
         return config_path
     _write_jev_data(config_path, data, patch={"jev": updated})
     return config_path
@@ -170,8 +204,9 @@ def patch_jev_enabled_yaml(text: str, *, enabled: bool) -> str:
             elif not replaced:
                 match = _ENABLED_LINE.match(line)
                 if match and indent > jev_indent:
-                    comment = match.group(2) or ""
-                    out.append(f"{match.group(1)}enabled: {value}{comment}".rstrip() + "\n")
+                    comment = match.group(3) or ""
+                    spacer = "  " if comment else ""
+                    out.append(f"{match.group(1)}enabled: {value}{spacer}{comment}".rstrip() + "\n")
                     replaced = True
                     continue
         out.append(line)

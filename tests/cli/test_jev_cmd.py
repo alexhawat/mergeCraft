@@ -6,9 +6,11 @@ import base64
 import json
 from typing import TYPE_CHECKING
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
+from mergecraft.cli import jev_cmd
 from mergecraft.cli.app import app
 from mergecraft.cli.jev_cmd import apply_jev_enabled_on_default_branch, patch_jev_enabled_yaml
 
@@ -257,3 +259,78 @@ def test_repeated_writes_never_accumulate_jev_keys(tmp_path: Path) -> None:
     assert raw.count("\njev:") + raw.startswith("jev:") == 1, f"duplicate jev key:\n{raw}"
     loaded = yaml.safe_load(raw)
     assert loaded["jev"] == {"budgetTokens": 777, "enabled": True}
+
+
+# --- MC-3b1980: every YAML boolean spelling must be replaced, not duplicated --
+#
+# patch_jev_enabled_yaml matched only unquoted lowercase true/false. A valid
+# `enabled: True` fell through to the insert path, which added a second
+# `enabled` key ahead of the original — and PyYAML keeps the last one, so
+# `jev disable` printed success while Jev stayed enabled.
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ["true", "True", "TRUE", "yes", "Yes", "on", '"true"', "'true'"],
+)
+def test_disable_turns_off_every_truthy_yaml_spelling(tmp_path: Path, spelling: str) -> None:
+    """``disable`` must actually disable, whatever spelling the consumer used."""
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"# note\njev:\n  enabled: {spelling}\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["jev", "disable", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.stdout
+    raw = config.read_text(encoding="utf-8")
+    assert raw.count("enabled:") == 1, f"duplicate enabled key for {spelling!r}:\n{raw}"
+    loaded = yaml.safe_load(raw)
+    assert loaded["jev"]["enabled"] is False, (
+        f"disable reported success but {spelling!r} survived as {loaded['jev']['enabled']!r}"
+    )
+
+
+@pytest.mark.parametrize("spelling", ["false", "False", "FALSE", "no", "off", '"false"'])
+def test_enable_turns_on_every_falsey_yaml_spelling(tmp_path: Path, spelling: str) -> None:
+    """``enable`` is the mirror case and must not leave the old value last."""
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(f"# note\njev:\n  enabled: {spelling}\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.stdout
+    raw = config.read_text(encoding="utf-8")
+    assert raw.count("enabled:") == 1, f"duplicate enabled key for {spelling!r}:\n{raw}"
+    assert yaml.safe_load(raw)["jev"]["enabled"] is True
+
+
+def test_toggle_preserves_an_inline_comment_on_the_enabled_line(tmp_path: Path) -> None:
+    """A trailing comment on the toggled line survives the rewrite."""
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("# note\njev:\n  enabled: True  # why\n", encoding="utf-8")
+
+    runner.invoke(app, ["jev", "disable", "--cwd", str(tmp_path)])
+
+    raw = config.read_text(encoding="utf-8")
+    assert "# why" in raw
+    assert yaml.safe_load(raw)["jev"]["enabled"] is False
+
+
+def test_write_is_verified_and_falls_back_when_the_line_patch_misses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A patcher that silently no-ops must not be reported as success."""
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("# note\njev:\n  enabled: true\n", encoding="utf-8")
+
+    monkeypatch.setattr(jev_cmd, "patch_jev_enabled_yaml", lambda text, *, enabled: text)
+
+    result = runner.invoke(app, ["jev", "disable", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.stdout
+    assert yaml.safe_load(config.read_text(encoding="utf-8"))["jev"]["enabled"] is False, (
+        "the post-write check did not catch a no-op patcher"
+    )
