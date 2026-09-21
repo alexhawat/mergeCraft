@@ -82,8 +82,9 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    Open a pull request titled "ci: add mergeCraft AI PR review".
 
 7. That PR is the first review target. Tell me to watch the `mergecraft-approval`
-   check on it, and that I can re-run a review any time by commenting
-   `@mergecraft review`.
+   check on it. Re-run by pushing a commit (`synchronize`) or using
+   `workflow_dispatch`. The default `mergecraft init` workflow does not listen
+   for `@mergecraft review` comments.
 
 Finally, print a short summary: provider chosen, files added, PR link, and the
 exact command I still need to run (if any).
@@ -393,8 +394,10 @@ The credential is stored as a GitHub Actions secret via `gh secret set`. Add
 More providers, custom gateways and model chains:
 [`docs/authentication.md`](docs/authentication.md).
 
-3. **Trigger a review** — open a pull request, comment `@mergecraft review`, or
-   run the workflow via `workflow_dispatch`.
+3. **Trigger a review** — open a pull request, or run the workflow via
+   `workflow_dispatch`. The default scaffold does not listen for
+   `@mergecraft review` comments (comment triggers are an opt-in pattern in
+   [`docs/workflows.md`](docs/workflows.md)).
 
 ```bash
 mergecraft doctor   # optional: verify git, providers, analyzers, auth, config, MCP
