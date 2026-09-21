@@ -5,7 +5,7 @@ to ``--output-format stream-json`` (or ``codex exec --json``) and consume the
 event stream incrementally. The four contracts here pin the shape of the
 spans and the robustness of the parser.
 
-All four tests are ``@pytest.mark.xfail(strict=False)`` — they are expected
+All four tests carry a non-strict ``xfail`` marker — they are expected
 to fail until W6 wires the streaming read loop. After W6 lands, the test-
 creator will be re-dispatched to remove the markers and the tests will pass
 without modification.
