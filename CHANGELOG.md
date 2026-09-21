@@ -54,11 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carry a new `coverage` marker and the `make test` selector is now
   `-m "not integration and not coverage"`. They still run under
   `make coverage-measure` and `make ci`, so the coverage number is no longer
-  inflated by suites filed among the product tests. `utils/token.py` is dropped
-  from the critical-path `MODULE_FLOORS`: its 39.2% branch floor let most of the
-  module's branches go uncovered, and the tree-wide `fail_under` is a line floor
-  that protects nothing there specifically — branch coverage on the module is
-  now ungated until real tests land (#771, #797).
+  inflated by suites filed among the product tests. The critical-path
+  `utils/token.py` floor stays in `MODULE_FLOORS` unchanged: removing it would
+  leave the token authentication path with no module-level branch check at all
+  (the tree-wide `fail_under` is a line floor), so it is retained until
+  behavioral tests and a measured replacement floor can land together (#771,
+  #797).
 
 - The coverage/mutation CI gate's `enforce` mode is now exercised under test —
   both `shadow` and `enforce`, asserting the gate action and `reaches`. It had
