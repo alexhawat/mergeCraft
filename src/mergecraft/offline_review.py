@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.config.settings import CliTrustOverride, RepoSettings
+    from mergecraft.jev.types import JevCallResult
     from mergecraft.mcp.tool_state import AnalyzerRunState
     from mergecraft.review.engine import ReviewEngine
     from mergecraft.tracing.review_context import ReviewContext
@@ -515,6 +516,32 @@ def _stamp_jev_skip(result: OfflineReviewResult, reason: str | None) -> OfflineR
     return result
 
 
+def _append_jev_review_section(
+    result: OfflineReviewResult, *, settings: RepoSettings
+) -> OfflineReviewResult:
+    """Append the Jev summary section onto ``result.output`` (#786).
+
+    A no-op when there is no rendered body to attach it to (a failed or empty
+    review), and — via ``render_jev_review_section`` — a no-op when Jev is
+    disabled for this run. Disabled must stay byte-identical to a run with no
+    Jev at all, so this never appends an empty section or a "disabled" line.
+    """
+    if not result.output:
+        return result
+    from mergecraft.jev.summary import render_jev_review_section
+
+    section = render_jev_review_section(
+        enabled=settings.jev.enabled,
+        skip_reason=result.jev_skip_reason,
+        predictions=result.jev_predictions,
+        dispatch_skips=result.jev_dispatch_skips,
+        model=settings.jev.model,
+    )
+    if section:
+        result.output = f"{result.output.rstrip()}\n\n{section}\n"
+    return result
+
+
 def _record_shadow_jev_skip(result: OfflineReviewResult, reason: str) -> None:
     """Record a shadow skip without changing the review result (D4, D6)."""
     logger.info("jev shadow skip code={}", reason)
@@ -617,7 +644,8 @@ async def _run_shadow_jev_review(
     shadow_path = _jev_shadow_artifact_path(review_out, driver)
     try:
         units = segment_hunks(diff_text)
-        await dispatch_residual_units(
+        dispatch_skips: list[JevCallResult] = []
+        predictions = await dispatch_residual_units(
             units,
             findings,
             client=client,
@@ -627,7 +655,17 @@ async def _run_shadow_jev_review(
             run_id="offline-review",
             change_id=change_id,
             settings=settings,
+            skipped_out=dispatch_skips,
         )
+        review_out.jev_dispatch_skips = [
+            str(skip.reason or "unknown") for skip in dispatch_skips
+        ] or None
+        # Predictions were computed, logged to the shadow JSONL, and then
+        # discarded — nothing rendered them into the review a human reads
+        # (#786). Stash the dumps so the caller can build the summary section.
+        review_out.jev_predictions = [
+            prediction.model_dump(mode="json") for prediction in predictions
+        ]
         body = review_out.output or ""
         judge = None
         if body:
@@ -1079,7 +1117,9 @@ async def _run_offline_diff_review(
                         review_out=published,
                         settings=settings,
                     )
-                return _stamp_jev_skip(published, jev_skip_reason)
+                return _append_jev_review_section(
+                    _stamp_jev_skip(published, jev_skip_reason), settings=settings
+                )
             except TimeoutError:
                 return _stamp_jev_skip(
                     _offline_failure(

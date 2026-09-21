@@ -32,6 +32,7 @@ from mergecraft.cli import (
     gha_cmd,
     health_cmd,
     init_cmd,
+    jev_cmd,
     learnings_cmd,
     lens_cmd,
     mcp_cmd,
@@ -111,6 +112,7 @@ app.add_typer(context_cmd.app, name="context")
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(provider_cmd.app, name="provider")
 app.add_typer(trust_cmd.app, name="trust")
+app.add_typer(jev_cmd.app, name="jev")
 app.add_typer(model_cmd.app, name="model")
 app.add_typer(workflow_cmd.app, name="workflow")
 app.add_typer(models_cmd.app, name="models")

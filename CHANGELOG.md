@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft jev enable|disable|status|set` configures the Jev advisory
+  screening gate. `enable` writes only `jev.enabled: true` — every other
+  value keeps coming from `JevSettings` defaults, so a later default change
+  still reaches repos that never pinned their own. `enable --github` /
+  `disable --github` open a PR against the default branch, mirroring
+  `trust set-self-review --gh-apply`, and `status --github` reports whether
+  the default branch has it on and whether the `TYPESAFE_API_KEY` Actions
+  secret is present. `set` round-trips any single value through
+  `JevSettings` and refuses an invalid one (a floating model alias, a
+  non-positive budget) before writing. YAML comments in an existing config
+  survive every write (#786).
+
+- Offline reviews now render a Jev summary section when Jev is enabled: a
+  collapsed table of per-unit predictions when it ran, or the recorded
+  `jev_skip_reason` (`credential_absent`, `kill_switch`) when it did not —
+  previously nothing surfaced that gap, so a missing credential looked
+  identical to a clean run. The section always states Jev is advisory
+  (`enforced` is always `false`) and never implies its thresholds are
+  calibrated. With Jev disabled, review output is unchanged (#786).
+
 - Order-dependent test coupling now surfaces on a scheduled, non-blocking
   unit-suite run whose seed is the per-run `github.run_id`, so a pinned seed
   no longer hides it. `MERGECRAFT_PYTEST_RANDOM_SEED` is set only on the

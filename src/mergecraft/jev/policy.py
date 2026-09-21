@@ -379,6 +379,7 @@ async def dispatch_residual_units(
     run_id: str = "jev",
     change_id: str | None = None,
     settings: RepoSettings | None = None,
+    skipped_out: list[JevCallResult] | None = None,
 ) -> list[JevPrediction]:
     """Run the unit battery only on analyzer-residual hunks, then order them.
 
@@ -396,6 +397,9 @@ async def dispatch_residual_units(
 
     Returns:
         list[JevPrediction]: Ordered residual predictions. Never suppresses.
+        Units skipped at dispatch time yield no prediction; pass
+        ``skipped_out`` to collect their ``JevCallResult`` rather than lose
+        the fact that they were skipped at all.
     """
     from mergecraft.jev.segment import residual_units
 
@@ -405,6 +409,12 @@ async def dispatch_residual_units(
     for unit in residual:
         assessment = await unit_battery(unit, client=client, trust_tier=trust_tier)
         if isinstance(assessment, JevCallResult):
+            # A skip at dispatch time (kill switch, absent credential, transport
+            # error) produces no prediction. Dropping it silently made an
+            # all-skipped run indistinguishable from a clean screen, so hand the
+            # result back to the caller when it asked for them (#786).
+            if skipped_out is not None:
+                skipped_out.append(assessment)
             continue
         prior = None if prior_by_unit is None else prior_by_unit.get(unit.unit_id)
         prediction = predict_jev_action(

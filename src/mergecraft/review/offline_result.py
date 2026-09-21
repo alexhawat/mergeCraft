@@ -45,6 +45,13 @@ class OfflineReviewResult:
     # parallel-judge dump. Calibration rows must outlive the temp run dir (D6).
     jev_shadow_path: str | None = None
     jev_judge: dict[str, Any] | None = None
+    # Per-unit ``JevPrediction`` dumps from ``dispatch_residual_units`` — the
+    # material the Jev review summary section renders from (#786). ``None``
+    # when Jev did not run this call at all (disabled, or a skip).
+    jev_predictions: list[dict[str, Any]] | None = None
+    #: Skip codes for units Jev did not screen at dispatch time. An
+    #: all-skipped run must not render as a clean screen (#786).
+    jev_dispatch_skips: list[str] | None = None
 
 
 def _offline_failure(
