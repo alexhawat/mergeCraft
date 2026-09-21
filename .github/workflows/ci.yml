@@ -203,6 +203,7 @@ jobs:
       # canonical artifact set per PR.
       - name: Emit actionlint and zizmor SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         env:
           MERGECRAFT_WORKFLOW_SARIF_DIR: .sarif
         run: ./scripts/workflow_lint.sh

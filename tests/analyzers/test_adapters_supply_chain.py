@@ -13,6 +13,7 @@ from tests.analyzers.support import (
     FORK_PULL_REQUEST_EVENT,
     PLANTED_AWS_SECRET,
     import_module,
+    skip_if_managed_binary_provision_failed,
 )
 
 
@@ -96,6 +97,7 @@ def test_newly_introduced_cve_reported_with_fix_and_transitive_status(
         tier="trusted",
     )
     _skip_if_userspace_unshare_unavailable(result)
+    skip_if_managed_binary_provision_failed(result)
     assert not result.skipped, result.skip_reason
     assert result.findings, f"{tool_id} must report the newly introduced CVE"
 
@@ -227,6 +229,7 @@ def test_trufflehog_reports_secret_by_type_and_location(adapter_fixture_repo: Pa
 
     path = C2_SUPPLY_CHAIN_TOOLS[tool_id]
     result = _run(tool_id, adapter_fixture_repo, [path])
+    skip_if_managed_binary_provision_failed(result)
     assert not result.skipped, result.skip_reason
     assert result.findings, "TruffleHog must report the planted secret"
 
@@ -243,6 +246,7 @@ def test_trufflehog_remediation_is_rotation_first(adapter_fixture_repo: Path) ->
 
     path = C2_SUPPLY_CHAIN_TOOLS[tool_id]
     result = _run(tool_id, adapter_fixture_repo, [path])
+    skip_if_managed_binary_provision_failed(result)
     assert result.findings
     remediation = (result.findings[0].remediation or "").casefold()
     assert "rotate" in remediation, "remediation must mention rotation first (C2.4)"
@@ -259,6 +263,7 @@ def test_trufflehog_never_emits_secret_value(adapter_fixture_repo: Path) -> None
 
     path = C2_SUPPLY_CHAIN_TOOLS[tool_id]
     result = _run(tool_id, adapter_fixture_repo, [path])
+    skip_if_managed_binary_provision_failed(result)
     redact = import_module("mergecraft.analyzers.redact")
 
     for finding in result.findings:

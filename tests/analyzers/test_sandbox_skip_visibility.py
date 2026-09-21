@@ -104,6 +104,10 @@ def test_sandbox_unavailable_finding_survives_pipeline_scoping(
         "mergecraft.analyzers.sandbox.probe_capabilities",
         lambda: _missing_caps(),
     )
+    monkeypatch.setattr(
+        "mergecraft.analyzers.adapters.provision_managed_argv",
+        lambda plan, **_: plan,
+    )
 
     diff = """diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
 @@ -1,3 +1,4 @@

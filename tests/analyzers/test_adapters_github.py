@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import finding_path_matches, import_module
+from tests.analyzers.support import (
+    finding_path_matches,
+    import_module,
+    skip_if_managed_binary_provision_failed,
+)
 
 PLANTED: dict[str, tuple[str, int]] = {
     "actionlint": (".github/workflows/broken.yml", 2),
@@ -26,12 +30,14 @@ UNTOUCHED_PATHS = (
 def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Path) -> None:
     adapters = import_module("mergecraft.analyzers.adapters")
     path, line = PLANTED[tool_id]
-    findings = adapters.run_adapter(
+    result = adapters.run_adapter(
         tool_id=tool_id,
         repo_root=adapter_fixture_repo,
         changed_files=[path],
         tier="trusted",
-    ).findings
+    )
+    skip_if_managed_binary_provision_failed(result)
+    findings = result.findings
     matches = [f for f in findings if finding_path_matches(path, f.path) and f.start_line == line]
     assert matches, f"{tool_id} must catch planted finding at {path}:{line}"
 

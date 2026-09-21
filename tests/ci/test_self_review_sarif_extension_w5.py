@@ -95,6 +95,20 @@ def test_static_sarif_uploads_continue_on_github_artifact_errors() -> None:
     assert seen == names
 
 
+def test_static_workflow_sarif_emit_continues_on_github_release_errors() -> None:
+    """A GitHub-releases 504 must not fail Verify after ``make ci-static`` passed."""
+    static = load_workflow("ci.yml")["jobs"]["static"]
+    assert isinstance(static, dict)
+    for step in as_list(static.get("steps")):
+        if not isinstance(step, dict):
+            continue
+        if step.get("name") != "Emit actionlint and zizmor SARIF":
+            continue
+        assert step.get("continue-on-error") is True
+        return
+    pytest.fail("static job is missing the actionlint/zizmor SARIF emit step")
+
+
 def test_ci_yml_static_job_sets_workflow_sarif_dir() -> None:
     """W5 — actionlint/zizmor emit step exports ``MERGECRAFT_WORKFLOW_SARIF_DIR``."""
     text = read_text(".github/workflows/ci.yml")
