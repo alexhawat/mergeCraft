@@ -30,6 +30,8 @@ from mergecraft.cli import analyzers_cmd
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
+pytestmark = pytest.mark.coverage
+
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 

@@ -10,7 +10,8 @@ from typing import Any
 
 import pytest
 
-from mergecraft.agents.gates import _packet_has_blockers
+from mergecraft.config.settings import GateMode, default_settings
+from mergecraft.config.settings_snapshot import RepoSettingsSnapshot
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
@@ -24,7 +25,6 @@ from tests.ci.support_crap import (
     load_diff,
     load_mutation,
     load_source,
-    packet_with_findings,
     zip_artifact,
 )
 
@@ -52,7 +52,12 @@ class _ArtifactGitHub(GitHubClient):
         return self.archives[artifact_id]
 
 
-def _ctx(tmp_path: Path, *, github: GitHubClient) -> ToolContext:
+def _ctx(
+    tmp_path: Path,
+    *,
+    github: GitHubClient,
+    snapshot: RepoSettingsSnapshot | None = None,
+) -> ToolContext:
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -71,11 +76,19 @@ def _ctx(tmp_path: Path, *, github: GitHubClient) -> ToolContext:
         tmpdir=str(tmp_path),
         trust_tier="trusted",
         resolved_model="claude-sonnet-4-5",
+        repo_settings_snapshot=snapshot,
     )
 
 
 def _mutation() -> Any:
     return import_ci("mutation")
+
+
+def _mode_snapshot(tmp_path: Path, mode: GateMode) -> RepoSettingsSnapshot:
+    """Pin the mutation gate mode for the `collect_ci_mutation_findings` path."""
+    settings = default_settings()
+    settings.mutation.mode = mode
+    return RepoSettingsSnapshot(settings=settings, config_hash="", repo_root=tmp_path)
 
 
 def test_internal_harness_script_still_exists() -> None:
@@ -190,18 +203,28 @@ def test_survivor_threshold_two_suppresses_single_survivor() -> None:
     assert result.findings == []
 
 
-def test_shadow_mutation_does_not_reach_has_blockers() -> None:
+@pytest.mark.parametrize(
+    ("mode", "expected_scope", "reaches"),
+    [
+        pytest.param("shadow", "run", False, id="shadow"),
+        pytest.param("enforce", "change", True, id="enforce"),
+    ],
+)
+def test_mutation_findings_gate_action_and_reaches_by_mode(
+    mode: GateMode, expected_scope: str, reaches: bool
+) -> None:
+    """C-D5: shadow keeps a survivor out of blockers; enforce lets it in."""
     mutation = _mutation()
     parsed = mutation.parse_mutmut_json(load_mutation("mutmut-survivor.json"))
     result = mutation.mutation_findings(
         parsed,
         changed_functions=[("src/mod.py", "fn_watch")],
         source="ci",
-        mode="shadow",
+        mode=mode,
     )
     assert result.findings
-    assert result.reaches_has_blockers is False
-    assert _packet_has_blockers(packet_with_findings(result.findings)) is False
+    assert result.findings[0].scope == expected_scope
+    assert result.reaches_has_blockers is reaches
 
 
 def _harness_file_loads(*, allow_preexisting_sibling: set[str]) -> list[str]:
@@ -286,15 +309,22 @@ async def test_declared_failed_mutation_check_emits_finding_never_substitution(
 
 
 @pytest.mark.asyncio
-async def test_declared_successful_mutmut_artifact_attributes_survivor(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("mode", "expected_scope", "reaches"),
+    [
+        pytest.param("shadow", "run", False, id="shadow"),
+        pytest.param("enforce", "change", True, id="enforce"),
+    ],
+)
+async def test_declared_successful_mutmut_artifact_gate_action_and_reaches_by_mode(
+    tmp_path: Path, mode: GateMode, expected_scope: str, reaches: bool
 ) -> None:
     document = load_mutation("mutmut-survivor.json")
     github = _ArtifactGitHub(
         artifacts=[{"id": 11, "name": "mutmut-json"}],
         archives={11: zip_artifact("mutmut-survivor.json", document)},
     )
-    ctx = _ctx(tmp_path, github=github)
+    ctx = _ctx(tmp_path, github=github, snapshot=_mode_snapshot(tmp_path, mode))
     result = await _mutation().collect_ci_mutation_findings(
         ctx,
         client=github,
@@ -306,6 +336,8 @@ async def test_declared_successful_mutmut_artifact_attributes_survivor(
         check_runs=[{"name": "mutmut-json", "conclusion": "success", "status": "completed"}],
     )
     assert any(item.rule_id == "survivor" and item.source == "ci" for item in result.findings)
+    assert all(item.scope == expected_scope for item in result.findings)
+    assert result.reaches_has_blockers is reaches
 
 
 def test_stryker_without_function_or_location_is_unattributable() -> None:
@@ -363,3 +395,29 @@ async def test_mismatched_failed_job_name_does_not_download_mutation(
     assert result.findings
     assert all(item.rule_id == "check-run/failure" for item in result.findings)
     assert result.substitutions == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_check_blocks_mutation_download(tmp_path: Path) -> None:
+    document = load_mutation("mutmut-survivor.json")
+    github = _ArtifactGitHub(
+        artifacts=[{"id": 11, "name": "mutmut-json"}],
+        archives={11: zip_artifact("mutmut-survivor.json", document)},
+    )
+    ctx = _ctx(tmp_path, github=github)
+    result = await _mutation().collect_ci_mutation_findings(
+        ctx,
+        client=github,
+        runs=[{"id": 88}],
+        artifacts=["mutmut-json"],
+        changed_functions=[("src/mod.py", "fn_watch")],
+        check_runs=[
+            {
+                "name": "CI / test",
+                "conclusion": "cancelled",
+                "status": "completed",
+            }
+        ],
+    )
+    assert github.download_calls == 0
+    assert any(item.rule_id == "check-run/cancelled" for item in result.findings)

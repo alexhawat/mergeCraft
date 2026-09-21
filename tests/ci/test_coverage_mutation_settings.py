@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, get_args
+from typing import TYPE_CHECKING, Final, get_args
 
 import pytest
 from pydantic import ValidationError
 
+from mergecraft.ci.coverage import complexity_from_source
+from mergecraft.ci.crap import crap_score
 from mergecraft.review_taxonomy import FindingSource
 from tests.ci.support_crap import (
     C_D10_NOT_PROOF,
@@ -177,3 +179,154 @@ def test_c2_c4_deliverable_symbol_export() -> None:
     assert MutationSettings.__name__ == "MutationSettings"
     assert "ci_mutation_artifacts" in ToolContext.__dataclass_fields__
     assert LocalEvidenceResult.__name__ == "LocalEvidenceResult"
+
+
+# N3 — `complexity_from_source` weights CRAP, and nothing asserted its integer.
+# Each source defines exactly one function starting on line 1; expected values
+# are hand-computed as ``1 + decision nodes`` where the decision nodes are
+# ``_DECISION_NODES`` in ``mergecraft.ci.coverage`` (If / For / AsyncFor /
+# While / ExceptHandler / Assert / IfExp). Note that Boolean operators and
+# comprehension ``if`` clauses are *not* decision nodes in this counter, so
+# those fixtures stay at 1.
+_COMPLEXITY_FIXTURES: Final[tuple[tuple[str, str, int], ...]] = (
+    ("straight_line", "def straight_line(value):\n    return value\n", 1),
+    ("single_if", "def single_if(value):\n    if value:\n        return 1\n    return 0\n", 2),
+    (
+        "if_elif_else",
+        "def if_elif_else(value):\n"
+        "    if value > 0:\n"
+        "        return 1\n"
+        "    elif value < 0:\n"
+        "        return -1\n"
+        "    else:\n"
+        "        return 0\n",
+        3,
+    ),
+    (
+        "for_loop",
+        "def for_loop(items):\n"
+        "    total = 0\n"
+        "    for item in items:\n"
+        "        total += item\n"
+        "    return total\n",
+        2,
+    ),
+    (
+        "while_loop",
+        "def while_loop(value):\n    while value > 0:\n        value -= 1\n    return value\n",
+        2,
+    ),
+    (
+        "boolean_operators",
+        "def boolean_operators(left, right):\n    return left and right or not left\n",
+        1,
+    ),
+    (
+        "comprehension",
+        "def comprehension(items):\n    return [item for item in items if item]\n",
+        1,
+    ),
+    (
+        "nested_branches",
+        "def nested_branches(left, right):\n"
+        "    if left:\n"
+        "        if right:\n"
+        "            return 1\n"
+        "        return 2\n"
+        "    return 3\n",
+        3,
+    ),
+    ("assert_guard", "def assert_guard(value):\n    assert value\n    return value\n", 2),
+    (
+        "try_except",
+        "def try_except():\n    try:\n        return 1\n    except ValueError:\n        return 2\n",
+        2,
+    ),
+    ("ternary", "def ternary(value):\n    return 1 if value else 0\n", 2),
+    (
+        "for_with_if",
+        "def for_with_if(items):\n"
+        "    total = 0\n"
+        "    for item in items:\n"
+        "        if item:\n"
+        "            total += item\n"
+        "    return total\n",
+        3,
+    ),
+    (
+        "five_decisions",
+        "def five_decisions(value):\n"
+        "    if value > 0:\n"
+        "        value += 1\n"
+        "    if value > 1:\n"
+        "        value += 1\n"
+        "    for _ in range(value):\n"
+        "        value += 0\n"
+        "    while value > 10:\n"
+        "        value -= 1\n"
+        "    return value\n",
+        5,
+    ),
+    (
+        "ten_decisions",
+        "def ten_decisions(value):\n"
+        "    if value > 0:\n"
+        "        value += 1\n"
+        "    if value > 1:\n"
+        "        value += 1\n"
+        "    if value > 2:\n"
+        "        value += 1\n"
+        "    if value > 3:\n"
+        "        value += 1\n"
+        "    if value > 4:\n"
+        "        value += 1\n"
+        "    if value > 5:\n"
+        "        value += 1\n"
+        "    if value > 6:\n"
+        "        value += 1\n"
+        "    if value > 7:\n"
+        "        value += 1\n"
+        "    if value > 8:\n"
+        "        value += 1\n"
+        "    return value\n",
+        10,
+    ),
+)
+
+
+@pytest.mark.parametrize(("name", "source", "expected"), _COMPLEXITY_FIXTURES)
+def test_complexity_from_source_counts_decision_nodes(
+    name: str, source: str, expected: int
+) -> None:
+    """N3: the integer `C` CRAP squares, asserted for distinct fixtures."""
+    assert complexity_from_source(source, name=name, start_line=1) == expected
+
+
+def test_complexity_from_source_anchors_crap_worked_examples() -> None:
+    """Plan 24 band table: C=5, cov=0.5 → 8.125; C=10, cov=0.0 → 110."""
+    sources = {name: source for name, source, _ in _COMPLEXITY_FIXTURES}
+    five = complexity_from_source(sources["five_decisions"], name="five_decisions", start_line=1)
+    ten = complexity_from_source(sources["ten_decisions"], name="ten_decisions", start_line=1)
+    assert five == 5
+    assert ten == 10
+    assert crap_score(five, 0.5) == pytest.approx(8.125)
+    assert crap_score(ten, 0.0) == pytest.approx(110.0)
+
+
+def test_complexity_from_source_matches_function_at_offset_start_line() -> None:
+    source = "import os\n\n\ndef offset(value):\n    if value:\n        return 1\n    return 0\n"
+    assert complexity_from_source(source, name="offset", start_line=4) == 2
+
+
+def test_complexity_from_source_returns_none_for_unknown_name() -> None:
+    source = "def known(value):\n    return value\n"
+    assert complexity_from_source(source, name="missing", start_line=1) is None
+
+
+def test_complexity_from_source_returns_none_when_start_line_mismatches() -> None:
+    source = "def known(value):\n    return value\n"
+    assert complexity_from_source(source, name="known", start_line=2) is None
+
+
+def test_complexity_from_source_returns_none_for_unparseable_source() -> None:
+    assert complexity_from_source("def broken(:\n", name="broken", start_line=1) is None

@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from mergecraft.agents.gates import _packet_has_blockers
+from mergecraft.config.settings import GateMode, default_settings
+from mergecraft.config.settings_snapshot import RepoSettingsSnapshot
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
@@ -67,6 +69,7 @@ def _ctx(
     tmp_path: Path,
     *,
     github: GitHubClient,
+    snapshot: RepoSettingsSnapshot | None = None,
 ) -> ToolContext:
     return ToolContext(
         agent_id="claude",
@@ -86,11 +89,19 @@ def _ctx(
         tmpdir=str(tmp_path),
         trust_tier="trusted",
         resolved_model="claude-sonnet-4-5",
+        repo_settings_snapshot=snapshot,
     )
 
 
 def _coverage() -> Any:
     return import_ci("coverage")
+
+
+def _mode_snapshot(tmp_path: Path, mode: GateMode) -> RepoSettingsSnapshot:
+    """Pin the coverage gate mode for the `collect_ci_coverage_findings` path."""
+    settings = default_settings()
+    settings.coverage.mode = mode
+    return RepoSettingsSnapshot(settings=settings, config_hash="", repo_root=tmp_path)
 
 
 def _watch_findings(**kwargs: Any) -> Any:
@@ -232,7 +243,17 @@ def test_ingested_coverage_findings_are_ci_source() -> None:
     assert all(item.source == "ci" for item in result.findings)
 
 
-def test_shadow_severe_does_not_reach_has_blockers() -> None:
+@pytest.mark.parametrize(
+    ("mode", "expected_scope", "reaches"),
+    [
+        pytest.param("shadow", "run", False, id="shadow"),
+        pytest.param("enforce", "change", True, id="enforce"),
+    ],
+)
+def test_severe_coverage_findings_gate_action_and_reaches_by_mode(
+    mode: GateMode, expected_scope: str, reaches: bool
+) -> None:
+    """C-D5: shadow keeps a Critical finding out of blockers; enforce lets it in."""
     coverage = _coverage()
     parsed = coverage.parse_coverage_py_json(load_band_coverage("severe"))
     result = coverage.coverage_findings(
@@ -240,12 +261,13 @@ def test_shadow_severe_does_not_reach_has_blockers() -> None:
         diff=load_diff("severe"),
         source_tree={"src/mod.py": load_source("severe")},
         source="ci",
-        mode="shadow",
+        mode=mode,
     )
     assert result.findings
     assert result.findings[0].severity == "Critical"
-    assert result.reaches_has_blockers is False
-    assert _packet_has_blockers(packet_with_findings(result.findings)) is False
+    assert result.findings[0].scope == expected_scope
+    assert result.reaches_has_blockers is reaches
+    assert _packet_has_blockers(packet_with_findings(result.findings)) is reaches
 
 
 def test_default_bands_run_note() -> None:
@@ -279,8 +301,15 @@ async def test_undeclared_coverage_makes_no_api_call(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_declared_successful_coverage_artifact_emits_changed_function_finding(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("mode", "expected_scope", "reaches"),
+    [
+        pytest.param("shadow", "run", False, id="shadow"),
+        pytest.param("enforce", "change", True, id="enforce"),
+    ],
+)
+async def test_declared_successful_coverage_artifact_gate_action_and_reaches_by_mode(
+    tmp_path: Path, mode: GateMode, expected_scope: str, reaches: bool
 ) -> None:
     document = (CRAP_FIXTURES / "ingest" / "declared-success" / "coverage.json").read_text(
         encoding="utf-8"
@@ -289,7 +318,7 @@ async def test_declared_successful_coverage_artifact_emits_changed_function_find
         artifacts=[{"id": 7, "name": "coverage-json"}],
         archives={7: zip_artifact("coverage.json", document)},
     )
-    ctx = _ctx(tmp_path, github=github)
+    ctx = _ctx(tmp_path, github=github, snapshot=_mode_snapshot(tmp_path, mode))
     result = await _coverage().collect_ci_coverage_findings(
         ctx,
         client=github,
@@ -302,6 +331,8 @@ async def test_declared_successful_coverage_artifact_emits_changed_function_find
         ],
     )
     assert any(item.rule_id == "crap-watch" and item.source == "ci" for item in result.findings)
+    assert all(item.scope == expected_scope for item in result.findings)
+    assert result.reaches_has_blockers is reaches
     assert result.substitutions == []
     assert NOTE_COVERAGE_UNDECLARED not in result.run_notes
 

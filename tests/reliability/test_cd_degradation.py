@@ -1,15 +1,16 @@
-"""W14 / W18 — live recovery cleanup and redacted diagnostic bundles (#365)."""
+"""W14 / W18 — live redacted diagnostic bundles (#365).
+
+Recovery cleanup moved to a behavioural suite that observes the kill side
+effect and the failure-to-clean path (``tests/reliability/test_recovery.py``);
+the former ``cleaned is True`` terminal assertion lives there no longer.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.support.cd_batch import (
     BUNDLE_MODULE,
-    CLEANUP_FAILURE_MODES,
-    RECOVERY_MODULE,
     require_callable,
     require_module,
 )
@@ -24,15 +25,3 @@ def test_diagnostic_bundle_redacts_secrets(tmp_path: Path) -> None:
     path = Path(bundle) if not isinstance(bundle, Path) else bundle
     data = path.read_bytes()
     assert secret.encode("utf-8") not in data
-
-
-@pytest.mark.parametrize("mode", sorted(CLEANUP_FAILURE_MODES))
-def test_cleanup_runs_on_timeout_cancel_and_crashes(mode: str) -> None:
-    """Happy: cleanup is invoked for each named failure mode."""
-    module = require_module(RECOVERY_MODULE)
-    cleanup = require_callable(module, "cleanup_on_failure")
-    result = cleanup(mode)
-    cleaned = getattr(result, "cleaned", None)
-    if cleaned is None:
-        cleaned = result.get("cleaned")
-    assert cleaned is True

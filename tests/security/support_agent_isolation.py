@@ -44,9 +44,6 @@ LANE_B_SANDBOX_SYMBOLS = (
     "user_namespace_failure_hint",
 )
 
-W2_XFAIL = pytest.mark.xfail(reason="green after W2: credential broker", strict=False)
-W3_XFAIL = pytest.mark.xfail(reason="green after W3: Codex broker wire-up", strict=False)
-
 
 def load_broker_module() -> Any:
     """Import ``mergecraft.security.broker`` or fail with a clear message."""

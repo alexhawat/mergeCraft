@@ -13,9 +13,9 @@ W8 (executor) must satisfy:
 - The approval path reuses ``Finding`` from ``analyzers/finding.py`` and
   defines no parallel model (D12).
 
-Each test is decorated with ``@pytest.mark.xfail(reason="green after W8",
-strict=False)`` on the test functions themselves so they collect even though
-the decision function does not exist yet.
+Each test carries a non-strict ``xfail`` marker (``reason="green after W8"``)
+on the test function itself so it collects even though the decision function
+does not exist yet.
 """
 
 from __future__ import annotations

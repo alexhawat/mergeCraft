@@ -5,7 +5,7 @@ into `src/mergecraft/utils/fence.py` (D7) and thread a per-run `Fence`
 through `resolve_instructions()` (`src/mergecraft/utils/instructions.py:208+`)
 and `build_offline_review_prompt()` (`src/mergecraft/offline_review.py:46`).
 This file pins the prompt-assembly contract W4 must satisfy; every test
-is `@pytest.mark.xfail(strict=False)` for the same reason as
+carries a non-strict `xfail` marker for the same reason as
 `tests/utils/test_fence.py`.
 
 The contract under test (D7, D8):
