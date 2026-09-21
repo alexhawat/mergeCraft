@@ -24,7 +24,12 @@ through an attached external trace. :attr:`TrajectoryRecord.read_coverage`
 records that distinction honestly, and the auditor's ``changed-unread-file``
 check is suppressed when it is ``False``: absence of read evidence is *unknown*,
 not *unread*. ``files_modified``, by contrast, is authoritative — it comes from
-the run's own diff, not from what the agent reported.
+the run's own diff and nothing else. A tool argument can never widen it, because
+the trade inverts on the write side: a false path in ``files_read`` *suppresses*
+a finding, but a false path in ``files_modified`` *manufactures* one (Q-D3), as
+``origin/main..HEAD`` and a bare regex once did (#796). Revision ranges
+(``a..b``, ``a...b``) and ``rev:path`` object specs are rejected as paths
+outright by :func:`_is_git_revision_spec`.
 
 Note on ``tool_state.usage_entries``: the wave plan described it as the
 trajectory substrate and as "write-only". Neither is right today. It holds
@@ -331,6 +336,23 @@ def _looks_like_path(token: str) -> bool:
     return "/" in token or "." in token.lstrip(".")
 
 
+def _is_git_revision_spec(token: str) -> bool:
+    """True for git revision syntax that ``_looks_like_path`` would mistake for a file.
+
+    ``origin/main..HEAD`` and ``origin/main...HEAD`` are revision *ranges*;
+    ``HEAD:src/app.py`` and ``origin/main:docs/x.md`` are ``rev:path`` *object
+    specs*. Each carries ``/`` or ``.``, so the permissive path heuristic above
+    admits them — the right bias for ``files_read`` (a false path there
+    suppresses a finding), the wrong one for ``files_modified`` (a false path
+    there manufactures a ``changed-unread-file`` finding — #796, Q-D3).
+
+    No checkout contains a file named ``a..b`` or ``rev:path``, so excluding
+    them is safe on both sides: a dropped token can only ever have been matched
+    against a real file in the run diff, which it never was.
+    """
+    return ".." in token or ":" in token
+
+
 def _paths_in(values: Any) -> list[str]:
     """Collect plausible repo-relative paths from an arbitrary argument tree."""
     found: list[str] = []
@@ -339,7 +361,7 @@ def _paths_in(values: Any) -> list[str]:
         if len(found) >= _MAX_PATHS_PER_CALL:
             return
         if isinstance(node, str):
-            if _looks_like_path(node):
+            if _looks_like_path(node) and not _is_git_revision_spec(node):
                 found.append(node)
             return
         if isinstance(node, dict):
@@ -543,6 +565,13 @@ def build_trajectory_record(
         sources.append(SOURCE_RUN_DIFF)
 
     read_paths: list[str] = []
+    # ``files_modified`` is the run diff, and only the run diff — never a
+    # modify-intent argument. An argument is a weaker write signal than the
+    # diff it could be checked against, and on this side a false path
+    # *manufactures* a finding instead of suppressing one (Q-D3). Re-adding
+    # ``call.paths`` here would bring back ``origin/main..HEAD``,
+    # ``HEAD:src/…`` and a bare regex as Major ``changed-unread-file``
+    # findings (#796).
     modified_paths: list[str] = list(files_modified or [])
     commands: list[str] = []
     tests: list[str] = []
@@ -556,8 +585,6 @@ def build_trajectory_record(
         if call.intent == "read":
             observed_read = True
             read_paths.extend(call.paths)
-        elif call.intent == "modify":
-            modified_paths.extend(call.paths)
         elif call.intent == "verify":
             if call.command:
                 tests.append(call.command)
