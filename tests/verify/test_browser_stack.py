@@ -129,8 +129,14 @@ def test_unreachable_cdp_artifacts_run_is_never_a_passing_report(
 ) -> None:
     """R-D3: no configuration produces a stub-pass green verify.
 
+    R-D11 / R7-F4: the report the refusal writes must *name* the skip, and the
+    operator remedy in that name must survive redaction. So the first
+    ``skipped_or_unverified`` entry carries a ``cdp_unavailable:`` prefix and
+    the literal ``--remote-debugging-port`` — the latter is otherwise shaped
+    like a secret and is kept only by ``redact._KNOWN_SAFE_LITERALS``.
+
     Even with ``--artifacts-dir`` set (which must not opt into the stub), the
-    run refuses and any report written is not ``pass``.
+    run refuses and the report it writes is not ``pass``.
     """
     monkeypatch.setenv("MERGECRAFT_CDP_URL", "http://127.0.0.1:9777")
     artifacts = tmp_path / "arts"
@@ -149,9 +155,15 @@ def test_unreachable_cdp_artifacts_run_is_never_a_passing_report(
         )
     assert result.exit_code != 0
     report = artifacts / "report.json"
-    if report.exists():
-        payload: Any = json.loads(report.read_text(encoding="utf-8"))
-        assert payload.get("status") != "pass"
+    assert report.exists(), "the refusal must write a report that names the skip"
+    payload: Any = json.loads(report.read_text(encoding="utf-8"))
+    assert payload.get("status") != "pass"
+    reasons = payload.get("skipped_or_unverified")
+    assert isinstance(reasons, list)
+    assert reasons, "the skip reason must be recorded"
+    reason = reasons[0]
+    assert "cdp_unavailable:" in reason
+    assert "--remote-debugging-port" in reason
 
 
 @pytest.mark.skipif(not browser_stack_available(), reason=_CDP_SKIP_REASON)

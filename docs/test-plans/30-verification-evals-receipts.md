@@ -49,7 +49,7 @@ Wire rules the tests enforce:
 | Unreachable CDP raises `BrowserStackUnavailableError`; message names the endpoint, `--remote-debugging-port`, `MERGECRAFT_CDP_URL` | unit / refusal | `test_browser_stack.py::test_launch_browser_driver_fails_closed_when_cdp_unreachable` |
 | Reachable CDP returns a `BrowserDriver` (lazy construction), not a stub | unit / integration | `test_browser_stack.py::test_launch_browser_driver_returns_live_driver_when_cdp_reachable` |
 | `_resolve_driver` binds the live driver; stub only via `--allow-stub` | unit / integration | `test_browser_stack.py::test_resolve_driver_*` |
-| Fail closed never produces a passing report, even with `--artifacts-dir` | functional / CLI | `test_browser_stack.py::test_unreachable_cdp_cli_exits_configuration_not_pass`, `::test_unreachable_cdp_artifacts_run_is_never_a_passing_report` |
+| Fail closed never produces a passing report, even with `--artifacts-dir`; the written report names `cdp_unavailable:` and keeps the `--remote-debugging-port` remedy through `redact_secrets` | functional / CLI / error | `test_browser_stack.py::test_unreachable_cdp_cli_exits_configuration_not_pass`, `::test_unreachable_cdp_artifacts_run_is_never_a_passing_report` |
 | Real Chrome end-to-end navigate/extract, skip-gated and named | functional / live | `test_browser_stack.py::test_live_cdp_driver_navigates_and_extracts` |
 | Every `BrowserDriver` method exists on the fake and is async | unit | `test_driver_protocol.py::test_fake_exposes_each_protocol_method_as_async` |
 | Protocol and fake declare the same method set | unit | `test_driver_protocol.py::test_protocol_method_set_matches_the_fake` |
@@ -86,6 +86,31 @@ assertion's meaning:
   `type(driver) is CdpBrowserDriver`. `isinstance` against the protocol and the
   `_StubBrowserDriver` name check both accept an empty class; the concrete-type
   assertion does not, and needs no real Chrome.
+
+## Named-skip report guard (R-D11, R7-F4)
+
+`test_unreachable_cdp_artifacts_run_is_never_a_passing_report` drives the
+`verify-behavior` refusal with `--artifacts-dir` and an unreachable
+`MERGECRAFT_CDP_URL`, then reads the `report.json` the refusal writes. Beyond
+the fail-closed `status != "pass"` assertion it pins two behaviours that were
+previously only asserted by prose:
+
+- the first `skipped_or_unverified` entry starts `cdp_unavailable:` — the skip
+  is **named**, so a verification that did not happen never renders as one that
+  found nothing (R-D11); and
+- that reason still carries the literal `--remote-debugging-port` — the
+  operator remedy survives `redact_secrets`, which would otherwise redact the
+  hyphenated run as secret-shaped. `redact._KNOWN_SAFE_LITERALS` is the
+  exact-match allowlist that keeps it, so emptying that set makes this test
+  fail (R7-F4).
+
+The report is required to exist, not conditionally inspected, and both
+assertions live on the one test that already reaches this path end to end —
+rather than in a near-duplicate. Proof the guard bites: with
+`redact._KNOWN_SAFE_LITERALS` monkeypatched to `frozenset()` the reason loses
+`--remote-debugging-port`; with the reason rewritten to a bare
+`verification skipped` it loses `cdp_unavailable:`. Either mutation fails the
+assertions.
 
 ## Skip policy
 
