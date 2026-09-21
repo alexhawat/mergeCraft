@@ -257,6 +257,14 @@ class Case(BaseModel):
     recorded_findings: list[dict[str, Any]] | None = None
     run_succeeded: bool = True
     trust_tier: str = "trusted"
+    # The adjudication provenance string this label was written with (#738,
+    # R-D6). It holds the same values ``evals/bench`` rows and
+    # ``adjudication.tier_for_provenance`` already use, so the reader decides
+    # what the label may claim rather than the writer asserting it. The empty
+    # default keeps every pre-existing case at tier ``none`` — no committed
+    # corpus row changes meaning. It is deliberately **not** a required
+    # front-matter key, so existing case files still load unchanged.
+    label_provenance: str = ""
     # An explicit curator assertion that `recorded_findings` is complete and
     # confirmed-clean — mirrors `scoring.BaselineIssue`'s `closed_world` flag
     # (D4/D5). Trust tier alone is not defect ground truth: an untrusted-tier

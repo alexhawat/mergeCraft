@@ -95,22 +95,22 @@ required PR check is added.
 
 | Contract | Layer | Test node(s) | Status |
 | --- | --- | --- | --- |
-| Ingest writes an `agent-seeded` structural case with its persisted provenance; `tier_for_provenance` reads it back as `none` | Unit / integration | `tests/evals/test_flywheel_ingest.py::test_ingest_writes_an_agent_seeded_case_with_its_provenance` | RED (xfail) |
-| `human` is written only when the candidate carries an independent adjudication record | Integration | `…::test_ingest_writes_a_human_adjudicated_case_when_the_record_is_independent` | RED (xfail) |
-| A model adjudicator's label is written at tier `model`, never upgraded | Unit | `…::test_ingest_writes_an_llm_adjudicated_case_at_the_model_tier` | RED (xfail) |
-| One vocabulary: the persisted string is exactly `provenance_for(record)` | Unit | `…::test_ingest_writes_the_provenance_the_adjudication_module_derives` | RED (xfail) |
-| Refuse a candidate without provenance; drop it, no file, tier `none` | Unit / error | `…::test_ingest_refuses_a_candidate_without_provenance_and_drops_it` | RED (xfail) |
-| An unknown provenance string is refused, never privileged | Unit / edge | `…::test_ingest_refuses_an_unknown_provenance_string` | RED (xfail) |
-| Refuse to mint `human` without an adjudication record (the claim is not independent) | Integration / error | `…::test_ingest_refuses_to_mint_human_without_an_adjudication_record` | RED (xfail) |
-| Refuse a `human` claim backed by a non-independent (model-tier) record | Integration / error | `…::test_ingest_refuses_a_human_claim_backed_by_a_non_independent_record` | RED (xfail) |
-| An `agent-seeded` candidate is never silently upgraded to `human` | Unit | `…::test_ingest_never_marks_an_agent_seeded_case_human` | RED (xfail) |
-| A rejected candidate leaves no case file and reports no path | Unit / error | `…::test_a_rejected_candidate_leaves_no_case_and_no_label` | RED (xfail) |
-| Fail-closed is per candidate: a bad row does not abort the batch | Integration / error | `…::test_a_rejected_candidate_does_not_abort_the_batch` | RED (xfail) |
-| An empty candidate list writes nothing and reports zero counters | Unit / edge | `…::test_ingest_of_an_empty_candidate_list_writes_nothing` | RED (xfail) |
-| Ingested cases join `run_structural_replay` and carry no detection/calibration block | Integration / functional | `…::test_ingested_cases_join_the_structural_replay_bank` | RED (xfail) |
-| Ingested `agent-seeded` rows never make a calibration claim eligible (one row sinks an independent corpus) | Integration | `…::test_ingested_agent_seeded_cases_are_never_calibration_labels` | RED (xfail) |
-| Logfire ingest + reject counters: one span per candidate, one summary span | Integration | `…::test_ingest_emits_ingest_and_reject_counters` | RED (xfail) |
-| Ingest defaults to the bank `eval replay-bank` already reads (no new required check) | Unit (structural) | `…::test_ingest_targets_the_structural_bank_by_default` | RED (xfail) |
+| Ingest writes an `agent-seeded` structural case with its persisted provenance; `tier_for_provenance` reads it back as `none` | Unit / integration | `tests/evals/test_flywheel_ingest.py::test_ingest_writes_an_agent_seeded_case_with_its_provenance` | ✅ pass |
+| `human` is written only when the candidate carries an independent adjudication record | Integration | `…::test_ingest_writes_a_human_adjudicated_case_when_the_record_is_independent` | ✅ pass |
+| A model adjudicator's label is written at tier `model`, never upgraded | Unit | `…::test_ingest_writes_an_llm_adjudicated_case_at_the_model_tier` | ✅ pass |
+| One vocabulary: the persisted string is exactly `provenance_for(record)` | Unit | `…::test_ingest_writes_the_provenance_the_adjudication_module_derives` | ✅ pass |
+| Refuse a candidate without provenance; drop it, no file, tier `none` | Unit / error | `…::test_ingest_refuses_a_candidate_without_provenance_and_drops_it` | ✅ pass |
+| An unknown provenance string is refused, never privileged | Unit / edge | `…::test_ingest_refuses_an_unknown_provenance_string` | ✅ pass |
+| Refuse to mint `human` without an adjudication record (the claim is not independent) | Integration / error | `…::test_ingest_refuses_to_mint_human_without_an_adjudication_record` | ✅ pass |
+| Refuse a `human` claim backed by a non-independent (model-tier) record | Integration / error | `…::test_ingest_refuses_a_human_claim_backed_by_a_non_independent_record` | ✅ pass |
+| An `agent-seeded` candidate is never silently upgraded to `human` | Unit | `…::test_ingest_never_marks_an_agent_seeded_case_human` | ✅ pass |
+| A rejected candidate leaves no case file and reports no path | Unit / error | `…::test_a_rejected_candidate_leaves_no_case_and_no_label` | ✅ pass |
+| Fail-closed is per candidate: a bad row does not abort the batch | Integration / error | `…::test_a_rejected_candidate_does_not_abort_the_batch` | ✅ pass |
+| An empty candidate list writes nothing and reports zero counters | Unit / edge | `…::test_ingest_of_an_empty_candidate_list_writes_nothing` | ✅ pass |
+| Ingested cases join `run_structural_replay` and carry no detection/calibration block | Integration / functional | `…::test_ingested_cases_join_the_structural_replay_bank` | ✅ pass |
+| Ingested `agent-seeded` rows never make a calibration claim eligible (one row sinks an independent corpus) | Integration | `…::test_ingested_agent_seeded_cases_are_never_calibration_labels` | ✅ pass |
+| Logfire ingest + reject counters: one span per candidate, one summary span | Integration | `…::test_ingest_emits_ingest_and_reject_counters` | ✅ pass |
+| Ingest defaults to the bank `eval replay-bank` already reads (no new required check) | Unit (structural) | `…::test_ingest_targets_the_structural_bank_by_default` | ✅ pass |
 | Empty/unknown provenance resolves to tier `none`, not a privileged tier | Unit (green guard) | `…::test_empty_and_unknown_provenance_resolve_to_none_not_a_privileged_tier` | ✅ pass |
 | No workflow job runs flywheel ingest as a blocking, credentialed check | CI structural (green guard) | `tests/ci/test_flywheel_ingest_ci.py::test_no_workflow_job_runs_flywheel_ingest_as_a_blocking_check` | ✅ pass |
 | The required `eval-gate` check is unchanged and still replays the bank | CI structural (green guard) | `tests/ci/test_flywheel_ingest_ci.py::test_existing_structural_eval_gate_still_replays_the_bank` | ✅ pass |
@@ -149,18 +149,23 @@ provenance field") but not the symbols. The suite pins these:
   `mergecraft.eval.ingest.summary` span carrying
   `mergecraft.eval.ingest.count` and `mergecraft.eval.ingest.rejected`.
 
-### Red / green inventory at authoring time
+### Red / green inventory at reconciliation time
 
-Sixteen R5 contracts are RED under non-strict `xfail` markers (reason prefix
-`green after R5: `) — all sixteen in `tests/evals/test_flywheel_ingest.py`.
-Three are green guards that must stay green: the vocabulary guard
+The R5 implementation (`mergecraft.evals.flywheel` and `Case.label_provenance`)
+satisfied all sixteen contracts, so the reconciliation run (trace run.id
+`f8c575d3-5a2f-433a-9e6a-8c978fcd25d9`) removed all sixteen non-strict `xfail`
+markers — every one in `tests/evals/test_flywheel_ingest.py`. All nineteen R5
+tests are now real passes (19 passed, 0 xfail, 0 xpass), and the three green
+guards stayed green throughout: the vocabulary guard
 (`…::test_empty_and_unknown_provenance_resolve_to_none_not_a_privileged_tier`)
-and the two CI structural guards in `tests/ci/test_flywheel_ingest_ci.py`. No
-marker uses `strict=True`. The targeted run at authoring time (trace run.id
-`f8c575d3-5a2f-433a-9e6a-8c978fcd25d9`) is **3 passed, 16 xfailed**; the full
-`tests/evals tests/ci` run is 1077 passed, 2 skipped, 17 xfailed (the extra
-xfail is the pre-existing W9 spun-out marker in
-`tests/evals/test_benchmark_publication.py`).
+and the two CI structural guards in `tests/ci/test_flywheel_ingest_ci.py`.
+**Rationale:** the markers were `strict=False` by design, so the implementation
+wave made them `XPASS`; the session-level XPASS ratchet (`tests/conftest.py` +
+`scripts/check_xpass.py`) cannot go green until the satisfied markers are
+removed, and only `test-creator` may edit `tests/`. Removing the markers also
+dropped the now-unused `_R5` reason constant and the stale `pytest` import, and
+fixed a pre-existing `I001` import-order offense in the default-bank test body
+(no assertion changed).
 
 ### What this suite does not do
 

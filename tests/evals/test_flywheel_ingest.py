@@ -36,9 +36,9 @@ House style matches ``tests/evals/test_adjudication.py`` and
 ``tests/evidence/test_shadow_second_target.py``: helpers at the top, one
 behaviour per test, lazy imports for symbols the R5 implementation wave lands.
 
-Cross-wave reds use non-strict ``xfail`` (``strict=False``) so a marker that
-starts passing after R5 is an ``XPASS``, never a hard failure in a file the
-implementation wave is forbidden to touch.
+The R5 implementation wave satisfied every contract below; the reconciliation
+run (``f8c575d3-5a2f-433a-9e6a-8c978fcd25d9``) removed the non-strict
+``xfail`` markers so these are real passes.
 """
 
 from __future__ import annotations
@@ -46,10 +46,6 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 from typing import Any
-
-import pytest
-
-_R5 = "green after R5: "
 
 _HUMAN_SETTINGS: dict[str, object] = {
     "human": {"enabled": True, "independence": "independent"},
@@ -121,7 +117,6 @@ def _case_text(bank_dir: Path, case_id: str) -> str | None:
 # ── happy path: ingest writes the case and its provenance ────────────────────
 
 
-@pytest.mark.xfail(reason=_R5 + "flywheel module + Case.label_provenance", strict=False)
 def test_ingest_writes_an_agent_seeded_case_with_its_provenance(tmp_path: Path) -> None:
     """A production FP is written as a structural case carrying its provenance."""
     from mergecraft.evals.adjudication import tier_for_provenance
@@ -140,7 +135,6 @@ def test_ingest_writes_an_agent_seeded_case_with_its_provenance(tmp_path: Path) 
     assert tier_for_provenance(case.label_provenance) == "none"
 
 
-@pytest.mark.xfail(reason=_R5 + "human label only with an independent record", strict=False)
 def test_ingest_writes_a_human_adjudicated_case_when_the_record_is_independent(
     tmp_path: Path,
 ) -> None:
@@ -161,7 +155,6 @@ def test_ingest_writes_a_human_adjudicated_case_when_the_record_is_independent(
     assert tier_for_provenance(case.label_provenance) == "independent"
 
 
-@pytest.mark.xfail(reason=_R5 + "model-tier adjudication writes its own string", strict=False)
 def test_ingest_writes_an_llm_adjudicated_case_at_the_model_tier(tmp_path: Path) -> None:
     """A model adjudicator's label is written at tier ``model``, not upgraded."""
     from mergecraft.evals.store import load_case
@@ -178,7 +171,6 @@ def test_ingest_writes_an_llm_adjudicated_case_at_the_model_tier(tmp_path: Path)
     assert case.label_provenance == "llm-adjudicated"
 
 
-@pytest.mark.xfail(reason=_R5 + "ingest derives provenance, never re-spells it", strict=False)
 def test_ingest_writes_the_provenance_the_adjudication_module_derives(tmp_path: Path) -> None:
     """One vocabulary: the persisted string is ``provenance_for(record)``."""
     from mergecraft.evals.adjudication import provenance_for
@@ -195,7 +187,6 @@ def test_ingest_writes_the_provenance_the_adjudication_module_derives(tmp_path: 
 # ── fail-closed: refuse without provenance, drop rather than mint ────────────
 
 
-@pytest.mark.xfail(reason=_R5 + "ingest refuses a candidate with no provenance", strict=False)
 def test_ingest_refuses_a_candidate_without_provenance_and_drops_it(tmp_path: Path) -> None:
     """No provenance string means no case: the candidate is dropped, tier none."""
     bank = tmp_path / "cases"
@@ -210,7 +201,6 @@ def test_ingest_refuses_a_candidate_without_provenance_and_drops_it(tmp_path: Pa
     assert _case_text(bank, "synthetic-flywheel-001") is None
 
 
-@pytest.mark.xfail(reason=_R5 + "unknown provenance is refused, not privileged", strict=False)
 def test_ingest_refuses_an_unknown_provenance_string(tmp_path: Path) -> None:
     """A made-up string is not a label: dropped, tier ``none``."""
     bank = tmp_path / "cases"
@@ -221,7 +211,6 @@ def test_ingest_refuses_an_unknown_provenance_string(tmp_path: Path) -> None:
     assert _case_text(bank, "synthetic-flywheel-001") is None
 
 
-@pytest.mark.xfail(reason=_R5 + "human is refused without an adjudication record", strict=False)
 def test_ingest_refuses_to_mint_human_without_an_adjudication_record(tmp_path: Path) -> None:
     """R-D6 — a bare ``human`` string cannot mint an independent label."""
     bank = tmp_path / "cases"
@@ -235,7 +224,6 @@ def test_ingest_refuses_to_mint_human_without_an_adjudication_record(tmp_path: P
     assert _case_text(bank, "synthetic-flywheel-001") is None
 
 
-@pytest.mark.xfail(reason=_R5 + "human claim cannot be backed by a model record", strict=False)
 def test_ingest_refuses_a_human_claim_backed_by_a_non_independent_record(
     tmp_path: Path,
 ) -> None:
@@ -251,7 +239,6 @@ def test_ingest_refuses_a_human_claim_backed_by_a_non_independent_record(
     assert _case_text(bank, "synthetic-flywheel-001") is None
 
 
-@pytest.mark.xfail(reason=_R5 + "agent-seeded is never silently upgraded", strict=False)
 def test_ingest_never_marks_an_agent_seeded_case_human(tmp_path: Path) -> None:
     """An agent-seeded candidate is written as agent-seeded, never ``human``."""
     from mergecraft.evals.store import load_case
@@ -264,7 +251,6 @@ def test_ingest_never_marks_an_agent_seeded_case_human(tmp_path: Path) -> None:
     assert case.label_provenance != "human"
 
 
-@pytest.mark.xfail(reason=_R5 + "a rejected candidate leaves no case and no path", strict=False)
 def test_a_rejected_candidate_leaves_no_case_and_no_label(tmp_path: Path) -> None:
     """The reject path writes nothing and reports no path."""
     bank = tmp_path / "cases"
@@ -277,7 +263,6 @@ def test_a_rejected_candidate_leaves_no_case_and_no_label(tmp_path: Path) -> Non
     assert _case_text(bank, "synthetic-flywheel-bad") is None
 
 
-@pytest.mark.xfail(reason=_R5 + "one bad candidate must not abort the batch", strict=False)
 def test_a_rejected_candidate_does_not_abort_the_batch(tmp_path: Path) -> None:
     """Fail-closed is per candidate: the good rows after a bad one still land."""
     bank = tmp_path / "cases"
@@ -295,7 +280,6 @@ def test_a_rejected_candidate_does_not_abort_the_batch(tmp_path: Path) -> None:
     assert _case_text(bank, "synthetic-flywheel-bad") is None
 
 
-@pytest.mark.xfail(reason=_R5 + "empty ingest writes nothing", strict=False)
 def test_ingest_of_an_empty_candidate_list_writes_nothing(tmp_path: Path) -> None:
     """Boundary: no candidates, no cases, zero counters."""
     bank = tmp_path / "cases"
@@ -309,7 +293,6 @@ def test_ingest_of_an_empty_candidate_list_writes_nothing(tmp_path: Path) -> Non
 # ── R-D7: structural replay cases only, never calibration labels ─────────────
 
 
-@pytest.mark.xfail(reason=_R5 + "ingested cases join the structural replay bank", strict=False)
 def test_ingested_cases_join_the_structural_replay_bank(tmp_path: Path) -> None:
     """An ingested case is a replayable structural case, not a detection label."""
     from mergecraft.evals.benchmark import run_structural_replay
@@ -325,7 +308,6 @@ def test_ingested_cases_join_the_structural_replay_bank(tmp_path: Path) -> None:
     assert result.detection is None, "structural replay carries no calibration claim"
 
 
-@pytest.mark.xfail(reason=_R5 + "ingested agent-seeded rows sink a claim", strict=False)
 def test_ingested_agent_seeded_cases_are_never_calibration_labels(tmp_path: Path) -> None:
     """R-D7 — one ingested row makes a corpus-wide calibration claim ineligible."""
     from mergecraft.evals.adjudication import calibration_status
@@ -342,7 +324,6 @@ def test_ingested_agent_seeded_cases_are_never_calibration_labels(tmp_path: Path
 # ── Logfire ingest and reject counters ───────────────────────────────────────
 
 
-@pytest.mark.xfail(reason=_R5 + "ingest and reject counter spans", strict=False)
 def test_ingest_emits_ingest_and_reject_counters(tmp_path: Path) -> None:
     """One span per candidate plus a summary carrying both counters."""
     from mergecraft.tracing import MemorySink, Tracer
@@ -379,11 +360,9 @@ def test_ingest_emits_ingest_and_reject_counters(tmp_path: Path) -> None:
 # ── R-D10: ingest targets the bank the existing structural gate reads ────────
 
 
-@pytest.mark.xfail(reason=_R5 + "ingest defaults to the structural bank", strict=False)
 def test_ingest_targets_the_structural_bank_by_default() -> None:
     """No new CI job is needed: ingested cases land where ``replay-bank`` reads."""
     from mergecraft.evals.flywheel import ingest_flywheel
-
     from mergecraft.evals.store import DEFAULT_BANK_DIR
 
     signature = inspect.signature(ingest_flywheel)
