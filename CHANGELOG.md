@@ -48,7 +48,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing with Click's "Missing argument". `mergecraft config set` writes
   `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
 
+- Shadow comparison can run a second pinned target (a different model id and/or
+  prompt version) through the existing recorder and publish a disagreement
+  table grouped by lane and rule. The job is optional and keyless, and the live
+  review path never enforces a shadow prediction (#737).
+
+- Production false positives and human dismissals can be ingested into the eval
+  bank as versioned cases, each carrying explicit provenance. Ingest refuses a
+  case without provenance, refuses to record a human label that has not passed
+  independent adjudication, and drops a case rather than minting a label.
+  Ingested cases participate as structural replay cases only, never as
+  calibration labels (#738).
+
 ### Changed
+
+- CLI `--json` payloads carry their own schema version, decoupled from the
+  review snapshot's. Both stay `1.0.0`, so no payload changes; the two can now
+  be bumped independently (#777).
 
 - `make test` no longer runs the nine branch-walking `test_cov_*` suites: they
   carry a new `coverage` marker and the `make test` selector is now
