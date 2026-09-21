@@ -1,11 +1,14 @@
-"""``mergecraft jev enable|disable|status|set`` — CLI surface for the Jev gate (#786).
+"""``mergecraft jev enable|disable|status|set`` — CLI surface for the Jev gate (#786, #803).
 
 Jev is opt-in and advisory. ``enable`` writes only ``jev.enabled: true`` into
 the committed config — every other value keeps coming from ``JevSettings``
 defaults so a later change to a threshold or the pinned model reaches every
-repo that has not pinned its own value. ``set`` round-trips any single value
-through ``JevSettings`` before writing, so an invalid value (a floating model
-alias, a non-positive budget) is rejected before the file is touched.
+repo that has not pinned its own value. When ``TYPESAFE_API_KEY`` is not
+already set, ``enable`` requests it and writes it to ``.env``; ``--github``
+also stores it as the Actions secret when the secret is missing. ``set``
+round-trips any single value through ``JevSettings`` before writing, so an
+invalid value (a floating model alias, a non-positive budget) is rejected
+before the file is touched.
 
 Exports:
     app: Typer subapp registered as ``mergecraft jev``.
@@ -16,6 +19,7 @@ Exports:
 from __future__ import annotations
 
 import base64
+import getpass
 import json
 import os
 import re
@@ -24,11 +28,15 @@ from typing import Any
 
 import typer
 import yaml
+from dotenv import dotenv_values
 from loguru import logger
 from pydantic import ValidationError
 
+from mergecraft.cli.auth_cmd import _set_gh_secret, _write_env_value
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.interactive import is_interactive_session
+from mergecraft.cli.local_env import local_env_path_for_cwd
 from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
 from mergecraft.cli.trust_cmd import GhRunner, _default_gh_runner, _gh_json, _gh_optional_json
 from mergecraft.cli.typer_group import mergecraft_typer
@@ -36,10 +44,79 @@ from mergecraft.config.io import append_config_mapping, config_has_yaml_comments
 from mergecraft.config.settings import RepoSettings, load_repo_settings
 from mergecraft.jev.client import TYPESAFE_API_KEY_ENV
 
+_JEV_GROUP_HELP = """\
+Enable and configure the Jev advisory screening gate.
+
+Jev ranks and annotates review units. It never skips the reviewer, suppresses
+a finding, or blocks a merge. A live run also needs TYPESAFE_API_KEY in the
+local .env or as a GitHub Actions secret of the same name.
+
+Commands and options
+
+  enable [--cwd PATH] [--github]
+      Write jev.enabled: true. No other Jev key is written (defaults stay
+      in JevSettings). If TYPESAFE_API_KEY is not already set in the
+      environment or .env, prompts for it (hidden) and saves it to .env.
+      --cwd PATH     Repository root to update.
+      --github       Open a default-branch PR so Actions sees the flag, and
+                     store TYPESAFE_API_KEY as a repository secret when a
+                     key is available and the secret is missing.
+
+  disable [--cwd PATH] [--github]
+      Write jev.enabled: false.
+      --cwd PATH     Repository root to update.
+      --github       Open a default-branch PR that turns Jev off for Actions.
+                     Does not delete the TYPESAFE_API_KEY secret.
+
+  status [--cwd PATH] [--github]
+      Show enabled, model, budgetTokens, packs, thresholds, whether
+      TYPESAFE_API_KEY is present locally, and the advisory disclaimer.
+      --cwd PATH     Repository root to inspect.
+      --github       Also report default-branch jev.enabled and whether
+                     the TYPESAFE_API_KEY Actions secret is present.
+
+  set KEY VALUE [--cwd PATH]
+      Write one Jev parameter after JevSettings validation. Refuses an
+      invalid value (floating model alias, non-positive budget) before
+      touching the file.
+      KEY            enabled, model, budgetTokens, packs.<pack-id>,
+                     or thresholds.<name>.
+      VALUE          Scalar to write (bool / int / float / str).
+      --cwd PATH     Repository root.
+"""
+
 app = mergecraft_typer(
     name="jev",
-    help="Enable and configure the Jev advisory screening gate.",
+    help=_JEV_GROUP_HELP,
     no_args_is_help=True,
+)
+
+_CWD_HELP = "Repository root. Reads and writes .mergecraft/config.yaml here."
+_ENABLE_CWD_HELP = (
+    "Repository root. Writes jev.enabled in .mergecraft/config.yaml here, "
+    "and reads or writes TYPESAFE_API_KEY in .env here."
+)
+_ENABLE_GITHUB_HELP = (
+    "Also prepare GitHub Actions: open a PR against the default branch that "
+    "sets jev.enabled: true, and store TYPESAFE_API_KEY as a repository secret "
+    "when a key is available and the secret is missing."
+)
+_DISABLE_GITHUB_HELP = (
+    "Also open a PR against the default branch that sets jev.enabled: false "
+    "so Actions/PRT see the change. Does not delete the TYPESAFE_API_KEY secret."
+)
+_STATUS_GITHUB_HELP = (
+    "Also report whether the default-branch config has jev.enabled: true and "
+    "whether the TYPESAFE_API_KEY Actions secret is present."
+)
+_SET_KEY_HELP = (
+    "Jev key to write: enabled, model, budgetTokens, packs.<pack-id> "
+    "(e.g. packs.unit/v1), or thresholds.<name> (e.g. thresholds.unit/v1.likely)."
+)
+_SET_VALUE_HELP = (
+    "Value to write. Booleans (true/false), integers, floats, and strings "
+    "are accepted. The value is validated through JevSettings before the file "
+    "is touched — a floating model alias or a non-positive budget is refused."
 )
 
 _CONFIG_REL = ".mergecraft/config.yaml"
@@ -328,10 +405,12 @@ def apply_jev_enabled_on_default_branch(
                 "Jev is advisory only: it ranks and annotates units, it never skips the "
                 "reviewer, suppresses a finding, or blocks a merge (see "
                 "`docs/jev-gate-patterns.md`'s enforcement-status section). This PR only "
-                "writes the committed config; it does not set a credential.\n\n"
-                f"A Jev call also needs the `{TYPESAFE_API_KEY_ENV}` repository secret. "
-                f"Check with `mergecraft jev status --github`, and if it is missing, set "
-                f"it with `gh secret set {TYPESAFE_API_KEY_ENV} --repo {repo}`."
+                "writes the committed config.\n\n"
+                f"`mergecraft jev enable --github` also stores `{TYPESAFE_API_KEY_ENV}` "
+                f"as a repository secret when a key is available and the secret is "
+                f"missing. Check with `mergecraft jev status --github`, and if it is "
+                f"still missing, set it with `gh secret set {TYPESAFE_API_KEY_ENV} "
+                f"--repo {repo}`."
             ),
         ]
     ).strip()
@@ -422,43 +501,120 @@ def _current_repo_slug() -> str | None:
     return slug or None
 
 
+def _typesafe_key_from_env_or_file(cwd: Path) -> str | None:
+    """Return a non-empty ``TYPESAFE_API_KEY`` from the process env or the repo ``.env``."""
+    from_env = os.environ.get(TYPESAFE_API_KEY_ENV, "").strip()
+    if from_env:
+        return from_env
+    env_path = local_env_path_for_cwd(cwd)
+    if not env_path.is_file():
+        return None
+    from_file = (dotenv_values(env_path).get(TYPESAFE_API_KEY_ENV) or "").strip()
+    return from_file or None
+
+
+def _request_typesafe_api_key() -> str | None:
+    """Prompt for ``TYPESAFE_API_KEY`` on an interactive session. Never echo the value."""
+    if not is_interactive_session():
+        return None
+    try:
+        entered = getpass.getpass(f"{TYPESAFE_API_KEY_ENV} (Enter to skip): ").strip()
+    except EOFError:
+        return None
+    return entered or None
+
+
+def _save_typesafe_api_key_locally(cwd: Path, key: str) -> Path | None:
+    """Write *key* to the repo ``.env``. Return the path on success, else ``None``."""
+    env_path = local_env_path_for_cwd(cwd)
+    if _write_env_value(env_path, TYPESAFE_API_KEY_ENV, key):
+        return env_path
+    return None
+
+
+def _missing_key_note() -> None:
+    """Tell the operator how to set ``TYPESAFE_API_KEY`` when enable could not collect it."""
+    repo_slug = _current_repo_slug()
+    cmd = f"gh secret set {TYPESAFE_API_KEY_ENV}" + (f" --repo {repo_slug}" if repo_slug else "")
+    console.print(
+        f"[yellow]note:[/yellow] {TYPESAFE_API_KEY_ENV} is not set locally — Jev will "
+        f"record a `credential_absent` skip until it is. Set it with:\n  {cmd}"
+    )
+
+
+def _maybe_persist_github_secret(*, key: str | None) -> None:
+    """Store ``TYPESAFE_API_KEY`` as an Actions secret when it is missing and *key* is known."""
+    repo_slug = _current_repo_slug()
+    if repo_slug is None:
+        console.print(
+            "[yellow]github:[/yellow] could not resolve repository via gh — secret not set"
+        )
+        return
+    present = _github_secret_present(name=TYPESAFE_API_KEY_ENV, repo_slug=repo_slug)
+    if present is True:
+        console.print(f"{TYPESAFE_API_KEY_ENV} secret on {repo_slug}: already present")
+        return
+    if not key:
+        console.print(
+            f"{TYPESAFE_API_KEY_ENV} secret on {repo_slug}: absent — set it with:\n"
+            f"  gh secret set {TYPESAFE_API_KEY_ENV} --repo {repo_slug}"
+        )
+        return
+    if _set_gh_secret(name=TYPESAFE_API_KEY_ENV, value=key, repo_slug=repo_slug):
+        console.print(f"saved [green]{TYPESAFE_API_KEY_ENV}[/green] Actions secret on {repo_slug}")
+        return
+    console.print(
+        f"[yellow]warning:[/yellow] gh secret set failed — set it with:\n"
+        f"  gh secret set {TYPESAFE_API_KEY_ENV} --repo {repo_slug}"
+    )
+
+
 @app.command("enable")
 def enable_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root to update."),
-    github: bool = typer.Option(
-        False,
-        "--github",
-        help="Also open a PR against the default branch so Actions/PRT see the change.",
-    ),
+    cwd: Path = typer.Option(Path("."), "--cwd", help=_ENABLE_CWD_HELP),
+    github: bool = typer.Option(False, "--github", help=_ENABLE_GITHUB_HELP),
 ) -> None:
-    """Write ``jev.enabled: true`` to the committed config. No other key is written."""
+    """Write ``jev.enabled: true``. Prompt for and save ``TYPESAFE_API_KEY`` when unset.
+
+    No other Jev config key is written. If ``TYPESAFE_API_KEY`` is not already in
+    the process env or the repo ``.env``, prompts for it (hidden) and saves it
+    to ``.env``. ``--github`` also opens a default-branch PR so Actions sees
+    the flag, and stores the key as the ``TYPESAFE_API_KEY`` repository secret
+    when a key is available and the secret is missing.
+    """
     target = cwd.resolve()
+    key = _typesafe_key_from_env_or_file(target)
+    if key is None:
+        key = _request_typesafe_api_key()
+        if key:
+            saved = _save_typesafe_api_key_locally(target, key)
+            if saved is not None:
+                os.environ[TYPESAFE_API_KEY_ENV] = key
+                console.print(f"saved [green]{TYPESAFE_API_KEY_ENV}[/green] to {saved}")
+            else:
+                console.print(
+                    f"[yellow]warning:[/yellow] could not write {TYPESAFE_API_KEY_ENV} to .env"
+                )
     if github:
         pr_url = apply_jev_enabled_on_default_branch(enabled=True)
         console.print(f"opened default-branch PR for Actions: {pr_url}")
+        _maybe_persist_github_secret(key=key)
     config_path = _set_jev_enabled(target, enabled=True)
     console.print(f"wrote [green]{config_path}[/green] jev.enabled=true")
-    if not os.environ.get(TYPESAFE_API_KEY_ENV):
-        repo_slug = _current_repo_slug()
-        cmd = f"gh secret set {TYPESAFE_API_KEY_ENV}" + (
-            f" --repo {repo_slug}" if repo_slug else ""
-        )
-        console.print(
-            f"[yellow]note:[/yellow] {TYPESAFE_API_KEY_ENV} is not set locally — Jev will "
-            f"record a `credential_absent` skip until it is. Set it with:\n  {cmd}"
-        )
+    if not key:
+        _missing_key_note()
 
 
 @app.command("disable")
 def disable_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root to update."),
-    github: bool = typer.Option(
-        False,
-        "--github",
-        help="Also open a PR against the default branch so Actions/PRT see the change.",
-    ),
+    cwd: Path = typer.Option(Path("."), "--cwd", help=_CWD_HELP),
+    github: bool = typer.Option(False, "--github", help=_DISABLE_GITHUB_HELP),
 ) -> None:
-    """Write ``jev.enabled: false`` to the committed config."""
+    """Write ``jev.enabled: false`` to the committed config.
+
+    ``--github`` opens a default-branch PR so Actions/PRT see the change. It
+    does not delete the ``TYPESAFE_API_KEY`` repository secret.
+    """
     target = cwd.resolve()
     if github:
         pr_url = apply_jev_enabled_on_default_branch(enabled=False)
@@ -485,14 +641,15 @@ def _coerce_jev_value(raw: str) -> Any:
 
 @app.command("set")
 def set_cmd(
-    key: str = typer.Argument(
-        ...,
-        help="Jev key: enabled, model, budgetTokens, packs.<pack-id>, thresholds.<name>.",
-    ),
-    value: str = typer.Argument(..., help="Value to write."),
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
+    key: str = typer.Argument(..., help=_SET_KEY_HELP),
+    value: str = typer.Argument(..., help=_SET_VALUE_HELP),
+    cwd: Path = typer.Option(Path("."), "--cwd", help=_CWD_HELP),
 ) -> None:
-    """Write one Jev parameter, validated through ``JevSettings`` before writing."""
+    """Write one Jev parameter, validated through ``JevSettings`` before writing.
+
+    Allowed keys: ``enabled``, ``model``, ``budgetTokens``, ``packs.<pack-id>``,
+    ``thresholds.<name>``. An invalid value is refused before the file is touched.
+    """
     target = cwd.resolve()
     config_path = _config_path(target)
     data = _load_config_dict(config_path)
@@ -525,14 +682,16 @@ def set_cmd(
 
 @app.command("status")
 def status_cmd(
-    cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root to inspect."),
-    github: bool = typer.Option(
-        False,
-        "--github",
-        help="Also report default-branch config and Actions secret presence.",
-    ),
+    cwd: Path = typer.Option(Path("."), "--cwd", help=_CWD_HELP),
+    github: bool = typer.Option(False, "--github", help=_STATUS_GITHUB_HELP),
 ) -> None:
-    """Show config, credential presence, and effective Jev values."""
+    """Show config, credential presence, and effective Jev values.
+
+    Prints enabled, model, budgetTokens, packs, thresholds, whether
+    TYPESAFE_API_KEY is present locally, and the advisory disclaimer.
+    ``--github`` also reports default-branch ``jev.enabled`` and whether the
+    Actions secret is present.
+    """
     target = cwd.resolve()
     settings = load_repo_settings(root=target, load_learnings_files=False)
     jev = settings.jev
