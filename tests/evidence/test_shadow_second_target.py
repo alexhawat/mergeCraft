@@ -399,6 +399,35 @@ def test_keyless_job_keeps_an_executed_second_target(tmp_path: Path) -> None:
     assert {row.target_id for row in rows} == {"live", "shadow-b"}
 
 
+def test_keyless_job_does_not_synthesize_partial_second_target_coverage(tmp_path: Path) -> None:
+    """A second target that ran on one change is not invented for the others."""
+    from mergecraft.evidence.shadow import load_shadow_records
+    from mergecraft.evidence.shadow_compare import main
+
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text(
+        '{"change_id":"acme/demo#101","target_id":"live","outcome":"block",'
+        '"diagnostic":"high_risk_migration","lane":"high","actual_outcome":"merged"}\n'
+        '{"change_id":"acme/demo#102","target_id":"live","outcome":"auto_merge",'
+        '"diagnostic":"low_risk_passing","lane":"low","actual_outcome":"merged"}\n'
+        '{"change_id":"acme/demo#101","target_id":"shadow-b","outcome":"auto_merge",'
+        '"diagnostic":"low_risk_passing","lane":"low","actual_outcome":"merged",'
+        '"executed":true}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.jsonl"
+    assert main(["--corpus", str(corpus), "--output", str(output)]) == 0
+    rows = load_shadow_records(output)
+    covered = {(row.target_id, row.change_id) for row in rows}
+    assert covered == {
+        ("live", "acme/demo#101"),
+        ("live", "acme/demo#102"),
+        ("shadow-b", "acme/demo#101"),
+    }
+    shadow_rows = [row for row in rows if row.target_id == "shadow-b"]
+    assert shadow_rows[0].action == "auto_merge"
+
+
 # ── the comparison job: records both targets, fails closed on a write error ──
 
 

@@ -658,8 +658,7 @@ def emit_run_packet(
         # mode — applying the action is the gate's job, not a side
         # effect of emit.
         if assembled.decision is not None and assembled.decision.mode == "shadow":
-            from mergecraft.evidence.shadow import record_shadow_prediction
-            from mergecraft.evidence.shadow_compare import LIVE_TARGET
+            from mergecraft.evidence.shadow import LIVE_TARGET, record_shadow_prediction
 
             shadow_path = path.with_name("merge-evidence-shadow.jsonl")
             try:
@@ -675,8 +674,7 @@ def emit_run_packet(
             except Exception as shadow_err:  # a shadow record never fails the run
                 logger.warning("shadow record: emission failed — {}", shadow_err)
         if verdict_prediction is not None:
-            from mergecraft.evidence.shadow import record_shadow_prediction
-            from mergecraft.evidence.shadow_compare import LIVE_TARGET
+            from mergecraft.evidence.shadow import LIVE_TARGET, record_shadow_prediction
 
             shadow_path = path.with_name("merge-evidence-shadow.jsonl")
             try:

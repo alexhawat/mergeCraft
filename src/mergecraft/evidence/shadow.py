@@ -112,6 +112,10 @@ class ShadowTarget(BaseModel):
     prompt_version: str | None = None
 
 
+LIVE_TARGET: ShadowTarget = ShadowTarget(target_id="live", model="anthropic/claude-sonnet-5")
+"""The incumbent target: the model the live review path already runs."""
+
+
 class ShadowRecord(BaseModel):
     """One recorded shadow prediction.
 
@@ -592,6 +596,7 @@ def disagreement_report(
 
 
 __all__ = [
+    "LIVE_TARGET",
     "ShadowRecord",
     "ShadowTarget",
     "VerdictProtocolPrediction",

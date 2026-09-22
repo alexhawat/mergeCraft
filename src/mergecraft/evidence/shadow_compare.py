@@ -17,8 +17,10 @@ existing ``record_shadow_prediction`` writer. This module is that comparison:
 * The ``__main__`` entry point is the optional, **keyless** CI job. It records
   the live target from the committed corpus (that target's recorded review)
   and a second target only when the corpus row is marked ``executed`` — a run
-  produced that output. An unmarked second-target row is dropped, so the table
-  cannot publish a hand-authored disagreement as if the other model had run.
+  produced that output. An unmarked second-target row is dropped, and a
+  second target that ran on only some changes is not given a synthesized
+  result for the rest, so the table cannot publish an output that model did
+  not produce.
   Structural replay only, never live detection, and never a required PR check.
 
 Two properties are load-bearing:
@@ -60,6 +62,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION, AgentMetadata, MergeEvidencePacket
 from mergecraft.evidence.shadow import (
+    LIVE_TARGET,
     ShadowRecord,
     ShadowTarget,
     disagreement_report,
@@ -71,9 +74,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from mergecraft.tracing.tracer import NullTracer, Tracer
-
-LIVE_TARGET: ShadowTarget = ShadowTarget(target_id="live", model="anthropic/claude-sonnet-5")
-"""The incumbent target: the model the live review path already runs."""
 
 SECOND_TARGET: ShadowTarget = ShadowTarget(
     target_id="shadow-b",
@@ -152,9 +152,11 @@ def compare_shadow_targets(
     Each ``(target, change)`` pair is recorded through the **existing**
     ``record_shadow_prediction`` writer, stamped with the target identity, so a
     second target never grows a second JSONL writer. ``predictions`` maps
-    ``target_id`` → ``change_id`` → prediction; a missing entry falls back to
-    the recorder's gate-action path. ``outcomes`` maps ``change_id`` → the
-    human final outcome.
+    ``target_id`` → ``change_id`` → prediction. When a target has a prediction
+    map, a change missing from that map is skipped: the gate-action fallback
+    would otherwise publish a synthesized result as that target's output.
+    Omitting ``predictions`` entirely keeps the gate-action path. ``outcomes``
+    maps ``change_id`` → the human final outcome.
 
     A recording failure **propagates**. This is the one shadow path that fails
     closed (R-D5): a job that could not record must not render missing data as
@@ -164,9 +166,12 @@ def compare_shadow_targets(
     resolved_outcomes = dict(outcomes or {})
     resolved_predictions = predictions or {}
     for target in targets:
+        covered = target.target_id in resolved_predictions
         target_predictions = resolved_predictions.get(target.target_id) or {}
         for packet in packets:
             change_id = packet.change_id
+            if covered and change_id not in target_predictions:
+                continue
             record = record_shadow_prediction(
                 packet,
                 change_id=change_id,
