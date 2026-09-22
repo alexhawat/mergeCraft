@@ -18,6 +18,22 @@ from coverage import Coverage
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
 
+_COVERAGE_SHARD_SELECTORS = (
+    "MERGECRAFT_TEST_SPLITS",
+    "MERGECRAFT_TEST_GROUP",
+    "MERGECRAFT_COVERAGE_RUN_DIR",
+    "MAKEFLAGS",
+    "MAKEOVERRIDES",
+)
+
+
+def _default_gate_environment(**values: str) -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in _COVERAGE_SHARD_SELECTORS:
+        environment.pop(name, None)
+    environment.update(values)
+    return environment
+
 
 def _load_module() -> Any:
     path = REPO_ROOT / "scripts" / "coverage_shards.py"
@@ -100,7 +116,7 @@ def test_default_gate_stops_when_measurement_fails(tmp_path: Path) -> None:
             f"UV={fake_uv}",
         ],
         cwd=tmp_path,
-        env={**os.environ, "MERGECRAFT_FAKE_UV_LOG": str(log)},
+        env=_default_gate_environment(MERGECRAFT_FAKE_UV_LOG=str(log)),
         capture_output=True,
         text=True,
         check=False,
@@ -117,12 +133,11 @@ def test_default_gate_stops_before_floors_when_ratchet_fails(tmp_path: Path) -> 
     result = subprocess.run(
         ["make", "coverage-gate", "PYTEST=/usr/bin/true", f"UV={fake_uv}"],
         cwd=tmp_path,
-        env={
-            **os.environ,
-            "MERGECRAFT_FAKE_UV_LOG": str(log),
-            "RATCHET_RC": "1",
-            "FLOORS_RC": "0",
-        },
+        env=_default_gate_environment(
+            MERGECRAFT_FAKE_UV_LOG=str(log),
+            RATCHET_RC="1",
+            FLOORS_RC="0",
+        ),
         capture_output=True,
         text=True,
         check=False,
