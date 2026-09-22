@@ -20,6 +20,8 @@ import pytest
 from mergecraft.analyzers.antislop.matcher import _snippet, apply_rules
 from mergecraft.analyzers.antislop.policy import AntislopRule, load_native_rules
 
+pytestmark = pytest.mark.coverage
+
 if TYPE_CHECKING:
     from mergecraft.analyzers.antislop.policy import MatchKind
 

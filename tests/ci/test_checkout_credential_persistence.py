@@ -73,9 +73,17 @@ def test_checkout_does_not_persist_credentials(relpath: str) -> None:
         )
 
 
+# ── #790 — every shipped example exports the Action pin it runs ─────────────
+
+
 _PIN_EXAMPLES = (
     "examples/workflows/mergecraft.yml",
     "examples/workflows/mergecraft-hardened.yml",
+)
+
+_PIN_TEMPLATES = (
+    "scripts/example_workflows/minimal.yml.tpl",
+    "scripts/example_workflows/hardened.yml.tpl",
 )
 
 
@@ -87,6 +95,9 @@ def test_shipped_examples_export_the_pin_they_run(relative: str) -> None:
     and the container cannot see the workflow's `uses:` line. An example that
     omits it hands every copier an empty Action pin and no pin/image mismatch
     detection — the same gap `mergecraft init` had before #679.
+
+    Ported from `pre-0.0.1` #682 (commit b72d7abe), where it never reached
+    `main`.
     """
     import re
 
@@ -102,6 +113,51 @@ def test_shipped_examples_export_the_pin_they_run(relative: str) -> None:
     )
 
 
+def _action_steps(doc: object) -> list[dict[str, object]]:
+    """Steps that run the mergeCraft action in a workflow document."""
+    steps: list[dict[str, object]] = []
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    if not isinstance(jobs, dict):
+        return steps
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        for step in job.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if isinstance(uses, str) and uses.startswith(
+                ("__ACTION_REPO__@", "alexhawat/mergeCraft@")
+            ):
+                steps.append(step)
+    return steps
+
+
+@pytest.mark.parametrize("relative", _PIN_TEMPLATES)
+def test_workflow_templates_export_the_pin_placeholder(relative: str) -> None:
+    """The templates the examples are generated from export the pin too.
+
+    `examples/workflows/*.yml` are generated from these templates, so a pin
+    that lands only in the generated files would drift on the next
+    regeneration. The exported value tracks the template's own `uses:` pin —
+    `__ACTION_PIN__` — in the same `env:` block as the credentials, where the
+    container reads it (#790).
+    """
+    path = Path(REPO_ROOT) / relative
+    assert path.is_file(), f"missing {relative}"
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    steps = _action_steps(doc)
+    assert steps, f"{relative} has no mergeCraft action step to check"
+    for step in steps:
+        env_block = step.get("env") or {}
+        assert isinstance(env_block, dict)
+        assert env_block.get("MERGECRAFT_ACTION_SHA") == "__ACTION_PIN__", (
+            f"{relative}: the mergeCraft step must export "
+            "MERGECRAFT_ACTION_SHA: __ACTION_PIN__ so the generated example "
+            "records the pin it runs"
+        )
+
+
 def _readme_workflow_examples() -> list[str]:
     """Fenced yaml blocks in README that configure the action."""
     import re
@@ -114,16 +170,31 @@ def _readme_workflow_examples() -> list[str]:
 def test_readme_examples_honour_a_dispatch_prompt_they_declare() -> None:
     """An example that advertises `workflow_dispatch` must actually use it.
 
-    README declared a required `prompt` input and then passed a hardcoded
-    string to the action, so a manually dispatched run silently ignored what
-    the operator typed — unlike the workflow `mergecraft init` generates and
-    unlike both shipped example templates, which resolve it event-aware.
+    Ported from `pre-0.0.1` #682 (commit 7274cad2), where it never reached
+    `main`.
+
+    The port is deliberately stricter than the `pre-0.0.1` guard: there, the
+    README example already declared a required `prompt` input and hardcoded
+    the text passed to the action, so the guard only had to catch the
+    hardcoding. `main`'s example declares no input at all, which makes the
+    verbatim guard vacuous — it would pass green while the advertised
+    `workflow_dispatch` path ignores any prompt. So this pins the contract the
+    `pre-0.0.1` example (and `mergecraft init`) satisfies: declare the prompt
+    input, and honour it.
     """
     examples = _readme_workflow_examples()
     assert examples, "no action example found in README"
     for block in examples:
-        if "workflow_dispatch" not in block or "inputs:" not in block:
+        if "workflow_dispatch" not in block:
             continue
+        assert "inputs:" in block, (
+            "README example advertises workflow_dispatch but declares no prompt "
+            "input; the event-aware example `mergecraft init` generates does"
+        )
+        assert "prompt" in block, (
+            "README example advertises workflow_dispatch but declares no prompt "
+            "input; the event-aware example `mergecraft init` generates does"
+        )
         assert "github.event.inputs.prompt" in block or "inputs.prompt" in block, (
             "README example declares a workflow_dispatch prompt input but never "
             "passes it to the action; a dispatched run would ignore it"

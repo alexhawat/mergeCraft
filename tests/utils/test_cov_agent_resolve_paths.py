@@ -24,6 +24,8 @@ from mergecraft.config.settings import RepoSettings
 from mergecraft.models import BEDROCK_MODEL_ID_ENV, VERTEX_MODEL_ID_ENV
 from mergecraft.utils import agent_resolve as ar
 
+pytestmark = pytest.mark.coverage
+
 if TYPE_CHECKING:
     from pathlib import Path
 

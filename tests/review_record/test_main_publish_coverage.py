@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.agents.shared import AgentUsage
 from mergecraft.config.settings import RepoSettings
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.run_packet import prepare_run_packet
@@ -15,17 +15,6 @@ from tests.evidence.test_run_packet import _make_ctx
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@dataclass
-class _UsageRow:
-    total_tokens: int
-
-
-@dataclass
-class _SplitUsageRow:
-    input_tokens: int
-    output_tokens: int
 
 
 def _publish() -> Any:
@@ -44,21 +33,15 @@ def _token_summary() -> Any:
     ("rows", "expected"),
     [
         ([], None),
-        ([_UsageRow(total_tokens=100), _UsageRow(total_tokens=50)], "100, 50"),
+        # #801: the fallback reads the split from real `AgentUsage`, not a
+        # combined `total_tokens`. The old expectation was `"100, 50"`.
         (
-            [_SplitUsageRow(input_tokens=100, output_tokens=40)],
-            "100 input / 40 output",
-        ),
-        (
-            [
-                _SplitUsageRow(input_tokens=100, output_tokens=40),
-                _SplitUsageRow(input_tokens=50, output_tokens=10),
-            ],
-            "150 input / 50 output",
+            [AgentUsage(agent="claude", input_tokens=100, output_tokens=50)],
+            "100 input / 50 output",
         ),
     ],
 )
-def test_token_summary_formats_usage_entries(rows: list[Any], expected: str | None) -> None:
+def test_token_summary_formats_usage_entries(rows: list[AgentUsage], expected: str | None) -> None:
     assert _token_summary()(rows) == expected
 
 

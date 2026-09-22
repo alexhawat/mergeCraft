@@ -298,52 +298,55 @@ def resolve_run_bounds(
     )
 
 
-def _usage_input_output(usage_entries: list[Any]) -> tuple[int, int] | None:
-    """Sum input and output tokens from usage rows that report the split."""
+def _usage_token_totals(usage_entries: list[Any]) -> tuple[int, int]:
+    """Sum ``input_tokens`` and ``output_tokens`` across usage rows.
+
+    ``AgentUsage`` carries the two counts separately; zero is rendered
+    honestly rather than dropped (#801). Rows missing either attribute
+    contribute nothing, so a partial record still renders what it has.
+    """
     input_total = 0
     output_total = 0
-    found = False
     for row in usage_entries:
-        inp = getattr(row, "input_tokens", None)
-        out = getattr(row, "output_tokens", None)
-        if isinstance(inp, int):
-            found = True
-            input_total += inp
-        if isinstance(out, int):
-            found = True
-            output_total += out
-    if not found:
-        return None
+        input_total += int(getattr(row, "input_tokens", 0) or 0)
+        output_total += int(getattr(row, "output_tokens", 0) or 0)
     return input_total, output_total
-
-
-def _format_input_output(input_tokens: int, output_tokens: int) -> str:
-    return f"{input_tokens:,} input / {output_tokens:,} output"
 
 
 def format_token_budget_summary(
     tracker: BudgetTracker,
     *,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
+    usage_entries: list[Any] | None = None,
 ) -> str:
     """Render token usage with target, ceiling, phase attribution, and over-target flag.
 
-    When input and output counts are supplied, the published figure names both
-    instead of a single combined total (#801).
+    When ``usage_entries`` is supplied, the usage figure splits input and output
+    (#801) — the per-run budget itself stays combined, unchanged by this
+    display-only split. Without it, the legacy combined ``tokens_used``
+    total is rendered.
+
+    The input/output sums come only from ``AgentUsage`` rows, so any other
+    budgeted tokens would be dropped and total consumption under-reported. The
+    only non-agent charge today is dynamic context expansion, recorded at the
+    ``context_expansion`` phase (:mod:`mergecraft.context.dynamic_expansion`);
+    it is rendered as its own component so the published components sum to
+    ``tracker.tokens_used``.
     """
     bounds = tracker.bounds
-    used = tracker.tokens_used
-    if input_tokens is not None and output_tokens is not None:
-        split = _format_input_output(input_tokens, output_tokens)
-        if used == input_tokens + output_tokens:
-            head = f"{split} used"
-        else:
-            head = f"{split}; {used:,} used"
+    if usage_entries is None:
+        used = f"{tracker.tokens_used:,} used"
     else:
-        head = f"{used:,} used"
+        input_total, output_total = _usage_token_totals(usage_entries)
+        context_extra = tracker.tokens_used - (input_total + output_total)
+        if context_extra > 0:
+            used = (
+                f"{input_total:,} input / {output_total:,} output / "
+                f"{context_extra:,} context expansion used"
+            )
+        else:
+            used = f"{input_total:,} input / {output_total:,} output used"
     parts = [
-        f"{head} (target {bounds.token_budget:,}, ceiling {bounds.token_ceiling:,})",
+        f"{used} (target {bounds.token_budget:,}, ceiling {bounds.token_ceiling:,})",
     ]
     if tracker.over_target:
         parts.append("over target")
@@ -360,26 +363,21 @@ def token_summary_from_usage(
     *,
     budget_tracker: BudgetTracker | None = None,
 ) -> str | None:
-    """Prefer budget-tracker band summary; fall back to usage-entry input/output."""
-    split = _usage_input_output(usage_entries)
+    """Render published token usage with input and output split (#801).
+
+    The per-run budget band summary is preferred when a tracker has recorded
+    usage; otherwise the raw per-attempt ``AgentUsage`` counts are summed. Both
+    paths publish ``"{input:,} input / {output:,} output"`` and never a single
+    combined figure.
+    """
     if isinstance(budget_tracker, BudgetTracker) and (
         budget_tracker.tokens_used > 0 or budget_tracker.over_target
     ):
-        if split is not None:
-            return format_token_budget_summary(
-                budget_tracker,
-                input_tokens=split[0],
-                output_tokens=split[1],
-            )
-        return format_token_budget_summary(budget_tracker)
-    if split is not None:
-        return _format_input_output(split[0], split[1])
-    totals = [
-        str(row.total_tokens)
-        for row in usage_entries
-        if getattr(row, "total_tokens", None) is not None
-    ]
-    return ", ".join(totals) if totals else None
+        return format_token_budget_summary(budget_tracker, usage_entries=usage_entries)
+    if not usage_entries:
+        return None
+    input_total, output_total = _usage_token_totals(usage_entries)
+    return f"{input_total:,} input / {output_total:,} output"
 
 
 def enumerate_unbounded_external_operations() -> list[str]:

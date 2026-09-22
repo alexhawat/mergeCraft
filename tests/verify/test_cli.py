@@ -87,7 +87,10 @@ def test_cli_allow_stub_writes_a_report(tmp_path: Path) -> None:
             "--allow-stub",
         ],
     )
-    assert result.exit_code in {0, 1}
+    # The stub driver reports the criterion unmet, so verify exits 1 — a
+    # report is still written. Pinned exactly (T-D5); the old {0, 1} accepted
+    # both the pass and fail verdicts and so asserted nothing.
+    assert result.exit_code == 1
     assert list(artifacts.rglob("*.json"))
 
 
@@ -114,7 +117,9 @@ def test_cli_reproduce_mode_accepts_issue_file(tmp_path: Path) -> None:
             "--allow-stub",
         ],
     )
-    assert result.exit_code in {0, 1}
+    # The stub driver cannot reproduce the issue, so reproduce exits 1 — a
+    # report is still written. Pinned exactly (T-D5).
+    assert result.exit_code == 1
     assert list(artifacts.rglob("*.json"))
 
 

@@ -54,6 +54,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   show input and output token counts separately instead of one combined total
   (#801)
 
+- `make test` no longer runs the nine branch-walking `test_cov_*` suites: they
+  carry a new `coverage` marker and the `make test` selector is now
+  `-m "not integration and not coverage"`. They still run under
+  `make coverage-measure` and `make ci`, so the coverage number is no longer
+  inflated by suites filed among the product tests. The critical-path
+  `utils/token.py` floor stays in `MODULE_FLOORS` unchanged: removing it would
+  leave the token authentication path with no module-level branch check at all
+  (the tree-wide `fail_under` is a line floor), so it is retained until
+  behavioral tests and a measured replacement floor can land together (#771,
+  #797).
+
+- The coverage/mutation CI gate's `enforce` mode is now exercised under test —
+  both `shadow` and `enforce`, asserting the gate action and `reaches`. It had
+  shipped dark, so the branches deciding whether a finding blocks a merge had
+  never run. `review_policy/` and five production modules gained behavioral
+  suites, the `EvalMetadata` verdict vocabulary gained a rejection case, and
+  stale `xfail` markers tagged to a closed issue were deleted (#766, #767,
+  #768, #770).
+
 - The action-pin bump workflow no longer advertises a push it cannot perform.
   `stage=pin` rewrites `.github/workflows/`, which GitHub refuses from a
   `GITHUB_TOKEN` push by construction, so it prepares the four consumer
@@ -123,6 +142,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Verify criteria are scored per criterion; reproduce matches page text to
   repro notes; `--start-command` retries navigate while the app comes up (#61)
+
+- Codex no longer lets a stale ambient `CODEX_AUTH_JSON` override a resolved
+  registry API key: the flat subscription fallback applies only when the
+  registry resolved no Codex credential, so the broker stays active and the
+  selected key is used instead of a stale `auth.json` (#711)
 
 ### Added
 
