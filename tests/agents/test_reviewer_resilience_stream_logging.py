@@ -33,14 +33,17 @@ def _logging_tests_restore_process_handlers() -> Iterator[None]:
     assert _handler_ids() == before
 
 
-def test_loguru_sinks_use_enqueue_true(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("configured", [False, True])
+def test_loguru_sinks_use_enqueue_true(
+    monkeypatch: pytest.MonkeyPatch,
+    configured: bool,
+) -> None:
     from loguru import logger as loguru_logger
 
     from mergecraft.utils import log as log_mod
 
     added: list[dict[str, Any]] = []
     original_handler_id = log_mod._STDERR_HANDLER_ID
-    original_configured = log_mod._CONFIGURED
 
     def _recording_add(*args: Any, **kwargs: Any) -> int:
         added.append(kwargs)
@@ -48,7 +51,9 @@ def test_loguru_sinks_use_enqueue_true(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(log_mod, "_remove_stderr_handler", lambda: None)
     monkeypatch.setattr(log_mod, "_STDERR_HANDLER_ID", original_handler_id)
-    monkeypatch.setattr(log_mod, "_CONFIGURED", original_configured)
+    monkeypatch.setattr(log_mod, "_CONFIGURED", configured)
+    monkeypatch.setattr(loguru_logger, "configure", lambda **_kwargs: None)
+    monkeypatch.setattr(loguru_logger, "remove", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(loguru_logger, "add", _recording_add)
     configure_logging(force=True)
     assert added, "expected at least one sink registration"
