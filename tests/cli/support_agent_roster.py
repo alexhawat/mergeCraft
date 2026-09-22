@@ -37,11 +37,6 @@ models:
 
 MALFORMED_SLOTS: tuple[str, ...] = ("p-1", "pX", "1", "p 0")
 
-W2_XFAIL = pytest.mark.xfail(reason="green after W2: slot primitives", strict=False)
-W4_XFAIL = pytest.mark.xfail(reason="green after W4: agent-local scope", strict=False)
-W5_XFAIL = pytest.mark.xfail(reason="green after W5: registry multiplicity", strict=False)
-W7_XFAIL = pytest.mark.xfail(reason="green after W7: auth manifest fail-closed", strict=False)
-
 WORKFLOW_INDEXED_STEP = """\
 name: mergecraft
 on:
@@ -244,10 +239,6 @@ __all__ = [
     "LOCAL_CONFIG_REL",
     "MALFORMED_SLOTS",
     "REVIEWER_TERMINAL_MODULE",
-    "W2_XFAIL",
-    "W4_XFAIL",
-    "W5_XFAIL",
-    "W7_XFAIL",
     "WORKFLOW_GATED_STEP",
     "WORKFLOW_INDEXED_STEP",
     "agents_entry",

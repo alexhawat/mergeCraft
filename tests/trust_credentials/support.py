@@ -27,12 +27,6 @@ HeadScenario = Literal[
     "head_on_default",
 ]
 
-W2_XFAIL = pytest.mark.xfail(reason="green after W2: agentSandbox policy gate", strict=True)
-W3_XFAIL = pytest.mark.xfail(reason="green after W3: analyzer egress fail-closed", strict=True)
-W4_XFAIL = pytest.mark.xfail(reason="green after W4: credential probe consolidation", strict=True)
-W5_XFAIL = pytest.mark.xfail(reason="green after W5: Logfire action token seam", strict=True)
-W6_XFAIL = pytest.mark.xfail(reason="green after W6: entropy redaction evidence", strict=True)
-
 NOUS_SLUG = "nous/deepseek/deepseek-v4-flash"
 DEFAULT_HEAD_SHA = "abc123def4567890abcdef1234567890abcd1234"
 DEFAULT_BRANCH_SHA = "deadbeef" * 5  # 40-char hex on default branch
@@ -250,11 +244,6 @@ __all__ = [
     "NOUS_SLUG",
     "SANDBOX_MATRIX",
     "SELF_REVIEW_LEVELS",
-    "W2_XFAIL",
-    "W3_XFAIL",
-    "W4_XFAIL",
-    "W5_XFAIL",
-    "W6_XFAIL",
     "decision_honours_override",
     "import_action_symbol",
     "import_agent_resolve_symbol",

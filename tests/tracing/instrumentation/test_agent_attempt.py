@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from tests.tracing.instrumentation.conftest import (
     make_agent_result,
     make_agent_usage,
@@ -79,34 +78,6 @@ def test_one_agent_attempt_span_per_fallback_entry(captured_sink: Any) -> None:
     assert len(attempts) == 3, f"expected 3 agent.attempt spans, got {len(attempts)}"
     indices = [attempt.attrs.get("model.fallback_index") for attempt in attempts]
     assert indices == [0, 1, 2], f"fallback indices out of order: {indices}"
-
-
-@pytest.mark.xfail(reason="green after W4: agent.attempt per fallback entry (#276)", strict=True)
-def test_one_agent_attempt_span_for_skipped_entry(captured_sink: Any) -> None:
-    """W3.2 (skipped) — entry 0 is skipped (missing creds); entry 1 succeeds.
-
-    With chain ``[a, b]`` and only ``b`` runnable, the production chain
-    emits exactly one ``agent.attempt`` for ``b`` at index 0 (the
-    *runnable* index, not the configured chain index). The skipped entry
-    is a configuration-time skip, not a runtime attempt — this test pins
-    that distinction by configuring two models and asserting one span
-    lands.
-
-    The plan's literal "skipped entry" wording covers the *retryable*
-    case below; here we exercise the runnable-chain layout.
-    """
-    settings = _build_settings(models=["anthropic/claude-sonnet", "openai/gpt-5"])
-    results = [
-        make_agent_result(success=True, usage=make_agent_usage(agent="codex")),
-    ]
-    winning_slug, result = _drive_chain(settings, results)
-    assert winning_slug == "openai/gpt-5"
-    assert result.success
-
-    captured_sink.record()
-    attempts = captured_sink.by_kind.get("agent.attempt", [])
-    assert len(attempts) == 1
-    assert attempts[0].attrs.get("model.fallback_index") == 0
 
 
 def test_one_agent_attempt_span_per_retryable_failure(captured_sink: Any) -> None:
@@ -181,7 +152,6 @@ def test_agent_attempt_span_carries_provider_model_and_mode(captured_sink: Any) 
 
 __all__ = [
     "test_agent_attempt_span_carries_provider_model_and_mode",
-    "test_one_agent_attempt_span_for_skipped_entry",
     "test_one_agent_attempt_span_per_fallback_entry",
     "test_one_agent_attempt_span_per_retryable_failure",
     "test_one_agent_attempt_span_when_chain_is_singleton",

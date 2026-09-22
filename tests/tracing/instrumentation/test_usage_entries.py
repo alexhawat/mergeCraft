@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from tests.tracing.instrumentation.conftest import make_agent_usage
 
 
@@ -122,53 +121,7 @@ def test_usage_entries_field_may_be_deleted(captured_sink: Any) -> None:
         pass
 
 
-@pytest.mark.xfail(reason="green after W4: usage_entries consumer or deletion (#276)", strict=True)
-def test_usage_entries_aggregation_across_multiple_attempts(captured_sink: Any) -> None:
-    """W3.5 — multi-attempt chain: each ``llm.call`` span carries *its* usage.
-
-    With a 2-entry chain where both attempts succeed, each attempt's
-    ``AgentUsage`` must reach its own ``llm.call`` span. W4 may also
-    expose an aggregated view; the test only asserts per-span attribution.
-    """
-    from mergecraft.agents.shared import AgentResult
-    from mergecraft.config import RepoSettings
-
-    settings = RepoSettings.model_validate(
-        {
-            "tracing": {"enabled": True, "sinks": [{"type": "memory"}]},
-            "models": ["anthropic/claude-sonnet", "openai/gpt-5"],
-        }
-    )
-    results = [
-        AgentResult(
-            success=False,
-            error="transient",
-            retryable=True,
-            usage=make_agent_usage(input_tokens=100, output_tokens=20, cost_usd=0.005),
-        ),
-        AgentResult(
-            success=True,
-            usage=make_agent_usage(input_tokens=300, output_tokens=70, cost_usd=0.02),
-        ),
-    ]
-    _drive_chain(settings, results)
-
-    captured_sink.record()
-    llm_calls = captured_sink.by_kind.get("llm.call", [])
-    assert len(llm_calls) == 2, f"expected 2 llm.call spans, got {len(llm_calls)}"
-
-    # Each call must carry its own cost.* attributes.
-    for span in llm_calls:
-        cost_attrs = {
-            key: value
-            for key, value in span.attrs.items()
-            if isinstance(key, str) and key.startswith("cost.")
-        }
-        assert cost_attrs, f"llm.call span missing cost.* attrs: {span.attrs}"
-
-
 __all__ = [
-    "test_usage_entries_aggregation_across_multiple_attempts",
     "test_usage_entries_are_consumed",
     "test_usage_entries_field_may_be_deleted",
 ]

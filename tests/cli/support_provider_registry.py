@@ -423,8 +423,6 @@ def bootstrap_nous_registry(
 
 # BF #483 — ``provider migrate`` / config-secret split (D2, D7, D10).
 
-BF_XFAIL = pytest.mark.xfail(reason="green after BF impl", strict=False)
-
 LEGACY_API_KEY_MIGRATIONS: dict[str, tuple[str, str]] = {
     "OPENAI_API_KEY": ("openai", "API_KEY"),
     "ANTHROPIC_API_KEY": ("anthropic", "API_KEY"),
@@ -519,8 +517,6 @@ def env_text(tmp_path: Path) -> str:
 
 
 # BG #484 — ``workflow`` CLI authoring + surgical workflow YAML mutator (D9).
-
-BG_XFAIL = pytest.mark.xfail(reason="green after BG impl", strict=False)
 
 WORKFLOW_CMD_MODULE = "mergecraft.cli.workflow_cmd"
 WORKFLOW_WF_YAML_MODULE = "mergecraft.cli.workflow_wf_yaml"
