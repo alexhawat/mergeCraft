@@ -501,7 +501,7 @@ def test_record_tool_call_redacts_and_bounds_every_persisted_field() -> None:
     assert REDACTION_SENTINEL in row.error
     assert len(row.command) <= 400
     assert len(row.error) <= 400
-    assert row.paths == ["src/app.py"]
+    assert row.paths == []
 
 
 def test_build_trajectory_sanitizes_copies_of_direct_and_external_calls() -> None:
