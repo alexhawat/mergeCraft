@@ -18,12 +18,12 @@ dependencies = [
     "loguru==0.7.3",
     "httpx==0.28.1",
     "rich==15.0.0",
-    "typer==0.25.1",
+    "typer==0.27.2",
     "pyyaml==6.0.3",
     "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
     "fastapi==0.141.1",
-    "uvicorn[standard]==0.52.4",
+    "uvicorn[standard]==0.53.0",
     "starlette==1.6.0",
     "jsonschema==4.26.0",
     "semver==3.1.0",
@@ -37,7 +37,7 @@ dependencies = [
     "tree-sitter==0.26.0",
     "tree-sitter-python==0.25.0",
     "typing-extensions==4.16.0",
-    "typesafe-sdk==0.6.0",
+    "typesafe-sdk==0.7.0",
     # CDP transport for the host-Chrome verify driver (`mergecraft.browser.cdp`).
     # Pinned to the version already locked transitively via uvicorn[standard].
     "websockets==15.0.1",
@@ -65,7 +65,7 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-xdist==3.8.0",
-    "ruff==0.16.7",
+    "ruff==0.16.8",
     "mypy==2.3.1",
     "pre-commit==4.6.2",
     "bandit[toml]==1.9.4",
@@ -81,11 +81,11 @@ dev = [
     # Pinned to the version in analyzers/catalog/ast-grep.yaml so dev/test
     # runs exercise the same declaration-node kinds as the managed binary
     # impact.py resolves at review time.
-    "ast-grep-cli==0.44.1",
+    "ast-grep-cli==0.45.3",
     # Pinned to analyzers/catalog/vulture.yaml — repo-native dead-code scan (#427).
     "vulture==2.16",
     # Pinned to analyzers/catalog/typos.yaml — repo-native typo checker (#427).
-    "typos==1.50.1",
+    "typos==1.50.2",
     # BR0 / D14b — property-based tests for redaction transforms (BR1 RED suite).
     "hypothesis==6.168.0",
 ]
