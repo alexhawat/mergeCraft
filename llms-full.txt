@@ -581,7 +581,8 @@ Use this when asked to add AI PR review to another repository.
    invent, paste, or commit credentials, tokens, secrets, or `.env` files. Each
    `mergecraft provider auth … --scope github` stores a GitHub Actions secret via `gh secret set` — hand
    that step to the human when interactive auth is required.
-5. **Commit only** `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
+5. **Commit only** `.mergecraft/config.yaml`, `.mergecraft/learnings.md`,
+   `.github/workflows/mergecraft.yml`, and any `.gitignore` lines `init` added
    on a new branch. Do not commit secrets.
 6. **Trigger a review** — open a pull request or run the workflow via
    `workflow_dispatch`. The default `mergecraft init` workflow does **not**
@@ -609,7 +610,8 @@ Follow the same consumer flow as other agents:
    tokens, secrets, or `.env` files.
 4. After the human confirms the GitHub Actions secret is stored, you may run
    **`mergecraft doctor`** and **`mergecraft review`** as needed.
-5. Commit only `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
+5. Commit only `.mergecraft/config.yaml`, `.mergecraft/learnings.md`,
+   `.github/workflows/mergecraft.yml`, and any `.gitignore` lines `init` added
    on a new branch in the consumer repo.
 
 ## Working on this repo (development)
