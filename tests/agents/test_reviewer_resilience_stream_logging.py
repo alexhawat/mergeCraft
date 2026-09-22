@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import threading
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -13,16 +15,40 @@ from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_st
 from mergecraft.utils.log import configure_logging
 
 
+def _handler_ids() -> frozenset[int]:
+    """Return the process-global Loguru handler identities owned by the suite."""
+    from loguru import logger
+
+    return frozenset(logger._core.handlers)
+
+
+@pytest.fixture(autouse=True)
+def _logging_tests_restore_process_handlers() -> Iterator[None]:
+    """Keep this module's logger exercises from leaking into later tests."""
+    from loguru import logger
+
+    before = _handler_ids()
+    yield
+    logger.complete()
+    assert _handler_ids() == before
+
+
 def test_loguru_sinks_use_enqueue_true(monkeypatch: pytest.MonkeyPatch) -> None:
     from loguru import logger as loguru_logger
 
+    from mergecraft.utils import log as log_mod
+
     added: list[dict[str, Any]] = []
-    original_add = loguru_logger.add
+    original_handler_id = log_mod._STDERR_HANDLER_ID
+    original_configured = log_mod._CONFIGURED
 
     def _recording_add(*args: Any, **kwargs: Any) -> int:
         added.append(kwargs)
-        return original_add(*args, **kwargs)
+        return original_handler_id if original_handler_id is not None else 0
 
+    monkeypatch.setattr(log_mod, "_remove_stderr_handler", lambda: None)
+    monkeypatch.setattr(log_mod, "_STDERR_HANDLER_ID", original_handler_id)
+    monkeypatch.setattr(log_mod, "_CONFIGURED", original_configured)
     monkeypatch.setattr(loguru_logger, "add", _recording_add)
     configure_logging(force=True)
     assert added, "expected at least one sink registration"
@@ -37,14 +63,11 @@ def test_log_queue_drain_registered_on_atexit() -> None:
     assert hasattr(git_setup, "_register_log_drain")
 
 
-def test_concurrent_logger_and_stream_writes_do_not_interleave(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_concurrent_logger_and_stream_writes_do_not_interleave() -> None:
     from loguru import logger
 
     buffer = io.StringIO()
-    logger.remove()
-    logger.add(buffer, format="{message}", enqueue=True)
+    sink_id = logger.add(buffer, format="{message}", enqueue=True)
 
     stop = threading.Event()
 
@@ -61,20 +84,28 @@ def test_concurrent_logger_and_stream_writes_do_not_interleave(
         consume_stream(raw_stream=lines, accumulator=acc, handler=lambda *_a, **_k: None)
         stop.set()
 
-    t1 = threading.Thread(target=_logger_thread)
-    t2 = threading.Thread(target=_stream_thread)
-    t1.start()
-    t2.start()
-    t1.join(timeout=30)
-    t2.join(timeout=30)
+    try:
+        t1 = threading.Thread(target=_logger_thread)
+        t2 = threading.Thread(target=_stream_thread)
+        t1.start()
+        t2.start()
+        t1.join(timeout=30)
+        t2.join(timeout=30)
+        assert not t1.is_alive()
+        assert not t2.is_alive()
 
-    output = buffer.getvalue().splitlines()
-    for line in output:
-        if line.startswith("LOG-LINE-"):
-            assert line.endswith("-END")
-        elif line.startswith("{"):
-            parsed = json.loads(line)
-            assert isinstance(parsed, dict)
+        logger.complete()
+        output = buffer.getvalue().splitlines()
+        log_lines = [line for line in output if line.startswith("LOG-LINE-")]
+        assert len(log_lines) == 2000
+        assert all(line.endswith("-END") for line in log_lines)
+        for line in output:
+            if line.startswith("{"):
+                parsed = json.loads(line)
+                assert isinstance(parsed, dict)
+    finally:
+        logger.complete()
+        logger.remove(sink_id)
 
 
 def test_consume_stream_marks_activity_per_event(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,14 +178,20 @@ def test_actions_step_debug_no_longer_dumps_raw_line(
     outcome, paths, failure class — is the forensic surface. The interleaved
     raw dump is not reinstated, even under ``ACTIONS_STEP_DEBUG``.
     """
+    from loguru import logger
+
     monkeypatch.setenv("ACTIONS_STEP_DEBUG", "true")
-    configure_logging(force=True)
     raw = json.dumps({"type": "item.completed", "item": {"id": "debug"}})
-    consume_stream(
-        raw_stream=[raw],
-        accumulator=StreamSpanAccumulator(agent_name="codex"),
-        handler=lambda *_a, **_k: None,
-    )
+    sink_id = logger.add(sys.stderr, level="DEBUG", enqueue=True)
+    try:
+        consume_stream(
+            raw_stream=[raw],
+            accumulator=StreamSpanAccumulator(agent_name="codex"),
+            handler=lambda *_a, **_k: None,
+        )
+        logger.complete()
+    finally:
+        logger.remove(sink_id)
     captured = capsys.readouterr()
     assert raw not in captured.out
     assert raw not in captured.err
