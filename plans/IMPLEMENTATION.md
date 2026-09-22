@@ -20,6 +20,14 @@ Implementation is in progress on `codex/implement-issue-remediation-20260922`, i
 
 A final validation attempt at `4abd9199` passed static checks, both type checkers, package/docs generation checks and security. Normal CI and group 1 then exposed the same old fixture defect: `test_coverage_hh._coverage_json` labelled a module as 96% covered but truncated 9.6 covered branches to 9/10 (90%), below the correctly raised 91.2% token floor. The test-only correction is integrated as `cbdf2b0c`: fully covered modules isolate the global 82% contract. The coordinator reran both exact coverage fixture/floor files: **11 passed, 1 expected skip** because no previous root coverage report exists. The three test runs were interrupted after diagnosis (CI: 1 failed/920 passed; group 1: 1 failed/1,584 passed; group 2: 1,556 passed). These incomplete runs do not satisfy final CI or parity. Production floors are unchanged by this test-only correction.
 
+### Completed integrated validation and parity follow-up
+
+At frozen source `68e56cd9405d4512b8963113f7a8140af8f01c1a`, default `make ci` passed all static, type, build, documentation, security and coverage gates: **10,033 passed, 16 skipped, 22 deselected, 4 xfailed**, with 17 warnings in 2,461.51 seconds. Native combined coverage was **83.2872338961593%**. Both complete isolated shards also passed (group 1: 5,015 passed/10 skipped/3 xfailed; group 2: 5,018 passed/8 skipped/1 xfailed), with an exact, disjoint union of 10,051 selected nodes. The official `make coverage-combine-gate` passed source/runtime/collection validation, ratchet and every coverage floor; combined coverage was **83.29549051177256%**.
+
+Exact per-file parity nevertheless failed: the shards covered two additional lines and four additional branches in doctor credential detection, run-manifest tracing configuration, shell Git-directory fallback protection and empty owned-workspace cleanup. Both gate decisions passed, but this difference does not satisfy plan 008's exact comparison. Test-only commit `70c5d6c8` exercises those paths explicitly and removes timing dependence from a socket shutdown/error regression. No production behavior or threshold was relaxed. Independent validation of all five affected test files passed **293 tests**, with four warnings in 54.89 seconds. A fresh same-source default CI and complete two-shard comparison will verify the final test changes.
+
+All receipts remain under `/private/tmp/mergecraft-remediation-validation-20260922/`: `final-v2-ci.log`, `final-v2-unsharded.json`, `final-v2-parity-shards/`, `final-v2-combine.log`, `final-v2-combined.json`, `final-v2-parity-differences.json`, and `stability-focused.log`. Earlier failed attempts remain diagnostic evidence only.
+
 ## Release inventory (plan 015)
 
 Read-only GitHub inventory on 2026-09-22 found:
@@ -55,7 +63,7 @@ The 85 audit/probe tests in VERIFICATION.md describe the original bugs and are n
 | 016 visible provisioning failure causes | `0edae3fb` | 68 adapter, contract, supply-chain, provisioning and sandbox tests passed |
 | 014 offline benchmark publication | `e79fdeec` | 66 publication, receipt, live-boundary and calibration tests passed; one expected xfail for still-unpublished live metrics |
 
-These are focused checks, not a completed full CI gate. The initial redaction-check command named a nonexistent test file and ran no tests; the corrected exact-file invocation above completed successfully. The baseline generated-documentation check also passed.
+The table records focused checks; the completed integrated CI and pending exact-parity follow-up are recorded above. The initial redaction-check command named a nonexistent test file and ran no tests; the corrected exact-file invocation above completed successfully. The baseline generated-documentation check also passed.
 
 Issue #827 was filed during implementation after a deterministic reproduction showed that the shared redactor masked the shipped doctrine filename. The central correction preserves bounded ordinary uppercase identifier components while existing high-entropy and credential-prefix tests remain green; trajectory persistence never restores redactor-removed values.
 
