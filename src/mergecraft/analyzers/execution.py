@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import sys
 import time
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
+from urllib.parse import urlparse
 
 from loguru import logger
 
 from mergecraft.analyzers.provision import ProvisionError, resolve_baked_binary, resolve_with_lock
+from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.analyzers.registry import filter_lint_targets_for_manifest
 from mergecraft.analyzers.resolve import (
     FILES_TOKEN,
@@ -33,6 +36,33 @@ TrustTier = Literal["trusted", "untrusted"]
 _NO_LINT_TARGETS_REASON = "no source files to lint after dropping enablement markers"
 _PROVISION_MAX_ATTEMPTS = 3
 _PROVISION_RETRY_DELAY_S = 1.0
+_PROVISION_FAILURE_MAX_CHARS = 512
+_URL_RE = re.compile(r"https?://[^\s'\"]+")
+
+
+def _safe_url_marker(match: re.Match[str]) -> str:
+    """Retain only a safe origin class needed for transient-outage handling."""
+    try:
+        parsed = urlparse(match.group(0).rstrip(".,);]"))
+    except ValueError:
+        return "<redacted-url>"
+    if parsed.hostname == "github.com" and "/releases/" in parsed.path:
+        return "<github-release-url>"
+    return "<redacted-url>"
+
+
+def _provisioning_error_detail(error: BaseException) -> str:
+    """Return bounded, redacted diagnostic text safe for logs and results."""
+    raw = str(error).strip() or "unspecified error"
+    without_urls = _URL_RE.sub(_safe_url_marker, raw)
+    redacted = " ".join(redact_secrets(without_urls).split()) or "unspecified error"
+    return redacted[:_PROVISION_FAILURE_MAX_CHARS]
+
+
+def provisioning_failure_reason(tool_id: str, error: BaseException) -> str:
+    """Return the visible managed-provisioning failure contract."""
+    prefix = f"skipped {tool_id}: managed binary provisioning failed: "
+    return f"{prefix}{_provisioning_error_detail(error)}"[:_PROVISION_FAILURE_MAX_CHARS]
 
 
 def marker_only_lint_skip_reason(manifest: AnalyzerManifest) -> str:
@@ -124,8 +154,9 @@ def provision_managed_argv(
                 cache_dir=cache_dir,
             )
         except OSError as exc:
-            logger.info("{}", exc)
-            return None
+            detail = _provisioning_error_detail(exc)
+            logger.info("{}", detail)
+            raise ProvisionError(detail) from exc
         argv = list(plan.argv)
         if argv and argv[0] == manifest.command[0]:
             argv[0] = str(script)
@@ -148,7 +179,6 @@ def provision_managed_argv(
     platform_key = provision_platform_key()
     cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
     lock_path = repo_root / ".mergecraft" / "analyzers.lock"
-    last_error: ProvisionError | None = None
     for attempt in range(1, _PROVISION_MAX_ATTEMPTS + 1):
         try:
             result = resolve_with_lock(
@@ -159,23 +189,21 @@ def provision_managed_argv(
             )
             break
         except ProvisionError as exc:
-            last_error = exc
+            detail = _provisioning_error_detail(exc)
             logger.warning(
                 "{}: provisioning failed on attempt {}/{}: {}",
                 manifest.id,
                 attempt,
                 _PROVISION_MAX_ATTEMPTS,
-                exc,
+                detail,
             )
             if attempt < _PROVISION_MAX_ATTEMPTS:
                 time.sleep(_PROVISION_RETRY_DELAY_S)
                 continue
-            logger.info("{}", exc)
-            return None
-    else:
-        assert last_error is not None
-        logger.info("{}", last_error)
-        return None
+            logger.info("{}", detail)
+            raise
+    else:  # pragma: no cover - range is a fixed, non-empty internal constant
+        raise AssertionError("managed provisioning retry loop exhausted without a result")
 
     argv = list(plan.argv)
     if argv and argv[0] == manifest.command[0]:
@@ -214,7 +242,10 @@ def run_argv(
     from mergecraft.analyzers.sandbox import sandbox_skip_findings
 
     plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
-    provisioned = provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
+    try:
+        provisioned = provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
+    except ProvisionError as exc:
+        return None, provisioning_failure_reason(manifest.id, exc), []
     if provisioned is None:
         return None, plan.reason or f"skipped {manifest.id}: provisioning failed", []
 
@@ -258,5 +289,6 @@ __all__ = [
     "provision_managed_argv",
     "provision_platform_key",
     "provision_resolved_plan",
+    "provisioning_failure_reason",
     "run_argv",
 ]
