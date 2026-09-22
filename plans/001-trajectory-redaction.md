@@ -1,6 +1,6 @@
 # Plan 001: Close the trajectory redaction bypass
 
-- Status: TODO
+- Status: Integrated; independent focused verification passed; final combined-tree CI pending
 - Issue: [#819](https://github.com/alexhawat/mergeCraft/issues/819)
 - Priority: P1; effort: S–M; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.

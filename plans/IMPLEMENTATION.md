@@ -41,6 +41,9 @@ The 85 audit/probe tests in VERIFICATION.md describe the original bugs and are n
 | 012 offline trajectory scorer | `7d384ac9` | 80 passed across scorer, trajectory and run-packet tests; development fixtures remain advisory, with human protocol/enforcement pending |
 | 013 offline judge calibration | `ddd442d3` | 102 protocol, scoring, provenance/seal and CLI tests passed; actual independent human labels and held-out validation remain pending |
 | 011 human review preparation | `ec2481f6` | 14 strict manifest/evidence tests passed; rendered [nine-case review sheet](HUMAN-REVIEW.md), all evidence missing and decisions unanswered |
+| 010 complete setup artifact instructions | `3ffdd697` | 42 existing setup/documentation tests passed |
+| 016 visible provisioning failure causes | `0edae3fb` | 68 adapter, contract, supply-chain, provisioning and sandbox tests passed |
+| 014 offline benchmark publication | `e79fdeec` | 66 publication, receipt, live-boundary and calibration tests passed; one expected xfail for still-unpublished live metrics |
 
 These are focused checks, not a completed full CI gate. The initial redaction-check command named a nonexistent test file and ran no tests; the corrected exact-file invocation above completed successfully. The baseline generated-documentation check also passed.
 
@@ -51,3 +54,5 @@ Issue #828 was filed for installation-token revocation reporting success without
 The first tracing run could not bind its local HTTP server under the sandbox; the affected 12-test file was rerun with loopback access and passed. The supported Docker collector target completed successfully and cleaned up its test container. These checks establish trace transport and parenting, not a live provider evaluation.
 
 An intermediate integrated `make ci-static` passed lock/lint, both type checkers, catalog and agent checks, package build, examples and CLI examples. It stopped at the expected generated CLI reference drift for the newly added calibration command; final generation is deferred until all new commands are integrated. The intermediate `make security` passed (no medium/high Bandit findings and no known dependency vulnerabilities). These results do not substitute for the final combined-tree gate.
+
+A final independent review reproduced source drift during combine-time test collection in plan 008. The existing shard-time checks did not cover this boundary. The plan is refined to recheck the validated source/runtime identity after collection and around combination/reporting/gating, with mutation regressions before the complete measurement.

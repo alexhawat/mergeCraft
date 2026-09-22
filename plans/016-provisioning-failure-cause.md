@@ -1,6 +1,6 @@
 # Plan 016: Preserve managed analyzer provisioning failure causes
 
-- Status: TODO
+- Status: Integrated; independent focused verification passed; final combined-tree CI pending
 - Issue: [#825](https://github.com/alexhawat/mergeCraft/issues/825)
 - Planned against main `41cf53b3`, 2026-09-22.
 - Priority: P2; dependencies: none.

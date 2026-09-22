@@ -1,6 +1,6 @@
 # Plan 010: Finish the remaining AGENTS setup artifact lists
 
-- Status: TODO
+- Status: Integrated; independent focused verification passed; final combined-tree CI pending
 - Issue: [#792](https://github.com/alexhawat/mergeCraft/issues/792)
 - Priority: P3; effort: S; change risk: LOW; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.

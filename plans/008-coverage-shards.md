@@ -110,3 +110,7 @@ Stop if actual executed node IDs cannot be recorded, their union cannot be compa
 Refresh the manifest schema deliberately when collection inputs or tool versions change. Cleanup may remove only the exact completed run directory it created, never a broad `.coverage.*` glob shared with another run.
 
 Implementation reconciliation: snapshot compatibility metadata before the test process and reject changed inputs afterward. Include test-selection/configuration and fixture inputs in the dirty fingerprint. Under xdist, record actual post-filter worker collections on the controller and write one node-ID receipt only after successful completion. Combine only the validated raw files, never all files found in their directories. The default serial gate must propagate failures from measurement and each subsequent policy check.
+
+## Final review refinement
+
+Combine-time fresh collection can execute imports and hooks. Recheck the expected source/runtime metadata after that collection and around combination, JSON rendering and gates; reject drift rather than gating old measurements against new source. Add regressions for mutations during fresh collection and reporting. This closes a reproduced gap in the existing complete-set contract.
