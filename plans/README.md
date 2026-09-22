@@ -4,7 +4,13 @@ Audited on **2026-09-22** using current GitHub main **`be9993367386b03f982c795ce
 
 The audit used immutable main source, preserving the original checkout and its pre-existing configuration change. This plan branch starts from the audited main revision in a separate worktree. Implementation branches must start from updated main and pass each plan's drift check. See [EXECUTION.md](EXECUTION.md) for work allocation, integration gates, and the exact meaning of completion.
 
-## What PR #817 closes
+## Implementation update — 2026-09-22
+
+The user authorized implementation after PR #826. Work proceeds in the isolated `codex/implement-issue-remediation-20260922` branch, based on updated main and including merged PR #817 (`41cf53b3`). The original audit below remains a historical record; current implementation verification is recorded separately in [IMPLEMENTATION.md](IMPLEMENTATION.md). The source scopes of the first implementation batch were unchanged; coverage floors and generated documentation must be reconciled with the newer main.
+
+PR #817 merged at 17:16:45 UTC and closed #771. Twenty issues remain open at this snapshot, including the subsequently filed [#825](https://github.com/alexhawat/mergeCraft/issues/825), covered by [plan 016](016-provisioning-failure-cause.md). PR #826 contains plans only and closes none. Implementation closure references will be limited to verified fixes.
+
+## What PR #817 closes (original audit)
 
 [PR #817](https://github.com/alexhawat/mergeCraft/pull/817) is **open and unmerged** at this audit. Its body and GitHub `closingIssuesReferences` contain **only [#771](https://github.com/alexhawat/mergeCraft/issues/771)**. It changes the coverage-floor script and CHANGELOG.
 
@@ -56,13 +62,13 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 
 | Plan | Deliverable | Priority | Dependency | Status |
 |---|---|---|---|---|
-| [001](001-trajectory-redaction.md) | Redact every trajectory persistence route | P1 | — | TODO |
-| [002](002-normalized-terminal-verdict.md) | Finalized findings determine enforced verdict | P1 | — | TODO |
+| [001](001-trajectory-redaction.md) | Redact every trajectory persistence route | P1 | — | IN PROGRESS |
+| [002](002-normalized-terminal-verdict.md) | Finalized findings determine enforced verdict | P1 | — | IN PROGRESS |
 | [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions by purpose | P1 | — | TODO |
-| [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | TODO |
-| [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | TODO |
+| [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | IN PROGRESS |
+| [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | IN PROGRESS |
 | [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | TODO |
-| [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | TODO |
+| [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | IN PROGRESS |
 | [008](008-coverage-shards.md) | Isolated coverage shards + complete-data gate | P2 | 006 | TODO |
 | [009](009-tracing-contracts.md) | Valid tracing contracts and whole-run parent tree | P2 | coordinate 003 | TODO |
 | [010](010-setup-instructions.md) | Finish setup artifact lists | P3 | — | TODO |
@@ -70,7 +76,8 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 | [012](012-trajectory-scoring.md) | Per-check trajectory scoring and labelled baseline | P2 | 001/005 before baseline; separate human trajectories | TODO scorer; human-labelled enforcement pending |
 | [013](013-judge-calibration.md) | Eligibility vs held-out judge calibration | P2 | 007/011 plus broader held-out dataset | TODO reporting; held-out validation pending |
 | [014](014-live-benchmark-publication.md) | Two-provider live detection report | P2 | 013; separate detection labels, model choices and spend ceiling | TODO campaign preparation; live run pending |
-| [015](015-release-candidate.md) | Verified refreshed release and deployment identity | P2 | selected technical fixes 001–010 | TODO candidate preparation; publication separate |
+| [015](015-release-candidate.md) | Verified refreshed release and deployment identity | P2 | selected technical fixes 001–010 | Inventory recorded; fresh candidate/publication pending |
+| [016](016-provisioning-failure-cause.md) | Visible provisioning cause and narrow outage handling (#825) | P2 | — | TODO |
 
 ```mermaid
 flowchart TD
