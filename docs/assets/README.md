@@ -13,7 +13,7 @@ The one binary still missing is the demo capture for the landing README **Visual
 
 | File | Purpose |
 |------|---------|
-| `assets/demo.mp4` | Preferred ~30s screen capture: open PR → `@mergecraft review` → inline findings → approval check |
+| `assets/demo.mp4` | Preferred ~30s screen capture: open PR → review runs → inline findings → approval check |
 | `assets/demo.gif` | GIF fallback when MP4 is unavailable — same capture, shorter loop |
 
 Do not invent a placeholder GIF or MP4 in CI — ship the real capture under `assets/`

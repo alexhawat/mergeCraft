@@ -72,13 +72,14 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    read docs/authentication.md and set up the custom-provider env pair instead.
    Each command stores a GitHub Actions secret for me via `gh secret set`.
 
-5. After I confirm the credential is stored, set `models:` in
-   .mergecraft/config.yaml to a fallback chain whose first entry matches the
-   provider I authenticated. Then run `mergecraft doctor` and fix anything it
-   reports that is not the credential itself.
+5. After I confirm the credential is stored, run `mergecraft doctor` and fix
+   anything it reports that is not the credential itself. The first
+   `provider auth` after `init` seeds `agents.reviewer` and `models:` — only
+   edit `models:` if you want a fallback chain.
 
-6. Commit ONLY .mergecraft/config.yaml, .mergecraft/learnings.md, and
-   .github/workflows/mergecraft.yml on a new branch. Never commit secrets.
+6. Commit ONLY .mergecraft/config.yaml, .mergecraft/learnings.md,
+   .github/workflows/mergecraft.yml, and any `.gitignore` lines `init` added.
+   Never commit secrets.
    Open a pull request titled "ci: add mergeCraft AI PR review".
 
 7. That PR is the first review target. Tell me to watch the `mergecraft-approval`
@@ -248,8 +249,8 @@ Constraints:
     Never fabricate, log, or commit a credential.
   - `mergecraft review --agent` streams versioned JSONL on stdout — use that,
     not screen-scraping, if you want to consume review results.
-  - Exit codes are contractual: 0 pass, 10 findings, 11 blocking, 20
-    inconclusive, 30 config error, 40 provider/infra, 50 timeout.
+  - Exit codes are contractual: 0 pass, 10 findings, 11 blocking, 12 failed,
+    20 inconclusive, 30 config error, 40 provider/infra, 50 timeout, 2 usage.
     See docs/EXIT-CODES.md.
 
 Produce a plan, execute it, then open a PR and report the escalation you need.
