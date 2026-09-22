@@ -374,7 +374,7 @@ jobs:
 
   # R-D10 — optional, keyless fixture replay. Two hard-coded packets go
   # through the gate so the table can be published without a provider. This
-  # is not a live-reviewer comparison and does not close #737.
+  # is not a live-reviewer comparison and leaves #737 open.
   # continue-on-error keeps it advisory, and it reads no provider secret.
   shadow-comparison:
     name: Shadow fixture replay (advisory, keyless)

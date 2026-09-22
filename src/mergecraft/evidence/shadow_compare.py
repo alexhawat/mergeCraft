@@ -259,7 +259,7 @@ def render_disagreement_table(rows: Sequence[Mapping[str, object]]) -> str:
         "",
         "These rows are two hard-coded packets, not a live review. The live "
         "row is the default gate. Prompt 2.0.0 blocks a high-risk migration. "
-        "This job does not run a model and does not close #737. No threshold "
+        "This job does not run a model and leaves #737 open. No threshold "
         "here is calibrated and no rate is a detection-quality claim.",
         "",
         "| Target | Model | Prompt | Lane | Rule | Predicted | Actual | Disagreement |",
@@ -299,7 +299,7 @@ def _runtime_packets() -> list[MergeEvidencePacket]:
     Not a live review and not a second model. ``#101`` is a high-risk
     migration, so prompt 2.0.0 blocks where the live gate asks for a human.
     ``#102`` is a low-risk pass, where the two policies agree. This replay
-    does not close #737.
+    leaves #737 open.
     """
     from mergecraft.classify.blast_radius import BlastRadiusClassification
     from mergecraft.evidence.packet import Decision
@@ -395,13 +395,13 @@ def main(argv: list[str] | None = None) -> int:
 
     ``record`` writes the fixture log. ``publish`` (the default) reads
     ``--from-run`` when given, otherwise replays ``--corpus``. A failure
-    returns 1. This entry point does not run a model and does not close #737.
+    returns 1. This entry point does not run a model and leaves #737 open.
     """
     parser = argparse.ArgumentParser(
         prog="python -m mergecraft.evidence.shadow_compare",
         description=(
             "Replay two hard-coded fixture packets through the gate. Does not "
-            "run a model and does not close #737 (keyless; advisory)."
+            "run a model and leaves #737 open (keyless; advisory)."
         ),
     )
     parser.add_argument(

@@ -57,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A second gate policy (prompt 2.0.0) records through the existing recorder.
   The optional keyless job replays two hard-coded packets; it does not run a
-  model and does not close #737. The live review path never enforces a shadow
+  model and leaves #737 open. The live review path never enforces a shadow
   prediction.
 
 - Production false positives and human dismissals can be ingested into the eval
@@ -149,7 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The keyless shadow job is a fixture replay of two hard-coded packets. It
-  does not read a live review and does not close #737.
+  does not read a live review and leaves #737 open.
 
 - `mergecraft eval ingest --from-dismissals` turns recorded dismissal signals
   into structural eval cases. A dismissal is stored as `agent-seeded`, not as

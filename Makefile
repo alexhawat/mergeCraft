@@ -339,7 +339,7 @@ eval-convergence: ## Score multi-round convergence metric; write result set (RC6
 	$(UV) run mergecraft eval convergence
 
 SHADOW_RUN ?= /tmp/mergecraft-shadow-run.jsonl
-shadow-compare: ## Replay two fixture packets through the gate (keyless, advisory, not #737)
+shadow-compare: ## Replay two fixture packets through the gate (keyless, advisory)
 	$(UV) run python -m mergecraft.evidence.shadow_compare record --output "$(SHADOW_RUN)"
 	$(UV) run python -m mergecraft.evidence.shadow_compare --from-run "$(SHADOW_RUN)"
 
