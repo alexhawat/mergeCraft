@@ -8,7 +8,7 @@ The original checkout and its pre-existing configuration edit are preserved. The
 
 The user authorized implementation after PR #826. Work proceeds in the isolated `codex/implement-issue-remediation-20260922` branch, based on updated main and including merged PR #817 (`41cf53b3`). The original audit below remains a historical record; current implementation verification is recorded separately in [IMPLEMENTATION.md](IMPLEMENTATION.md). The source scopes of the first implementation batch were unchanged; coverage floors and generated documentation must be reconciled with the newer main.
 
-PR #817 merged at 17:16:45 UTC and closed #771. Twenty issues remain open at this snapshot, including the subsequently filed [#825](https://github.com/alexhawat/mergeCraft/issues/825), covered by [plan 016](016-provisioning-failure-cause.md). PR #826 contains plans only and closes none. A later implementation inventory has 22 open issues after new #827/#828 were filed. Implementation closure references will be limited to verified fixes.
+PR #817 merged at 17:16:45 UTC and closed #771. Twenty issues remain open at this snapshot, including the subsequently filed [#825](https://github.com/alexhawat/mergeCraft/issues/825), covered by [plan 016](016-provisioning-failure-cause.md). PR #826 merged at 17:37:07 UTC, contains plans only and closed none. The current implementation inventory has 22 open issues after new #827/#828 were filed. Implementation closure references will be limited to verified fixes.
 
 ## What PR #817 closes (original audit)
 

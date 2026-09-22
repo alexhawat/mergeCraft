@@ -6,6 +6,7 @@ Implementation is in progress on `codex/implement-issue-remediation-20260922`, i
 
 - Original audit: main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`.
 - Implementation started from main `d77511cb93438c064c83d50ffdb9228136e8996b` (merged #818), then integrated main `41cf53b3` (merged #817).
+- Integrated main `e79217be` after plan PR #826 merged. Its plan contents exactly matched the originally cherry-picked plans; the merge retains subsequent implementation refinements and adds no source drift.
 - The first source scopes (001/002/004/005/007) did not drift. #818 changed strict analyzer test handling, which is accounted for in new plan 016. #817 changed coverage floors; plan 006 must use the merged baseline and a new attributable final measurement.
 - Human labels, chosen live models/budgets, candidate-specific release verification and publication remain separate completion criteria. Synthetic tests do not satisfy them.
 

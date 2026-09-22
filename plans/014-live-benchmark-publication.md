@@ -1,6 +1,6 @@
 # Plan 014: Publish a bounded reproducible two-provider detection campaign
 
-- Status: TODO — campaign tooling/report preparation has not started; live execution is BLOCKED on 013, provider/model choices, credentials, and approved spend
+- Status: Publication tooling in progress; live execution remains pending independent labels, actual 013 validation, provider/model choices, credentials, and approved spend
 - Issue: [#140](https://github.com/alexhawat/mergeCraft/issues/140)
 - Priority: P2; effort: M plus live-run/human time; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -99,3 +99,9 @@ Verification: Publication tests/docs-check pass; every table value can be recomp
 Missing independently adjudicated detection labels, 013 validation, provider/model choices, credentials, spend approval, immutable patches, complete execution, or operator publication acceptance blocks the live/publication step. The existing smoke manifest does not clear those gates. Never invent scores or turn structural replay into live quality evidence. Also stop/reconcile on materially drifted source, a twice-failed verification, or an out-of-scope change. Do not count skipped work as complete.
 
 Run new campaigns for materially changed models/rubrics/corpora. Keep old results immutable and document protocol differences.
+
+## Implementation review refinements
+
+Publication consumes the strict plan 013 report and requires successful calibration and held-out threshold results, a seal, and matching candidate/prompt/rubric protocol. A string declaring `validated` is insufficient. Verified raw findings and frozen baselines are rescored with the existing scorer before report values are accepted; the manifest pins closed-world status. Closed-world strict precision aggregates TP and FP counts rather than averaging per-case precision. Reports retain unadjudicated findings, closed-world FP measures, intervals, latency, source/result hashes and exact protocol pins.
+
+Historical structural model defaults are not detection execution evidence. Execution receipts must distinguish the model actually requested/executed from configured structural defaults; unavailable immutable identity remains ineligible rather than being invented. Hashes are captured at the execution boundary and mutation during review invalidates the receipt. Actual reported costs must fit the approved bounds; missing actual cost remains unknown. Existing campaign outputs are immutable. No live run or publication claim is created during implementation.

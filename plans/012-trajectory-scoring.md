@@ -1,6 +1,6 @@
 # Plan 012: Score the existing trajectory auditor on independently labelled runs
 
-- Status: TODO — scorer implementation has not started; labelled-baseline enforcement is BLOCKED on a separate human trajectory corpus
+- Status: Scorer implementation in progress; labelled-baseline enforcement remains pending a separate human trajectory corpus and approved protocol
 - Issue: [#735](https://github.com/alexhawat/mergeCraft/issues/735)
 - Priority: P2; effort: L; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -91,3 +91,7 @@ Verification: make eval-trajectory and make eval-gate pass baseline fixtures; a 
 Stop baseline enforcement if a check lacks the approved sample count, the matching unit is ambiguous, split/hash validation fails, or tolerances were chosen after held-out scores were viewed. Resolve the protocol before tuning thresholds. Also stop/reconcile on materially drifted source, a twice-failed verification, or an out-of-scope change. Do not count skipped work as complete.
 
 Version matching/scoring policy and auditor changes together. Preserve raw disagreements so a score change can be explained.
+
+## Implementation review refinements
+
+Repeated case IDs or canonical trajectory hashes are rejected across the entire input collection, including repeated files in the same split, to prevent accidental sample weighting. Reports retain source commits, label-set and trajectory hashes, split membership and named human attribution. Independent label provenance is separate from quality eligibility: until a predeclared minimum-count/tolerance protocol and frozen baseline exist, all scoring remains advisory, including human-labelled inputs. Unknown labels cannot establish passing quality. Unexpected runtime rule IDs fail closed instead of being silently excluded from metrics.
