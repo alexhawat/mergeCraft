@@ -79,11 +79,13 @@ class _FakeClient:
         *,
         get_response: _FakeResponse | None = None,
         post_response: _FakeResponse | None = None,
+        delete_response: _FakeResponse | None = None,
         delete_error: Exception | None = None,
     ) -> None:
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
         self._get_response = get_response
         self._post_response = post_response or _FakeResponse(json_data={"token": "ghs_test"})
+        self._delete_response = delete_response or _FakeResponse(status_code=204)
         self._delete_error = delete_error
 
     async def __aenter__(self) -> _FakeClient:
@@ -105,7 +107,7 @@ class _FakeClient:
         self.calls.append(("DELETE", url, kwargs))
         if self._delete_error is not None:
             raise self._delete_error
-        return _FakeResponse()
+        return self._delete_response
 
 
 def _install_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -> _FakeClient:
@@ -299,6 +301,27 @@ async def test_revoke_installation_token_never_raises(
     )
 
     assert await revoke_installation_token("ghs_x") is None
+
+
+@pytest.mark.parametrize("status_code", [403, 500])
+async def test_revoke_installation_token_logs_http_failures_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    _install_client(
+        monkeypatch,
+        _FakeClient(delete_response=_FakeResponse(status_code=status_code)),
+    )
+    messages: list[str] = []
+
+    def _record_info(message: str, *args: object) -> None:
+        messages.append(message.format(*args))
+
+    monkeypatch.setattr(token_mod.logger, "info", _record_info)
+
+    assert await revoke_installation_token("ghs_secret_value") is None
+    assert messages == [f"Failed to revoke installation token: HTTP {status_code}"]
+    assert "ghs_secret_value" not in messages[0]
 
 
 # ── resolve_tokens ───────────────────────────────────────────────────────────

@@ -68,7 +68,7 @@ async def revoke_installation_token(token: str) -> None:
     api_url = (os.environ.get("GITHUB_API_URL") or "https://api.github.com").rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            await client.delete(
+            response = await client.delete(
                 f"{api_url}/installation/token",
                 headers={
                     "Accept": "application/vnd.github+json",
@@ -76,6 +76,7 @@ async def revoke_installation_token(token: str) -> None:
                     "X-GitHub-Api-Version": "2022-11-28",
                 },
             )
+            response.raise_for_status()
         logger.debug("» installation token revoked")
     except Exception as exc:
         logger.info("Failed to revoke installation token: {}", exc)
