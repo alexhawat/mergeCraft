@@ -14,10 +14,12 @@ existing ``record_shadow_prediction`` writer. This module is that comparison:
 * :data:`LIVE_TARGET` / :data:`SECOND_TARGET` are the two concrete pinned
   configs: the live target is the incumbent model, the second target is a
   different pinned model id *and* prompt version.
-* The ``__main__`` entry point is the optional, **keyless** CI job. It replays a
-  committed corpus of recorded predictions through both targets and publishes
-  the disagreement table — structural replay only, never live detection, and
-  never a required PR check.
+* The ``__main__`` entry point is the optional, **keyless** CI job. It records
+  the live target from the committed corpus (that target's recorded review)
+  and a second target only when the corpus row is marked ``executed`` — a run
+  produced that output. An unmarked second-target row is dropped, so the table
+  cannot publish a hand-authored disagreement as if the other model had run.
+  Structural replay only, never live detection, and never a required PR check.
 
 Two properties are load-bearing:
 
@@ -109,6 +111,9 @@ class ShadowComparisonRow(BaseModel):
     diagnostic: str = Field(min_length=1)
     lane: str = Field(default="review", min_length=1)
     actual_outcome: str | None = None
+    executed: bool = False
+    """True when a run produced this row. The live target's recorded review
+    is kept without it; any other target is dropped unless this is set."""
 
 
 def _shadow_placeholder_packet(*, change_id: str, model: str) -> MergeEvidencePacket:
@@ -204,6 +209,8 @@ def _predictions_from_rows(
     predictions: dict[str, dict[str, ShadowPrediction]] = {}
     outcomes: dict[str, str] = {}
     for row in rows:
+        if row.target_id != LIVE_TARGET.target_id and not row.executed:
+            continue
         predictions.setdefault(row.target_id, {})[row.change_id] = ShadowPrediction(
             outcome=row.outcome,
             diagnostic=row.diagnostic,
@@ -251,9 +258,11 @@ def render_disagreement_table(rows: Sequence[Mapping[str, object]]) -> str:
     lines = [
         "### Shadow target comparison (structural replay)",
         "",
-        "Two pinned shadow targets recorded through the existing recorder. "
-        "This is structural replay of recorded predictions — no threshold here "
-        "is calibrated and no rate is a detection-quality claim.",
+        "Rows are outputs a target actually produced. The live target is the "
+        "recorded review. A second pinned target appears only when its corpus "
+        "row is marked executed; an unmarked row is omitted rather than "
+        "published as that model's output. No threshold here is calibrated "
+        "and no rate is a detection-quality claim.",
         "",
         "| Target | Model | Prompt | Lane | Rule | Predicted | Actual | Disagreement |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -317,10 +326,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         rows = load_comparison_corpus(args.corpus)
         predictions, outcomes = _predictions_from_rows(rows)
-        packets = _packets_from_rows(rows, targets=PINNED_TARGETS)
+        targets = tuple(target for target in PINNED_TARGETS if target.target_id in predictions)
+        if not targets:
+            msg = "corpus has no executed target predictions"
+            raise ValueError(msg)
+        packets = _packets_from_rows(rows, targets=targets)
         report = compare_shadow_targets(
             packets,
-            targets=PINNED_TARGETS,
+            targets=targets,
             output_path=args.output or _default_output_path(),
             predictions=predictions,
             outcomes=outcomes,

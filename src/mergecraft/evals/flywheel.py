@@ -37,6 +37,7 @@ Exports:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003 — Pydantic field type on IngestOutcome
 from typing import TYPE_CHECKING, Any, Final, Literal
@@ -341,6 +342,56 @@ def _emit_summary_span(tracer: Tracer | NullTracer | None, report: FlywheelInges
         logger.warning("flywheel ingest summary span failed: {}", exc)
 
 
+def _case_id_for_fingerprint(fingerprint: str) -> str:
+    """Stable bank id for a dismissal fingerprint.
+
+    Fingerprints carry path separators, which are not legal case ids. The
+    digest keeps the id stable without putting the path into the filename.
+    """
+    digest = hashlib.sha256(fingerprint.encode()).hexdigest()[:20]
+    return f"fp-{digest}"
+
+
+def candidates_from_dismissal_signals(
+    records: list[dict[str, str]],
+    *,
+    run_id: str,
+    author_login: str,
+    author_association: str | None = None,
+) -> list[FlywheelCandidate]:
+    """Turn recorded dismissal signals into flywheel candidates.
+
+    ``records`` is the shape :func:`mergecraft.findings.materiality.dismissal_eval_records`
+    writes. A row without a fingerprint or a known reason code is refused
+    rather than stored as an unprovenanced label.
+    """
+    from mergecraft.findings.materiality import DISMISSAL_REASON_CODES
+
+    candidates: list[FlywheelCandidate] = []
+    for record in records:
+        fingerprint = str(record.get("fingerprint", "")).strip()
+        reason_code = str(record.get("reason_code", "")).strip()
+        if not fingerprint or reason_code not in DISMISSAL_REASON_CODES:
+            msg = "dismissal signal needs a fingerprint and a known reason_code"
+            raise ValueError(msg)
+        candidates.append(
+            FlywheelCandidate(
+                case_id=_case_id_for_fingerprint(fingerprint),
+                title=f"Dismissed finding ({reason_code})",
+                category=reason_code,
+                failure_mode=reason_code,
+                expected_finding=fingerprint,
+                expected_decision="neutral",
+                provenance=AGENT_SEEDED_PROVENANCE,
+                body=f"Recorded dismissal {reason_code} for {fingerprint}.",
+                run_id=run_id,
+                author_login=author_login,
+                author_association=author_association,
+            )
+        )
+    return candidates
+
+
 def ingest_flywheel(
     candidates: Sequence[FlywheelCandidate],
     *,
@@ -396,5 +447,6 @@ __all__ = [
     "FlywheelCandidate",
     "FlywheelIngestReport",
     "IngestOutcome",
+    "candidates_from_dismissal_signals",
     "ingest_flywheel",
 ]

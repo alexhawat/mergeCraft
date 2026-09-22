@@ -372,10 +372,10 @@ jobs:
         # (`mergecraft eval replay-bank` → `evals/results/latest.json`) so the
         # gate measures drift, not corpus edits.
 
-  # R-D10 — optional, keyless shadow-target comparison (#737, M4). It diffs two
-  # pinned shadow targets and publishes the disagreement table. It is
-  # deliberately NOT a required PR check: continue-on-error keeps it advisory,
-  # and it reads no provider secret, so a keyless checkout can always run it.
+  # R-D10 — optional, keyless shadow-target comparison (#737, M4). It records
+  # the live target's recorded review, and a second target only when that
+  # row was produced by a run. It does not invent the second target's outcome.
+  # continue-on-error keeps it advisory, and it reads no provider secret.
   # The job fails closed on a recording failure (missing data is not agreement)
   # while the live review path stays silent.
   shadow-comparison:

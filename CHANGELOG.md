@@ -148,6 +148,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The live evidence emit stamps shadow rows with the live target, and the
+  keyless shadow comparison publishes a second target only when that row was
+  produced by a run. An unmarked second-target row is omitted instead of
+  shown as that model's output (#737).
+
+- `mergecraft eval ingest --from-dismissals` turns recorded dismissal signals
+  into structural eval cases. A dismissal is stored as `agent-seeded`, not as
+  a human label (#738).
+
 - The deterministic run record no longer publishes an approval-shaped verdict
   when no credentialed reviewer ran: a skipped reviewer credential renders the
   record `inconclusive` (the GitHub check conclusion stays `neutral`),

@@ -330,6 +330,69 @@ def test_live_emit_swallows_a_shadow_recording_failure(
     assert written.is_file(), "a shadow failure must not stop the evidence packet"
 
 
+def test_live_emit_stamps_the_live_target(tmp_path: Path) -> None:
+    """Production shadow rows name the live target, not an unlabelled legacy row."""
+    from mergecraft.evidence.packet import Decision
+    from mergecraft.evidence.run_packet import emit_run_packet
+    from mergecraft.evidence.shadow import load_shadow_records
+    from mergecraft.evidence.shadow_compare import LIVE_TARGET
+
+    packet = _packet(
+        change_id="acme/demo#42",
+        decision=Decision(
+            verdict="neutral",
+            reason="shadow-mode decision",
+            decided_by="mergecraft.agents.gates.decide_approval",
+            mode="shadow",
+        ),
+    )
+    written = emit_run_packet(_ctx(tmp_path), packet=packet)
+    assert written is not None
+    rows = load_shadow_records(written.with_name("merge-evidence-shadow.jsonl"))
+    assert len(rows) == 1
+    assert rows[0].target_id == LIVE_TARGET.target_id
+    assert rows[0].target_model == LIVE_TARGET.model
+
+
+def test_keyless_job_omits_an_unexecuted_second_target(tmp_path: Path) -> None:
+    """A hand-authored second-target row is not published as that model's output."""
+    from mergecraft.evidence.shadow import load_shadow_records
+    from mergecraft.evidence.shadow_compare import main
+
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text(
+        '{"change_id":"acme/demo#101","target_id":"live","outcome":"block",'
+        '"diagnostic":"high_risk_migration","lane":"high","actual_outcome":"merged"}\n'
+        '{"change_id":"acme/demo#101","target_id":"shadow-b","outcome":"auto_merge",'
+        '"diagnostic":"low_risk_passing","lane":"low","actual_outcome":"merged"}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.jsonl"
+    assert main(["--corpus", str(corpus), "--output", str(output)]) == 0
+    rows = load_shadow_records(output)
+    assert {row.target_id for row in rows} == {"live"}
+
+
+def test_keyless_job_keeps_an_executed_second_target(tmp_path: Path) -> None:
+    """A second target is recorded when the corpus says a run produced the row."""
+    from mergecraft.evidence.shadow import load_shadow_records
+    from mergecraft.evidence.shadow_compare import main
+
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text(
+        '{"change_id":"acme/demo#101","target_id":"live","outcome":"block",'
+        '"diagnostic":"high_risk_migration","lane":"high","actual_outcome":"merged"}\n'
+        '{"change_id":"acme/demo#101","target_id":"shadow-b","outcome":"auto_merge",'
+        '"diagnostic":"low_risk_passing","lane":"low","actual_outcome":"merged",'
+        '"executed":true}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "out.jsonl"
+    assert main(["--corpus", str(corpus), "--output", str(output)]) == 0
+    rows = load_shadow_records(output)
+    assert {row.target_id for row in rows} == {"live", "shadow-b"}
+
+
 # ── the comparison job: records both targets, fails closed on a write error ──
 
 

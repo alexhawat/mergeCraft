@@ -684,6 +684,57 @@ def bench_cmd(
         console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
 
 
+# ── ingest ─────────────────────────────────────────────────────────────
+
+
+@app.command("ingest")
+def ingest_cmd(
+    dismissals: Path = typer.Option(
+        ...,
+        "--from-dismissals",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="JSONL of dismissal_eval_records rows (fingerprint, reason_code).",
+    ),
+    bank: Path | None = typer.Option(
+        None,
+        "--bank",
+        help="Bank directory (default: evals/cases/).",
+    ),
+    run_id: str = typer.Option(..., "--run-id", help="Run id recorded on each ingested case."),
+    author: str = typer.Option(
+        ..., "--author", help="Author login recorded on each ingested case."
+    ),
+) -> None:
+    """Ingest recorded dismissal signals into the structural eval bank.
+
+    Each line is one signal from ``dismissal_eval_records``. The command
+    converts those rows into flywheel candidates and writes the ones the
+    provenance policy accepts. A dismissal is not a human adjudication, so
+    the stored provenance stays ``agent-seeded``.
+    """
+    from mergecraft.evals.flywheel import candidates_from_dismissal_signals, ingest_flywheel
+
+    rows: list[dict[str, str]] = []
+    for number, line in enumerate(dismissals.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            cli_bail(f"{dismissals}:{number}: not valid JSON — {exc}")
+        if not isinstance(payload, dict):
+            cli_bail(f"{dismissals}:{number}: each line must be a JSON object")
+        rows.append({str(key): str(value) for key, value in payload.items()})
+    try:
+        candidates = candidates_from_dismissal_signals(rows, run_id=run_id, author_login=author)
+    except ValueError as exc:
+        cli_bail(str(exc))
+    report = ingest_flywheel(candidates, bank_dir=_bank_dir(bank))
+    console.print(f"ingested {report.ingested_count}, rejected {report.rejected_count}")
+
+
 # ── score ──────────────────────────────────────────────────────────────
 
 

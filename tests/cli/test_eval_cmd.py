@@ -531,6 +531,40 @@ def test_eval_add_list_replay_round_trip(tmp_path: Path) -> None:
     assert "passed" in (replay_result.stdout + replay_result.stderr)
 
 
+def test_eval_ingest_persists_a_recorded_dismissal(tmp_path: Path) -> None:
+    """A dismissal signal becomes a structural case through ``eval ingest``."""
+    from mergecraft.findings.materiality import dismissal_eval_records, record_dismissal
+
+    record = record_dismissal(fingerprint="src/mergecraft/foo.py:42", reason_code="false_positive")
+    source = tmp_path / "dismissals.jsonl"
+    source.write_text(json.dumps(dismissal_eval_records([record])[0]) + "\n", encoding="utf-8")
+    bank = tmp_path / "bank"
+
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            "ingest",
+            "--from-dismissals",
+            str(source),
+            "--bank",
+            str(bank),
+            "--run-id",
+            "run-808",
+            "--author",
+            "octo",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout + result.stderr
+    cases = list_cases(bank)
+    assert len(cases) == 1
+    case = cases[0]
+    assert case.expected_finding == "src/mergecraft/foo.py:42"
+    assert case.label_provenance == "agent-seeded"
+    assert case.provenance.author_login == "octo"
+    assert case.provenance.run_id == "run-808"
+
+
 # ── root help ──────────────────────────────────────────────────────────
 
 
