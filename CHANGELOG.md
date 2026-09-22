@@ -55,7 +55,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing with Click's "Missing argument". `mergecraft config set` writes
   `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
 
+- A second gate policy (prompt 2.0.0) records through the existing recorder.
+  The optional keyless job replays two hard-coded packets; it does not run a
+  model and leaves #737 open. The live review path never enforces a shadow
+  prediction.
+
+- Production false positives and human dismissals can be ingested into the eval
+  bank as versioned cases, each carrying explicit provenance. Ingest refuses a
+  case without provenance, refuses to record a human label that has not passed
+  independent adjudication, and drops a case rather than minting a label.
+  Ingested cases participate as structural replay cases only, never as
+  calibration labels (#738).
+
 ### Changed
+
+- CLI `--json` payloads carry their own schema version, decoupled from the
+  review snapshot's. Both stay `1.0.0`, so no payload changes; the two can now
+  be bumped independently (#777).
 
 - `mergecraft jev --help` (and each `enable` / `disable` / `status` / `set`
   `--help`) now documents every command and option, including the
@@ -131,6 +147,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `tests/` still fires.
 
 ### Fixed
+
+- The keyless shadow job is a fixture replay of two hard-coded packets. It
+  does not read a live review and leaves #737 open.
+- A live shadow row records the model on the packet (the slug that ran, else
+  the configured reviewer). When the packet has no model, the row leaves it
+  unset instead of claiming Claude.
+
+- `mergecraft eval ingest --from-dismissals` turns recorded dismissal signals
+  into structural eval cases. A dismissal is stored as `agent-seeded`, not as
+  a human label (#738).
 
 - The deterministic run record no longer publishes an approval-shaped verdict
   when no credentialed reviewer ran: a skipped reviewer credential renders the

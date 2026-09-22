@@ -72,6 +72,31 @@ def _run_expecting_cve(
     return result
 
 
+#: The namespace invocation the userspace filtered-egress probe shells out to.
+#: Its presence in a skip reason is the stable signal that *this environment*
+#: could not apply filtered egress — not a product failure.
+_USERSPACE_EGRESS_NAMESPACE = "unshare --user --map-root-user --net"
+
+
+def _userspace_egress_skip_reason(result: Any) -> str | None:
+    """Return the skip reason iff it names the userspace filtered-egress probe.
+
+    Matched **narrowly**: the reason must both carry the ``egress policy``
+    prefix and name the ``unshare --user --map-root-user --net`` probe. Any
+    other skip — a missing binary, an unsupported platform, the older
+    sandbox-isolation message — returns ``None`` so it still reaches
+    ``assert not result.skipped``.
+    """
+    if not result.skipped:
+        return None
+    reason = result.skip_reason or ""
+    if "egress policy" not in reason.casefold():
+        return None
+    if _USERSPACE_EGRESS_NAMESPACE not in reason:
+        return None
+    return reason
+
+
 @pytest.mark.parametrize("tool_id", ["osv-scanner", "trivy"])
 def test_newly_introduced_cve_reported_with_fix_and_transitive_status(
     tool_id: str, adapter_fixture_repo: Path
@@ -85,6 +110,17 @@ def test_newly_introduced_cve_reported_with_fix_and_transitive_status(
         ["requirements.txt"],
         tier="trusted",
     )
+    egress_skip = _userspace_egress_skip_reason(result)
+    if egress_skip is not None:
+        # The runner cannot apply userspace filtered egress. That is an
+        # environment limitation, not a product failure, so report a visible,
+        # named skip (``-rs``) instead of a red assertion. Any other skip is
+        # not excused and falls through to the assertion below.
+        pytest.skip(
+            f"{tool_id}: userspace filtered egress unavailable "
+            f"({_USERSPACE_EGRESS_NAMESPACE}); cannot apply declared network "
+            f"hosts — {egress_skip}"
+        )
     assert not result.skipped, result.skip_reason
     assert result.findings, f"{tool_id} must report the newly introduced CVE"
 
@@ -200,6 +236,44 @@ def test_run_expecting_cve_persistent_skip_still_fails_the_assertion(
     assert len(calls) == supply_chain._TRIVY_MAX_ATTEMPTS
     assert result.skipped, "a persistent skip must reach `assert not result.skipped`"
     assert result.skip_reason, "the skip reason must be preserved for diagnosis"
+
+
+@pytest.mark.parametrize("tool_id", ["osv-scanner", "trivy"])
+def test_userspace_egress_skip_is_named_by_tool_and_probed_namespace(tool_id: str) -> None:
+    """The environment skip is recognised, and the surfaced reason names both."""
+    result = _skipped_egress_result(tool_id)
+
+    reason = _userspace_egress_skip_reason(result)
+
+    assert reason == result.skip_reason
+    assert tool_id in reason, "the named skip must identify the tool"
+    assert _USERSPACE_EGRESS_NAMESPACE in reason, "the named skip must name the probed namespace"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "Skipped: egress policy — trivy declares network hosts but trusted PR "
+        "cannot enforce filtered egress (sandbox isolation unavailable on this runner)",
+        "Skipped: egress policy — trivy declares network hosts (ghcr.io) but "
+        "untrusted (pull_request, fork head) cannot enforce filtered egress",
+        "trivy binary not found on PATH",
+        "requires Linux",
+        # Names the probe but is not the egress-policy refusal: still not excused.
+        "userspace filtered egress unavailable: unshare --user --map-root-user --net",
+    ],
+)
+def test_other_skips_are_not_excused_by_the_userspace_egress_gate(reason: str) -> None:
+    """A skip that is not the named userspace egress failure still fails the test."""
+    adapters = import_module("mergecraft.analyzers.adapters")
+    result = adapters.AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+    assert _userspace_egress_skip_reason(result) is None
+
+
+def test_a_successful_run_is_not_excused_by_the_userspace_egress_gate() -> None:
+    """The gate only ever excuses a skip; a real result is untouched."""
+    assert _userspace_egress_skip_reason(_cve_result("trivy")) is None
 
 
 def test_trufflehog_reports_secret_by_type_and_location(adapter_fixture_repo: Path) -> None:

@@ -69,6 +69,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
 | `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
+| `mergecraft eval ingest` | Ingest recorded dismissal signals into the structural eval bank. |
 | `mergecraft eval list` | List cases in the bank. |
 | `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44). |
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
@@ -161,6 +162,15 @@ The bare `gha` group invocation (no subcommand) is the Docker action's runtime
 entry point — it is a Typer group callback, not a `registered_commands` leaf
 itself, so it is described here in prose rather than as its own table row;
 `mergecraft gha token` above is the one real leaf command under that group.
+
+## JSON output schema
+
+Every CLI `--json` payload carries a top-level `schema_version` field, currently
+`"1.0.0"`. That value is versioned independently of the review snapshot model
+and of the agent JSONL protocol: bumping it announces a change to the shape of
+CLI JSON output only, and does **not** by itself mean the review snapshot or the
+agent wire format changed. The converse also holds — a change to either of those
+contracts does not move the CLI stamp.
 
 ## See also
 

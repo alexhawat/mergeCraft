@@ -1,0 +1,2 @@
+{"change_id": "acme/demo#101", "target_id": "live", "outcome": "block", "diagnostic": "high_risk_migration", "lane": "high", "actual_outcome": "merged"}
+{"change_id": "acme/demo#102", "target_id": "live", "outcome": "auto_merge", "diagnostic": "low_risk_passing", "lane": "low", "actual_outcome": "merged"}

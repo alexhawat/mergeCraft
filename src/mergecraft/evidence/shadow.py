@@ -30,6 +30,7 @@ never re-classifies blast radius. The packet is the source of truth.
 is the only place that applies the action as a gate.
 
 Exports:
+    ShadowTarget: A pinned shadow target identity (label, model, prompt version).
     ShadowRecord: One recorded shadow prediction.
     predict_action: Pure read of the gate against a packet.
     record_shadow_prediction: Persist a row to disk.
@@ -37,6 +38,11 @@ Exports:
     disagree_with_outcome: Compare a prediction against an outcome.
     load_shadow_records: Read a JSON-Lines shadow log.
     disagreement_report: Group a set of records by lane and rule.
+
+A second target is a second :class:`ShadowTarget` value recorded through the
+*same* recorder — never a second JSONL writer. The recorder stamps the target
+identity onto the row and emits one ``mergecraft.shadow.prediction`` span when
+a tracer is supplied; the JSONL row remains the audit trail.
 """
 
 from __future__ import annotations
@@ -50,7 +56,12 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from mergecraft.agents.gates import decide_action, select_rule_id
-from mergecraft.evidence.gate_policy import GATE_ACTIONS, GateAction, GateActionPolicy
+from mergecraft.evidence.gate_policy import (
+    DEFAULT_GATE_POLICIES,
+    GATE_ACTIONS,
+    GateAction,
+    GateActionPolicy,
+)
 from mergecraft.run_outcome import RunOutcome
 
 if TYPE_CHECKING:
@@ -58,6 +69,7 @@ if TYPE_CHECKING:
 
     from mergecraft.agents.shared import AgentResult
     from mergecraft.evidence.packet import MergeEvidencePacket
+    from mergecraft.tracing.tracer import NullTracer, Tracer
 
 
 # Closed action vocabulary: the predicted action must be one of the
@@ -84,6 +96,49 @@ _LANE_TO_AREA: Final[dict[str, str]] = {
 }
 
 
+class ShadowTarget(BaseModel):
+    """A pinned shadow target identity (#737, M4).
+
+    A second shadow target is a second *value* of this model — a different
+    pinned model id and/or prompt version — recorded through the existing
+    recorder. It is deliberately not a settings block and not a second
+    recorder: the target only labels which prediction produced a row so the
+    disagreement table can group by target as well as by lane and rule.
+
+    ``target_id`` is the table label (``"live"`` / ``"shadow-b"``); ``model``
+    is the slug that produced the row, or unset when the run did not record
+    one. ``prompt_version`` is optional so a target may differ by model alone.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target_id: str = Field(min_length=1)
+    model: str | None = None
+    prompt_version: str | None = None
+
+
+LIVE_TARGET: ShadowTarget = ShadowTarget(target_id="live")
+"""The live row's label. Its model comes from the packet, not from this constant."""
+
+SECOND_TARGET: ShadowTarget = ShadowTarget(
+    target_id="shadow-b",
+    model="mergecraft.agents.gates.decide_action",
+    prompt_version="2.0.0",
+)
+"""The second pinned target: the gate under prompt ``2.0.0``.
+
+Prompt ``2.0.0`` blocks a high-risk migration. The live gate asks for human
+review on that same rule. :func:`execute_second_target` runs this policy; it
+is not a second copy of the live gate and not a model call (R-D10).
+"""
+
+SECOND_TARGET_POLICY: GateActionPolicy = {
+    **DEFAULT_GATE_POLICIES,
+    "high_risk_migration": GateAction.BLOCK,
+}
+"""Prompt ``2.0.0``: high-risk migrations block; every other rule matches the live gate."""
+
+
 class ShadowRecord(BaseModel):
     """One recorded shadow prediction.
 
@@ -93,6 +148,9 @@ class ShadowRecord(BaseModel):
     and ``run_id`` for attribution, and the timestamp. The full packet
     lives on disk in the run's evidence directory; the shadow record is
     the breadcrumb.
+
+    The three ``target_*`` fields are additive (#737): a legacy row with no
+    target identity still validates, and ``target_id`` is ``None`` for it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -113,6 +171,9 @@ class ShadowRecord(BaseModel):
     diagnostic: str | None = None
     verdict_diagnostic: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    target_id: str | None = None
+    target_model: str | None = None
+    target_prompt_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +318,88 @@ def predict_action(
     return decide_action(packet, policy=policy)
 
 
+@dataclass(frozen=True, slots=True)
+class GateShadowPrediction:
+    """Prediction produced by running :data:`SECOND_TARGET` on one packet."""
+
+    outcome: str
+    diagnostic: str
+    lane: str = "review"
+
+
+def live_target_for_packet(packet: MergeEvidencePacket) -> ShadowTarget:
+    """Label the live row with the model this packet actually ran.
+
+    Prefers ``executed_model`` (the slug that ran) and otherwise the packet's
+    ``model`` (the configured reviewer). When neither is recorded the model is
+    left unset, so the row is not attributed to a model that did not run.
+    """
+    executed = packet.agent.executed_model.strip()
+    configured = packet.agent.model.strip()
+    model = executed or configured or None
+    return ShadowTarget(target_id=LIVE_TARGET.target_id, model=model)
+
+
+def execute_second_target(packet: MergeEvidencePacket) -> GateShadowPrediction:
+    """Run the second pinned target on ``packet`` and return its prediction.
+
+    Calls the gate (:func:`predict_action` and :func:`select_rule_id`). The
+    caller records the return value through :func:`record_shadow_prediction`
+    with :data:`SECOND_TARGET`. Nothing here is read from a fixture.
+    """
+    lane = packet.blast_radius.lane if packet.blast_radius is not None else "review"
+    return GateShadowPrediction(
+        outcome=predict_action(packet, policy=SECOND_TARGET_POLICY).value,
+        diagnostic=select_rule_id(packet),
+        lane=lane,
+    )
+
+
+def record_pinned_targets(
+    packet: MergeEvidencePacket,
+    *,
+    change_id: str,
+    run_id: str,
+    output_path: Path,
+    tracer: Tracer | NullTracer | None = None,
+) -> None:
+    """Record the live gate and the second target for one packet.
+
+    The live row uses the default gate. The second row is
+    :func:`execute_second_target`. A failure is raised so the comparison job
+    can fail closed; :func:`mergecraft.evidence.run_packet.emit_run_packet`
+    catches it and stays silent.
+    """
+    failures: list[BaseException] = []
+    try:
+        record_shadow_prediction(
+            packet,
+            change_id=change_id,
+            run_id=run_id,
+            policy_id="default",
+            output_path=output_path,
+            target=live_target_for_packet(packet),
+            tracer=tracer,
+        )
+    except Exception as exc:  # both targets are attempted; the caller decides
+        failures.append(exc)
+    try:
+        record_shadow_prediction(
+            packet,
+            change_id=change_id,
+            run_id=run_id,
+            policy_id=SECOND_TARGET.target_id,
+            output_path=output_path,
+            target=SECOND_TARGET,
+            prediction=execute_second_target(packet),
+            tracer=tracer,
+        )
+    except Exception as exc:
+        failures.append(exc)
+    if failures:
+        raise failures[0]
+
+
 def enforce_action(
     packet: MergeEvidencePacket,
     *,
@@ -274,6 +417,32 @@ def enforce_action(
     return decide_action(packet, policy=policy)
 
 
+def _emit_shadow_span(
+    tracer: Tracer | NullTracer | None,
+    *,
+    change_id: str,
+    target_id: str | None,
+    disagreement: bool | None,
+) -> None:
+    """Emit one ``mergecraft.shadow.prediction`` span (best-effort, never throws).
+
+    Tracing must never fail a review (convention 3): ``None`` / ``NullTracer``
+    is a silent no-op, and any failure degrades to a missing span. The JSONL
+    row is already on disk — the span is the second, optional surface.
+    """
+    if tracer is None:
+        return
+    try:
+        span = tracer.start_span("mergecraft.shadow.prediction")
+        span.__enter__()
+        span.set_attribute("mergecraft.shadow.change_id", change_id)
+        span.set_attribute("mergecraft.shadow.target_id", target_id)
+        span.set_attribute("mergecraft.shadow.disagreement", disagreement)
+        span.close()
+    except Exception as exc:  # pragma: no cover — defensive; tracing is non-fatal
+        logger.debug("shadow span failed: {}", exc)
+
+
 def record_shadow_prediction(
     packet: MergeEvidencePacket,
     *,
@@ -285,6 +454,8 @@ def record_shadow_prediction(
     prediction: Any | None = None,
     actual_outcome: str | None = None,
     metadata: dict[str, Any] | None = None,
+    target: ShadowTarget | None = None,
+    tracer: Tracer | NullTracer | None = None,
 ) -> ShadowRecord:
     """Build a :class:`ShadowRecord` and append it to ``output_path`` (W10.2 / VP3).
 
@@ -293,7 +464,19 @@ def record_shadow_prediction(
     ``metadata`` is merged onto the row (Jev records pack id, model, and the
     raw confidence float here — never on ``Finding.evidence``). Otherwise the
     gate-action path is unchanged.
+
+    ``target`` is additive (#737): a second shadow target is a second
+    :class:`ShadowTarget` value recorded through this same writer, which stamps
+    ``target_id`` / ``target_model`` / ``target_prompt_version`` onto the row.
+    ``None`` preserves today's behaviour exactly — a legacy row with no target
+    identity. When ``tracer`` is supplied one ``mergecraft.shadow.prediction``
+    span is emitted; the JSONL row is still written either way, because the
+    JSONL log remains the audit trail.
     """
+    target_id = target.target_id if target is not None else None
+    target_model = target.model if target is not None else None
+    target_prompt_version = target.prompt_version if target is not None else None
+
     if prediction is not None:
         predicted_outcome = _prediction_outcome_value(prediction)
         diagnostic = _prediction_diagnostic_value(prediction)
@@ -331,6 +514,9 @@ def record_shadow_prediction(
             actual_outcome=actual_outcome,
             disagreement=disagreement,
             metadata=merged_metadata,
+            target_id=target_id,
+            target_model=target_model,
+            target_prompt_version=target_prompt_version,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("a", encoding="utf-8") as handle:
@@ -341,6 +527,12 @@ def record_shadow_prediction(
             change_id,
             predicted_outcome,
             diagnostic,
+        )
+        _emit_shadow_span(
+            tracer,
+            change_id=change_id,
+            target_id=target_id,
+            disagreement=record.disagreement,
         )
         return record
 
@@ -358,6 +550,9 @@ def record_shadow_prediction(
         lane=lane,
         auto_merge_lane=auto_merge_lane,
         repo_area=_lane_to_repo_area(packet),
+        target_id=target_id,
+        target_model=target_model,
+        target_prompt_version=target_prompt_version,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("a", encoding="utf-8") as handle:
@@ -369,6 +564,12 @@ def record_shadow_prediction(
         rule_id,
         action.value,
         lane,
+    )
+    _emit_shadow_span(
+        tracer,
+        change_id=change_id,
+        target_id=target_id,
+        disagreement=record.disagreement,
     )
     return record
 
@@ -464,7 +665,8 @@ def disagreement_report(
 
     The report returns one row per record. The caller can group in
     whatever way suits them; the rows are keyed by ``lane`` and
-    ``rule_id`` themselves. ``outcomes`` maps ``change_id`` to the
+    ``rule_id`` themselves, and carry the target identity so a table can
+    group by target as well (#737). ``outcomes`` maps ``change_id`` to the
     human final outcome as a string (``"merged"`` / ``"closed"`` /
     ``"changes_requested"``). When the outcome is absent the row
     carries ``disagreement=None`` so the report can render the missing
@@ -491,18 +693,29 @@ def disagreement_report(
                 predicted_rule_id=record.rule_id,
                 repo_area=record.repo_area or "(unknown)",
             )
+        row["target_id"] = record.target_id
+        row["target_model"] = record.target_model
+        row["target_prompt_version"] = record.target_prompt_version
         rows.append(row)
     return rows
 
 
 __all__ = [
+    "LIVE_TARGET",
+    "SECOND_TARGET",
+    "SECOND_TARGET_POLICY",
+    "GateShadowPrediction",
     "ShadowRecord",
+    "ShadowTarget",
     "VerdictProtocolPrediction",
     "disagree_with_outcome",
     "disagreement_report",
     "enforce_action",
+    "execute_second_target",
+    "live_target_for_packet",
     "load_shadow_records",
     "predict_action",
     "predict_verdict_protocol",
+    "record_pinned_targets",
     "record_shadow_prediction",
 ]

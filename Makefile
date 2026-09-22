@@ -21,7 +21,7 @@ SHELL := /bin/bash
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	mutation-test-decisions \
-	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-gate eval-replay eval-convergence \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-gate eval-replay eval-convergence shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
@@ -337,6 +337,11 @@ eval-replay: ## Replay structural eval-bank integrity; keyless, not live detecti
 
 eval-convergence: ## Score multi-round convergence metric; write result set (RC6)
 	$(UV) run mergecraft eval convergence
+
+SHADOW_RUN ?= /tmp/mergecraft-shadow-run.jsonl
+shadow-compare: ## Replay two fixture packets through the gate (keyless, advisory)
+	$(UV) run python -m mergecraft.evidence.shadow_compare record --output "$(SHADOW_RUN)"
+	$(UV) run python -m mergecraft.evidence.shadow_compare --from-run "$(SHADOW_RUN)"
 
 BENCH_DETECT_ARGS ?=
 bench-detect: ## Join structural replay + live finding-location detection (#140, B3; needs live keys)

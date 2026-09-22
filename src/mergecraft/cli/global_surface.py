@@ -15,13 +15,19 @@ from rich.console import COLOR_SYSTEMS
 from mergecraft.cli import consoles
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
-from mergecraft.review.snapshot import REVIEW_SCHEMA_VERSION as CLI_JSON_SCHEMA_VERSION
 from mergecraft.utils.log import configure_logging, drain_loguru_queue
 
 OutputFormat = Literal["table", "json"]
 ColorMode = Literal["auto", "always", "never"]
 
 _LOG_LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"})
+
+# Version of every CLI ``--json`` payload. It shares a value with
+# ``review.snapshot.REVIEW_SCHEMA_VERSION`` but not a lifecycle: the two
+# contracts may move independently, and ``review/`` must not import ``cli/``,
+# so ``cli/`` owns this constant outright. The same-value/separate-lifecycle
+# precedent is ``review.completed.COMPLETED_REVIEW_SCHEMA_VERSION``.
+CLI_JSON_SCHEMA_VERSION = "1.0.0"
 
 
 @dataclass(frozen=True)
