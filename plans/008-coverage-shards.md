@@ -1,6 +1,6 @@
 # Plan 008: Measure isolated raw coverage shards and gate only a complete set
 
-- Status: Integrated (`b2a899ee`); 33 independent focused tests passed; final whole-tree parity and CI pending
+- Status: Implemented; focused real parity and prior complete CI/combined gates passed. Final whole-suite parity repeat skipped at user request; see [IMPLEMENTATION.md](IMPLEMENTATION.md).
 - Issue: [#785](https://github.com/alexhawat/mergeCraft/issues/785)
 - Priority: P2; effort: M; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -114,3 +114,7 @@ Implementation reconciliation: snapshot compatibility metadata before the test p
 ## Final review refinement
 
 Combine-time fresh collection can execute imports and hooks. Recheck the expected source/runtime metadata after that collection and around combination, JSON rendering and gates; reject drift rather than gating old measurements against new source. Add regressions for mutations during fresh collection and reporting. This closes a reproduced gap in the existing complete-set contract.
+
+## Final verification scope
+
+The user requested a smaller final test set instead of another full CI run. All 74 focused coverage tests passed (one complete-report-dependent check skipped), including real miniature two-shard/xdist parity. Prior complete CI and whole-suite combined gates passed, but their exact coverage sets differed by two lines and four branches. Explicit deterministic tests now cover those paths; the final whole-suite comparison remains unverified and is not represented as passed. This does not change any production validation, completeness or coverage-floor rule.

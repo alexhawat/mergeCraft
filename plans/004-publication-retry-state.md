@@ -1,6 +1,6 @@
 # Plan 004: Clear unresolved publication failure after a confirmed retry
 
-- Status: Integrated; independent focused verification passed; final combined-tree CI pending
+- Status: Implemented; integrated full CI passed at `68e56cd9`; final focused checks passed. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the user-selected verification scope.
 - Issue: [#822](https://github.com/alexhawat/mergeCraft/issues/822)
 - Priority: P2; effort: S; change risk: LOW–MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.

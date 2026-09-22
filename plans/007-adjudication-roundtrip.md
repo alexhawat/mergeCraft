@@ -1,6 +1,6 @@
 # Plan 007: Make golden-case adjudication safe and round-trippable
 
-- Status: IMPLEMENTED — focused, lint, type, eval, and wheel gates pass; integrated CI pending
+- Status: Implemented; integrated full CI passed at `68e56cd9`; final focused checks passed. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the user-selected verification scope.
 - Issue: [#779](https://github.com/alexhawat/mergeCraft/issues/779)
 - Priority: P1; effort: M; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.

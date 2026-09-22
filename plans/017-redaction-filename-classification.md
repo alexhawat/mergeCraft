@@ -1,6 +1,6 @@
 # Plan 017: Preserve ordinary uppercase repository filenames
 
-- Status: Integrated; independent focused verification passed; final combined-tree CI pending
+- Status: Implemented; integrated full CI passed at `68e56cd9`; final focused checks passed. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the user-selected verification scope.
 - Issue: [#827](https://github.com/alexhawat/mergeCraft/issues/827)
 - Planned against main `41cf53b3`, 2026-09-22.
 - Dependencies: coordinate 001/005; separate central-redactor commit.

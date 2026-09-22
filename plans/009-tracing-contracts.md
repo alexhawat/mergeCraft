@@ -1,6 +1,6 @@
 # Plan 009: Reconcile tracing contracts and root the complete review lifecycle
 
-- Status: Integrated (`327a6d2c`); independent focused and real collector checks passed; final CI pending
+- Status: Implemented; integrated full CI passed at `68e56cd9`; final focused checks passed. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the user-selected verification scope.
 - Issue: [#798](https://github.com/alexhawat/mergeCraft/issues/798)
 - Priority: P2; effort: M–L; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -109,4 +109,4 @@ Span lifecycle ownership must remain above all reached review phases. Any bounda
 | Exported trace identity | Existing OTel identity forwarding is retained and independently tested through the real Docker collector. |
 | Setup timeout | Moving root ownership does not expand the existing setup budget: setup is bounded and remaining credential time is reduced by elapsed setup time. |
 
-Independent verification is recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md). The final full gate remains pending; no skipped check is counted as passed.
+Independent verification is recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md). The integrated full gate passed; the user selected focused checks for the final test-only changes. No skipped check is counted as passed.

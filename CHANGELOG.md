@@ -182,10 +182,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Managed analyzer provisioning failures now retain a bounded, redacted final
   cause in logs and skip results, distinguishing transient GitHub release
   outages from checksum, redirect, and other provisioning failures without
-  exposing credentials or download URLs.
+  exposing credentials or download URLs (#825).
 
 - Persisted review trajectories redact secrets while retaining exact, safe
-  read-path attribution. Terminal verdicts use normalized, deduplicated typed
+  read-path attribution and ordinary repository filenames (#819, #823, #827). Terminal verdicts use normalized, deduplicated typed
   findings, and publication retry state clears only after a matching scope/head
   receipt is stored.
 
