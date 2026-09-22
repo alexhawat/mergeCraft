@@ -48,8 +48,30 @@ an installed wheel, or an unrelated custom corpus.
 for the nine golden rows tracked by #780. Render its review sheet with:
 
 ```bash
-python -m mergecraft.evals.human_batch
+make eval-human-batch
 ```
+
+### Judge calibration
+
+Label provenance only determines whether labels are eligible for scoring. It
+does not establish that the verifier judge is calibrated. A judge-calibration
+report requires frozen, disjoint calibration and held-out splits containing
+saved verifier verdicts paired with independent human references.
+
+```bash
+make eval-judge-calibration \
+  JUDGE_CALIBRATION_PROTOCOL=/path/to/protocol.json \
+  JUDGE_CALIBRATION_CASES=/path/to/cases.json \
+  JUDGE_CALIBRATION_SEAL=/path/to/candidate-seal.json
+```
+
+The command is keyless and reads saved verdicts only. It verifies case hashes,
+judge/model/rubric pins, deterministic checks, human provenance, split class
+coverage, and every explicit threshold. Without an externally created seal it
+returns a provisional calibration-only report and does not score the held-out
+split. There is currently no qualifying human-labelled dataset in this
+repository, so the real held-out run remains pending. Test fixtures exercise
+the protocol without being presented as human decisions.
 
 The committed manifest names `alexhawat` as the intended adjudicator, but all
 nine rows remain `evidence_status: missing` and `decision: pending`. Repository

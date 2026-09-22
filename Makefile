@@ -335,6 +335,24 @@ eval-cases-sync: ## Copy authored golden/mutation/skill cases into package resou
 eval-cases-sync-check: ## Check authored and packaged eval cases have identical files and bytes
 	$(UV) run python scripts/sync_eval_cases.py --check
 
+.PHONY: eval-human-batch eval-judge-calibration
+
+eval-human-batch: ## Render the pending human golden-case review sheet
+	@$(UV) run python -m mergecraft.evals.human_batch
+
+JUDGE_CALIBRATION_PROTOCOL ?=
+JUDGE_CALIBRATION_CASES ?=
+JUDGE_CALIBRATION_SEAL ?=
+eval-judge-calibration: ## Evaluate frozen saved judge verdicts; input paths are required
+	@if [ -z "$(JUDGE_CALIBRATION_PROTOCOL)" ] || [ -z "$(JUDGE_CALIBRATION_CASES)" ]; then \
+	  echo "Set JUDGE_CALIBRATION_PROTOCOL and JUDGE_CALIBRATION_CASES to frozen JSON inputs."; \
+	  echo "No human-labelled calibration corpus is committed; validation remains pending."; \
+	  exit 2; \
+	fi
+	$(UV) run mergecraft eval judge-calibration \
+	  --protocol "$(JUDGE_CALIBRATION_PROTOCOL)" --cases "$(JUDGE_CALIBRATION_CASES)" \
+	  $(if $(JUDGE_CALIBRATION_SEAL),--seal "$(JUDGE_CALIBRATION_SEAL)",) --json
+
 eval-gate: eval-cases-sync-check ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
 	$(UV) run mergecraft eval gate
 

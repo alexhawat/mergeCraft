@@ -1,6 +1,6 @@
 # Plan 013: Separate label eligibility from validated judge calibration
 
-- Status: TODO — eligibility wording/report implementation has not started; validated threshold is BLOCKED on frozen human-labelled calibration and held-out sets
+- Status: IMPLEMENTED OFFLINE — strict saved-verdict protocol, metrics, CLI, and corrected eligibility wording are complete; a validated threshold remains BLOCKED on frozen human-labelled calibration and held-out sets
 - Issue: [#736](https://github.com/alexhawat/mergeCraft/issues/736)
 - Priority: P2; effort: L; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -81,11 +81,11 @@ Verification: make eval-judge-calibration accepts a passing frozen candidate and
 
 ## Done criteria
 
-- [ ] Eligibility alone never prints calibrated.
-- [ ] Paired decisions, model/rubric identity, disjoint held-out split and metrics are reproducible.
+- [x] Eligibility alone never prints calibrated.
+- [x] Paired decisions, model/rubric identity, disjoint held-out split and metrics are reproducible.
 - [ ] Only a candidate satisfying the held-out acceptance contract may be called calibrated.
 - [ ] Relevant commands pass with actual results/limitations recorded.
-- [ ] `git diff --check` exits0; changed paths stay within scope, plus plan status/changelog.
+- [x] `git diff --check` exits0; changed paths stay within scope, plus plan status/changelog.
 - [ ] Update this plan and plans/README.md; distinguish preparation complete from blocked human/operator steps.
 
 ## Stop conditions and maintenance

@@ -74,6 +74,7 @@ from mergecraft.evals.benchmark import (
 )
 from mergecraft.evals.convergence_benchmark import replay_convergence
 from mergecraft.evals.corpora import CorpusCase
+from mergecraft.evals.judge_calibration import load_and_evaluate
 from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
     run_full_benchmark,
@@ -745,11 +746,11 @@ def bench_cmd(
         console.print(f"  recall          : {det.aggregate.recall:.2%}")
         console.print(f"  precision       : {det.aggregate.corpus_confirmed_precision:.2%}")
         console.print(f"  f1              : {det.aggregate.f1:.2%}")
-        # Printed beside the numbers, not below the artifact path: a reader
-        # who stops at f1 must still have seen whether it is calibrated.
+        # Printed beside the numbers so provenance eligibility cannot be
+        # mistaken for a completed judge-calibration study.
         if det.calibration is not None:
-            verdict = "calibrated" if det.calibration.eligible else "NOT calibrated"
-            console.print(f"  calibration     : {verdict} — {det.calibration.reason}")
+            verdict = "eligible" if det.calibration.eligible else "ineligible"
+            console.print(f"  label eligibility: {verdict} — {det.calibration.reason}")
         console.print(f"  raw findings @  : {det.raw_findings_dir}")
     else:
         console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
@@ -949,6 +950,57 @@ def adjudicate_cmd(
         f"adjudicated {issue_id} by {by} — provenance {provenance_for(record)} "
         f"(tier {record.independence})"
     )
+
+
+@app.command("judge-calibration")
+def judge_calibration_cmd(
+    ctx: typer.Context,
+    protocol: Path = typer.Option(
+        ...,
+        "--protocol",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Frozen calibration protocol JSON.",
+    ),
+    cases: Path = typer.Option(
+        ...,
+        "--cases",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Saved paired judge-human case JSON list.",
+    ),
+    seal: Path | None = typer.Option(
+        None,
+        "--seal",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Candidate commitment created after calibration and before held-out scoring.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit the strict report as JSON."),
+) -> None:
+    """Evaluate saved judge verdicts offline against frozen human references."""
+    try:
+        report = load_and_evaluate(protocol, cases, seal_path=seal)
+    except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        cli_bail(f"invalid judge calibration input: {exc}")
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(report.model_dump(mode="json"))
+    else:
+        console.print(f"judge calibration: {report.state}")
+        console.print(f"  candidate       : {report.candidate_id}")
+        console.print(f"  calibration n   : {report.calibration.metrics.sample_count}")
+        if report.held_out is None:
+            console.print("  held-out        : not evaluated")
+        else:
+            console.print(f"  held-out n      : {report.held_out.metrics.sample_count}")
+            macro_f1 = report.held_out.metrics.macro_f1
+            rendered_f1 = f"{macro_f1:.2%}" if macro_f1 is not None else "undefined"
+            console.print(f"  held-out macro f1: {rendered_f1}")
+    if report.state != "validated":
+        raise typer.Exit(CLI_FAILED_EXIT_CODE)
 
 
 @app.command("score")

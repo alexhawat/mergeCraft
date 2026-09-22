@@ -223,15 +223,17 @@ class TestScoringIntegration:
         assert report.calibration is not None
         assert report.calibration.eligible is True
 
-    def test_format_report_states_the_calibration_verdict(self) -> None:
+    def test_format_report_states_label_ineligibility(self) -> None:
         rendered = format_report(
             score_findings([self._issue("1", "agent-seeded")], [self._finding()])
         )
-        assert "NOT calibrated" in rendered
+        assert "label eligibility: ineligible" in rendered
+        assert "calibrated" not in rendered
 
-    def test_format_report_says_calibrated_for_independent_labels(self) -> None:
+    def test_format_report_says_eligible_for_independent_labels(self) -> None:
         rendered = format_report(score_findings([self._issue("1", "human")], [self._finding()]))
-        assert "calibration      : calibrated" in rendered
+        assert "label eligibility: eligible" in rendered
+        assert "calibrated" not in rendered
 
     def test_report_predating_the_field_is_not_read_as_eligible(self) -> None:
         report = ScoreReport(
@@ -296,7 +298,7 @@ class TestConfigReachesScoring:
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
         assert result.exit_code == 0, result.output
-        assert "NOT calibrated" in result.output
+        assert "label eligibility: ineligible" in result.output
 
     def test_lowering_the_bar_in_config_changes_the_cli_verdict(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -306,8 +308,8 @@ class TestConfigReachesScoring:
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
         assert result.exit_code == 0, result.output
-        assert "NOT calibrated" not in result.output
-        assert "calibrated" in result.output
+        assert "label eligibility: eligible" in result.output
+        assert "calibrated" not in result.output
 
     def test_live_detection_accepts_and_applies_the_bar(self) -> None:
         signature = inspect.signature(run_live_detection)
@@ -852,7 +854,7 @@ class TestNoBarCannotBeConfigured:
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
         assert result.exit_code == 0, result.output
-        assert "NOT calibrated" in result.output
+        assert "label eligibility: ineligible" in result.output
 
 
 class TestFailedCaseStillCounts:
