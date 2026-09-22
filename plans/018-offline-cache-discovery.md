@@ -1,6 +1,6 @@
 # Plan 018: Exclude managed analyzer cache from offline untracked discovery
 
-- Status: Planned; implementation and regression pending
+- Status: Integrated (`021dd273`); 29 independent tests passed; final CI pending
 - Issue: [#829](https://github.com/alexhawat/mergeCraft/issues/829)
 - Discovered during the 2026-09-22 implementation wave at `157f57a3`.
 - Priority: P2; dependencies: none.

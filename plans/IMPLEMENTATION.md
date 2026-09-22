@@ -1,6 +1,6 @@
 # Implementation record
 
-Implementation is in progress on `codex/implement-issue-remediation-20260922`, in `/private/tmp/mergecraft-implementation-20260922`, at `157f57a3`. The original checkout and its existing configuration edit are preserved. The initial wave used three faster `gpt-5.6-sol` executors; subsequent work is assigned to the available `gpt-5.6-luna` model. The coordinator reviews and integrates their commits.
+Implementation is in progress on `codex/implement-issue-remediation-20260922`, in `/private/tmp/mergecraft-implementation-20260922`. The original checkout and its existing configuration edit are preserved. The initial wave used three faster `gpt-5.6-sol` executors; subsequent work is assigned to the available `gpt-5.6-luna` model. The coordinator reviews and integrates their commits.
 
 ## Baseline and scope
 
@@ -12,10 +12,11 @@ Implementation is in progress on `codex/implement-issue-remediation-20260922`, i
 
 ## Current verification state
 
-- The latest integrated change is `157f57a3` (`fix(ci): reject coverage metadata drift`). It adds combine-time source/runtime identity checks and has 38 focused agent tests recorded across the integrated remediation work. A full serial coverage measurement is still running; the initial report, final floors, final CI gate and fresh shard/parity comparison are pending.
-- The first whole-shard attempt is not a passing result: group 1 reported **1 failed, 5,011 passed, 9 skipped and 3 xfailed**; group 2 was interrupted after **3 failed, 1,037 passed and 3 skipped**. The failure analysis found nested fixture runs inheriting the outer shard variables. Test-only cleanup commit `aa6bcac7` is pending and is recorded as unintegrated until the coordinator reviews it.
-- Queued test-only Loguru capture lifetime fixes are `9829600d` and `960366d9`; they remain pending. These test cleanups do not prove the full gate.
-- Final validation remains open: whole-tree coverage floors, full `make ci`, fresh shard/parity evidence, and the initial implementation report have not been completed. Keep plan status and issue closure language conditional until those artifacts exist.
+- The complete unsharded baseline at source `157f57a3` passed: **10,025 passed, 16 skipped, 22 deselected, 4 xfailed**, with 17 warnings in 3,462.87 seconds. Native combined coverage is **83.28103063836815%**, above the unchanged 82% floor. Python 3.14.6, coverage 7.15.2, pytest 9.1.1, seed 424242, selection `not integration`. The saved JSON SHA-256 is `1f54f759d1f77d8f318268e6ee4afe46227703e19b77998a4ffcb47cb2cb5b2c`; JSON/raw data and runtime/source receipts are retained in `/private/tmp/mergecraft-remediation-validation-20260922/`. Three plan files were temporarily edited and restored during measurement; Python, test and coverage configuration inputs remained unchanged.
+- Combine-time source/runtime drift checks (`157f57a3`) passed 38 focused executor tests. The first whole-shard attempt was unsuccessful: group 1 reported **1 failed, 5,011 passed, 9 skipped and 3 xfailed**; group 2 was interrupted after **3 failed, 1,037 passed and 3 skipped**. Nested standalone gate fixtures inherited outer shard variables. Reviewed test-only cleanup is integrated as `daaa613c`; failed or interrupted artifacts are retained for diagnosis and are not accepted as parity evidence.
+- Reviewed Loguru capture lifetime fixes are integrated as `24990993` and `c241c426`. Tests now drain and remove their own queued sinks before captured streams close and preserve existing process handlers.
+- Issue #829 was reproduced during the full measurement: 2,814 generated analyzer cache files in the persistent hostile fixture were treated as untracked source. The reviewed fix is integrated as `021dd273`; generated cache entries are excluded before reads and per-file Git calls, while ordinary source/configuration and tracked changes remain eligible. The executor's exact changed test files passed 15 tests; the coordinator's exact-file offline diff, init and hostile-corpus checks passed **29 tests in 58.46 seconds**.
+- The baseline measurement precedes these test-isolation and cache fixes. Measured critical thresholds, final default `make ci`, and fresh complete shard/unsharded parity remain pending. Final CI will supply the unsharded side of the same-source comparison; concurrent isolated shard measurements supply the other side. Its report must be preserved before combination writes the final report, avoiding an unnecessary third unchanged full run.
 
 ## Release inventory (plan 015)
 

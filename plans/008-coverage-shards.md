@@ -53,7 +53,7 @@ Start a clean branch `codex/008-coverage-shards` from updated main. Preserve the
 3. If dependencies are absent, `make setup` in the implementation checkout only.
 4. Focused gate: `make test MERGECRAFT_PYTEST_JOBS=0 PYTEST='uv run pytest -k "coverage_shards or coverage_ratchet"'`.
 5. Static gates: `make lint typecheck pyright`.
-6. Whole-suite parity is an explicit two-measurement acceptance check. After it passes, run one final `make ci` on the exact final tree; do not repeat unchanged full coverage runs.
+6. Whole-suite parity is an explicit two-measurement acceptance check. Use the unsharded coverage measurement from final default `make ci` as one side, and a fresh two-shard measurement of the same source/config/seed as the other. Preserve the unsharded report before combination. Do not repeat an unchanged full run solely to reorder these independent checks.
 
 ## Implementation steps
 
