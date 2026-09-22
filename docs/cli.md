@@ -73,6 +73,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval judge-calibration` | Evaluate saved judge verdicts offline against frozen human references. |
 | `mergecraft eval list` | List cases in the bank. |
 | `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44). |
+| `mergecraft eval publish-benchmark` | Validate two saved provider runs and write an auditable report. |
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
 | `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set (#140). |
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
