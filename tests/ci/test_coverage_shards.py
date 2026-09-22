@@ -196,13 +196,14 @@ def _manifest(
     group: int,
     splits: int = 2,
     nodeids: list[str] | None = None,
+    root: Path = REPO_ROOT,
 ) -> dict[str, Any]:
     group_dir = run_dir / f"group-{group}"
     group_dir.mkdir(parents=True, exist_ok=True)
     raw = group_dir / f".coverage.group-{group}"
     raw.write_bytes(f"raw-{group}".encode())
     selected = nodeids if nodeids is not None else [f"tests/test_demo.py::test_{group}"]
-    manifest = module._metadata(REPO_ROOT, splits=splits, jobs="0", seed="424242")
+    manifest = module._metadata(root, splits=splits, jobs="0", seed="424242")
     manifest.update(
         {
             "group": group,
@@ -214,6 +215,36 @@ def _manifest(
     )
     (group_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return manifest
+
+
+def _fingerprint_repo(root: Path) -> Path:
+    root.mkdir()
+    (root / "src").mkdir()
+    source = root / "src" / "demo.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "tests").mkdir()
+    (root / "tests" / "test_demo.py").write_text(
+        "def test_demo():\n    assert True\n",
+        encoding="utf-8",
+    )
+    (root / "pyproject.toml").write_text("[tool.coverage.run]\nbranch = true\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Coverage Test",
+            "-c",
+            "user.email=coverage@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=root,
+        check=True,
+    )
+    return source
 
 
 @pytest.mark.parametrize("mode", ["missing", "extra", "duplicate"])
@@ -382,6 +413,28 @@ def test_source_change_during_measurement_leaves_no_manifest(
     assert not (tmp_path / "run" / "group-1" / "manifest.json").exists()
 
 
+def test_source_change_during_complete_collection_rejects_manifests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    root = tmp_path / "repo"
+    source = _fingerprint_repo(root)
+    run_dir = tmp_path / "run"
+    _manifest(module, run_dir, group=1, nodeids=["test_demo"], root=root)
+    initial = _manifest(module, run_dir, group=2, nodeids=["test_other"], root=root)
+
+    def mutate_during_collection(*_args: Any, **_kwargs: Any) -> list[str]:
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        return ["test_demo", "test_other"]
+
+    monkeypatch.setattr(module, "_collect_nodeids", mutate_during_collection)
+
+    with pytest.raises(module.ShardError, match=r"changed.*collection"):
+        module.validate_manifests(root, run_dir, splits=2)
+    assert module._source_fingerprint(root) != initial["source_fingerprint"]
+
+
 def test_empty_group_is_allowed_only_when_collection_is_smaller_than_splits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -409,12 +462,13 @@ def test_combine_uses_only_manifested_raw_files(
     module = _load_module()
     raw_paths = []
     manifests = []
+    metadata = module._metadata(REPO_ROOT, splits=2, jobs="0", seed="424242")
     for group in (1, 2):
         raw = tmp_path / f"group-{group}" / f".coverage.group-{group}"
         raw.parent.mkdir()
         raw.write_bytes(b"raw")
         raw_paths.append(str(raw))
-        manifests.append({"raw_path": str(raw)})
+        manifests.append({**metadata, "raw_path": str(raw)})
     extra = tmp_path / "group-1" / ".coverage.unmanifested"
     extra.write_bytes(b"must-not-combine")
     monkeypatch.setattr(module, "validate_manifests", lambda *args, **kwargs: manifests)
@@ -426,6 +480,41 @@ def test_combine_uses_only_manifested_raw_files(
     combine = commands[0]
     assert all(path in combine for path in raw_paths)
     assert str(extra) not in combine
+
+
+@pytest.mark.parametrize(
+    ("mutation_call", "stage"),
+    [
+        (1, "combine"),
+        (2, "report"),
+        (3, "ratchet"),
+        (4, "floors"),
+    ],
+)
+def test_source_change_during_combine_or_gates_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation_call: int,
+    stage: str,
+) -> None:
+    module = _load_module()
+    root = tmp_path / "repo"
+    source = _fingerprint_repo(root)
+    run_dir = tmp_path / "run"
+    manifests = [_manifest(module, run_dir, group=group, root=root) for group in (1, 2)]
+    monkeypatch.setattr(module, "validate_manifests", lambda *args, **kwargs: manifests)
+    commands: list[list[str]] = []
+
+    def mutate_at_boundary(command: list[str], **_kwargs: Any) -> None:
+        commands.append(command)
+        if len(commands) == mutation_call:
+            source.write_text("VALUE = 2\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "_run", mutate_at_boundary)
+
+    with pytest.raises(module.ShardError, match=stage):
+        module.combine_and_gate(root, run_dir, splits=2)
+    assert len(commands) == mutation_call
 
 
 def test_xdist_split_reports_match_unsharded_real_branch_data(tmp_path: Path) -> None:

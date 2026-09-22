@@ -377,6 +377,27 @@ def _collect_nodeids(root: Path, *, seed: str, jobs: str, destination: Path) -> 
     return nodeids
 
 
+def _assert_metadata_current(
+    root: Path,
+    manifest: dict[str, Any],
+    *,
+    splits: int,
+    stage: str,
+) -> None:
+    selection = manifest.get("selection")
+    if not isinstance(selection, dict):
+        raise ShardError("manifest selection metadata is missing or invalid")
+    current = _metadata(
+        root,
+        splits=splits,
+        jobs=str(selection.get("xdist_jobs", "")),
+        seed=str(selection.get("seed", "")),
+    )
+    for key in _COMPATIBILITY_KEYS:
+        if manifest.get(key) != current[key]:
+            raise ShardError(f"source or coverage inputs changed {stage}: {key}")
+
+
 def validate_manifests(
     root: Path,
     run_dir: Path,
@@ -425,14 +446,19 @@ def validate_manifests(
         seen_nodeids.update(nodeids)
     if collect:
         selection = first["selection"]
-        expected_nodeids = set(
-            _collect_nodeids(
-                root,
-                seed=str(selection["seed"]),
-                jobs=str(selection["xdist_jobs"]),
-                destination=run_dir / "complete-nodeids.json",
-            )
+        collected_nodeids = _collect_nodeids(
+            root,
+            seed=str(selection["seed"]),
+            jobs=str(selection["xdist_jobs"]),
+            destination=run_dir / "complete-nodeids.json",
         )
+        _assert_metadata_current(
+            root,
+            first,
+            splits=splits,
+            stage="during complete test collection",
+        )
+        expected_nodeids = set(collected_nodeids)
         if seen_nodeids != expected_nodeids:
             missing = sorted(expected_nodeids - seen_nodeids)
             extra = sorted(seen_nodeids - expected_nodeids)
@@ -443,11 +469,19 @@ def validate_manifests(
             not manifest["nodeids"] for manifest in manifests
         ):
             raise ShardError("empty shard is invalid when the collection has at least N tests")
+    _assert_metadata_current(
+        root,
+        first,
+        splits=splits,
+        stage="during manifest validation",
+    )
     return manifests
 
 
 def combine_and_gate(root: Path, run_dir: Path, *, splits: int) -> None:
     manifests = validate_manifests(root, run_dir, splits=splits)
+    first = manifests[0]
+    _assert_metadata_current(root, first, splits=splits, stage="before coverage combine")
     combined_dir = run_dir / "combined"
     combined_dir.mkdir(exist_ok=True)
     combined_data = combined_dir / ".coverage"
@@ -460,6 +494,7 @@ def combine_and_gate(root: Path, run_dir: Path, *, splits: int) -> None:
         root=root,
         env=environment,
     )
+    _assert_metadata_current(root, first, splits=splits, stage="during coverage combine")
     report = root / "coverage.json"
     report.unlink(missing_ok=True)
     _run(
@@ -467,8 +502,11 @@ def combine_and_gate(root: Path, run_dir: Path, *, splits: int) -> None:
         root=root,
         env=environment,
     )
+    _assert_metadata_current(root, first, splits=splits, stage="during coverage report")
     _run([sys.executable, "scripts/check_coverage_ratchet.py", str(report)], root=root)
+    _assert_metadata_current(root, first, splits=splits, stage="during coverage ratchet check")
     _run([sys.executable, "scripts/check_coverage_floors.py", str(report)], root=root)
+    _assert_metadata_current(root, first, splits=splits, stage="during coverage floors check")
 
 
 def _bounded_jobs(jobs: str, *, splits: int) -> tuple[int, str]:
