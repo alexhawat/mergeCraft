@@ -163,6 +163,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Review execution and evaluation now preserve their trust and audit boundaries
+  end to end: persisted trajectories redact secrets while retaining exact,
+  safe read-path attribution; terminal verdicts use normalized, deduplicated
+  typed findings, and publication retry state clears only after a matching
+  scope/head receipt is stored. GitHub App runs mint separate least-privilege
+  API, Git, and cross-repository tokens and attempt to revoke every owned token.
+  Coverage gates use native line/branch metrics and accept only complete,
+  fingerprinted shard sets, while a single run trace covers setup through
+  publication across Action, offline, and MCP execution. Adjudication records
+  round-trip without dropping corpus data and write atomically after validation;
+  offline tools can prepare human-review batches, score exact trajectory
+  rule/path multiplicities, and run sealed judge-calibration protocols. The
+  committed evaluation labels remain agent-seeded, development-only, and
+  ineligible for quality claims: independent human calibration, live-model
+  benchmarks, release verification, and publication have not happened yet.
+
 - The keyless shadow job is a fixture replay of two hard-coded packets. It
   does not read a live review and leaves #737 open.
 - A live shadow row records the model on the packet (the slug that ran, else
