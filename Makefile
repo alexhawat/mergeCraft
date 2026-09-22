@@ -24,7 +24,7 @@ SHELL := /bin/bash
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
-	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
+	test-integration test-integration-live test-otlp-collector coverage-measure coverage-combine-gate coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare \
 	tracked-markdown-check
 
@@ -191,15 +191,39 @@ test-otlp-collector: ## OTLP collector integration — spans must leave the proc
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
 coverage-measure: ## Unit tests with coverage report only (no floor/ratchet gates)
-	rm -f coverage.json .coverage .coverage.*
-	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
-		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
-		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
-		-rX
+	@if [ -n "$(MERGECRAFT_TEST_SPLITS)$(MERGECRAFT_TEST_GROUP)" ]; then \
+		$(UV) run python scripts/coverage_shards.py measure \
+			$(if $(MERGECRAFT_COVERAGE_RUN_DIR),--run-dir "$(MERGECRAFT_COVERAGE_RUN_DIR)",) \
+			$(if $(MERGECRAFT_TEST_SPLITS),--splits "$(MERGECRAFT_TEST_SPLITS)",) \
+			$(if $(MERGECRAFT_TEST_GROUP),--group "$(MERGECRAFT_TEST_GROUP)",) \
+			--jobs "$(MERGECRAFT_PYTEST_JOBS)" \
+			--seed "$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}"; \
+	else \
+		rm -f coverage.json .coverage .coverage.*; \
+		$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
+			--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
+			--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} -rX; \
+	fi
 
-coverage-gate: coverage-measure ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
-	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
-	$(UV) run python scripts/check_coverage_floors.py coverage.json
+coverage-combine-gate: ## Validate, combine, and gate one explicit complete shard collection
+	$(UV) run python scripts/coverage_shards.py combine \
+		$(if $(MERGECRAFT_COVERAGE_RUN_DIR),--run-dir "$(MERGECRAFT_COVERAGE_RUN_DIR)",) \
+		$(if $(MERGECRAFT_TEST_SPLITS),--splits "$(MERGECRAFT_TEST_SPLITS)",)
+
+coverage-gate: ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
+	@if [ -n "$(MERGECRAFT_TEST_GROUP)" ]; then \
+		echo "coverage-gate refuses a partial shard; run coverage-measure then coverage-combine-gate" >&2; \
+		exit 2; \
+	elif [ -n "$(MERGECRAFT_TEST_SPLITS)" ]; then \
+		$(UV) run python scripts/coverage_shards.py orchestrate \
+			$(if $(MERGECRAFT_COVERAGE_RUN_DIR),--run-dir "$(MERGECRAFT_COVERAGE_RUN_DIR)",) \
+			--splits "$(MERGECRAFT_TEST_SPLITS)" --jobs "$(MERGECRAFT_PYTEST_JOBS)" \
+			--seed "$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}"; \
+	else \
+		$(MAKE) coverage-measure && \
+		$(UV) run python scripts/check_coverage_ratchet.py coverage.json && \
+		$(UV) run python scripts/check_coverage_floors.py coverage.json; \
+	fi
 
 mutation-test-decisions: ## Decision-module mutation harness (advisory; D15 / §2.6)
 	$(UV) run python scripts/mutate_decision_modules.py --threshold $(MUTATION_ESCAPE_THRESHOLD_PCT)
