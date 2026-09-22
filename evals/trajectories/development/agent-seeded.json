@@ -1,0 +1,860 @@
+{
+  "adjudicator_login": null,
+  "auditor_version": "1.0.0",
+  "cases": [
+    {
+      "adjudication": null,
+      "case_id": "development-clean",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "ignored-tool-error",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "no-post-edit-verification",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "missing-completion-signal",
+          "truth": "negative"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [
+          "all"
+        ],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "run-diff"
+        ],
+        "tests_run": [],
+        "tool_calls": [],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "40b6e95bdc04c383da992beaa0e9125c8c0815458c1a9388bd302da6fd7ff6ea"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-changed-unread",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [
+            "src/changed.py"
+          ],
+          "rule_id": "changed-unread-file",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "ignored-tool-error",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "no-post-edit-verification",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "missing-completion-signal",
+          "truth": "negative"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [
+          "src/changed.py"
+        ],
+        "files_read": [
+          "src/read.py"
+        ],
+        "fixes_after_failures": 0,
+        "read_coverage": true,
+        "regions_cleared": [],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "run-diff"
+        ],
+        "tests_run": [],
+        "tool_calls": [],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "bdc7e3933772f3dd61694abe79d3970e6de6979d67b425fa3b12e7a636e32cf1"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-ignored-error",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "ignored-tool-error",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "no-post-edit-verification",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "missing-completion-signal",
+          "truth": "positive"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "mcp-tool-calls"
+        ],
+        "tests_run": [],
+        "tool_calls": [
+          {
+            "command": null,
+            "error": "connection reset",
+            "failure_class": "transient",
+            "intent": "read",
+            "ok": false,
+            "outcome_ok": null,
+            "paths": [],
+            "sequence": 1,
+            "signature": "failed-read",
+            "tool": "get_pull_request"
+          }
+        ],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "9b30432694c9916afed239819bb7c9925438162832aa1005e4f44bcd97bc5a59"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-no-post-edit",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "ignored-tool-error",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "no-post-edit-verification",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "missing-completion-signal",
+          "truth": "negative"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [
+          "src/unverified.py"
+        ],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "run-diff"
+        ],
+        "tests_run": [],
+        "tool_calls": [],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "cf9c267301827d59c302318e1224660cb0efab94be160f16160ba4b106aef02f"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-repeated-loop",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "ignored-tool-error",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "no-post-edit-verification",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "repeated-tool-loop",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "missing-completion-signal",
+          "truth": "positive"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "mcp-tool-calls"
+        ],
+        "tests_run": [],
+        "tool_calls": [
+          {
+            "command": null,
+            "error": null,
+            "failure_class": "unknown",
+            "intent": "verify",
+            "ok": true,
+            "outcome_ok": true,
+            "paths": [],
+            "sequence": 1,
+            "signature": "same-check",
+            "tool": "run_static_checks"
+          },
+          {
+            "command": null,
+            "error": null,
+            "failure_class": "unknown",
+            "intent": "verify",
+            "ok": true,
+            "outcome_ok": true,
+            "paths": [],
+            "sequence": 2,
+            "signature": "same-check",
+            "tool": "run_static_checks"
+          },
+          {
+            "command": null,
+            "error": null,
+            "failure_class": "unknown",
+            "intent": "verify",
+            "ok": true,
+            "outcome_ok": true,
+            "paths": [],
+            "sequence": 3,
+            "signature": "same-check",
+            "tool": "run_static_checks"
+          }
+        ],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "9bfc418fbd891d54762f087c1e3e6bfdee70c988527c46f0407ddb0d02d369d8"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-unresolved",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "ignored-tool-error",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "no-post-edit-verification",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "unresolved-failure",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "missing-completion-signal",
+          "truth": "positive"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [
+          "make lint failed"
+        ],
+        "files_modified": [],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "mcp-tool-calls"
+        ],
+        "tests_run": [],
+        "tool_calls": [
+          {
+            "command": "make lint",
+            "error": null,
+            "failure_class": "unknown",
+            "intent": "verify",
+            "ok": true,
+            "outcome_ok": false,
+            "paths": [],
+            "sequence": 1,
+            "signature": "failed-check",
+            "tool": "run_static_checks"
+          }
+        ],
+        "unresolved_errors": [
+          "make lint failed"
+        ]
+      },
+      "trajectory_sha256": "c4dc05f9b9e94d30fbd69b8d061955db8684897e40d270dc40ad1937713ba0d1"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-broad-edit",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "ignored-tool-error",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "no-post-edit-verification",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "missing-completion-signal",
+          "truth": "negative"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [
+          "src/file_0.py",
+          "src/file_1.py",
+          "src/file_2.py",
+          "src/file_3.py",
+          "src/file_4.py",
+          "src/file_5.py",
+          "src/file_6.py",
+          "src/file_7.py",
+          "src/file_8.py",
+          "src/file_9.py",
+          "src/file_10.py",
+          "src/file_11.py",
+          "src/file_12.py",
+          "src/file_13.py",
+          "src/file_14.py",
+          "src/file_15.py",
+          "src/file_16.py",
+          "src/file_17.py",
+          "src/file_18.py",
+          "src/file_19.py",
+          "src/file_20.py",
+          "src/file_21.py",
+          "src/file_22.py",
+          "src/file_23.py",
+          "src/file_24.py"
+        ],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "run-diff"
+        ],
+        "tests_run": [],
+        "tool_calls": [],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "dab4a2f65a7784a832ac4ae4090d4caf1022b9c4947d0380ceb7e52889ff8ad5"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-stale-retry",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "ignored-tool-error",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "no-post-edit-verification",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "positive"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "missing-completion-signal",
+          "truth": "positive"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [],
+        "retries": 1,
+        "schema_version": "1.0.0",
+        "sources": [
+          "mcp-tool-calls"
+        ],
+        "tests_run": [],
+        "tool_calls": [
+          {
+            "command": null,
+            "error": "connection reset",
+            "failure_class": "transient",
+            "intent": "read",
+            "ok": false,
+            "outcome_ok": null,
+            "paths": [],
+            "sequence": 1,
+            "signature": "stale-read",
+            "tool": "get_pull_request"
+          },
+          {
+            "command": null,
+            "error": "connection reset",
+            "failure_class": "transient",
+            "intent": "read",
+            "ok": false,
+            "outcome_ok": null,
+            "paths": [],
+            "sequence": 2,
+            "signature": "stale-read",
+            "tool": "get_pull_request"
+          }
+        ],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "fc6647ee97a06195c09ebcbad5c2ffdcba9dd4e7377c3c35e5fe2b3437edc61b"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-missing-completion",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "ignored-tool-error",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "no-post-edit-verification",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "negative"
+        },
+        {
+          "expected_paths": [
+            ""
+          ],
+          "rule_id": "missing-completion-signal",
+          "truth": "positive"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "mcp-tool-calls"
+        ],
+        "tests_run": [],
+        "tool_calls": [
+          {
+            "command": null,
+            "error": null,
+            "failure_class": "unknown",
+            "intent": "read",
+            "ok": true,
+            "outcome_ok": null,
+            "paths": [],
+            "sequence": 1,
+            "signature": "successful-read",
+            "tool": "get_pull_request"
+          }
+        ],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "27119df8c15d1cc838e1b583a7e3771433059492702a57deddde5d2638acc75e"
+    },
+    {
+      "adjudication": null,
+      "case_id": "development-all-unknown",
+      "labelled_at": null,
+      "labels": [
+        {
+          "expected_paths": [],
+          "rule_id": "changed-unread-file",
+          "truth": "unknown"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "ignored-tool-error",
+          "truth": "unknown"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "no-post-edit-verification",
+          "truth": "unknown"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "repeated-tool-loop",
+          "truth": "unknown"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "unresolved-failure",
+          "truth": "unknown"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "suspicious-broad-edit",
+          "truth": "unknown"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "stale-assumption-after-failure",
+          "truth": "unknown"
+        },
+        {
+          "expected_paths": [],
+          "rule_id": "missing-completion-signal",
+          "truth": "unknown"
+        }
+      ],
+      "provenance": "agent-seeded",
+      "trajectory": {
+        "commands_run": [],
+        "completion_claims": [],
+        "external_trace": null,
+        "failures_observed": [],
+        "files_modified": [],
+        "files_read": [],
+        "fixes_after_failures": 0,
+        "read_coverage": false,
+        "regions_cleared": [
+          "unknown-label-example"
+        ],
+        "retries": 0,
+        "schema_version": "1.0.0",
+        "sources": [
+          "external-trace"
+        ],
+        "tests_run": [],
+        "tool_calls": [],
+        "unresolved_errors": []
+      },
+      "trajectory_sha256": "61f0c18ee4bd7ce46abb03fb5b4a740020cedb7cd6b0254f44be31fb99fa178b"
+    }
+  ],
+  "schema_version": "1.0.0",
+  "source_commit": "ddd442d3003ddc7f547cfd4a0e356d5d92291e7a",
+  "split": "development"
+}

@@ -87,6 +87,24 @@ fixture to `evals/fixtures/golden/<case-id>/`, and verifies its SHA-256 before
 rendering. This batch establishes neither judge calibration nor human-human
 agreement, even after its provenance requirements are eventually satisfied.
 
+### Trajectory auditor scoring
+
+`mergecraft eval trajectory-score --labels PATH --json` scores the eight
+deterministic trajectory checks against a strict, versioned label set. Matching
+uses exact `(rule_id, path)` multiplicities. Predictions attached to an
+`unknown` label stay in the raw report but do not enter confusion counts or
+run-level exact match. Undefined precision and recall remain JSON `null`.
+
+The committed rows under `evals/trajectories/development/` are explicitly
+`agent-seeded`. They include positive, negative, and unknown examples for every
+check and exercise the offline scorer through `make eval-trajectory`; they are
+not an independently labelled quality baseline. The report therefore remains
+advisory with `quality_eligible: false`, even when a separate input contains
+human provenance. Quality eligibility needs a maintainer-approved manifest
+that freezes sample minimums, split membership, and tolerances before held-out
+scores are viewed. The golden finding metadata prepared for #780 does not
+contain tool-call trajectories and cannot supply these labels.
+
 ## Metric set
 
 Computed by `mergecraft.evals.quality_metrics.compute_quality_metrics` against

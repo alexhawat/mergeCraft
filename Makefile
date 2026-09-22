@@ -21,7 +21,7 @@ SHELL := /bin/bash
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	mutation-test-decisions \
-	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence shadow-compare \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence eval-trajectory shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-combine-gate coverage-gate npm-audit workflow-lint \
@@ -385,6 +385,10 @@ eval-replay: ## Replay structural eval-bank integrity; keyless, not live detecti
 
 eval-convergence: ## Score multi-round convergence metric; write result set (RC6)
 	$(UV) run mergecraft eval convergence
+
+TRAJECTORY_LABELS ?= evals/trajectories/development
+eval-trajectory: ## Score saved trajectories; development labels remain advisory (#735)
+	$(UV) run mergecraft eval trajectory-score --labels "$(TRAJECTORY_LABELS)" --json
 
 SHADOW_RUN ?= /tmp/mergecraft-shadow-run.jsonl
 shadow-compare: ## Replay two fixture packets through the gate (keyless, advisory)

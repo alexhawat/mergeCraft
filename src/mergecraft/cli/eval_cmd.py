@@ -87,6 +87,10 @@ from mergecraft.evals.scoring import (
     score_findings,
 )
 from mergecraft.evals.store import CATEGORY_REJECTED, CATEGORY_REVERTED, FAILURE_CATEGORIES
+from mergecraft.evals.trajectory_scoring import (
+    load_trajectory_label_sets,
+    score_trajectory_labels,
+)
 from mergecraft.models import get_model_provider
 from mergecraft.utils.agent_resolve import resolve_effective_model_slug, resolve_model
 from mergecraft.utils.learnings import LearningProvenance
@@ -1001,6 +1005,56 @@ def judge_calibration_cmd(
             console.print(f"  held-out macro f1: {rendered_f1}")
     if report.state != "validated":
         raise typer.Exit(CLI_FAILED_EXIT_CODE)
+
+
+@app.command("trajectory-score")
+def trajectory_score_cmd(
+    ctx: typer.Context,
+    labels: Path = typer.Option(
+        ...,
+        "--labels",
+        exists=True,
+        readable=True,
+        help="Trajectory label-set JSON file or directory of JSON files.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the strict trajectory score report as JSON.",
+    ),
+) -> None:
+    """Score the deterministic trajectory auditor against frozen labels.
+
+    Agent-seeded development labels exercise the scorer but remain advisory.
+    Only calibration or held-out rows with independent human provenance are
+    reported as independently labelled.
+    """
+    try:
+        report = score_trajectory_labels(load_trajectory_label_sets(labels))
+    except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        cli_bail(f"invalid trajectory labels: {exc}")
+
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(report.model_dump(mode="json"))
+        return
+
+    console.print(
+        f"trajectory score: {report.cases_total} cases / "
+        f"{report.exact_match.eligible_cases} exact-match eligible"
+    )
+    exact_rate = report.exact_match.rate
+    console.print(
+        "  exact match     : " + (f"{exact_rate:.2%}" if exact_rate is not None else "undefined")
+    )
+    for metric_name, value in (
+        ("micro precision", report.micro.precision),
+        ("micro recall", report.micro.recall),
+        ("macro precision", report.macro.precision),
+        ("macro recall", report.macro.recall),
+    ):
+        rendered = f"{value:.2%}" if value is not None else "undefined"
+        console.print(f"  {metric_name:<17}: {rendered}")
+    console.print(f"  eligibility    : {report.eligibility.reason}")
 
 
 @app.command("score")
