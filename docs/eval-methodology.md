@@ -27,6 +27,21 @@ requirements, large-PR, and incremental-review.
 
 APIs: `mergecraft.evals.corpora`, `mergecraft.evals.quality_metrics`.
 
+### Authoring and packaged copies
+
+`evals/cases/` is the only authoring tree for the package-backed `golden/`,
+`mutation/`, and `skill/` corpora. After editing or adding a case, run
+`make eval-cases-sync`, review both the authoring file and its copy under
+`src/mergecraft/evals/cases/`, then run `make eval-cases-sync-check`. The sync
+is one way and does not delete stale packaged-only files; deleting a case
+requires an explicit reviewed deletion from both trees.
+
+At runtime, `mergecraft.evals.corpora` loads an explicit cwd-relative
+`evals/cases/<kind>` directory first, packaged wheel resources second, and the
+checkout-relative authoring tree last. `mergecraft eval adjudicate` changes
+only the path passed by the operator. It does not infer or update another copy,
+an installed wheel, or an unrelated custom corpus.
+
 ## Metric set
 
 Computed by `mergecraft.evals.quality_metrics.compute_quality_metrics` against

@@ -21,7 +21,7 @@ SHELL := /bin/bash
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	mutation-test-decisions \
-	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-gate eval-replay eval-convergence shadow-compare \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
@@ -329,7 +329,13 @@ bench-review: ## Run ReviewBench via Harbor (set REVIEWBENCH_DIR to an external 
 eval-skill-corpus: ## Review-skill eval corpus gate — fixture-only, no live provider (D11/F9)
 	$(UV) run python -m mergecraft.evals.skill
 
-eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
+eval-cases-sync: ## Copy authored golden/mutation/skill cases into package resources
+	$(UV) run python scripts/sync_eval_cases.py
+
+eval-cases-sync-check: ## Check authored and packaged eval cases have identical files and bytes
+	$(UV) run python scripts/sync_eval_cases.py --check
+
+eval-gate: eval-cases-sync-check ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
 	$(UV) run mergecraft eval gate
 
 eval-replay: ## Replay structural eval-bank integrity; keyless, not live detection scores

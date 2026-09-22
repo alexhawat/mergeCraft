@@ -29,8 +29,11 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from mergecraft.evals.adjudication import AdjudicationRecord  # noqa: TC001
+
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
+
 __all__ = [
     "BENCHMARK_CASE_KINDS",
     "GOLDEN_CATEGORIES",
@@ -109,6 +112,8 @@ class CorpusCase(BaseModel):
     start_line: int = 1
     end_line: int = 1
     notes: str = ""
+    provenance: str = ""
+    adjudication: AdjudicationRecord | None = None
 
 
 def _cases_from_path(directory: Path) -> tuple[CorpusCase, ...]:

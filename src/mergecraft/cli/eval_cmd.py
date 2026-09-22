@@ -21,6 +21,8 @@ scaffolded; the CLI accepts an override so tests can use a tmpdir.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,7 @@ from mergecraft.evals.benchmark import (
     write_result_set,
 )
 from mergecraft.evals.convergence_benchmark import replay_convergence
+from mergecraft.evals.corpora import CorpusCase
 from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
     run_full_benchmark,
@@ -111,6 +114,74 @@ def _case_path(bank_dir: Path, case_id: str) -> Path:
     if not case_id or not case_id.replace("-", "").replace("_", "").replace(".", "").isalnum():
         cli_bail(f"invalid case id: {case_id!r}")
     return bank_dir / f"{case_id}{CASE_FILE_SUFFIX}"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Replace *path* atomically, preserving an existing file's mode."""
+    mode = path.stat().st_mode & 0o777 if path.is_file() else None
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if mode is not None:
+            tmp_path.chmod(mode)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _validate_adjudication_candidate(
+    rendered: str,
+    *,
+    was_jsonl: bool,
+    is_corpus_object: bool,
+) -> None:
+    """Decode and validate the complete candidate before replacing the source."""
+
+    def validate_baseline_rows(rows: list[Any]) -> None:
+        if not rows or any(not isinstance(row, dict) for row in rows):
+            raise ValueError("baseline rows must all be objects")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("baseline rows must all be objects")
+            if not str(row.get("id") or row.get("cluster_id") or "").strip():
+                raise ValueError("baseline rows must have a non-empty id")
+            if not str(row.get("path") or "").strip():
+                raise ValueError("baseline rows must have a non-empty path")
+        parsed = load_baseline_issues(rows)
+        if len(parsed) != len(rows):
+            raise ValueError("not every baseline row could be validated")
+        if any(not issue.id.strip() or not issue.path.strip() for issue in parsed):
+            raise ValueError("baseline row anchors must remain non-empty after normalization")
+
+    if was_jsonl:
+        rows = [
+            json.loads(line)
+            for line in rendered.splitlines()
+            if line.strip() and not line.lstrip().startswith("//")
+        ]
+        validate_baseline_rows(rows)
+        return
+
+    payload = json.loads(rendered)
+    if is_corpus_object:
+        CorpusCase.model_validate(payload)
+        return
+    if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
+        rows = payload["issues"]
+    elif isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = [payload]
+    else:
+        raise ValueError("expected baseline rows or an 'issues' envelope")
+    validate_baseline_rows(rows)
 
 
 def _resolve_synthetic_provenance(
@@ -802,11 +873,26 @@ def adjudicate_cmd(
     # Structure is decided before format, because a compact envelope is also a
     # single line that parses as an object and would otherwise be mistaken for
     # a JSONL row.
+    is_corpus_object = (
+        baseline.suffix.casefold() != ".jsonl"
+        and isinstance(payload, dict)
+        and not isinstance(payload.get("issues"), list)
+        and (
+            str(payload.get("id") or "").startswith("golden-")
+            or "language" in payload
+            or "framework" in payload
+        )
+    )
     if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
         # The envelope every shipped corpus baseline uses. Bind to the list
         # inside the payload so the rewrite reaches it and the other keys live.
         was_jsonl = False
         rows = payload["issues"]
+    elif is_corpus_object:
+        # Golden cases are authored as one object per file. Keep the original
+        # object bound to ``payload`` while exposing a mutable one-row view.
+        was_jsonl = False
+        rows = [payload]
     elif was_jsonl:
         rows = [json.loads(line) for line in jsonl_lines]
         payload = rows
@@ -814,7 +900,6 @@ def adjudicate_cmd(
         rows = payload
     elif isinstance(payload, dict):
         rows = [payload]
-        payload = rows
     else:
         cli_bail(f"{baseline}: expected baseline rows, an 'issues' envelope, or JSONL")
 
@@ -851,7 +936,15 @@ def adjudicate_cmd(
         rendered = "\n".join(rendered_lines) + "\n"
     else:
         rendered = json.dumps(payload, indent=2) + "\n"
-    baseline.write_text(rendered, encoding="utf-8")
+    try:
+        _validate_adjudication_candidate(
+            rendered,
+            was_jsonl=was_jsonl,
+            is_corpus_object=is_corpus_object,
+        )
+        _atomic_write_text(baseline, rendered)
+    except (OSError, ValueError, ValidationError) as exc:
+        cli_bail(f"could not safely update {baseline}: {exc}")
     console.print(
         f"adjudicated {issue_id} by {by} — provenance {provenance_for(record)} "
         f"(tier {record.independence})"
