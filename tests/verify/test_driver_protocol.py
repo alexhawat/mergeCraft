@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import get_type_hints
 
@@ -44,6 +45,33 @@ def test_fake_satisfies_protocol() -> None:
     protocol = require_symbol(driver_mod, "BrowserDriver")
     fake = FakeBrowserDriver()
     assert isinstance(fake, protocol)
+
+
+@pytest.mark.parametrize("method_name", PROTOCOL_METHODS)
+def test_fake_exposes_each_protocol_method_as_async(method_name: str) -> None:
+    method = getattr(FakeBrowserDriver(), method_name, None)
+    assert callable(method), method_name
+    assert inspect.iscoroutinefunction(method), method_name
+
+
+def test_protocol_method_set_matches_the_fake() -> None:
+    """The protocol and the shared fake declare exactly the same surface."""
+    driver_mod = import_verify("driver")
+    protocol = require_symbol(driver_mod, "BrowserDriver")
+    declared = {
+        name
+        for name in dir(protocol)
+        if not name.startswith("_") and callable(getattr(protocol, name, None))
+    }
+    assert declared == set(PROTOCOL_METHODS)
+    for name in PROTOCOL_METHODS:
+        assert callable(getattr(FakeBrowserDriver, name, None)), name
+
+
+async def test_scroll_defaults_to_no_movement() -> None:
+    fake = FakeBrowserDriver()
+    await fake.scroll()
+    assert ("scroll", (0, 0)) in fake.calls
 
 
 async def test_fake_navigate_click_fill_type_press_scroll(tmp_path: Path) -> None:

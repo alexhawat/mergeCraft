@@ -15,11 +15,13 @@ from mergecraft.jev.types import (
     ALIGN_THRESHOLD_CORPUS_IDS,
     CERTAIN_CONFIDENCE_FLOOR,
     CLAIM_PACK_ID,
+    CRITERION_PACK_ID,
     EVIDENCE_PACK_ID,
     LENS_PACK_ID,
     LENS_THRESHOLD_CORPUS_IDS,
     LIKELY_CONFIDENCE_FLOOR,
     NOUL_ACT_FLOOR,
+    REPRO_PACK_ID,
     UNIT_PACK_ID,
     UNIT_THRESHOLD_CORPUS_IDS,
 )
@@ -79,6 +81,18 @@ PACK_REGISTRY: Final[dict[str, PackRegistryEntry]] = {
         state_fields=frozenset({"diff", "paths"}),
         threshold_keys=frozenset({"lens/v1.likely"}),
         corpus_ids=LENS_THRESHOLD_CORPUS_IDS,
+    ),
+    CRITERION_PACK_ID: PackRegistryEntry(
+        pack_id=CRITERION_PACK_ID,
+        state_fields=frozenset({"criterion", "page"}),
+        threshold_keys=frozenset(),
+        corpus_ids=(),
+    ),
+    REPRO_PACK_ID: PackRegistryEntry(
+        pack_id=REPRO_PACK_ID,
+        state_fields=frozenset({"claim", "page"}),
+        threshold_keys=frozenset(),
+        corpus_ids=(),
     ),
 }
 

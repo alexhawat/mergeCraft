@@ -84,7 +84,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft health run` | Emit JSON health status for the running mergeCraft installation. |
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` and an example workflow (local, no API). |
 | `mergecraft jev disable` | Write `jev.enabled: false` to the committed config. |
-| `mergecraft jev enable` | Write `jev.enabled: true` to the committed config. No other key is written. |
+| `mergecraft jev enable` | Write `jev.enabled: true`. Prompt for and save `TYPESAFE_API_KEY` when unset. |
 | `mergecraft jev set <key> <value>` | Write one Jev parameter, validated through `JevSettings` before writing. |
 | `mergecraft jev status` | Show config, credential presence, and effective Jev values. |
 | `mergecraft learnings active` | List only the active (promoted) learning entries. |

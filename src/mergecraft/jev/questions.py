@@ -9,6 +9,8 @@ Exports:
     claim_pack: Prose-claim battery for plan 21 D6 rules 1, 3, 4.
     align_pack: Entity-alignment battery per candidate pair (G14).
     lens_pack: One Choice per catalog lens, read live (plan 21 D9).
+    criterion_pack: One noul per behaviour-verification criterion.
+    repro_pack: One noul for a reproduce claim.
     get_pack: Lookup by versioned pack id.
     select_lenses: One ``lens/v1`` call per PR.
     select_lenses_or_fallback: ``jev:`` toggle + confidence-floor fallback.
@@ -25,9 +27,13 @@ from mergecraft.jev.architecture import build_system_one_questions
 from mergecraft.jev.types import (
     ALIGN_PACK_ID,
     CLAIM_PACK_ID,
+    CRITERION_ANSWER_NAME,
+    CRITERION_PACK_ID,
     EVIDENCE_PACK_ID,
     LENS_PACK_ID,
     LIKELY_CONFIDENCE_FLOOR,
+    REPRO_ANSWER_NAME,
+    REPRO_PACK_ID,
     UNIT_PACK_ID,
     ChoiceAnswer,
     JevError,
@@ -303,12 +309,46 @@ def lens_pack() -> LensQuestionPack:
     return LensQuestionPack(pack_id=LENS_PACK_ID, questions=questions)
 
 
+def criterion_pack() -> QuestionPack:
+    """Pack ``criterion/v1`` — one noul per acceptance criterion (behaviour verify).
+
+    Jev answers whether the observed page satisfies the criterion. It is never
+    asked how many criteria pass — Python maps each answer to a verdict.
+    """
+    return QuestionPack(
+        pack_id=CRITERION_PACK_ID,
+        questions=(
+            QuestionSpec(
+                name=CRITERION_ANSWER_NAME,
+                kind="noul",
+                instructions="The observed page satisfies this acceptance criterion.",
+            ),
+        ),
+    )
+
+
+def repro_pack() -> QuestionPack:
+    """Pack ``repro/v1`` — one noul for a reproduce claim (behaviour verify)."""
+    return QuestionPack(
+        pack_id=REPRO_PACK_ID,
+        questions=(
+            QuestionSpec(
+                name=REPRO_ANSWER_NAME,
+                kind="noul",
+                instructions="The observed page reproduces the claimed defect.",
+            ),
+        ),
+    )
+
+
 _PACK_FACTORIES = {
     UNIT_PACK_ID: unit_pack,
     EVIDENCE_PACK_ID: evidence_pack,
     CLAIM_PACK_ID: claim_pack,
     ALIGN_PACK_ID: align_pack,
     LENS_PACK_ID: lens_pack,
+    CRITERION_PACK_ID: criterion_pack,
+    REPRO_PACK_ID: repro_pack,
 }
 
 
@@ -449,9 +489,11 @@ __all__ = [
     "QuestionSpec",
     "align_pack",
     "claim_pack",
+    "criterion_pack",
     "evidence_pack",
     "get_pack",
     "lens_pack",
+    "repro_pack",
     "select_lenses",
     "select_lenses_or_fallback",
     "unit_pack",

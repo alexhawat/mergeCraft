@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft verify-behavior` now drives a real Chrome over the DevTools
+  Protocol and scores each acceptance criterion and reproduction claim through
+  Jev, instead of refusing every run. A reachable host Chrome yields a live
+  driver; an unreachable endpoint still fails closed, with a named, readable
+  skip in both the test run and the report. The report states what a green
+  verify does and does not prove (#752).
+
 - `mergecraft jev enable|disable|status|set` configures the Jev advisory
   screening gate. `enable` writes only `jev.enabled: true` — every other
   value keeps coming from `JevSettings` defaults, so a later default change
@@ -65,6 +72,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI `--json` payloads carry their own schema version, decoupled from the
   review snapshot's. Both stay `1.0.0`, so no payload changes; the two can now
   be bumped independently (#777).
+
+- `mergecraft jev --help` (and each `enable` / `disable` / `status` / `set`
+  `--help`) now documents every command and option, including the
+  `TYPESAFE_API_KEY` local `.env` and Actions-secret paths (#803)
+
+- `mergecraft jev enable` now requests `TYPESAFE_API_KEY` when it is not
+  already set and writes it to `.env`. `enable --github` also stores the
+  key as the `TYPESAFE_API_KEY` Actions secret when a key is available
+  and the secret is missing (#803)
 
 - `make test` no longer runs the nine branch-walking `test_cov_*` suites: they
   carry a new `coverage` marker and the `make test` selector is now

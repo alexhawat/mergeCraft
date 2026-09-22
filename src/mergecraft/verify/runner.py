@@ -4,9 +4,16 @@ This module never imports a browser automation library. Tests inject
 ``FakeBrowserDriver``; the CLI uses ``--allow-stub`` or
 ``mergecraft.browser.launch_browser_driver``.
 
+Criterion and repro scoring go through ``mergecraft.verify.jev_seam`` when a
+``jev_client`` is supplied: Jev judges each criterion and the repro claim, and
+this module maps the categorical verdicts onto report statuses in Python. With
+no client the module keeps its local text heuristic, which is what unit tests
+drive.
+
 Exports:
     collect_skip_reasons: Trust, shell, and enabled:false skip list.
     run_verify_behavior: Trusted-tier gate, process lifecycle, report write.
+    write_skipped_report: Named skip report when the run could not start.
 """
 
 from __future__ import annotations
@@ -26,6 +33,7 @@ from loguru import logger
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.analyzers.trust import derive_trust_tier
 from mergecraft.verify.artifacts import redact_screenshot
+from mergecraft.verify.jev_seam import judge_criteria, judge_repro_claim
 from mergecraft.verify.models import (
     BlockedDetails,
     CriterionResult,
@@ -40,6 +48,7 @@ from mergecraft.verify.models import (
 
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
+    from mergecraft.jev.client import AsyncJevClient
     from mergecraft.verify.driver import BrowserDriver
 
 _MAX_LOG_CHARS = 4000
@@ -351,10 +360,71 @@ def _criterion_status(text: str, page: str, evidence: list[str]) -> CriterionRes
     )
 
 
+async def _score_criteria(
+    spec: VerificationInput,
+    page: str,
+    jev_client: AsyncJevClient | None,
+    evidence: list[str],
+) -> tuple[list[CriterionResult], list[str]]:
+    """Score each criterion via the Jev seam, or locally when no client is bound.
+
+    Returns:
+        tuple[list[CriterionResult], list[str]]: Per-criterion results and the
+        named skip reasons for criteria Jev could not judge. Callers own the
+        pass/fail/partial aggregation.
+    """
+    if jev_client is None:
+        return [_criterion_status(text, page, evidence) for text in spec.acceptance_criteria], []
+    judgments = await judge_criteria(spec.acceptance_criteria, page_text=page, client=jev_client)
+    results: list[CriterionResult] = []
+    unverified: list[str] = []
+    for judgment in judgments:
+        if judgment.verdict == "unverified":
+            unverified.append(_unverified_reason("criterion", judgment.criterion, judgment.reason))
+        results.append(
+            CriterionResult(
+                id=judgment.criterion[:48] or "criterion",
+                text=judgment.criterion,
+                status=judgment.verdict,
+                evidence=list(evidence),
+            )
+        )
+    return results, unverified
+
+
+def _unverified_reason(kind: str, subject: str, reason: str) -> str:
+    """Name a judgment that did not happen so it never reads as 'found nothing'."""
+    return f"{kind} unverified: {subject} ({reason or 'unavailable'})"
+
+
+def write_skipped_report(spec: VerificationInput, *, reason: str) -> VerificationReport:
+    """Write a report that names why the run did not happen. Never a pass.
+
+    Args:
+        spec (VerificationInput): The requested run.
+        reason (str): Named skip reason recorded on ``skipped_or_unverified``.
+
+    Returns:
+        VerificationReport: ``skipped`` for verify, ``partial`` for reproduce —
+        never ``pass`` / ``reproduced``. Written to ``spec.artifacts_dir`` when set.
+
+    Examples:
+        >>> import inspect
+        >>> inspect.isfunction(write_skipped_report)
+        True
+    """
+    status: ReportStatus = "skipped" if spec.mode == "verify" else "partial"
+    report = _build_report(spec, status=status, skipped_or_unverified=[reason])
+    if spec.artifacts_dir:
+        _write_artifacts(Path(spec.artifacts_dir), report, "")
+    return report
+
+
 async def run_verify_behavior(
     spec: VerificationInput,
     *,
     driver: BrowserDriver | None = None,
+    jev_client: AsyncJevClient | None = None,
     event: dict[str, Any] | None = None,
     event_name: str | None = None,
     shell: str | None = None,
@@ -367,6 +437,9 @@ async def run_verify_behavior(
         spec (VerificationInput): Union input from issues 61, 62, and 63.
         driver (BrowserDriver | None, optional): Injected protocol. Tests pass
             a fake; the CLI binds browser-use or ``--allow-stub``.
+        jev_client (AsyncJevClient | None, optional): Pinned Jev client. When
+            supplied, criteria and the repro claim are scored by the seam; when
+            omitted, the local text heuristic is used.
         event (dict[str, Any] | None, optional): GitHub event payload.
         event_name (str | None, optional): Event name for ``derive_trust_tier``.
         shell (str | None, optional): Effective ``shell`` permission.
@@ -506,16 +579,24 @@ async def run_verify_behavior(
             trace=None,
             network_summary=None,
         )
-        criteria = [_criterion_status(text, page, screenshots) for text in spec.acceptance_criteria]
+        criteria, skipped_criteria = await _score_criteria(spec, page, jev_client, screenshots)
 
         if spec.mode == "reproduce":
             expected = spec.repro_notes or (
                 spec.acceptance_criteria[0] if spec.acceptance_criteria else "expected behaviour"
             )
             observed = page or "no page text"
-            status: ReportStatus = (
-                "reproduced" if _page_matches_expected(expected, page) else "not_reproduced"
-            )
+            if jev_client is None:
+                status: ReportStatus = (
+                    "reproduced" if _page_matches_expected(expected, page) else "not_reproduced"
+                )
+            else:
+                repro = await judge_repro_claim(expected, page_text=page, client=jev_client)
+                if repro.verdict == "unverified":
+                    status = "partial"
+                    skipped_criteria.append(_unverified_reason("repro", expected, repro.reason))
+                else:
+                    status = repro.verdict
             report = _build_report(
                 spec,
                 status=status,
@@ -523,22 +604,23 @@ async def run_verify_behavior(
                 criteria=criteria,
                 observed=observed,
                 expected=expected,
+                skipped_or_unverified=skipped_criteria,
                 artifacts=artifacts,
                 console_errors=console_errors,
                 credential_names=credential_names,
             )
         else:
-            statuses = {item.status for item in criteria}
-            skipped_criteria: list[str] = []
             if not criteria:
                 verify_status: ReportStatus = "partial"
                 skipped_criteria.append("no acceptance criteria")
-            elif statuses == {"pass"}:
-                verify_status = "pass"
-            elif statuses == {"fail"}:
-                verify_status = "fail"
             else:
-                verify_status = "partial"
+                statuses = {item.status for item in criteria}
+                if statuses == {"pass"}:
+                    verify_status = "pass"
+                elif statuses == {"fail"}:
+                    verify_status = "fail"
+                else:
+                    verify_status = "partial"
             report = _build_report(
                 spec,
                 status=verify_status,

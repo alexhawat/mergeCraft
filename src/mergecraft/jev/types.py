@@ -7,6 +7,8 @@ Exports:
     CLAIM_PACK_ID: Versioned ``claim/v1`` pack id (J4).
     ALIGN_PACK_ID: Versioned ``align/v1`` pack id (J5).
     LENS_PACK_ID: Versioned ``lens/v1`` pack id (J5).
+    CRITERION_PACK_ID: Versioned ``criterion/v1`` pack id (behaviour verify).
+    REPRO_PACK_ID: Versioned ``repro/v1`` pack id (behaviour verify).
     Usage: Token counts; either field may be ``None`` (T4).
     NoulAnswer: Probability of yes; no confidence field (T5 / G6).
     ChoiceAnswer: Discrete choice with confidence and probabilities.
@@ -100,6 +102,10 @@ EVIDENCE_PACK_ID: Final[str] = "evidence/v1"
 CLAIM_PACK_ID: Final[str] = "claim/v1"
 ALIGN_PACK_ID: Final[str] = "align/v1"
 LENS_PACK_ID: Final[str] = "lens/v1"
+CRITERION_PACK_ID: Final[str] = "criterion/v1"
+REPRO_PACK_ID: Final[str] = "repro/v1"
+CRITERION_ANSWER_NAME: Final[str] = "satisfied"
+REPRO_ANSWER_NAME: Final[str] = "reproduced"
 CERTAIN_CONFIDENCE_FLOOR: Final[float] = 0.9
 LIKELY_CONFIDENCE_FLOOR: Final[float] = 0.6
 NOUL_ACT_FLOOR: Final[float] = 0.5
@@ -314,12 +320,16 @@ __all__ = [
     "ALIGN_THRESHOLD_CORPUS_IDS",
     "CERTAIN_CONFIDENCE_FLOOR",
     "CLAIM_PACK_ID",
+    "CRITERION_ANSWER_NAME",
+    "CRITERION_PACK_ID",
     "EVIDENCE_PACK_ID",
     "LENS_PACK_ID",
     "LENS_THRESHOLD_CORPUS_IDS",
     "LIKELY_CONFIDENCE_FLOOR",
     "NOUL_ACT_FLOOR",
     "PINNED_MODEL",
+    "REPRO_ANSWER_NAME",
+    "REPRO_PACK_ID",
     "SEVERITY_BY_SCORE",
     "UNIT_PACK_ID",
     "UNIT_THRESHOLD_CORPUS_IDS",

@@ -35,9 +35,11 @@ from mergecraft.verify.models import (
     is_successful,
     load_verification_input,
 )
-from mergecraft.verify.runner import collect_skip_reasons, run_verify_behavior
+from mergecraft.verify.runner import collect_skip_reasons, run_verify_behavior, write_skipped_report
 
 if TYPE_CHECKING:
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.jev.client import AsyncJevClient
     from mergecraft.verify.driver import BrowserDriver
 
 _PNG_HEADER = b"\x89PNG\r\n\x1a\n"
@@ -215,6 +217,18 @@ def _resolve_driver(
     return launch_browser_driver()
 
 
+def _resolve_jev_client(settings: RepoSettings) -> AsyncJevClient:
+    """Build the pinned Jev client the verify path judges criteria with.
+
+    Unavailable Jev (disabled, kill switch, absent credential) is not an
+    exception here: the client reports an honest skip and the seam renders each
+    criterion ``unverified`` with that reason.
+    """
+    from mergecraft.jev.client import AsyncJevClient
+
+    return AsyncJevClient(settings=settings.jev)
+
+
 def _spec_from_flags(
     *,
     mode: str | None,
@@ -311,18 +325,27 @@ def run(
         offline=offline,
     )
     driver: BrowserDriver | None = None
+    cdp_unavailable: str | None = None
     if not skip:
         try:
             driver = _resolve_driver(allow_stub=allow_stub, viewport=spec.viewport)
         except BrowserStackUnavailableError as exc:
-            typer.echo(str(exc), err=True)
-            raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
+            cdp_unavailable = str(exc)
 
+    if cdp_unavailable is not None:
+        # R-D3: fail closed. R-D11: the report names the skip so a verification
+        # that did not happen never renders as one that found nothing.
+        typer.echo(cdp_unavailable, err=True)
+        write_skipped_report(spec, reason=f"cdp_unavailable: {cdp_unavailable}")
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
+
+    jev_client = _resolve_jev_client(settings)
     try:
         report = run_async(
             run_verify_behavior(
                 spec,
                 driver=driver,
+                jev_client=jev_client,
                 offline=offline,
                 event=event,
                 event_name=event_name,

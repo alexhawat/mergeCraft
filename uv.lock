@@ -1753,6 +1753,7 @@ dependencies = [
     { name = "typesafe-sdk" },
     { name = "typing-extensions" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -1840,6 +1841,7 @@ requires-dist = [
     { name = "typos", marker = "extra == 'dev'", specifier = "==1.50.1" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.52.4" },
     { name = "vulture", marker = "extra == 'dev'", specifier = "==2.16" },
+    { name = "websockets", specifier = "==15.0.1" },
 ]
 provides-extras = ["harbor", "tracing", "dev"]
 

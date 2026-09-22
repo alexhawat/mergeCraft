@@ -4,7 +4,7 @@ Exports:
     BrowserStackUnavailableError: Raised when live browsing cannot start.
     browser_stack_available: Probe whether CDP responds.
     cdp_base_url: Resolved CDP HTTP base URL.
-    launch_browser_driver: Public live-driver entrypoint (fail closed until wired).
+    launch_browser_driver: Public live-driver entrypoint (CDP host Chrome).
 """
 
 from __future__ import annotations

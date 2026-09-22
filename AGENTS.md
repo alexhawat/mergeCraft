@@ -42,8 +42,10 @@ Use this when asked to add AI PR review to another repository.
    that step to the human when interactive auth is required.
 5. **Commit only** `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
    on a new branch. Do not commit secrets.
-6. **Trigger a review** — open a pull request, comment `@mergecraft review`, or
-   run the workflow via `workflow_dispatch`. Local/offline review uses
+6. **Trigger a review** — open a pull request or run the workflow via
+   `workflow_dispatch`. The default `mergecraft init` workflow does **not**
+   listen for `@mergecraft review` comments (comment triggers are opt-in; see
+   [`docs/workflows.md`](docs/workflows.md)). Local/offline review uses
    **`mergecraft review`** (not `diff-review`, which is a deprecated alias that
    emits one stderr warning per invocation).
 
