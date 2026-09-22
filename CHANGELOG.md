@@ -69,6 +69,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The critical-path and per-prefix coverage floors are re-measured against the
+  tree the three preceding changes produced, replacing a baseline four weeks
+  old. Every number comes from one `make coverage-measure` run on the merged
+  tree and keeps the existing buffer convention (module `measured-2` on line and
+  branch; prefix line `measured-2`, branch `measured-3`), so `utils/token.py`
+  moves off the 39.2% branch floor that let most of its branches go uncovered
+  onto the 86.2% the tree actually measures. Four floors whose measured value
+  came back lower shift down with it — each diagnosed as tree churn since the
+  old baseline, never lowered to make a gate pass — and `fail_under` stays 82
+  (#771).
+
 - CLI `--json` payloads carry their own schema version, decoupled from the
   review snapshot's. Both stay `1.0.0`, so no payload changes; the two can now
   be bumped independently (#777).
