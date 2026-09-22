@@ -56,7 +56,12 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 from mergecraft.agents.gates import decide_action, select_rule_id
-from mergecraft.evidence.gate_policy import GATE_ACTIONS, GateAction, GateActionPolicy
+from mergecraft.evidence.gate_policy import (
+    DEFAULT_GATE_POLICIES,
+    GATE_ACTIONS,
+    GateAction,
+    GateActionPolicy,
+)
 from mergecraft.run_outcome import RunOutcome
 
 if TYPE_CHECKING:
@@ -120,12 +125,18 @@ SECOND_TARGET: ShadowTarget = ShadowTarget(
     model="mergecraft.agents.gates.decide_action",
     prompt_version="2.0.0",
 )
-"""The second pinned target: the deterministic gate, run on the same packet.
+"""The second pinned target: the gate under prompt ``2.0.0``.
 
-This is not a second model call. The keyless job reads no provider secret
-(R-D10). :func:`execute_second_target` is the runtime that produces its
-prediction; the recorder only stores that result.
+Prompt ``2.0.0`` blocks a high-risk migration. The live gate asks for human
+review on that same rule. :func:`execute_second_target` runs this policy; it
+is not a second copy of the live gate and not a model call (R-D10).
 """
+
+SECOND_TARGET_POLICY: GateActionPolicy = {
+    **DEFAULT_GATE_POLICIES,
+    "high_risk_migration": GateAction.BLOCK,
+}
+"""Prompt ``2.0.0``: high-risk migrations block; every other rule matches the live gate."""
 
 
 class ShadowRecord(BaseModel):
@@ -325,10 +336,55 @@ def execute_second_target(packet: MergeEvidencePacket) -> GateShadowPrediction:
     """
     lane = packet.blast_radius.lane if packet.blast_radius is not None else "review"
     return GateShadowPrediction(
-        outcome=predict_action(packet).value,
+        outcome=predict_action(packet, policy=SECOND_TARGET_POLICY).value,
         diagnostic=select_rule_id(packet),
         lane=lane,
     )
+
+
+def record_pinned_targets(
+    packet: MergeEvidencePacket,
+    *,
+    change_id: str,
+    run_id: str,
+    output_path: Path,
+    tracer: Tracer | NullTracer | None = None,
+) -> None:
+    """Record the live gate and the second target for one packet.
+
+    The live row uses the default gate. The second row is
+    :func:`execute_second_target`. A failure is raised so the comparison job
+    can fail closed; :func:`mergecraft.evidence.run_packet.emit_run_packet`
+    catches it and stays silent.
+    """
+    failures: list[BaseException] = []
+    try:
+        record_shadow_prediction(
+            packet,
+            change_id=change_id,
+            run_id=run_id,
+            policy_id="default",
+            output_path=output_path,
+            target=LIVE_TARGET,
+            tracer=tracer,
+        )
+    except Exception as exc:  # both targets are attempted; the caller decides
+        failures.append(exc)
+    try:
+        record_shadow_prediction(
+            packet,
+            change_id=change_id,
+            run_id=run_id,
+            policy_id=SECOND_TARGET.target_id,
+            output_path=output_path,
+            target=SECOND_TARGET,
+            prediction=execute_second_target(packet),
+            tracer=tracer,
+        )
+    except Exception as exc:
+        failures.append(exc)
+    if failures:
+        raise failures[0]
 
 
 def enforce_action(
@@ -634,6 +690,7 @@ def disagreement_report(
 __all__ = [
     "LIVE_TARGET",
     "SECOND_TARGET",
+    "SECOND_TARGET_POLICY",
     "GateShadowPrediction",
     "ShadowRecord",
     "ShadowTarget",
@@ -645,5 +702,6 @@ __all__ = [
     "load_shadow_records",
     "predict_action",
     "predict_verdict_protocol",
+    "record_pinned_targets",
     "record_shadow_prediction",
 ]

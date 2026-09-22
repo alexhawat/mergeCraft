@@ -330,16 +330,12 @@ def test_live_emit_swallows_a_shadow_recording_failure(
     assert written.is_file(), "a shadow failure must not stop the evidence packet"
 
 
-def test_live_emit_records_both_pinned_targets(tmp_path: Path) -> None:
-    """A shadow emit runs the second target and records that prediction."""
+def test_live_emit_records_a_divergent_second_target(tmp_path: Path) -> None:
+    """Prompt 2.0.0 blocks a high-risk migration the live gate sends to a human."""
+    from mergecraft.classify.blast_radius import BlastRadiusClassification
     from mergecraft.evidence.packet import Decision
     from mergecraft.evidence.run_packet import emit_run_packet
-    from mergecraft.evidence.shadow import (
-        LIVE_TARGET,
-        SECOND_TARGET,
-        execute_second_target,
-        load_shadow_records,
-    )
+    from mergecraft.evidence.shadow import LIVE_TARGET, SECOND_TARGET, load_shadow_records
 
     change_id = "acme/demo#live-target-stamp"
     packet = _packet(
@@ -350,8 +346,14 @@ def test_live_emit_records_both_pinned_targets(tmp_path: Path) -> None:
             decided_by="mergecraft.agents.gates.decide_approval",
             mode="shadow",
         ),
+        blast_radius=BlastRadiusClassification(
+            lane="high",
+            auto_merge_lane="forbidden",
+            reason="migration files changed",
+            next_action="Require human review; automatic merge is forbidden.",
+            categories=["migrations"],
+        ),
     )
-    expected = execute_second_target(packet)
     written = emit_run_packet(_ctx(tmp_path), packet=packet)
     assert written is not None
     # CI sets RUNNER_TEMP, so every emit in the job appends to one shadow log.
@@ -362,13 +364,11 @@ def test_live_emit_records_both_pinned_targets(tmp_path: Path) -> None:
     ]
     by_target = {row.target_id: row for row in rows}
     assert set(by_target) == {LIVE_TARGET.target_id, SECOND_TARGET.target_id}
-    assert by_target["live"].target_model == LIVE_TARGET.model
+    assert by_target["live"].action == "require_human_review"
     second = by_target["shadow-b"]
-    assert second.target_model == SECOND_TARGET.model
+    assert second.action == "block"
     assert second.target_prompt_version == SECOND_TARGET.prompt_version
-    assert second.outcome == expected.outcome
-    assert second.diagnostic == expected.diagnostic
-    assert second.lane == expected.lane
+    assert second.action != by_target["live"].action
 
 
 def test_keyless_job_omits_an_unexecuted_second_target(tmp_path: Path) -> None:
@@ -439,6 +439,23 @@ def test_keyless_job_does_not_synthesize_partial_second_target_coverage(tmp_path
     assert shadow_rows[0].action == "auto_merge"
 
 
+def test_publish_step_reads_the_runtime_shadow_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The advisory job publishes the file the record step wrote, including both targets."""
+    from mergecraft.evidence.shadow_compare import main
+
+    runtime = tmp_path / "shadow-run.jsonl"
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    assert main(["record", "--output", str(runtime)]) == 0
+    assert main(["--from-run", str(runtime)]) == 0
+    published = summary.read_text(encoding="utf-8")
+    assert "require_human_review" in published
+    assert "block" in published
+    assert "shadow-b" in published
+
+
 def test_keyless_job_publishes_the_committed_corpus_as_a_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -454,7 +471,7 @@ def test_keyless_job_publishes_the_committed_corpus_as_a_report(
     assert rows
     assert {row.target_id for row in rows} == {"live"}
     published = summary.read_text(encoding="utf-8")
-    assert "Recorded shadow corpus" in published
+    assert "Shadow target comparison" in published
     assert "does not run a model" in published
     assert "shadow-b" not in published
 

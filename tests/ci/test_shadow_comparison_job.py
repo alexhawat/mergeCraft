@@ -3,9 +3,9 @@
 Wave plan: the verification/evals/receipts wave plan (R4). Test-plan doc:
 ``docs/test-plans/30-verification-evals-receipts.md``.
 
-The shadow corpus report ships as an **optional, keyless** workflow job: it
-publishes rows a run already recorded, and it must never become a required PR
-blocker. ``continue-on-error: true`` is the repo's
+The shadow comparison ships as an **optional, keyless** workflow job: a record
+step writes both targets and a publish step reads that file. It must never
+become a required PR blocker. ``continue-on-error: true`` is the repo's
 established non-blocking mechanism (``mutation-advisory``); a job that needs a
 provider key is a job that gets disabled.
 
@@ -50,3 +50,10 @@ def test_shadow_comparison_job_is_non_blocking_and_keyless() -> None:
         assert "secrets." not in yaml.safe_dump(job), (
             f"{workflow_name}:{job_id} must not read repository secrets"
         )
+        script = "\n".join(
+            str(step.get("run", "")) for step in (job.get("steps") or []) if isinstance(step, dict)
+        )
+        assert "shadow_compare record" in script, (
+            f"{workflow_name}:{job_id} must record a runtime log"
+        )
+        assert "--from-run" in script, f"{workflow_name}:{job_id} must publish that runtime log"

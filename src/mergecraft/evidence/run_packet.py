@@ -658,40 +658,19 @@ def emit_run_packet(
         # mode — applying the action is the gate's job, not a side
         # effect of emit.
         if assembled.decision is not None and assembled.decision.mode == "shadow":
-            from mergecraft.evidence.shadow import (
-                LIVE_TARGET,
-                SECOND_TARGET,
-                execute_second_target,
-                record_shadow_prediction,
-            )
+            from mergecraft.evidence.shadow import record_pinned_targets
 
             shadow_path = path.with_name("merge-evidence-shadow.jsonl")
-            tracer = _resolve_shadow_tracer(ctx)
             try:
-                record_shadow_prediction(
+                record_pinned_targets(
                     assembled,
                     change_id=resolved_change_id,
                     run_id=_shadow_run_id(ctx),
-                    policy_id="default",
                     output_path=shadow_path,
-                    target=LIVE_TARGET,
-                    tracer=tracer,
+                    tracer=_resolve_shadow_tracer(ctx),
                 )
             except Exception as shadow_err:  # a shadow record never fails the run
                 logger.warning("shadow record: emission failed — {}", shadow_err)
-            try:
-                record_shadow_prediction(
-                    assembled,
-                    change_id=resolved_change_id,
-                    run_id=_shadow_run_id(ctx),
-                    policy_id=SECOND_TARGET.target_id,
-                    output_path=shadow_path,
-                    target=SECOND_TARGET,
-                    prediction=execute_second_target(assembled),
-                    tracer=tracer,
-                )
-            except Exception as shadow_err:  # a shadow record never fails the run
-                logger.warning("second-target shadow record: emission failed — {}", shadow_err)
         if verdict_prediction is not None:
             from mergecraft.evidence.shadow import LIVE_TARGET, record_shadow_prediction
 

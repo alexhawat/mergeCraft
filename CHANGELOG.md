@@ -148,10 +148,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The live evidence emit records the live target and runs the second pinned
-  target on the same packet. That second prediction is the deterministic
-  gate, not a second model call. The keyless job publishes rows a run already
-  recorded and does not fill in a target that has no row (#737).
+- The second shadow target is the gate under prompt 2.0.0, which blocks a
+  high-risk migration the live gate sends to a human. A shadow emit records
+  both. The keyless job writes that runtime log and publishes it; it does not
+  run a model (#737).
 
 - `mergecraft eval ingest --from-dismissals` turns recorded dismissal signals
   into structural eval cases. A dismissal is stored as `agent-seeded`, not as

@@ -65,6 +65,8 @@ from mergecraft.evidence.shadow import (
     ShadowRecord,
     ShadowTarget,
     disagreement_report,
+    load_shadow_records,
+    record_pinned_targets,
     record_shadow_prediction,
 )
 from mergecraft.utils.step_summary import append_step_summary
@@ -253,13 +255,12 @@ def render_disagreement_table(rows: Sequence[Mapping[str, object]]) -> str:
     predictions, not a calibrated comparison (R-D7).
     """
     lines = [
-        "### Recorded shadow corpus",
+        "### Shadow target comparison (structural replay)",
         "",
-        "This job publishes rows a run already recorded. It does not run a "
-        "model, and it does not compare a target that has no row in the "
-        "corpus. A second target appears only when a run recorded that row. "
-        "No threshold here is calibrated and no rate is a detection-quality "
-        "claim.",
+        "The live row is the default gate. The second row is prompt 2.0.0, "
+        "which blocks a high-risk migration the live gate sends to a human. "
+        "This job does not run a model. No threshold here is calibrated and "
+        "no rate is a detection-quality claim.",
         "",
         "| Target | Model | Prompt | Lane | Rule | Predicted | Actual | Disagreement |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -292,20 +293,118 @@ def _default_output_path() -> Path:
     return base / "mergecraft" / "shadow-compare.jsonl"
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Publish the recorded shadow corpus (keyless).
+def _runtime_packets() -> list[MergeEvidencePacket]:
+    """Packets the advisory job records, one per committed corpus change.
 
-    Returns 0 when the corpus report is published. A recording or corpus
-    failure returns 1 — the job fails closed, and because the workflow job is
-    ``continue-on-error: true`` that failure is visible without blocking the PR.
-    This entry point does not run a model.
+    ``#101`` is a high-risk migration, so prompt 2.0.0 blocks where the live
+    gate asks for a human. ``#102`` is a low-risk pass, where the two policies
+    agree.
+    """
+    from mergecraft.classify.blast_radius import BlastRadiusClassification
+    from mergecraft.evidence.packet import Decision
+
+    high = BlastRadiusClassification(
+        lane="high",
+        auto_merge_lane="forbidden",
+        reason="migration files changed",
+        next_action="Require human review; automatic merge is forbidden.",
+        categories=["migrations"],
+    )
+    low = BlastRadiusClassification(
+        lane="low",
+        auto_merge_lane="eligible",
+        reason="generated files only",
+        next_action="Eligible for automatic merge after required checks pass.",
+        categories=["generated_files"],
+    )
+    trusted = Decision(
+        verdict="success",
+        reason="structural approval",
+        decided_by="mergecraft.agents.gates.decide_approval",
+        mode="shadow",
+    )
+    shadow = Decision(
+        verdict="neutral",
+        reason="shadow-mode decision",
+        decided_by="mergecraft.agents.gates.decide_approval",
+        mode="shadow",
+    )
+    return [
+        _runtime_packet(change_id="acme/demo#101", blast_radius=high, decision=shadow),
+        _runtime_packet(change_id="acme/demo#102", blast_radius=low, decision=trusted),
+    ]
+
+
+def _runtime_packet(
+    *,
+    change_id: str,
+    blast_radius: Any,
+    decision: Any,
+) -> MergeEvidencePacket:
+    return MergeEvidencePacket(
+        schema_version=PACKET_SCHEMA_VERSION,
+        change_id=change_id,
+        agent=AgentMetadata(id="shadow-compare", version="0.0.0", model=SECOND_TARGET.model),
+        files_changed=[],
+        findings=[],
+        deterministic_checks=[],
+        self_assessment=None,
+        decision=decision,
+        blast_radius=blast_radius,
+        trajectory=None,
+        evals=None,
+    )
+
+
+def record_runtime_shadow(output_path: Path) -> None:
+    """Write both pinned targets to ``output_path`` for the publish step."""
+    if output_path.exists():
+        output_path.unlink()
+    for packet in _runtime_packets():
+        change_id = packet.change_id
+        if change_id is None:
+            msg = "runtime packet has no change_id"
+            raise ValueError(msg)
+        record_pinned_targets(
+            packet,
+            change_id=change_id,
+            run_id="shadow-compare",
+            output_path=output_path,
+        )
+
+
+def publish_runtime_shadow(path: Path) -> list[dict[str, object]]:
+    """Publish the JSONL a record step wrote. Missing rows are not agreement."""
+    if not path.is_file():
+        msg = f"runtime shadow log is missing: {path}"
+        raise ValueError(msg)
+    records = load_shadow_records(path)
+    targets = {record.target_id for record in records}
+    if targets != {LIVE_TARGET.target_id, SECOND_TARGET.target_id}:
+        msg = f"runtime shadow log targets are {sorted(targets)}, not both pinned targets"
+        raise ValueError(msg)
+    return disagreement_report(records)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Record both pinned targets, or publish a runtime shadow log (keyless).
+
+    ``record`` writes the log. ``publish`` (the default) reads ``--from-run``
+    when given, otherwise replays ``--corpus``. A failure returns 1. This
+    entry point does not run a model.
     """
     parser = argparse.ArgumentParser(
         prog="python -m mergecraft.evidence.shadow_compare",
         description=(
-            "Publish the recorded shadow corpus. Does not run a model and does "
-            "not compare a target that has no recorded row (keyless; advisory)."
+            "Record both pinned shadow targets, then publish that runtime log. "
+            "Does not run a model (keyless; advisory)."
         ),
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="publish",
+        choices=("record", "publish"),
     )
     parser.add_argument(
         "--corpus",
@@ -314,28 +413,40 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Recorded-prediction corpus (default: {DEFAULT_CORPUS_PATH}).",
     )
     parser.add_argument(
+        "--from-run",
+        type=Path,
+        default=None,
+        help="Runtime shadow JSONL written by the record step.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
-        help="JSONL destination for the recorded rows (default: RUNNER_TEMP).",
+        help="JSONL destination for the record step (default: RUNNER_TEMP).",
     )
     args = parser.parse_args(argv)
 
     try:
-        rows = load_comparison_corpus(args.corpus)
-        predictions, outcomes = _predictions_from_rows(rows)
-        targets = tuple(target for target in PINNED_TARGETS if target.target_id in predictions)
-        if not targets:
-            msg = "corpus has no executed target predictions"
-            raise ValueError(msg)
-        packets = _packets_from_rows(rows, targets=targets)
-        report = compare_shadow_targets(
-            packets,
-            targets=targets,
-            output_path=args.output or _default_output_path(),
-            predictions=predictions,
-            outcomes=outcomes,
-        )
+        if args.command == "record":
+            record_runtime_shadow(args.output or _default_output_path())
+            return 0
+        if args.from_run is not None:
+            report = publish_runtime_shadow(args.from_run)
+        else:
+            rows = load_comparison_corpus(args.corpus)
+            predictions, outcomes = _predictions_from_rows(rows)
+            targets = tuple(target for target in PINNED_TARGETS if target.target_id in predictions)
+            if not targets:
+                msg = "corpus has no executed target predictions"
+                raise ValueError(msg)
+            packets = _packets_from_rows(rows, targets=targets)
+            report = compare_shadow_targets(
+                packets,
+                targets=targets,
+                output_path=args.output or _default_output_path(),
+                predictions=predictions,
+                outcomes=outcomes,
+            )
     except Exception as exc:  # missing data is not agreement
         logger.error("shadow comparison failed closed: {}", exc)
         return 1

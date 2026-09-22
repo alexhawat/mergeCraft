@@ -338,8 +338,10 @@ eval-replay: ## Replay structural eval-bank integrity; keyless, not live detecti
 eval-convergence: ## Score multi-round convergence metric; write result set (RC6)
 	$(UV) run mergecraft eval convergence
 
-shadow-compare: ## Publish the recorded shadow corpus; keyless, does not run a model (advisory)
-	$(UV) run python -m mergecraft.evidence.shadow_compare
+SHADOW_RUN ?= /tmp/mergecraft-shadow-run.jsonl
+shadow-compare: ## Record both shadow targets, then publish that runtime log (keyless, advisory)
+	$(UV) run python -m mergecraft.evidence.shadow_compare record --output "$(SHADOW_RUN)"
+	$(UV) run python -m mergecraft.evidence.shadow_compare --from-run "$(SHADOW_RUN)"
 
 BENCH_DETECT_ARGS ?=
 bench-detect: ## Join structural replay + live finding-location detection (#140, B3; needs live keys)
