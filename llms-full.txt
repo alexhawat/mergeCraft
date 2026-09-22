@@ -3127,7 +3127,7 @@ and repository scopes needed by their role:
 The reviewer, Git, and cross-repository read credentials are minted separately
 when their permissions or repository scopes differ. The current repository
 always remains in the reviewer and Git token scopes; configured cross-repository
-targets cannot displace it. Every internally minted token is revoked at cleanup,
+targets cannot displace it. Cleanup attempts to revoke every internally minted token,
 including tokens minted before a later role fails. Caller-owned `GH_TOKEN` and
 the job-token fallback are never revoked by mergeCraft.
 
