@@ -330,12 +330,16 @@ def test_live_emit_swallows_a_shadow_recording_failure(
     assert written.is_file(), "a shadow failure must not stop the evidence packet"
 
 
-def test_live_emit_stamps_the_live_target(tmp_path: Path) -> None:
-    """Production shadow rows name the live target, not an unlabelled legacy row."""
+def test_live_emit_records_both_pinned_targets(tmp_path: Path) -> None:
+    """A shadow emit runs the second target and records that prediction."""
     from mergecraft.evidence.packet import Decision
     from mergecraft.evidence.run_packet import emit_run_packet
-    from mergecraft.evidence.shadow import load_shadow_records
-    from mergecraft.evidence.shadow_compare import LIVE_TARGET
+    from mergecraft.evidence.shadow import (
+        LIVE_TARGET,
+        SECOND_TARGET,
+        execute_second_target,
+        load_shadow_records,
+    )
 
     change_id = "acme/demo#live-target-stamp"
     packet = _packet(
@@ -347,6 +351,7 @@ def test_live_emit_stamps_the_live_target(tmp_path: Path) -> None:
             mode="shadow",
         ),
     )
+    expected = execute_second_target(packet)
     written = emit_run_packet(_ctx(tmp_path), packet=packet)
     assert written is not None
     # CI sets RUNNER_TEMP, so every emit in the job appends to one shadow log.
@@ -355,9 +360,15 @@ def test_live_emit_stamps_the_live_target(tmp_path: Path) -> None:
         for row in load_shadow_records(written.with_name("merge-evidence-shadow.jsonl"))
         if row.change_id == change_id
     ]
-    assert len(rows) == 1
-    assert rows[0].target_id == LIVE_TARGET.target_id
-    assert rows[0].target_model == LIVE_TARGET.model
+    by_target = {row.target_id: row for row in rows}
+    assert set(by_target) == {LIVE_TARGET.target_id, SECOND_TARGET.target_id}
+    assert by_target["live"].target_model == LIVE_TARGET.model
+    second = by_target["shadow-b"]
+    assert second.target_model == SECOND_TARGET.model
+    assert second.target_prompt_version == SECOND_TARGET.prompt_version
+    assert second.outcome == expected.outcome
+    assert second.diagnostic == expected.diagnostic
+    assert second.lane == expected.lane
 
 
 def test_keyless_job_omits_an_unexecuted_second_target(tmp_path: Path) -> None:

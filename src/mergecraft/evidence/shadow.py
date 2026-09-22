@@ -115,6 +115,18 @@ class ShadowTarget(BaseModel):
 LIVE_TARGET: ShadowTarget = ShadowTarget(target_id="live", model="anthropic/claude-sonnet-5")
 """The incumbent target: the model the live review path already runs."""
 
+SECOND_TARGET: ShadowTarget = ShadowTarget(
+    target_id="shadow-b",
+    model="mergecraft.agents.gates.decide_action",
+    prompt_version="2.0.0",
+)
+"""The second pinned target: the deterministic gate, run on the same packet.
+
+This is not a second model call. The keyless job reads no provider secret
+(R-D10). :func:`execute_second_target` is the runtime that produces its
+prediction; the recorder only stores that result.
+"""
+
 
 class ShadowRecord(BaseModel):
     """One recorded shadow prediction.
@@ -293,6 +305,30 @@ def predict_action(
     :func:`record_shadow_prediction` separately.
     """
     return decide_action(packet, policy=policy)
+
+
+@dataclass(frozen=True, slots=True)
+class GateShadowPrediction:
+    """Prediction produced by running :data:`SECOND_TARGET` on one packet."""
+
+    outcome: str
+    diagnostic: str
+    lane: str = "review"
+
+
+def execute_second_target(packet: MergeEvidencePacket) -> GateShadowPrediction:
+    """Run the second pinned target on ``packet`` and return its prediction.
+
+    Calls the gate (:func:`predict_action` and :func:`select_rule_id`). The
+    caller records the return value through :func:`record_shadow_prediction`
+    with :data:`SECOND_TARGET`. Nothing here is read from a fixture.
+    """
+    lane = packet.blast_radius.lane if packet.blast_radius is not None else "review"
+    return GateShadowPrediction(
+        outcome=predict_action(packet).value,
+        diagnostic=select_rule_id(packet),
+        lane=lane,
+    )
 
 
 def enforce_action(
@@ -597,12 +633,15 @@ def disagreement_report(
 
 __all__ = [
     "LIVE_TARGET",
+    "SECOND_TARGET",
+    "GateShadowPrediction",
     "ShadowRecord",
     "ShadowTarget",
     "VerdictProtocolPrediction",
     "disagree_with_outcome",
     "disagreement_report",
     "enforce_action",
+    "execute_second_target",
     "load_shadow_records",
     "predict_action",
     "predict_verdict_protocol",

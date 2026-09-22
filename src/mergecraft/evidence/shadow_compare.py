@@ -61,6 +61,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION, AgentMetadata, MergeEvidencePacket
 from mergecraft.evidence.shadow import (
     LIVE_TARGET,
+    SECOND_TARGET,
     ShadowRecord,
     ShadowTarget,
     disagreement_report,
@@ -72,13 +73,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from mergecraft.tracing.tracer import NullTracer, Tracer
-
-SECOND_TARGET: ShadowTarget = ShadowTarget(
-    target_id="shadow-b",
-    model="anthropic/claude-opus-4-8",
-    prompt_version="2.0.0",
-)
-"""The second pinned target — a different model id *and* prompt version (#737)."""
 
 PINNED_TARGETS: tuple[ShadowTarget, ...] = (LIVE_TARGET, SECOND_TARGET)
 """The two pinned configs the comparison job diffs."""
