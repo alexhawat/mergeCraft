@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Coverage ratchet: enforce ``fail_under`` and require deliberate floor bumps.
+"""Combined coverage ratchet: enforce ``fail_under`` and deliberate floor bumps.
 
-Fails when measured line coverage drops below the floor in ``pyproject.toml``
+Fails when coverage.py's combined line-and-branch metric drops below the floor
+in ``pyproject.toml``
 (``[tool.coverage.report] fail_under``). Compares the declared floor to the
 merge-base ``pyproject.toml`` value so lowering ``fail_under`` without a
 deliberate baseline commit fails the gate.
@@ -226,12 +227,12 @@ def check_coverage_ratchet(
 
     if measured + _EPS < resolved_floor:
         failures.append(
-            f"line coverage {measured:.2f}% < floor {resolved_floor:.2f}% "
+            f"combined coverage {measured:.2f}% < floor {resolved_floor:.2f}% "
             f"(see [tool.coverage.report] fail_under in pyproject.toml)"
         )
     elif measured > ceiling + _EPS:
         message = (
-            f"line coverage {measured:.2f}% exceeds floor {resolved_floor:.2f}% "
+            f"combined coverage {measured:.2f}% exceeds floor {resolved_floor:.2f}% "
             f"by more than {margin:.2f} points (ceiling {ceiling:.2f}%) — "
             "consider bumping fail_under in pyproject.toml in a deliberate commit"
         )
@@ -241,15 +242,18 @@ def check_coverage_ratchet(
             warnings.append(message)
 
     if failures:
-        print("coverage ratchet FAILED:", file=sys.stderr)
+        print("combined coverage ratchet FAILED:", file=sys.stderr)
         for item in failures:
             print(f"  - {item}", file=sys.stderr)
         return 1
 
     for item in warnings:
-        print(f"coverage ratchet WARNING: {item}", file=sys.stderr)
+        print(f"combined coverage ratchet WARNING: {item}", file=sys.stderr)
 
-    print(f"coverage ratchet OK ({measured:.2f}% within [{resolved_floor:.2f}%, {ceiling:.2f}%])")
+    print(
+        "combined coverage ratchet OK "
+        f"({measured:.2f}% within [{resolved_floor:.2f}%, {ceiling:.2f}%])"
+    )
     return 0
 
 
@@ -296,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             base_ref=args.base_ref,
         )
     except (FileNotFoundError, KeyError, json.JSONDecodeError, ValueError) as exc:
-        print(f"coverage ratchet error: {exc}", file=sys.stderr)
+        print(f"combined coverage ratchet error: {exc}", file=sys.stderr)
         return 2
 
 

@@ -118,6 +118,7 @@ def test_equal_coverage_above_floor_is_ok(tmp_path: Path) -> None:
 
     assert result.inherited is False
     assert result.caused_by_change is False
+    assert "combined coverage delta" in result.message.lower()
 
 
 def test_missing_coverage_report_raises_file_not_found(tmp_path: Path) -> None:

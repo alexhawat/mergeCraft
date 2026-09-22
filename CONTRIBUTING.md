@@ -30,10 +30,12 @@ make ci
 `make test` runs the unit and mocked-integration suite — **no API keys or secrets required**.
 Live-provider tests are excluded by default (`-m "not integration"`).
 
-`make coverage-gate` enforces the ``fail_under`` floor on every CI event; the
-merge-base **lowering guard** that blocks undeclared ``fail_under`` drops runs
-only on pull requests, because on ``push`` / ``workflow_dispatch`` the
-merge-base comparison is self-referential.
+`make coverage-gate` enforces the native coverage.py combined line-and-branch
+``fail_under`` floor on every CI event. Critical module and package-prefix
+floors separately enforce pure line coverage from line counts and branch
+coverage from branch counts. The merge-base **lowering guard** that blocks
+undeclared ``fail_under`` drops runs only on pull requests, because on ``push``
+/ ``workflow_dispatch`` the merge-base comparison is self-referential.
 
 ### Config path resolution (#573)
 

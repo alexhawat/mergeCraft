@@ -94,12 +94,14 @@ def main() -> int:
 
     data = json.loads(args.coverage_json.read_text(encoding="utf-8"))
     totals = data["totals"]
-    global_line = float(totals["percent_covered"])
+    global_combined = float(totals["percent_covered"])
     global_floor = _fail_under_from_pyproject()
     failures: list[str] = []
 
-    if global_line + 1e-9 < global_floor:
-        failures.append(f"global line coverage {global_line:.2f}% < floor {global_floor:.2f}%")
+    if global_combined + 1e-9 < global_floor:
+        failures.append(
+            f"global combined coverage {global_combined:.2f}% < floor {global_floor:.2f}%"
+        )
 
     files: dict[str, Any] = data["files"]
     for suffix, (line_floor, branch_floor) in MODULE_FLOORS.items():
@@ -113,7 +115,10 @@ def main() -> int:
             continue
         # Prefer the shortest matching path (exact module over similarly named).
         _path, summary = sorted(matched, key=lambda item: len(item[0]))[0]
-        line_pct = float(summary["percent_covered"])
+        line_pct = _pct(
+            int(summary["covered_lines"]),
+            int(summary["num_statements"]),
+        )
         branch_pct = _pct(
             int(summary.get("covered_branches") or 0),
             int(summary.get("num_branches") or 0),
@@ -139,7 +144,7 @@ def main() -> int:
             print(f"  - {item}", file=sys.stderr)
         return 1
 
-    print(f"coverage floor check OK (global line {global_line:.2f}% ≥ {global_floor:.2f}%)")
+    print(f"coverage floor check OK (global combined {global_combined:.2f}% ≥ {global_floor:.2f}%)")
     return 0
 
 

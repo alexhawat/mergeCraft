@@ -650,6 +650,7 @@ dev = ["pytest==9.0.3", "ruff==0.15.22", "mypy==1.20.2"]
 | `build` | `uv build` |
 | `ci-static` | `lockcheck lint typecheck pyright catalog-check build` |
 | `ci` | `ci-static security test` |
+| `coverage-gate` | Native combined global floor plus separate critical line and branch floors |
 | `ci-steps` / `ci-resume` / `ci-reset` | Ordered step list + resumable runner (`scripts/ci_resume.sh`) |
 | `docker-build` | Build the Action image |
 | `clean` | Drop caches and build artifacts |
