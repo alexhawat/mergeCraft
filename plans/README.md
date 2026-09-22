@@ -1,8 +1,8 @@
 # mergeCraft issue audit and implementation plan
 
-Audited on **2026-09-22** using current GitHub main **`be9993367386b03f982c795ceb1d80e4a0bfcf1d`** and PR #817 head **`d72b4e77dd47d7937527837b3f653a858804cf4e`**. Generated with the improve skill and independently reviewed by three faster subagents. This PR publishes the audit and implementation handoff. It does not implement the fixes, close existing issues, merge other PRs, or approve a release.
+This document tracks implementation of the **2026-09-22** audit, originally performed against main **`be9993367386b03f982c795ceb1d80e4a0bfcf1d`** and PR #817 head **`d72b4e77dd47d7937527837b3f653a858804cf4e`**. The improve skill and three faster subagents produced the audit and plans in [PR #826](https://github.com/alexhawat/mergeCraft/pull/826). The user then authorized implementation in a new branch and worktree.
 
-The audit used immutable main source, preserving the original checkout and its pre-existing configuration change. This plan branch starts from the audited main revision in a separate worktree. Implementation branches must start from updated main and pass each plan's drift check. See [EXECUTION.md](EXECUTION.md) for work allocation, integration gates, and the exact meaning of completion.
+The original checkout and its pre-existing configuration edit are preserved. The status table below distinguishes integrated code, remaining verification, and human/operator prerequisites. [IMPLEMENTATION.md](IMPLEMENTATION.md) records independent implementation checks; [EXECUTION.md](EXECUTION.md) describes work allocation and completion criteria. Historical audit observations remain labelled as such.
 
 ## Implementation update — 2026-09-22
 
@@ -67,15 +67,15 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 | [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions and honest revocation (#821/#828) | P1 | — | Integrated; focused checks passed; final CI pending |
 | [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | Integrated; focused checks passed; final CI pending |
 | [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | Integrated; focused checks passed; final CI pending |
-| [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | IN PROGRESS |
+| [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | Arithmetic integrated; final measurement pending |
 | [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | Integrated; focused checks passed; final CI pending |
-| [008](008-coverage-shards.md) | Isolated coverage shards + complete-data gate | P2 | 006 | TODO |
-| [009](009-tracing-contracts.md) | Valid tracing contracts and whole-run parent tree | P2 | coordinate 003 | IN PROGRESS |
+| [008](008-coverage-shards.md) | Isolated coverage shards + complete-data gate | P2 | 006 | IN PROGRESS |
+| [009](009-tracing-contracts.md) | Valid tracing contracts and whole-run parent tree | P2 | coordinate 003 | Integrated; focused and real collector checks passed; final CI pending |
 | [010](010-setup-instructions.md) | Finish setup artifact lists | P3 | — | TODO |
 | [011](011-human-golden-batch.md) | Evidence packet + nine actual human decisions | P2 | 007 | Preparation integrated; evidence and human decisions pending |
-| [012](012-trajectory-scoring.md) | Per-check trajectory scoring and labelled baseline | P2 | 001/005 before baseline; separate human trajectories | TODO scorer; human-labelled enforcement pending |
-| [013](013-judge-calibration.md) | Eligibility vs held-out judge calibration | P2 | 007/011 plus broader held-out dataset | Reporting in progress; held-out validation pending |
-| [014](014-live-benchmark-publication.md) | Two-provider live detection report | P2 | 013; separate detection labels, model choices and spend ceiling | TODO campaign preparation; live run pending |
+| [012](012-trajectory-scoring.md) | Per-check trajectory scoring and labelled baseline | P2 | 001/005 before baseline; separate human trajectories | Scorer in progress; human-labelled enforcement pending |
+| [013](013-judge-calibration.md) | Eligibility vs held-out judge calibration | P2 | 007/011 plus broader held-out dataset | Offline protocol integrated; actual held-out validation pending |
+| [014](014-live-benchmark-publication.md) | Two-provider live detection report | P2 | 013; separate detection labels, model choices and spend ceiling | Publication tooling in progress; live run pending |
 | [015](015-release-candidate.md) | Verified refreshed release and deployment identity | P2 | selected technical fixes 001–010 | Inventory recorded; fresh candidate/publication pending |
 | [016](016-provisioning-failure-cause.md) | Visible provisioning cause and narrow outage handling (#825) | P2 | — | TODO |
 | [017](017-redaction-filename-classification.md) | Preserve ordinary filenames without bypassing redaction (#827) | P2 | coordinate 001/005 | Integrated; focused checks passed; final CI pending |

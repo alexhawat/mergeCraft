@@ -24,7 +24,7 @@ Before publication, the operator must select a fresh source/version and supply s
 
 ## Verification
 
-The 85 audit/probe tests in VERIFICATION.md describe the original bugs and are not verification of these fixes. The coordinator independently inspected the integrated diffs and ran the following focused checks with the fresh isolated development/tracing environment (seed 424242):
+The 85 audit/probe tests in VERIFICATION.md describe the original bugs and are not verification of these fixes. The coordinator independently inspected the integrated diffs and ran the following focused checks with the fresh isolated development/tracing environment (seed 424242 unless stated):
 
 | Plans | Integrated commits | Independent result |
 |---|---|---|
@@ -33,8 +33,10 @@ The 85 audit/probe tests in VERIFICATION.md describe the original bugs and are n
 | 004 publication retry | `10130b5e` | 32 passed across outcome, anchor recovery and real MCP review tests |
 | 001 persistence redaction, 017 ordinary filenames | `9c101677`, `9afaacec` | 248 passed across trajectory/read coverage/packet and five analyzer-redaction test files |
 | 005 exact successful-read attribution | `a0af80d9`, `6e2e09ed` | 292 passed across the same eight evidence/redaction files, including literal colon Git pathspec regression |
+| 006 true line and branch coverage | `0b804ab8` | 47 passed across seven coverage CI files; numeric floors unchanged; final full measurement pending |
 | 007 adjudication round-trip and corpus synchronization | `e1bb753f` | 117 passed; eval corpus sync check, structural/adversarial gate and installed-wheel convergence passed |
-
+| 009 complete lifecycle tracing | `327a6d2c` | 410 tracing tests passed, plus 12 HTTP tracing tests with loopback access; real Docker OTLP collector passed 7 pre-seed and 2 post-seed tests (wrapper seeds 3886865826 and 3250636949) |
+| 013 offline judge calibration | `ddd442d3` | 102 protocol, scoring, provenance/seal and CLI tests passed; actual independent human labels and held-out validation remain pending |
 | 011 human review preparation | `ec2481f6` | 14 strict manifest/evidence tests passed; rendered [nine-case review sheet](HUMAN-REVIEW.md), all evidence missing and decisions unanswered |
 
 These are focused checks, not a completed full CI gate. The initial redaction-check command named a nonexistent test file and ran no tests; the corrected exact-file invocation above completed successfully. The baseline generated-documentation check also passed.
@@ -42,3 +44,5 @@ These are focused checks, not a completed full CI gate. The initial redaction-ch
 Issue #827 was filed during implementation after a deterministic reproduction showed that the shared redactor masked the shipped doctrine filename. The central correction preserves bounded ordinary uppercase identifier components while existing high-entropy and credential-prefix tests remain green; trajectory persistence never restores redactor-removed values.
 
 Issue #828 was filed for installation-token revocation reporting success without checking the HTTP response. The fix checks the status, keeps cleanup best effort across all owned tokens, and tests rejected revocations without leaking credentials.
+
+The first tracing run could not bind its local HTTP server under the sandbox; the affected 12-test file was rerun with loopback access and passed. The supported Docker collector target completed successfully and cleaned up its test container. These checks establish trace transport and parenting, not a live provider evaluation.

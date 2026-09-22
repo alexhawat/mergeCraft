@@ -23,6 +23,7 @@ coverage-measure:
 Only these implementation paths, plus this plan's status and an appropriate changelog entry:
 - `Makefile`
 - `scripts/coverage_shards.py` (new orchestrator, manifest validator and pytest collection recorder)
+- `.gitignore` (ignore isolated `.coverage-shards/` runtime outputs)
 - `tests/ci/test_coverage_shards.py` (new)
 - `tests/ci/test_coverage_ratchet.py` (CI graph assertion only if needed)
 - `CONTRIBUTING.md`
@@ -107,3 +108,5 @@ Verification: run the focused gate above. A new regression should fail for the s
 Stop if actual executed node IDs cannot be recorded, their union cannot be compared with the complete eligible collection, or coverage.py cannot combine isolated raw databases without path/config drift. Do not weaken floors, accept manifests by count alone, or parallelize `ci-resume` stages as a workaround. Also stop and reconcile if source excerpts have drifted, a prerequisite is incomplete, two reasonable verification attempts fail, or an out-of-scope change is necessary. Never label skipped checks as passed.
 
 Refresh the manifest schema deliberately when collection inputs or tool versions change. Cleanup may remove only the exact completed run directory it created, never a broad `.coverage.*` glob shared with another run.
+
+Implementation reconciliation: snapshot compatibility metadata before the test process and reject changed inputs afterward. Include test-selection/configuration and fixture inputs in the dirty fingerprint. Under xdist, record actual post-filter worker collections on the controller and write one node-ID receipt only after successful completion. Combine only the validated raw files, never all files found in their directories. The default serial gate must propagate failures from measurement and each subsequent policy check.
