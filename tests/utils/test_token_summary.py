@@ -59,7 +59,7 @@ def test_split_and_unattributed_tokens_both_appear() -> None:
     tracker.record_tokens(15, phase="context_expansion")
     summary = token_summary_from_usage([usage], budget_tracker=tracker)
     assert summary is not None
-    assert summary.startswith("100 input / 20 output; 135 used (")
+    assert summary.startswith("100 input / 20 output / 15 context expansion used (")
 
 
 def test_review_record_renders_split_token_line() -> None:
