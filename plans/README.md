@@ -78,6 +78,7 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 | [014](014-live-benchmark-publication.md) | Two-provider live detection report | P2 | 013; separate detection labels, model choices and spend ceiling | TODO campaign preparation; live run pending |
 | [015](015-release-candidate.md) | Verified refreshed release and deployment identity | P2 | selected technical fixes 001–010 | Inventory recorded; fresh candidate/publication pending |
 | [016](016-provisioning-failure-cause.md) | Visible provisioning cause and narrow outage handling (#825) | P2 | — | TODO |
+| [017](017-redaction-filename-classification.md) | Preserve ordinary filenames without bypassing redaction (#827) | P2 | coordinate 001/005 | IN PROGRESS |
 
 ```mermaid
 flowchart TD
