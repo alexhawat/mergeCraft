@@ -42,6 +42,29 @@ checkout-relative authoring tree last. `mergecraft eval adjudicate` changes
 only the path passed by the operator. It does not infer or update another copy,
 an installed wheel, or an unrelated custom corpus.
 
+### First human adjudication batch
+
+`evals/adjudication/golden-batch-001.json` is the strict preparation manifest
+for the nine golden rows tracked by #780. Render its review sheet with:
+
+```bash
+python -m mergecraft.evals.human_batch
+```
+
+The committed manifest names `alexhawat` as the intended adjudicator, but all
+nine rows remain `evidence_status: missing` and `decision: pending`. Repository
+history shows that commit `3ff1bb39d6a5c2035c19c793131c493b591cf98d`
+introduced the metadata files; it contains no source patch, originating
+repository, PR, or immutable code snapshot and is therefore history, not
+substantive evidence for the claims. The review sheet keeps every row visibly
+unanswered. No row may receive human provenance until immutable evidence is
+recovered and the named human supplies an actual decision.
+
+The manifest validates source URLs as commit-pinned, confines any local
+fixture to `evals/fixtures/golden/<case-id>/`, and verifies its SHA-256 before
+rendering. This batch establishes neither judge calibration nor human-human
+agreement, even after its provenance requirements are eventually satisfied.
+
 ## Metric set
 
 Computed by `mergecraft.evals.quality_metrics.compute_quality_metrics` against
