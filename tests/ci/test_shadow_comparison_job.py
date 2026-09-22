@@ -3,9 +3,9 @@
 Wave plan: the verification/evals/receipts wave plan (R4). Test-plan doc:
 ``docs/test-plans/30-verification-evals-receipts.md``.
 
-The second-target comparison ships as an **optional, keyless** workflow job: it
-diffs two pinned configs and publishes the disagreement table, and it must
-never become a required PR blocker. ``continue-on-error: true`` is the repo's
+The shadow corpus report ships as an **optional, keyless** workflow job: it
+publishes rows a run already recorded, and it must never become a required PR
+blocker. ``continue-on-error: true`` is the repo's
 established non-blocking mechanism (``mutation-advisory``); a job that needs a
 provider key is a job that gets disabled.
 

@@ -338,7 +338,7 @@ eval-replay: ## Replay structural eval-bank integrity; keyless, not live detecti
 eval-convergence: ## Score multi-round convergence metric; write result set (RC6)
 	$(UV) run mergecraft eval convergence
 
-shadow-compare: ## Diff two pinned shadow targets; keyless structural replay (advisory, not a required check)
+shadow-compare: ## Publish the recorded shadow corpus; keyless, does not run a model (advisory)
 	$(UV) run python -m mergecraft.evidence.shadow_compare
 
 BENCH_DETECT_ARGS ?=

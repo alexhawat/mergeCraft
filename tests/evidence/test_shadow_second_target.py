@@ -428,6 +428,26 @@ def test_keyless_job_does_not_synthesize_partial_second_target_coverage(tmp_path
     assert shadow_rows[0].action == "auto_merge"
 
 
+def test_keyless_job_publishes_the_committed_corpus_as_a_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CI entry point reports recorded rows and does not run a second target."""
+    from mergecraft.evidence.shadow import load_shadow_records
+    from mergecraft.evidence.shadow_compare import DEFAULT_CORPUS_PATH, main
+
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    output = tmp_path / "out.jsonl"
+    assert main(["--corpus", str(DEFAULT_CORPUS_PATH), "--output", str(output)]) == 0
+    rows = load_shadow_records(output)
+    assert rows
+    assert {row.target_id for row in rows} == {"live"}
+    published = summary.read_text(encoding="utf-8")
+    assert "Recorded shadow corpus" in published
+    assert "does not run a model" in published
+    assert "shadow-b" not in published
+
+
 # ── the comparison job: records both targets, fails closed on a write error ──
 
 

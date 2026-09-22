@@ -13,7 +13,8 @@ version) section is reserved below and filled in when that RED suite lands.
 Wave outcome: a second shadow target — a different pinned model id and/or
 prompt version — records through the **existing** `mergecraft.evidence.shadow`
 recorder. A disagreement table is produced per target, grouped by lane and by
-rule. The live path stays silent; the optional keyless comparison job fails
+rule. The live path stays silent. The optional keyless job publishes the
+recorded corpus and does not run a model; a recording failure fails that job
 closed. The recorder is not rebuilt.
 
 ### Contract matrix

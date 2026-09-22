@@ -1,4 +1,4 @@
-"""Compare two pinned shadow targets through the existing recorder (#737, M4).
+"""Record shadow targets and publish the recorded corpus (#737, M4).
 
 Module: mergecraft.evidence.shadow_compare
 Depends: mergecraft.evidence.{packet,shadow}, loguru
@@ -14,13 +14,11 @@ existing ``record_shadow_prediction`` writer. This module is that comparison:
 * :data:`LIVE_TARGET` / :data:`SECOND_TARGET` are the two concrete pinned
   configs: the live target is the incumbent model, the second target is a
   different pinned model id *and* prompt version.
-* The ``__main__`` entry point is the optional, **keyless** CI job. It records
-  the live target from the committed corpus (that target's recorded review)
-  and a second target only when the corpus row is marked ``executed`` — a run
-  produced that output. An unmarked second-target row is dropped, and a
-  second target that ran on only some changes is not given a synthesized
-  result for the rest, so the table cannot publish an output that model did
-  not produce.
+* The ``__main__`` entry point is the optional, **keyless** CI job. It is a
+  corpus report: it publishes rows a run already recorded. It does not call a
+  model, and it does not compare a pinned target that has no row. An unmarked
+  second-target row is dropped, and a second target that ran on only some
+  changes is not given a synthesized result for the rest.
   Structural replay only, never live detection, and never a required PR check.
 
 Two properties are load-bearing:
@@ -261,13 +259,13 @@ def render_disagreement_table(rows: Sequence[Mapping[str, object]]) -> str:
     predictions, not a calibrated comparison (R-D7).
     """
     lines = [
-        "### Shadow target comparison (structural replay)",
+        "### Recorded shadow corpus",
         "",
-        "Rows are outputs a target actually produced. The live target is the "
-        "recorded review. A second pinned target appears only when its corpus "
-        "row is marked executed; an unmarked row is omitted rather than "
-        "published as that model's output. No threshold here is calibrated "
-        "and no rate is a detection-quality claim.",
+        "This job publishes rows a run already recorded. It does not run a "
+        "model, and it does not compare a target that has no row in the "
+        "corpus. A second target appears only when a run recorded that row. "
+        "No threshold here is calibrated and no rate is a detection-quality "
+        "claim.",
         "",
         "| Target | Model | Prompt | Lane | Rule | Predicted | Actual | Disagreement |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -301,17 +299,18 @@ def _default_output_path() -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Record two pinned targets and publish the disagreement table (keyless).
+    """Publish the recorded shadow corpus (keyless).
 
-    Returns 0 when the table is published. A recording or corpus failure
-    returns 1 — the job fails closed, and because the workflow job is
+    Returns 0 when the corpus report is published. A recording or corpus
+    failure returns 1 — the job fails closed, and because the workflow job is
     ``continue-on-error: true`` that failure is visible without blocking the PR.
+    This entry point does not run a model.
     """
     parser = argparse.ArgumentParser(
         prog="python -m mergecraft.evidence.shadow_compare",
         description=(
-            "Compare two pinned shadow targets through the existing recorder "
-            "(structural replay; keyless; advisory)."
+            "Publish the recorded shadow corpus. Does not run a model and does "
+            "not compare a target that has no recorded row (keyless; advisory)."
         ),
     )
     parser.add_argument(

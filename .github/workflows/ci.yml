@@ -372,14 +372,13 @@ jobs:
         # (`mergecraft eval replay-bank` → `evals/results/latest.json`) so the
         # gate measures drift, not corpus edits.
 
-  # R-D10 — optional, keyless shadow-target comparison (#737, M4). It records
-  # the live target's recorded review, and a second target only when that
-  # row was produced by a run. It does not invent the second target's outcome.
-  # continue-on-error keeps it advisory, and it reads no provider secret.
-  # The job fails closed on a recording failure (missing data is not agreement)
-  # while the live review path stays silent.
+  # R-D10 — optional, keyless corpus report (#737, M4). It publishes rows a
+  # run already recorded. It does not run a model and does not compare a
+  # target that has no row. continue-on-error keeps it advisory, and it reads
+  # no provider secret. The job fails closed on a recording failure (missing
+  # data is not agreement) while the live review path stays silent.
   shadow-comparison:
-    name: Shadow comparison (advisory, keyless)
+    name: Shadow corpus report (advisory, keyless)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
@@ -388,5 +387,5 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
-      - name: Compare pinned shadow targets
+      - name: Publish recorded shadow corpus
         run: make shadow-compare

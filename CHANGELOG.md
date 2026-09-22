@@ -55,10 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing with Click's "Missing argument". `mergecraft config set` writes
   `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
 
-- Shadow comparison can run a second pinned target (a different model id and/or
-  prompt version) through the existing recorder and publish a disagreement
-  table grouped by lane and rule. The job is optional and keyless, and the live
-  review path never enforces a shadow prediction (#737).
+- A second shadow target (a different model id and/or prompt version) records
+  through the existing recorder. The optional keyless job publishes that
+  recorded corpus; it does not run a model or compare a target that has no
+  row. The live review path never enforces a shadow prediction (#737).
 
 - Production false positives and human dismissals can be ingested into the eval
   bank as versioned cases, each carrying explicit provenance. Ingest refuses a
