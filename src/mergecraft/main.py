@@ -1321,7 +1321,6 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         tool_state=tool_state,
         api_token=run_context.api_token,
         resolved_model=ctx.resolved_model,
-        stop_script=settings.stop_script,
     )
 
 
