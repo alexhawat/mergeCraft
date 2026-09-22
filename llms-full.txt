@@ -3104,10 +3104,24 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
 
 The repository's self-review workflows support `MERGECRAFT_APP_ID` and
 `MERGECRAFT_APP_PRIVATE_KEY` as GitHub Actions secrets. Install the App only on
-repositories it should review. Its installation needs contents and Actions read,
-and checks, pull requests and issues write. The workflow requests a token scoped
-to the current repository, with a fresh token before each provider attempt;
-the official token action revokes each token after the job.
+repositories it should review. Runtime-minted tokens request only the permissions
+and repository scopes needed by their role:
+
+| Token role | Repository scope | Installation permissions |
+|------------|------------------|--------------------------|
+| Reviewer API | Current repository only | `contents: read`, `pull_requests: write`, `issues: write`, `actions: read`, and `checks: read` |
+| Reviewer API with `status_checks: enabled` | Current repository only | Same permissions, with `checks: write` replacing `checks: read` |
+| Reviewer API with effective SARIF upload enabled | Current repository only | Same permissions plus `security_events: write` |
+| Git fetch with push disabled | Current repository plus configured cross-repository write targets | `contents: read` |
+| Git fetch/push with push restricted or enabled | Current repository plus configured cross-repository write targets | `contents: write`, `workflows: write` |
+| Cross-repository read checkout | Configured read repositories only | `contents: read` |
+
+The reviewer, Git, and cross-repository read credentials are minted separately
+when their permissions or repository scopes differ. The current repository
+always remains in the reviewer and Git token scopes; configured cross-repository
+targets cannot displace it. Every internally minted token is revoked at cleanup,
+including tokens minted before a later role fails. Caller-owned `GH_TOKEN` and
+the job-token fallback are never revoked by mergeCraft.
 
 If the reviewer App is absent or minting fails, review attempts retain the
 job-token fallback. `prApproveEnabled: false` makes normal publication COMMENT,

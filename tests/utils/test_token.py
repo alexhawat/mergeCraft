@@ -13,6 +13,7 @@ No floor number changes here (Q-D6).
 
 from __future__ import annotations
 
+import asyncio
 import builtins
 import sys
 import types
@@ -350,7 +351,7 @@ async def test_resolve_tokens_app_mint_wins_and_revokes_on_close(
 
     async def _mint(**kwargs: Any) -> str:
         minted.append(kwargs)
-        return "minted-token"
+        return f"minted-token-{len(minted)}"
 
     async def _revoke(token: str) -> None:
         revoked.append(token)
@@ -358,18 +359,32 @@ async def test_resolve_tokens_app_mint_wins_and_revokes_on_close(
     monkeypatch.setattr(token_mod, "acquire_installation_token", _mint)
     monkeypatch.setattr(token_mod, "revoke_installation_token", _revoke)
 
-    ref = await resolve_tokens(push="restricted")
+    ref = await resolve_tokens(push="restricted", primary_repo="acme/demo")
     try:
-        assert ref.git_token == "minted-token"
-        assert ref.mcp_token == "minted-token"
+        assert ref.git_token == "minted-token-2"
+        assert ref.mcp_token == "minted-token-1"
         assert ref.read_token is None
         assert minted == [
-            {"repos": None, "permissions": {"contents": "write", "workflows": "write"}}
+            {
+                "repos": ["acme/demo"],
+                "permissions": {
+                    "contents": "read",
+                    "pull_requests": "write",
+                    "issues": "write",
+                    "checks": "read",
+                    "actions": "read",
+                },
+            },
+            {
+                "repos": ["acme/demo"],
+                "permissions": {"contents": "write", "workflows": "write"},
+            },
         ]
     finally:
         await ref.aclose()
+        await ref.aclose()
 
-    assert revoked == ["minted-token"]
+    assert revoked == ["minted-token-1", "minted-token-2"]
     assert token_mod._mcp_token_value is None
 
 
@@ -387,9 +402,12 @@ async def test_resolve_tokens_disabled_push_requests_read_only_contents(
 
     monkeypatch.setattr(token_mod, "acquire_installation_token", _mint)
 
-    ref = await resolve_tokens(push="disabled")
+    ref = await resolve_tokens(push="disabled", primary_repo="acme/demo")
     try:
-        assert minted[0]["permissions"] == {"contents": "read"}
+        assert minted[1] == {
+            "repos": ["acme/demo"],
+            "permissions": {"contents": "read"},
+        }
     finally:
         await ref.aclose()
 
@@ -443,12 +461,229 @@ async def test_resolve_tokens_xrepo_object_uses_its_write_list(
     monkeypatch.setattr(token_mod, "acquire_installation_token", _mint)
     xrepo = XrepoConfig(mode="explicit", read=["acme/read"], write=["acme/other"])
 
-    ref = await resolve_tokens(xrepo=xrepo)
+    ref = await resolve_tokens(
+        xrepo=xrepo,
+        primary_repo="acme/demo",
+        status_checks=True,
+        sarif_upload=True,
+    )
     try:
-        assert minted[0]["repos"] == ["acme/other"]
+        assert minted == [
+            {
+                "repos": ["acme/demo"],
+                "permissions": {
+                    "contents": "read",
+                    "pull_requests": "write",
+                    "issues": "write",
+                    "checks": "write",
+                    "actions": "read",
+                    "security_events": "write",
+                },
+            },
+            {
+                "repos": ["acme/demo", "acme/other"],
+                "permissions": {"contents": "write", "workflows": "write"},
+            },
+            {
+                "repos": ["acme/read"],
+                "permissions": {"contents": "read"},
+            },
+        ]
         assert ref.read_token == "minted-token"
     finally:
         await ref.aclose()
+
+
+async def test_resolve_tokens_wire_bodies_keep_api_git_and_read_scopes_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """App-token wire requests carry the exact permission and repository matrix."""
+    monkeypatch.setenv("GITHUB_APP_ID", "12345")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "7")
+    monkeypatch.setenv("GITHUB_TOKEN", "workflow-tok")
+    monkeypatch.setattr(token_mod, "_app_jwt", lambda: "app-jwt")
+    real_async_client = httpx.AsyncClient
+    requests: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(201, json={"token": f"ghs_{len(requests)}"})
+
+    transport = httpx.MockTransport(_handler)
+    monkeypatch.setattr(
+        token_mod.httpx,
+        "AsyncClient",
+        lambda *_args, **_kwargs: real_async_client(transport=transport),
+    )
+
+    ref = await resolve_tokens(
+        push="restricted",
+        xrepo=XrepoConfig(
+            mode="explicit",
+            read=["acme/docs"],
+            write=["acme/tools"],
+        ),
+        primary_repo="acme/demo",
+        status_checks=True,
+        sarif_upload=True,
+    )
+    try:
+        assert ref.mcp_token == "ghs_1"
+        assert ref.git_token == "ghs_2"
+        assert ref.read_token == "ghs_3"
+        mint_requests = [request for request in requests if request.method == "POST"]
+        assert [request.read().decode() for request in mint_requests] == [
+            '{"permissions":{"contents":"read","pull_requests":"write","issues":"write",'
+            '"checks":"write","actions":"read","security_events":"write"},'
+            '"repositories":["demo"]}',
+            '{"permissions":{"contents":"write","workflows":"write"},'
+            '"repositories":["demo","tools"]}',
+            '{"permissions":{"contents":"read"},"repositories":["docs"]}',
+        ]
+    finally:
+        await ref.aclose()
+
+    revoked = [
+        request.headers["Authorization"] for request in requests if request.method == "DELETE"
+    ]
+    assert revoked == ["Bearer ghs_1", "Bearer ghs_2", "Bearer ghs_3"]
+
+
+async def test_resolve_tokens_disabled_push_wire_body_keeps_git_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "12345")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "7")
+    monkeypatch.setenv("GITHUB_TOKEN", "workflow-tok")
+    monkeypatch.setattr(token_mod, "_app_jwt", lambda: "app-jwt")
+    real_async_client = httpx.AsyncClient
+    requests: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(201, json={"token": f"ghs_{len(requests)}"})
+
+    transport = httpx.MockTransport(_handler)
+    monkeypatch.setattr(
+        token_mod.httpx,
+        "AsyncClient",
+        lambda *_args, **_kwargs: real_async_client(transport=transport),
+    )
+
+    ref = await resolve_tokens(push="disabled", primary_repo="acme/demo")
+    try:
+        mint_requests = [request for request in requests if request.method == "POST"]
+        assert [request.read().decode() for request in mint_requests] == [
+            '{"permissions":{"contents":"read","pull_requests":"write","issues":"write",'
+            '"checks":"read","actions":"read"},"repositories":["demo"]}',
+            '{"permissions":{"contents":"read"},"repositories":["demo"]}',
+        ]
+    finally:
+        await ref.aclose()
+
+
+async def test_resolve_tokens_revokes_shared_token_alias_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "12345")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_TOKEN", "workflow-tok")
+    revoked: list[str] = []
+
+    async def _mint(**_kwargs: Any) -> str:
+        return "shared-installation-token"
+
+    async def _revoke(token: str) -> None:
+        revoked.append(token)
+
+    monkeypatch.setattr(token_mod, "acquire_installation_token", _mint)
+    monkeypatch.setattr(token_mod, "revoke_installation_token", _revoke)
+
+    ref = await resolve_tokens(primary_repo="acme/demo")
+    await ref.aclose()
+    await ref.aclose()
+
+    assert revoked == ["shared-installation-token"]
+
+
+async def test_resolve_tokens_partial_mint_failure_revokes_before_job_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "12345")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_TOKEN", "workflow-tok")
+    minted: list[dict[str, Any]] = []
+    revoked: list[str] = []
+    warnings: list[str] = []
+
+    async def _mint(**kwargs: Any) -> str:
+        minted.append(kwargs)
+        if len(minted) == 2:
+            request = httpx.Request("POST", f"{_API}/app/installations/7/access_tokens")
+            response = httpx.Response(403, request=request)
+            raise httpx.HTTPStatusError("forbidden", request=request, response=response)
+        return "partial-api-token"
+
+    async def _revoke(token: str) -> None:
+        revoked.append(token)
+
+    monkeypatch.setattr(token_mod, "acquire_installation_token", _mint)
+    monkeypatch.setattr(token_mod, "revoke_installation_token", _revoke)
+    monkeypatch.setattr(
+        token_mod.logger,
+        "warning",
+        lambda message, *args: warnings.append(message.format(*args)),
+    )
+
+    ref = await resolve_tokens(primary_repo="acme/demo")
+    try:
+        assert ref.mcp_token == "workflow-tok"
+        assert ref.git_token == "workflow-tok"
+        assert revoked == ["partial-api-token"]
+        assert len(warnings) == 1
+        assert "Git" in warnings[0]
+        assert "HTTP 403" in warnings[0]
+        assert "contents:write" in warnings[0]
+        assert "workflows:write" in warnings[0]
+        assert "partial-api-token" not in warnings[0]
+    finally:
+        await ref.aclose()
+    assert revoked == ["partial-api-token"]
+
+
+async def test_resolve_tokens_cancellation_revokes_partial_mints_and_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_APP_ID", "12345")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "key")
+    monkeypatch.setenv("GITHUB_TOKEN", "workflow-tok")
+    minted = 0
+    revoked: list[str] = []
+
+    async def _mint(**_kwargs: Any) -> str:
+        nonlocal minted
+        minted += 1
+        if minted == 2:
+            raise asyncio.CancelledError
+        return "partial-api-token"
+
+    async def _revoke(token: str) -> None:
+        revoked.append(token)
+
+    monkeypatch.setattr(token_mod, "acquire_installation_token", _mint)
+    monkeypatch.setattr(token_mod, "revoke_installation_token", _revoke)
+
+    with pytest.raises(asyncio.CancelledError):
+        await resolve_tokens(primary_repo="acme/demo")
+
+    assert revoked == ["partial-api-token"]
+    assert token_mod._mcp_token_value is None
 
 
 async def test_resolve_tokens_without_any_token_fails_closed() -> None:

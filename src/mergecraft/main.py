@@ -735,6 +735,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     """
     assert ctx.tool_state is not None
     assert ctx.scm is not None
+    assert ctx.run_context is not None
 
     from mergecraft.action.inputs import (
         ForkCredentialInvariantError,
@@ -837,8 +838,21 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
             ctx.setup_script_skip_reason = skip_reason
             ctx.tool_state.setup_script_skip_reason = skip_reason
 
+    # Resolve capability-dependent API permissions only after repository
+    # settings have passed the trust-tier filter. The same resolved SARIF flag
+    # is carried into ToolContext later; it must not be reinterpreted after the
+    # App tokens have already been minted.
+    sarif_upload_enabled = resolve_sarif_upload_enabled(
+        action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+        repo_setting=settings.analyzers.sarif_upload,
+    )
+    ctx.sarif_upload_enabled = sarif_upload_enabled
     token_ref = await resolve_tokens(
-        push=ctx.payload.get("push") or "restricted", xrepo=ctx.payload.get("xrepo")
+        push=ctx.payload.get("push") or "restricted",
+        xrepo=ctx.payload.get("xrepo"),
+        primary_repo=f"{ctx.run_context.repo.owner}/{ctx.run_context.repo.name}",
+        status_checks=bool(ctx.payload.get("statusChecks")),
+        sarif_upload=sarif_upload_enabled,
     )
     ctx.token_ref = token_ref
     # Prefer MCP token for API calls
@@ -996,11 +1010,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     ctx.ctx_payload = ctx_payload
     analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
     ctx.analyzers_mode = analyzers_mode
-    sarif_upload_enabled = resolve_sarif_upload_enabled(
-        action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
-        repo_setting=settings.analyzers.sarif_upload,
-    )
-    ctx.sarif_upload_enabled = sarif_upload_enabled
+    sarif_upload_enabled = ctx.sarif_upload_enabled
     from mergecraft.mcp.tool_state import primary_repo_state
 
     ctx.tool_context = ToolContext(

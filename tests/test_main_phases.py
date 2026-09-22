@@ -40,6 +40,7 @@ from typing import Any
 
 import pytest
 
+import mergecraft.main as main_mod
 import mergecraft.utils.token as token_mod
 from mergecraft.agents.shared import AgentResult
 from mergecraft.analyzers.trust import derive_trust_tier
@@ -121,6 +122,46 @@ async def test_run_context_carries_every_phase_input(
     # resolved run_context / payload / modes computed above.
     assert ctx.tool_state.oss is True
     assert ctx.tool_state.modes == ctx.modes
+
+
+async def test_credential_phase_passes_trusted_capabilities_to_token_resolution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The App permission request is derived after trust-filtered settings exist."""
+    captured: dict[str, Any] = {}
+    real_phase = main_mod._resolve_credentials
+
+    async def _capture_phase(ctx: Any) -> Any:
+        harness_resolver = main_mod.resolve_tokens
+
+        async def _capture_resolve_tokens(**kwargs: Any) -> Any:
+            captured.update(kwargs)
+            return await harness_resolver(**kwargs)
+
+        main_mod.resolve_tokens = _capture_resolve_tokens
+        try:
+            return await real_phase(ctx)
+        finally:
+            main_mod.resolve_tokens = harness_resolver
+
+    monkeypatch.setattr(main_mod, "_resolve_credentials", _capture_phase)
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        settings=RepoSettings(analyzers=AnalyzersSettings(sarif_upload=True)),
+        event_name="workflow_dispatch",
+        event_payload={"action": "workflow_dispatch"},
+        env={"INPUT_STATUS_CHECKS": "enabled"},
+    )
+
+    assert rec.raised is None
+    assert captured == {
+        "push": "restricted",
+        "xrepo": None,
+        "primary_repo": "acme/demo",
+        "status_checks": True,
+        "sarif_upload": True,
+    }
 
 
 def test_setup_run_resolves_prompt_and_mode(tmp_path: Path) -> None:
@@ -292,7 +333,7 @@ async def test_resolve_credentials_matches_current_precedence(
         return "minted-installation-tok"
 
     monkeypatch.setattr(token_mod, "acquire_installation_token", _fake_mint_ok)
-    ref = await resolve_tokens(push="restricted", xrepo=None)
+    ref = await resolve_tokens(push="restricted", xrepo=None, primary_repo="acme/demo")
     try:
         if ref.git_token != "minted-installation-tok":
             failures.append(
@@ -313,7 +354,7 @@ async def test_resolve_credentials_matches_current_precedence(
         raise RuntimeError(msg)
 
     monkeypatch.setattr(token_mod, "acquire_installation_token", _fake_mint_boom)
-    ref = await resolve_tokens(push="restricted", xrepo=None)
+    ref = await resolve_tokens(push="restricted", xrepo=None, primary_repo="acme/demo")
     try:
         if ref.git_token != "workflow-tok":
             failures.append(
