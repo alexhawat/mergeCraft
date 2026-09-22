@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from mergecraft.modes import Mode
     from mergecraft.review_checks import StaticCheckConfig
     from mergecraft.scm.protocol import ScmProvider
+    from mergecraft.tracing.tracer import TraceParent
     from mergecraft.types import AgentId, XrepoConfig
     from mergecraft.utils.github import GitHubClient
     from mergecraft.utils.run_bounds import BudgetTracker
@@ -104,6 +105,7 @@ class ToolContext:
     suggest_eval_add: bool = False
     budget_tracker: BudgetTracker | None = None
     repo_settings_snapshot: RepoSettingsSnapshot | None = None
+    trace_parent: TraceParent | None = None
 
     def __init__(
         self,
@@ -149,6 +151,7 @@ class ToolContext:
         suggest_eval_add: bool = False,
         budget_tracker: BudgetTracker | None = None,
         repo_settings_snapshot: RepoSettingsSnapshot | None = None,
+        trace_parent: TraceParent | None = None,
     ) -> None:
         from mergecraft.scm.github import GitHubScmAdapter
 
@@ -203,3 +206,8 @@ class ToolContext:
         self.suggest_eval_add = suggest_eval_add
         self.budget_tracker = budget_tracker
         self.repo_settings_snapshot = repo_settings_snapshot
+        if trace_parent is None:
+            from mergecraft.tracing.tracer import current_trace_parent
+
+            trace_parent = current_trace_parent()
+        self.trace_parent = trace_parent

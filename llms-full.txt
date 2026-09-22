@@ -2202,6 +2202,14 @@ seams. Spans carry `parent_span_id` pointers so the tree is reconstructible
 from any sink's flat event stream. The root is the only span whose
 `parent_span_id` is `None` — convention 9.
 
+The Action and offline orchestrators own this root from the first point at
+which resolved tracing settings are available until publication completes.
+Model fallback reuses that active run root; calling the model-chain helper on
+its own still creates one. MCP server tasks also receive an immutable
+`trace_id` and root `span_id` through `ToolContext`, so a tool call remains in
+the same tree even when task scheduling does not inherit Python context
+variables. Disabled tracing carries no parent identity and stays a no-op.
+
 ```text
 mergecraft.run                       (root; run_id, repo, pr_number,
                                        commit_sha, workflow_run_id, job_id)

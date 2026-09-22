@@ -173,6 +173,7 @@ class RunContext:
     timeout_ms: int | None = None
     timeout_raw: Any = None
     timeout_error: str | None = None
+    setup_completed: bool = False
 
     # -- populated by ``_resolve_credentials`` (security boundary) ----------
     trust_tier: TrustTier = "untrusted"
@@ -216,7 +217,8 @@ class RunContext:
 
     async def materialize(self) -> None:
         with gha_log.group("setup"):
-            await _setup_run(self)
+            if not self.setup_completed:
+                await _setup_run(self)
             await _resolve_credentials(self)
         if self.setup_script_skip_reason:
             gha_log.warning(self.setup_script_skip_reason)
@@ -721,6 +723,7 @@ async def _setup_run(ctx: RunContext) -> RunContext:
         os.environ.pop("ACTIONS_ID_TOKEN_REQUEST_URL", None)
         os.environ.pop("ACTIONS_ID_TOKEN_REQUEST_TOKEN", None)
 
+    ctx.setup_completed = True
     return ctx
 
 
@@ -1865,34 +1868,50 @@ async def main() -> MainResult:
     # spawned agent CLI) carries the same ``review.id``.
     with bind_review_context(_action_review_context()):
         try:
-            staged = await engine.run(
-                ctx,
-                on_timeout=lambda _name: kill_all_active_process_groups(),
-            )
-            return staged.published_or(
-                MainResult(
-                    success=False,
-                    error="review engine returned no result",
-                    outcome=RunOutcome.infra_error,
-                )
-            )
-        except Exception as error:
-            error_message = str(error) if error else "unknown error occurred"
-            logger.error("{}", error_message)
-            error_outcome = _classify_error_outcome(error)
-            if isinstance(error, (TimeoutError, asyncio.TimeoutError, _AgentTimeoutError)):
+            # Tracing settings are resolved by setup. From this first usable
+            # seam onward, the run root remains open through every engine
+            # stage and failure-publication path.
+            materialize_budget = engine.timeout_s("materialize")
+            setup_started = time.monotonic()
+            try:
+                await asyncio.wait_for(_setup_run(ctx), timeout=materialize_budget)
+            except TimeoutError:
                 kill_all_active_process_groups()
-            if ctx.tool_context:
+                raise
+            materialize_remaining = max(
+                0.001,
+                materialize_budget - (time.monotonic() - setup_started),
+            )
+            assert ctx.settings is not None
+            from mergecraft.tracing.tracer import get_tracer_from_settings, run_root_span
+
+            tracer = get_tracer_from_settings(ctx.settings)
+            with run_root_span(
+                tracer,
+                attrs_source=lambda: dict(resolve_correlation_from_env()),
+            ) as root_span:
                 try:
-                    await _publish(
+                    staged = await engine.run(
                         ctx,
-                        outcome=error_outcome,
-                        failure_reason=error_message,
-                        emit=False,
+                        timeouts={"materialize": materialize_remaining},
+                        on_timeout=lambda _name: kill_all_active_process_groups(),
                     )
-                except Exception as cleanup_exc:
-                    logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
-            return MainResult(success=False, error=error_message, outcome=error_outcome)
+                    result = staged.published_or(
+                        MainResult(
+                            success=False,
+                            error="review engine returned no result",
+                            outcome=RunOutcome.infra_error,
+                        )
+                    )
+                except Exception as error:
+                    result = await _action_failure_result(ctx, error)
+                if not result.success:
+                    root_span.set_status("error", result.error or "review failed")
+                return result
+        except Exception as error:
+            # Setup failures happen before tracing settings exist, so no run
+            # root can be created. Preserve the existing structured outcome.
+            return await _action_failure_result(ctx, error)
         finally:
             if ctx.stop_mcp is not None:
                 with contextlib.suppress(Exception):
@@ -1908,6 +1927,26 @@ async def main() -> MainResult:
             from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
 
             reset_gateway_settings_cache()
+
+
+async def _action_failure_result(ctx: RunContext, error: Exception) -> MainResult:
+    """Map one Action failure and run best-effort failure publication."""
+    error_message = str(error) if error else "unknown error occurred"
+    logger.error("{}", error_message)
+    error_outcome = _classify_error_outcome(error)
+    if isinstance(error, (TimeoutError, asyncio.TimeoutError, _AgentTimeoutError)):
+        kill_all_active_process_groups()
+    if ctx.tool_context:
+        try:
+            await _publish(
+                ctx,
+                outcome=error_outcome,
+                failure_reason=error_message,
+                emit=False,
+            )
+        except Exception as cleanup_exc:
+            logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
+    return MainResult(success=False, error=error_message, outcome=error_outcome)
 
 
 __all__ = [
