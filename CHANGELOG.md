@@ -174,6 +174,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Offline local diff materialization skips mergeCraft's generated
+  `.mergecraft/analyzer-cache/` entries before per-file untracked diff
+  generation, preventing a populated managed cache from adding thousands of
+  subprocess calls while preserving ordinary untracked source and tracked
+  changes (#829).
+
 - Managed analyzer provisioning failures now retain a bounded, redacted final
   cause in logs and skip results, distinguishing transient GitHub release
   outages from checksum, redirect, and other provisioning failures without
