@@ -183,6 +183,7 @@ jobs:
           uv run python scripts/native_output_to_sarif.py mypy .sarif/mypy.json .sarif/mypy.sarif
       - name: Upload ruff SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ruff-sarif
@@ -190,6 +191,7 @@ jobs:
           if-no-files-found: warn
       - name: Upload mypy SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mypy-sarif
@@ -201,11 +203,13 @@ jobs:
       # canonical artifact set per PR.
       - name: Emit actionlint and zizmor SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         env:
           MERGECRAFT_WORKFLOW_SARIF_DIR: .sarif
         run: ./scripts/workflow_lint.sh
       - name: Upload actionlint SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: actionlint-sarif
@@ -213,6 +217,7 @@ jobs:
           if-no-files-found: warn
       - name: Upload zizmor SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: zizmor-sarif
@@ -256,8 +261,12 @@ jobs:
         env:
           UV_PROJECT_ENVIRONMENT: .venv-dev
         run: uv run python scripts/native_output_to_sarif.py bandit .sarif/bandit.json .sarif/bandit.sarif
+      # SARIF upload is evidence publication, not the audit. A FinalizeArtifact
+      # 403 must not fail this job once `make security` has passed — and this one
+      # is a required context, so that failure would block the merge.
       - name: Upload bandit SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bandit-sarif
@@ -272,6 +281,7 @@ jobs:
         run: uv run python scripts/ci_extended_sarif.py .sarif/semgrep.sarif
       - name: Upload semgrep SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: semgrep-sarif
@@ -286,6 +296,7 @@ jobs:
         run: uv run python scripts/ci_extended_sarif.py trufflehog .sarif/trufflehog.sarif
       - name: Upload trufflehog SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: trufflehog-sarif

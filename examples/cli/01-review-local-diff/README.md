@@ -6,7 +6,7 @@ the uncommitted edit that `run.sh` applies before invoking mergeCraft.
 
 ## Live command
 
-From this directory (after `mergecraft auth …`):
+From this directory (after `mergecraft provider auth …`):
 
 ```bash
 mergecraft review

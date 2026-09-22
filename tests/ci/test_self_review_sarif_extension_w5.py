@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from tests.ci.test_ci_sarif_evidence_464 import _upload_artifact_names
-from tests.ci.workflow_support import REPO_ROOT, load_workflow, read_text
+from tests.ci.workflow_support import REPO_ROOT, as_list, load_workflow, read_text
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -73,6 +73,51 @@ def test_committed_config_lists_trufflehog_sarif_artifact() -> None:
     assert isinstance(ci_evidence, dict)
     artifacts = ci_evidence.get("sarifArtifacts") or []
     assert _TRUFFLEHOG_ARTIFACT in artifacts
+
+
+@pytest.mark.parametrize(
+    ("job", "names"),
+    [
+        ("static", {"ruff-sarif", "mypy-sarif", "actionlint-sarif", "zizmor-sarif"}),
+        ("security", {"bandit-sarif", "semgrep-sarif", "trufflehog-sarif"}),
+    ],
+)
+def test_sarif_uploads_continue_on_github_artifact_errors(job: str, names: set[str]) -> None:
+    """A FinalizeArtifact 403 must not fail a Verify job whose checks already passed.
+
+    Covers ``security`` as well as ``static``: the 403 is a publication fault in
+    both, and ``Verify (security audit py3.14)`` is a required context, so there
+    it would block the merge rather than just redden an advisory job.
+    """
+    steps = load_workflow("ci.yml")["jobs"][job]
+    assert isinstance(steps, dict)
+    seen: set[str] = set()
+    for step in as_list(steps.get("steps")):
+        if not isinstance(step, dict):
+            continue
+        with_block = step.get("with") or {}
+        if not isinstance(with_block, dict):
+            continue
+        name = with_block.get("name")
+        if name not in names:
+            continue
+        seen.add(str(name))
+        assert step.get("continue-on-error") is True, name
+    assert seen == names
+
+
+def test_static_workflow_sarif_emit_continues_on_github_release_errors() -> None:
+    """A GitHub-releases 504 must not fail Verify after ``make ci-static`` passed."""
+    static = load_workflow("ci.yml")["jobs"]["static"]
+    assert isinstance(static, dict)
+    for step in as_list(static.get("steps")):
+        if not isinstance(step, dict):
+            continue
+        if step.get("name") != "Emit actionlint and zizmor SARIF":
+            continue
+        assert step.get("continue-on-error") is True
+        return
+    pytest.fail("static job is missing the actionlint/zizmor SARIF emit step")
 
 
 def test_ci_yml_static_job_sets_workflow_sarif_dir() -> None:

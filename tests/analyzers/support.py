@@ -15,6 +15,26 @@ MANIFEST_FIXTURES = FIXTURES_DIR / "manifests"
 # W0.8 canary — must never escape any output path (D8).
 CANARY_SECRET = "sk-canary-w0-8-do-not-leak-7f3a9b2c1d4e5f6a"
 
+_GITHUB_RELEASE_OUTAGE_NEEDLES = (
+    "gateway time-out",
+    "gateway timeout",
+    "returned error: 502",
+    "returned error: 503",
+    "returned error: 504",
+    "server error '502",
+    "server error '503",
+    "server error '504",
+)
+
+
+def skip_if_github_release_outage(detail: str) -> None:
+    """Skip live GitHub-releases downloads when GitHub returns 5xx."""
+    import pytest
+
+    blob = detail.casefold()
+    if any(needle in blob for needle in _GITHUB_RELEASE_OUTAGE_NEEDLES):
+        pytest.skip(detail.strip() or "GitHub releases 5xx")
+
 
 def redacted_text(text: str) -> str:
     """Text after the analyzer/tracing redaction boundary (BR8 ``<redacted>``)."""
