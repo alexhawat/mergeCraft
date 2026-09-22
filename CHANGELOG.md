@@ -57,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `mergecraft jev --help` (and each `enable` / `disable` / `status` / `set`
+  `--help`) now documents every command and option, including the
+  `TYPESAFE_API_KEY` local `.env` and Actions-secret paths (#803)
+
+- `mergecraft jev enable` now requests `TYPESAFE_API_KEY` when it is not
+  already set and writes it to `.env`. `enable --github` also stores the
+  key as the `TYPESAFE_API_KEY` Actions secret when a key is available
+  and the secret is missing (#803)
+
 - `make test` no longer runs the nine branch-walking `test_cov_*` suites: they
   carry a new `coverage` marker and the `make test` selector is now
   `-m "not integration and not coverage"`. They still run under

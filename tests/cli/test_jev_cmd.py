@@ -1,4 +1,4 @@
-"""#786 — ``mergecraft jev enable|disable|status|set``."""
+"""#786 / #803 — ``mergecraft jev enable|disable|status|set``."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import yaml
+from dotenv import dotenv_values
 from typer.testing import CliRunner
 
 from mergecraft.cli import jev_cmd
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 runner = CliRunner()
+_DUMB_ENV = {"NO_COLOR": "1", "TERM": "dumb"}
 
 
 def _write_config(tmp_path: Path, body: str) -> Path:
@@ -334,3 +336,241 @@ def test_write_is_verified_and_falls_back_when_the_line_patch_misses(
     assert yaml.safe_load(config.read_text(encoding="utf-8"))["jev"]["enabled"] is False, (
         "the post-write check did not catch a no-op patcher"
     )
+
+
+# --- #803: group/command help lists every command and option -----------------
+
+
+def test_group_help_documents_each_command_and_all_options() -> None:
+    """``mergecraft jev --help`` is the operator-facing catalog (#803)."""
+    result = runner.invoke(app, ["jev", "--help"], env=_DUMB_ENV)
+    assert result.exit_code == 0, result.output
+    out = result.output.lower()
+    for needle in (
+        "enable",
+        "disable",
+        "status",
+        "set",
+        "--cwd",
+        "--github",
+        "typesafe_api_key",
+        "budgettokens",
+        "packs.",
+        "thresholds.",
+        "advisory",
+    ):
+        assert needle in out, f"missing {needle!r} in jev --help:\n{result.output}"
+
+
+@pytest.mark.parametrize(
+    ("args", "needles"),
+    [
+        (
+            ["jev", "enable", "--help"],
+            ("--cwd", "--github", "typesafe_api_key", ".env", "secret"),
+        ),
+        (
+            ["jev", "disable", "--help"],
+            ("--cwd", "--github", "does not delete"),
+        ),
+        (
+            ["jev", "status", "--help"],
+            ("--cwd", "--github", "typesafe_api_key", "advisory"),
+        ),
+        (
+            ["jev", "set", "--help"],
+            ("--cwd", "budgettokens", "packs.", "thresholds.", "jevsettings"),
+        ),
+    ],
+)
+def test_subcommand_help_documents_its_options(args: list[str], needles: tuple[str, ...]) -> None:
+    result = runner.invoke(app, args, env=_DUMB_ENV)
+    assert result.exit_code == 0, result.output
+    out = result.output.lower()
+    for needle in needles:
+        assert needle in out, f"missing {needle!r} in {' '.join(args)}:\n{result.output}"
+
+
+# --- #803: enable collects and persists TYPESAFE_API_KEY ---------------------
+
+
+def test_enable_prompts_and_saves_key_when_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interactive enable with no key writes the prompt value to .env."""
+    _write_config(tmp_path, "models:\n  - anthropic/claude-sonnet\n")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.setenv("MERGECRAFT_FORCE_INTERACTIVE", "1")
+    monkeypatch.setattr(jev_cmd.getpass, "getpass", lambda _prompt="": "ts-test-key")
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    env_path = tmp_path / ".env"
+    assert env_path.is_file()
+    assert dotenv_values(env_path)["TYPESAFE_API_KEY"] == "ts-test-key"
+    assert "saved" in result.output.lower()
+    assert "ts-test-key" not in result.output
+
+
+def test_enable_does_not_prompt_when_key_already_in_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, "jev:\n  enabled: false\n")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "already-there")
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.setenv("MERGECRAFT_FORCE_INTERACTIVE", "1")
+    prompted: list[str] = []
+    monkeypatch.setattr(
+        jev_cmd.getpass, "getpass", lambda prompt="": prompted.append(prompt) or "new-key"
+    )
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert prompted == []
+    assert not (tmp_path / ".env").exists()
+
+
+def test_enable_does_not_prompt_when_key_already_in_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, "jev:\n  enabled: false\n")
+    (tmp_path / ".env").write_text("TYPESAFE_API_KEY=from-file\n", encoding="utf-8")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.setenv("MERGECRAFT_FORCE_INTERACTIVE", "1")
+    prompted: list[str] = []
+    monkeypatch.setattr(
+        jev_cmd.getpass, "getpass", lambda prompt="": prompted.append(prompt) or "new-key"
+    )
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert prompted == []
+    assert dotenv_values(tmp_path / ".env")["TYPESAFE_API_KEY"] == "from-file"
+
+
+def test_enable_skips_prompt_when_not_interactive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, "jev:\n  enabled: false\n")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.delenv("MERGECRAFT_FORCE_INTERACTIVE", raising=False)
+    monkeypatch.setenv("MERGECRAFT_NONINTERACTIVE", "1")
+    monkeypatch.setattr(
+        jev_cmd.getpass,
+        "getpass",
+        lambda _prompt="": (_ for _ in ()).throw(AssertionError("getpass must not run")),
+    )
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / ".env").exists()
+    assert "credential_absent" in result.output
+
+
+def test_enable_github_sets_secret_when_key_available_and_secret_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, "jev:\n  enabled: false\n")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-from-env")
+    monkeypatch.setattr(
+        jev_cmd, "apply_jev_enabled_on_default_branch", lambda **_kw: "https://example/pr/1"
+    )
+    monkeypatch.setattr(jev_cmd, "_current_repo_slug", lambda: "acme/demo")
+    monkeypatch.setattr(jev_cmd, "_github_secret_present", lambda **_kw: False)
+    captured: list[dict[str, str]] = []
+
+    def _recorder(*, name: str, value: str, repo_slug: str) -> bool:
+        captured.append({"name": name, "value": value, "repo_slug": repo_slug})
+        return True
+
+    monkeypatch.setattr(jev_cmd, "_set_gh_secret", _recorder)
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path), "--github"])
+
+    assert result.exit_code == 0, result.output
+    assert captured == [
+        {"name": "TYPESAFE_API_KEY", "value": "ts-from-env", "repo_slug": "acme/demo"}
+    ]
+    assert "Actions secret" in result.output or "actions secret" in result.output.lower()
+    assert "ts-from-env" not in result.output
+
+
+def test_enable_github_leaves_existing_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, "jev:\n  enabled: false\n")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-from-env")
+    monkeypatch.setattr(
+        jev_cmd, "apply_jev_enabled_on_default_branch", lambda **_kw: "https://example/pr/1"
+    )
+    monkeypatch.setattr(jev_cmd, "_current_repo_slug", lambda: "acme/demo")
+    monkeypatch.setattr(jev_cmd, "_github_secret_present", lambda **_kw: True)
+    monkeypatch.setattr(
+        jev_cmd,
+        "_set_gh_secret",
+        lambda **_kw: (_ for _ in ()).throw(AssertionError("must not overwrite a present secret")),
+    )
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path), "--github"])
+
+    assert result.exit_code == 0, result.output
+    assert "already present" in result.output
+
+
+def test_enable_github_does_not_write_when_secret_lookup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed ``gh secret list`` must not be treated as absent (#804 review)."""
+    _write_config(tmp_path, "jev:\n  enabled: false\n")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-from-env")
+    monkeypatch.setattr(
+        jev_cmd, "apply_jev_enabled_on_default_branch", lambda **_kw: "https://example/pr/1"
+    )
+    monkeypatch.setattr(jev_cmd, "_current_repo_slug", lambda: "acme/demo")
+    monkeypatch.setattr(jev_cmd, "_github_secret_present", lambda **_kw: None)
+    monkeypatch.setattr(
+        jev_cmd,
+        "_set_gh_secret",
+        lambda **_kw: (_ for _ in ()).throw(
+            AssertionError("must not write when secret presence is unknown")
+        ),
+    )
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path), "--github"])
+
+    assert result.exit_code == 0, result.output
+    assert "unknown" in result.output.lower()
+    assert "lookup failed" in result.output.lower()
+    assert "ts-from-env" not in result.output
+
+
+def test_enable_github_prints_set_command_when_key_and_secret_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(tmp_path, "jev:\n  enabled: false\n")
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.delenv("MERGECRAFT_FORCE_INTERACTIVE", raising=False)
+    monkeypatch.setenv("MERGECRAFT_NONINTERACTIVE", "1")
+    monkeypatch.setattr(
+        jev_cmd, "apply_jev_enabled_on_default_branch", lambda **_kw: "https://example/pr/1"
+    )
+    monkeypatch.setattr(jev_cmd, "_current_repo_slug", lambda: "acme/demo")
+    monkeypatch.setattr(jev_cmd, "_github_secret_present", lambda **_kw: False)
+    monkeypatch.setattr(
+        jev_cmd,
+        "_set_gh_secret",
+        lambda **_kw: (_ for _ in ()).throw(AssertionError("no key to store")),
+    )
+
+    result = runner.invoke(app, ["jev", "enable", "--cwd", str(tmp_path), "--github"])
+
+    assert result.exit_code == 0, result.output
+    assert "gh secret set TYPESAFE_API_KEY --repo acme/demo" in result.output
