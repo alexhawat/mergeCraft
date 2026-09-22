@@ -337,8 +337,9 @@ def test_live_emit_stamps_the_live_target(tmp_path: Path) -> None:
     from mergecraft.evidence.shadow import load_shadow_records
     from mergecraft.evidence.shadow_compare import LIVE_TARGET
 
+    change_id = "acme/demo#live-target-stamp"
     packet = _packet(
-        change_id="acme/demo#42",
+        change_id=change_id,
         decision=Decision(
             verdict="neutral",
             reason="shadow-mode decision",
@@ -348,7 +349,12 @@ def test_live_emit_stamps_the_live_target(tmp_path: Path) -> None:
     )
     written = emit_run_packet(_ctx(tmp_path), packet=packet)
     assert written is not None
-    rows = load_shadow_records(written.with_name("merge-evidence-shadow.jsonl"))
+    # CI sets RUNNER_TEMP, so every emit in the job appends to one shadow log.
+    rows = [
+        row
+        for row in load_shadow_records(written.with_name("merge-evidence-shadow.jsonl"))
+        if row.change_id == change_id
+    ]
     assert len(rows) == 1
     assert rows[0].target_id == LIVE_TARGET.target_id
     assert rows[0].target_model == LIVE_TARGET.model
