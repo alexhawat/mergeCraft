@@ -227,14 +227,14 @@ def _packets_from_rows(
 ) -> list[MergeEvidencePacket]:
     """Build one minimal packet per change, in first-seen order."""
     model_by_target = {target.target_id: target.model for target in targets}
-    fallback_model = targets[0].model if targets else "unknown"
+    fallback_model = next((target.model for target in targets if target.model), "unknown")
     seen: dict[str, MergeEvidencePacket] = {}
     for row in rows:
         if row.change_id in seen:
             continue
         seen[row.change_id] = _shadow_placeholder_packet(
             change_id=row.change_id,
-            model=model_by_target.get(row.target_id, fallback_model),
+            model=model_by_target.get(row.target_id) or fallback_model,
         )
     return list(seen.values())
 
@@ -345,7 +345,11 @@ def _runtime_packet(
     return MergeEvidencePacket(
         schema_version=PACKET_SCHEMA_VERSION,
         change_id=change_id,
-        agent=AgentMetadata(id="shadow-compare", version="0.0.0", model=SECOND_TARGET.model),
+        agent=AgentMetadata(
+            id="shadow-compare",
+            version="0.0.0",
+            model=SECOND_TARGET.model or "mergecraft.agents.gates.decide_action",
+        ),
         files_changed=[],
         findings=[],
         deterministic_checks=[],

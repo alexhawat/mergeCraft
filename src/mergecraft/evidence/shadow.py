@@ -106,19 +106,19 @@ class ShadowTarget(BaseModel):
     disagreement table can group by target as well as by lane and rule.
 
     ``target_id`` is the table label (``"live"`` / ``"shadow-b"``); ``model``
-    is the pinned model id the prediction was produced with; ``prompt_version``
-    is optional so a target may differ by model alone.
+    is the slug that produced the row, or unset when the run did not record
+    one. ``prompt_version`` is optional so a target may differ by model alone.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     target_id: str = Field(min_length=1)
-    model: str = Field(min_length=1)
+    model: str | None = None
     prompt_version: str | None = None
 
 
-LIVE_TARGET: ShadowTarget = ShadowTarget(target_id="live", model="anthropic/claude-sonnet-5")
-"""The incumbent target: the model the live review path already runs."""
+LIVE_TARGET: ShadowTarget = ShadowTarget(target_id="live")
+"""The live row's label. Its model comes from the packet, not from this constant."""
 
 SECOND_TARGET: ShadowTarget = ShadowTarget(
     target_id="shadow-b",
@@ -327,6 +327,19 @@ class GateShadowPrediction:
     lane: str = "review"
 
 
+def live_target_for_packet(packet: MergeEvidencePacket) -> ShadowTarget:
+    """Label the live row with the model this packet actually ran.
+
+    Prefers ``executed_model`` (the slug that ran) and otherwise the packet's
+    ``model`` (the configured reviewer). When neither is recorded the model is
+    left unset, so the row is not attributed to a model that did not run.
+    """
+    executed = packet.agent.executed_model.strip()
+    configured = packet.agent.model.strip()
+    model = executed or configured or None
+    return ShadowTarget(target_id=LIVE_TARGET.target_id, model=model)
+
+
 def execute_second_target(packet: MergeEvidencePacket) -> GateShadowPrediction:
     """Run the second pinned target on ``packet`` and return its prediction.
 
@@ -365,7 +378,7 @@ def record_pinned_targets(
             run_id=run_id,
             policy_id="default",
             output_path=output_path,
-            target=LIVE_TARGET,
+            target=live_target_for_packet(packet),
             tracer=tracer,
         )
     except Exception as exc:  # both targets are attempted; the caller decides
@@ -699,6 +712,7 @@ __all__ = [
     "disagreement_report",
     "enforce_action",
     "execute_second_target",
+    "live_target_for_packet",
     "load_shadow_records",
     "predict_action",
     "predict_verdict_protocol",

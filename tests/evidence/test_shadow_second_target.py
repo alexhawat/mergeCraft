@@ -371,6 +371,67 @@ def test_live_emit_records_a_divergent_second_target(tmp_path: Path) -> None:
     assert second.action != by_target["live"].action
 
 
+def test_live_emit_stamps_the_configured_reviewer_model(tmp_path: Path) -> None:
+    """A Nous review is not recorded as Claude."""
+    from mergecraft.evidence.packet import AgentMetadata, Decision
+    from mergecraft.evidence.run_packet import emit_run_packet
+    from mergecraft.evidence.shadow import load_shadow_records
+
+    change_id = "acme/demo#configured-reviewer"
+    packet = _packet(
+        change_id=change_id,
+        agent=AgentMetadata(
+            id="nous",
+            version="0.0.0",
+            model="nous/tencent/hy3",
+            executed_model="nous/tencent/hy3",
+        ),
+        decision=Decision(
+            verdict="neutral",
+            reason="shadow-mode decision",
+            decided_by="mergecraft.agents.gates.decide_approval",
+            mode="shadow",
+        ),
+    )
+    written = emit_run_packet(_ctx(tmp_path), packet=packet)
+    assert written is not None
+    rows = [
+        row
+        for row in load_shadow_records(written.with_name("merge-evidence-shadow.jsonl"))
+        if row.change_id == change_id and row.target_id == "live"
+    ]
+    assert rows
+    assert rows[0].target_model == "nous/tencent/hy3"
+
+
+def test_live_emit_leaves_the_model_unset_when_the_packet_has_none(tmp_path: Path) -> None:
+    """A packet with no reviewer slug is not labelled with a stand-in model."""
+    from mergecraft.evidence.packet import AgentMetadata, Decision
+    from mergecraft.evidence.run_packet import emit_run_packet
+    from mergecraft.evidence.shadow import load_shadow_records
+
+    change_id = "acme/demo#no-model"
+    packet = _packet(
+        change_id=change_id,
+        agent=AgentMetadata(id="unknown", version="0.0.0", model=""),
+        decision=Decision(
+            verdict="neutral",
+            reason="shadow-mode decision",
+            decided_by="mergecraft.agents.gates.decide_approval",
+            mode="shadow",
+        ),
+    )
+    written = emit_run_packet(_ctx(tmp_path), packet=packet)
+    assert written is not None
+    rows = [
+        row
+        for row in load_shadow_records(written.with_name("merge-evidence-shadow.jsonl"))
+        if row.change_id == change_id and row.target_id == "live"
+    ]
+    assert rows
+    assert rows[0].target_model is None
+
+
 def test_keyless_job_omits_an_unexecuted_second_target(tmp_path: Path) -> None:
     """A hand-authored second-target row is not published as that model's output."""
     from mergecraft.evidence.shadow import load_shadow_records

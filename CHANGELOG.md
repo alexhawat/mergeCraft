@@ -150,6 +150,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The keyless shadow job is a fixture replay of two hard-coded packets. It
   does not read a live review and leaves #737 open.
+- A live shadow row records the model on the packet (the slug that ran, else
+  the configured reviewer). When the packet has no model, the row leaves it
+  unset instead of claiming Claude.
 
 - `mergecraft eval ingest --from-dismissals` turns recorded dismissal signals
   into structural eval cases. A dismissal is stored as `agent-seeded`, not as
