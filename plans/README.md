@@ -62,10 +62,10 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 
 | Plan | Deliverable | Priority | Dependency | Status |
 |---|---|---|---|---|
-| [001](001-trajectory-redaction.md) | Redact every trajectory persistence route | P1 | — | IN PROGRESS |
-| [002](002-normalized-terminal-verdict.md) | Finalized findings determine enforced verdict | P1 | — | IN PROGRESS |
+| [001](001-trajectory-redaction.md) | Redact every trajectory persistence route | P1 | — | Integrated; focused checks passed; final CI pending |
+| [002](002-normalized-terminal-verdict.md) | Finalized findings determine enforced verdict | P1 | — | Integrated; focused checks passed; final CI pending |
 | [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions by purpose | P1 | — | TODO |
-| [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | IN PROGRESS |
+| [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | Integrated; focused checks passed; final CI pending |
 | [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | IN PROGRESS |
 | [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | TODO |
 | [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | IN PROGRESS |
@@ -78,7 +78,7 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 | [014](014-live-benchmark-publication.md) | Two-provider live detection report | P2 | 013; separate detection labels, model choices and spend ceiling | TODO campaign preparation; live run pending |
 | [015](015-release-candidate.md) | Verified refreshed release and deployment identity | P2 | selected technical fixes 001–010 | Inventory recorded; fresh candidate/publication pending |
 | [016](016-provisioning-failure-cause.md) | Visible provisioning cause and narrow outage handling (#825) | P2 | — | TODO |
-| [017](017-redaction-filename-classification.md) | Preserve ordinary filenames without bypassing redaction (#827) | P2 | coordinate 001/005 | IN PROGRESS |
+| [017](017-redaction-filename-classification.md) | Preserve ordinary filenames without bypassing redaction (#827) | P2 | coordinate 001/005 | Integrated; focused checks passed; final CI pending |
 
 ```mermaid
 flowchart TD
