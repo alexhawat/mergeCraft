@@ -19,12 +19,19 @@ Actions it reads those variables: a fork `pull_request` or
 PR-authored `startup_command` does not run. `shell: disabled` is also inert.
 `enabled: true` cannot re-enable an untrusted tier.
 
-Live browsing binds to the **custom browser-use stack** under
-`mergecraft.browser` (CDP host Chrome — not Playwright). JEV modules
-(`mergecraft.jev.*`) will score verification judgments once the CDP driver is
-wired (#752). Until then the CLI **fails closed** when the stack is
-unavailable. `--allow-stub` is the only way to use the non-browser stub
-(tests). The production Action image does not include a browser.
+Live browsing binds to a **CDP host-Chrome driver** under `mergecraft.browser`
+— not Playwright, and mergeCraft never launches, downloads, or sandboxes a
+browser. Chrome is started by the operator or CI host with
+`--remote-debugging-port`; `MERGECRAFT_CDP_URL` (default
+`http://127.0.0.1:9222`) points at its HTTP endpoint. Acceptance criteria and
+reproduce claims are scored by `mergecraft.jev`; when Jev is unavailable or its
+transport fails each criterion is left `unverified` with a named reason rather
+than guessed, and the report is `partial` — never an aborted run. When
+the CDP endpoint is unreachable the CLI **refuses** (non-zero exit) and, with
+`--artifacts-dir`, writes a `skipped` report naming the probed endpoint.
+`--allow-stub` is the only way to use the non-browser stub (tests);
+`--artifacts-dir` never opts into it. The production Action image does not
+include a browser.
 
 Flags:
 
@@ -56,15 +63,19 @@ mergecraft verify-behavior \
 
 `criteria.md` is one criterion per line (`- Clear button removes the image`).
 The run writes `report.json` and redacted console logs under `--artifacts-dir`.
-Without a reachable CDP endpoint (or until #752 wires the driver), the command
-does not exit 0 as a pass — including when `--artifacts-dir` is set.
+Without a reachable CDP endpoint the command does not exit 0 and never reports
+a pass — including when `--artifacts-dir` is set.
 
-After navigate, optional YAML `actions` (`click` / `fill` / `type`) are
-driven through the `BrowserDriver` protocol. Each acceptance criterion is scored
-from the page text against that criterion's own wording (`unverified` when
-empty; a criterion that names `still visible` or `mismatch` fails only when
-that phrase is on the page; otherwise pass when the criterion's significant
-tokens all appear). Verify with no criteria is `partial`, not `pass`. When
+After navigate, optional YAML `actions` (`click` / `fill` / `type`) are driven
+through the `BrowserDriver` protocol. Each acceptance criterion is judged
+against the observed page text by the pinned Jev model: one call per criterion
+returning a `noul`, mapped in Python at the `0.5` act floor to `pass` or
+`fail`. An unavailable judge, a failing Jev transport, a blank page, or a
+missing answer leaves the criterion `unverified` and names the reason in
+`skipped_or_unverified` — the CLI never invents a local verdict and never aborts
+the run. Report status is `pass` only when every
+criterion is `pass`; any `unverified`, or a mix of `pass` and `fail`, is
+`partial`. Verify with no criteria is `partial`, not `pass`. When
 `--start-command` is set, navigate retries for up to 15s on connection
 refused so a slow app can come up.
 
@@ -91,10 +102,11 @@ mergecraft verify-behavior \
   --artifacts-dir .mergecraft/artifacts/issues/61/repro
 ```
 
-`issue.md` holds the repro notes. Reproduce is `reproduced` only when those
-notes' significant tokens appear in the page text — a non-empty homepage is
-not a hit. Credentials are env-var **names** only (`credential_env_names`
-in YAML); values never appear in the report JSON.
+`issue.md` holds the repro notes. The CLI asks the pinned Jev model whether the
+observed page reproduces those notes; a non-empty homepage is not a hit. An
+unavailable or failing judge is `partial` with a named `repro unverified:`
+reason, never `reproduced`. Credentials are env-var **names** only
+(`credential_env_names` in YAML); values never appear in the report JSON.
 
 `schema_version` is required and pinned to **`1.0.0`**. The JSON Schema is
 derived from the Pydantic models. Markdown is a **view** of that JSON, not a
@@ -104,18 +116,24 @@ second source of truth.
 
 The driver is a thin protocol (`BrowserDriver`): navigate, extract text, click,
 fill, type, press key, scroll, screenshot, read/set cookies, and read console.
-Live browsing binds to `mergecraft.browser.launch_browser_driver` (custom
-browser-use over CDP plus JEV — not Playwright). Nothing in mergeCraft imports
-Playwright.
+Live browsing binds to `mergecraft.browser.launch_browser_driver`, a
+CDP-backed driver that attaches to a host Chrome over `MERGECRAFT_CDP_URL`.
+Nothing in mergeCraft imports Playwright, and mergeCraft never launches,
+downloads, or sandboxes a browser — lifecycle stays with the host.
+Construction is lazy: it probes `/json/version` but opens no websocket until
+the first command. The driver creates its own page target and closes only the
+target it created; an existing host tab is never closed.
 
-Start Chrome with remote debugging and set `MERGECRAFT_CDP_URL` when the default
-`http://127.0.0.1:9222` is wrong. When the stack is unavailable the CLI fails
-closed rather than raising a raw import error, including when `--artifacts-dir`
-is set.
+Start Chrome with `--remote-debugging-port` and set `MERGECRAFT_CDP_URL` when
+the default `http://127.0.0.1:9222` is wrong. When the endpoint is unreachable
+the CLI refuses with a named `skipped` report rather than raising a raw import
+or connection error, including when `--artifacts-dir` is set.
 
-CI (`make ci` / `make test`) never launches a live browser. Unit tests drive
-an in-process fake. A real-browser smoke test, if added later, must be marked
-`integration` so those targets exclude it.
+CI (`make ci` / `make test`) never launches a live browser. Unit tests drive an
+in-process fake. One live driver case is gated on a reachable endpoint and
+self-skips with a named reason (naming CDP and the probed URL) when none
+answers, so it is never silently deselected. A real-browser smoke test, if
+added later, must be marked `integration` so those targets exclude it.
 
 Cookie handling on the protocol uses name/value dicts. Reports and logs record
 credential **names** only — never values. Post-run `screenshot.png` is omitted
@@ -144,6 +162,47 @@ startup command, unreachable URL). A blocked run is never a pass and must not
 be omitted from review output.
 
 A report is successful only for verify `pass` or reproduce `reproduced`.
+
+## What a green verify does and does not prove
+
+A verify report is `pass` only when **every** acceptance criterion is judged
+`pass`. That proves the named criteria were observed to hold on the page the
+run actually reached — and nothing more.
+
+It does **not** prove:
+
+- that criteria not listed were checked;
+- that the page was reached through the production configuration, unless the
+  run used the same `--start-command` and `--url`;
+- that the judgment is correct. A criterion is judged by the pinned Jev model
+  as written; an unavailable judge leaves it `unverified`, never a locally
+  fabricated verdict;
+- anything the run skipped. An unreachable endpoint, an inert trust tier, a
+  disabled shell, a disabled capability, a blocked URL, or an unavailable
+  judge produce `skipped` / `blocked` / `partial` with a named reason, never
+  `pass`.
+
+A `pass` with no criteria is impossible: verify with no criteria is `partial`.
+
+## Refusal and named skip
+
+A run refuses — non-zero exit, never `pass` — and names why:
+
+| Condition | Report / signal |
+|-----------|-----------------|
+| CDP endpoint unreachable | non-zero exit; `report.json` status `skipped`, `skipped_or_unverified` starts with `cdp_unavailable:` and names the probed URL |
+| Untrusted tier (fork PR, `pull_request_target`) | status `skipped` with the trust reason |
+| `shell: disabled` | status `skipped` with the shell reason |
+| `verify_behavior.enabled: false` | status `skipped` with the config reason |
+| Env credentials named in the input are absent | status `blocked`, `blocked.missing` names them |
+| App URL unreachable | status `blocked`, `blocked.missing` names the URL |
+| A configured action target is absent | status `blocked`, `blocked.missing` names the step |
+| Jev unavailable (disabled, no credential, kill switch) | criteria `unverified` with the skip token named; report `partial` |
+| Jev transport fails (`transport_error`) | criteria `unverified` with `transport_error` named; report `partial`, never an aborted run |
+
+An unavailable judge is a named `unverified`, not a pass and not a silent
+absence. The same rule holds for the test suite: a live case with no reachable
+endpoint reports a named skip in the `-rs` summary, never a quiet deselect.
 
 ## Artifact layout
 

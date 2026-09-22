@@ -606,6 +606,9 @@ _JEV_PACK_IDS: Final[tuple[str, ...]] = (
     "claim/v1",
     "align/v1",
     "lens/v1",
+    # Behaviour verification (``verify-behavior``) criterion / repro judges.
+    "criterion/v1",
+    "repro/v1",
 )
 _JEV_DEFAULT_BUDGET_TOKENS: Final[int] = 250_000
 

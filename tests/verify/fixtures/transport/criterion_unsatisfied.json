@@ -1,0 +1,14 @@
+{
+  "http": {
+    "status": 200,
+    "headers": { "content-type": "application/json" }
+  },
+  "body": {
+    "request_id": "req_verify_criterion_unsatisfied",
+    "model": "jev-1.13.0",
+    "usage": { "input_tokens": 120, "output_tokens": 3 },
+    "answers": {
+      "satisfied": { "noul": 0.08 }
+    }
+  }
+}

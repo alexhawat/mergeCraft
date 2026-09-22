@@ -63,6 +63,13 @@ _SLUG_ENTROPY_SLACK = 0.12
 # exempt before the dense-token pass so glanceable catalog rows survive redaction.
 _METADATA_ASSIGNMENT_RE = re.compile(r"^(?P<key>[a-z][a-z0-9_]*)=(?P<value>[a-z][a-z0-9_-]*)$")
 _SIMPLE_METADATA_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+# Exact operator-remedy literals that are known-safe and must survive the dense
+# entropy pass so a fail-closed message stays actionable. R7-F4: the
+# CDP-unavailable remedy names ``--remote-debugging-port``, which is otherwise
+# redacted as a secret-shaped hyphenated run. This is an exact-match allowlist:
+# no token shaping the pattern space is exempted, so secret redaction is
+# unchanged for every value that is not literally one of these strings.
+_KNOWN_SAFE_LITERALS: frozenset[str] = frozenset({"--remote-debugging-port"})
 
 
 def _shannon_entropy(value: str) -> float:
@@ -165,6 +172,8 @@ def _looks_like_repo_path_token(token: str) -> bool:
 def _entropy_redact(text: str) -> str:
     def replacer(match: re.Match[str]) -> str:
         token = match.group(0)
+        if token in _KNOWN_SAFE_LITERALS:
+            return token
         # The entropy alphabet excludes dots, so inspect a bounded filename
         # suffix before classifying a normal path prefix as a dense token.
         suffix = re.match(
@@ -223,6 +232,8 @@ def _pattern_redact(text: str) -> str:
 def _maybe_redact_entire_string(text: str, redacted: str) -> str:
     """Redact credential-shaped single tokens that fall outside the ASCII entropy regex."""
     if redacted != text:
+        return redacted
+    if text in _KNOWN_SAFE_LITERALS:
         return redacted
     if len(text) < _MIN_ENTROPY_LENGTH or any(char.isspace() for char in text):
         return redacted
