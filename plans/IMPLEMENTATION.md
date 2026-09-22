@@ -29,9 +29,14 @@ The 85 audit/probe tests in VERIFICATION.md describe the original bugs and are n
 | Plans | Integrated commits | Independent result |
 |---|---|---|
 | 002 finalized verdict | `a648bef2` | 77 passed across terminal submission, verdict policy/harness and publication body tests |
+| 003 reviewer/Git tokens and revocation | `a51188bd`, `9e8b327e` | 56 passed across token, Action phase and trust ordering tests |
 | 004 publication retry | `10130b5e` | 32 passed across outcome, anchor recovery and real MCP review tests |
 | 001 persistence redaction, 017 ordinary filenames | `9c101677`, `9afaacec` | 248 passed across trajectory/read coverage/packet and five analyzer-redaction test files |
+
+| 007 adjudication round-trip and corpus synchronization | `e1bb753f` | 117 passed; eval corpus sync check, structural/adversarial gate and installed-wheel convergence passed |
 
 These are focused checks, not a completed full CI gate. The initial redaction-check command named a nonexistent test file and ran no tests; the corrected exact-file invocation above completed successfully. The baseline generated-documentation check also passed.
 
 Issue #827 was filed during implementation after a deterministic reproduction showed that the shared redactor masked the shipped doctrine filename. The central correction preserves bounded ordinary uppercase identifier components while existing high-entropy and credential-prefix tests remain green; trajectory persistence never restores redactor-removed values.
+
+Issue #828 was filed for installation-token revocation reporting success without checking the HTTP response. The fix checks the status, keeps cleanup best effort across all owned tokens, and tests rejected revocations without leaking credentials.

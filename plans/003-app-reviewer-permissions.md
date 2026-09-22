@@ -1,6 +1,6 @@
 # Plan 003: Separate Git access from reviewer API permissions
 
-- Status: TODO
+- Status: INTEGRATED — independent focused checks passed; final CI pending
 - Issue: [#821](https://github.com/alexhawat/mergeCraft/issues/821)
 - Related lifecycle defect found during implementation: [#828](https://github.com/alexhawat/mergeCraft/issues/828).
 - Priority: P1; effort: M; change risk: HIGH; confidence: HIGH.

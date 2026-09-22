@@ -64,15 +64,15 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 |---|---|---|---|---|
 | [001](001-trajectory-redaction.md) | Redact every trajectory persistence route | P1 | — | Integrated; focused checks passed; final CI pending |
 | [002](002-normalized-terminal-verdict.md) | Finalized findings determine enforced verdict | P1 | — | Integrated; focused checks passed; final CI pending |
-| [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions and honest revocation (#821/#828) | P1 | — | IN PROGRESS |
+| [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions and honest revocation (#821/#828) | P1 | — | Integrated; focused checks passed; final CI pending |
 | [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | Integrated; focused checks passed; final CI pending |
 | [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | IN PROGRESS |
-| [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | TODO |
-| [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | IN PROGRESS |
+| [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | IN PROGRESS |
+| [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | Integrated; focused checks passed; final CI pending |
 | [008](008-coverage-shards.md) | Isolated coverage shards + complete-data gate | P2 | 006 | TODO |
-| [009](009-tracing-contracts.md) | Valid tracing contracts and whole-run parent tree | P2 | coordinate 003 | TODO |
+| [009](009-tracing-contracts.md) | Valid tracing contracts and whole-run parent tree | P2 | coordinate 003 | IN PROGRESS |
 | [010](010-setup-instructions.md) | Finish setup artifact lists | P3 | — | TODO |
-| [011](011-human-golden-batch.md) | Evidence packet + nine actual human decisions | P2 | 007 | TODO preparation; human decisions pending |
+| [011](011-human-golden-batch.md) | Evidence packet + nine actual human decisions | P2 | 007 | Preparation in progress; human decisions pending |
 | [012](012-trajectory-scoring.md) | Per-check trajectory scoring and labelled baseline | P2 | 001/005 before baseline; separate human trajectories | TODO scorer; human-labelled enforcement pending |
 | [013](013-judge-calibration.md) | Eligibility vs held-out judge calibration | P2 | 007/011 plus broader held-out dataset | TODO reporting; held-out validation pending |
 | [014](014-live-benchmark-publication.md) | Two-provider live detection report | P2 | 013; separate detection labels, model choices and spend ceiling | TODO campaign preparation; live run pending |
