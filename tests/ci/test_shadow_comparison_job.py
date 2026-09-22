@@ -3,9 +3,10 @@
 Wave plan: the verification/evals/receipts wave plan (R4). Test-plan doc:
 ``docs/test-plans/30-verification-evals-receipts.md``.
 
-The shadow comparison ships as an **optional, keyless** workflow job: a record
-step writes both targets and a publish step reads that file. It must never
-become a required PR blocker. ``continue-on-error: true`` is the repo's
+The shadow fixture replay ships as an **optional, keyless** workflow job: a
+record step writes two hard-coded packets and a publish step reads that file.
+It is not a live-model comparison and must never become a required PR blocker.
+``continue-on-error: true`` is the repo's
 established non-blocking mechanism (``mutation-advisory``); a job that needs a
 provider key is a job that gets disabled.
 

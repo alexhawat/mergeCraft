@@ -485,8 +485,8 @@ def test_keyless_job_publishes_the_committed_corpus_as_a_report(
     assert rows
     assert {row.target_id for row in rows} == {"live"}
     published = summary.read_text(encoding="utf-8")
-    assert "Shadow target comparison" in published
-    assert "does not run a model" in published
+    assert "Shadow fixture replay" in published
+    assert "does not close #737" in published
     assert "shadow-b" not in published
 
 

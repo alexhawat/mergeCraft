@@ -55,10 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing with Click's "Missing argument". `mergecraft config set` writes
   `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
 
-- A second shadow target (a different model id and/or prompt version) records
-  through the existing recorder. The optional keyless job publishes that
-  recorded corpus; it does not run a model or compare a target that has no
-  row. The live review path never enforces a shadow prediction (#737).
+- A second gate policy (prompt 2.0.0) records through the existing recorder.
+  The optional keyless job replays two hard-coded packets; it does not run a
+  model and does not close #737. The live review path never enforces a shadow
+  prediction.
 
 - Production false positives and human dismissals can be ingested into the eval
   bank as versioned cases, each carrying explicit provenance. Ingest refuses a
@@ -148,10 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The second shadow target is the gate under prompt 2.0.0, which blocks a
-  high-risk migration the live gate sends to a human. A shadow emit records
-  both. The keyless job writes that runtime log and publishes it; it does not
-  run a model (#737).
+- The keyless shadow job is a fixture replay of two hard-coded packets. It
+  does not read a live review and does not close #737.
 
 - `mergecraft eval ingest --from-dismissals` turns recorded dismissal signals
   into structural eval cases. A dismissal is stored as `agent-seeded`, not as

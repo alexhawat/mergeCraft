@@ -255,12 +255,12 @@ def render_disagreement_table(rows: Sequence[Mapping[str, object]]) -> str:
     predictions, not a calibrated comparison (R-D7).
     """
     lines = [
-        "### Shadow target comparison (structural replay)",
+        "### Shadow fixture replay",
         "",
-        "The live row is the default gate. The second row is prompt 2.0.0, "
-        "which blocks a high-risk migration the live gate sends to a human. "
-        "This job does not run a model. No threshold here is calibrated and "
-        "no rate is a detection-quality claim.",
+        "These rows are two hard-coded packets, not a live review. The live "
+        "row is the default gate. Prompt 2.0.0 blocks a high-risk migration. "
+        "This job does not run a model and does not close #737. No threshold "
+        "here is calibrated and no rate is a detection-quality claim.",
         "",
         "| Target | Model | Prompt | Lane | Rule | Predicted | Actual | Disagreement |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -294,11 +294,12 @@ def _default_output_path() -> Path:
 
 
 def _runtime_packets() -> list[MergeEvidencePacket]:
-    """Packets the advisory job records, one per committed corpus change.
+    """Hard-coded fixture packets for the advisory job.
 
-    ``#101`` is a high-risk migration, so prompt 2.0.0 blocks where the live
-    gate asks for a human. ``#102`` is a low-risk pass, where the two policies
-    agree.
+    Not a live review and not a second model. ``#101`` is a high-risk
+    migration, so prompt 2.0.0 blocks where the live gate asks for a human.
+    ``#102`` is a low-risk pass, where the two policies agree. This replay
+    does not close #737.
     """
     from mergecraft.classify.blast_radius import BlastRadiusClassification
     from mergecraft.evidence.packet import Decision
@@ -390,17 +391,17 @@ def publish_runtime_shadow(path: Path) -> list[dict[str, object]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Record both pinned targets, or publish a runtime shadow log (keyless).
+    """Replay two fixture packets, or publish that log (keyless).
 
-    ``record`` writes the log. ``publish`` (the default) reads ``--from-run``
-    when given, otherwise replays ``--corpus``. A failure returns 1. This
-    entry point does not run a model.
+    ``record`` writes the fixture log. ``publish`` (the default) reads
+    ``--from-run`` when given, otherwise replays ``--corpus``. A failure
+    returns 1. This entry point does not run a model and does not close #737.
     """
     parser = argparse.ArgumentParser(
         prog="python -m mergecraft.evidence.shadow_compare",
         description=(
-            "Record both pinned shadow targets, then publish that runtime log. "
-            "Does not run a model (keyless; advisory)."
+            "Replay two hard-coded fixture packets through the gate. Does not "
+            "run a model and does not close #737 (keyless; advisory)."
         ),
     )
     parser.add_argument(
