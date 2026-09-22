@@ -11,7 +11,10 @@ either direction.
 An absent observation (a blank page) is ``unverified`` **without dispatching**:
 Python decides, so Jev is never asked to reason about a page nobody observed. An
 honest Jev skip is ``unverified`` carrying the skip token, so a judgment that
-did not happen is never rendered as one that found nothing.
+did not happen is never rendered as one that found nothing. A client failure
+(a transport error or structured ``JevError``) is ``unverified`` with a named
+reason rather than an exception: the failure never escapes the seam, so an
+otherwise completed verification is reported ``partial``, never aborted.
 
 Exports:
     CRITERION_PACK_ID: Versioned criterion question pack id.
@@ -27,9 +30,11 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, Literal
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.jev.architecture import build_system_one_questions, route_noul
+from mergecraft.jev.client import TypeSafeAPIError
 from mergecraft.jev.questions import criterion_pack, repro_pack
 from mergecraft.jev.types import (
     CRITERION_ANSWER_NAME,
@@ -38,6 +43,7 @@ from mergecraft.jev.types import (
     REPRO_ANSWER_NAME,
     REPRO_PACK_ID,
     JevCallResult,
+    JevError,
     NoulAnswer,
     SystemOneResponse,
 )
@@ -49,6 +55,7 @@ _FLOOR: float = NOUL_ACT_FLOOR
 _EMPTY_PAGE_REASON = "empty_page"
 _MISSING_ANSWER_REASON = "missing_answer"
 _UNAVAILABLE_REASON = "unavailable"
+_TRANSPORT_ERROR_REASON = "transport_error"
 
 
 class CriterionJudgment(BaseModel):
@@ -94,13 +101,22 @@ async def judge_criteria(
         return [_criterion_unverified(text, _EMPTY_PAGE_REASON) for text in criteria]
     judged: list[CriterionJudgment] = []
     for criterion in criteria:
-        result = await client.call(
-            state={"criterion": criterion, "page": page_text},
-            pack_id=CRITERION_PACK_ID,
-            unit_id=_unit_id("criterion", criterion),
-            questions=build_system_one_questions(criterion_pack()),
-            trust_tier=trust_tier,
-        )
+        try:
+            result = await client.call(
+                state={"criterion": criterion, "page": page_text},
+                pack_id=CRITERION_PACK_ID,
+                unit_id=_unit_id("criterion", criterion),
+                questions=build_system_one_questions(criterion_pack()),
+                trust_tier=trust_tier,
+            )
+        except (TypeSafeAPIError, JevError) as exc:
+            logger.warning(
+                "jev seam criterion call failed pack_id={} code={}",
+                CRITERION_PACK_ID,
+                _failure_code(exc),
+            )
+            judged.append(_criterion_unverified(criterion, _TRANSPORT_ERROR_REASON))
+            continue
         judged.append(_criterion_judgment(criterion, result))
     return judged
 
@@ -125,13 +141,21 @@ async def judge_repro_claim(
     """
     if not page_text.strip():
         return ReproJudgment(claim=claim, verdict="unverified", reason=_EMPTY_PAGE_REASON)
-    result = await client.call(
-        state={"claim": claim, "page": page_text},
-        pack_id=REPRO_PACK_ID,
-        unit_id=_unit_id("repro", claim),
-        questions=build_system_one_questions(repro_pack()),
-        trust_tier=trust_tier,
-    )
+    try:
+        result = await client.call(
+            state={"claim": claim, "page": page_text},
+            pack_id=REPRO_PACK_ID,
+            unit_id=_unit_id("repro", claim),
+            questions=build_system_one_questions(repro_pack()),
+            trust_tier=trust_tier,
+        )
+    except (TypeSafeAPIError, JevError) as exc:
+        logger.warning(
+            "jev seam repro call failed pack_id={} code={}",
+            REPRO_PACK_ID,
+            _failure_code(exc),
+        )
+        return ReproJudgment(claim=claim, verdict="unverified", reason=_TRANSPORT_ERROR_REASON)
     if result.skipped or result.response is None:
         return ReproJudgment(
             claim=claim,
@@ -159,6 +183,11 @@ def _criterion_judgment(criterion: str, result: JevCallResult) -> CriterionJudgm
 
 def _criterion_unverified(criterion: str, reason: str) -> CriterionJudgment:
     return CriterionJudgment(criterion=criterion, verdict="unverified", reason=reason)
+
+
+def _failure_code(exc: TypeSafeAPIError | JevError) -> str:
+    """Name the client failure for the log line without leaking its message."""
+    return exc.code or type(exc).__name__
 
 
 def _answer_noul(response: SystemOneResponse, name: str) -> float | None:

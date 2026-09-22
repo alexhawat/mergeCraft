@@ -9,7 +9,7 @@ implementation existed; the driver and seam wave landed, every cross-wave
 - **Branch:** `wave/browser-cdp-driver`
 - **Suite:** `tests/verify/` (`test_cdp_availability.py`, `test_browser_stack.py`,
   `test_driver_protocol.py`, `test_jev_seam.py`,
-  `test_runner_jev_composition.py`)
+  `test_runner_jev_composition.py`, `test_jev_transport_failure.py`)
 - **Fixtures:** `tests/verify/fixtures/transport/*.json` (recorded Jev
   envelopes — CI makes zero live TypeSafe calls), `tests/verify/conftest.py`
   (`fake_cdp_endpoint`)
@@ -37,6 +37,12 @@ Wire rules the tests enforce:
   decides, so Jev is never asked to reason about an absent observation.
 - A Jev skip is an honest `unverified` carrying the skip token
   (`credential_absent`, `disabled`, `kill_switch`) in `reason`.
+- A client failure is `unverified`, never an exception. `TypeSafeAPIError`
+  (after the client exhausts its 5xx retries) and the structured `JevError`
+  (`invalid_state`, `credential_absent`) are both caught in the seam and
+  returned as `unverified` with reason `transport_error`. The criterion loop
+  keeps judging — one failing call does not abort the remaining criteria — and
+  the runner reports `partial`, so a partial report is always written.
 - No rate, count, or aggregate crosses the seam in either direction.
 
 ## Coverage map
@@ -66,6 +72,9 @@ Wire rules the tests enforce:
 | Runner composes a scored Jev verdict into the observable report status (verify pass) | integration | `test_runner_jev_composition.py::test_scored_criterion_pass_reaches_report_status` |
 | Runner composes a below-floor Jev verdict into `fail` | integration | `test_runner_jev_composition.py::test_scored_criterion_fail_reaches_report_status` |
 | Runner composes a scored repro verdict into `reproduced` | integration | `test_runner_jev_composition.py::test_scored_repro_claim_reaches_report_status` |
+| Seam: `TypeSafeAPIError` / `JevError` ⇒ one `unverified` per criterion, loop continues | unit / error | `test_jev_transport_failure.py::test_judge_criteria_transport_failure_is_unverified_and_keeps_judging` |
+| Seam: repro claim under client failure ⇒ `unverified`, no exception | unit / error | `test_jev_transport_failure.py::test_judge_repro_claim_transport_failure_is_unverified` |
+| Runner: client failure ⇒ `partial` with named `transport_error`, never an abort (verify + reproduce) | integration / error | `test_jev_transport_failure.py::test_runner_reports_partial_when_the_jev_transport_fails` |
 
 ## Hermetic env and no-op driver detection
 
@@ -111,6 +120,41 @@ rather than in a near-duplicate. Proof the guard bites: with
 `--remote-debugging-port`; with the reason rewritten to a bare
 `verification skipped` it loses `cdp_unavailable:`. Either mutation fails the
 assertions.
+
+## Transport-failure guard (review finding)
+
+A review finding required the seam to survive a client failure. Without the
+catch, `AsyncJevClient.call()` raises `TypeSafeAPIError` on transport failure
+after exhausted 5xx retries and `JevError` for `invalid_state` /
+`credential_absent`; the exception escapes the runner and no partial report is
+written. `test_jev_transport_failure.py` pins the fix by driving the real seams,
+never by inspecting source:
+
+- **Seam, criteria.** A client whose transport raises
+  `TypeSafeAPIError(status_code=500, code="server_error")`, and one raising
+  `JevError(code="credential_absent")`, each yield one `unverified` judgment per
+  criterion with `reason == "transport_error"`. Two criteria are judged in a
+  single call, so a failed call that aborted the loop (return instead of append
+  + continue) would drop the second judgment.
+- **Seam, repro.** The same two failures yield a `ReproJudgment` with
+  `verdict == "unverified"` and `reason == "transport_error"`, claim preserved.
+- **Runner.** `run_verify_behavior(..., jev_client=<failing client>)` returns
+  status `partial` with a `skipped_or_unverified` entry naming `transport_error`,
+  in both `verify` and `reproduce` modes. The exception never propagates — the
+  tests would error if it did.
+
+The TypeSafe case replays a recorded 500 envelope
+(`tests/verify/fixtures/transport/client_transport_error.json`) through
+`RecordedTransport`; `JevError` has no recorded envelope form, so that transport
+is injected directly. Retry waits are neutralised with
+`monkeypatch.setattr("mergecraft.jev.client.DEFAULT_WAIT", wait_none())` so the
+suite stays sub-second while still exercising retry exhaustion.
+
+**Proof the guard bites.** With both `except (TypeSafeAPIError, JevError)`
+clauses mutated to `except ValueError`, all eight cases fail with the escaping
+exception: `TypeSafeAPIError: server_error` for the `typesafe_500` parameter and
+`JevError: credential_absent` for the `credential_absent` parameter. Restoring
+the catch returns all eight to green.
 
 ## Skip policy
 

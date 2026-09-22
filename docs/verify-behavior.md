@@ -24,8 +24,9 @@ Live browsing binds to a **CDP host-Chrome driver** under `mergecraft.browser`
 browser. Chrome is started by the operator or CI host with
 `--remote-debugging-port`; `MERGECRAFT_CDP_URL` (default
 `http://127.0.0.1:9222`) points at its HTTP endpoint. Acceptance criteria and
-reproduce claims are scored by `mergecraft.jev`; when Jev is unavailable each
-criterion is left `unverified` with a named reason rather than guessed. When
+reproduce claims are scored by `mergecraft.jev`; when Jev is unavailable or its
+transport fails each criterion is left `unverified` with a named reason rather
+than guessed, and the report is `partial` — never an aborted run. When
 the CDP endpoint is unreachable the CLI **refuses** (non-zero exit) and, with
 `--artifacts-dir`, writes a `skipped` report naming the probed endpoint.
 `--allow-stub` is the only way to use the non-browser stub (tests);
@@ -69,9 +70,10 @@ After navigate, optional YAML `actions` (`click` / `fill` / `type`) are driven
 through the `BrowserDriver` protocol. Each acceptance criterion is judged
 against the observed page text by the pinned Jev model: one call per criterion
 returning a `noul`, mapped in Python at the `0.5` act floor to `pass` or
-`fail`. An unavailable judge, a blank page, or a missing answer leaves the
-criterion `unverified` and names the reason in `skipped_or_unverified` — the
-CLI never invents a local verdict. Report status is `pass` only when every
+`fail`. An unavailable judge, a failing Jev transport, a blank page, or a
+missing answer leaves the criterion `unverified` and names the reason in
+`skipped_or_unverified` — the CLI never invents a local verdict and never aborts
+the run. Report status is `pass` only when every
 criterion is `pass`; any `unverified`, or a mix of `pass` and `fail`, is
 `partial`. Verify with no criteria is `partial`, not `pass`. When
 `--start-command` is set, navigate retries for up to 15s on connection
@@ -102,9 +104,9 @@ mergecraft verify-behavior \
 
 `issue.md` holds the repro notes. The CLI asks the pinned Jev model whether the
 observed page reproduces those notes; a non-empty homepage is not a hit. An
-unavailable judge is `partial` with a named `repro unverified:` reason, never
-`reproduced`. Credentials are env-var **names** only (`credential_env_names`
-in YAML); values never appear in the report JSON.
+unavailable or failing judge is `partial` with a named `repro unverified:`
+reason, never `reproduced`. Credentials are env-var **names** only
+(`credential_env_names` in YAML); values never appear in the report JSON.
 
 `schema_version` is required and pinned to **`1.0.0`**. The JSON Schema is
 derived from the Pydantic models. Markdown is a **view** of that JSON, not a
@@ -196,6 +198,7 @@ A run refuses — non-zero exit, never `pass` — and names why:
 | App URL unreachable | status `blocked`, `blocked.missing` names the URL |
 | A configured action target is absent | status `blocked`, `blocked.missing` names the step |
 | Jev unavailable (disabled, no credential, kill switch) | criteria `unverified` with the skip token named; report `partial` |
+| Jev transport fails (`transport_error`) | criteria `unverified` with `transport_error` named; report `partial`, never an aborted run |
 
 An unavailable judge is a named `unverified`, not a pass and not a silent
 absence. The same rule holds for the test suite: a live case with no reachable
