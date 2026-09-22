@@ -69,7 +69,7 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 | [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions and honest revocation (#821/#828) | P1 | — | Integrated; focused checks passed; final CI pending |
 | [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | Integrated; focused checks passed; final CI pending |
 | [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | Integrated; focused checks passed; final CI pending |
-| [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | Arithmetic integrated; full baseline passed; threshold update pending |
+| [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | Arithmetic and attributable rebaseline recorded; final CI pending |
 | [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | Integrated; focused checks passed; final CI pending |
 | [008](008-coverage-shards.md) | Isolated coverage shards + complete-data gate | P2 | 006 | Integrated; 33 focused checks passed; full-tree parity pending |
 | [009](009-tracing-contracts.md) | Valid tracing contracts and whole-run parent tree | P2 | coordinate 003 | Integrated; focused and real collector checks passed; final CI pending |

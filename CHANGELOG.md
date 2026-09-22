@@ -80,16 +80,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that may be committed: the config, learnings file, workflow, and added
   `.gitignore` lines. Authentication remains an interactive human step.
 
-- The critical-path and per-prefix coverage floors are re-measured against the
-  tree the three preceding changes produced, replacing a baseline four weeks
-  old. Every number comes from one `make coverage-measure` run on the merged
-  tree and keeps the existing buffer convention (module `measured-2` on line and
-  branch; prefix line `measured-2`, branch `measured-3`), so `utils/token.py`
-  moves off the 39.2% branch floor that let most of its branches go uncovered
-  onto the 86.2% the tree actually measures. Four floors whose measured value
-  came back lower shift down with it — each diagnosed as tree churn since the
-  old baseline, never lowered to make a gate pass — and `fail_under` stays 82
-  (#771).
+- The critical-path and per-prefix coverage floors are rebaselined from one
+  complete 2026-09-22 measurement at integrated HEAD `157f57a3`. Module line
+  and branch floors use separate counts with a two point buffer; prefix line
+  floors use two points and branch floors three points. `utils/token.py`
+  measures 95.7% line and 93.2% branch, yielding floors of 93.7% and 91.2%.
+  No current floor is lower than the prior PR #817 baseline, and the native
+  combined global `fail_under = 82` is unchanged. Report hashes, runtime,
+  counts and every floor delta are recorded in `plans/COVERAGE-BASELINE.md`
+  (#771, #797, #824).
 
 - CLI `--json` payloads carry their own schema version, decoupled from the
   review snapshot's. Both stay `1.0.0`, so no payload changes; the two can now

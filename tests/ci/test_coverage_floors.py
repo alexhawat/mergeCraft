@@ -85,7 +85,7 @@ def test_module_line_floor_uses_line_counts(
     )
 
     assert _run(tmp_path, monkeypatch, report) == 1
-    assert "utils/git_setup.py line 90.0% < floor 92.0%" in capsys.readouterr().err
+    assert "utils/git_setup.py line 90.0% < floor 93.3%" in capsys.readouterr().err
 
 
 def test_module_line_floor_ignores_lower_combined_percentage(

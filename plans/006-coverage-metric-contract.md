@@ -1,6 +1,6 @@
 # Plan 006: Enforce actual module line coverage and name combined coverage honestly
 
-- Status: ARITHMETIC INTEGRATED — focused checks pass; final complete measurement and floor reconciliation pending
+- Status: ATTRIBUTABLE REBASELINE RECORDED — focused checks pass; final CI on the integrated tree pending
 - Issue: [#824](https://github.com/alexhawat/mergeCraft/issues/824)
 - Priority: P1; effort: S–M; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -72,7 +72,7 @@ Verification: run the focused gate above. A new regression should fail for the s
 
 ### 3. Implement the bounded change
 
-After deciding whether #817 is amended before merge or followed immediately by this correction, run one attributable `make coverage-measure` on the resulting integrated tree. Record SHA, Python and coverage versions, seed and full report. This target includes tests marked `coverage` because it selects `not integration`; do not compare it to `make test`, which excludes that marker.
+After deciding whether #817 is amended before merge or followed immediately by this correction, run one attributable `make coverage-measure` on the resulting integrated tree. The completed measurement is recorded in [COVERAGE-BASELINE.md](COVERAGE-BASELINE.md), including the source SHA, report hashes, Python and coverage versions, seed, selection and full counts. This target includes tests marked `coverage` because it selects `not integration`; do not compare it to `make test`, which excludes that marker.
 
 Derive module line percentages from line counts and branch percentages from branch counts. Validate the already-count-based prefixes from the same report. Apply module measured-minus-2 and prefix line-minus-2/branch-minus-3. Preserve the numbers while fixing arithmetic; then, in the attributable rebaseline, explain every increase or decrease directly from the complete report and buffer convention. Never lower a floor simply to turn a failure green. Run the ratchet and floors scripts directly against the saved report instead of repeating the full suite. Update the baseline table with explicit line/branch/combined labels. Record that #817 closes only #771 automatically; close #797 manually only after the corrected token floors and existing behavioral tests are reviewed together.
 
@@ -87,11 +87,11 @@ Verification: run the focused gate above. A new regression should fail for the s
 ## Completion criteria
 
 - [ ] Branch percentage cannot conceal a module line-floor failure.
-- [ ] All reported baseline columns have explicit line/branch/combined meaning and come from one attributable measurement.
-- [ ] Global native combined `fail_under` remains 82; arithmetic changes do not alter floors, and every later rebaseline change has measured/buffer provenance.
+- [x] All reported baseline columns have explicit line/branch/combined meaning and come from one attributable measurement.
+- [x] Global native combined `fail_under` remains 82; arithmetic changes do not alter floors, and every later rebaseline change has measured/buffer provenance.
 - [ ] #817 coordination records only #771 as auto-closing; #797's manual disposition is accurate.
 - [ ] Focused and final gates pass; results and any environment limitation recorded.
-- [ ] `git diff --check` exits 0 and `git diff --name-only` stays in scope.
+- [x] `git diff --check` exits 0 and `git diff --name-only` stays in scope.
 - [ ] Update this status and plans/README.md; use a Conventional Commit subject ≤72 characters. Do not use --no-verify.
 
 ## Stop conditions and maintenance
