@@ -173,15 +173,24 @@ def resolve_codex_broker_posture(
     Callers that hold the already resolved credential mapping pass it in
     (``codex_auth_json`` / ``openai_api_key``) rather than relying on the
     ambient environment (D4). When omitted, the process environment is read.
+
+    A resolved API key suppresses the ambient ``CODEX_AUTH_JSON`` fallback: a
+    caller that resolved an API key credential must not have an ambient
+    subscription outrank it, or the broker is skipped and the stale subscription
+    is written as ``auth.json`` (PR #711 regression). Only a call with neither a
+    resolved API key nor a resolved subscription reads the ambient subscription.
     """
-    subscription_raw = (codex_auth_json or os.environ.get("CODEX_AUTH_JSON", "")).strip()
+    resolved_api_key = openai_api_key.strip()
+    subscription_raw = codex_auth_json.strip()
+    if not subscription_raw and not resolved_api_key:
+        subscription_raw = os.environ.get("CODEX_AUTH_JSON", "").strip()
     if subscription_raw and subscription_auth_usable(subscription_raw):
         return CodexBrokerPosture(
             active=False,
             auth_mode="subscription",
             reason="broker inactive: subscription auth is not brokered",
         )
-    api_key = openai_api_key.strip() or os.environ.get("OPENAI_API_KEY", "").strip()
+    api_key = resolved_api_key or os.environ.get("OPENAI_API_KEY", "").strip()
     if api_key:
         return CodexBrokerPosture(
             active=True,

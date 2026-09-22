@@ -1,7 +1,7 @@
 """DG9.1 RED suite — ``ScmProvider`` protocol contract (D10).
 
 Wave plan: ``.ignorelocal/waves/05-review-depth-governance-wave-plan.md`` (DG9.1 RED,
-DG9.2 impl). Six tests are ``@pytest.mark.xfail(strict=False)`` pending protocol
+DG9.2 impl). Six tests carry a non-strict ``xfail`` marker pending protocol
 extraction; ``test_github_tool_endpoint_behaviour_is_unchanged`` carries the
 pre-refactor behavioural pins that must keep passing through DG9.2.
 

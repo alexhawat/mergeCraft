@@ -27,6 +27,8 @@ from mergecraft.agents.openai_compatible_gateways import (
 from mergecraft.tracing.genai import ModelParams
 from mergecraft.types import MERGECRAFT_MCP_NAME
 
+pytestmark = pytest.mark.coverage
+
 if TYPE_CHECKING:
     from pathlib import Path
 

@@ -29,6 +29,8 @@ from mergecraft.cli import auth_cmd
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE, CLI_USAGE_EXIT_CODE
 
+pytestmark = pytest.mark.coverage
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 

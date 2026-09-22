@@ -280,7 +280,9 @@ def test_traces_command_missing_run_id_reports_cleanly(
         ["traces", "unknown-run"],
         env={"NO_COLOR": "1", "TERM": "dumb", "MERGECRAFT_TRACE_DIR": str(trace_dir)},
     )
-    assert result.exit_code in {0, 1}  # not a crash
+    # A missing run id is a clean notice, not an error: exit 0. Pinned
+    # exactly (T-D5); the old {0, 1} accepted a crash-equivalent exit.
+    assert result.exit_code == 0
     assert result.stdout or result.stderr
 
 

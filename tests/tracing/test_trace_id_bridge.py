@@ -24,15 +24,10 @@ does not exist yet:
 - ``tests/tracing/conftest.py`` — ``trace_event_data`` lacked ``trace_id``
   until T3.1 landed (see the fixture edit).
 
-Acceptance (after T3.2 lands): **11 collected; 10 green; 1 xfailed** — the
-single xfail is ``test_otel_sink_forwards_real_trace_id`` because the
-recording-processor's ``trace_id`` capture is the last T3.2 surface to land.
-The other 10 tests turn green the moment T3.2 ships
-``Tracer.trace_id``/``Span.trace_id``/``TraceEvent.trace_id`` and the
-``otel_bridge.attach_trace_context`` body.
-
-The xfail marker is ``strict=False`` so an unsatisfied xfail never hard-fails
-the suite (the T3.2 impl wave is allowed to turn tests green on touch).
+Acceptance: **10 collected; 10 green**. The OTel recording-processor
+``trace_id`` capture contract (formerly
+``test_otel_sink_forwards_real_trace_id``) was deleted from this suite; it is
+recorded on the instrumentation issue tracker (#798) for a future wave.
 """
 
 from __future__ import annotations
@@ -240,55 +235,6 @@ def test_jsonl_sink_includes_trace_id(trace_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 9 — ``OTLPSink`` forwards the real OTel ``trace_id`` on the produced
-# span, and ``_RecordingSpanProcessor`` captures it. Pinned via the existing
-# test seam in ``src/mergecraft/tracing/exporters.py``.
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.xfail(
-    reason="green after T3.2: OTel trace_id set on span + recording capture (#276)",
-    strict=True,
-)
-def test_otel_sink_forwards_real_trace_id(trace_event_payload: dict[str, Any]) -> None:
-    """OTLPSink writes a span whose OTel ``trace_id`` matches ``event.trace_id``."""
-    pytest.importorskip("opentelemetry")
-
-    from mergecraft.config import RepoSettings
-    from mergecraft.tracing import TraceEvent, sink_factory
-    from mergecraft.tracing.exporters import captured_payload
-
-    settings = RepoSettings.model_validate(
-        {
-            "tracing": {
-                "enabled": True,
-                "sinks": [
-                    {
-                        "type": "otel",
-                        "endpoint": "http://127.0.0.1:1/canary-no-network",
-                        "headers": {},
-                    }
-                ],
-            }
-        }
-    ).tracing
-    sink = sink_factory(settings)
-
-    trace_id_hex = "0123456789abcdef" * 2  # 32 hex chars (OTel trace_id is 128 bits)
-    event = TraceEvent.model_validate(trace_event_payload | {"trace_id": trace_id_hex})
-    sink.write(event)
-    sink.flush()
-
-    payloads = captured_payload()
-    assert payloads, "OTLPSink did not capture any spans via _RecordingSpanProcessor"
-    # ``_RecordingSpanProcessor.on_end`` writes JSON arrays per span; the
-    # T3.2 update surfaces ``trace_id`` on the captured payload so the
-    # Logfire-grouping contract is observable through the existing seam.
-    parsed = json.loads(b"".join(payloads).decode("utf-8"))
-    assert int(parsed[0]["trace_id"], 16) == int(trace_id_hex, 16)
-
-
-# ---------------------------------------------------------------------------
 # Test 10 — ``tests/tracing/conftest.py::trace_event_data`` now includes
 # ``trace_id``; the round-trip equality holds.
 # ---------------------------------------------------------------------------
@@ -347,7 +293,6 @@ __all__ = [
     "test_disabled_path_emits_no_trace_id",
     "test_existing_fixtures_remain_green",
     "test_jsonl_sink_includes_trace_id",
-    "test_otel_sink_forwards_real_trace_id",
     "test_trace_id_falls_back_to_github_run_id",
     "test_trace_id_field_added_to_trace_event_data_fixture",
     "test_trace_id_is_uuid4_when_no_env",

@@ -201,3 +201,40 @@ annotation moved under `TYPE_CHECKING`.
 Twelve `xfail` tests elsewhere in `tests/` (tracing/evals/evidence waves) remain
 and are genuine xfails; they are outside lane A and untouched. The repo-wide
 ratchet is clean: **0 xpassed**.
+
+## Post-review regression — Codex registry credential vs ambient flat auth
+
+A mergeCraft self-review of `2f39b221` (PR #711) found the RA1.1 slice only
+covered the indexed-`device_code` / ambient-flat conflict. The mixed case, where
+the active `openai` registry row is `api_key` based, was not: `build_agent_env`
+maps the indexed key to `OPENAI_API_KEY`, but
+`src/mergecraft/agents/codex.py::_with_flat_codex_auth` still re-inserted an
+ambient flat `CODEX_AUTH_JSON` because the resolved mapping lacked that
+*different* credential. `resolve_codex_broker_posture`
+(`src/mergecraft/security/broker.py:166`) prefers subscription over API key, so
+the stale flat subscription silently overrode the selected registry API key:
+the broker was skipped and `_setup_codex_auth` wrote the flat `auth.json`.
+
+**Precedence contract:** a resolved registry credential for Codex outranks the
+ambient flat `CODEX_AUTH_JSON` fallback.
+
+| Contract (finding) | Test file | Cases |
+| --- | --- | --- |
+| Resolved registry API key beats ambient flat auth | `tests/agents/test_codex_auth_indexed.py` | `test_mixed_indexed_api_key_and_flat_auth_prefers_registry_api_key` |
+| Flat fallback survives an empty Codex registry (control) | `tests/agents/test_codex_auth_indexed.py` | `test_flat_codex_auth_json_fallback_survives_empty_codex_registry` |
+
+The regression test asserts the observable outcomes (D14), not implementation
+layout: `_resolved_parent_credentials(ctx)` carries `OPENAI_API_KEY ==
+"indexed-api-key"` and no `CODEX_AUTH_JSON`; the posture resolved from that
+mapping is `active is True` / `auth_mode == "api_key"`; and the run home's
+`auth.json` is not the flat subscription payload after `_build_env(ctx)`.
+
+The control proves the fix does not simply delete the fallback: with the
+mergeCraft home scaffolded, the CWD under `tmp_path` and no registry row, the
+ambient flat `CODEX_AUTH_JSON` still resolves and `_build_env(ctx)` writes it as
+the run home's `auth.json`. It is the hermetic counterpart to
+`test_flat_codex_auth_json_still_writes_auth_file`, which relied on the ambient
+repo config to resolve no registry credential.
+
+This test was authored RED against `2f39b221` and greened by the accompanying
+src fix; it is a strict regression test, not an `xfail`.

@@ -6,7 +6,7 @@ Worktree: `mergecraft-meat-a-spike` @ `wave/meat-a-spike`
 W1 authored the RED suite (commit ``834ce19``); W2 produced the green
 implementation in ``tests/support/meat_harness.py`` and this
 file reconciles the suite per the W1.10 reconciliation plan. Every
-``@pytest.mark.xfail(reason="green after W2: …", strict=False)`` marker
+non-strict ``xfail`` marker (``reason="green after W2: …"``)
 on a contract the harness now satisfies has been removed. The
 ``_HARNESS_AVAILABLE`` guard and the ``_require_harness`` helper are
 gone — the import at the top of this file is the new contract.

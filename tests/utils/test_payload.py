@@ -247,7 +247,7 @@ def test_validate_compatibility() -> None:
 # ----------------------------------------------------------------------------
 # Wave W1 — RED suite for #72 (comment-trigger authorization).
 #
-# All cases are `@pytest.mark.xfail(strict=False)` because the author-association
+# All cases carry a non-strict `xfail` marker because the author-association
 # gate and the `pull_request_target` opt-in land in W2. The regression guard in
 # `test_pull_request_synchronize_under_target_still_dispatches` is xfail-marked
 # per W1.7 to keep the W1 close-out mechanical — it is expected to XPASS today

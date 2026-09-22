@@ -25,6 +25,8 @@ from mergecraft.tracing.sinks import MemorySink
 from mergecraft.tracing.tracer import Tracer
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 
+pytestmark = pytest.mark.coverage
+
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 

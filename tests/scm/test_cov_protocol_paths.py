@@ -24,6 +24,8 @@ from mergecraft.scm.protocol import (
     validate_provider,
 )
 
+pytestmark = pytest.mark.coverage
+
 
 def _async_stub(name: str) -> Any:
     """Build an ``async def`` method that records nothing and returns its name."""
