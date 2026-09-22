@@ -814,10 +814,21 @@ def _git_paths(
     if parsed is None:
         return None
     positional, _ = parsed
-    after_separator = args[args.index("--") + 1 :] if "--" in args else []
+    separator_index = args.index("--") if "--" in args else None
+    after_separator = args[separator_index + 1 :] if separator_index is not None else []
+    object_positionals = positional
+    if separator_index is not None:
+        before_separator = _option_positionals(
+            args[:separator_index],
+            no_value=_GIT_NO_VALUE_OPTIONS[subcommand],
+            takes_value=_GIT_VALUE_OPTIONS.get(subcommand, frozenset()),
+        )
+        if before_separator is None:
+            return None
+        object_positionals, _ = before_separator
     paths: list[str] = []
     if subcommand in {"show", "cat-file", "diff"}:
-        for token in positional:
+        for token in object_positionals:
             if ":" not in token:
                 continue
             normalized = _normalize_git_object_spec(token)

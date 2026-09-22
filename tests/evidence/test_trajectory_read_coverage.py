@@ -214,6 +214,7 @@ def test_shell_read_operand_count_and_length_are_bounded() -> None:
         ("git -C src show", ["HEAD:app.py"], ["app.py"]),
         ("git -C src show", ["HEAD:./app.py"], ["src/app.py"]),
         ("diff", ["HEAD", "--", "src/app.py"], ["src/app.py"]),
+        ("diff", ["HEAD", "--", "src/foo:bar.py"], ["src/foo:bar.py"]),
         ("grep", ["thing.to_find", "--", "src/app.py"], ["src/app.py"]),
         ("show", ["origin/main..HEAD"], []),
         ("show", ["--unknown", "HEAD:src/app.py"], []),
