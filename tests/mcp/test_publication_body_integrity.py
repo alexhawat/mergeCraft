@@ -21,7 +21,7 @@ from mergecraft.mcp.review import (
     publish_pull_request_review,
 )
 from mergecraft.mcp.tool_state import ReviewRecord
-from mergecraft.mcp.verdict import ReviewPhase, register_review_scope
+from mergecraft.mcp.verdict import ReviewPhase, register_review_scope, submit_review_verdict_tool
 from mergecraft.review.terminal_submission import (
     ReviewerRun,
     terminal_submission_count_from_review_runs,
@@ -34,6 +34,66 @@ _REAL_SUMMARY = (
     "## Review findings\n\n"
     "- **Major** `src/checkout.py:147` — config guard blocks publication on checkout.\n"
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested_verdict", "body", "expected_severity", "expected_verdict", "expected_event"),
+    [
+        ("approve", "README spelling typo", "Trivial", "approve", "APPROVE"),
+        (
+            "request_changes",
+            "README spelling typo",
+            "Trivial",
+            "request_changes",
+            "REQUEST_CHANGES",
+        ),
+        (
+            "approve",
+            "Calling undefined method crashes every request.",
+            "Major",
+            "request_changes",
+            "REQUEST_CHANGES",
+        ),
+    ],
+)
+async def test_terminal_verdict_and_publication_follow_finalized_findings(
+    tmp_path: Path,
+    requested_verdict: str,
+    body: str,
+    expected_severity: str,
+    expected_verdict: str,
+    expected_event: str,
+) -> None:
+    """The stored verdict and GitHub event use the normalized finding severity."""
+    github = RecordingGitHub()
+    ctx = publication_ctx(tmp_path, github=github)
+    summary = f"Review result: {body}"
+
+    submitted = await submit_review_verdict_tool(ctx).execute(
+        {
+            "verdict": requested_verdict,
+            "summary": summary,
+            "findings": [
+                {
+                    "path": "README.md" if expected_severity == "Trivial" else "src/app.py",
+                    "line": 1,
+                    "body": body,
+                    "severity": "Major",
+                }
+            ],
+        }
+    )
+
+    assert submitted.is_error is False
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    assert submission.findings[0].severity == expected_severity
+    assert submission.verdict == expected_verdict
+
+    published = await publish_pull_request_review(ctx)
+    assert published["success"] is True
+    assert github.review_payloads[-1]["event"] == expected_event
 
 
 @pytest.mark.asyncio

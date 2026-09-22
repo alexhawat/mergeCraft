@@ -95,6 +95,22 @@ def verdict_from_merged_findings(findings: list[dict[str, Any]]) -> str:
     return "approve"
 
 
+def enforce_terminal_verdict_from_finalized_findings(
+    *,
+    requested: str,
+    findings: list[Any],
+) -> str:
+    """Combine the requested verdict with blockers from finalized findings."""
+    from mergecraft.findings.agent_adapter import blocking_agent_findings
+
+    from_findings = (
+        "request_changes"
+        if blocking_agent_findings(findings, rule_id="agent:terminal")
+        else "approve"
+    )
+    return _strictest_terminal_verdict(requested, from_findings)
+
+
 def terminal_submission_count_from_review_runs(runs: list[ReviewerRun]) -> int:
     """Terminal verdict cardinality stays one regardless of reviewer count (D7)."""
     _ = runs
@@ -289,6 +305,7 @@ __all__ = [
     "UNKNOWN_RAISED_BY",
     "ReviewerRun",
     "append_degradation_to_summary",
+    "enforce_terminal_verdict_from_finalized_findings",
     "enrich_finding_body_with_provenance",
     "format_finding_provenance_line",
     "format_reviewer_degradation_summary",

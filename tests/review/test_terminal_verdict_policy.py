@@ -574,6 +574,32 @@ def test_request_changes_with_no_findings_is_semantically_rejected(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_request_changes_rejects_when_normalization_removes_all_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finalized empty findings retain the request-changes semantic rejection."""
+    ctx = _ctx(tmp_path)
+    primary_repo_state(ctx.tool_state).diff_path = str(tmp_path / "diff.patch")
+    monkeypatch.setattr(
+        "mergecraft.mcp.verdict.normalize_agent_findings_via_pipeline",
+        lambda *args, **kwargs: [],
+    )
+
+    result = await _submit_verdict(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "A finding was removed by final normalization.",
+            "findings": [_agent_blocker().model_dump()],
+        },
+    )
+
+    assert result.is_error is True
+    assert _REASON_REQUEST_CHANGES_NO_FINDINGS in result.content[0]["text"]
+    assert ctx.tool_state.terminal_submission is None
+
+
+@pytest.mark.asyncio
 async def test_duplicate_conflicting_submissions_fail_closed(tmp_path: Path) -> None:
     """D4: a differing payload is rejected and the attempt is unusable."""
     ctx = _ctx(tmp_path)

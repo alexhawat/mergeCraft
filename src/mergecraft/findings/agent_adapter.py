@@ -167,6 +167,20 @@ def normalize_agent_findings_via_pipeline(
     return normalized
 
 
+def blocking_agent_findings(
+    findings: list[Any],
+    *,
+    rule_id: str,
+) -> list[Finding]:
+    """Return finalized agent findings that satisfy the central blocker policy."""
+    from mergecraft.agents.gates import blocking_findings
+
+    typed = [
+        agent_finding_to_finding(coerce_agent_finding(item), rule_id=rule_id) for item in findings
+    ]
+    return blocking_findings(typed)
+
+
 def finding_for_publication_validation(
     row: dict[str, Any] | None,
     *,
@@ -207,6 +221,7 @@ def finding_for_publication_validation(
 
 __all__ = [
     "agent_finding_to_finding",
+    "blocking_agent_findings",
     "coerce_agent_finding",
     "finding_for_publication_validation",
     "finding_to_agent_draft",
