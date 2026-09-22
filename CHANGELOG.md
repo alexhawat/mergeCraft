@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft eval publish-benchmark` validates two saved provider runs against
+  an approved campaign manifest, independently adjudicated label and judge
+  receipts, immutable artifact and model identities, shared protocol pins, and
+  cost ceilings before writing a non-overwritable machine summary and report.
+  This is offline publication preparation: no approved human-labelled campaign,
+  live comparative result, benchmark claim, or release is included.
+
 - `mergecraft verify-behavior` now drives a real Chrome over the DevTools
   Protocol and scores each acceptance criterion and reproduction claim through
   Jev, instead of refusing every run. A reachable host Chrome yields a live
@@ -68,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calibration labels (#738).
 
 ### Changed
+
+- Consumer setup guidance now lists every file produced by `mergecraft init`
+  that may be committed: the config, learnings file, workflow, and added
+  `.gitignore` lines. Authentication remains an interactive human step.
 
 - The critical-path and per-prefix coverage floors are re-measured against the
   tree the three preceding changes produced, replacing a baseline four weeks
@@ -162,6 +173,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `tests/` still fires.
 
 ### Fixed
+
+- Managed analyzer provisioning failures now retain a bounded, redacted final
+  cause in logs and skip results, distinguishing transient GitHub release
+  outages from checksum, redirect, and other provisioning failures without
+  exposing credentials or download URLs.
 
 - Persisted review trajectories redact secrets while retaining exact, safe
   read-path attribution. Terminal verdicts use normalized, deduplicated typed
