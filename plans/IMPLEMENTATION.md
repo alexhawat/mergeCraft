@@ -36,7 +36,9 @@ The 85 audit/probe tests in VERIFICATION.md describe the original bugs and are n
 | 005 exact successful-read attribution | `a0af80d9`, `6e2e09ed` | 292 passed across the same eight evidence/redaction files, including literal colon Git pathspec regression |
 | 006 true line and branch coverage | `0b804ab8` | 47 passed across seven coverage CI files; numeric floors unchanged; final full measurement pending |
 | 007 adjudication round-trip and corpus synchronization | `e1bb753f` | 117 passed; eval corpus sync check, structural/adversarial gate and installed-wheel convergence passed |
+| 008 isolated coverage shards | `b2a899ee` | 33 passed, including real xdist/split fixture parity, manifest tampering/incompleteness, source drift and failure propagation; final whole-tree parity pending |
 | 009 complete lifecycle tracing | `327a6d2c` | 410 tracing tests passed, plus 12 HTTP tracing tests with loopback access; real Docker OTLP collector passed 7 pre-seed and 2 post-seed tests (wrapper seeds 3886865826 and 3250636949) |
+| 012 offline trajectory scorer | `7d384ac9` | 80 passed across scorer, trajectory and run-packet tests; development fixtures remain advisory, with human protocol/enforcement pending |
 | 013 offline judge calibration | `ddd442d3` | 102 protocol, scoring, provenance/seal and CLI tests passed; actual independent human labels and held-out validation remain pending |
 | 011 human review preparation | `ec2481f6` | 14 strict manifest/evidence tests passed; rendered [nine-case review sheet](HUMAN-REVIEW.md), all evidence missing and decisions unanswered |
 
@@ -47,3 +49,5 @@ Issue #827 was filed during implementation after a deterministic reproduction sh
 Issue #828 was filed for installation-token revocation reporting success without checking the HTTP response. The fix checks the status, keeps cleanup best effort across all owned tokens, and tests rejected revocations without leaking credentials.
 
 The first tracing run could not bind its local HTTP server under the sandbox; the affected 12-test file was rerun with loopback access and passed. The supported Docker collector target completed successfully and cleaned up its test container. These checks establish trace transport and parenting, not a live provider evaluation.
+
+An intermediate integrated `make ci-static` passed lock/lint, both type checkers, catalog and agent checks, package build, examples and CLI examples. It stopped at the expected generated CLI reference drift for the newly added calibration command; final generation is deferred until all new commands are integrated. The intermediate `make security` passed (no medium/high Bandit findings and no known dependency vulnerabilities). These results do not substitute for the final combined-tree gate.

@@ -69,15 +69,15 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 | [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | Integrated; focused checks passed; final CI pending |
 | [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | Arithmetic integrated; final measurement pending |
 | [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | Integrated; focused checks passed; final CI pending |
-| [008](008-coverage-shards.md) | Isolated coverage shards + complete-data gate | P2 | 006 | IN PROGRESS |
+| [008](008-coverage-shards.md) | Isolated coverage shards + complete-data gate | P2 | 006 | Integrated; 33 focused checks passed; full-tree parity pending |
 | [009](009-tracing-contracts.md) | Valid tracing contracts and whole-run parent tree | P2 | coordinate 003 | Integrated; focused and real collector checks passed; final CI pending |
 | [010](010-setup-instructions.md) | Finish setup artifact lists | P3 | — | TODO |
 | [011](011-human-golden-batch.md) | Evidence packet + nine actual human decisions | P2 | 007 | Preparation integrated; evidence and human decisions pending |
-| [012](012-trajectory-scoring.md) | Per-check trajectory scoring and labelled baseline | P2 | 001/005 before baseline; separate human trajectories | Scorer in progress; human-labelled enforcement pending |
+| [012](012-trajectory-scoring.md) | Per-check trajectory scoring and labelled baseline | P2 | 001/005 before baseline; separate human trajectories | Offline scorer integrated; human-labelled enforcement pending |
 | [013](013-judge-calibration.md) | Eligibility vs held-out judge calibration | P2 | 007/011 plus broader held-out dataset | Offline protocol integrated; actual held-out validation pending |
 | [014](014-live-benchmark-publication.md) | Two-provider live detection report | P2 | 013; separate detection labels, model choices and spend ceiling | Publication tooling in progress; live run pending |
 | [015](015-release-candidate.md) | Verified refreshed release and deployment identity | P2 | selected technical fixes 001–010 | Inventory recorded; fresh candidate/publication pending |
-| [016](016-provisioning-failure-cause.md) | Visible provisioning cause and narrow outage handling (#825) | P2 | — | TODO |
+| [016](016-provisioning-failure-cause.md) | Visible provisioning cause and narrow outage handling (#825) | P2 | — | In progress |
 | [017](017-redaction-filename-classification.md) | Preserve ordinary filenames without bypassing redaction (#827) | P2 | coordinate 001/005 | Integrated; focused checks passed; final CI pending |
 
 ```mermaid

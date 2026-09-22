@@ -1,6 +1,6 @@
 # Plan 012: Score the existing trajectory auditor on independently labelled runs
 
-- Status: Scorer implementation in progress; labelled-baseline enforcement remains pending a separate human trajectory corpus and approved protocol
+- Status: Scorer integrated (`7d384ac9`); 80 independent scorer/trajectory/run-packet tests passed; human corpus and approved baseline enforcement remain pending
 - Issue: [#735](https://github.com/alexhawat/mergeCraft/issues/735)
 - Priority: P2; effort: L; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.

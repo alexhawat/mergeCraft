@@ -25,6 +25,7 @@ bench-detect:
 - `evals/bench/smoke-manifest.json`
 - `evals/bench/campaign-manifest.json (new, after separate detection-label adjudication and 013)`
 - `src/mergecraft/evals/publication.py (new strict manifest/report validation)`
+- `src/mergecraft/evals/judge_calibration.py` and `tests/evals/test_judge_calibration.py` (shared threshold-validation extraction only; preserve calibration behavior)
 - `src/mergecraft/evals/benchmark.py` and `src/mergecraft/evals/live_run.py` (backward-compatible execution receipt fields and recording only)
 - `tests/evals/test_live_run.py` (receipt capture and older-artifact compatibility, if this file is the existing live-run test surface)
 - `src/mergecraft/cli/eval_cmd.py`
@@ -105,3 +106,5 @@ Run new campaigns for materially changed models/rubrics/corpora. Keep old result
 Publication consumes the strict plan 013 report and requires successful calibration and held-out threshold results, a seal, and matching candidate/prompt/rubric protocol. A string declaring `validated` is insufficient. Verified raw findings and frozen baselines are rescored with the existing scorer before report values are accepted; the manifest pins closed-world status. Closed-world strict precision aggregates TP and FP counts rather than averaging per-case precision. Reports retain unadjudicated findings, closed-world FP measures, intervals, latency, source/result hashes and exact protocol pins.
 
 Historical structural model defaults are not detection execution evidence. Execution receipts must distinguish the model actually requested/executed from configured structural defaults; unavailable immutable identity remains ineligible rather than being invented. Hashes are captured at the execution boundary and mutation during review invalidates the receipt. Actual reported costs must fit the approved bounds; missing actual cost remains unknown. Existing campaign outputs are immutable. No live run or publication claim is created during implementation.
+
+The publication boundary also checks complete threshold keys and recomputes their decisions from the declared acceptance contract; empty or inconsistent threshold maps do not validate a judge. Human detection receipts bind `closed_world` in addition to patch/baseline hashes. A manually supplied model pin must be the actual model identifier dispatched, with operator-supplied provenance explicit; it is not a provider attestation that an alias resolves to a particular version. The scorer/source/prompt contract is pinned and checked before rescoring.

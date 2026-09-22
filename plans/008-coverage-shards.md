@@ -1,6 +1,6 @@
 # Plan 008: Measure isolated raw coverage shards and gate only a complete set
 
-- Status: TODO
+- Status: Integrated (`b2a899ee`); 33 independent focused tests passed; final whole-tree parity and CI pending
 - Issue: [#785](https://github.com/alexhawat/mergeCraft/issues/785)
 - Priority: P2; effort: M; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
