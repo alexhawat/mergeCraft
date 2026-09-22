@@ -668,7 +668,8 @@ def bench_cmd(
     model_pin: str | None = typer.Option(
         None,
         "--model-pin",
-        help="Immutable executed model identity for a publication-eligible receipt.",
+        help="Operator-declared model pin; must exactly equal the requested model slug and "
+        "does not verify provider execution identity or make a floating alias immutable.",
     ),
     json_output: bool = typer.Option(
         False,

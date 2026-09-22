@@ -646,6 +646,9 @@ def build_publication(
         total_campaign_spend_ceiling_usd=manifest.total_campaign_spend_ceiling_usd,
         providers=providers,
         limitations=[
+            "Detection model pins are operator-declared and must equal the requested model "
+            "slug; this does not verify the provider's execution identity or make a "
+            "floating alias immutable.",
             "Providers are reported separately; this report does not average or rank them.",
             "Corpus-confirmed precision is a lower bound for open-world cases; unmatched "
             "findings are unadjudicated, not false positives.",

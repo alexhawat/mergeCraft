@@ -334,7 +334,12 @@ def test_keyless_publication_recomputes_each_provider_and_keeps_unknown_cost_nul
 
     summary_path, report_path = write_publication(summary, output_dir=tmp_path / "published")
     assert summary_path == tmp_path / "published" / "campaign-20260922" / "summary.json"
-    assert "Corpus-confirmed F1" in report_path.read_text(encoding="utf-8")
+    assert any("operator-declared" in limitation for limitation in summary.limitations)
+    report = report_path.read_text(encoding="utf-8")
+    assert "Corpus-confirmed F1" in report
+    assert "operator-declared" in report
+    assert "does not verify the provider's execution identity" in report
+    assert "make a floating alias immutable" in report
     with pytest.raises(ValueError, match="already exists"):
         write_publication(summary, output_dir=tmp_path / "published")
 
@@ -376,6 +381,15 @@ def test_bench_cli_refuses_alias_to_pin_assertion(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "must be the exact requested model slug" in result.output
+
+
+def test_bench_cli_describes_model_pin_as_operator_declared() -> None:
+    result = CliRunner().invoke(app, ["eval", "bench", "--help"])
+    assert result.exit_code == 0, result.output
+    help_text = " ".join(result.output.replace("│", "").split())
+    assert "Operator-declared model pin" in help_text
+    assert "does not verify provider execution identity" in help_text
+    assert "make a floating alias immutable" in help_text
 
 
 def test_manifest_rejects_same_provider_agent_seeded_and_nonfinite_budget() -> None:
