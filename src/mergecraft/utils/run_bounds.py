@@ -324,13 +324,27 @@ def format_token_budget_summary(
     (#801) — the per-run budget itself stays combined, unchanged by this
     display-only split. Without it, the legacy combined ``tokens_used``
     total is rendered.
+
+    The input/output sums come only from ``AgentUsage`` rows, so any other
+    budgeted tokens would be dropped and total consumption under-reported. The
+    only non-agent charge today is dynamic context expansion, recorded at the
+    ``context_expansion`` phase (:mod:`mergecraft.context.dynamic_expansion`);
+    it is rendered as its own component so the published components sum to
+    ``tracker.tokens_used``.
     """
     bounds = tracker.bounds
     if usage_entries is None:
         used = f"{tracker.tokens_used:,} used"
     else:
         input_total, output_total = _usage_token_totals(usage_entries)
-        used = f"{input_total:,} input / {output_total:,} output used"
+        context_extra = tracker.tokens_used - (input_total + output_total)
+        if context_extra > 0:
+            used = (
+                f"{input_total:,} input / {output_total:,} output / "
+                f"{context_extra:,} context expansion used"
+            )
+        else:
+            used = f"{input_total:,} input / {output_total:,} output used"
     parts = [
         f"{used} (target {bounds.token_budget:,}, ceiling {bounds.token_ceiling:,})",
     ]

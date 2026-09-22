@@ -11,6 +11,11 @@ Contract (issue #801):
 
 * budget tracker present →
   ``"{input:,} input / {output:,} output used (target {target:,}, ceiling {ceiling:,})"``
+* budget tracker present with non-agent budget charges (dynamic context
+  expansion, phase ``context_expansion``) →
+  ``"{input:,} input / {output:,} output / {extra:,} context expansion used
+  (target {target:,}, ceiling {ceiling:,})"``, so the published components sum
+  to ``tracker.tokens_used`` rather than under-reporting total consumption
 * no budget tracker →
   ``"{input:,} input / {output:,} output"``
 
@@ -96,6 +101,30 @@ def test_token_summary_from_usage_with_budget_splits_input_and_output() -> None:
     operator.
     """
     assert _budget_summary().startswith(_budget_split_prefix())
+
+
+def test_budget_summary_accounts_for_context_expansion_tokens() -> None:
+    """Budgeted non-agent tokens are published, not dropped.
+
+    ``format_token_budget_summary`` derives the split from ``AgentUsage`` rows
+    only, but ``dynamic_expansion`` also charges the tracker (phase
+    ``context_expansion``). Rendering just the input/output sums would
+    under-report total consumption, so the extra is its own component and the
+    components sum to ``tracker.tokens_used``.
+    """
+    tracker = BudgetTracker(_bounds())
+    usage = _usage()
+    record_agent_usage(tracker, usage)
+    tracker.record_tokens(500, phase="context_expansion")
+
+    summary = token_summary_from_usage([usage], budget_tracker=tracker)
+
+    assert summary is not None
+    assert summary.startswith(
+        f"{_INPUT:,} input / {_OUTPUT:,} output / 500 context expansion used "
+        f"(target {_TARGET:,}, ceiling {_TARGET:,})"
+    )
+    assert tracker.tokens_used == _INPUT + _OUTPUT + 500
 
 
 def test_token_summary_from_usage_without_budget_splits_input_and_output() -> None:
