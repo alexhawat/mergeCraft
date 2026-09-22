@@ -69,6 +69,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
 | `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
+| `mergecraft eval ingest` | Ingest recorded dismissal signals into the structural eval bank. |
 | `mergecraft eval list` | List cases in the bank. |
 | `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44). |
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
