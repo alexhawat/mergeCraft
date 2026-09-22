@@ -456,6 +456,20 @@ def test_publish_step_reads_the_runtime_shadow_log(
     assert "shadow-b" in published
 
 
+def test_publish_rejects_a_runtime_row_with_no_target(tmp_path: Path) -> None:
+    """A legacy unlabelled row fails the publish step instead of crashing the sort."""
+    from mergecraft.evidence.shadow_compare import publish_runtime_shadow
+
+    runtime = tmp_path / "shadow-run.jsonl"
+    runtime.write_text(
+        '{"run_id":"r","change_id":"acme/demo#101","policy_id":"default",'
+        '"rule_id":"schema_failure","action":"block"}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="no target"):
+        publish_runtime_shadow(runtime)
+
+
 def test_keyless_job_publishes_the_committed_corpus_as_a_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

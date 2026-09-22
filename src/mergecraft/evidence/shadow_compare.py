@@ -379,7 +379,10 @@ def publish_runtime_shadow(path: Path) -> list[dict[str, object]]:
         msg = f"runtime shadow log is missing: {path}"
         raise ValueError(msg)
     records = load_shadow_records(path)
-    targets = {record.target_id for record in records}
+    if any(record.target_id is None for record in records):
+        msg = "runtime shadow log has a row with no target"
+        raise ValueError(msg)
+    targets = {record.target_id for record in records if record.target_id is not None}
     if targets != {LIVE_TARGET.target_id, SECOND_TARGET.target_id}:
         msg = f"runtime shadow log targets are {sorted(targets)}, not both pinned targets"
         raise ValueError(msg)
