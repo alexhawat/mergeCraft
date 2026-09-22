@@ -38,7 +38,7 @@ def _read_external_trace() -> ExternalTraceRef:
                 signature="Read:1",
                 intent="read",
                 ok=True,
-                paths=["docs/REVIEW-DOCTRINE.md"],
+                paths=["docs/review-doctrine.md"],
             )
         ],
     )
@@ -54,7 +54,7 @@ def test_external_trace_with_no_reads_is_not_read_coverage() -> None:
 def test_external_trace_with_reads_is_read_coverage() -> None:
     state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
     record = build_trajectory_record(state, external_trace=_read_external_trace())
-    assert record.files_read == ["docs/REVIEW-DOCTRINE.md"]
+    assert record.files_read == ["docs/review-doctrine.md"]
     assert record.read_coverage is True
 
 

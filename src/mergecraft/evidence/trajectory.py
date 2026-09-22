@@ -228,7 +228,11 @@ _GIT_READ_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
 
 _MAX_COMMAND_CHARS: Final[int] = 400
 _MAX_ERROR_CHARS: Final[int] = 400
+_MAX_PATH_CHARS: Final[int] = 400
 _MAX_PATHS_PER_CALL: Final[int] = 20
+_EXPLICIT_PATH_FIELDS: Final[frozenset[str]] = frozenset(
+    {"file", "files", "filename", "filenames", "path", "paths"}
+)
 
 
 class ToolCallRecord(BaseModel):
@@ -372,28 +376,77 @@ def _normalize_git_object_spec(token: str) -> str | None:
     return None
 
 
+def _sanitize_path(value: str) -> str | None:
+    """Return one safe, bounded path value or ``None``.
+
+    Paths are evidence identities, so truncating or redacting one would create
+    a different path. Drop the value instead whenever it cannot be retained
+    exactly and safely.
+    """
+    if len(value) > _MAX_PATH_CHARS or any(char.isspace() for char in value):
+        return None
+    normalized = _normalize_git_object_spec(value)
+    if normalized is None or not _looks_like_path(normalized):
+        return None
+    if any(part == ".." for part in normalized.split("/")):
+        return None
+    normalized = normalized.removeprefix("./")
+    # A redacted path cannot be retained as evidence: keeping the original
+    # leaks the value, while persisting a marker would manufacture a path.
+    redacted = redact_secrets(normalized)
+    if redacted != normalized:
+        return None
+    return normalized
+
+
+def _legacy_git_show_paths(command: str) -> list[str]:
+    """Preserve the existing exact ``git show REV:path`` read contract.
+
+    General shell operand extraction belongs to the tool-aware parser below;
+    this narrow compatibility case avoids treating arbitrary command text as a
+    path while retaining the #796 object-spec behavior.
+    """
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return []
+    if len(argv) != 3 or argv[0] != "git" or argv[1] != "show":
+        return []
+    path = _sanitize_path(argv[2])
+    return [path] if path is not None else []
+
+
 def _paths_in(values: Any) -> list[str]:
-    """Collect plausible repo-relative paths from an arbitrary argument tree."""
+    """Collect safe paths from documented explicit path fields only."""
     found: list[str] = []
 
-    def walk(node: Any) -> None:
+    def add(node: Any) -> None:
         if len(found) >= _MAX_PATHS_PER_CALL:
             return
         if isinstance(node, str):
-            if _looks_like_path(node):
-                normalized = _normalize_git_object_spec(node)
-                if normalized:
-                    found.append(normalized)
-            return
-        if isinstance(node, dict):
-            for value in node.values():
-                walk(value)
+            path = _sanitize_path(node)
+            if path is not None:
+                found.append(path)
             return
         if isinstance(node, (list, tuple)):
             for value in node:
+                add(value)
+
+    def walk(node: Any) -> None:
+        if len(found) >= _MAX_PATHS_PER_CALL or not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if key in _EXPLICIT_PATH_FIELDS:
+                add(value)
+            elif isinstance(value, dict):
                 walk(value)
 
-    walk(values)
+    if isinstance(values, dict):
+        walk(values)
+        command = values.get("command")
+        if isinstance(command, str):
+            found.extend(_legacy_git_show_paths(command))
+
     seen: set[str] = set()
     unique: list[str] = []
     for path in found:
@@ -482,7 +535,21 @@ def _signature(tool: str, arguments: dict[str, Any] | None) -> str:
 
 
 def _truncate(text: str, limit: int) -> str:
-    return text if len(text) <= limit else f"{text[:limit]}…"
+    if len(text) <= limit:
+        return text
+    if limit <= 1:
+        return text[:limit]
+    return f"{text[: limit - 1]}…"
+
+
+def _sanitize_tool_call(call: ToolCallRecord) -> ToolCallRecord:
+    """Copy one call through the pre-persistence redaction boundary."""
+    command = _truncate(redact_secrets(call.command), _MAX_COMMAND_CHARS) if call.command else None
+    error = _truncate(redact_secrets(call.error), _MAX_ERROR_CHARS) if call.error else None
+    paths = _dedupe([path for raw in call.paths if (path := _sanitize_path(raw)) is not None])[
+        :_MAX_PATHS_PER_CALL
+    ]
+    return call.model_copy(update={"command": command, "error": error, "paths": paths})
 
 
 def record_tool_call(
@@ -508,17 +575,23 @@ def record_tool_call(
     """
     command_raw = str((arguments or {}).get("command") or "") or None
     error_text = _truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None
-    row = ToolCallRecord(
-        sequence=len(state.tool_calls) + 1,
-        tool=tool,
-        signature=_signature(tool, arguments),
-        intent=classify_tool_intent(tool, arguments),
-        ok=ok,
-        outcome_ok=outcome_ok,
-        error=error_text,
-        failure_class=classify_failure_class(error_text) if not ok and error_text else "unknown",
-        command=_truncate(redact_secrets(command_raw), _MAX_COMMAND_CHARS) if command_raw else None,
-        paths=_paths_in(arguments),
+    row = _sanitize_tool_call(
+        ToolCallRecord(
+            sequence=len(state.tool_calls) + 1,
+            tool=tool,
+            signature=_signature(tool, arguments),
+            intent=classify_tool_intent(tool, arguments),
+            ok=ok,
+            outcome_ok=outcome_ok,
+            error=error_text,
+            failure_class=classify_failure_class(error_text)
+            if not ok and error_text
+            else "unknown",
+            command=_truncate(redact_secrets(command_raw), _MAX_COMMAND_CHARS)
+            if command_raw
+            else None,
+            paths=_paths_in(arguments),
+        )
     )
     state.tool_calls.append(row)
     return row
@@ -575,12 +648,17 @@ def build_trajectory_record(
     appended after the mediated ones, which is what can lift
     ``read_coverage`` for a driver whose file reads never cross MCP.
     """
-    calls: list[ToolCallRecord] = list(getattr(state, "tool_calls", []) or [])
+    calls = [
+        _sanitize_tool_call(ToolCallRecord.model_validate(call))
+        for call in (getattr(state, "tool_calls", []) or [])
+    ]
     sources: list[str] = []
     if calls:
         sources.append(SOURCE_MCP)
     if external_trace is not None:
-        calls = [*calls, *external_trace.tool_calls]
+        sanitized_external_calls = [_sanitize_tool_call(call) for call in external_trace.tool_calls]
+        external_trace = external_trace.model_copy(update={"tool_calls": sanitized_external_calls})
+        calls = [*calls, *sanitized_external_calls]
         sources.append(SOURCE_EXTERNAL_TRACE)
     if files_modified:
         sources.append(SOURCE_RUN_DIFF)

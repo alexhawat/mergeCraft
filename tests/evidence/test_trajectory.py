@@ -24,8 +24,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.redaction_sentinel import REDACTION_SENTINEL
+
 if TYPE_CHECKING:
     from mergecraft.evidence.trajectory import ToolCallRecord, TrajectoryRecord
+
+
+_CANARY_SECRET = "sk-canary-w0-8-do-not-leak-7f3a9b2c1d4e5f6a"
+_ENTROPY_CANARY = "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
 
 
 # ── record construction helpers ───────────────────────────────────────────────
@@ -465,6 +471,101 @@ def test_trajectory_record_is_populated_without_external_trace() -> None:
     assert record.tests_run == ["pytest -q"]
     assert record.completion_claims == ["create_pull_request_review"]
     assert record.files_modified == ["src/app.py"]
+
+
+def test_record_tool_call_redacts_and_bounds_every_persisted_field() -> None:
+    """Raw argument strings cannot bypass the command/error redaction boundary."""
+    from mergecraft.evidence.trajectory import record_tool_call
+    from mergecraft.mcp.tool_state import init_tool_state
+
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    row = record_tool_call(
+        state,
+        tool="shell",
+        arguments={
+            "command": f"grep {_CANARY_SECRET} src/app.py",
+            "path": "src/app.py",
+            "nested": {"path": f"src/{_CANARY_SECRET}.py"},
+            "paths": [f"src/{_ENTROPY_CANARY}.py"],
+        },
+        ok=False,
+        error=f"failed with {_CANARY_SECRET} " + ("x" * 500),
+    )
+
+    serialized = row.model_dump_json()
+    assert _CANARY_SECRET not in serialized
+    assert _ENTROPY_CANARY not in serialized
+    assert row.command is not None
+    assert REDACTION_SENTINEL in row.command
+    assert row.error is not None
+    assert REDACTION_SENTINEL in row.error
+    assert len(row.command) <= 400
+    assert len(row.error) <= 400
+    assert row.paths == ["src/app.py"]
+
+
+def test_build_trajectory_sanitizes_copies_of_direct_and_external_calls() -> None:
+    """Every ingestion source is sanitized without mutating caller-owned models."""
+    from mergecraft.evidence.trajectory import (
+        ExternalTraceRef,
+        ToolCallRecord,
+        build_trajectory_record,
+    )
+    from mergecraft.mcp.tool_state import init_tool_state
+
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    direct = ToolCallRecord(
+        sequence=1,
+        tool="Read",
+        signature="Read:direct",
+        intent="read",
+        ok=True,
+        command=f"cat {_CANARY_SECRET} src/direct.py" + ("x" * 500),
+        error=f"direct {_CANARY_SECRET}",
+        paths=["src/direct.py", f"src/{_CANARY_SECRET}.py", *[f"src/{i}.py" for i in range(30)]],
+    )
+    external_call = ToolCallRecord(
+        sequence=2,
+        tool="Read",
+        signature="Read:external",
+        intent="read",
+        ok=True,
+        command=f"cat {_CANARY_SECRET} src/external.py",
+        error=f"external {_CANARY_SECRET}",
+        paths=["src/external.py", f"src/{_CANARY_SECRET}.py"],
+    )
+    state.tool_calls.append(direct)
+    external = ExternalTraceRef(
+        source="mergecraft.tracing",
+        event_count=1,
+        tool_calls=[external_call],
+    )
+
+    record = build_trajectory_record(
+        state,
+        files_modified=["src/direct.py", "src/unread.py"],
+        external_trace=external,
+    )
+
+    assert _CANARY_SECRET in direct.command
+    assert _CANARY_SECRET in external_call.command
+    assert _CANARY_SECRET not in record.model_dump_json()
+    assert record.tool_calls[0] is not direct
+    assert record.external_trace is not external
+    assert record.external_trace is not None
+    assert record.external_trace.tool_calls[0] is not external_call
+    assert len(record.tool_calls[0].command or "") <= 400
+    assert len(record.tool_calls[0].paths) == 20
+    assert record.files_read[:2] == ["src/direct.py", "src/0.py"]
+    assert "src/external.py" in record.files_read
+    assert _CANARY_SECRET not in "\n".join(record.files_read)
+    from mergecraft.evidence.trajectory_audit import audit_trajectory
+
+    assert [
+        finding.path
+        for finding in audit_trajectory(record)
+        if finding.rule_id == "changed-unread-file"
+    ] == ["src/unread.py"]
 
 
 def test_external_trace_is_optional_enrichment() -> None:
