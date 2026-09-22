@@ -191,7 +191,6 @@ class AgentRunContext:
     mcp_auth_token: str = ""
     resolved_model: str | None = None
     verifier_denied_tools: Sequence[str] = ()
-    stop_script: str | None = None
 
 
 def mcp_auth_headers(ctx: AgentRunContext) -> dict[str, str]:
