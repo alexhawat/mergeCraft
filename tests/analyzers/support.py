@@ -36,20 +36,6 @@ def skip_if_github_release_outage(detail: str) -> None:
         pytest.skip(detail.strip() or "GitHub releases 5xx")
 
 
-def skip_if_managed_binary_provision_failed(result: Any) -> None:
-    """Live catalog downloads that cannot provision are an environment skip.
-
-    Pin/checksum regressions stay covered by isolated provision tests that do
-    not hit GitHub releases.
-    """
-    import pytest
-
-    reason = getattr(result, "skip_reason", None) or ""
-    skip_if_github_release_outage(reason)
-    if getattr(result, "skipped", False) and "provisioning failed" in reason.casefold():
-        pytest.skip(reason)
-
-
 def redacted_text(text: str) -> str:
     """Text after the analyzer/tracing redaction boundary (BR8 ``<redacted>``)."""
     from mergecraft.analyzers.redact import redact_secrets

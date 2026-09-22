@@ -17,11 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.analyzers.support import (
-    finding_path_matches,
-    import_module,
-    skip_if_managed_binary_provision_failed,
-)
+from tests.analyzers.support import finding_path_matches, import_module
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -64,7 +60,7 @@ def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Pat
         changed_files=[path],
         tier="trusted",
     )
-    skip_if_managed_binary_provision_failed(result)
+    _fail_if_skipped(result, tool_id)
     matches = [
         f for f in result.findings if finding_path_matches(path, f.path) and f.start_line == line
     ]
