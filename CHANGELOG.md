@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Review records, sticky progress comments, and the Actions step summary now
+  show input and output token counts separately instead of one combined total
+  (#801)
+
 - `make test` no longer runs the nine branch-walking `test_cov_*` suites: they
   carry a new `coverage` marker and the `make test` selector is now
   `-m "not integration and not coverage"`. They still run under

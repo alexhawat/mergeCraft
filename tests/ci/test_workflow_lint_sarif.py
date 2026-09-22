@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.analyzers.support import skip_if_github_release_outage
 from tests.ci.workflow_support import REPO_ROOT
 
 _ACTIONLINT_TEMPLATE = (
@@ -50,6 +51,8 @@ def test_workflow_lint_emits_parseable_actionlint_sarif(tmp_path: Path) -> None:
         text=True,
         check=False,
     )
+    if completed.returncode != 0:
+        skip_if_github_release_outage(completed.stderr or completed.stdout or "")
     assert completed.returncode == 0, completed.stderr or completed.stdout
     out = tmp_path / "actionlint.sarif"
     assert out.is_file()

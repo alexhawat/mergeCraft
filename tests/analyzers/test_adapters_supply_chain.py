@@ -13,6 +13,7 @@ from tests.analyzers.support import (
     FORK_PULL_REQUEST_EVENT,
     PLANTED_AWS_SECRET,
     import_module,
+    skip_if_managed_binary_provision_failed,
 )
 
 
@@ -50,6 +51,16 @@ def _cve_run_is_transient(tool_id: str, result: Any) -> bool:
     return tool_id == "trivy" and not result.findings
 
 
+_UNSHARE_SKIP_NEEDLE = "unshare --user --map-root-user --net"
+
+
+def _skip_if_userspace_unshare_unavailable(result: Any) -> None:
+    """Skip when retries exhausted and the host still cannot unshare user+net."""
+    reason = result.skip_reason or ""
+    if result.skipped and _UNSHARE_SKIP_NEEDLE in reason:
+        pytest.skip(reason)
+
+
 def _run_expecting_cve(
     tool_id: str, repo_root: Path, changed_files: list[str], *, tier: str = "trusted"
 ) -> Any:
@@ -85,6 +96,8 @@ def test_newly_introduced_cve_reported_with_fix_and_transitive_status(
         ["requirements.txt"],
         tier="trusted",
     )
+    _skip_if_userspace_unshare_unavailable(result)
+    skip_if_managed_binary_provision_failed(result)
     assert not result.skipped, result.skip_reason
     assert result.findings, f"{tool_id} must report the newly introduced CVE"
 
@@ -202,6 +215,13 @@ def test_run_expecting_cve_persistent_skip_still_fails_the_assertion(
     assert result.skip_reason, "the skip reason must be preserved for diagnosis"
 
 
+def test_live_cve_run_skips_when_unshare_stays_unavailable() -> None:
+    """A loaded runner that cannot unshare is an environment skip, not a failed CVE scan."""
+    result = _skipped_egress_result("osv-scanner")
+    with pytest.raises(pytest.skip.Exception, match="unshare --user --map-root-user --net"):
+        _skip_if_userspace_unshare_unavailable(result)
+
+
 def test_trufflehog_reports_secret_by_type_and_location(adapter_fixture_repo: Path) -> None:
     tool_id = "trufflehog"
     if tool_id not in _catalog_ids():
@@ -209,6 +229,7 @@ def test_trufflehog_reports_secret_by_type_and_location(adapter_fixture_repo: Pa
 
     path = C2_SUPPLY_CHAIN_TOOLS[tool_id]
     result = _run(tool_id, adapter_fixture_repo, [path])
+    skip_if_managed_binary_provision_failed(result)
     assert not result.skipped, result.skip_reason
     assert result.findings, "TruffleHog must report the planted secret"
 
@@ -225,6 +246,7 @@ def test_trufflehog_remediation_is_rotation_first(adapter_fixture_repo: Path) ->
 
     path = C2_SUPPLY_CHAIN_TOOLS[tool_id]
     result = _run(tool_id, adapter_fixture_repo, [path])
+    skip_if_managed_binary_provision_failed(result)
     assert result.findings
     remediation = (result.findings[0].remediation or "").casefold()
     assert "rotate" in remediation, "remediation must mention rotation first (C2.4)"
@@ -241,6 +263,7 @@ def test_trufflehog_never_emits_secret_value(adapter_fixture_repo: Path) -> None
 
     path = C2_SUPPLY_CHAIN_TOOLS[tool_id]
     result = _run(tool_id, adapter_fixture_repo, [path])
+    skip_if_managed_binary_provision_failed(result)
     redact = import_module("mergecraft.analyzers.redact")
 
     for finding in result.findings:

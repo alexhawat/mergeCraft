@@ -183,6 +183,7 @@ jobs:
           uv run python scripts/native_output_to_sarif.py mypy .sarif/mypy.json .sarif/mypy.sarif
       - name: Upload ruff SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ruff-sarif
@@ -190,6 +191,7 @@ jobs:
           if-no-files-found: warn
       - name: Upload mypy SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mypy-sarif
@@ -201,11 +203,13 @@ jobs:
       # canonical artifact set per PR.
       - name: Emit actionlint and zizmor SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         env:
           MERGECRAFT_WORKFLOW_SARIF_DIR: .sarif
         run: ./scripts/workflow_lint.sh
       - name: Upload actionlint SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: actionlint-sarif
@@ -213,6 +217,7 @@ jobs:
           if-no-files-found: warn
       - name: Upload zizmor SARIF
         if: always() && matrix.python == '3.14'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: zizmor-sarif
