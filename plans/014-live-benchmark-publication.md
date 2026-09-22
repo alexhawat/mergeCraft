@@ -25,6 +25,8 @@ bench-detect:
 - `evals/bench/smoke-manifest.json`
 - `evals/bench/campaign-manifest.json (new, after separate detection-label adjudication and 013)`
 - `src/mergecraft/evals/publication.py (new strict manifest/report validation)`
+- `src/mergecraft/evals/benchmark.py` and `src/mergecraft/evals/live_run.py` (backward-compatible execution receipt fields and recording only)
+- `tests/evals/test_live_run.py` (receipt capture and older-artifact compatibility, if this file is the existing live-run test surface)
 - `src/mergecraft/cli/eval_cmd.py`
 - `Makefile`
 - `README.md`
@@ -58,6 +60,8 @@ After both that detection corpus and 013's judge-calibration receipt exist, crea
 Implement strict manifest/report validation in `publication.py`: reject unknown fields, duplicate models, non-disjoint provider identities, hash drift, agent-seeded/ineligible labels for comparative claims, missing 013 validation, empty corpora, and unset/non-positive limits. Never read or persist credential values.
 
 Verification: Manifest validation proves the same case IDs/hashes and protocol apply to both providers; no live invocation occurs before the operator's choices and budget.
+
+Implementation reconciliation: existing `DetectionCaseResult` has counts but no patch/baseline/raw hashes, elapsed time, or actual cost. Add optional versioned execution receipts to the existing result models without breaking older artifacts, and record hashes and monotonic elapsed time at the actual per-case review boundary. Preserve `null` cost when the provider does not supply it. Older results remain readable but cannot satisfy publication evidence requirements. Publication must compare saved execution receipts to manifest identities and current verified artifacts; never infer historical execution from an unrelated current file. Tests may use mocked review functions, and their outputs remain fixtures rather than live evidence.
 
 ### 2. Reconcile publication scope
 

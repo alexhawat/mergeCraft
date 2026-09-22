@@ -1,6 +1,6 @@
 # Plan 005: Record real shell read operands instead of command strings
 
-- Status: TODO
+- Status: INTEGRATED — independent focused checks passed; final CI pending
 - Issue: [#823](https://github.com/alexhawat/mergeCraft/issues/823)
 - Priority: P2; effort: M; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.

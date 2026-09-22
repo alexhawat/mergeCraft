@@ -8,7 +8,7 @@ The audit used immutable main source, preserving the original checkout and its p
 
 The user authorized implementation after PR #826. Work proceeds in the isolated `codex/implement-issue-remediation-20260922` branch, based on updated main and including merged PR #817 (`41cf53b3`). The original audit below remains a historical record; current implementation verification is recorded separately in [IMPLEMENTATION.md](IMPLEMENTATION.md). The source scopes of the first implementation batch were unchanged; coverage floors and generated documentation must be reconciled with the newer main.
 
-PR #817 merged at 17:16:45 UTC and closed #771. Twenty issues remain open at this snapshot, including the subsequently filed [#825](https://github.com/alexhawat/mergeCraft/issues/825), covered by [plan 016](016-provisioning-failure-cause.md). PR #826 contains plans only and closes none. Implementation closure references will be limited to verified fixes.
+PR #817 merged at 17:16:45 UTC and closed #771. Twenty issues remain open at this snapshot, including the subsequently filed [#825](https://github.com/alexhawat/mergeCraft/issues/825), covered by [plan 016](016-provisioning-failure-cause.md). PR #826 contains plans only and closes none. A later implementation inventory has 22 open issues after new #827/#828 were filed. Implementation closure references will be limited to verified fixes.
 
 ## What PR #817 closes (original audit)
 
@@ -66,15 +66,15 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 | [002](002-normalized-terminal-verdict.md) | Finalized findings determine enforced verdict | P1 | — | Integrated; focused checks passed; final CI pending |
 | [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions and honest revocation (#821/#828) | P1 | — | Integrated; focused checks passed; final CI pending |
 | [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | Integrated; focused checks passed; final CI pending |
-| [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | IN PROGRESS |
+| [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | Integrated; focused checks passed; final CI pending |
 | [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | IN PROGRESS |
 | [007](007-adjudication-roundtrip.md) | Safe typed adjudication round-trip | P1 | — | Integrated; focused checks passed; final CI pending |
 | [008](008-coverage-shards.md) | Isolated coverage shards + complete-data gate | P2 | 006 | TODO |
 | [009](009-tracing-contracts.md) | Valid tracing contracts and whole-run parent tree | P2 | coordinate 003 | IN PROGRESS |
 | [010](010-setup-instructions.md) | Finish setup artifact lists | P3 | — | TODO |
-| [011](011-human-golden-batch.md) | Evidence packet + nine actual human decisions | P2 | 007 | Preparation in progress; human decisions pending |
+| [011](011-human-golden-batch.md) | Evidence packet + nine actual human decisions | P2 | 007 | Preparation integrated; evidence and human decisions pending |
 | [012](012-trajectory-scoring.md) | Per-check trajectory scoring and labelled baseline | P2 | 001/005 before baseline; separate human trajectories | TODO scorer; human-labelled enforcement pending |
-| [013](013-judge-calibration.md) | Eligibility vs held-out judge calibration | P2 | 007/011 plus broader held-out dataset | TODO reporting; held-out validation pending |
+| [013](013-judge-calibration.md) | Eligibility vs held-out judge calibration | P2 | 007/011 plus broader held-out dataset | Reporting in progress; held-out validation pending |
 | [014](014-live-benchmark-publication.md) | Two-provider live detection report | P2 | 013; separate detection labels, model choices and spend ceiling | TODO campaign preparation; live run pending |
 | [015](015-release-candidate.md) | Verified refreshed release and deployment identity | P2 | selected technical fixes 001–010 | Inventory recorded; fresh candidate/publication pending |
 | [016](016-provisioning-failure-cause.md) | Visible provisioning cause and narrow outage handling (#825) | P2 | — | TODO |

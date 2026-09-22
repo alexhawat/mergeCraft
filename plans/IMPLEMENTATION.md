@@ -32,8 +32,10 @@ The 85 audit/probe tests in VERIFICATION.md describe the original bugs and are n
 | 003 reviewer/Git tokens and revocation | `a51188bd`, `9e8b327e` | 56 passed across token, Action phase and trust ordering tests |
 | 004 publication retry | `10130b5e` | 32 passed across outcome, anchor recovery and real MCP review tests |
 | 001 persistence redaction, 017 ordinary filenames | `9c101677`, `9afaacec` | 248 passed across trajectory/read coverage/packet and five analyzer-redaction test files |
-
+| 005 exact successful-read attribution | `a0af80d9`, `6e2e09ed` | 292 passed across the same eight evidence/redaction files, including literal colon Git pathspec regression |
 | 007 adjudication round-trip and corpus synchronization | `e1bb753f` | 117 passed; eval corpus sync check, structural/adversarial gate and installed-wheel convergence passed |
+
+| 011 human review preparation | `ec2481f6` | 14 strict manifest/evidence tests passed; rendered [nine-case review sheet](HUMAN-REVIEW.md), all evidence missing and decisions unanswered |
 
 These are focused checks, not a completed full CI gate. The initial redaction-check command named a nonexistent test file and ran no tests; the corrected exact-file invocation above completed successfully. The baseline generated-documentation check also passed.
 
