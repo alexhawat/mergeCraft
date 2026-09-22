@@ -377,6 +377,20 @@ eval-judge-calibration: ## Evaluate frozen saved judge verdicts; input paths are
 	  --protocol "$(JUDGE_CALIBRATION_PROTOCOL)" --cases "$(JUDGE_CALIBRATION_CASES)" \
 	  $(if $(JUDGE_CALIBRATION_SEAL),--seal "$(JUDGE_CALIBRATION_SEAL)",) --json
 
+.PHONY: eval-publish-benchmark
+
+BENCHMARK_CAMPAIGN_MANIFEST ?=
+BENCHMARK_CAMPAIGN_RESULTS ?=
+BENCHMARK_CAMPAIGN_OUTPUT ?=
+eval-publish-benchmark: ## Validate and publish two saved provider benchmark results
+	@if [ -z "$(BENCHMARK_CAMPAIGN_MANIFEST)" ] || [ -z "$(BENCHMARK_CAMPAIGN_RESULTS)" ] || [ -z "$(BENCHMARK_CAMPAIGN_OUTPUT)" ]; then \
+	  echo "Set BENCHMARK_CAMPAIGN_MANIFEST, BENCHMARK_CAMPAIGN_RESULTS, and BENCHMARK_CAMPAIGN_OUTPUT."; \
+	  exit 2; \
+	fi
+	$(UV) run mergecraft eval publish-benchmark --manifest "$(BENCHMARK_CAMPAIGN_MANIFEST)" \
+	  $(foreach result,$(BENCHMARK_CAMPAIGN_RESULTS),--result "$(result)") \
+	  --output "$(BENCHMARK_CAMPAIGN_OUTPUT)"
+
 eval-gate: eval-cases-sync-check ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
 	$(UV) run mergecraft eval gate
 

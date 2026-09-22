@@ -1,6 +1,6 @@
 # Plan 014: Publish a bounded reproducible two-provider detection campaign
 
-- Status: Publication tooling in progress; live execution remains pending independent labels, actual 013 validation, provider/model choices, credentials, and approved spend
+- Status: Offline tooling integrated; independent verification in progress. Live execution remains pending independent labels, actual 013 validation, provider/model choices, credentials, and approved spend.
 - Issue: [#140](https://github.com/alexhawat/mergeCraft/issues/140)
 - Priority: P2; effort: M plus live-run/human time; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -89,10 +89,10 @@ Verification: Publication tests/docs-check pass; every table value can be recomp
 ## Done criteria
 
 - [ ] Two explicitly chosen models ran the same frozen corpus with real detection outputs.
-- [ ] All failures and exclusions are visible; metric claims match the available ground truth.
+- [x] Offline validation makes all failures and exclusions visible and constrains metric claims to available ground truth.
 - [ ] A dated report and README link satisfy the agreed publication contract.
 - [ ] Relevant commands pass with actual results/limitations recorded.
-- [ ] `git diff --check` exits0; changed paths stay within scope, plus plan status/changelog.
+- [x] `git diff --check` exits0; changed paths stay within scope, plus plan status/changelog.
 - [ ] Update this plan and plans/README.md; distinguish preparation complete from blocked human/operator steps.
 
 ## Stop conditions and maintenance

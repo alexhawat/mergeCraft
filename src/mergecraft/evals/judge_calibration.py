@@ -1,7 +1,9 @@
 """Offline calibration of saved verifier verdicts against human references."""
 
 import json
+import math
 import re
+from collections.abc import Mapping
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -24,6 +26,17 @@ from mergecraft.policy.schema import SeverityLiteral
 CalibrationState = Literal["eligibility_only", "provisional", "validated", "rejected"]
 _VERDICTS: tuple[JudgeVerdictName, ...] = ("confirm", "downgrade", "drop")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+THRESHOLD_KEYS: frozenset[str] = frozenset(
+    {
+        "minimum_per_class",
+        "minimum_macro_f1",
+        "minimum_drop_precision",
+        "minimum_confirm_recall",
+        "minimum_kappa",
+        "maximum_disagreement_rate",
+        "required_high_stakes_escalation_recall",
+    }
+)
 
 
 class HumanJudgeReference(BaseModel):
@@ -411,33 +424,74 @@ def compute_calibration_metrics(cases: list[JudgeCalibrationCase]) -> Calibratio
     )
 
 
-def _threshold_report(
-    metrics: CalibrationMetrics, protocol: JudgeCalibrationProtocol
-) -> CalibrationSplitReport:
+def threshold_results_for_metrics(
+    metrics: CalibrationMetrics,
+    acceptance_contract: Mapping[str, float | int],
+) -> dict[str, bool]:
+    """Recompute every declared threshold from saved metrics, failing closed."""
+    if set(acceptance_contract) != THRESHOLD_KEYS:
+        raise ValueError("acceptance contract must contain every declared threshold exactly")
+    minimum_per_class = acceptance_contract["minimum_per_class"]
+    if isinstance(minimum_per_class, bool) or not isinstance(minimum_per_class, int):
+        raise ValueError("minimum_per_class must be an integer")
+    if minimum_per_class < 1:
+        raise ValueError("minimum_per_class must be positive")
+    thresholds: dict[str, float] = {}
+    for key in THRESHOLD_KEYS - {"minimum_per_class"}:
+        value = acceptance_contract[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{key} must be numeric")
+        converted = float(value)
+        if not math.isfinite(converted):
+            raise ValueError(f"{key} must be finite")
+        lower = -1.0 if key == "minimum_kappa" else 0.0
+        if not lower <= converted <= 1.0:
+            raise ValueError(f"{key} must be between {lower} and 1")
+        thresholds[key] = converted
+
     def minimum(value: float | None, threshold: float) -> bool:
         return value is not None and value >= threshold
 
-    results = {
+    return {
         "minimum_per_class": all(
-            metrics.human_class_counts[label] >= protocol.minimum_per_class for label in _VERDICTS
+            metrics.human_class_counts.get(label, 0) >= minimum_per_class for label in _VERDICTS
         ),
-        "minimum_macro_f1": minimum(metrics.macro_f1, protocol.minimum_macro_f1),
+        "minimum_macro_f1": minimum(metrics.macro_f1, thresholds["minimum_macro_f1"]),
         "minimum_drop_precision": minimum(
-            metrics.per_class["drop"].precision, protocol.minimum_drop_precision
+            metrics.per_class["drop"].precision, thresholds["minimum_drop_precision"]
         ),
         "minimum_confirm_recall": minimum(
-            metrics.per_class["confirm"].recall, protocol.minimum_confirm_recall
+            metrics.per_class["confirm"].recall, thresholds["minimum_confirm_recall"]
         ),
-        "minimum_kappa": minimum(metrics.cohen_kappa, protocol.minimum_kappa),
+        "minimum_kappa": minimum(metrics.cohen_kappa, thresholds["minimum_kappa"]),
         "maximum_disagreement_rate": (
             metrics.disagreement_rate is not None
-            and metrics.disagreement_rate <= protocol.maximum_disagreement_rate
+            and metrics.disagreement_rate <= thresholds["maximum_disagreement_rate"]
         ),
         "required_high_stakes_escalation_recall": minimum(
             metrics.high_stakes_escalation_recall,
-            protocol.required_high_stakes_escalation_recall,
+            thresholds["required_high_stakes_escalation_recall"],
         ),
     }
+
+
+def _threshold_report(
+    metrics: CalibrationMetrics, protocol: JudgeCalibrationProtocol
+) -> CalibrationSplitReport:
+    results = threshold_results_for_metrics(
+        metrics,
+        {
+            "minimum_per_class": protocol.minimum_per_class,
+            "minimum_macro_f1": protocol.minimum_macro_f1,
+            "minimum_drop_precision": protocol.minimum_drop_precision,
+            "minimum_confirm_recall": protocol.minimum_confirm_recall,
+            "minimum_kappa": protocol.minimum_kappa,
+            "maximum_disagreement_rate": protocol.maximum_disagreement_rate,
+            "required_high_stakes_escalation_recall": (
+                protocol.required_high_stakes_escalation_recall
+            ),
+        },
+    )
     return CalibrationSplitReport(
         metrics=metrics,
         threshold_results=results,
@@ -624,4 +678,5 @@ __all__ = [
     "evaluate_judge_calibration",
     "load_and_evaluate",
     "protocol_sha256",
+    "threshold_results_for_metrics",
 ]

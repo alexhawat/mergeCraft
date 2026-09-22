@@ -51,6 +51,20 @@ for the nine golden rows tracked by #780. Render its review sheet with:
 make eval-human-batch
 ```
 
+The committed manifest names `alexhawat` as the intended adjudicator, but all
+nine rows remain `evidence_status: missing` and `decision: pending`. Repository
+history shows that commit `3ff1bb39d6a5c2035c19c793131c493b591cf98d`
+introduced the metadata files; it contains no source patch, originating
+repository, PR, or immutable code snapshot and is therefore history, not
+substantive evidence for the claims. The review sheet keeps every row visibly
+unanswered. No row may receive human provenance until immutable evidence is
+recovered and the named human supplies an actual decision.
+
+The manifest validates source URLs as commit-pinned, confines any local
+fixture to `evals/fixtures/golden/<case-id>/`, and verifies its SHA-256 before
+rendering. This batch establishes neither judge calibration nor human-human
+agreement, even after its provenance requirements are eventually satisfied.
+
 ### Judge calibration
 
 Label provenance only determines whether labels are eligible for scoring. It
@@ -72,20 +86,6 @@ returns a provisional calibration-only report and does not score the held-out
 split. There is currently no qualifying human-labelled dataset in this
 repository, so the real held-out run remains pending. Test fixtures exercise
 the protocol without being presented as human decisions.
-
-The committed manifest names `alexhawat` as the intended adjudicator, but all
-nine rows remain `evidence_status: missing` and `decision: pending`. Repository
-history shows that commit `3ff1bb39d6a5c2035c19c793131c493b591cf98d`
-introduced the metadata files; it contains no source patch, originating
-repository, PR, or immutable code snapshot and is therefore history, not
-substantive evidence for the claims. The review sheet keeps every row visibly
-unanswered. No row may receive human provenance until immutable evidence is
-recovered and the named human supplies an actual decision.
-
-The manifest validates source URLs as commit-pinned, confines any local
-fixture to `evals/fixtures/golden/<case-id>/`, and verifies its SHA-256 before
-rendering. This batch establishes neither judge calibration nor human-human
-agreement, even after its provenance requirements are eventually satisfied.
 
 ### Trajectory auditor scoring
 
@@ -140,7 +140,7 @@ hypotheses until a live result set fills them.
 
 `make eval-gate` and `make eval-replay` check structural case integrity and
 replay expected decisions without a provider. They do not measure live detection.
-Use `make bench-detect BENCH_DETECT_ARGS='--model PROVIDER/MODEL --detection-corpus PATH --results-dir PATH --json'`
+Use `make bench-detect BENCH_DETECT_ARGS='--model PROVIDER/IMMUTABLE_MODEL_ID --model-pin PROVIDER/IMMUTABLE_MODEL_ID --detection-corpus PATH --results-dir PATH --json'`
 once per chosen model against the same frozen, patch-bearing corpus. Record its
 Git tree SHA, exact model, rubric/source pins, expected case count, executed
 case count, errors, latency and cost alongside each result. A missing detection
@@ -155,6 +155,27 @@ campaign size. Preserve raw case results for adjudication. Unmatched findings
 remain unadjudicated when the reference labels are incomplete. Publish measured
 results here or under `evals/results`, with a README link rather than unsupported
 landing-page scores; reconcile #140's publication contract before closure.
+
+After two complete saved runs exist, the keyless publication command verifies
+the independently adjudicated label receipt, validated judge-calibration
+receipt, current corpus hashes, immutable execution identities, raw finding
+hashes, per-case scores, shared protocol pins, and configured cost ceilings:
+
+```bash
+make eval-publish-benchmark \
+  BENCHMARK_CAMPAIGN_MANIFEST=/path/to/campaign.json \
+  BENCHMARK_CAMPAIGN_RESULTS='/path/to/provider-a.json /path/to/provider-b.json' \
+  BENCHMARK_CAMPAIGN_OUTPUT=evals/results
+```
+
+Older result sets remain readable but lack the execution receipts required for
+publication. Unknown provider cost stays `null`; the report records the
+approved conservative reservation without presenting it as measured spend.
+The model pin is explicitly operator-declared and must equal the requested
+slug; this runner does not prove that a provider alias resolved to a particular
+backend revision. A floating slug is therefore not suitable for a publication
+manifest. No independently labelled campaign manifest or live result is
+committed yet.
 
 `make test-wheel-corpus` installs the built wheel in a temporary target and
 runs convergence outside the source checkout. This verifies packaging only.

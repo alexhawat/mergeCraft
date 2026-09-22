@@ -79,6 +79,7 @@ from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
     run_full_benchmark,
 )
+from mergecraft.evals.publication import build_publication, write_publication
 from mergecraft.evals.scoring import (
     DEFAULT_LINE_SLACK,
     format_report,
@@ -664,6 +665,11 @@ def bench_cmd(
         help="Model slug to drive live detection with (otherwise .mergecraft/config.yaml / "
         "MERGECRAFT_MODEL — same resolution as `diff-review`).",
     ),
+    model_pin: str | None = typer.Option(
+        None,
+        "--model-pin",
+        help="Immutable executed model identity for a publication-eligible receipt.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -708,6 +714,12 @@ def bench_cmd(
             "model: in .mergecraft/config.yaml."
         )
         raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
+    if model_pin is not None and model_pin != resolved_model:
+        console.print(
+            "[red]Model pin mismatch[/red] — --model-pin must be the exact requested model "
+            "slug; alias-to-pin resolution is not recorded by this runner."
+        )
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
     try:
         detection_provider = get_model_provider(resolved_model)
     except ValueError:
@@ -732,6 +744,7 @@ def bench_cmd(
         providers=DEFAULT_BENCHMARK_PROVIDERS,
         detection_provider=detection_provider,
         detection_model=resolved_model,
+        detection_model_pin=model_pin,
         required_provenance=required,
     )
     # update_latest=False: a single-provider detection result must not
@@ -1055,6 +1068,36 @@ def trajectory_score_cmd(
         rendered = f"{value:.2%}" if value is not None else "undefined"
         console.print(f"  {metric_name:<17}: {rendered}")
     console.print(f"  eligibility    : {report.eligibility.reason}")
+
+
+@app.command("publish-benchmark")
+def publish_benchmark_cmd(
+    manifest: Path = typer.Option(
+        ...,
+        "--manifest",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Approved frozen campaign manifest.",
+    ),
+    results: list[Path] = typer.Option(
+        ...,
+        "--result",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Provider result set; pass exactly twice.",
+    ),
+    output: Path = typer.Option(..., "--output", file_okay=False, help="Report directory."),
+) -> None:
+    """Validate two saved provider runs and write an auditable report."""
+    try:
+        summary = build_publication(manifest, results)
+        summary_path, report_path = write_publication(summary, output_dir=output)
+    except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        cli_bail(f"benchmark publication refused: {exc}")
+    console.print(f"[green]benchmark publication[/green] → {report_path}")
+    console.print(f"  machine summary: {summary_path}")
 
 
 @app.command("score")

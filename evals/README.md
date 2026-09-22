@@ -280,6 +280,32 @@ separately when publishing (B7).
 Provider set defaults to **Claude + OpenAI**; estimate ~10–30 tokens per case for
 a minimal live probe. Full live `mergecraft review` runs are operator-triggered, not PR CI.
 
+### Keyless publication validation
+
+Live case results now carry optional versioned receipts for the exact patch,
+baseline, raw findings, elapsed time, and known-or-unknown provider cost. They
+also carry the actual detection execution identity separately from structural
+replay defaults. Older artifacts remain readable, but they cannot be published
+because those facts cannot be reconstructed honestly after a run.
+
+`mergecraft eval publish-benchmark` validates an approved two-provider campaign
+manifest and two saved result sets without credentials. It verifies independent
+label and judge-calibration receipts, immutable model pins, current and executed
+artifact hashes, shared prompt/judge/rubric/scorer pins, raw recomputed scores,
+complete case counts, and operator budget ceilings. The Make wrapper is:
+
+```bash
+make eval-publish-benchmark \
+  BENCHMARK_CAMPAIGN_MANIFEST=/path/to/campaign.json \
+  BENCHMARK_CAMPAIGN_RESULTS='/path/to/provider-a.json /path/to/provider-b.json' \
+  BENCHMARK_CAMPAIGN_OUTPUT=evals/results
+```
+
+No approved campaign manifest or real comparative result is committed. The
+agent-seeded smoke manifest remains an integrity/readiness artifact only. Model
+pins are operator declarations that must exactly equal the requested slug; the
+runner does not turn a floating provider alias into verified immutable identity.
+
 ## Harbor agent
 
 Batch B ships a Harbor agent at `mergecraft.harbor.agent:MergecraftReviewAgent`.

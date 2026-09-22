@@ -25,6 +25,7 @@ distinct skip reasons (no credential vs. no patch-bearing cases) and their prece
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -235,6 +236,23 @@ def test_end_to_end_fixture_corpus_produces_correct_prf1(tmp_path: Path) -> None
     assert raw_dir.is_dir()
     assert (raw_dir / "bench-detect-open-001.json").is_file()
     assert (raw_dir / "bench-detect-clean-001.json").is_file()
+    receipt = open_result.execution_receipt
+    assert receipt is not None
+    assert receipt.patch_sha256 == hashlib.sha256(cases[1].patch_path.read_bytes()).hexdigest()
+    assert (
+        receipt.baseline_sha256 == hashlib.sha256(cases[1].baseline_path.read_bytes()).hexdigest()
+    )
+    assert (
+        receipt.raw_findings_sha256
+        == hashlib.sha256(Path(receipt.raw_findings_path).read_bytes()).hexdigest()
+    )
+    assert receipt.elapsed_seconds >= 0
+    assert receipt.cost_known is False
+    assert receipt.cost_usd is None
+    assert metrics.execution_identity is not None
+    assert metrics.execution_identity.immutable_model_pin is None
+    assert metrics.execution_identity.pin_provenance is None
+    assert metrics.execution_identity.fully_pinned is False
 
 
 def test_detection_case_result_omits_strict_precision_for_open_world_case() -> None:
@@ -252,6 +270,30 @@ def test_detection_case_result_omits_strict_precision_for_open_world_case() -> N
         f1=1.0,
     )
     assert result.strict_precision is None
+    assert result.execution_receipt is None
+
+
+def test_review_mutating_the_frozen_inputs_cannot_receive_a_receipt(tmp_path: Path) -> None:
+    corpus = tmp_path / "detect-corpus"
+    _write_detection_case(corpus, "mutated", closed_world=False, issues=[])
+    case = discover_detection_cases(corpus)[0]
+
+    def mutating_review(reviewed: DetectionCase) -> list[dict[str, Any]]:
+        reviewed.patch_path.write_text("changed during review", encoding="utf-8")
+        return []
+
+    metrics = run_live_detection(
+        [case],
+        provider="test",
+        model="test/model",
+        review_fn=mutating_review,
+        results_dir=tmp_path / "results",
+    )
+
+    assert metrics.cases_run == 0
+    assert metrics.cases_failed == 1
+    assert metrics.failed_case_ids == ["mutated"]
+    assert metrics.case_results == []
 
 
 # ── B3.1 bullet 2: no credentials -> detection omitted, skipped recorded ──
