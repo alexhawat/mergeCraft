@@ -111,6 +111,12 @@ required PR check is added.
 | Ingested `agent-seeded` rows never make a calibration claim eligible (one row sinks an independent corpus) | Integration | `…::test_ingested_agent_seeded_cases_are_never_calibration_labels` | ✅ pass |
 | Logfire ingest + reject counters: one span per candidate, one summary span | Integration | `…::test_ingest_emits_ingest_and_reject_counters` | ✅ pass |
 | Ingest defaults to the bank `eval replay-bank` already reads (no new required check) | Unit (structural) | `…::test_ingest_targets_the_structural_bank_by_default` | ✅ pass |
+| `CASE_ID_RE` rejects a trailing newline (`\Z`, not `$`) and accepts a normal id | Unit / edge | `tests/evals/test_flywheel_ingest.py::test_case_id_re_rejects_a_trailing_newline_and_accepts_a_valid_id` | ✅ pass |
+| A traversal-shaped `case_id` is refused by `ingest_flywheel` with the named single-line reason, writing nothing anywhere | Integration / error | `…::test_ingest_refuses_a_traversal_case_id_and_writes_nothing` | ✅ pass |
+| `FlywheelCandidate` rejects a traversal id at construction | Unit / error | `…::test_candidate_rejects_a_traversal_case_id_at_construction` | ✅ pass |
+| A legal id with dots/dashes still ingests and writes (guard against over-blocking) | Unit (green guard) | `…::test_a_valid_case_id_still_ingests_and_writes` | ✅ pass |
+| `store.add_case` refuses a post-construction mutated traversal id and writes nothing | Unit / error | `tests/evals/test_store.py::test_add_case_refuses_a_post_construction_traversal_id` | ✅ pass |
+| `add_case` still writes a legal id (guard against over-blocking) | Unit (green guard) | `tests/evals/test_store.py::test_add_case_still_writes_a_valid_id` | ✅ pass |
 | Empty/unknown provenance resolves to tier `none`, not a privileged tier | Unit (green guard) | `…::test_empty_and_unknown_provenance_resolve_to_none_not_a_privileged_tier` | ✅ pass |
 | No workflow job runs flywheel ingest as a blocking, credentialed check | CI structural (green guard) | `tests/ci/test_flywheel_ingest_ci.py::test_no_workflow_job_runs_flywheel_ingest_as_a_blocking_check` | ✅ pass |
 | The required `eval-gate` check is unchanged and still replays the bank | CI structural (green guard) | `tests/ci/test_flywheel_ingest_ci.py::test_existing_structural_eval_gate_still_replays_the_bank` | ✅ pass |
@@ -166,6 +172,30 @@ removed, and only `test-creator` may edit `tests/`. Removing the markers also
 dropped the now-unused `_R5` reason constant and the stale `pytest` import, and
 fixed a pre-existing `I001` import-order offense in the default-bank test body
 (no assertion changed).
+
+### Review-finding regression — path traversal via `case_id` (#808)
+
+A review of #808 found the id that becomes the case file stem was not
+constrained to a filename token: `..` segments or a trailing newline could
+escape `bank_dir`. The guards added here are behavioural, not regex reads:
+
+- `FlywheelCandidate` validates `case_id` at construction, and `_classify`
+  re-checks before any `Case` is built, so a post-construction mutation
+  (`Case` has no `validate_assignment`) is refused with the named single-line
+  reason `INVALID_CASE_ID_REASON`.
+- `CASE_ID_RE` anchors with `\Z` (not `$`), so `"a\n"` is rejected.
+- `store.add_case` re-checks containment against the resolved `bank_dir` as the
+  last line of defence.
+- The traversal tests assert the real filesystem effect — no `.md` anywhere in
+  the sandbox and nothing outside it — rather than only the returned fields.
+  The over-blocking guards assert a legal id still writes.
+
+Task 2 of the same review pass lives in `tests/analyzers/test_adapters_supply_chain.py`:
+when a persistent supply-chain run is skipped because this runner cannot apply
+userspace filtered egress (`unshare --user --map-root-user --net`), the test now
+reports a visible, named `pytest.skip` instead of failing. The gate is matched
+narrowly (the `egress policy` prefix **and** the namespace marker), and its
+narrowness is pinned by `test_other_skips_are_not_excused_by_the_userspace_egress_gate`.
 
 ### What this suite does not do
 

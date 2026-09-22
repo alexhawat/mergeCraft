@@ -345,6 +345,34 @@ def test_add_case_creates_missing_directory(tmp_path: Path) -> None:
     assert target.is_file()
 
 
+def test_add_case_refuses_a_post_construction_traversal_id(tmp_path: Path) -> None:
+    """A mutated ``case.id`` cannot escape the bank: raise and write nothing.
+
+    ``Case`` validates its id at construction but has no ``validate_assignment``
+    (see ``test_case_extra_forbid_invariant_documented``), so the store re-checks
+    containment at the write rather than trusting the field validator.
+    """
+    bank = tmp_path / "sandbox" / "bank"
+    case = _case()
+    case.id = "../../escaped"
+
+    with pytest.raises(ValueError, match="outside the bank"):
+        add_case(bank, case)
+
+    assert not list(tmp_path.rglob("*.md")), "a refused write must leave no case file"
+    assert not (tmp_path / "escaped.md").exists(), "the traversal target must not be written"
+    assert not (tmp_path.parent / "escaped.md").exists(), "nothing escaped the bank"
+
+
+def test_add_case_still_writes_a_valid_id(tmp_path: Path) -> None:
+    """Guard against over-blocking: the containment check passes a legal id."""
+    bank = tmp_path / "sandbox" / "bank"
+    target = add_case(bank, _case(id="synthetic.legal-001"))
+
+    assert target == bank / "synthetic.legal-001.md"
+    assert target.is_file()
+
+
 def test_list_cases_returns_all_when_no_filters(tmp_path: Path) -> None:
     """``list_cases`` returns every case in the bank."""
     add_case(tmp_path, _case(id="synthetic-001"))

@@ -42,7 +42,7 @@ from pathlib import Path  # noqa: TC003 — Pydantic field type on IngestOutcome
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mergecraft.evals.adjudication import (
     AdjudicationRecord,
@@ -50,6 +50,7 @@ from mergecraft.evals.adjudication import (
     provenance_for,
     tier_for_provenance,
 )
+from mergecraft.evals.ids import CASE_ID_RE
 from mergecraft.evals.store import DEFAULT_BANK_DIR, Case, add_case
 from mergecraft.utils.learnings import LearningProvenance
 
@@ -66,6 +67,11 @@ AGENT_SEEDED_PROVENANCE: Final[str] = "agent-seeded"
 #: Logfire span kinds: one point span per candidate, one summary per run.
 INGEST_SPAN_KIND: Final[str] = "mergecraft.eval.ingest"
 INGEST_SUMMARY_SPAN_KIND: Final[str] = "mergecraft.eval.ingest.summary"
+
+#: The named, single-line refusal reason for a candidate whose ``case_id`` is
+#: not a safe filename token. It is a stable string (not a pydantic dump) so a
+#: caller can branch on it; the id that failed is logged separately.
+INVALID_CASE_ID_REASON: Final[str] = "case_id is not a valid identifier"
 
 TrustTier = Literal["trusted", "untrusted"]
 
@@ -98,6 +104,21 @@ class FlywheelCandidate(BaseModel):
     run_id: str = Field(min_length=1)
     author_login: str = Field(min_length=1)
     author_association: str | None = None
+
+    @field_validator("case_id")
+    @classmethod
+    def _validate_case_id(cls, value: str) -> str:
+        """Reject a case id that is not a safe filename token.
+
+        The id becomes the case file stem in the bank, so a value carrying
+        path separators or traversal segments would escape ``bank_dir``. This
+        is the construction-time guard; :func:`_classify` re-checks it so a
+        post-construction mutation cannot reach the writer either.
+        """
+        if not CASE_ID_RE.match(value):
+            msg = f"case_id {value!r} is not a valid identifier"
+            raise ValueError(msg)
+        return value
 
 
 class IngestOutcome(BaseModel):
@@ -157,6 +178,13 @@ def _classify(candidate: FlywheelCandidate) -> tuple[bool, str, str, Independenc
     carries tier ``none`` and a reason that names what was missing — never a
     minted label.
     """
+    if not CASE_ID_RE.match(candidate.case_id):
+        # Structural precondition, checked before any ``Case`` is built: the
+        # id becomes the case file stem, so a traversal-shaped id must be
+        # refused here — with a named reason, not the pydantic dump that
+        # ``Case`` construction would otherwise raise. This also catches a
+        # post-construction mutation that bypassed the field validator.
+        return False, INVALID_CASE_ID_REASON, "", "none"
     declared = candidate.provenance.strip()
     if not declared:
         return (

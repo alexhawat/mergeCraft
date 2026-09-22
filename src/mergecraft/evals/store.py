@@ -563,12 +563,29 @@ def add_case(
         The path of the written case file.
 
     Raises:
+        ValueError: When ``case.id`` resolves to a target outside
+            ``bank_dir`` (a traversal-shaped id, e.g. ``"../../escaped"``).
+            ``Case`` validates its id at construction, but a caller can
+            mutate ``case.id`` afterwards, so the write re-checks containment
+            rather than trusting the field validator.
         FileExistsError: When ``overwrite`` is False and a case file
             with the same id already exists.
         OSError: When the file cannot be written.
     """
     bank_dir.mkdir(parents=True, exist_ok=True)
     target = bank_dir / f"{case.id}{CASE_FILE_SUFFIX}"
+    # Containment check: the id must not escape ``bank_dir``. Resolve both
+    # sides so ``..`` segments and absolute ids cannot slip past, then keep
+    # the unresolved ``target`` for the write and the return value so the
+    # caller sees the path it asked for.
+    resolved_bank = bank_dir.resolve()
+    resolved_target = target.resolve()
+    if not resolved_target.is_relative_to(resolved_bank):
+        msg = (
+            f"case id {case.id!r} resolves to {resolved_target}, outside the bank "
+            f"directory {resolved_bank} — refusing to write"
+        )
+        raise ValueError(msg)
     if target.exists() and not overwrite:
         raise FileExistsError(target)
     target.write_text(render_case_text(case), encoding="utf-8")

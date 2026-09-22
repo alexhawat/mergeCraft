@@ -28,6 +28,12 @@ Pinned contracts:
 * **Logfire counters** — one ``mergecraft.eval.ingest`` span per candidate and
   one ``mergecraft.eval.ingest.summary`` span carrying the ingest and reject
   counts.
+* **A case id is a filename token, never a path** (review finding on #808) —
+  ``CASE_ID_RE`` anchors with ``\\Z`` (a trailing newline is rejected), the
+  ``FlywheelCandidate`` field validator rejects a traversal-shaped id at
+  construction, and ``_classify`` re-checks so a post-construction mutation is
+  refused with the named single-line reason :data:`INVALID_CASE_ID_REASON`.
+  The store's ``add_case`` re-checks containment as the last line of defence.
 * **No new required PR check** (R-D10) — ingest defaults to the same bank
   ``eval replay-bank`` already reads, so no new CI job is needed. The CI guard
   lives in ``tests/ci/test_flywheel_ingest_ci.py``.
@@ -46,6 +52,8 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 _HUMAN_SETTINGS: dict[str, object] = {
     "human": {"enabled": True, "independence": "independent"},
@@ -380,3 +388,89 @@ def test_empty_and_unknown_provenance_resolve_to_none_not_a_privileged_tier() ->
     assert tier_for_provenance("   ") == "none"
     assert tier_for_provenance("hand-wavy") == "none"
     assert tier_for_provenance("human") == "independent"
+
+
+# ── path-traversal guards: a case id is a filename token, not a path ─────────
+#
+# The review finding on #808: the id becomes the case file stem, so a value
+# carrying ``..`` or a newline escaped ``bank_dir``. The guards are pinned
+# behaviourally — what landed on disk (nothing) and the named reason — not by
+# re-reading the regex.
+
+#: Traversal-shaped ids that must never reach the writer. ``"a\\n"`` is the
+#: ``$``-versus-``\\Z`` case: ``$`` matches just before a trailing newline.
+_TRAVERSAL_CASE_IDS = ["../../pwned", "a\n", ".."]
+
+
+def _mutated_candidate(case_id: str) -> Any:
+    """Build a candidate, then set ``case_id`` after construction.
+
+    ``FlywheelCandidate`` rejects these ids at construction, so a
+    post-construction mutation is the only way to reach the ingest with a
+    traversal-shaped id — and it is exactly the vector that bypassed the field
+    validator before the ``_classify`` re-check landed (``Case`` has no
+    ``validate_assignment``).
+    """
+    candidate = _candidate()
+    candidate.case_id = case_id
+    return candidate
+
+
+@pytest.mark.parametrize("case_id", _TRAVERSAL_CASE_IDS)
+def test_ingest_refuses_a_traversal_case_id_and_writes_nothing(
+    case_id: str, tmp_path: Path
+) -> None:
+    """A traversal id is dropped with the named reason and leaves no file."""
+    from mergecraft.evals.flywheel import INVALID_CASE_ID_REASON
+
+    sandbox = tmp_path / "sandbox"
+    bank = sandbox / "bank" / "cases"
+    report = _ingest([_mutated_candidate(case_id)], bank)
+
+    assert report.ingested_count == 0
+    assert report.rejected_count == 1
+    outcome = report.outcomes[0]
+    assert outcome.ingested is False
+    assert outcome.path is None
+    assert outcome.tier == "none"
+    assert outcome.reason == INVALID_CASE_ID_REASON
+    assert "\n" not in outcome.reason, "the refusal reason is a single line"
+    # The real filesystem effect: nothing was written anywhere in the tree, and
+    # nothing escaped it either.
+    assert not list(sandbox.rglob("*.md")), "a refused candidate must not write a case"
+    assert not list(tmp_path.rglob("pwned.md")), "no traversal target was written"
+    assert not (tmp_path.parent / "pwned.md").exists(), "nothing escaped the sandbox"
+
+
+@pytest.mark.parametrize("case_id", _TRAVERSAL_CASE_IDS)
+def test_candidate_rejects_a_traversal_case_id_at_construction(case_id: str) -> None:
+    """The field validator rejects a traversal id before any writer sees it."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="not a valid identifier"):
+        _candidate(case_id=case_id)
+
+
+def test_case_id_re_rejects_a_trailing_newline_and_accepts_a_valid_id() -> None:
+    """``\\Z`` (not ``$``) rejects a trailing newline; a normal id still matches."""
+    from mergecraft.evals.ids import CASE_ID_RE
+
+    assert CASE_ID_RE.match("synthetic-flywheel-001") is not None
+    assert CASE_ID_RE.match("a\n") is None, "a trailing newline must not be accepted"
+    assert CASE_ID_RE.fullmatch("a\n") is None
+
+
+def test_a_valid_case_id_still_ingests_and_writes(tmp_path: Path) -> None:
+    """Guard against over-blocking: a legal id with dots and dashes still lands."""
+    from mergecraft.evals.store import load_case
+
+    sandbox = tmp_path / "sandbox"
+    bank = sandbox / "bank" / "cases"
+    report = _ingest([_candidate(case_id="synthetic.flywheel-001")], bank)
+
+    assert report.ingested_count == 1
+    outcome = report.outcomes[0]
+    assert outcome.ingested is True
+    assert outcome.path is not None
+    assert outcome.path.is_file()
+    assert load_case(outcome.path).id == "synthetic.flywheel-001"
