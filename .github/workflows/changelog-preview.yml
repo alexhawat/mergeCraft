@@ -18,9 +18,11 @@ concurrency:
 
 jobs:
   changelog-preview:
-    # Craft installs its binary from GitHub releases; a 5xx there must not
-    # block the PR (the preview is advisory).
-    continue-on-error: true
+    # Craft installs its binary from GitHub releases, so a 5xx there can fail
+    # this job. `continue-on-error` cannot express that here: a job that calls a
+    # reusable workflow with `uses` accepts only name/uses/with/secrets/needs/
+    # if/permissions, and actionlint rejects anything else. The preview stays
+    # advisory because it is not in `require-ci-on-main`'s required contexts.
     # Pin: getsentry/craft changelog-preview@v2 → 2.30.1; dependabot owns bumps.
     uses: getsentry/craft/.github/workflows/changelog-preview.yml@55694f8bf3a0fd051e21a877f57b4c0dd8e946bb # v2
     # Pin the craft binary too: the upstream default ("latest") queries
