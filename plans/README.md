@@ -64,7 +64,7 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 |---|---|---|---|---|
 | [001](001-trajectory-redaction.md) | Redact every trajectory persistence route | P1 | — | Integrated; focused checks passed; final CI pending |
 | [002](002-normalized-terminal-verdict.md) | Finalized findings determine enforced verdict | P1 | — | Integrated; focused checks passed; final CI pending |
-| [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions by purpose | P1 | — | TODO |
+| [003](003-app-reviewer-permissions.md) | Git/App reviewer permissions and honest revocation (#821/#828) | P1 | — | IN PROGRESS |
 | [004](004-publication-retry-state.md) | Correct recovered-publication status | P2 | coordinate 002 | Integrated; focused checks passed; final CI pending |
 | [005](005-shell-read-evidence.md) | Accurate shell read attribution | P2 | 001 | IN PROGRESS |
 | [006](006-coverage-metric-contract.md) | Real line floors and honest metric names | P1 | coordinate #817 | TODO |
