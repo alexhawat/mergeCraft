@@ -1,6 +1,6 @@
 # Implementation record
 
-Implementation is in progress on `codex/implement-issue-remediation-20260922`, in `/private/tmp/mergecraft-implementation-20260922`. The original checkout and its existing configuration edit are preserved. Three faster `gpt-5.6-sol` executors use separate worktrees; the coordinator reviews and integrates their commits.
+Implementation is in progress on `codex/implement-issue-remediation-20260922`, in `/private/tmp/mergecraft-implementation-20260922`, at `157f57a3`. The original checkout and its existing configuration edit are preserved. The initial wave used three faster `gpt-5.6-sol` executors; subsequent work is assigned to the available `gpt-5.6-luna` model. The coordinator reviews and integrates their commits.
 
 ## Baseline and scope
 
@@ -9,6 +9,13 @@ Implementation is in progress on `codex/implement-issue-remediation-20260922`, i
 - Integrated main `e79217be` after plan PR #826 merged. Its plan contents exactly matched the originally cherry-picked plans; the merge retains subsequent implementation refinements and adds no source drift.
 - The first source scopes (001/002/004/005/007) did not drift. #818 changed strict analyzer test handling, which is accounted for in new plan 016. #817 changed coverage floors; plan 006 must use the merged baseline and a new attributable final measurement.
 - Human labels, chosen live models/budgets, candidate-specific release verification and publication remain separate completion criteria. Synthetic tests do not satisfy them.
+
+## Current verification state
+
+- The latest integrated change is `157f57a3` (`fix(ci): reject coverage metadata drift`). It adds combine-time source/runtime identity checks and has 38 focused agent tests recorded across the integrated remediation work. A full serial coverage measurement is still running; the initial report, final floors, final CI gate and fresh shard/parity comparison are pending.
+- The first whole-shard attempt is not a passing result: group 1 reported **1 failed, 5,011 passed, 9 skipped and 3 xfailed**; group 2 was interrupted after **3 failed, 1,037 passed and 3 skipped**. The failure analysis found nested fixture runs inheriting the outer shard variables. Test-only cleanup commit `aa6bcac7` is pending and is recorded as unintegrated until the coordinator reviews it.
+- Queued test-only Loguru capture lifetime fixes are `9829600d` and `960366d9`; they remain pending. These test cleanups do not prove the full gate.
+- Final validation remains open: whole-tree coverage floors, full `make ci`, fresh shard/parity evidence, and the initial implementation report have not been completed. Keep plan status and issue closure language conditional until those artifacts exist.
 
 ## Release inventory (plan 015)
 

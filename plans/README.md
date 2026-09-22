@@ -6,9 +6,11 @@ The original checkout and its pre-existing configuration edit are preserved. The
 
 ## Implementation update — 2026-09-22
 
-The user authorized implementation after PR #826. Work proceeds in the isolated `codex/implement-issue-remediation-20260922` branch, based on updated main and including merged PR #817 (`41cf53b3`). The original audit below remains a historical record; current implementation verification is recorded separately in [IMPLEMENTATION.md](IMPLEMENTATION.md). The source scopes of the first implementation batch were unchanged; coverage floors and generated documentation must be reconciled with the newer main.
+The user authorized implementation after PR #826. Work proceeds in the isolated `codex/implement-issue-remediation-20260922` branch at implementation snapshot `157f57a3`. PR #817 is merged and closed #771; PR #826 is merged, contains plans only, and closed no issue. The original audit below remains a historical record; current implementation verification is recorded separately in [IMPLEMENTATION.md](IMPLEMENTATION.md). The source scopes of the first implementation batch were unchanged; coverage floors, generated documentation and final parity still require reconciliation with the newer main.
 
-PR #817 merged at 17:16:45 UTC and closed #771. Twenty issues remain open at this snapshot, including the subsequently filed [#825](https://github.com/alexhawat/mergeCraft/issues/825), covered by [plan 016](016-provisioning-failure-cause.md). PR #826 merged at 17:37:07 UTC, contains plans only and closed none. The current implementation inventory has 22 open issues after new #827/#828 were filed. Implementation closure references will be limited to verified fixes.
+The current inventory has **23 open issues**: [#829](https://github.com/alexhawat/mergeCraft/issues/829), [#828](https://github.com/alexhawat/mergeCraft/issues/828), [#827](https://github.com/alexhawat/mergeCraft/issues/827), [#825](https://github.com/alexhawat/mergeCraft/issues/825), [#824](https://github.com/alexhawat/mergeCraft/issues/824), [#823](https://github.com/alexhawat/mergeCraft/issues/823), [#822](https://github.com/alexhawat/mergeCraft/issues/822), [#821](https://github.com/alexhawat/mergeCraft/issues/821), [#820](https://github.com/alexhawat/mergeCraft/issues/820), [#819](https://github.com/alexhawat/mergeCraft/issues/819), [#798](https://github.com/alexhawat/mergeCraft/issues/798), [#797](https://github.com/alexhawat/mergeCraft/issues/797), [#796](https://github.com/alexhawat/mergeCraft/issues/796), [#792](https://github.com/alexhawat/mergeCraft/issues/792), [#790](https://github.com/alexhawat/mergeCraft/issues/790), [#785](https://github.com/alexhawat/mergeCraft/issues/785), [#783](https://github.com/alexhawat/mergeCraft/issues/783), [#780](https://github.com/alexhawat/mergeCraft/issues/780), [#779](https://github.com/alexhawat/mergeCraft/issues/779), [#736](https://github.com/alexhawat/mergeCraft/issues/736), [#735](https://github.com/alexhawat/mergeCraft/issues/735), [#723](https://github.com/alexhawat/mergeCraft/issues/723), and [#140](https://github.com/alexhawat/mergeCraft/issues/140). The implementation closure target is 17 of these after plan 018 and final evidence are complete; the remaining six are #780, #735, #736, #140, #783 and #723. These are implementation recommendations, not GitHub state changes.
+
+Issue #829 was filed after the implementation snapshot: managed analyzer provisioning writes `.mergecraft/analyzer-cache/`, and offline untracked discovery can mistake those generated files for reviewable source when the consumer repository does not already ignore that exact path. [Plan 018](018-offline-cache-discovery.md) records the bounded fix and regression contract.
 
 ## What PR #817 closes (original audit)
 
@@ -41,9 +43,9 @@ All **14** open issues were read, including comments. These dispositions disting
 
 No original issue was closed or rewritten during this planning audit. The table records the recommended housekeeping actions and avoids silently changing existing issue scope.
 
-## New issues filed
+## New issues filed in the original audit
 
-All six are high-confidence, independently vetted against the source, and have reproducible failure paths. Evidence uses fabricated inputs or mocked APIs; no real credentials or GitHub reviews were used.
+The six original findings below are high-confidence, independently vetted against the source, and have reproducible failure paths. Evidence uses fabricated inputs or mocked APIs; no real credentials or GitHub reviews were used. Issues #825 and #827–#829 were filed later during implementation and are recorded by their numbered plans.
 
 | Issue / finding | Priority | Effort | Fix risk | Evidence / plan |
 |---|---|---|---|---|
@@ -79,6 +81,7 @@ The recommended first batch is **001, 002, 003, 006 and 007**. They protect secr
 | [015](015-release-candidate.md) | Verified refreshed release and deployment identity | P2 | selected technical fixes 001–010 | Inventory recorded; fresh candidate/publication pending |
 | [016](016-provisioning-failure-cause.md) | Visible provisioning cause and narrow outage handling (#825) | P2 | — | Integrated; 68 independent adapter tests passed |
 | [017](017-redaction-filename-classification.md) | Preserve ordinary filenames without bypassing redaction (#827) | P2 | coordinate 001/005 | Integrated; focused checks passed; final CI pending |
+| [018](018-offline-cache-discovery.md) | Exclude generated managed analyzer cache from offline untracked discovery (#829) | P2 | — | Planned; implementation and regression pending |
 
 ```mermaid
 flowchart TD
