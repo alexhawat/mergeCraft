@@ -105,12 +105,12 @@ def _record_from_real_payload(*, files_modified: list[str], bogus_arguments: boo
     )
     args: dict[str, Any] = {"message": "record claims"}
     if bogus_arguments:
-        # From the #789 payload: a revision range, a ``rev:path`` spec, and a
-        # bare regex, none of which is a file.
+        # From the #789 payload: two revision ranges and a regex — none of
+        # which is a file, on either side. (A ``rev:path`` spec is handled
+        # separately: it *is* a file read, so it is normalised, not dropped.)
         args["args"] = [
             "origin/main..HEAD",
             "origin/main...HEAD",
-            "HEAD:src/mergecraft/cli/jev_cmd.py",
             r"^(def |class |@app\.command|    def )",
         ]
     record_tool_call(state, tool="commit_changes", arguments=args, ok=True, outcome_ok=True)
@@ -122,17 +122,15 @@ def test_revision_ranges_and_regexes_are_not_changed_unread_files() -> None:
 
     ``files_modified`` comes from the run diff and is authoritative
     (``trajectory.py``'s own docstring says so). Extending it with
-    ``call.paths`` from a modify-intent call lets ``origin/main..HEAD``,
-    ``HEAD:src/…`` and a bare regex each emit a Major, burying the genuine
-    findings (#796).
+    ``call.paths`` from a modify-intent call lets ``origin/main..HEAD`` and a
+    bare regex each emit a Major, burying the genuine findings (#796).
     """
     record = _record_from_real_payload(files_modified=["src/real.py"], bogus_arguments=True)
 
     assert record.read_coverage is True
     assert record.files_read == ["src/real.py"]
     assert _changed_unread_paths(record) == [], (
-        "a revision range, a rev:path spec, or a regex was reported as a "
-        "modified file that was never read"
+        "a revision range or a regex was reported as a modified file that was never read"
     )
 
 
@@ -147,4 +145,36 @@ def test_a_genuinely_unread_modified_file_still_raises_one_finding() -> None:
         bogus_arguments=False,
     )
 
+    assert _changed_unread_paths(record) == ["src/unread.py"]
+
+
+def test_rev_path_reads_are_preserved_as_read_evidence() -> None:
+    """A read at a revision is a read of the file, not of a bogus path.
+
+    ``git show HEAD:src/base.py`` addresses ``src/base.py``. Normalising the
+    ``rev:path`` object spec to its path keeps the base read in ``files_read``,
+    so ``changed-unread-file`` does not fire on a file whose base *was* read —
+    the read-side bias (Q-D3). A revision *range* is not a file and stays out.
+    """
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    record_tool_call(
+        state,
+        tool="shell",
+        arguments={"command": "git show HEAD:src/base.py"},
+        ok=True,
+        outcome_ok=True,
+    )
+    record_tool_call(
+        state,
+        tool="shell",
+        arguments={"command": "git diff origin/main..HEAD"},
+        ok=True,
+        outcome_ok=True,
+    )
+
+    record = build_trajectory_record(state, files_modified=["src/base.py", "src/unread.py"])
+
+    assert "src/base.py" in record.files_read
+    assert "HEAD:src/base.py" not in record.files_read
+    assert "origin/main..HEAD" not in record.files_read
     assert _changed_unread_paths(record) == ["src/unread.py"]

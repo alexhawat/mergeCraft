@@ -28,8 +28,10 @@ the run's own diff and nothing else. A tool argument can never widen it, because
 the trade inverts on the write side: a false path in ``files_read`` *suppresses*
 a finding, but a false path in ``files_modified`` *manufactures* one (Q-D3), as
 ``origin/main..HEAD`` and a bare regex once did (#796). Revision ranges
-(``a..b``, ``a...b``) and ``rev:path`` object specs are rejected as paths
-outright by :func:`_is_git_revision_spec`.
+(``a..b``, ``a...b``) are rejected as paths outright by
+:func:`_is_git_revision_range`; a ``rev:path`` object spec
+(``HEAD:src/app.py``) is *not* rejected — it names a real file whose base was
+read, so :func:`_normalize_git_object_spec` keeps its path as read evidence.
 
 Note on ``tool_state.usage_entries``: the wave plan described it as the
 trajectory substrate and as "write-only". Neither is right today. It holds
@@ -336,21 +338,38 @@ def _looks_like_path(token: str) -> bool:
     return "/" in token or "." in token.lstrip(".")
 
 
-def _is_git_revision_spec(token: str) -> bool:
-    """True for git revision syntax that ``_looks_like_path`` would mistake for a file.
+def _is_git_revision_range(token: str) -> bool:
+    """True for git revision *ranges* (``a..b`` / ``a...b``).
 
-    ``origin/main..HEAD`` and ``origin/main...HEAD`` are revision *ranges*;
-    ``HEAD:src/app.py`` and ``origin/main:docs/x.md`` are ``rev:path`` *object
-    specs*. Each carries ``/`` or ``.``, so the permissive path heuristic above
-    admits them — the right bias for ``files_read`` (a false path there
-    suppresses a finding), the wrong one for ``files_modified`` (a false path
-    there manufactures a ``changed-unread-file`` finding — #796, Q-D3).
-
-    No checkout contains a file named ``a..b`` or ``rev:path``, so excluding
-    them is safe on both sides: a dropped token can only ever have been matched
-    against a real file in the run diff, which it never was.
+    A range names a set of commits, not a file, and no checkout contains a path
+    containing ``..`` — so excluding it is safe on both the read and write sides:
+    a dropped token can only ever have been matched against a real file in the
+    run diff, which it never was (#796, Q-D3).
     """
-    return ".." in token or ":" in token
+    return ".." in token
+
+
+def _normalize_git_object_spec(token: str) -> str | None:
+    """Normalise a ``rev:path`` object spec to its path, or ``None``.
+
+    ``git show HEAD:src/app.py``, ``git cat-file origin/main:docs/x.md`` and
+    ``git diff HEAD:src/app.py`` address a *file* at a revision. That file is
+    genuinely read when such a spec crosses the wire, so its path must survive
+    as read evidence: dropping it would let ``changed-unread-file`` fire on a
+    file whose base was read (Q-D3 — a false path on the read side suppresses a
+    finding, so an over-strict read side manufactures one).
+
+    A range is not a file (:func:`_is_git_revision_range`); a bare revision
+    with an empty or non-path tail is not a file either.
+    """
+    if _is_git_revision_range(token):
+        return None
+    head, sep, tail = token.partition(":")
+    if not sep:
+        return token
+    if head and tail and ("/" in tail or "." in tail.lstrip(".")):
+        return tail
+    return None
 
 
 def _paths_in(values: Any) -> list[str]:
@@ -361,8 +380,10 @@ def _paths_in(values: Any) -> list[str]:
         if len(found) >= _MAX_PATHS_PER_CALL:
             return
         if isinstance(node, str):
-            if _looks_like_path(node) and not _is_git_revision_spec(node):
-                found.append(node)
+            if _looks_like_path(node):
+                normalized = _normalize_git_object_spec(node)
+                if normalized:
+                    found.append(normalized)
             return
         if isinstance(node, dict):
             for value in node.values():
