@@ -15,7 +15,9 @@ import socket
 import struct
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -316,6 +318,54 @@ def test_splice_propagates_eof_like_copy_both() -> None:
         worker.join(timeout=10)
         for sock in (left_b, right_a):
             sock.close()
+
+
+def test_splice_handles_worker_oserror_and_done_gate_deterministically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed first worker stops the second before it reads from its socket."""
+
+    class _FakeSocket:
+        def __init__(self, *, raises: bool) -> None:
+            self.raises = raises
+            self.recv_calls = 0
+            self.shutdowns: list[int] = []
+
+        def recv(self, _size: int) -> bytes:
+            self.recv_calls += 1
+            if self.raises:
+                raise OSError("peer closed")
+            return b"unused"
+
+        def sendall(self, _data: bytes) -> None:
+            raise AssertionError("done worker must not forward bytes")
+
+        def shutdown(self, how: int) -> None:
+            self.shutdowns.append(how)
+
+    class _ImmediateThread:
+        def __init__(self, target: object, args: tuple[object, ...], daemon: bool) -> None:
+            del daemon
+            self._target = target
+            self._args = args
+
+        def start(self) -> None:
+            target = cast("Callable[..., None]", self._target)
+            target(*self._args)
+
+        def join(self) -> None:
+            return None
+
+    left = _FakeSocket(raises=True)
+    right = _FakeSocket(raises=False)
+    monkeypatch.setattr("mergecraft.analyzers.egress_userspace.threading.Thread", _ImmediateThread)
+
+    _splice(cast("socket.socket", left), cast("socket.socket", right))
+
+    assert left.shutdowns == [socket.SHUT_WR]
+    assert right.shutdowns == [socket.SHUT_WR]
+    assert left.recv_calls == 1
+    assert right.recv_calls == 0
 
 
 def test_read_line_stops_at_the_newline() -> None:

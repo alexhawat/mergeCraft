@@ -59,6 +59,7 @@ def test_local_run_defaults_to_no_remote_telemetry(
     monkeypatch.delenv("MERGECRAFT_TRACING", raising=False)
     monkeypatch.delenv("MERGECRAFT_TRACING_TO", raising=False)
     monkeypatch.delenv("MERGECRAFT_LOGFIRE_TOKEN", raising=False)
+    monkeypatch.setattr(mod, "logfire_token_resolvable", lambda: False)
 
     defaults = resolve(cwd=tmp_path, private_repo=True)
     assert defaults.get("enabled") is False or defaults.get("tracing_to") in {
@@ -92,3 +93,29 @@ def test_yaml_remote_tracing_is_honored_for_local_review(tmp_path: Path) -> None
     defaults = resolve(cwd=tmp_path, private_repo=True)
     assert defaults.get("enabled") is True
     assert defaults.get("tracing_to") == "logfire"
+
+
+def test_yaml_local_tracing_keeps_private_remote_defaults_off(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A local sink in YAML must not turn on a private run's remote defaults."""
+    mod = _manifest_mod()
+    resolve = getattr(mod, "resolve_local_telemetry_defaults", None)
+    if resolve is None:
+        pytest.fail(
+            "resolve_local_telemetry_defaults not defined in mergecraft.evidence.run_manifest"
+        )
+
+    monkeypatch.delenv("MERGECRAFT_TRACING_TO", raising=False)
+    monkeypatch.delenv("MERGECRAFT_LOGFIRE_TOKEN", raising=False)
+
+    config_dir = tmp_path / ".mergecraft"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.yaml").write_text(
+        "tracing:\n  enabled: true\n  sinks:\n    - type: jsonl_file\n      path: .mergecraft/traces/\n",
+        encoding="utf-8",
+    )
+
+    defaults = resolve(cwd=tmp_path, private_repo=True)
+
+    assert defaults == {"enabled": False, "tracing_to": None}

@@ -33,7 +33,7 @@ from mergecraft.mcp.context import (
     ResolvedPayload,
     ToolContext,
 )
-from mergecraft.mcp.shell import _is_git_command, shell_tool
+from mergecraft.mcp.shell import _git_readonly_bind_mounts, _is_git_command, shell_tool
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
@@ -161,6 +161,19 @@ def test_already_covered_forms_stay_recognised(command: str) -> None:
 @pytest.mark.parametrize("command", NOT_GIT)
 def test_non_git_commands_are_not_over_blocked(command: str) -> None:
     assert _is_git_command(command) is False, command
+
+
+def test_git_bind_mounts_use_a_safe_fallback_without_registered_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty root registry still protects the current checkout's .git."""
+    monkeypatch.setattr("mergecraft.mcp.shell.allowed_workspace_roots", list)
+
+    fragment = _git_readonly_bind_mounts()
+
+    assert "for _ws in .; do" in fragment
+    assert 'mount --bind "$_ws/.git" "$_ws/.git"' in fragment
+    assert 'mount -o remount,bind,ro "$_ws/.git"' in fragment
 
 
 @pytest.mark.parametrize("command", BYPASSES)
