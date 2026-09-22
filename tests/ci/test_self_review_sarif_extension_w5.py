@@ -75,13 +75,24 @@ def test_committed_config_lists_trufflehog_sarif_artifact() -> None:
     assert _TRUFFLEHOG_ARTIFACT in artifacts
 
 
-def test_static_sarif_uploads_continue_on_github_artifact_errors() -> None:
-    """A FinalizeArtifact 403 must not fail Verify after ``make ci-static`` passed."""
-    static = load_workflow("ci.yml")["jobs"]["static"]
-    assert isinstance(static, dict)
-    names = {"ruff-sarif", "mypy-sarif", "actionlint-sarif", "zizmor-sarif"}
+@pytest.mark.parametrize(
+    ("job", "names"),
+    [
+        ("static", {"ruff-sarif", "mypy-sarif", "actionlint-sarif", "zizmor-sarif"}),
+        ("security", {"bandit-sarif", "semgrep-sarif", "trufflehog-sarif"}),
+    ],
+)
+def test_sarif_uploads_continue_on_github_artifact_errors(job: str, names: set[str]) -> None:
+    """A FinalizeArtifact 403 must not fail a Verify job whose checks already passed.
+
+    Covers ``security`` as well as ``static``: the 403 is a publication fault in
+    both, and ``Verify (security audit py3.14)`` is a required context, so there
+    it would block the merge rather than just redden an advisory job.
+    """
+    steps = load_workflow("ci.yml")["jobs"][job]
+    assert isinstance(steps, dict)
     seen: set[str] = set()
-    for step in as_list(static.get("steps")):
+    for step in as_list(steps.get("steps")):
         if not isinstance(step, dict):
             continue
         with_block = step.get("with") or {}
