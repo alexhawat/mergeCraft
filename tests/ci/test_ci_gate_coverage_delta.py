@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 from typing import TYPE_CHECKING
 
 from tests.ci.support_ci_gate_coverage import (
@@ -28,7 +29,43 @@ from tests.ci.test_coverage_delta_wrapper import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 _INTEGRATION_TIMEOUT = 180
+
+
+def test_fixture_runner_drops_ambient_coverage_shard_selectors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_environment: dict[str, str] = {}
+
+    def capture_run(
+        args: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        environment = kwargs.get("env")
+        assert isinstance(environment, dict)
+        captured_environment.update(environment)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    for name, value in (
+        ("MERGECRAFT_TEST_SPLITS", "2"),
+        ("MERGECRAFT_TEST_GROUP", "2"),
+        ("MERGECRAFT_COVERAGE_RUN_DIR", "/tmp/outer-shard"),
+        ("MAKEFLAGS", " -- MERGECRAFT_TEST_SPLITS=2 MERGECRAFT_TEST_GROUP=2"),
+        ("MAKEOVERRIDES", "MERGECRAFT_TEST_SPLITS=2 MERGECRAFT_TEST_GROUP=2"),
+    ):
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr("tests.ci.support_ci_gate_coverage.subprocess.run", capture_run)
+
+    run_coverage_delta_gate(tmp_path, base_ref="main")
+
+    assert "MERGECRAFT_TEST_SPLITS" not in captured_environment
+    assert "MERGECRAFT_TEST_GROUP" not in captured_environment
+    assert "MERGECRAFT_COVERAGE_RUN_DIR" not in captured_environment
+    assert "MAKEFLAGS" not in captured_environment
+    assert "MAKEOVERRIDES" not in captured_environment
 
 
 def _bootstrap_broken_base(scratch: Path, tmp_path: Path, base_ref: str = "broken-base") -> None:

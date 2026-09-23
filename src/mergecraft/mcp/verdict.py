@@ -925,6 +925,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
         from mergecraft.config.settings_snapshot import repo_settings_from_context
         from mergecraft.review.terminal_submission import (
             append_degradation_to_summary,
+            enforce_terminal_verdict_from_finalized_findings,
             prepare_terminal_submission,
             stamped_findings_for_terminal_submission,
         )
@@ -940,7 +941,8 @@ def submit_review_verdict_tool(ctx: ToolContext):
             terminal_findings=raw_findings,
             dispatch_runs=list(ctx.tool_state.reviewer_dispatch_runs),
         )
-        merged_raw, enforced_verdict = prepare_terminal_submission(
+        requested_verdict = validated.verdict
+        merged_raw, prepared_verdict = prepare_terminal_submission(
             registry=registry,
             findings=stamped_findings,
             verdict=validated.verdict,
@@ -954,9 +956,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
             AgentFinding.model_validate(row if isinstance(row, dict) else dict(row))
             for row in merged_raw
         ]
-        validated = validated.model_copy(
-            update={"verdict": enforced_verdict, "findings": merged_findings, "summary": summary}
-        )
+        validated = validated.model_copy(update={"findings": merged_findings, "summary": summary})
         trust = (
             ctx.tool_state.trust_tier
             if ctx.tool_state.trust_tier in {"trusted", "untrusted"}
@@ -969,8 +969,17 @@ def submit_review_verdict_tool(ctx: ToolContext):
             repo_root=repo_root,
             trust_tier=trust,  # type: ignore[arg-type]
         )
+        enforced_verdict = enforce_terminal_verdict_from_finalized_findings(
+            requested=requested_verdict,
+            findings=normalized_findings,
+        )
+        # Preserve the existing fail-closed all-reviewers-degraded path. A
+        # normal finding set, including one fully removed by normalization,
+        # derives its verdict exclusively from finalized typed findings.
+        if not merged_raw and prepared_verdict == "request_changes":
+            enforced_verdict = "request_changes"
         submission_dict = {
-            "verdict": validated.verdict,
+            "verdict": enforced_verdict,
             "summary": validated.summary,
             "findings": [
                 item.model_dump() if hasattr(item, "model_dump") else item

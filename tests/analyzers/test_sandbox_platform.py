@@ -9,6 +9,7 @@ import pytest
 from loguru import logger
 
 from mergecraft.analyzers import execution, sandbox
+from mergecraft.analyzers.provision import ProvisionError
 from mergecraft.analyzers.registry import get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan
 
@@ -66,6 +67,37 @@ def test_production_execution_refuses_missing_isolation(
     assert "isolation unavailable" in reason
     assert findings[0].rule_id == "analyzers.sandbox-unavailable"
     assert not (tmp_path / "launched").exists()
+
+
+def test_execution_returns_visible_provisioning_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    manifest = get_manifest("actionlint")
+    plan = AnalyzerPlan(
+        manifest_id=manifest.id,
+        argv=("actionlint",),
+        cwd=tmp_path,
+        mode="managed",
+    )
+    monkeypatch.setattr(execution, "resolve_analyzer", lambda **_kwargs: plan)
+
+    def fail_provision(*_args: object, **_kwargs: object) -> None:
+        raise ProvisionError("download returned 404 Not Found")
+
+    monkeypatch.setattr(execution, "provision_resolved_plan", fail_provision)
+
+    raw, reason, findings = execution.run_argv(
+        manifest=manifest,
+        repo_root=tmp_path,
+        argv=plan.argv,
+        changed_files=[],
+        tier="trusted",
+    )
+
+    assert raw is None
+    assert findings == []
+    assert "managed binary provisioning failed" in (reason or "")
+    assert "404 Not Found" in (reason or "")
 
 
 def test_trusted_execution_reports_incomplete_isolation(

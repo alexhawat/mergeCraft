@@ -1,6 +1,6 @@
 # Plan 007: Make golden-case adjudication safe and round-trippable
 
-- Status: TODO — plan ready; implementation has not started
+- Status: Implemented; integrated full CI passed at `68e56cd9`; final focused checks passed. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the user-selected verification scope.
 - Issue: [#779](https://github.com/alexhawat/mergeCraft/issues/779)
 - Priority: P1; effort: M; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -77,12 +77,12 @@ Verification: run the focused gate above. A new regression should fail for the s
 
 ## Completion criteria
 
-- [ ] Adjudicating a real golden case preserves an object and loads through CorpusCase with a typed record.
-- [ ] Existing golden rows without the new keys still validate as `provenance == ""` and `adjudication is None`.
-- [ ] All accepted input shapes and policy failures preserve valid data; packaged twins remain synchronized.
-- [ ] No human labels are created as part of implementation tests outside temporary fixtures.
+- [x] Adjudicating a real golden case preserves an object and loads through CorpusCase with a typed record.
+- [x] Existing golden rows without the new keys still validate as `provenance == ""` and `adjudication is None`.
+- [x] All accepted input shapes and policy failures preserve valid data; packaged twins remain synchronized.
+- [x] No human labels are created as part of implementation tests outside temporary fixtures.
 - [ ] Focused and final gates pass; results and any environment limitation recorded.
-- [ ] `git diff --check` exits 0 and `git diff --name-only` stays in scope.
+- [x] `git diff --check` exits 0 and `git diff --name-only` stays in scope.
 - [ ] Update this status and plans/README.md; use a Conventional Commit subject ≤72 characters. Do not use --no-verify.
 
 ## Stop conditions and maintenance

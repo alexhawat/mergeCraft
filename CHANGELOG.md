@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft eval publish-benchmark` validates two saved provider runs against
+  an approved campaign manifest, independently adjudicated label and judge
+  receipts, immutable artifact and model identities, shared protocol pins, and
+  cost ceilings before writing a non-overwritable machine summary and report.
+  This is offline publication preparation: no approved human-labelled campaign,
+  live comparative result, benchmark claim, or release is included.
+
 - `mergecraft verify-behavior` now drives a real Chrome over the DevTools
   Protocol and scores each acceptance criterion and reproduction claim through
   Jev, instead of refusing every run. A reachable host Chrome yields a live
@@ -69,16 +76,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The critical-path and per-prefix coverage floors are re-measured against the
-  tree the three preceding changes produced, replacing a baseline four weeks
-  old. Every number comes from one `make coverage-measure` run on the merged
-  tree and keeps the existing buffer convention (module `measured-2` on line and
-  branch; prefix line `measured-2`, branch `measured-3`), so `utils/token.py`
-  moves off the 39.2% branch floor that let most of its branches go uncovered
-  onto the 86.2% the tree actually measures. Four floors whose measured value
-  came back lower shift down with it — each diagnosed as tree churn since the
-  old baseline, never lowered to make a gate pass — and `fail_under` stays 82
-  (#771).
+- Consumer setup guidance now lists every file produced by `mergecraft init`
+  that may be committed: the config, learnings file, workflow, and added
+  `.gitignore` lines. Authentication remains an interactive human step.
+
+- The critical-path and per-prefix coverage floors are rebaselined from one
+  complete 2026-09-22 measurement at integrated HEAD `157f57a3`. Module line
+  and branch floors use separate counts with a two point buffer; prefix line
+  floors use two points and branch floors three points. `utils/token.py`
+  measures 95.7% line and 93.2% branch, yielding floors of 93.7% and 91.2%.
+  No current floor is lower than the prior PR #817 baseline, and the native
+  combined global `fail_under = 82` is unchanged. Report hashes, runtime,
+  counts and every floor delta are recorded in `plans/COVERAGE-BASELINE.md`
+  (#771, #797, #824).
 
 - CLI `--json` payloads carry their own schema version, decoupled from the
   review snapshot's. Both stay `1.0.0`, so no payload changes; the two can now
@@ -162,6 +172,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `tests/` still fires.
 
 ### Fixed
+
+- Offline local diff materialization skips mergeCraft's generated
+  `.mergecraft/analyzer-cache/` entries before per-file untracked diff
+  generation, preventing a populated managed cache from adding thousands of
+  subprocess calls while preserving ordinary untracked source and tracked
+  changes (#829).
+
+- Managed analyzer provisioning failures now retain a bounded, redacted final
+  cause in logs and skip results, distinguishing transient GitHub release
+  outages from checksum, redirect, and other provisioning failures without
+  exposing credentials or download URLs (#825).
+
+- Persisted review trajectories redact secrets while retaining exact, safe
+  read-path attribution and ordinary repository filenames (#819, #823, #827). Terminal verdicts use normalized, deduplicated typed
+  findings, and publication retry state clears only after a matching scope/head
+  receipt is stored.
+
+- GitHub App runs mint separate least-privilege API, Git, and cross-repository
+  tokens. Cleanup attempts to revoke every internally minted token.
+
+- Coverage gates use native line/branch metrics and accept only complete,
+  fingerprinted shard sets. A single run trace covers setup through publication
+  across Action, offline, and MCP execution.
+
+- Evaluation records round-trip without dropping corpus data and write
+  atomically after validation. Offline tools prepare human-review batches,
+  score exact trajectory rule/path multiplicities, and support a sealed
+  judge-calibration protocol. The new trajectory fixtures are agent-seeded
+  development data and are ineligible for quality claims; actual human
+  validation, live-model benchmarking, release verification, and publication
+  remain pending.
 
 - The keyless shadow job is a fixture replay of two hard-coded packets. It
   does not read a live review and leaves #737 open.

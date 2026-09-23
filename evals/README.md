@@ -42,11 +42,11 @@ which it would then trivially rediscover. Every baseline row carries a mandatory
 `provenance` field for exactly this reason. Keep `provenance: human` as the
 primary corpus and report scores with and without the rest.
 
-## Calibration bar
+## Label eligibility bar
 
-Scoring reports recall and precision for any corpus. Whether those numbers may
-be called *calibrated* is a separate question, decided by label provenance
-against a configured bar.
+Scoring reports recall and precision for any corpus. Label provenance decides
+whether those labels meet a configured eligibility bar. It does not establish
+that a model judge is calibrated.
 
 ```yaml
 adjudication:
@@ -71,18 +71,27 @@ satisfy the bar by accident.
 make.
 
 Scoring still reports recall and precision for an agent-seeded corpus — the
-numbers are real and useful for regression detection. What it withholds is the
-word *calibrated*: `ScoreReport.calibration.eligible` stays `False` unless every
+numbers are real and useful for regression detection.
+`ScoreReport.calibration.eligible` stays `False` unless every
 label in the set meets `requireForCalibration`. One unadjudicated row is enough
 to sink a corpus-wide claim, because a claim about the corpus is only as good as
 its weakest label.
 
 ```text
-  calibration      : NOT calibrated — 1 of 3 labels below the 'independent' bar
+  label eligibility: ineligible — 1 of 3 labels below the 'independent' bar
 ```
 
 The same verdict is carried on `DetectionMetrics` so a persisted benchmark
-result cannot show scores without it, and appears in `eval score --json`.
+result cannot show scores without it, and appears under the backward-compatible
+`calibration` key in `eval score --json`.
+
+A separate saved-verdict protocol measures judge calibration. It compares raw
+`confirm|downgrade|drop` judge decisions with independent human references on
+disjoint, hash-pinned calibration and held-out splits. Run it with
+`make eval-judge-calibration JUDGE_CALIBRATION_PROTOCOL=... JUDGE_CALIBRATION_CASES=...`.
+An externally supplied candidate seal is required before held-out metrics are
+computed. No qualifying human-labelled paired dataset is committed yet, so no
+validated judge-calibration claim is currently available.
 
 ## Adjudication
 
@@ -270,6 +279,32 @@ separately when publishing (B7).
 
 Provider set defaults to **Claude + OpenAI**; estimate ~10–30 tokens per case for
 a minimal live probe. Full live `mergecraft review` runs are operator-triggered, not PR CI.
+
+### Keyless publication validation
+
+Live case results now carry optional versioned receipts for the exact patch,
+baseline, raw findings, elapsed time, and known-or-unknown provider cost. They
+also carry the actual detection execution identity separately from structural
+replay defaults. Older artifacts remain readable, but they cannot be published
+because those facts cannot be reconstructed honestly after a run.
+
+`mergecraft eval publish-benchmark` validates an approved two-provider campaign
+manifest and two saved result sets without credentials. It verifies independent
+label and judge-calibration receipts, immutable model pins, current and executed
+artifact hashes, shared prompt/judge/rubric/scorer pins, raw recomputed scores,
+complete case counts, and operator budget ceilings. The Make wrapper is:
+
+```bash
+make eval-publish-benchmark \
+  BENCHMARK_CAMPAIGN_MANIFEST=/path/to/campaign.json \
+  BENCHMARK_CAMPAIGN_RESULTS='/path/to/provider-a.json /path/to/provider-b.json' \
+  BENCHMARK_CAMPAIGN_OUTPUT=evals/results
+```
+
+No approved campaign manifest or real comparative result is committed. The
+agent-seeded smoke manifest remains an integrity/readiness artifact only. Model
+pins are operator declarations that must exactly equal the requested slug; the
+runner does not turn a floating provider alias into verified immutable identity.
 
 ## Harbor agent
 

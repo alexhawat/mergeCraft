@@ -15,9 +15,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 import pytest
 
-from tests.analyzers.support import finding_path_matches, import_module
+from tests.analyzers.support import (
+    finding_path_matches,
+    import_module,
+    skip_if_github_release_outage,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -118,3 +123,192 @@ def test_unprovisioned_managed_tool_skips_with_a_provisioning_reason(
     assert result.skipped is True
     reason = result.skip_reason or ""
     assert "provisioning" in reason, reason
+
+
+@pytest.mark.parametrize(
+    ("detail", "expected", "transient_outage", "http_status", "download_url"),
+    [
+        (
+            "",
+            "502",
+            True,
+            502,
+            "https://github.com/example/tool/releases/download/v1/tool",
+        ),
+        (
+            "",
+            "503",
+            True,
+            503,
+            "https://github.com/example/tool/releases/download/v1/tool",
+        ),
+        (
+            "",
+            "504",
+            True,
+            504,
+            "https://github.com/example/tool/releases/download/v1/tool",
+        ),
+        (
+            "",
+            "404",
+            False,
+            404,
+            "https://github.com/example/tool/releases/download/v1/tool",
+        ),
+        (
+            "",
+            "503",
+            False,
+            503,
+            "https://example.invalid/releases/download/v1/tool",
+        ),
+        (
+            "sha256 checksum mismatch for downloaded artifact",
+            "checksum mismatch",
+            False,
+            None,
+            None,
+        ),
+        (
+            "refusing redirect from pinned download url to an unsafe host",
+            "refusing redirect",
+            False,
+            None,
+            None,
+        ),
+        ("unexpected provisioning failure", "unexpected provisioning failure", False, None, None),
+        ("", "unspecified error", False, None, None),
+    ],
+)
+def test_managed_provisioning_preserves_final_redacted_failure_cause(
+    detail: str,
+    expected: str,
+    transient_outage: bool,
+    http_status: int | None,
+    download_url: str | None,
+    adapter_fixture_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mergecraft.analyzers import adapters as adapters_mod
+    from mergecraft.analyzers import execution
+    from mergecraft.analyzers.provision import ProvisionError
+    from mergecraft.analyzers.resolve import AnalyzerPlan
+
+    plan = AnalyzerPlan(manifest_id="hadolint", mode="managed", argv=("hadolint",))
+    attempts = 0
+
+    def fail_provision(**_kwargs: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        if http_status is not None and download_url is not None:
+            request = httpx.Request("GET", download_url)
+            response = httpx.Response(http_status, request=request)
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise ProvisionError(f"download failed for {download_url!r}: {exc}") from exc
+            pytest.fail("test HTTP status did not raise")
+        raise ProvisionError(detail)
+
+    monkeypatch.setattr(adapters_mod, "resolve_analyzer", lambda **_kwargs: plan)
+    monkeypatch.setattr(execution, "resolve_baked_binary", lambda _manifest: None)
+    monkeypatch.setattr(execution, "resolve_with_lock", fail_provision)
+    monkeypatch.setattr(execution.time, "sleep", lambda _seconds: None)
+
+    result = adapters_mod.run_adapter(
+        tool_id="hadolint",
+        repo_root=adapter_fixture_repo,
+        changed_files=["Dockerfile"],
+        tier="trusted",
+    )
+
+    assert attempts == 3
+    assert result.skipped is True
+    reason = result.skip_reason or ""
+    assert expected in reason
+    assert "https://" not in reason
+    if transient_outage:
+        with pytest.raises(pytest.skip.Exception):
+            skip_if_github_release_outage(reason)
+    else:
+        assert skip_if_github_release_outage(reason) is None
+
+
+def test_managed_provisioning_redacts_and_bounds_failure_cause(
+    adapter_fixture_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mergecraft.analyzers import adapters as adapters_mod
+    from mergecraft.analyzers import execution
+    from mergecraft.analyzers.provision import ProvisionError
+    from mergecraft.analyzers.resolve import AnalyzerPlan
+
+    canary = "ghp_1234567890abcdefghijklmnop"
+    detail = f"download failed for https://example.invalid/tool?token={canary}: {canary}" + (
+        "x" * 2_000
+    )
+    plan = AnalyzerPlan(manifest_id="hadolint", mode="managed", argv=("hadolint",))
+    monkeypatch.setattr(adapters_mod, "resolve_analyzer", lambda **_kwargs: plan)
+    monkeypatch.setattr(execution, "resolve_baked_binary", lambda _manifest: None)
+    monkeypatch.setattr(
+        execution,
+        "resolve_with_lock",
+        lambda **_kwargs: (_ for _ in ()).throw(ProvisionError(detail)),
+    )
+    monkeypatch.setattr(execution.time, "sleep", lambda _seconds: None)
+
+    result = adapters_mod.run_adapter(
+        tool_id="hadolint",
+        repo_root=adapter_fixture_repo,
+        changed_files=["Dockerfile"],
+        tier="trusted",
+    )
+
+    reason = result.skip_reason or ""
+    assert canary not in reason
+    assert "https://" not in reason
+    assert "<redacted>" in reason
+    assert len(reason) <= 512
+
+
+def test_provisioning_failure_formatter_handles_malformed_url_and_long_tool_id() -> None:
+    from mergecraft.analyzers.execution import provisioning_failure_reason
+    from mergecraft.analyzers.provision import ProvisionError
+
+    malformed_reason = provisioning_failure_reason("tool", ProvisionError("https://["))
+    long_id_reason = provisioning_failure_reason(
+        "tool-" + ("x" * 1_000), ProvisionError("download failed")
+    )
+
+    assert "<redacted-url>" in malformed_reason
+    assert "https://" not in malformed_reason
+    assert len(long_id_reason) == 512
+
+
+def test_semgrep_provisioning_error_uses_the_same_visible_contract(
+    adapter_fixture_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mergecraft.analyzers import adapters as adapters_mod
+    from mergecraft.analyzers import pattern
+    from mergecraft.analyzers.resolve import AnalyzerPlan
+
+    plan = AnalyzerPlan(manifest_id="semgrep", mode="managed", argv=("semgrep",))
+    monkeypatch.setattr(adapters_mod, "resolve_analyzer", lambda **_kwargs: plan)
+    monkeypatch.setattr(
+        pattern,
+        "provision_pip_script",
+        lambda **_kwargs: (_ for _ in ()).throw(OSError("pip cache is read-only")),
+    )
+
+    result = adapters_mod.run_adapter(
+        tool_id="semgrep",
+        repo_root=adapter_fixture_repo,
+        changed_files=["action.yml"],
+        tier="trusted",
+    )
+
+    assert result.skipped is True
+    assert "managed binary provisioning failed" in (result.skip_reason or "")
+    assert "pip cache is read-only" in (result.skip_reason or "")

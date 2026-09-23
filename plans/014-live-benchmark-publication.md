@@ -1,6 +1,6 @@
 # Plan 014: Publish a bounded reproducible two-provider detection campaign
 
-- Status: TODO — campaign tooling/report preparation has not started; live execution is BLOCKED on 013, provider/model choices, credentials, and approved spend
+- Status: Offline tooling integrated; independent verification in progress. Live execution remains pending independent labels, actual 013 validation, provider/model choices, credentials, and approved spend.
 - Issue: [#140](https://github.com/alexhawat/mergeCraft/issues/140)
 - Priority: P2; effort: M plus live-run/human time; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -25,6 +25,9 @@ bench-detect:
 - `evals/bench/smoke-manifest.json`
 - `evals/bench/campaign-manifest.json (new, after separate detection-label adjudication and 013)`
 - `src/mergecraft/evals/publication.py (new strict manifest/report validation)`
+- `src/mergecraft/evals/judge_calibration.py` and `tests/evals/test_judge_calibration.py` (shared threshold-validation extraction only; preserve calibration behavior)
+- `src/mergecraft/evals/benchmark.py` and `src/mergecraft/evals/live_run.py` (backward-compatible execution receipt fields and recording only)
+- `tests/evals/test_live_run.py` (receipt capture and older-artifact compatibility, if this file is the existing live-run test surface)
 - `src/mergecraft/cli/eval_cmd.py`
 - `Makefile`
 - `README.md`
@@ -59,6 +62,8 @@ Implement strict manifest/report validation in `publication.py`: reject unknown 
 
 Verification: Manifest validation proves the same case IDs/hashes and protocol apply to both providers; no live invocation occurs before the operator's choices and budget.
 
+Implementation reconciliation: existing `DetectionCaseResult` has counts but no patch/baseline/raw hashes, elapsed time, or actual cost. Add optional versioned execution receipts to the existing result models without breaking older artifacts, and record hashes and monotonic elapsed time at the actual per-case review boundary. Preserve `null` cost when the provider does not supply it. Older results remain readable but cannot satisfy publication evidence requirements. Publication must compare saved execution receipts to manifest identities and current verified artifacts; never infer historical execution from an unrelated current file. Tests may use mocked review functions, and their outputs remain fixtures rather than live evidence.
+
 ### 2. Reconcile publication scope
 
 Use the existing metric semantics exactly. Recall is `found/total_issues`. On open-world cases, `corpus_confirmed_precision` is a lower bound and unmatched findings remain `unadjudicated`; do not call them false positives. `strict_precision`, `false_positives`, false positives per case, and clean-case FP rate are publishable only for closed-world rows. F1 must be named `corpus-confirmed F1` when it uses the open-world lower-bound precision. Report each provider separately with `cases_run`, `cases_failed`, failed IDs, expected case count, total issues/reported/found, uncertainty intervals, raw artifact path/hash, and model/prompt/judge/rubric/corpus pins. Measure wall-clock latency in the campaign runner. Record provider-reported cost only when available; otherwise emit `cost_known=false`, `cost_usd=null`, and the configured budget ceiling, never zero. Never average providers into one ranking.
@@ -84,10 +89,10 @@ Verification: Publication tests/docs-check pass; every table value can be recomp
 ## Done criteria
 
 - [ ] Two explicitly chosen models ran the same frozen corpus with real detection outputs.
-- [ ] All failures and exclusions are visible; metric claims match the available ground truth.
+- [x] Offline validation makes all failures and exclusions visible and constrains metric claims to available ground truth.
 - [ ] A dated report and README link satisfy the agreed publication contract.
 - [ ] Relevant commands pass with actual results/limitations recorded.
-- [ ] `git diff --check` exits0; changed paths stay within scope, plus plan status/changelog.
+- [x] `git diff --check` exits0; changed paths stay within scope, plus plan status/changelog.
 - [ ] Update this plan and plans/README.md; distinguish preparation complete from blocked human/operator steps.
 
 ## Stop conditions and maintenance
@@ -95,3 +100,11 @@ Verification: Publication tests/docs-check pass; every table value can be recomp
 Missing independently adjudicated detection labels, 013 validation, provider/model choices, credentials, spend approval, immutable patches, complete execution, or operator publication acceptance blocks the live/publication step. The existing smoke manifest does not clear those gates. Never invent scores or turn structural replay into live quality evidence. Also stop/reconcile on materially drifted source, a twice-failed verification, or an out-of-scope change. Do not count skipped work as complete.
 
 Run new campaigns for materially changed models/rubrics/corpora. Keep old results immutable and document protocol differences.
+
+## Implementation review refinements
+
+Publication consumes the strict plan 013 report and requires successful calibration and held-out threshold results, a seal, and matching candidate/prompt/rubric protocol. A string declaring `validated` is insufficient. Verified raw findings and frozen baselines are rescored with the existing scorer before report values are accepted; the manifest pins closed-world status. Closed-world strict precision aggregates TP and FP counts rather than averaging per-case precision. Reports retain unadjudicated findings, closed-world FP measures, intervals, latency, source/result hashes and exact protocol pins.
+
+Historical structural model defaults are not detection execution evidence. Execution receipts must distinguish the model actually requested/executed from configured structural defaults; unavailable immutable identity remains ineligible rather than being invented. Hashes are captured at the execution boundary and mutation during review invalidates the receipt. Actual reported costs must fit the approved bounds; missing actual cost remains unknown. Existing campaign outputs are immutable. No live run or publication claim is created during implementation.
+
+The publication boundary also checks complete threshold keys and recomputes their decisions from the declared acceptance contract; empty or inconsistent threshold maps do not validate a judge. Human detection receipts bind `closed_world` in addition to patch/baseline hashes. A manually supplied model pin must be the actual model identifier dispatched, with operator-supplied provenance explicit; it is not a provider attestation that an alias resolves to a particular version. The scorer/source/prompt contract is pinned and checked before rescoring.

@@ -1,12 +1,8 @@
-"""RED contracts for Batch BC / #374 — OTel parent context + span_id (W5).
+"""OTel exporter contract for real trace, span, and parent identifiers.
 
-``OTLPSink.write`` currently writes ``parent_span_id`` as a string attribute only
-and never passes ``context=`` to ``start_span``. ``_override_span_trace_id`` rewrites
-``trace_id`` but keeps the SDK-generated ``span_id``. Logfire therefore shows every
-span as a root with mismatched column vs attribute ids.
-
-W6 overrides ``span_id`` from the event, builds parent ``SpanContext``, and passes
-``context=`` into ``start_span``. These tests xfail until W6 greens them.
+``OTLPSink.write`` maps mergeCraft identifiers onto the OTel ``SpanContext`` and
+passes a parent context to ``start_span``. The recording seam below exposes those
+SDK identifiers so this test protects the existing exporter behavior.
 """
 
 from __future__ import annotations
@@ -29,8 +25,8 @@ def _enrich_recording_with_span_context(monkeypatch: pytest.MonkeyPatch) -> None
     """Augment the recording seam with OTel ``span_id`` / parent from ``SpanContext``.
 
     Production Logfire reads column ids from OTel context, not mergeCraft attrs.
-    W6 may extend ``_RecordingSpanProcessor``; until then tests enrich the last
-    captured payload so RED contracts assert on real OTel identifiers.
+    Enrich the recording payload from the actual ended span so assertions inspect
+    those identifiers instead of the parallel mergeCraft string attributes.
     """
     pytest.importorskip("opentelemetry")
 

@@ -35,6 +35,13 @@ _BASE_MEASURE_BLOCK_RE = re.compile(
 )
 _SCRIPT_PATH = REPO_ROOT / "scripts" / "ci_coverage_delta_gate.sh"
 _WORKTREE_SUFFIX = ".ci-mergecraft-base-coverage"
+_COVERAGE_SHARD_SELECTORS = (
+    "MERGECRAFT_TEST_SPLITS",
+    "MERGECRAFT_TEST_GROUP",
+    "MERGECRAFT_COVERAGE_RUN_DIR",
+    "MAKEFLAGS",
+    "MAKEOVERRIDES",
+)
 
 
 def script_text() -> str:
@@ -184,6 +191,12 @@ def run_coverage_delta_gate(
             "CI": "true",
         }
     )
+    # This helper models the standalone integration workflow. Outer coverage
+    # shard selectors, including command-line variables propagated by Make,
+    # would turn its nested full gate into a partial-shard invocation that the
+    # Makefile correctly refuses.
+    for name in _COVERAGE_SHARD_SELECTORS:
+        env.pop(name, None)
     if extra_env:
         env.update(dict(extra_env))
     return subprocess.run(

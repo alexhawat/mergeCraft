@@ -1,6 +1,6 @@
 # Plan 011: Prepare and complete the first human adjudication batch
 
-- Status: TODO — preparation implementation has not started; completion is BLOCKED on 007, recovered evidence, and Alex's decisions
+- Status: PREPARATION COMPLETE — BLOCKED: all nine rows lack immutable code evidence and Alex's decisions
 - Issue: [#780](https://github.com/alexhawat/mergeCraft/issues/780)
 - Priority: P2; effort: M plus human review; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -78,7 +78,7 @@ Verification: make eval-gate passes; the batch report contains exactly nine inde
 
 - [ ] Every confirmed/corrected label is backed by code evidence and an actual human response.
 - [ ] All nine rows have recovered immutable evidence and actual Alex decisions before closing #780; otherwise the plan remains blocked with exact row statuses.
-- [ ] No judge calibration or trajectory-label completion is inferred from this batch.
+- [x] No judge calibration or trajectory-label completion is inferred from this batch.
 - [ ] Relevant commands pass with actual results/limitations recorded.
 - [ ] `git diff --check` exits0; changed paths stay within scope, plus plan status/changelog.
 - [ ] Update this plan and plans/README.md; distinguish preparation complete from blocked human/operator steps.

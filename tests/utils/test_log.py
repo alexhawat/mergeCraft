@@ -10,7 +10,6 @@ from mergecraft.utils import log as log_mod
 from mergecraft.utils.log import (
     bind_run_context,
     clear_run_context,
-    configure_logging,
     is_debug_enabled,
     resolve_log_format,
     resolve_log_level,
@@ -33,7 +32,6 @@ def test_resolve_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ACTIONS_STEP_DEBUG", "true")
     assert resolve_log_level() == "DEBUG"
     assert is_debug_enabled() is True
-    configure_logging(force=True)
 
 
 def test_resolve_log_format_defaults_to_text(monkeypatch: pytest.MonkeyPatch) -> None:

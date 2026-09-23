@@ -25,6 +25,12 @@ def test_source_path_remains_readable() -> None:
     assert redact_secrets(f"changed {path} today") == f"changed {path} today"
 
 
+def test_uppercase_kebab_source_path_remains_readable() -> None:
+    path = "docs/REVIEW-DOCTRINE.md"
+    assert redact_secrets(path) == path
+    assert redact_secrets(f"changed {path} today") == f"changed {path} today"
+
+
 def test_secret_inside_source_path_is_still_redacted() -> None:
     secret = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890"
     assert secret not in redact_secrets(f"src/{secret}/redact.py")

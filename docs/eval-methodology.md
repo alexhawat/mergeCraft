@@ -27,6 +27,84 @@ requirements, large-PR, and incremental-review.
 
 APIs: `mergecraft.evals.corpora`, `mergecraft.evals.quality_metrics`.
 
+### Authoring and packaged copies
+
+`evals/cases/` is the only authoring tree for the package-backed `golden/`,
+`mutation/`, and `skill/` corpora. After editing or adding a case, run
+`make eval-cases-sync`, review both the authoring file and its copy under
+`src/mergecraft/evals/cases/`, then run `make eval-cases-sync-check`. The sync
+is one way and does not delete stale packaged-only files; deleting a case
+requires an explicit reviewed deletion from both trees.
+
+At runtime, `mergecraft.evals.corpora` loads an explicit cwd-relative
+`evals/cases/<kind>` directory first, packaged wheel resources second, and the
+checkout-relative authoring tree last. `mergecraft eval adjudicate` changes
+only the path passed by the operator. It does not infer or update another copy,
+an installed wheel, or an unrelated custom corpus.
+
+### First human adjudication batch
+
+`evals/adjudication/golden-batch-001.json` is the strict preparation manifest
+for the nine golden rows tracked by #780. Render its review sheet with:
+
+```bash
+make eval-human-batch
+```
+
+The committed manifest names `alexhawat` as the intended adjudicator, but all
+nine rows remain `evidence_status: missing` and `decision: pending`. Repository
+history shows that commit `3ff1bb39d6a5c2035c19c793131c493b591cf98d`
+introduced the metadata files; it contains no source patch, originating
+repository, PR, or immutable code snapshot and is therefore history, not
+substantive evidence for the claims. The review sheet keeps every row visibly
+unanswered. No row may receive human provenance until immutable evidence is
+recovered and the named human supplies an actual decision.
+
+The manifest validates source URLs as commit-pinned, confines any local
+fixture to `evals/fixtures/golden/<case-id>/`, and verifies its SHA-256 before
+rendering. This batch establishes neither judge calibration nor human-human
+agreement, even after its provenance requirements are eventually satisfied.
+
+### Judge calibration
+
+Label provenance only determines whether labels are eligible for scoring. It
+does not establish that the verifier judge is calibrated. A judge-calibration
+report requires frozen, disjoint calibration and held-out splits containing
+saved verifier verdicts paired with independent human references.
+
+```bash
+make eval-judge-calibration \
+  JUDGE_CALIBRATION_PROTOCOL=/path/to/protocol.json \
+  JUDGE_CALIBRATION_CASES=/path/to/cases.json \
+  JUDGE_CALIBRATION_SEAL=/path/to/candidate-seal.json
+```
+
+The command is keyless and reads saved verdicts only. It verifies case hashes,
+judge/model/rubric pins, deterministic checks, human provenance, split class
+coverage, and every explicit threshold. Without an externally created seal it
+returns a provisional calibration-only report and does not score the held-out
+split. There is currently no qualifying human-labelled dataset in this
+repository, so the real held-out run remains pending. Test fixtures exercise
+the protocol without being presented as human decisions.
+
+### Trajectory auditor scoring
+
+`mergecraft eval trajectory-score --labels PATH --json` scores the eight
+deterministic trajectory checks against a strict, versioned label set. Matching
+uses exact `(rule_id, path)` multiplicities. Predictions attached to an
+`unknown` label stay in the raw report but do not enter confusion counts or
+run-level exact match. Undefined precision and recall remain JSON `null`.
+
+The committed rows under `evals/trajectories/development/` are explicitly
+`agent-seeded`. They include positive, negative, and unknown examples for every
+check and exercise the offline scorer through `make eval-trajectory`; they are
+not an independently labelled quality baseline. The report therefore remains
+advisory with `quality_eligible: false`, even when a separate input contains
+human provenance. Quality eligibility needs a maintainer-approved manifest
+that freezes sample minimums, split membership, and tolerances before held-out
+scores are viewed. The golden finding metadata prepared for #780 does not
+contain tool-call trajectories and cannot supply these labels.
+
 ## Metric set
 
 Computed by `mergecraft.evals.quality_metrics.compute_quality_metrics` against
@@ -62,7 +140,7 @@ hypotheses until a live result set fills them.
 
 `make eval-gate` and `make eval-replay` check structural case integrity and
 replay expected decisions without a provider. They do not measure live detection.
-Use `make bench-detect BENCH_DETECT_ARGS='--model PROVIDER/MODEL --detection-corpus PATH --results-dir PATH --json'`
+Use `make bench-detect BENCH_DETECT_ARGS='--model PROVIDER/IMMUTABLE_MODEL_ID --model-pin PROVIDER/IMMUTABLE_MODEL_ID --detection-corpus PATH --results-dir PATH --json'`
 once per chosen model against the same frozen, patch-bearing corpus. Record its
 Git tree SHA, exact model, rubric/source pins, expected case count, executed
 case count, errors, latency and cost alongside each result. A missing detection
@@ -77,6 +155,27 @@ campaign size. Preserve raw case results for adjudication. Unmatched findings
 remain unadjudicated when the reference labels are incomplete. Publish measured
 results here or under `evals/results`, with a README link rather than unsupported
 landing-page scores; reconcile #140's publication contract before closure.
+
+After two complete saved runs exist, the keyless publication command verifies
+the independently adjudicated label receipt, validated judge-calibration
+receipt, current corpus hashes, immutable execution identities, raw finding
+hashes, per-case scores, shared protocol pins, and configured cost ceilings:
+
+```bash
+make eval-publish-benchmark \
+  BENCHMARK_CAMPAIGN_MANIFEST=/path/to/campaign.json \
+  BENCHMARK_CAMPAIGN_RESULTS='/path/to/provider-a.json /path/to/provider-b.json' \
+  BENCHMARK_CAMPAIGN_OUTPUT=evals/results
+```
+
+Older result sets remain readable but lack the execution receipts required for
+publication. Unknown provider cost stays `null`; the report records the
+approved conservative reservation without presenting it as measured spend.
+The model pin is explicitly operator-declared and must equal the requested
+slug; this runner does not prove that a provider alias resolved to a particular
+backend revision. A floating slug is therefore not suitable for a publication
+manifest. No independently labelled campaign manifest or live result is
+committed yet.
 
 `make test-wheel-corpus` installs the built wheel in a temporary target and
 runs convergence outside the source checkout. This verifies packaging only.

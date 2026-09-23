@@ -117,6 +117,14 @@ def _reviews_gitignore_line() -> str:
     return COMPLETED_REVIEWS_GITIGNORE_LINE
 
 
+def _analyzer_cache_gitignore_line() -> str:
+    return ".mergecraft/analyzer-cache/"
+
+
+def _analyzers_lock_gitignore_line() -> str:
+    return ".mergecraft/analyzers.lock"
+
+
 def _ensure_gitignore_line(root: Path, line: str) -> None:
     """Ensure consumer ``.gitignore`` contains ``line`` once."""
     gitignore_path = root / ".gitignore"
@@ -139,6 +147,12 @@ def _ensure_audit_jsonl_gitignore(root: Path) -> None:
 def _ensure_reviews_gitignore(root: Path) -> None:
     """Ensure consumer ``.gitignore`` ignores durable local review artifacts."""
     _ensure_gitignore_line(root, _reviews_gitignore_line())
+
+
+def _ensure_analyzer_runtime_gitignore(root: Path) -> None:
+    """Ensure generated managed analyzer state stays out of consumer worktrees."""
+    _ensure_gitignore_line(root, _analyzer_cache_gitignore_line())
+    _ensure_gitignore_line(root, _analyzers_lock_gitignore_line())
 
 
 def _parse_git_remote() -> tuple[str, str] | None:
@@ -219,6 +233,7 @@ def run(
 
     _ensure_audit_jsonl_gitignore(root)
     _ensure_reviews_gitignore(root)
+    _ensure_analyzer_runtime_gitignore(root)
 
     if config_path.is_file():
         seed_builtin_providers(config_path)

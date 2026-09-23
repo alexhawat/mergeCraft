@@ -1,7 +1,8 @@
 # Plan 003: Separate Git access from reviewer API permissions
 
-- Status: TODO
+- Status: Implemented; integrated full CI passed at `68e56cd9`; final focused checks passed. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the user-selected verification scope.
 - Issue: [#821](https://github.com/alexhawat/mergeCraft/issues/821)
+- Related lifecycle defect found during implementation: [#828](https://github.com/alexhawat/mergeCraft/issues/828).
 - Priority: P1; effort: M; change risk: HIGH; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
 - Dependencies: None.
@@ -80,6 +81,8 @@ Cover acquisition failure, missing installation grants, partial mint cleanup, an
 Verification: run the focused gate above. A new regression should fail for the specified behavior before implementation; after the fix all selected cases must pass. Do not accept an import/fixture error as the expected failure.
 
 ## Completion criteria
+
+Implementation review amendment: `revoke_installation_token` currently ignores the DELETE response status and logs success even for 401/403/5xx. Check the HTTP status before logging success, preserve best-effort cleanup of all other owned tokens, and add mocked success/rejection regressions with redacted diagnostics. This is inside the existing token.py/test_token.py scope and must be verified before closing #828.
 
 - [ ] MockTransport requests include the required reviewer permissions and preserve read-only Git when push is disabled.
 - [ ] API, git-write, and xrepo-read repository scopes are explicit; the primary repository remains available to the reviewer API token.

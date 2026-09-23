@@ -20,10 +20,12 @@ stub at the same seam instead.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import shutil
 import tempfile
+import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -42,7 +44,9 @@ from mergecraft.evals.benchmark import (
     BenchmarkResultSet,
     DetectionCase,
     DetectionCaseResult,
+    DetectionExecutionReceipt,
     DetectionMetrics,
+    DetectionRunIdentity,
     run_structural_replay,
 )
 from mergecraft.evals.scoring import (
@@ -166,6 +170,7 @@ def run_live_detection(
     results_dir: Path,
     slack: int = DEFAULT_LINE_SLACK,
     required_provenance: IndependenceTier = "independent",
+    immutable_model_pin: str | None = None,
 ) -> DetectionMetrics:
     """Drive every case through ``review_fn``, score it, and fold the results.
 
@@ -203,21 +208,36 @@ def run_live_detection(
         # contributes its provenance. The contract is that *every* corpus label
         # meets the bar; collecting only from successful cases would let a run
         # with a failed agent-seeded case report itself calibrated.
-        baseline_payload = json.loads(case.baseline_path.read_text(encoding="utf-8"))
+        patch_sha256 = hashlib.sha256(case.patch_path.read_bytes()).hexdigest()
+        baseline_bytes = case.baseline_path.read_bytes()
+        baseline_sha256 = hashlib.sha256(baseline_bytes).hexdigest()
+        baseline_payload = json.loads(baseline_bytes)
         issues = load_baseline_issues(baseline_payload)
         all_provenances.extend(issue.provenance for issue in issues)
 
         try:
+            started_at = time.monotonic()
             raw_rows = review_fn(case)
         except ReviewRunFailed as exc:
             logger.warning("detection case {} review failed: {}", case.case_id, exc)
             failed_case_ids.append(case.case_id)
             continue
+        elapsed_seconds = time.monotonic() - started_at
+        if (
+            hashlib.sha256(case.patch_path.read_bytes()).hexdigest() != patch_sha256
+            or hashlib.sha256(case.baseline_path.read_bytes()).hexdigest() != baseline_sha256
+        ):
+            logger.warning(
+                "detection case {} changed its patch or baseline during review; "
+                "refusing an execution receipt",
+                case.case_id,
+            )
+            failed_case_ids.append(case.case_id)
+            continue
 
-        (raw_dir / f"{case.case_id}.json").write_text(
-            json.dumps({"findings": raw_rows}, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        raw_path = raw_dir / f"{case.case_id}.json"
+        raw_bytes = (json.dumps({"findings": raw_rows}, indent=2, sort_keys=True) + "\n").encode()
+        raw_path.write_bytes(raw_bytes)
         findings = load_reported_findings({"findings": raw_rows})
 
         report = score_findings(
@@ -263,6 +283,15 @@ def run_live_detection(
                 corpus_confirmed_precision=report.corpus_confirmed_precision,
                 f1=report.f1,
                 strict_precision=report.strict_precision if case.closed_world else None,
+                execution_receipt=DetectionExecutionReceipt(
+                    patch_sha256=patch_sha256,
+                    baseline_sha256=baseline_sha256,
+                    raw_findings_path=str(raw_path),
+                    raw_findings_sha256=hashlib.sha256(raw_bytes).hexdigest(),
+                    elapsed_seconds=elapsed_seconds,
+                    cost_known=False,
+                    cost_usd=None,
+                ),
             )
         )
 
@@ -278,6 +307,13 @@ def run_live_detection(
         # Fold the per-case label provenance into one corpus-level verdict so
         # the persisted artifact carries it, not just the transient reports.
         calibration=calibration_status(all_provenances, required=required_provenance),
+        execution_identity=DetectionRunIdentity(
+            provider=provider,
+            requested_model=model,
+            executed_model=model,
+            immutable_model_pin=immutable_model_pin,
+            pin_provenance=("operator-declared" if immutable_model_pin is not None else None),
+        ),
     )
 
 
@@ -338,6 +374,7 @@ def run_detection(
     results_dir: Path,
     review_fn: ReviewFn | None = None,
     required_provenance: IndependenceTier = "independent",
+    immutable_model_pin: str | None = None,
 ) -> tuple[DetectionMetrics | None, str | None]:
     """Run detection if possible, or report exactly why it was skipped.
 
@@ -359,6 +396,7 @@ def run_detection(
         review_fn=resolved_review_fn,
         results_dir=results_dir,
         required_provenance=required_provenance,
+        immutable_model_pin=immutable_model_pin,
     )
     return metrics, None
 
@@ -373,6 +411,7 @@ def run_full_benchmark(
     detection_model: str,
     review_fn: ReviewFn | None = None,
     required_provenance: IndependenceTier = "independent",
+    detection_model_pin: str | None = None,
 ) -> BenchmarkResultSet:
     """Join structural decision replay with the live detection run.
 
@@ -398,6 +437,7 @@ def run_full_benchmark(
         results_dir=results_dir,
         review_fn=review_fn,
         required_provenance=required_provenance,
+        immutable_model_pin=detection_model_pin,
     )
     return structural.model_copy(update={"detection": metrics, "skipped_reason": skipped_reason})
 

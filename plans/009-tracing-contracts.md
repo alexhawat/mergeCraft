@@ -1,6 +1,6 @@
 # Plan 009: Reconcile tracing contracts and root the complete review lifecycle
 
-- Status: TODO
+- Status: Implemented; integrated full CI passed at `68e56cd9`; final focused checks passed. See [IMPLEMENTATION.md](IMPLEMENTATION.md) for the user-selected verification scope.
 - Issue: [#798](https://github.com/alexhawat/mergeCraft/issues/798)
 - Priority: P2; effort: M–L; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -96,3 +96,17 @@ Verification: run the focused gate above. A new regression should fail for the s
 Stop if a proposed span contract requires inventing events or changing fallback dispatch semantics. Do not restore broken fixture constructors or xfail the real regression. Also stop and reconcile if source excerpts have drifted, a prerequisite is incomplete, two reasonable verification attempts fail, or an out-of-scope change is necessary. Never label skipped checks as passed.
 
 Span lifecycle ownership must remain above all reached review phases. Any boundary that does not inherit Python task context uses explicit trace identity; do not assume ambient `ContextVar` inheritance.
+
+## Implemented contract reconciliation
+
+| Original concern | Verified contract and disposition |
+|---|---|
+| Analyzer spans | Existing synchronous adapter instrumentation is preserved; findings, empty results and failures have behavioral tests. |
+| Attempt indices and stop behavior | Indices describe configured models. Execution stops after success/nonretryable failure; remaining configured entries may emit `not_visited` spans. Span count is not executed-attempt count. No fallback policy was changed. |
+| Per-attempt usage | Existing usage stamping is retained and exact values are asserted for the attempts that execute. |
+| Complete lifecycle root | Action and offline orchestration now own one context-local root through publication; standalone chains create a root only when necessary. |
+| Detached MCP tasks | An immutable explicit trace parent bridges server task scheduling; all recorded child parents resolve within the run. |
+| Exported trace identity | Existing OTel identity forwarding is retained and independently tested through the real Docker collector. |
+| Setup timeout | Moving root ownership does not expand the existing setup budget: setup is bounded and remaining credential time is reduced by elapsed setup time. |
+
+Independent verification is recorded in [IMPLEMENTATION.md](IMPLEMENTATION.md). The integrated full gate passed; the user selected focused checks for the final test-only changes. No skipped check is counted as passed.

@@ -80,5 +80,32 @@ def test_two_runs_at_same_lock_resolve_identically(tmp_path: Path) -> None:
 def test_github_release_outage_is_an_environment_skip() -> None:
     with pytest.raises(pytest.skip.Exception, match="504 Gateway Time-out"):
         skip_if_github_release_outage(
-            "Server error '504 Gateway Time-out' for url 'https://github.com/'"
+            "Server error '504 Gateway Time-out' for url "
+            "'https://github.com/rhysd/actionlint/releases/download/v1/actionlint'"
         )
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_only_github_release_transient_statuses_are_environment_skips(status: int) -> None:
+    detail = (
+        f"download failed for 'https://github.com/example/tool/releases/download/v1/tool': "
+        f"server error '{status} temporary failure'"
+    )
+
+    with pytest.raises(pytest.skip.Exception):
+        skip_if_github_release_outage(detail)
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "download failed for 'https://github.com/example/tool/releases/download/v1/tool': 404",
+        "checksum mismatch for GitHub release artifact",
+        "unsafe redirect from GitHub release download",
+        "generic failure containing unrelated number 503",
+        "server error '503' for https://example.invalid/releases/download/tool",
+        "",
+    ],
+)
+def test_permanent_or_unidentified_provisioning_failures_are_not_skipped(detail: str) -> None:
+    assert skip_if_github_release_outage(detail) is None

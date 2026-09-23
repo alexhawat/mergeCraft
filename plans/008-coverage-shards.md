@@ -1,6 +1,6 @@
 # Plan 008: Measure isolated raw coverage shards and gate only a complete set
 
-- Status: TODO
+- Status: Implemented; focused real parity and prior complete CI/combined gates passed. Final whole-suite parity repeat skipped at user request; see [IMPLEMENTATION.md](IMPLEMENTATION.md).
 - Issue: [#785](https://github.com/alexhawat/mergeCraft/issues/785)
 - Priority: P2; effort: M; change risk: MED; confidence: HIGH.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -23,6 +23,7 @@ coverage-measure:
 Only these implementation paths, plus this plan's status and an appropriate changelog entry:
 - `Makefile`
 - `scripts/coverage_shards.py` (new orchestrator, manifest validator and pytest collection recorder)
+- `.gitignore` (ignore isolated `.coverage-shards/` runtime outputs)
 - `tests/ci/test_coverage_shards.py` (new)
 - `tests/ci/test_coverage_ratchet.py` (CI graph assertion only if needed)
 - `CONTRIBUTING.md`
@@ -52,7 +53,7 @@ Start a clean branch `codex/008-coverage-shards` from updated main. Preserve the
 3. If dependencies are absent, `make setup` in the implementation checkout only.
 4. Focused gate: `make test MERGECRAFT_PYTEST_JOBS=0 PYTEST='uv run pytest -k "coverage_shards or coverage_ratchet"'`.
 5. Static gates: `make lint typecheck pyright`.
-6. Whole-suite parity is an explicit two-measurement acceptance check. After it passes, run one final `make ci` on the exact final tree; do not repeat unchanged full coverage runs.
+6. Whole-suite parity is an explicit two-measurement acceptance check. Use the unsharded coverage measurement from final default `make ci` as one side, and a fresh two-shard measurement of the same source/config/seed as the other. Preserve the unsharded report before combination. Do not repeat an unchanged full run solely to reorder these independent checks.
 
 ## Implementation steps
 
@@ -107,3 +108,13 @@ Verification: run the focused gate above. A new regression should fail for the s
 Stop if actual executed node IDs cannot be recorded, their union cannot be compared with the complete eligible collection, or coverage.py cannot combine isolated raw databases without path/config drift. Do not weaken floors, accept manifests by count alone, or parallelize `ci-resume` stages as a workaround. Also stop and reconcile if source excerpts have drifted, a prerequisite is incomplete, two reasonable verification attempts fail, or an out-of-scope change is necessary. Never label skipped checks as passed.
 
 Refresh the manifest schema deliberately when collection inputs or tool versions change. Cleanup may remove only the exact completed run directory it created, never a broad `.coverage.*` glob shared with another run.
+
+Implementation reconciliation: snapshot compatibility metadata before the test process and reject changed inputs afterward. Include test-selection/configuration and fixture inputs in the dirty fingerprint. Under xdist, record actual post-filter worker collections on the controller and write one node-ID receipt only after successful completion. Combine only the validated raw files, never all files found in their directories. The default serial gate must propagate failures from measurement and each subsequent policy check.
+
+## Final review refinement
+
+Combine-time fresh collection can execute imports and hooks. Recheck the expected source/runtime metadata after that collection and around combination, JSON rendering and gates; reject drift rather than gating old measurements against new source. Add regressions for mutations during fresh collection and reporting. This closes a reproduced gap in the existing complete-set contract.
+
+## Final verification scope
+
+The user requested a smaller final test set instead of another full CI run. All 74 focused coverage tests passed (one complete-report-dependent check skipped), including real miniature two-shard/xdist parity. Prior complete CI and whole-suite combined gates passed, but their exact coverage sets differed by two lines and four branches. Explicit deterministic tests now cover those paths; the final whole-suite comparison remains unverified and is not represented as passed. This does not change any production validation, completeness or coverage-floor rule.

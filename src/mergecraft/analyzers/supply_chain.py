@@ -14,10 +14,15 @@ from typing import TYPE_CHECKING, Final, Literal
 from loguru import logger
 
 from mergecraft.analyzers.adapters import AdapterRunResult
-from mergecraft.analyzers.execution import finalize_plan, provision_resolved_plan
+from mergecraft.analyzers.execution import (
+    finalize_plan,
+    provision_resolved_plan,
+    provisioning_failure_reason,
+)
 from mergecraft.analyzers.parsers import parse_output
 from mergecraft.analyzers.parsers.osv_json import _severity_rank
 from mergecraft.analyzers.paths import safe_repo_relative_path
+from mergecraft.analyzers.provision import ProvisionError
 from mergecraft.analyzers.registry import get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv
 from mergecraft.analyzers.run import run_plan
@@ -52,8 +57,11 @@ def _provision_plan(
     *,
     manifest: AnalyzerManifest,
     repo_root: Path,
-) -> AnalyzerPlan | None:
-    return provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
+) -> tuple[AnalyzerPlan | None, str | None]:
+    try:
+        return provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root), None
+    except ProvisionError as exc:
+        return None, provisioning_failure_reason(manifest.id, exc)
 
 
 def _resolve_base_file_rel(repo_root: Path, head_rel: str, base_ref: str | None) -> str | None:
@@ -270,9 +278,9 @@ def _run_osv_scan(
         managed_available=True,
         allow_repo_binaries=allow_repo_binaries,
     )
-    provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
+    provisioned, provision_failure = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
-        return [], plan.reason or f"skipped {manifest.id}: provisioning failed"
+        return [], provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
 
     existing = [rel for rel in lockfiles if safe_repo_relative_path(repo_root, rel) is not None]
     argv = expand_analyzer_argv(provisioned.argv, repo_root=repo_root, changed_files=existing)
@@ -388,9 +396,9 @@ def _run_trivy_fs(
         managed_available=True,
         allow_repo_binaries=allow_repo_binaries,
     )
-    provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
+    provisioned, provision_failure = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
-        return [], plan.reason or f"skipped {manifest.id}: provisioning failed"
+        return [], provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
 
     binary = provisioned.argv[0] if provisioned.argv else "trivy"
     argv = (
@@ -479,9 +487,9 @@ def _run_trivy_config(
         managed_available=True,
         allow_repo_binaries=allow_repo_binaries,
     )
-    provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
+    provisioned, provision_failure = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
-        return [], plan.reason
+        return [], provision_failure or plan.reason
 
     paths = [str(repo_root / rel) for rel in iac_files if (repo_root / rel).is_file()]
     if not paths:

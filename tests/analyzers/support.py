@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,15 +16,15 @@ MANIFEST_FIXTURES = FIXTURES_DIR / "manifests"
 # W0.8 canary — must never escape any output path (D8).
 CANARY_SECRET = "sk-canary-w0-8-do-not-leak-7f3a9b2c1d4e5f6a"
 
-_GITHUB_RELEASE_OUTAGE_NEEDLES = (
-    "gateway time-out",
-    "gateway timeout",
-    "returned error: 502",
-    "returned error: 503",
-    "returned error: 504",
-    "server error '502",
-    "server error '503",
-    "server error '504",
+_GITHUB_RELEASE_ORIGIN_RE = re.compile(
+    r"(?:<github-release-url>|https://github\.com/[^\s/]+/[^\s/]+/releases/)",
+    re.IGNORECASE,
+)
+_GITHUB_RELEASE_TRANSIENT_RE = re.compile(
+    r"(?:server error\s*['\"]?|returned error:\s*|http\s+|status(?: code)?\s*[:=]?\s*)"
+    r"(?:502|503|504)\b|\b(?:502\s+bad gateway|503\s+service unavailable|"
+    r"504\s+gateway time(?:-out|out))\b",
+    re.IGNORECASE,
 )
 
 
@@ -31,8 +32,7 @@ def skip_if_github_release_outage(detail: str) -> None:
     """Skip live GitHub-releases downloads when GitHub returns 5xx."""
     import pytest
 
-    blob = detail.casefold()
-    if any(needle in blob for needle in _GITHUB_RELEASE_OUTAGE_NEEDLES):
+    if _GITHUB_RELEASE_ORIGIN_RE.search(detail) and _GITHUB_RELEASE_TRANSIENT_RE.search(detail):
         pytest.skip(detail.strip() or "GitHub releases 5xx")
 
 

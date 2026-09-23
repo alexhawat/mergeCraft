@@ -1,33 +1,16 @@
-"""W3.5 / D11 — ``usage_entries`` is consumed or deleted.
+"""Per-attempt model usage reaches the matching ``llm.call`` span.
 
-D11: "``usage_entries`` gets a consumer in B, or it is deleted in B." The
-contract has two acceptable outcomes:
-
-1. **Consumer**: token and cost attributes (``cost.tokens_in``,
-   ``cost.tokens_out``, ``cost.cache_read``, ``cost.cache_write``,
-   ``cost.usd``) reach ``llm.call`` spans via reads from
-   ``ToolState.usage_entries``. No reader exists today (the field is
-   write-only — finding 2).
-2. **Deletion**: ``ToolState.usage_entries`` is removed entirely, the
-   ``append`` at ``main.py`` is gone, and no consumer is needed.
-
-These tests pin both behaviours by checking what **the production code
-path** does after a successful run. We do not lock the field name or
-attribute keys (the issue's §4 names them; W4 chooses the exact spelling);
-we lock the **observable** outcome:
-
-- ``llm.call`` spans carry token + cost attributes *or* the field is gone
-  from ``ToolState`` and nothing appends to it.
-
-Both cases are accepted by the test; the RED suite lets W4 choose either
-path.
+The step summary consumes aggregate ``ToolState.usage_entries``. These tests
+protect the complementary trace contract: each executed model-chain attempt
+stamps its own exact token, cache, and cost values on its ``llm.call`` span,
+including retryable failures before the eventual winner.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from tests.tracing.instrumentation.conftest import make_agent_usage
+from tests.tracing.instrumentation.conftest import make_agent_result, make_agent_usage
 
 
 def _build_settings() -> Any:
@@ -82,46 +65,41 @@ def test_usage_entries_are_consumed(captured_sink: Any) -> None:
     assert llm_calls, "no llm.call spans recorded — usage has no consumer"
 
     attrs = llm_calls[0].attrs
-    cost_attrs = {
-        key: attrs[key] for key in attrs if isinstance(key, str) and key.startswith("cost.")
-    }
-    assert cost_attrs, f"llm.call span must carry cost.* attributes; got keys: {sorted(attrs)}"
-    # Tokens / cost must round-trip from AgentUsage.
-    for needle in (200, 80, 0.0123):
-        assert any(value == needle for value in cost_attrs.values()), (
-            f"value {needle} not found in cost.* attrs: {cost_attrs}"
-        )
+    assert attrs["cost.tokens_in"] == 200
+    assert attrs["cost.tokens_out"] == 80
+    assert attrs["cost.cache_read"] == 40
+    assert attrs["cost.cache_write"] == 10
+    assert attrs["cost.usd"] == 0.0123
 
 
-def test_usage_entries_field_may_be_deleted(captured_sink: Any) -> None:
-    """W3.5 — D11 alternative: the field may be deleted.
-
-    If W4 chose deletion, ``ToolState.usage_entries`` does not exist and
-    nothing appends to ``tool_state.usage_entries``. The test asserts the
-    field's absence (or, if it still exists for backward-compat, that it
-    stays empty after a successful run).
-
-    Both outcomes are acceptable per D11.
-    """
-    from mergecraft.agents.shared import AgentResult
-    from mergecraft.mcp.tool_state import ToolState
-
-    settings = _build_settings()
-    usage = make_agent_usage(input_tokens=10, output_tokens=5, cost_usd=0.0001)
-    results = [AgentResult(success=True, usage=usage)]
+def test_each_executed_attempt_carries_its_own_usage(captured_sink: Any) -> None:
+    """Retry usage stays on its attempt rather than leaking to the winner."""
+    settings = _build_settings().model_copy(
+        update={"models": ["anthropic/claude-sonnet", "openai/gpt-5"]}
+    )
+    results = [
+        make_agent_result(
+            success=False,
+            error="rate limited",
+            retryable=True,
+            usage=make_agent_usage(input_tokens=10, output_tokens=5, cost_usd=0.0001),
+        ),
+        make_agent_result(
+            success=True,
+            usage=make_agent_usage(input_tokens=20, output_tokens=8, cost_usd=0.0002),
+        ),
+    ]
     _drive_chain(settings, results)
 
-    has_field = "usage_entries" in ToolState.__dataclass_fields__
-    if has_field:
-        # If the field is still on ToolState (legacy compat), the test
-        # accepts an empty post-run list as a "consumer took it" outcome.
-        # We cannot inspect ``tool_state`` here without plumbing, so we
-        # only assert the field is *plumbed*. W4 may also keep the field
-        # for backward compat with prior wave consumers.
-        pass
+    captured_sink.record()
+    llm_calls = captured_sink.by_kind.get("llm.call", [])
+    assert len(llm_calls) == 2
+    assert [call.attrs["cost.tokens_in"] for call in llm_calls] == [10, 20]
+    assert [call.attrs["cost.tokens_out"] for call in llm_calls] == [5, 8]
+    assert [call.attrs["cost.usd"] for call in llm_calls] == [0.0001, 0.0002]
 
 
 __all__ = [
+    "test_each_executed_attempt_carries_its_own_usage",
     "test_usage_entries_are_consumed",
-    "test_usage_entries_field_may_be_deleted",
 ]

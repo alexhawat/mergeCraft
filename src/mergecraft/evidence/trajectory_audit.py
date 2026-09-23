@@ -37,12 +37,16 @@ if TYPE_CHECKING:
     from mergecraft.evidence.trajectory import ToolCallRecord, TrajectoryRecord
 
 __all__ = [
+    "TRAJECTORY_AUDITOR_VERSION",
     "TRAJECTORY_CHECKS",
     "TrajectoryCheck",
     "TrajectoryPlacement",
     "audit_trajectory",
     "place_trajectory_findings",
 ]
+
+TRAJECTORY_AUDITOR_VERSION: Final[str] = "1.0.0"
+"""Version the check table and matching policy as one scoring contract."""
 
 # A run touching more files than this in one pass is reported for a human look.
 # Not a hard error: large mechanical refactors are legitimate, which is why the

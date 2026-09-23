@@ -27,6 +27,7 @@ venv/
 htmlcov/
 coverage.xml
 coverage.json
+.coverage-shards/
 .cache/
 .pyright/
 

@@ -525,6 +525,10 @@ def _existing_publication_response(
     review = ctx.tool_state.review
     if review is None or not commit_id or review.reviewed_sha != commit_id:
         return None
+    # Callers establish the current PR scope and head before reaching this
+    # idempotent match. The recorded receipt therefore resolves any stale
+    # failure state without creating a duplicate review.
+    ctx.tool_state.terminal_publication_failed = False
     return {
         "success": True,
         "skipped": True,
@@ -1172,6 +1176,10 @@ async def _publish_github_review(
         node_id=str(result.get("node_id") or ""),
         reviewed_sha=payload.get("commit_id"),
     )
+    # Clear only after the response has yielded a parseable id and the local
+    # receipt has been stored. Failed or malformed retry responses remain
+    # unresolved and continue to fail closed in final outcome classification.
+    ctx.tool_state.terminal_publication_failed = False
     _maybe_suggest_eval_add(ctx)
     ctx.tool_state.approval = ApprovalRecord(
         would_approve=approved,

@@ -1,4 +1,4 @@
-"""Shared fixtures for Batch B RED suite — span tree instrumentation.
+"""Shared fixtures for span-tree instrumentation contracts.
 
 The Batch A conftest (``tests/tracing/conftest.py``) owns the trace-dir and
 event-data fixtures used by the config/sinks/redaction contracts. This
@@ -8,9 +8,7 @@ shadow those fixtures.
 What this conftest pins for W3:
 
 - A factory that resolves ``RepoSettings.tracing`` to a live ``MemorySink``
-  through the existing ``sink_factory`` (Batch A's public surface). W4 must
-  make the production emit sites route through the same factory so the
-  asserts below see the span tree.
+  through the production ``sink_factory`` surface.
 - The minimum correlation attribute set required on the root span (W3.4):
   ``run_id``, ``repo``, ``pr_number``, ``commit_sha``, ``workflow_run_id``,
   ``job_id``.
@@ -64,9 +62,8 @@ class CapturedSink:
 def captured_sink() -> Iterator[CapturedSink]:
     """Resolve ``RepoSettings.tracing`` to a live ``MemorySink``.
 
-    W4 must expose the same ``sink_factory``-driven surface from
-    ``mergecraft.tracing``; until then the returned ``CapturedSink.memory``
-    starts empty and the xfail assertions below turn green.
+    Production emit sites route through this ``sink_factory``-driven surface,
+    so the returned wrapper observes the same redacted event tree.
 
     Also resets the process-wide ``Tracer`` cache introduced in W4 (#292)
     so each test gets a fresh ``Tracer`` bound to *its* ``MemorySink``.

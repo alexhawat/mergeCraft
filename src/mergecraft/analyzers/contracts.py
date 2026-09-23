@@ -9,11 +9,16 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from mergecraft.analyzers.adapters import AdapterRunResult
-from mergecraft.analyzers.execution import provision_resolved_plan, run_argv
+from mergecraft.analyzers.execution import (
+    provision_resolved_plan,
+    provisioning_failure_reason,
+    run_argv,
+)
 from mergecraft.analyzers.parsers.buf_native import parse_buf_breaking_json, parse_buf_lint_json
 from mergecraft.analyzers.parsers.oasdiff_json import parse_oasdiff_json
 from mergecraft.analyzers.parsers.squawk_json import parse_squawk_json
 from mergecraft.analyzers.paths import safe_repo_relative_path
+from mergecraft.analyzers.provision import ProvisionError
 from mergecraft.analyzers.registry import _matches_detect_patterns, get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, resolve_analyzer
 from mergecraft.utils.git_hardening import git_argv
@@ -100,8 +105,11 @@ def _provision_plan(
     *,
     manifest: AnalyzerManifest,
     repo_root: Path,
-) -> AnalyzerPlan | None:
-    return provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
+) -> tuple[AnalyzerPlan | None, str | None]:
+    try:
+        return provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root), None
+    except ProvisionError as exc:
+        return None, provisioning_failure_reason(manifest.id, exc)
 
 
 def _run_argv(
@@ -180,9 +188,13 @@ def _run_oasdiff(
             managed_available=True,
             allow_repo_binaries=allow_repo_binaries,
         )
-        provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
+        provisioned, provision_failure = _provision_plan(
+            plan, manifest=manifest, repo_root=repo_root
+        )
         if provisioned is None:
-            reason = plan.reason or f"skipped {manifest.id}: provisioning failed"
+            reason = (
+                provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
+            )
             return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
         binary = provisioned.argv[0] if provisioned.argv else "oasdiff"
@@ -242,9 +254,9 @@ def _run_squawk(
         managed_available=True,
         allow_repo_binaries=allow_repo_binaries,
     )
-    provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
+    provisioned, provision_failure = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
-        reason = plan.reason or f"skipped {manifest.id}: provisioning failed"
+        reason = provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     binary = provisioned.argv[0] if provisioned.argv else "squawk"
@@ -313,9 +325,13 @@ def _run_buf(
             managed_available=True,
             allow_repo_binaries=allow_repo_binaries,
         )
-        provisioned = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
+        provisioned, provision_failure = _provision_plan(
+            plan, manifest=manifest, repo_root=repo_root
+        )
         if provisioned is None:
-            reason = plan.reason or f"skipped {manifest.id}: provisioning failed"
+            reason = (
+                provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
+            )
             return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
         binary = provisioned.argv[0] if provisioned.argv else "buf"

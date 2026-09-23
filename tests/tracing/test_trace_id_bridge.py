@@ -1,7 +1,4 @@
-"""RED contracts for one ``trace_id`` per run + OTel context bridge (T3.1).
-
-Wave: ``issues-tracing-sevn-quality`` / PR T3 — ``feat(tracing): one trace_id per
-run + OTel context bridge``.
+"""Contracts for one ``trace_id`` per run plus the OTel context bridge.
 
 Contract
 --------
@@ -11,23 +8,9 @@ module) propagates that ``trace_id`` so nested OTel auto-instrumented
 operations (e.g. an httpx call inside a tool) inherit it without the caller
 having to know about mergeCraft's tracer.
 
-These tests are RED against ``origin/pre-0.0.1`` because the implementation
-does not exist yet:
-
-- ``src/mergecraft/tracing/event.py`` — ``TraceEvent.trace_id`` is missing.
-- ``src/mergecraft/tracing/tracer.py`` — ``Tracer.trace_id``, ``Span.trace_id``,
-  ``NullTracer.trace_id``, and ``resolve_trace_id()`` are missing.
-- ``src/mergecraft/tracing/otel_bridge.py`` — the module itself is missing.
-- ``src/mergecraft/tracing/exporters.py`` — ``OTLPSink.write`` does not yet
-  set the real OTel ``trace_id`` on the produced span, and the
-  ``_RecordingSpanProcessor`` does not yet capture ``trace_id``.
-- ``tests/tracing/conftest.py`` — ``trace_event_data`` lacked ``trace_id``
-  until T3.1 landed (see the fixture edit).
-
-Acceptance: **10 collected; 10 green**. The OTel recording-processor
-``trace_id`` capture contract (formerly
-``test_otel_sink_forwards_real_trace_id``) was deleted from this suite; it is
-recorded on the instrumentation issue tracker (#798) for a future wave.
+The exporter-specific parent and span-id behavior lives in
+``exporters/test_otlp_sink_parent_context.py``. This suite keeps the stable
+resolver, event, JSONL, and in-process OTel bridge contracts.
 """
 
 from __future__ import annotations

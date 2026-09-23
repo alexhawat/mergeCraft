@@ -87,7 +87,10 @@ def _run_ratchet(check: Any, report: Path, **kwargs: Any) -> int:
     return int(check(report, **kwargs))
 
 
-def test_ratchet_fails_when_coverage_drops_below_floor(tmp_path: Path) -> None:
+def test_ratchet_fails_when_combined_coverage_drops_below_floor(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     module = _load_ratchet()
     check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
     assert callable(check)
@@ -95,6 +98,7 @@ def test_ratchet_fails_when_coverage_drops_below_floor(tmp_path: Path) -> None:
     report = _coverage_json(tmp_path, max(0.0, floor - 60.0))
     rc = _run_ratchet(check, report)
     assert rc != 0, "ratchet accepted coverage below the floor"
+    assert "combined coverage" in capsys.readouterr().err
 
 
 def test_ratchet_warns_when_coverage_exceeds_floor_without_bump(tmp_path: Path) -> None:

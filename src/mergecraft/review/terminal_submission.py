@@ -95,6 +95,28 @@ def verdict_from_merged_findings(findings: list[dict[str, Any]]) -> str:
     return "approve"
 
 
+def enforce_terminal_verdict_from_finalized_findings(
+    *,
+    requested: str,
+    findings: list[Any],
+) -> str:
+    """Derive the enforced terminal verdict from finalized findings only.
+
+    The caller's ``requested`` verdict is preserved separately for validation
+    and audit; it does not override normalization. A ``request_changes`` call
+    with findings that normalize to non-blocking severities records ``approve``.
+    When normalization removes every finding, retain ``request_changes`` so
+    ``validate_submission`` can reject the empty payload.
+    """
+    from mergecraft.findings.agent_adapter import blocking_agent_findings
+
+    if blocking_agent_findings(findings, rule_id="agent:terminal"):
+        return "request_changes"
+    if requested == "request_changes" and not findings:
+        return "request_changes"
+    return "approve"
+
+
 def terminal_submission_count_from_review_runs(runs: list[ReviewerRun]) -> int:
     """Terminal verdict cardinality stays one regardless of reviewer count (D7)."""
     _ = runs
@@ -289,6 +311,7 @@ __all__ = [
     "UNKNOWN_RAISED_BY",
     "ReviewerRun",
     "append_degradation_to_summary",
+    "enforce_terminal_verdict_from_finalized_findings",
     "enrich_finding_body_with_provenance",
     "format_finding_provenance_line",
     "format_reviewer_degradation_summary",

@@ -21,10 +21,10 @@ SHELL := /bin/bash
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	mutation-test-decisions \
-	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-gate eval-replay eval-convergence shadow-compare \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence eval-trajectory shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
-	test-integration test-integration-live test-otlp-collector coverage-measure coverage-gate npm-audit workflow-lint \
+	test-integration test-integration-live test-otlp-collector coverage-measure coverage-combine-gate coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare \
 	tracked-markdown-check
 
@@ -191,15 +191,39 @@ test-otlp-collector: ## OTLP collector integration — spans must leave the proc
 	$(UV) run --extra tracing python scripts/run_otlp_collector_e2e.py
 
 coverage-measure: ## Unit tests with coverage report only (no floor/ratchet gates)
-	rm -f coverage.json .coverage .coverage.*
-	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
-		--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
-		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
-		-rX
+	@if [ -n "$(MERGECRAFT_TEST_SPLITS)$(MERGECRAFT_TEST_GROUP)" ]; then \
+		$(UV) run python scripts/coverage_shards.py measure \
+			$(if $(MERGECRAFT_COVERAGE_RUN_DIR),--run-dir "$(MERGECRAFT_COVERAGE_RUN_DIR)",) \
+			$(if $(MERGECRAFT_TEST_SPLITS),--splits "$(MERGECRAFT_TEST_SPLITS)",) \
+			$(if $(MERGECRAFT_TEST_GROUP),--group "$(MERGECRAFT_TEST_GROUP)",) \
+			--jobs "$(MERGECRAFT_PYTEST_JOBS)" \
+			--seed "$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}"; \
+	else \
+		rm -f coverage.json .coverage .coverage.*; \
+		$(PYTEST) tests -q --tb=short --strict-markers -m "not integration" \
+			--cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
+			--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} -rX; \
+	fi
 
-coverage-gate: coverage-measure ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
-	$(UV) run python scripts/check_coverage_ratchet.py coverage.json
-	$(UV) run python scripts/check_coverage_floors.py coverage.json
+coverage-combine-gate: ## Validate, combine, and gate one explicit complete shard collection
+	$(UV) run python scripts/coverage_shards.py combine \
+		$(if $(MERGECRAFT_COVERAGE_RUN_DIR),--run-dir "$(MERGECRAFT_COVERAGE_RUN_DIR)",) \
+		$(if $(MERGECRAFT_TEST_SPLITS),--splits "$(MERGECRAFT_TEST_SPLITS)",)
+
+coverage-gate: ## Unit tests + coverage floors (global + critical paths; xpass ratchet runs via conftest hook)
+	@if [ -n "$(MERGECRAFT_TEST_GROUP)" ]; then \
+		echo "coverage-gate refuses a partial shard; run coverage-measure then coverage-combine-gate" >&2; \
+		exit 2; \
+	elif [ -n "$(MERGECRAFT_TEST_SPLITS)" ]; then \
+		$(UV) run python scripts/coverage_shards.py orchestrate \
+			$(if $(MERGECRAFT_COVERAGE_RUN_DIR),--run-dir "$(MERGECRAFT_COVERAGE_RUN_DIR)",) \
+			--splits "$(MERGECRAFT_TEST_SPLITS)" --jobs "$(MERGECRAFT_PYTEST_JOBS)" \
+			--seed "$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}"; \
+	else \
+		$(MAKE) coverage-measure && \
+		$(UV) run python scripts/check_coverage_ratchet.py coverage.json && \
+		$(UV) run python scripts/check_coverage_floors.py coverage.json; \
+	fi
 
 mutation-test-decisions: ## Decision-module mutation harness (advisory; D15 / §2.6)
 	$(UV) run python scripts/mutate_decision_modules.py --threshold $(MUTATION_ESCAPE_THRESHOLD_PCT)
@@ -329,7 +353,45 @@ bench-review: ## Run ReviewBench via Harbor (set REVIEWBENCH_DIR to an external 
 eval-skill-corpus: ## Review-skill eval corpus gate — fixture-only, no live provider (D11/F9)
 	$(UV) run python -m mergecraft.evals.skill
 
-eval-gate: ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
+eval-cases-sync: ## Copy authored golden/mutation/skill cases into package resources
+	$(UV) run python scripts/sync_eval_cases.py
+
+eval-cases-sync-check: ## Check authored and packaged eval cases have identical files and bytes
+	$(UV) run python scripts/sync_eval_cases.py --check
+
+.PHONY: eval-human-batch eval-judge-calibration
+
+eval-human-batch: ## Render the pending human golden-case review sheet
+	@$(UV) run python -m mergecraft.evals.human_batch
+
+JUDGE_CALIBRATION_PROTOCOL ?=
+JUDGE_CALIBRATION_CASES ?=
+JUDGE_CALIBRATION_SEAL ?=
+eval-judge-calibration: ## Evaluate frozen saved judge verdicts; input paths are required
+	@if [ -z "$(JUDGE_CALIBRATION_PROTOCOL)" ] || [ -z "$(JUDGE_CALIBRATION_CASES)" ]; then \
+	  echo "Set JUDGE_CALIBRATION_PROTOCOL and JUDGE_CALIBRATION_CASES to frozen JSON inputs."; \
+	  echo "No human-labelled calibration corpus is committed; validation remains pending."; \
+	  exit 2; \
+	fi
+	$(UV) run mergecraft eval judge-calibration \
+	  --protocol "$(JUDGE_CALIBRATION_PROTOCOL)" --cases "$(JUDGE_CALIBRATION_CASES)" \
+	  $(if $(JUDGE_CALIBRATION_SEAL),--seal "$(JUDGE_CALIBRATION_SEAL)",) --json
+
+.PHONY: eval-publish-benchmark
+
+BENCHMARK_CAMPAIGN_MANIFEST ?=
+BENCHMARK_CAMPAIGN_RESULTS ?=
+BENCHMARK_CAMPAIGN_OUTPUT ?=
+eval-publish-benchmark: ## Validate and publish two saved provider benchmark results
+	@if [ -z "$(BENCHMARK_CAMPAIGN_MANIFEST)" ] || [ -z "$(BENCHMARK_CAMPAIGN_RESULTS)" ] || [ -z "$(BENCHMARK_CAMPAIGN_OUTPUT)" ]; then \
+	  echo "Set BENCHMARK_CAMPAIGN_MANIFEST, BENCHMARK_CAMPAIGN_RESULTS, and BENCHMARK_CAMPAIGN_OUTPUT."; \
+	  exit 2; \
+	fi
+	$(UV) run mergecraft eval publish-benchmark --manifest "$(BENCHMARK_CAMPAIGN_MANIFEST)" \
+	  $(foreach result,$(BENCHMARK_CAMPAIGN_RESULTS),--result "$(result)") \
+	  --output "$(BENCHMARK_CAMPAIGN_OUTPUT)"
+
+eval-gate: eval-cases-sync-check ## Check eval-bank integrity (structural; see 'mergecraft eval gate --help')
 	$(UV) run mergecraft eval gate
 
 eval-replay: ## Replay structural eval-bank integrity; keyless, not live detection scores
@@ -337,6 +399,10 @@ eval-replay: ## Replay structural eval-bank integrity; keyless, not live detecti
 
 eval-convergence: ## Score multi-round convergence metric; write result set (RC6)
 	$(UV) run mergecraft eval convergence
+
+TRAJECTORY_LABELS ?= evals/trajectories/development
+eval-trajectory: ## Score saved trajectories; development labels remain advisory (#735)
+	$(UV) run mergecraft eval trajectory-score --labels "$(TRAJECTORY_LABELS)" --json
 
 SHADOW_RUN ?= /tmp/mergecraft-shadow-run.jsonl
 shadow-compare: ## Replay two fixture packets through the gate (keyless, advisory)
