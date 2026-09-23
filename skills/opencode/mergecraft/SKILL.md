@@ -7,6 +7,45 @@ description: Set up, run, and troubleshoot mergeCraft — the BYOK AI PR review 
   or debug a failing mergeCraft workflow.
 compatibility: Requires uv; gh CLI optional
 ---
+## OpenCode install
+
+OpenCode reads skills from ``.opencode/skills/``, ``.agents/skills/``, and
+``.claude/skills/``. It also supports commands (``.opencode/commands/``),
+subagents (``.opencode/agents/``), and plugins (``.opencode/plugins/``).
+
+mergeCraft ships a first-class OpenCode integration under
+``integrations/opencode/``: slash commands (``/mergecraft/review`` and its
+engine variants), a read-only ``mergecraft/reviewer`` subagent, and a
+``mergecraft/fixer`` subagent for the review-only loop. A companion change
+adds a plugin that registers the public MCP server, the commands, the agent,
+and the skill automatically.
+
+```bash
+git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft-src
+mkdir -p .opencode
+cp -R /tmp/mergecraft-src/integrations/opencode/commands .opencode/
+cp -R /tmp/mergecraft-src/integrations/opencode/agents   .opencode/
+mkdir -p .opencode/skills
+cp -R /tmp/mergecraft-src/skills/opencode/mergecraft .opencode/skills/mergecraft
+rm -rf /tmp/mergecraft-src
+```
+
+Then add the ``mcp.servers.mergecraft`` block from
+``integrations/opencode/opencode.jsonc`` to your ``opencode.jsonc``. OpenCode
+V2 nests servers under ``mcp.servers`` and uses ``disabled`` (not the V1
+top-level ``mcp`` map with ``enabled``). Or let the CLI write it:
+
+```bash
+opencode mcp add mergecraft -- mergecraft mcp serve --role public --transport stdio
+opencode mcp list
+```
+
+``/mergecraft/review`` defaults to the native reviewer subagent (no mergecraft
+provider tokens). ``/mergecraft/review-deep`` runs the full engine —
+deterministic analyzers, JEV screen, verifier, and evidence packet. JEV and
+Logfire are configured with ``mergecraft jev enable`` and
+``mergecraft auth logfire``; when a Logfire token is present the plugin also
+traces native reviews. See ``docs/opencode.md``.
 # mergeCraft
 
 mergeCraft is an AI-powered PR reviewer: a GitHub Action plus a Python CLI

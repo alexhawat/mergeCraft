@@ -43,6 +43,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [jev-gate-patterns](jev-gate-patterns.md) | contributor | Pre-LLM Jev gate: dimension question packs, funnel thresholds, layering, and calibration status. |
 | [mcp-tools](mcp-tools.md) | consumer | Generated public MCP tool reference from ToolSpec schemas. |
 | [mcp](mcp.md) | consumer | Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries. |
+| [opencode](opencode.md) | consumer | OpenCode integration — commands, reviewer subagent, plugin, MCP wiring, and JEV/Logfire setup. |
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [support-matrix](support-matrix.md) | consumer | Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models. |
