@@ -32,6 +32,8 @@ _ALLOWLIST_PATHS = frozenset(
     {
         "docs/dev/changelog-archive.md",
         "CHANGELOG.md",
+        # Historical finding ledger. Decision IDs are the document's subject.
+        "plans/AUDIT-2026-09-22.md",
     }
 )
 _ALLOWLIST_PREFIXES = (

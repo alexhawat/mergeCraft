@@ -66,6 +66,10 @@
 # The job skips gracefully when none are set (e.g. fork PRs). Without
 # NOUS_API_KEY the primary is inert and Codex is the only reviewer; without
 # CODEX_AUTH_JSON / OPENAI_API_KEY, Nous is the only reviewer.
+# TYPESAFE_API_KEY is the Jev credential. jev.enabled is on in
+# .mergecraft/config.yaml, and each review rung passes this secret. An absent
+# key records credential_absent; the review still runs. It does not satisfy
+# the reviewer auth check above.
 #
 # Trigger: pull_request_target (not pull_request). GitHub skips pull_request
 # workflows when refs/pull/N/merge cannot be built (merge conflicts), so the
@@ -634,6 +638,7 @@ jobs:
           MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || 'github-actions[bot]' }}
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
@@ -784,6 +789,7 @@ jobs:
           MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_codex.outputs.app-slug && format('{0}[bot]', steps.app_token_codex.outputs.app-slug) || 'github-actions[bot]' }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
@@ -909,6 +915,7 @@ jobs:
           MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_claude.outputs.app-slug && format('{0}[bot]', steps.app_token_claude.outputs.app-slug) || 'github-actions[bot]' }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
