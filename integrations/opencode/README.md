@@ -17,10 +17,7 @@ can drive mergeCraft, and mergeCraft can run on OpenCode.
 | Fixer subagent | `.opencode/agents/mergecraft/fixer.md` | Applies findings; mergecraft re-reviews (review-only preserved) |
 | MCP server | `opencode.jsonc` → `mcp.servers.mergecraft` | Six review-only tools over stdio |
 | Plugin | `.opencode/plugins/mergecraft/index.ts` | Auto-registers MCP, commands, agent, skill; hooks |
-
-The plugin and the one-step `mergecraft opencode install` command arrive in a
-companion change. Until then, install the commands, agents, and MCP server by
-hand as shown below.
+| CLI installer | `mergecraft opencode install` / `doctor` | One-step copy, config patch, and diagnosis |
 
 If you only want the MCP tools, skip to [MCP only](#mcp-only).
 
@@ -44,20 +41,21 @@ deterministic analyzers, the JEV screen, the verifier, and the evidence packet.
 
 ## Install
 
-### From the mergeCraft source tree
+### One-step install
 
 ```bash
-git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft-src
-mkdir -p .opencode
-cp -R /tmp/mergecraft-src/integrations/opencode/commands .opencode/
-cp -R /tmp/mergecraft-src/integrations/opencode/agents   .opencode/
-rm -rf /tmp/mergecraft-src
+uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+mergecraft init                      # if the repo is not set up yet
+mergecraft opencode install          # commands, agents, plugin, MCP block, harness
+mergecraft opencode doctor --strict  # verify
 ```
 
-Then add the MCP server to `opencode.jsonc` using
-[`opencode.jsonc`](opencode.jsonc) as the template, and install the agent skill
-so future sessions keep the knowledge (OpenCode reads `.opencode/skills/`,
-`.agents/skills/`, and `.claude/skills/`):
+`mergecraft opencode install` copies the assets into `.opencode/`, writes the
+`mcp.servers.mergecraft` block, and sets `harness: opencode`. Add `--global` to
+install into `~/.config/opencode/` instead of the project.
+
+Then install the skill so future sessions keep the knowledge (OpenCode reads
+`.opencode/skills/`, `.agents/skills/`, and `.claude/skills/`):
 
 ```bash
 git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft-src
@@ -66,11 +64,11 @@ cp -R /tmp/mergecraft-src/skills/opencode/mergecraft .opencode/skills/mergecraft
 rm -rf /tmp/mergecraft-src
 ```
 
-### One-step install
+### Manual install
 
-`mergecraft opencode install` performs the copy, patches `opencode.jsonc`, and
-writes `harness: opencode` into `.mergecraft/config.yaml`. See
-[`docs/opencode.md`](../../docs/opencode.md).
+If you would rather copy files yourself, see
+[`docs/opencode.md`](../../docs/opencode.md#install) for the commands, agents,
+plugin, and MCP paths.
 
 ## MCP only
 
@@ -117,8 +115,8 @@ mergecraft tracing logfire wire-workflow --region eu --apply   # CI: patch the m
 - **JEV** is the pre-LLM screening gate. It is a *shadow* ranker today —
   `predict_jev_action` returns `enforced=False`, so it never withholds a unit
   from the reviewer or blocks a merge. Treat it as ranking and annotation.
-- **Logfire** receives mergecraft's `llm.call` and stage spans. The companion
-  plugin also emits a span for each *native* review when a Logfire token is in the
+- **Logfire** receives mergecraft's `llm.call` and stage spans. The plugin also
+  emits a span for each *native* review when a Logfire token is in the
   environment, so native and `deep` reviews land in one project.
 
 ## Compatibility

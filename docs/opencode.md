@@ -42,27 +42,34 @@ The engine decides who reviews and how much evidence is gathered.
 `native` is the default because it is free of mergecraft provider cost and works
 offline. Reach for `deep` when a change is high-stakes.
 
-The plugin (companion change) makes the default configurable with the `engine`
-plugin option, so `/mergecraft/review` can be `cli` or `deep` without editing
-commands.
+The plugin makes the default configurable with the `engine` plugin option, so
+`/mergecraft/review` can be `cli` or `deep` without editing commands.
 
 ## Install
+
+```bash
+uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+mergecraft init                      # if the repo is not set up yet
+mergecraft opencode install          # commands, agents, plugin, MCP block, harness
+mergecraft opencode doctor --strict  # verify
+```
+
+Add `--global` to `install`/`doctor` to target `~/.config/opencode/` instead of
+the project. The installer copies commands, subagents, and the plugin into
+`.opencode/`, writes the `mcp.servers.mergecraft` block, and sets
+`harness: opencode`.
+
+Manual equivalent:
 
 ```bash
 git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft-src
 mkdir -p .opencode
 cp -R /tmp/mergecraft-src/integrations/opencode/commands .opencode/
 cp -R /tmp/mergecraft-src/integrations/opencode/agents   .opencode/
+cp -R /tmp/mergecraft-src/integrations/opencode/plugins  .opencode/
 mkdir -p .opencode/skills
 cp -R /tmp/mergecraft-src/skills/opencode/mergecraft .opencode/skills/mergecraft
 rm -rf /tmp/mergecraft-src
-```
-
-Install the CLI if you want the `cli`, `deep`, `quick`, or `mcp` engines:
-
-```bash
-uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
-mergecraft init
 ```
 
 ## Agents
@@ -123,8 +130,10 @@ enforce and nothing is withheld from the reviewer. Do not configure a repository
 on the assumption that JEV blocks a merge. See
 [`jev-gate-patterns.md`](jev-gate-patterns.md).
 
-The companion plugin registers the `typsafe` provider in OpenCode so JEV is
-available as a model there too.
+JEV runs inside mergeCraft's own engine, not as an OpenCode provider: the
+TypeSafe SDK is not an OpenAI-compatible endpoint, so JEV is reached through the
+`deep` engine (and the MCP surface), not as a model you select in OpenCode.
+`mergecraft opencode doctor` reports whether the credential is present.
 
 ## Logfire
 
@@ -138,28 +147,40 @@ mergecraft config tracing                                    # resolved sinks, t
 ```
 
 OpenCode V2 has no documented OpenTelemetry export of its own. To get native
-reviews into Logfire, the companion plugin emits an OTLP span per native review
-when `MERGECRAFT_LOGFIRE_TOKEN` (or `LOGFIRE_TOKEN`) is present, using
+reviews into Logfire, the plugin emits an OTLP span per native review when
+`MERGECRAFT_LOGFIRE_TOKEN` (or `LOGFIRE_TOKEN`) is present, using
 `MERGECRAFT_TRACING_REGION` to pick the `us` or `eu` endpoint. Native and `deep`
 reviews then share one Logfire project.
 
-## Plugin (companion change)
+## Plugin
 
 The plugin under `integrations/opencode/plugins/mergecraft/` uses the OpenCode V2
-`Plugin.define` entrypoint and will:
+`Plugin.define` entrypoint.
 
-- **Register** the public MCP server (`ctx.mcp.transform`), the commands
-  (`ctx.command.transform`), the reviewer/fixer agents (`ctx.agent.transform`),
-  the skill (`ctx.skill.transform`), and `REVIEW-CHECKS.md` /
-  `REVIEW-DOCTRINE.md` as a reference (`ctx.reference.transform`).
-- **Hook** `session.prompt` (review-intent detection and secret redaction),
-  `session.context` (inject doctrine for the reviewer; drop write tools;
-  low temperature), `tool.execute.before` / `tool.execute.after` (observe edits,
-  run `mergecraft analyzers detect`), `permission.evaluate` (enforce review-only
-  for the reviewer agent), `shell.create.before` (inject `MERGECRAFT_*` env, cap
-  timeouts), and the event stream (offer a review when a session goes idle with a
-  dirty tree).
-- **Hold V1 compatibility** with a `server()` export for mixed fleets.
+**Transforms**
+
+- `ctx.mcp.transform` — registers the public MCP server, so a hand-edited
+  `opencode.jsonc` is not required.
+- `ctx.command.transform` — installs a programmatic `/mergecraft/review` override
+  when the `engine` option is not `native`.
+
+**Hooks**
+
+- `session.prompt` — redacts credential-shaped strings (GitHub tokens, API keys,
+  Logfire tokens, AWS keys, PEM private keys) before admission.
+- `session.context` — for the reviewer subagent only: appends the review
+  doctrine, removes `write`/`edit`/`patch` from the toolset, and sets
+  `temperature: 0.2`.
+- `permission.evaluate` — for the reviewer subagent only: forces `edit` and
+  `shell` to `deny`. A configured `deny` is final and never weakened.
+- `shell.create.before` — bounds `mergecraft` shell timeouts at 15 minutes.
+- `tool.execute.before` / `tool.execute.after` — emit one
+  `mergecraft.review.native` Logfire span per reviewer subagent run.
+
+Options are `engine`, `mcp`, `logfire`, `redact`, and `reviewerAgent`; see the
+[plugin README](../integrations/opencode/plugins/mergecraft/README.md). The
+commands and subagents ship as markdown and are discovered from disk, so the
+plugin does not re-register them.
 
 It never weakens a configured `deny` and never commits, pushes, or edits on
 mergeCraft's behalf.

@@ -112,6 +112,8 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft models list` | List curated model slugs and whether credentials are detected locally. |
 | `mergecraft models set <slugs>` | Write an ordered `models:` list to `.mergecraft/config.yaml`. |
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
+| `mergecraft opencode doctor` | Report whether the OpenCode integration is fully wired. |
+| `mergecraft opencode install` | Install OpenCode commands, subagents, plugin, and MCP config. |
 | `mergecraft pipeline explain` | Print pipeline step ids and predicate vocabulary. |
 | `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
 | `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |

@@ -32,11 +32,15 @@ Set up mergeCraft in this repository per
 5. Optional, on request: `mergecraft jev enable` (screening gate; prompts for
    `TYPESAFE_API_KEY`) and `mergecraft auth logfire` (tracing).
 
-6. Install this integration: copy `integrations/opencode/commands` and
-   `integrations/opencode/agents` into `.opencode/`, and add the
-   `mcp.servers.mergecraft` block from `integrations/opencode/opencode.jsonc` to
-   the project `opencode.jsonc`. The plugin and the one-step
-   `mergecraft opencode install` command arrive in a companion change.
+6. Install this integration:
+
+   ```bash
+   mergecraft opencode install
+   mergecraft opencode doctor --strict
+   ```
+
+   The installer copies commands, agents, and the plugin into `.opencode/`, adds
+   the `mcp.servers.mergecraft` block, and sets `harness: opencode`.
 
 7. Commit only `.mergecraft/config.yaml`, `.mergecraft/learnings.md`,
    `.github/workflows/mergecraft.yml`, the new `.opencode/**` and

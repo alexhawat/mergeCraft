@@ -9,13 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenCode plugin at `integrations/opencode/plugins/mergecraft/`: registers the
+  public MCP server, overrides `/mergecraft/review` with the configured engine,
+  redacts credentials from prompts, keeps the reviewer subagent read-only and
+  on-doctrine (`permission.evaluate` forces `edit`/`shell` to deny without
+  weakening a configured deny), bounds mergecraft shell timeouts, and emits one
+  `mergecraft.review.native` Logfire span per native review when a write token is
+  present.
+
+- `mergecraft opencode install` copies the commands, subagents, and plugin into
+  `.opencode/` (or `~/.config/opencode/` with `--global`), writes the V2
+  `mcp.servers.mergecraft` block, and sets `harness: opencode` in
+  `.mergecraft/config.yaml`. `mergecraft opencode doctor [--strict]` reports
+  whether the CLI, assets, config, MCP block, JEV credential, and Logfire token
+  are wired.
+
 - First-class OpenCode integration under `integrations/opencode/`: `/mergecraft/*`
   slash commands for six review engines (native, cli, deep, mcp, quick,
   thirdparty), a read-only `mergecraft/reviewer` subagent, a `mergecraft/fixer`
   subagent for the review-only loop, and an `opencode.jsonc` template. The
   generated `skills/opencode/mergecraft/SKILL.md` now carries an
-  OpenCode-specific install section instead of the generic body. A companion
-  change adds the plugin, `mergecraft opencode install`, and JEV/Logfire wiring.
+  OpenCode-specific install section instead of the generic body.
 
 - `docs/opencode.md` documents the integration: engine selection, commands,
   subagents, V2 MCP wiring, JEV scope, and Logfire tracing.
