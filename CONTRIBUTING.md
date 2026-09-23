@@ -30,10 +30,12 @@ make ci
 `make test` runs the unit and mocked-integration suite — **no API keys or secrets required**.
 Live-provider tests are excluded by default (`-m "not integration"`).
 
-`make coverage-gate` enforces the ``fail_under`` floor on every CI event; the
-merge-base **lowering guard** that blocks undeclared ``fail_under`` drops runs
-only on pull requests, because on ``push`` / ``workflow_dispatch`` the
-merge-base comparison is self-referential.
+`make coverage-gate` enforces the native coverage.py combined line-and-branch
+``fail_under`` floor on every CI event. Critical module and package-prefix
+floors separately enforce pure line coverage from line counts and branch
+coverage from branch counts. The merge-base **lowering guard** that blocks
+undeclared ``fail_under`` drops runs only on pull requests, because on ``push``
+/ ``workflow_dispatch`` the merge-base comparison is self-referential.
 
 ### Config path resolution (#573)
 
@@ -74,6 +76,36 @@ On ``pull_request``, ``scripts/ci_coverage_delta_gate.sh``:
 
 On ``push`` / ``workflow_dispatch`` the script runs the head gate only (no
 merge-base worktree).
+
+### Coverage shards
+
+The default `make coverage-measure` and `make coverage-gate` remain complete,
+unsharded runs. To diagnose one isolated shard, give it a split count and group:
+
+```bash
+MERGECRAFT_TEST_SPLITS=2 MERGECRAFT_TEST_GROUP=1 make coverage-measure
+```
+
+The command prints its unique artifact directory. Run every group with the same
+explicit directory, then validate the manifests, combine the raw databases, and
+apply the complete coverage gates:
+
+```bash
+MERGECRAFT_TEST_SPLITS=2 MERGECRAFT_TEST_GROUP=1 MERGECRAFT_COVERAGE_RUN_DIR=/tmp/mergecraft-cov make coverage-measure
+MERGECRAFT_TEST_SPLITS=2 MERGECRAFT_TEST_GROUP=2 MERGECRAFT_COVERAGE_RUN_DIR=/tmp/mergecraft-cov make coverage-measure
+MERGECRAFT_TEST_SPLITS=2 MERGECRAFT_COVERAGE_RUN_DIR=/tmp/mergecraft-cov make coverage-combine-gate
+```
+
+For one atomic CI stage, set only the split count. The gate runs bounded groups,
+validates their exact test collection, combines them, and enforces all floors:
+
+```bash
+MERGECRAFT_TEST_SPLITS=2 make coverage-gate
+MERGECRAFT_TEST_SPLITS=2 make ci-resume
+```
+
+A partial shard never writes `coverage.json` or invokes a floor. Missing,
+overlapping, modified, stale, or incompatible manifests fail before combination.
 
 To run the live slice (requires provider secrets such as `ANTHROPIC_API_KEY`):
 

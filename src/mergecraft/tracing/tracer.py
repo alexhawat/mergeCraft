@@ -52,6 +52,14 @@ if TYPE_CHECKING:
 MAX_SPANS_PER_RUN: Final[int] = 10_000
 
 
+@dataclass(frozen=True, slots=True)
+class TraceParent:
+    """Immutable trace identity carried across task and transport boundaries."""
+
+    trace_id: str
+    span_id: str
+
+
 @dataclass(slots=True)
 class Tracer:
     """Create spans and route completed events to one configured sink."""
@@ -408,6 +416,9 @@ class NullTracer:
 _ACTIVE_SPAN: ContextVar[Span | NullSpan | None] = ContextVar(
     "mergecraft_active_trace_span", default=None
 )
+_ACTIVE_RUN_SPAN: ContextVar[Span | None] = ContextVar(
+    "mergecraft_active_run_trace_span", default=None
+)
 
 _PROCESS_TRACER: Tracer | None = None
 _PROCESS_TRACING_FINGERPRINT: str | None = None
@@ -437,6 +448,7 @@ def reset_process_tracer_cache() -> None:
     # Prevent ``get_tracer_from_settings`` from returning a stale tracer when
     # a prior test left an active span on the ContextVar (xdist shard ordering).
     _ACTIVE_SPAN.set(None)
+    _ACTIVE_RUN_SPAN.set(None)
     # ``sink_factory`` stashes its product on a ContextVar; a leftover handoff
     # from an unrelated test (memory/jsonl vs otel) must not poison
     # ``claim_sink`` on this worker.
@@ -775,6 +787,48 @@ def active_span_for(tracer: Tracer | NullTracer | None) -> Span | None:
     return None
 
 
+def current_trace_parent() -> TraceParent | None:
+    """Return immutable identity for the active run root, if tracing is enabled."""
+    active_run = _ACTIVE_RUN_SPAN.get()
+    if active_run is not None:
+        return TraceParent(trace_id=active_run.trace_id, span_id=active_run.span_id)
+    active = _ACTIVE_SPAN.get()
+    if not isinstance(active, Span):
+        return None
+    return TraceParent(trace_id=active.trace_id, span_id=active.span_id)
+
+
+def tracer_for_trace_parent(parent: TraceParent | None) -> Tracer | None:
+    """Resolve the cached tracer that owns an explicitly carried parent."""
+    if parent is None or _PROCESS_TRACER is None:
+        return None
+    if _PROCESS_TRACER.trace_id != parent.trace_id:
+        return None
+    return _PROCESS_TRACER
+
+
+@contextlib.contextmanager
+def run_root_span(
+    tracer: Tracer | NullTracer,
+    *,
+    attrs_source: Callable[[], dict[str, Any]] | None = None,
+) -> Iterator[Span | NullSpan]:
+    """Reuse the active run root or own one for a standalone lifecycle."""
+    active_run = _ACTIVE_RUN_SPAN.get()
+    if active_run is not None and active_run.tracer is tracer:
+        yield active_run
+        return
+    with tracer.start_span("mergecraft.run", attrs_source=attrs_source) as root:
+        if isinstance(root, Span):
+            token = _ACTIVE_RUN_SPAN.set(root)
+            try:
+                yield root
+            finally:
+                _ACTIVE_RUN_SPAN.reset(token)
+        else:
+            yield root
+
+
 def resolve_session_id() -> str:
     """Resolve a stable session identifier or generate one.
 
@@ -857,12 +911,16 @@ __all__ = [
     "NullSpan",
     "NullTracer",
     "Span",
+    "TraceParent",
     "Tracer",
     "active_span_for",
     "baseline_run_attrs",
+    "current_trace_parent",
     "get_tracer_from_settings",
     "provider_llm_pair",
     "resolve_correlation_from_env",
     "resolve_session_id",
     "resolve_trace_id",
+    "run_root_span",
+    "tracer_for_trace_parent",
 ]

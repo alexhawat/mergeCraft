@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Coverage delta vs base branch for #432 / D6.
+"""Combined coverage delta vs base branch for #432 / D6.
 
 Compares a head ``coverage.json`` (merge result or push) against a base-branch
 report so CI can distinguish an inherited floor breach from a drop caused by the
@@ -49,7 +49,7 @@ def _percent_covered(report: Path) -> float:
 
 
 class CoverageDeltaResult(NamedTuple):
-    """Attribution for a head report measured against the base branch."""
+    """Attribution for a head combined metric measured against the base branch."""
 
     head_percent: float
     base_percent: float
@@ -61,7 +61,7 @@ class CoverageDeltaResult(NamedTuple):
 
 
 def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> CoverageDeltaResult:
-    """Compare head coverage to base and classify inherited vs caused drops."""
+    """Compare head combined coverage to base and classify inherited vs caused drops."""
     resolved_floor = floor if floor is not None else _fail_under_from_pyproject()
     head_percent = _percent_covered(head)
     base_percent = _percent_covered(base)
@@ -85,7 +85,7 @@ def compare_to_base(head: Path, base: Path, *, floor: float | None = None) -> Co
         )
 
     ok_message = (
-        f"coverage delta OK: head {head_percent:.2f}% vs base {base_percent:.2f}% "
+        f"combined coverage delta OK: head {head_percent:.2f}% vs base {base_percent:.2f}% "
         f"(delta {delta:+.2f}pp, floor {resolved_floor:.2f}%)"
     )
     caused_message = (

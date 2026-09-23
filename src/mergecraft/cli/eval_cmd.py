@@ -21,6 +21,8 @@ scaffolded; the CLI accepts an override so tests can use a tmpdir.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -71,10 +73,13 @@ from mergecraft.evals.benchmark import (
     write_result_set,
 )
 from mergecraft.evals.convergence_benchmark import replay_convergence
+from mergecraft.evals.corpora import CorpusCase
+from mergecraft.evals.judge_calibration import load_and_evaluate
 from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
     run_full_benchmark,
 )
+from mergecraft.evals.publication import build_publication, write_publication
 from mergecraft.evals.scoring import (
     DEFAULT_LINE_SLACK,
     format_report,
@@ -83,6 +88,10 @@ from mergecraft.evals.scoring import (
     score_findings,
 )
 from mergecraft.evals.store import CATEGORY_REJECTED, CATEGORY_REVERTED, FAILURE_CATEGORIES
+from mergecraft.evals.trajectory_scoring import (
+    load_trajectory_label_sets,
+    score_trajectory_labels,
+)
 from mergecraft.models import get_model_provider
 from mergecraft.utils.agent_resolve import resolve_effective_model_slug, resolve_model
 from mergecraft.utils.learnings import LearningProvenance
@@ -111,6 +120,74 @@ def _case_path(bank_dir: Path, case_id: str) -> Path:
     if not case_id or not case_id.replace("-", "").replace("_", "").replace(".", "").isalnum():
         cli_bail(f"invalid case id: {case_id!r}")
     return bank_dir / f"{case_id}{CASE_FILE_SUFFIX}"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Replace *path* atomically, preserving an existing file's mode."""
+    mode = path.stat().st_mode & 0o777 if path.is_file() else None
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if mode is not None:
+            tmp_path.chmod(mode)
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def _validate_adjudication_candidate(
+    rendered: str,
+    *,
+    was_jsonl: bool,
+    is_corpus_object: bool,
+) -> None:
+    """Decode and validate the complete candidate before replacing the source."""
+
+    def validate_baseline_rows(rows: list[Any]) -> None:
+        if not rows or any(not isinstance(row, dict) for row in rows):
+            raise ValueError("baseline rows must all be objects")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("baseline rows must all be objects")
+            if not str(row.get("id") or row.get("cluster_id") or "").strip():
+                raise ValueError("baseline rows must have a non-empty id")
+            if not str(row.get("path") or "").strip():
+                raise ValueError("baseline rows must have a non-empty path")
+        parsed = load_baseline_issues(rows)
+        if len(parsed) != len(rows):
+            raise ValueError("not every baseline row could be validated")
+        if any(not issue.id.strip() or not issue.path.strip() for issue in parsed):
+            raise ValueError("baseline row anchors must remain non-empty after normalization")
+
+    if was_jsonl:
+        rows = [
+            json.loads(line)
+            for line in rendered.splitlines()
+            if line.strip() and not line.lstrip().startswith("//")
+        ]
+        validate_baseline_rows(rows)
+        return
+
+    payload = json.loads(rendered)
+    if is_corpus_object:
+        CorpusCase.model_validate(payload)
+        return
+    if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
+        rows = payload["issues"]
+    elif isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = [payload]
+    else:
+        raise ValueError("expected baseline rows or an 'issues' envelope")
+    validate_baseline_rows(rows)
 
 
 def _resolve_synthetic_provenance(
@@ -588,6 +665,12 @@ def bench_cmd(
         help="Model slug to drive live detection with (otherwise .mergecraft/config.yaml / "
         "MERGECRAFT_MODEL — same resolution as `diff-review`).",
     ),
+    model_pin: str | None = typer.Option(
+        None,
+        "--model-pin",
+        help="Operator-declared model pin; must exactly equal the requested model slug and "
+        "does not verify provider execution identity or make a floating alias immutable.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -632,6 +715,12 @@ def bench_cmd(
             "model: in .mergecraft/config.yaml."
         )
         raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
+    if model_pin is not None and model_pin != resolved_model:
+        console.print(
+            "[red]Model pin mismatch[/red] — --model-pin must be the exact requested model "
+            "slug; alias-to-pin resolution is not recorded by this runner."
+        )
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
     try:
         detection_provider = get_model_provider(resolved_model)
     except ValueError:
@@ -656,6 +745,7 @@ def bench_cmd(
         providers=DEFAULT_BENCHMARK_PROVIDERS,
         detection_provider=detection_provider,
         detection_model=resolved_model,
+        detection_model_pin=model_pin,
         required_provenance=required,
     )
     # update_latest=False: a single-provider detection result must not
@@ -674,11 +764,11 @@ def bench_cmd(
         console.print(f"  recall          : {det.aggregate.recall:.2%}")
         console.print(f"  precision       : {det.aggregate.corpus_confirmed_precision:.2%}")
         console.print(f"  f1              : {det.aggregate.f1:.2%}")
-        # Printed beside the numbers, not below the artifact path: a reader
-        # who stops at f1 must still have seen whether it is calibrated.
+        # Printed beside the numbers so provenance eligibility cannot be
+        # mistaken for a completed judge-calibration study.
         if det.calibration is not None:
-            verdict = "calibrated" if det.calibration.eligible else "NOT calibrated"
-            console.print(f"  calibration     : {verdict} — {det.calibration.reason}")
+            verdict = "eligible" if det.calibration.eligible else "ineligible"
+            console.print(f"  label eligibility: {verdict} — {det.calibration.reason}")
         console.print(f"  raw findings @  : {det.raw_findings_dir}")
     else:
         console.print(f"[yellow]detection skipped[/yellow]: {result.skipped_reason}")
@@ -802,11 +892,26 @@ def adjudicate_cmd(
     # Structure is decided before format, because a compact envelope is also a
     # single line that parses as an object and would otherwise be mistaken for
     # a JSONL row.
+    is_corpus_object = (
+        baseline.suffix.casefold() != ".jsonl"
+        and isinstance(payload, dict)
+        and not isinstance(payload.get("issues"), list)
+        and (
+            str(payload.get("id") or "").startswith("golden-")
+            or "language" in payload
+            or "framework" in payload
+        )
+    )
     if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
         # The envelope every shipped corpus baseline uses. Bind to the list
         # inside the payload so the rewrite reaches it and the other keys live.
         was_jsonl = False
         rows = payload["issues"]
+    elif is_corpus_object:
+        # Golden cases are authored as one object per file. Keep the original
+        # object bound to ``payload`` while exposing a mutable one-row view.
+        was_jsonl = False
+        rows = [payload]
     elif was_jsonl:
         rows = [json.loads(line) for line in jsonl_lines]
         payload = rows
@@ -814,7 +919,6 @@ def adjudicate_cmd(
         rows = payload
     elif isinstance(payload, dict):
         rows = [payload]
-        payload = rows
     else:
         cli_bail(f"{baseline}: expected baseline rows, an 'issues' envelope, or JSONL")
 
@@ -851,11 +955,150 @@ def adjudicate_cmd(
         rendered = "\n".join(rendered_lines) + "\n"
     else:
         rendered = json.dumps(payload, indent=2) + "\n"
-    baseline.write_text(rendered, encoding="utf-8")
+    try:
+        _validate_adjudication_candidate(
+            rendered,
+            was_jsonl=was_jsonl,
+            is_corpus_object=is_corpus_object,
+        )
+        _atomic_write_text(baseline, rendered)
+    except (OSError, ValueError, ValidationError) as exc:
+        cli_bail(f"could not safely update {baseline}: {exc}")
     console.print(
         f"adjudicated {issue_id} by {by} — provenance {provenance_for(record)} "
         f"(tier {record.independence})"
     )
+
+
+@app.command("judge-calibration")
+def judge_calibration_cmd(
+    ctx: typer.Context,
+    protocol: Path = typer.Option(
+        ...,
+        "--protocol",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Frozen calibration protocol JSON.",
+    ),
+    cases: Path = typer.Option(
+        ...,
+        "--cases",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Saved paired judge-human case JSON list.",
+    ),
+    seal: Path | None = typer.Option(
+        None,
+        "--seal",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Candidate commitment created after calibration and before held-out scoring.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit the strict report as JSON."),
+) -> None:
+    """Evaluate saved judge verdicts offline against frozen human references."""
+    try:
+        report = load_and_evaluate(protocol, cases, seal_path=seal)
+    except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        cli_bail(f"invalid judge calibration input: {exc}")
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(report.model_dump(mode="json"))
+    else:
+        console.print(f"judge calibration: {report.state}")
+        console.print(f"  candidate       : {report.candidate_id}")
+        console.print(f"  calibration n   : {report.calibration.metrics.sample_count}")
+        if report.held_out is None:
+            console.print("  held-out        : not evaluated")
+        else:
+            console.print(f"  held-out n      : {report.held_out.metrics.sample_count}")
+            macro_f1 = report.held_out.metrics.macro_f1
+            rendered_f1 = f"{macro_f1:.2%}" if macro_f1 is not None else "undefined"
+            console.print(f"  held-out macro f1: {rendered_f1}")
+    if report.state != "validated":
+        raise typer.Exit(CLI_FAILED_EXIT_CODE)
+
+
+@app.command("trajectory-score")
+def trajectory_score_cmd(
+    ctx: typer.Context,
+    labels: Path = typer.Option(
+        ...,
+        "--labels",
+        exists=True,
+        readable=True,
+        help="Trajectory label-set JSON file or directory of JSON files.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the strict trajectory score report as JSON.",
+    ),
+) -> None:
+    """Score the deterministic trajectory auditor against frozen labels.
+
+    Agent-seeded development labels exercise the scorer but remain advisory.
+    Only calibration or held-out rows with independent human provenance are
+    reported as independently labelled.
+    """
+    try:
+        report = score_trajectory_labels(load_trajectory_label_sets(labels))
+    except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        cli_bail(f"invalid trajectory labels: {exc}")
+
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(report.model_dump(mode="json"))
+        return
+
+    console.print(
+        f"trajectory score: {report.cases_total} cases / "
+        f"{report.exact_match.eligible_cases} exact-match eligible"
+    )
+    exact_rate = report.exact_match.rate
+    console.print(
+        "  exact match     : " + (f"{exact_rate:.2%}" if exact_rate is not None else "undefined")
+    )
+    for metric_name, value in (
+        ("micro precision", report.micro.precision),
+        ("micro recall", report.micro.recall),
+        ("macro precision", report.macro.precision),
+        ("macro recall", report.macro.recall),
+    ):
+        rendered = f"{value:.2%}" if value is not None else "undefined"
+        console.print(f"  {metric_name:<17}: {rendered}")
+    console.print(f"  eligibility    : {report.eligibility.reason}")
+
+
+@app.command("publish-benchmark")
+def publish_benchmark_cmd(
+    manifest: Path = typer.Option(
+        ...,
+        "--manifest",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Approved frozen campaign manifest.",
+    ),
+    results: list[Path] = typer.Option(
+        ...,
+        "--result",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Provider result set; pass exactly twice.",
+    ),
+    output: Path = typer.Option(..., "--output", file_okay=False, help="Report directory."),
+) -> None:
+    """Validate two saved provider runs and write an auditable report."""
+    try:
+        summary = build_publication(manifest, results)
+        summary_path, report_path = write_publication(summary, output_dir=output)
+    except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        cli_bail(f"benchmark publication refused: {exc}")
+    console.print(f"[green]benchmark publication[/green] → {report_path}")
+    console.print(f"  machine summary: {summary_path}")
 
 
 @app.command("score")

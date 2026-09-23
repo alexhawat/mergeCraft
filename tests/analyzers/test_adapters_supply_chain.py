@@ -324,6 +324,32 @@ def test_trufflehog_never_emits_secret_value(adapter_fixture_repo: Path) -> None
             assert PLANTED_AWS_SECRET not in cleaned
 
 
+def test_supply_chain_provisioning_failure_stays_a_visible_skip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provision = import_module("mergecraft.analyzers.provision")
+    registry = import_module("mergecraft.analyzers.registry")
+    resolve = import_module("mergecraft.analyzers.resolve")
+    supply_chain = import_module("mergecraft.analyzers.supply_chain")
+    manifest = registry.get_manifest("osv-scanner")
+    plan = resolve.AnalyzerPlan(
+        manifest_id=manifest.id,
+        mode="managed",
+        argv=("osv-scanner",),
+    )
+
+    def fail_provision(*_args: object, **_kwargs: object) -> None:
+        raise provision.ProvisionError("unsafe redirect refused")
+
+    monkeypatch.setattr(supply_chain, "provision_resolved_plan", fail_provision)
+
+    resolved, reason = supply_chain._provision_plan(plan, manifest=manifest, repo_root=tmp_path)
+
+    assert resolved is None
+    assert "managed binary provisioning failed" in (reason or "")
+    assert "unsafe redirect refused" in (reason or "")
+
+
 def test_trufflehog_verification_off_on_fork(
     adapter_fixture_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

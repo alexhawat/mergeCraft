@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0.0",
+  "batch_id": "golden-batch-001",
+  "adjudicator_login": "alexhawat",
+  "cases": [
+    {
+      "case_id": "golden-go-chi-api-breakage-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-java-spring-performance-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-javascript-npm-dependency-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-python-django-migration-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-python-fastapi-correctness-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-python-requirements-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-ruby-rails-clean-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-rust-tokio-concurrency-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-typescript-express-security-001",
+      "evidence_status": "missing",
+      "source_url": null,
+      "fixture_path": null,
+      "fixture_sha256": null,
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    }
+  ]
+}

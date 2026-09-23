@@ -76,6 +76,33 @@ def test_register_created_path_feeds_scoped_wipe(tmp_path: Path, monkeypatch: Mo
     assert foreign.exists(), "unregistered path must survive ownership-scoped wipe"
 
 
+def test_wipe_runner_leak_surface_is_noop_with_empty_registry(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """An empty ownership registry cannot remove files under RUNNER_TEMP."""
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
+    sentinel = runner_temp / "unowned.txt"
+    sentinel.write_text("keep\n", encoding="utf-8")
+    monkeypatch.setattr(git_setup_mod, "_created_paths", set())
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", None)
+    monkeypatch.setenv("RUNNER_TEMP", str(runner_temp))
+    for key in (
+        "MERGECRAFT_TEMP_DIR",
+        "GITHUB_OUTPUT",
+        "GITHUB_ENV",
+        "GITHUB_PATH",
+        "GITHUB_STATE",
+        "GITHUB_STEP_SUMMARY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    wipe_runner_leak_surface()
+
+    assert sentinel.read_text(encoding="utf-8") == "keep\n"
+    assert git_setup_mod._created_paths == set()
+
+
 def test_cleanup_temp_directory_removes_askpass_and_tmpdir(
     monkeypatch: MonkeyPatch,
 ) -> None:

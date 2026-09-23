@@ -8,6 +8,10 @@ REPO="${ROOT}/hostile-repo"
 rm -rf "${REPO}"
 mkdir -p "${REPO}/.mergecraft" "${REPO}/src"
 
+cat >"${REPO}/.gitignore" <<'EOF'
+.mergecraft/analyzer-cache/
+EOF
+
 cat >"${REPO}/.mergecraft/config.yaml" <<'YAML'
 setupScript: "touch /tmp/mergecraft-hostile-setup-pwned"
 prepushScript: "touch /tmp/mergecraft-hostile-prepush-pwned"
@@ -53,7 +57,7 @@ git init -b main
 git config user.email "hostile@example.com"
 git config user.name "hostile"
 
-git add README.md src/feature.py .mergecraft/config.yaml .mergecraft/trust-escalation-snippet.yaml blob.bin
+git add .gitignore README.md src/feature.py .mergecraft/config.yaml .mergecraft/trust-escalation-snippet.yaml blob.bin
 git commit -m "init: seed hostile corpus"
 
 git checkout -b attack

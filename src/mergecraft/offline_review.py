@@ -720,6 +720,7 @@ class _OfflineDiffReviewRun:
     evidence_packet_path: Path | None
     on_finding: Callable[[dict[str, Any]], None] | None
     read_cache: bool
+    settings: RepoSettings | None = None
     verification_report_path: Path | None = None
     # Operator opt-in (#1). Defaults to the historical hardcoded value so any
     # caller that omits it keeps the pre-flag behaviour: repo-native analyzers
@@ -979,15 +980,25 @@ class _OfflineDiffReviewRun:
         )
 
     async def publish(self, review_out: OfflineReviewResult) -> OfflineReviewResult:
-        if review_out.empty_diff or self.dry_run:
-            return review_out
-        store_key = None if self.from_cache else self.cache_key
-        return _finish_offline_result(
-            review_out,
-            json_path=self.json_path,
-            scope_reduction=self.scope_reduction,
-            cache_key=store_key,
-        )
+        from mergecraft.tracing.tracer import get_tracer_from_settings
+
+        settings = self.settings or load_repo_settings(root=self.cwd, load_learnings_files=False)
+        tracer = get_tracer_from_settings(settings)
+        with tracer.start_span(
+            "mergecraft.publish",
+            attrs_source=lambda: {
+                "outcome": str(review_out.outcome) if review_out.outcome is not None else "unknown"
+            },
+        ):
+            if review_out.empty_diff or self.dry_run:
+                return review_out
+            store_key = None if self.from_cache else self.cache_key
+            return _finish_offline_result(
+                review_out,
+                json_path=self.json_path,
+                scope_reduction=self.scope_reduction,
+                cache_key=store_key,
+            )
 
 
 async def _run_offline_diff_review(
@@ -1068,6 +1079,7 @@ async def _run_offline_diff_review(
         trust_tier=trust_tier,
         shell=shell,
         run_bounds=run_bounds,
+        settings=settings,
         analyzers_enabled=settings.analyzers.enabled,
         json_path=json_path,
         prompt_extra=prompt_extra,
@@ -1081,7 +1093,7 @@ async def _run_offline_diff_review(
         with_mutation=with_mutation,
     )
 
-    try:
+    async def _execute_lifecycle() -> OfflineReviewResult:
         if with_coverage or with_mutation:
             from mergecraft.ci.local_evidence import checkout_is_fork_pr
 
@@ -1141,6 +1153,23 @@ async def _run_offline_diff_review(
                     _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc)),
                     jev_skip_reason,
                 )
+
+    try:
+        from mergecraft.tracing.tracer import (
+            get_tracer_from_settings,
+            resolve_correlation_from_env,
+            run_root_span,
+        )
+
+        tracer = get_tracer_from_settings(settings)
+        with run_root_span(
+            tracer,
+            attrs_source=lambda: dict(resolve_correlation_from_env()),
+        ) as root_span:
+            result = await _execute_lifecycle()
+            if not result.success:
+                root_span.set_status("error", result.error or "review failed")
+            return result
     finally:
         # Restore the operator's ``.env`` tracing vars so the ``diff-review``
         # overrides never leak into the caller's environment.

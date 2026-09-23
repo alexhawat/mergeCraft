@@ -169,6 +169,17 @@ def _looks_like_repo_path_token(token: str) -> bool:
     return "." in last or _is_benign_filename(token)
 
 
+def _is_benign_path_stem_segment(segment: str) -> bool:
+    """Recognize bounded ordinary path segments before a filename suffix."""
+    if re.fullmatch(r"[a-z_][a-z0-9_-]{0,14}", segment):
+        return True
+    return (
+        len(segment) <= 32
+        and segment == segment.upper()
+        and _BENIGN_IDENTIFIER_RE.fullmatch(segment) is not None
+    )
+
+
 def _entropy_redact(text: str) -> str:
     def replacer(match: re.Match[str]) -> str:
         token = match.group(0)
@@ -181,7 +192,7 @@ def _entropy_redact(text: str) -> str:
         )
         if suffix and "/" in token:
             segments = token.split("/")
-            if all(re.fullmatch(r"[a-z_][a-z0-9_-]{0,14}", part) for part in segments):
+            if all(_is_benign_path_stem_segment(part) for part in segments):
                 return token
         if _looks_like_repo_path_token(token):
             return token

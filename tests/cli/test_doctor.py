@@ -136,6 +136,35 @@ def test_never_prints_a_credential_value(tmp_path: Path, monkeypatch: MonkeyPatc
     assert "auth" in output.lower()
 
 
+def test_auth_probe_warns_when_secret_environment_is_empty(monkeypatch: MonkeyPatch) -> None:
+    """The auth warning is stable even when the host has provider credentials."""
+    from mergecraft.cli import doctor_cmd
+
+    for key in doctor_cmd._SECRET_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+    result = doctor_cmd._auth_probe()
+
+    assert result.status == "warn"
+    assert result.detail == "no credential env vars detected"
+
+
+def test_auth_probe_reports_presence_without_secret_material(monkeypatch: MonkeyPatch) -> None:
+    """A present credential changes status while its value stays out of detail."""
+    from mergecraft.cli import doctor_cmd
+
+    for key in doctor_cmd._SECRET_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    secret = "doctor-probe-secret-value"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+
+    result = doctor_cmd._auth_probe()
+
+    assert result.status == "ok"
+    assert result.detail == "1 credential env var(s) present"
+    assert secret not in result.detail
+
+
 def test_doctor_mcp_probe_does_not_treat_3764_as_the_mcp_port(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

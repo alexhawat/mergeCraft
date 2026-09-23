@@ -18,7 +18,12 @@ from mergecraft.tracing._tool_attrs import (
     enrich_tool_request,
     enrich_tool_response,
 )
-from mergecraft.tracing.tracer import get_tracer_from_settings
+from mergecraft.tracing.tracer import (
+    NullTracer,
+    Tracer,
+    get_tracer_from_settings,
+    tracer_for_trace_parent,
+)
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.version import package_version
 
@@ -93,7 +98,15 @@ async def dispatch_mcp_rpc(
             return rpc_error(req_id, RpcError(-32000, str(exc)))
         from mergecraft.config.settings import RepoSettings
 
-        tracer = get_tracer_from_settings(RepoSettings())
+        explicit_parent = tool_ctx.trace_parent if tool_ctx is not None else None
+        owned_tracer = tracer_for_trace_parent(explicit_parent)
+        tracer: Tracer | NullTracer = (
+            owned_tracer if owned_tracer is not None else get_tracer_from_settings(RepoSettings())
+        )
+        parent_span_id = None
+        if tracer.current_span() is None and explicit_parent is not None:
+            if tracer.trace_id == explicit_parent.trace_id:
+                parent_span_id = explicit_parent.span_id
         call_attrs: dict[str, Any] = {
             "tool.name": name,
             "tool.server": MERGECRAFT_MCP_NAME,
@@ -103,7 +116,11 @@ async def dispatch_mcp_rpc(
         }
         if agent_id:
             call_attrs["mergecraft.agent.id"] = agent_id
-        with tracer.start_span("tool.call", attrs_source=lambda: dict(call_attrs)) as span:
+        with tracer.start_span(
+            "tool.call",
+            parent_span_id=parent_span_id,
+            attrs_source=lambda: dict(call_attrs),
+        ) as span:
             enrich_tool_request(span, arguments=arguments)
             mode = tool_ctx.tool_state.selected_mode if tool_ctx is not None else None
             mode_token = bind_selected_mode(mode)

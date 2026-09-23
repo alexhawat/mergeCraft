@@ -32,6 +32,7 @@ from mergecraft.evals.adjudication import (
     tier_for_provenance,
 )
 from mergecraft.evals.benchmark import DetectionCase, DetectionMetrics
+from mergecraft.evals.corpora import CorpusCase
 from mergecraft.evals.live_run import (
     ReviewRunFailed,
     run_detection,
@@ -78,6 +79,18 @@ class TestApproval:
     def test_unknown_kind_is_a_configuration_error(self) -> None:
         with pytest.raises(ValueError, match="unknown adjudicator kind"):
             _settings(oracle={"enabled": True})
+
+    def test_existing_corpus_rows_default_to_unadjudicated(self) -> None:
+        case = CorpusCase.model_validate(
+            {
+                "id": "golden-1",
+                "title": "existing row",
+                "language": "python",
+                "framework": "django",
+            }
+        )
+        assert case.provenance == ""
+        assert case.adjudication is None
 
 
 class TestSelfAdjudication:
@@ -210,15 +223,17 @@ class TestScoringIntegration:
         assert report.calibration is not None
         assert report.calibration.eligible is True
 
-    def test_format_report_states_the_calibration_verdict(self) -> None:
+    def test_format_report_states_label_ineligibility(self) -> None:
         rendered = format_report(
             score_findings([self._issue("1", "agent-seeded")], [self._finding()])
         )
-        assert "NOT calibrated" in rendered
+        assert "label eligibility: ineligible" in rendered
+        assert "calibrated" not in rendered
 
-    def test_format_report_says_calibrated_for_independent_labels(self) -> None:
+    def test_format_report_says_eligible_for_independent_labels(self) -> None:
         rendered = format_report(score_findings([self._issue("1", "human")], [self._finding()]))
-        assert "calibration      : calibrated" in rendered
+        assert "label eligibility: eligible" in rendered
+        assert "calibrated" not in rendered
 
     def test_report_predating_the_field_is_not_read_as_eligible(self) -> None:
         report = ScoreReport(
@@ -283,7 +298,7 @@ class TestConfigReachesScoring:
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
         assert result.exit_code == 0, result.output
-        assert "NOT calibrated" in result.output
+        assert "label eligibility: ineligible" in result.output
 
     def test_lowering_the_bar_in_config_changes_the_cli_verdict(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -293,8 +308,8 @@ class TestConfigReachesScoring:
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
         assert result.exit_code == 0, result.output
-        assert "NOT calibrated" not in result.output
-        assert "calibrated" in result.output
+        assert "label eligibility: eligible" in result.output
+        assert "calibrated" not in result.output
 
     def test_live_detection_accepts_and_applies_the_bar(self) -> None:
         signature = inspect.signature(run_live_detection)
@@ -354,12 +369,13 @@ class TestAdjudicateCommand:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         baseline = self._baseline(tmp_path)
+        before = baseline.read_bytes()
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(
             app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "llm"]
         )
         assert result.exit_code != 0
-        assert self._rows(baseline)[0]["provenance"] == "agent-seeded"
+        assert baseline.read_bytes() == before
 
     def test_approved_adjudicator_writes_derived_provenance(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -415,6 +431,7 @@ class TestAdjudicateCommand:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         baseline = self._baseline(tmp_path)
+        before = baseline.read_bytes()
         self._enable_llm(tmp_path)
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(
@@ -434,7 +451,7 @@ class TestAdjudicateCommand:
             ],
         )
         assert result.exit_code != 0
-        assert self._rows(baseline)[0]["provenance"] == "agent-seeded"
+        assert baseline.read_bytes() == before
 
     def test_record_round_trips_so_independence_is_auditable(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -483,10 +500,16 @@ class TestAdjudicateCommand:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         baseline = self._baseline(tmp_path)
+        payload = json.loads(baseline.read_text(encoding="utf-8"))
+        payload.update({"source": "fixture", "kind": "detection", "notes": "keep me"})
+        baseline.write_text(json.dumps(payload), encoding="utf-8")
         monkeypatch.chdir(tmp_path)
         CliRunner().invoke(app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"])
         payload = json.loads(baseline.read_text())
         assert payload["closed_world"] is False
+        assert payload["source"] == "fixture"
+        assert payload["kind"] == "detection"
+        assert payload["notes"] == "keep me"
         assert payload["issues"][0]["provenance"] == "human"
 
     def test_bare_list_baseline_is_still_accepted(
@@ -527,16 +550,156 @@ class TestAdjudicateCommand:
         assert payload["issues"][0]["provenance"] == "human"
         assert "closed_world" in payload
 
+    def test_adjudicates_real_golden_case_as_typed_object(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The supported writer must preserve and validate a shipped golden object."""
+        repo_root = Path(__file__).resolve().parents[2]
+        source = (
+            repo_root / "evals" / "cases" / "golden" / "golden-python-django-migration-001.json"
+        )
+        target = tmp_path / source.name
+        target.write_bytes(source.read_bytes())
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "eval",
+                "adjudicate",
+                str(target),
+                "--id",
+                "golden-python-django-migration-001",
+                "--by",
+                "human",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        assert isinstance(payload, dict)
+        case = CorpusCase.model_validate(payload)
+        assert case.provenance == "human"
+        assert case.adjudication is not None
+        assert case.adjudication.adjudicated_by == "human"
+
     def test_unknown_issue_id_writes_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         baseline = self._baseline(tmp_path)
+        before = baseline.read_bytes()
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(
             app, ["eval", "adjudicate", str(baseline), "--id", "nope", "--by", "human"]
         )
         assert result.exit_code != 0
-        assert self._rows(baseline)[0]["provenance"] == "agent-seeded"
+        assert baseline.read_bytes() == before
+
+    def test_malformed_row_leaves_original_bytes_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = tmp_path / "malformed.json"
+        baseline.write_text(
+            json.dumps([{"id": "1", "path": "a.py"}, "not an object"]),
+            encoding="utf-8",
+        )
+        before = baseline.read_bytes()
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"]
+        )
+
+        assert result.exit_code != 0
+        assert baseline.read_bytes() == before
+        assert "adjudicated 1" not in result.output
+
+    def test_incomplete_golden_object_leaves_original_bytes_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = tmp_path / "golden-incomplete.json"
+        baseline.write_text(
+            json.dumps(
+                {
+                    "id": "golden-incomplete",
+                    "title": "missing required language",
+                    "framework": "django",
+                    "path": "a.py",
+                }
+            ),
+            encoding="utf-8",
+        )
+        before = baseline.read_bytes()
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(
+            app,
+            [
+                "eval",
+                "adjudicate",
+                str(baseline),
+                "--id",
+                "golden-incomplete",
+                "--by",
+                "human",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert baseline.read_bytes() == before
+        assert "adjudicated golden-incomplete" not in result.output
+
+    def test_ambiguous_bare_object_leaves_original_bytes_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = tmp_path / "ambiguous.json"
+        baseline.write_text(json.dumps({"id": "1"}), encoding="utf-8")
+        before = baseline.read_bytes()
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"]
+        )
+
+        assert result.exit_code != 0
+        assert baseline.read_bytes() == before
+        assert "adjudicated 1" not in result.output
+
+    def test_replace_failure_leaves_original_bytes_and_mode_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        baseline.chmod(0o640)
+        before = baseline.read_bytes()
+        monkeypatch.chdir(tmp_path)
+
+        def fail_replace(_source: object, _target: object) -> None:
+            raise OSError("simulated replace failure")
+
+        monkeypatch.setattr("mergecraft.cli.eval_cmd.os.replace", fail_replace)
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"]
+        )
+
+        assert result.exit_code != 0
+        assert baseline.read_bytes() == before
+        assert baseline.stat().st_mode & 0o777 == 0o640
+        assert "adjudicated 1" not in result.output
+        assert list(tmp_path.glob(f".{baseline.name}.*.tmp")) == []
+
+    def test_successful_atomic_replace_preserves_file_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        baseline = self._baseline(tmp_path)
+        baseline.chmod(0o640)
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(
+            app, ["eval", "adjudicate", str(baseline), "--id", "1", "--by", "human"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert baseline.stat().st_mode & 0o777 == 0o640
 
 
 class TestBenchmarkChainThreadsTheBar:
@@ -691,7 +854,7 @@ class TestNoBarCannotBeConfigured:
         monkeypatch.chdir(tmp_path)
         result = CliRunner().invoke(app, ["eval", "score", str(actual), str(expected)])
         assert result.exit_code == 0, result.output
-        assert "NOT calibrated" in result.output
+        assert "label eligibility: ineligible" in result.output
 
 
 class TestFailedCaseStillCounts:
@@ -855,5 +1018,40 @@ class TestBaselineInputShapes:
         result, path = self._run(tmp_path, monkeypatch, "b.json", body, "1")
         assert result.exit_code == 0, result.output
         decoded = json.loads(path.read_text())
-        rows = decoded if isinstance(decoded, list) else [decoded]
-        assert rows[0]["provenance"] == "human"
+        assert isinstance(decoded, dict)
+        assert decoded["provenance"] == "human"
+
+    def test_bare_baseline_with_title_and_category_is_not_a_corpus_case(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = json.dumps(
+            {
+                "id": "1",
+                "path": "a.py",
+                "title": "ordinary baseline issue",
+                "category": "correctness",
+            }
+        )
+        result, path = self._run(tmp_path, monkeypatch, "baseline.json", body, "1")
+        assert result.exit_code == 0, result.output
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(decoded, dict)
+        assert decoded["provenance"] == "human"
+
+    def test_compact_corpus_object_stays_an_object(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = json.dumps(
+            {
+                "id": "golden-1",
+                "title": "compact corpus case",
+                "language": "python",
+                "framework": "django",
+                "path": "a.py",
+            }
+        )
+        result, path = self._run(tmp_path, monkeypatch, "golden.json", body, "golden-1")
+        assert result.exit_code == 0, result.output
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(decoded, dict)
+        assert CorpusCase.model_validate(decoded).provenance == "human"

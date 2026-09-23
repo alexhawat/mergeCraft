@@ -16,9 +16,9 @@ import subprocess
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 import mergecraft
 from mergecraft.agents.verifier import (
@@ -230,6 +230,29 @@ class DetectionCase(BaseModel):
     closed_world: bool = False
 
 
+class DetectionExecutionReceipt(BaseModel):
+    """Immutable per-case evidence captured at the live review boundary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["1.0.0"] = "1.0.0"
+    patch_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    baseline_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    raw_findings_path: str
+    raw_findings_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    elapsed_seconds: float = Field(ge=0.0, allow_inf_nan=False)
+    cost_known: bool
+    cost_usd: float | None = Field(default=None, ge=0.0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _cost_fields_agree(self) -> DetectionExecutionReceipt:
+        if self.cost_known != (self.cost_usd is not None):
+            raise ValueError("cost_known must be true exactly when cost_usd is recorded")
+        if not self.raw_findings_path.strip():
+            raise ValueError("raw_findings_path must not be empty")
+        return self
+
+
 class DetectionCaseResult(BaseModel):
     """One case's live finding-location outcome — mirrors ``CaseReplayRow``'s
     role for structural replay, but for the detection join (B3, N5)."""
@@ -247,6 +270,33 @@ class DetectionCaseResult(BaseModel):
     # None on an open-world case — `ScoreReport.strict_precision` raises there
     # (D4); never fabricated as a number that doesn't exist.
     strict_precision: float | None = None
+    # Added in publication protocol 1.0. Older result sets remain readable,
+    # but publication rejects a missing receipt instead of inferring what an
+    # historical run reviewed from files that happen to exist now.
+    execution_receipt: DetectionExecutionReceipt | None = None
+
+
+class DetectionRunIdentity(BaseModel):
+    """Actual live-detection model identity, distinct from structural defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["1.0.0"] = "1.0.0"
+    provider: str
+    requested_model: str
+    executed_model: str
+    immutable_model_pin: str | None = None
+    pin_provenance: Literal["operator-declared"] | None = None
+
+    @property
+    def fully_pinned(self) -> bool:
+        return bool(
+            self.provider.strip()
+            and self.requested_model.strip()
+            and self.executed_model.strip()
+            and self.immutable_model_pin
+            and self.pin_provenance == "operator-declared"
+        )
 
 
 class DetectionMetrics(BaseModel):
@@ -277,6 +327,7 @@ class DetectionMetrics(BaseModel):
     # result set written before this field, so an older artifact is not read
     # as eligible.
     calibration: CalibrationStatus | None = None
+    execution_identity: DetectionRunIdentity | None = None
 
 
 class BenchmarkResultSet(BaseModel):
@@ -706,7 +757,9 @@ __all__ = [
     "CorpusClassRollup",
     "DetectionCase",
     "DetectionCaseResult",
+    "DetectionExecutionReceipt",
     "DetectionMetrics",
+    "DetectionRunIdentity",
     "GateMatrix",
     "LatencySummary",
     "ReviewingModelPin",

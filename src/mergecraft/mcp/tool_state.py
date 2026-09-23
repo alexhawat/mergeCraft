@@ -344,12 +344,14 @@ class ToolState:
     # #619 Task 4c — set when the review body exceeded GitHub's
     # 65536-character cap and was truncated before posting.
     review_body_truncated: bool = False
-    # #619 Task 3a — set in the exception path of
+    # #619 Task 3a / #822 — set in the exception path of
     # ``mcp/review.py::_create_github_review_with_anchor_recovery`` when
     # every 422 recovery attempt, including the last resort, still failed:
     # the terminal verdict was recorded but never published to GitHub.
     # ``main_outcome.py`` maps this to ``RunOutcome.inconclusive`` rather
-    # than ``passed`` so a lost review cannot read as a clean run.
+    # than ``passed`` so a lost review cannot read as a clean run. A later
+    # confirmed receipt or matching scope-checked replay clears the flag;
+    # trajectory records retain the failed-attempt history.
     terminal_publication_failed: bool = False
     terminal_submission: TerminalSubmission | None = None
     terminal_submission_conflict: bool = False

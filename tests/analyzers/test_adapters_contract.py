@@ -79,3 +79,25 @@ def test_skips_with_reason_when_base_ref_missing(tool_id: str, adapter_fixture_r
         f"{tool_id} skip reason must name the missing base ref, not guess: {result.skip_reason!r}"
     )
     assert result.findings == []
+
+
+def test_contract_provisioning_failure_stays_a_visible_skip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contracts = import_module("mergecraft.analyzers.contracts")
+    provision = import_module("mergecraft.analyzers.provision")
+    registry = import_module("mergecraft.analyzers.registry")
+    resolve = import_module("mergecraft.analyzers.resolve")
+    manifest = registry.get_manifest("oasdiff")
+    plan = resolve.AnalyzerPlan(manifest_id=manifest.id, mode="managed", argv=("oasdiff",))
+
+    def fail_provision(*_args: object, **_kwargs: object) -> None:
+        raise provision.ProvisionError("sha256 checksum mismatch")
+
+    monkeypatch.setattr(contracts, "provision_resolved_plan", fail_provision)
+
+    resolved, reason = contracts._provision_plan(plan, manifest=manifest, repo_root=tmp_path)
+
+    assert resolved is None
+    assert "managed binary provisioning failed" in (reason or "")
+    assert "checksum mismatch" in (reason or "")

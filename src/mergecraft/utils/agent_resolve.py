@@ -1010,7 +1010,11 @@ async def run_with_model_chain(
     """
     # Local imports avoid a circular import — tracing imports ``mergecraft.config`` for
     # ``RepoSettings`` only at type-check time.
-    from mergecraft.tracing.tracer import get_tracer_from_settings, resolve_correlation_from_env
+    from mergecraft.tracing.tracer import (
+        get_tracer_from_settings,
+        resolve_correlation_from_env,
+        run_root_span,
+    )
 
     tracer = get_tracer_from_settings(settings)
     correlation_attrs = (
@@ -1020,13 +1024,10 @@ async def run_with_model_chain(
     chain = effective_model_chain(settings, head=head, pin=pin)
     requested_model = chain[0] if chain else (head or "")
 
-    # Always emit the root span — the trace tree is the run's, not the
-    # chain's. An empty chain short-circuits with a flagged agent result;
-    # callers inspect ``success`` to surface the misconfiguration upstream.
-    with tracer.start_span(
-        "mergecraft.run",
-        attrs_source=lambda: dict(correlation_attrs),
-    ) as _root:
+    # Action and offline orchestration own the lifecycle root. Standalone
+    # callers still get a complete trace, while nested chain dispatch reuses
+    # the active run instead of creating a second root.
+    with run_root_span(tracer, attrs_source=lambda: dict(correlation_attrs)) as _root:
         if not chain:
             _empty_result = _empty_chain_result()
             _root.set_status("error", _empty_result.error or "empty model chain")

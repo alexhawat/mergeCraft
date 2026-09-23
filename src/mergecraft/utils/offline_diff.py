@@ -12,6 +12,7 @@ from mergecraft.utils.git_hardening import git_argv
 
 _DEFAULT_BASES = ("main", "master", "develop", "trunk")
 _MAX_UNTRACKED_FILE_BYTES = 256 * 1024
+_MANAGED_ANALYZER_CACHE = ".mergecraft/analyzer-cache"
 
 
 @dataclass(slots=True)
@@ -154,6 +155,11 @@ def _nul_paths(data: str) -> list[str]:
     return [item for item in data.split("\0") if item]
 
 
+def _is_managed_analyzer_cache_path(rel: str) -> bool:
+    """Return whether *rel* belongs to mergeCraft's generated analyzer cache."""
+    return rel == _MANAGED_ANALYZER_CACHE or rel.startswith(f"{_MANAGED_ANALYZER_CACHE}/")
+
+
 def _ignored_limitations(cwd: Path, *, already_seen: set[str]) -> list[str]:
     """Return limitations for gitignored working-tree paths.
 
@@ -194,6 +200,13 @@ def _discover_untracked_additions(
     eligible: set[str] = set()
     if listing.returncode == 0:
         for rel in _nul_paths(listing.stdout):
+            # Managed analyzer installations are runtime artifacts, not source
+            # additions. They can contain thousands of small package files and
+            # must never turn a local review into one ``git diff --no-index``
+            # invocation per cache entry. Tracked cache paths still arrive via
+            # the merge-base diff above and are intentionally left untouched.
+            if _is_managed_analyzer_cache_path(rel):
+                continue
             eligible.add(rel)
             path = cwd / rel
             if path.is_symlink():

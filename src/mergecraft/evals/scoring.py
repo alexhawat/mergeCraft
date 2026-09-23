@@ -698,8 +698,8 @@ def format_report(report: ScoreReport, *, corpus: Path | str = "") -> str:
         lines.append(f"  missed           : {', '.join(report.missed_issue_ids)}")
     calibration = report.calibration
     if calibration is not None:
-        verdict = "calibrated" if calibration.eligible else "NOT calibrated"
-        lines.append(f"  calibration      : {verdict} — {calibration.reason}")
+        verdict = "eligible" if calibration.eligible else "ineligible"
+        lines.append(f"  label eligibility: {verdict} — {calibration.reason}")
     return "\n".join(lines)
 
 

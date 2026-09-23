@@ -9,9 +9,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
-from mergecraft.analyzers.execution import finalize_plan, provision_managed_argv
+from mergecraft.analyzers.execution import (
+    finalize_plan,
+    provision_managed_argv,
+    provisioning_failure_reason,
+)
 from mergecraft.analyzers.parse import parse_output_file
 from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
+from mergecraft.analyzers.provision import ProvisionError
 from mergecraft.analyzers.registry import filter_changed_files_for_manifest, get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
 from mergecraft.analyzers.run import run_plan
@@ -420,7 +425,11 @@ def run_adapter(
         return AdapterRunResult(findings=[], skipped=True, skip_reason=plan.reason)
 
     if plan.mode == "managed":
-        provisioned = provision_managed_argv(plan, manifest=manifest, repo_root=repo_root)
+        try:
+            provisioned = provision_managed_argv(plan, manifest=manifest, repo_root=repo_root)
+        except ProvisionError as exc:
+            reason = provisioning_failure_reason(tool_id, exc)
+            return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
         if provisioned is None:
             reason = f"skipped {tool_id}: managed binary provisioning failed"
             return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)

@@ -9,8 +9,14 @@ from typing import Any
 import httpx
 import pytest
 import yaml
-from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
+from tests.support.tool_context import (
+    bind_github_client,
+    bind_review_publication_scope,
+    github_client_from_ctx,
+)
 
+from mergecraft.agents.shared import AgentResult
+from mergecraft.main_outcome import _classify_outcome
 from mergecraft.mcp.context import (
     PayloadEvent,
     RepoIdentity,
@@ -25,6 +31,7 @@ from mergecraft.review_taxonomy import (
     finding_fingerprint,
     stamp_finding_fingerprint,
 )
+from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.github import GitHubClient
 
 
@@ -49,8 +56,33 @@ class _RecordingGitHub(GitHubClient):
         return {"id": 1, "node_id": "n1", "html_url": "https://x/1", "state": "COMMENTED"}
 
 
-@pytest.fixture
-def ctx(tmp_path: Path) -> ToolContext:
+class _FailThenSucceedGitHub(_RecordingGitHub):
+    """Fail a configured number of publication attempts, then return a receipt."""
+
+    def __init__(self, *, failures: int = 1, invalid_receipt: bool = False) -> None:
+        super().__init__()
+        self.failures = failures
+        self.invalid_receipt = invalid_receipt
+
+    async def create_review(
+        self, owner: str, repo: str, pull_number: int, **payload: Any
+    ) -> dict[str, Any]:
+        self.review_payload = payload
+        self.review_payloads.append(payload)
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("temporary publication failure")
+        if self.invalid_receipt:
+            return {"id": "not-an-integer", "node_id": "bad"}
+        return {
+            "id": 42,
+            "node_id": "n42",
+            "html_url": "https://x/42",
+            "state": payload.get("event") or "COMMENTED",
+        }
+
+
+def _ctx(tmp_path: Path) -> ToolContext:
     tool_ctx = ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -68,11 +100,119 @@ def ctx(tmp_path: Path) -> ToolContext:
     return tool_ctx
 
 
+@pytest.fixture
+def ctx(tmp_path: Path) -> ToolContext:
+    return _ctx(tmp_path)
+
+
 async def _submit(ctx: ToolContext, comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     spec = create_pull_request_review_tool(ctx)
     await spec.execute({"pull_number": 7, "body": "review body", "comments": comments})
     payload = github_client_from_ctx(ctx).review_payload  # type: ignore[attr-defined]
     return list(payload.get("comments") or [])
+
+
+@pytest.mark.asyncio
+async def test_publication_retry_clears_unresolved_failure_after_storing_receipt(
+    tmp_path: Path,
+) -> None:
+    github = _FailThenSucceedGitHub()
+    tool_ctx = _ctx(tmp_path)
+    bind_review_publication_scope(tool_ctx, checkout_sha="abc123")
+    bind_github_client(tool_ctx, github)
+    tool = create_pull_request_review_tool(tool_ctx)
+    params = {"pull_number": 7, "body": "Looks good.", "approved": True}
+
+    first = await tool.execute(params)
+    assert first.is_error is True
+    assert tool_ctx.tool_state.terminal_publication_failed is True
+    assert tool_ctx.tool_state.review is None
+
+    second = await tool.execute(params)
+    assert second.is_error is False
+    assert tool_ctx.tool_state.review is not None
+    assert tool_ctx.tool_state.review.id == 42
+    assert tool_ctx.tool_state.review.reviewed_sha == "abc123"
+    assert tool_ctx.tool_state.terminal_publication_failed is False
+
+    outcome, reason = _classify_outcome(
+        result=AgentResult(success=True, terminal_submission_received=True),
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        mode="Review",
+        terminal_publication_failed=tool_ctx.tool_state.terminal_publication_failed,
+    )
+    assert outcome is RunOutcome.passed
+    assert reason is None
+
+
+@pytest.mark.asyncio
+async def test_publication_retry_keeps_failure_until_receipt_is_parseable(tmp_path: Path) -> None:
+    github = _FailThenSucceedGitHub(failures=1, invalid_receipt=True)
+    tool_ctx = _ctx(tmp_path)
+    bind_review_publication_scope(tool_ctx, checkout_sha="abc123")
+    bind_github_client(tool_ctx, github)
+    tool = create_pull_request_review_tool(tool_ctx)
+    params = {"pull_number": 7, "body": "Looks good.", "approved": True}
+
+    assert (await tool.execute(params)).is_error is True
+    assert (await tool.execute(params)).is_error is True
+    assert tool_ctx.tool_state.review is None
+    assert tool_ctx.tool_state.terminal_publication_failed is True
+
+
+@pytest.mark.asyncio
+async def test_repeated_publication_failures_remain_inconclusive(tmp_path: Path) -> None:
+    github = _FailThenSucceedGitHub(failures=2)
+    tool_ctx = _ctx(tmp_path)
+    bind_review_publication_scope(tool_ctx, checkout_sha="abc123")
+    bind_github_client(tool_ctx, github)
+    tool = create_pull_request_review_tool(tool_ctx)
+    params = {"pull_number": 7, "body": "Looks good.", "approved": True}
+
+    assert (await tool.execute(params)).is_error is True
+    assert (await tool.execute(params)).is_error is True
+    assert tool_ctx.tool_state.review is None
+    assert tool_ctx.tool_state.terminal_publication_failed is True
+
+    outcome, reason = _classify_outcome(
+        result=AgentResult(success=True, terminal_submission_received=True),
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        mode="Review",
+        terminal_publication_failed=tool_ctx.tool_state.terminal_publication_failed,
+    )
+    assert outcome is RunOutcome.inconclusive
+    assert reason is not None
+    assert "never published" in reason
+
+
+@pytest.mark.asyncio
+async def test_matching_publication_replay_clears_stale_failure_after_scope_check(
+    tmp_path: Path,
+) -> None:
+    github = _FailThenSucceedGitHub(failures=0)
+    tool_ctx = _ctx(tmp_path)
+    bind_review_publication_scope(tool_ctx, checkout_sha="abc123")
+    bind_github_client(tool_ctx, github)
+    tool = create_pull_request_review_tool(tool_ctx)
+    params = {"pull_number": 7, "body": "Looks good.", "approved": True}
+    assert (await tool.execute(params)).is_error is False
+    assert len(github.review_payloads) == 1
+
+    tool_ctx.tool_state.terminal_publication_failed = True
+    replay = await tool.execute(params)
+    assert replay.is_error is False
+    assert tool_ctx.tool_state.terminal_publication_failed is False
+    assert len(github.review_payloads) == 1
+
+    tool_ctx.tool_state.terminal_publication_failed = True
+    wrong_scope = await tool.execute({**params, "commit_id": "wrong-head"})
+    assert wrong_scope.is_error is True
+    assert tool_ctx.tool_state.terminal_publication_failed is True
+    assert len(github.review_payloads) == 1
 
 
 @pytest.mark.asyncio

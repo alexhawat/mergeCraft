@@ -54,6 +54,7 @@ Exports:
 from __future__ import annotations
 
 import hashlib
+import posixpath
 import shlex
 from typing import TYPE_CHECKING, Any, Final, Literal, Self
 
@@ -223,12 +224,183 @@ _MODIFY_COMMANDS: Final[frozenset[str]] = frozenset(
 
 # `git` sub-commands that only read.
 _GIT_READ_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
-    {"blame", "diff", "log", "ls-files", "show", "status"}
+    {
+        "blame",
+        "cat-file",
+        "diff",
+        "grep",
+        "log",
+        "ls-files",
+        "ls-tree",
+        "show",
+        "status",
+    }
 )
 
 _MAX_COMMAND_CHARS: Final[int] = 400
 _MAX_ERROR_CHARS: Final[int] = 400
+_MAX_PATH_CHARS: Final[int] = 400
 _MAX_PATHS_PER_CALL: Final[int] = 20
+_MAX_COMMAND_TOKENS: Final[int] = 64
+_EXPLICIT_PATH_FIELDS: Final[frozenset[str]] = frozenset(
+    {"file", "files", "filename", "filenames", "path", "paths"}
+)
+
+_SHELL_NO_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
+    "awk": frozenset(),
+    "bat": frozenset({"-n", "--number", "-p", "--plain", "--paging=never"}),
+    "cat": frozenset(
+        {
+            "-A",
+            "--show-all",
+            "-b",
+            "--number-nonblank",
+            "-e",
+            "-E",
+            "--show-ends",
+            "-n",
+            "--number",
+            "-s",
+            "--squeeze-blank",
+            "-t",
+            "-T",
+            "--show-tabs",
+            "-u",
+            "-v",
+            "--show-nonprinting",
+        }
+    ),
+    "diff": frozenset({"-q", "--brief", "-s", "--report-identical-files", "-u", "-y"}),
+    "grep": frozenset(
+        {
+            "-E",
+            "--extended-regexp",
+            "-F",
+            "--fixed-strings",
+            "-G",
+            "--basic-regexp",
+            "-H",
+            "--with-filename",
+            "-I",
+            "-i",
+            "--ignore-case",
+            "-L",
+            "--files-without-match",
+            "-l",
+            "--files-with-matches",
+            "-n",
+            "--line-number",
+            "-q",
+            "--quiet",
+            "-r",
+            "-R",
+            "--recursive",
+            "-s",
+            "--no-messages",
+            "-v",
+            "--invert-match",
+            "-w",
+            "--word-regexp",
+            "-x",
+            "--line-regexp",
+        }
+    ),
+    "head": frozenset({"-q", "--quiet", "-v", "--verbose"}),
+    "less": frozenset({"-F", "-R", "-S", "-X"}),
+    "ls": frozenset({"-a", "-A", "-d", "-F", "-h", "-l", "-R", "-r", "-t"}),
+    "more": frozenset({"-d", "-f", "-p", "-s", "-u"}),
+    "rg": frozenset(
+        {
+            "-F",
+            "--fixed-strings",
+            "-H",
+            "--with-filename",
+            "-I",
+            "--no-filename",
+            "-i",
+            "--ignore-case",
+            "-l",
+            "--files-with-matches",
+            "-n",
+            "--line-number",
+            "-s",
+            "--case-sensitive",
+            "-v",
+            "--invert-match",
+            "-w",
+            "--word-regexp",
+        }
+    ),
+    "sed": frozenset({"-E", "-n", "--quiet", "--silent"}),
+    "tail": frozenset({"-q", "--quiet", "-v", "--verbose"}),
+    "tree": frozenset({"-a", "-d", "-f", "-i"}),
+    "wc": frozenset({"-c", "--bytes", "-l", "--lines", "-m", "--chars", "-w", "--words"}),
+}
+
+_SHELL_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
+    "awk": frozenset({"-F", "-v", "-f"}),
+    "bat": frozenset({"-l", "--language", "--style"}),
+    "diff": frozenset({"-C", "--context", "-U", "--unified"}),
+    "grep": frozenset(
+        {
+            "-A",
+            "--after-context",
+            "-B",
+            "--before-context",
+            "-C",
+            "--context",
+            "-e",
+            "--regexp",
+            "-f",
+            "--file",
+            "-m",
+            "--max-count",
+        }
+    ),
+    "head": frozenset({"-c", "--bytes", "-n", "--lines"}),
+    "rg": frozenset(
+        {
+            "-A",
+            "--after-context",
+            "-B",
+            "--before-context",
+            "-C",
+            "--context",
+            "-e",
+            "--regexp",
+            "-f",
+            "--file",
+            "-g",
+            "--glob",
+            "-m",
+            "--max-count",
+            "-t",
+            "--type",
+        }
+    ),
+    "sed": frozenset({"-e", "--expression", "-f", "--file"}),
+    "tail": frozenset({"-c", "--bytes", "-n", "--lines"}),
+    "tree": frozenset({"-L", "--filelimit"}),
+}
+
+_GIT_NO_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
+    "blame": frozenset({"-b", "-l", "-p", "--porcelain", "-w"}),
+    "cat-file": frozenset({"-e", "-p", "-s", "-t"}),
+    "diff": frozenset({"--cached", "--name-only", "--name-status", "--no-color", "--stat", "-w"}),
+    "grep": _SHELL_NO_VALUE_OPTIONS["grep"],
+    "ls-files": frozenset(
+        {"-c", "--cached", "-d", "--deleted", "-m", "--modified", "-o", "--others"}
+    ),
+    "ls-tree": frozenset({"-d", "-l", "-r", "-t"}),
+    "show": frozenset({"--name-only", "--name-status", "--no-patch", "--oneline", "--stat", "-s"}),
+}
+
+_GIT_VALUE_OPTIONS: Final[dict[str, frozenset[str]]] = {
+    "blame": frozenset({"-L"}),
+    "diff": frozenset({"--diff-filter", "--unified", "-U"}),
+    "grep": _SHELL_VALUE_OPTIONS["grep"],
+    "show": frozenset({"--format", "--max-count", "--pretty"}),
+}
 
 
 class ToolCallRecord(BaseModel):
@@ -372,28 +544,61 @@ def _normalize_git_object_spec(token: str) -> str | None:
     return None
 
 
+def _sanitize_path(value: str) -> str | None:
+    """Return one safe, bounded path value or ``None``.
+
+    Paths are evidence identities, so truncating or redacting one would create
+    a different path. Drop the value instead whenever it cannot be retained
+    exactly and safely.
+    """
+    if (
+        len(value) > _MAX_PATH_CHARS
+        or value != value.strip()
+        or any(ord(char) < 32 for char in value)
+    ):
+        return None
+    if _is_git_revision_range(value) or not _looks_like_path(value):
+        return None
+    normalized = value
+    if any(part == ".." for part in normalized.split("/")):
+        return None
+    normalized = normalized.removeprefix("./")
+    # A redacted path cannot be retained as evidence: keeping the original
+    # leaks the value, while persisting a marker would manufacture a path.
+    redacted = redact_secrets(normalized)
+    if redacted != normalized:
+        return None
+    return normalized
+
+
 def _paths_in(values: Any) -> list[str]:
-    """Collect plausible repo-relative paths from an arbitrary argument tree."""
+    """Collect safe paths from documented explicit path fields only."""
     found: list[str] = []
 
-    def walk(node: Any) -> None:
+    def add(node: Any) -> None:
         if len(found) >= _MAX_PATHS_PER_CALL:
             return
         if isinstance(node, str):
-            if _looks_like_path(node):
-                normalized = _normalize_git_object_spec(node)
-                if normalized:
-                    found.append(normalized)
-            return
-        if isinstance(node, dict):
-            for value in node.values():
-                walk(value)
+            path = _sanitize_path(node)
+            if path is not None:
+                found.append(path)
             return
         if isinstance(node, (list, tuple)):
             for value in node:
+                add(value)
+
+    def walk(node: Any) -> None:
+        if len(found) >= _MAX_PATHS_PER_CALL or not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if key in _EXPLICIT_PATH_FIELDS:
+                add(value)
+            elif isinstance(value, dict):
                 walk(value)
 
-    walk(values)
+    if isinstance(values, dict):
+        walk(values)
+
     seen: set[str] = set()
     unique: list[str] = []
     for path in found:
@@ -403,6 +608,293 @@ def _paths_in(values: Any) -> list[str]:
     return unique
 
 
+def _has_dynamic_shell_syntax(command: str) -> bool:
+    """Return whether *command* needs shell interpretation to identify operands."""
+    if len(command) > _MAX_COMMAND_CHARS or any(char in command for char in "\n\r;&|<>`$*?["):
+        return True
+    return any(ord(char) < 32 for char in command)
+
+
+def _safe_argv(command: str) -> list[str] | None:
+    if _has_dynamic_shell_syntax(command):
+        return None
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if (
+        not argv
+        or len(argv) > _MAX_COMMAND_TOKENS
+        or any(len(token) > _MAX_PATH_CHARS for token in argv)
+        or any(token.startswith("~") for token in argv)
+    ):
+        return None
+    return argv
+
+
+def _option_positionals(
+    args: list[str],
+    *,
+    no_value: frozenset[str],
+    takes_value: frozenset[str],
+    pattern_options: frozenset[str] = frozenset(),
+) -> tuple[list[str], bool] | None:
+    """Parse a small known option vocabulary and return positional operands."""
+    positional: list[str] = []
+    consumed_value_option = False
+    options_open = True
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if options_open and token == "--":
+            options_open = False
+            index += 1
+            continue
+        if options_open and token.startswith("-") and token != "-":
+            if token in no_value:
+                index += 1
+                continue
+            if token in takes_value:
+                if index + 1 >= len(args):
+                    return None
+                consumed_value_option = consumed_value_option or token in pattern_options
+                index += 2
+                continue
+            flag, equals, _value = token.partition("=")
+            if equals and flag in takes_value:
+                consumed_value_option = consumed_value_option or flag in pattern_options
+                index += 1
+                continue
+            attached = next(
+                (flag for flag in takes_value if len(flag) == 2 and token.startswith(flag)),
+                None,
+            )
+            if attached is not None and len(token) > len(attached):
+                consumed_value_option = consumed_value_option or attached in pattern_options
+                index += 1
+                continue
+            return None
+        positional.append(token)
+        index += 1
+    return positional, consumed_value_option
+
+
+def _shell_operands(command: str) -> list[str] | None:
+    argv = _safe_argv(command)
+    if argv is None or argv[0] not in _READ_COMMANDS:
+        return None
+    tool = argv[0]
+    if tool == "find":
+        return None
+    pattern_options = {
+        "awk": frozenset({"-f"}),
+        "grep": frozenset({"-e", "--regexp", "-f", "--file"}),
+        "rg": frozenset({"-e", "--regexp", "-f", "--file"}),
+        "sed": frozenset({"-e", "--expression", "-f", "--file"}),
+    }.get(tool, frozenset())
+    parsed = _option_positionals(
+        argv[1:],
+        no_value=_SHELL_NO_VALUE_OPTIONS.get(tool, frozenset()),
+        takes_value=_SHELL_VALUE_OPTIONS.get(tool, frozenset()),
+        pattern_options=pattern_options,
+    )
+    if parsed is None:
+        return None
+    positional, pattern_from_option = parsed
+    if tool in {"grep", "rg"}:
+        if not pattern_from_option:
+            if not positional:
+                return []
+            positional = positional[1:]
+    elif tool in {"awk", "sed"} and not pattern_from_option:
+        if not positional:
+            return []
+        positional = positional[1:]
+    return positional
+
+
+def _lexical_working_directory(root: str, value: object) -> str | None:
+    root = posixpath.normpath(root)
+    raw = str(value or "")
+    if any(part == ".." for part in raw.split("/")) or any(ord(char) < 32 for char in raw):
+        return None
+    candidate = posixpath.normpath(raw if posixpath.isabs(raw) else posixpath.join(root, raw))
+    try:
+        if posixpath.commonpath((root, candidate)) != root:
+            return None
+    except ValueError:
+        return None
+    return candidate
+
+
+def _resolve_repo_operands(root: str, working_directory: object, operands: list[str]) -> list[str]:
+    cwd = _lexical_working_directory(root, working_directory)
+    if cwd is None:
+        return []
+    found: list[str] = []
+    for operand in operands:
+        if len(found) >= _MAX_PATHS_PER_CALL:
+            break
+        if posixpath.isabs(operand) or any(part == ".." for part in operand.split("/")):
+            continue
+        candidate = posixpath.normpath(posixpath.join(cwd, operand))
+        try:
+            if posixpath.commonpath((root, candidate)) != root:
+                continue
+        except ValueError:
+            continue
+        relative = posixpath.relpath(candidate, root)
+        path = _sanitize_path(relative)
+        if path is not None and path not in found:
+            found.append(path)
+    return found
+
+
+def _git_invocation(arguments: dict[str, Any]) -> tuple[str, list[str], list[str]] | None:
+    command = str(arguments.get("command") or "").strip()
+    raw_args = arguments.get("args") or []
+    if not isinstance(raw_args, list) or not all(isinstance(arg, str) for arg in raw_args):
+        return None
+    if _has_dynamic_shell_syntax(command) or any(
+        _has_dynamic_shell_syntax(arg) for arg in raw_args
+    ):
+        return None
+    had_git_prefix = command.lower() == "git" or command.lower().startswith("git ")
+    if command.lower() == "git":
+        command = ""
+    elif command.lower().startswith("git "):
+        command = command[4:].strip()
+    if had_git_prefix and command:
+        parsed_command = _safe_argv(f"git {command}")
+        if parsed_command is None:
+            return None
+        cmd_tokens = parsed_command[1:]
+    else:
+        cmd_tokens = [command] if command else []
+    if len(cmd_tokens) + len(raw_args) > _MAX_COMMAND_TOKENS:
+        return None
+    from mergecraft.mcp.git import _extract_global_opts
+
+    subcommand, args, global_options = _extract_global_opts(cmd_tokens, list(raw_args))
+    if subcommand and args and args[0].lower() == subcommand.lower():
+        args.pop(0)
+    return subcommand, args, global_options
+
+
+def _git_paths(
+    root: str,
+    arguments: dict[str, Any],
+    *,
+    working_directory: object = None,
+) -> list[str] | None:
+    invocation = _git_invocation(arguments)
+    if invocation is None:
+        return None
+    subcommand, args, global_options = invocation
+    if subcommand not in _GIT_NO_VALUE_OPTIONS:
+        return None
+    cwd = _lexical_working_directory(root, working_directory)
+    if cwd is None:
+        return None
+    index = 0
+    while index < len(global_options):
+        option = global_options[index]
+        if option != "-C" or index + 1 >= len(global_options):
+            return None
+        next_cwd = _lexical_working_directory(cwd, global_options[index + 1])
+        if next_cwd is None:
+            return None
+        cwd = next_cwd
+        index += 2
+    parsed = _option_positionals(
+        args,
+        no_value=_GIT_NO_VALUE_OPTIONS[subcommand],
+        takes_value=_GIT_VALUE_OPTIONS.get(subcommand, frozenset()),
+    )
+    if parsed is None:
+        return None
+    positional, _ = parsed
+    separator_index = args.index("--") if "--" in args else None
+    after_separator = args[separator_index + 1 :] if separator_index is not None else []
+    object_positionals = positional
+    if separator_index is not None:
+        before_separator = _option_positionals(
+            args[:separator_index],
+            no_value=_GIT_NO_VALUE_OPTIONS[subcommand],
+            takes_value=_GIT_VALUE_OPTIONS.get(subcommand, frozenset()),
+        )
+        if before_separator is None:
+            return None
+        object_positionals, _ = before_separator
+    paths: list[str] = []
+    if subcommand in {"show", "cat-file", "diff"}:
+        for token in object_positionals:
+            if ":" not in token:
+                continue
+            normalized = _normalize_git_object_spec(token)
+            if normalized is None:
+                continue
+            # Git object paths are tree-root relative even under ``git -C``.
+            # Only an explicit ``./`` asks git to prefix the current directory.
+            resolved_paths = (
+                _resolve_repo_operands(root, cwd, [normalized[2:]])
+                if normalized.startswith("./")
+                else _resolve_repo_operands(root, root, [normalized])
+            )
+            paths.extend(resolved_paths)
+    if subcommand in {"diff", "grep", "ls-tree"}:
+        paths.extend(_resolve_repo_operands(root, cwd, after_separator))
+    elif subcommand == "blame" and positional:
+        paths.extend(_resolve_repo_operands(root, cwd, [positional[-1]]))
+    elif subcommand == "ls-files" and "--" not in args:
+        paths.extend(_resolve_repo_operands(root, cwd, positional))
+    elif subcommand == "ls-files":
+        paths.extend(_resolve_repo_operands(root, cwd, after_separator))
+    return _dedupe(paths)[:_MAX_PATHS_PER_CALL]
+
+
+def _read_paths_for_call(
+    state: ToolState,
+    *,
+    tool: str,
+    arguments: dict[str, Any] | None,
+    ok: bool,
+    outcome_ok: bool | None,
+) -> list[str]:
+    """Extract exact repository read operands from one successful call."""
+    if not ok or outcome_ok is False:
+        return []
+    values = arguments or {}
+    explicit = _paths_in(values)
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    root = posixpath.normpath(primary_repo_state(state).dir)
+    if tool == "shell":
+        command = values.get("command")
+        if not isinstance(command, str):
+            return []
+        argv = _safe_argv(command)
+        if argv is not None and argv[0] == "git":
+            return (
+                _git_paths(
+                    root,
+                    {"command": command, "args": []},
+                    working_directory=values.get("working_directory"),
+                )
+                or []
+            )
+        operands = _shell_operands(command)
+        if operands is None:
+            return []
+        return _resolve_repo_operands(root, values.get("working_directory"), operands)
+    if tool == "git":
+        repo = values.get("repo")
+        if repo is not None and str(repo).casefold() != state.primary_repo_key.casefold():
+            return []
+        return _git_paths(root, values) or []
+    return explicit
+
+
 def _command_intent(tool: str, command: str) -> Intent:
     """Derive intent for the general-purpose ``shell`` / ``git`` tools."""
     argv = _argv(command)
@@ -410,7 +902,21 @@ def _command_intent(tool: str, command: str) -> Intent:
         return "other"
     head = argv[0].rsplit("/", maxsplit=1)[-1]
     if tool == "git" or head == "git":
-        sub = next((token for token in argv[1:] if not token.startswith("-")), "")
+        if tool == "git" and head != "git":
+            sub = head
+        else:
+            sub = ""
+            index = 1
+            while index < len(argv):
+                token = argv[index]
+                if token in {"-C", "--git-dir", "--namespace", "--work-tree"}:
+                    index += 2
+                    continue
+                if token.startswith(("--git-dir=", "--namespace=", "--work-tree=")):
+                    index += 1
+                    continue
+                sub = token
+                break
         return "read" if sub in _GIT_READ_SUBCOMMANDS else "modify"
     if head in _VERIFY_COMMANDS:
         return "verify"
@@ -482,7 +988,21 @@ def _signature(tool: str, arguments: dict[str, Any] | None) -> str:
 
 
 def _truncate(text: str, limit: int) -> str:
-    return text if len(text) <= limit else f"{text[:limit]}…"
+    if len(text) <= limit:
+        return text
+    if limit <= 1:
+        return text[:limit]
+    return f"{text[: limit - 1]}…"
+
+
+def _sanitize_tool_call(call: ToolCallRecord) -> ToolCallRecord:
+    """Copy one call through the pre-persistence redaction boundary."""
+    command = _truncate(redact_secrets(call.command), _MAX_COMMAND_CHARS) if call.command else None
+    error = _truncate(redact_secrets(call.error), _MAX_ERROR_CHARS) if call.error else None
+    paths = _dedupe([path for raw in call.paths if (path := _sanitize_path(raw)) is not None])[
+        :_MAX_PATHS_PER_CALL
+    ]
+    return call.model_copy(update={"command": command, "error": error, "paths": paths})
 
 
 def record_tool_call(
@@ -508,17 +1028,29 @@ def record_tool_call(
     """
     command_raw = str((arguments or {}).get("command") or "") or None
     error_text = _truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None
-    row = ToolCallRecord(
-        sequence=len(state.tool_calls) + 1,
-        tool=tool,
-        signature=_signature(tool, arguments),
-        intent=classify_tool_intent(tool, arguments),
-        ok=ok,
-        outcome_ok=outcome_ok,
-        error=error_text,
-        failure_class=classify_failure_class(error_text) if not ok and error_text else "unknown",
-        command=_truncate(redact_secrets(command_raw), _MAX_COMMAND_CHARS) if command_raw else None,
-        paths=_paths_in(arguments),
+    row = _sanitize_tool_call(
+        ToolCallRecord(
+            sequence=len(state.tool_calls) + 1,
+            tool=tool,
+            signature=_signature(tool, arguments),
+            intent=classify_tool_intent(tool, arguments),
+            ok=ok,
+            outcome_ok=outcome_ok,
+            error=error_text,
+            failure_class=classify_failure_class(error_text)
+            if not ok and error_text
+            else "unknown",
+            command=_truncate(redact_secrets(command_raw), _MAX_COMMAND_CHARS)
+            if command_raw
+            else None,
+            paths=_read_paths_for_call(
+                state,
+                tool=tool,
+                arguments=arguments,
+                ok=ok,
+                outcome_ok=outcome_ok,
+            ),
+        )
     )
     state.tool_calls.append(row)
     return row
@@ -575,12 +1107,17 @@ def build_trajectory_record(
     appended after the mediated ones, which is what can lift
     ``read_coverage`` for a driver whose file reads never cross MCP.
     """
-    calls: list[ToolCallRecord] = list(getattr(state, "tool_calls", []) or [])
+    calls = [
+        _sanitize_tool_call(ToolCallRecord.model_validate(call))
+        for call in (getattr(state, "tool_calls", []) or [])
+    ]
     sources: list[str] = []
     if calls:
         sources.append(SOURCE_MCP)
     if external_trace is not None:
-        calls = [*calls, *external_trace.tool_calls]
+        sanitized_external_calls = [_sanitize_tool_call(call) for call in external_trace.tool_calls]
+        external_trace = external_trace.model_copy(update={"tool_calls": sanitized_external_calls})
+        calls = [*calls, *sanitized_external_calls]
         sources.append(SOURCE_EXTERNAL_TRACE)
     if files_modified:
         sources.append(SOURCE_RUN_DIFF)
@@ -603,7 +1140,7 @@ def build_trajectory_record(
     for call in calls:
         if call.command:
             commands.append(call.command)
-        if call.intent == "read":
+        if call.intent == "read" and call.ok and call.outcome_ok is not False and call.paths:
             observed_read = True
             read_paths.extend(call.paths)
         elif call.intent == "verify":

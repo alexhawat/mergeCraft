@@ -581,7 +581,8 @@ Use this when asked to add AI PR review to another repository.
    invent, paste, or commit credentials, tokens, secrets, or `.env` files. Each
    `mergecraft provider auth … --scope github` stores a GitHub Actions secret via `gh secret set` — hand
    that step to the human when interactive auth is required.
-5. **Commit only** `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
+5. **Commit only** `.mergecraft/config.yaml`, `.mergecraft/learnings.md`,
+   `.github/workflows/mergecraft.yml`, and any `.gitignore` lines `init` added
    on a new branch. Do not commit secrets.
 6. **Trigger a review** — open a pull request or run the workflow via
    `workflow_dispatch`. The default `mergecraft init` workflow does **not**
@@ -609,7 +610,8 @@ Follow the same consumer flow as other agents:
    tokens, secrets, or `.env` files.
 4. After the human confirms the GitHub Actions secret is stored, you may run
    **`mergecraft doctor`** and **`mergecraft review`** as needed.
-5. Commit only `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
+5. Commit only `.mergecraft/config.yaml`, `.mergecraft/learnings.md`,
+   `.github/workflows/mergecraft.yml`, and any `.gitignore` lines `init` added
    on a new branch in the consumer repo.
 
 ## Working on this repo (development)
@@ -2202,6 +2204,14 @@ seams. Spans carry `parent_span_id` pointers so the tree is reconstructible
 from any sink's flat event stream. The root is the only span whose
 `parent_span_id` is `None` — convention 9.
 
+The Action and offline orchestrators own this root from the first point at
+which resolved tracing settings are available until publication completes.
+Model fallback reuses that active run root; calling the model-chain helper on
+its own still creates one. MCP server tasks also receive an immutable
+`trace_id` and root `span_id` through `ToolContext`, so a tool call remains in
+the same tree even when task scheduling does not inherit Python context
+variables. Disabled tracing carries no parent identity and stays a no-op.
+
 ```text
 mergecraft.run                       (root; run_id, repo, pr_number,
                                        commit_sha, workflow_run_id, job_id)
@@ -3104,10 +3114,24 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
 
 The repository's self-review workflows support `MERGECRAFT_APP_ID` and
 `MERGECRAFT_APP_PRIVATE_KEY` as GitHub Actions secrets. Install the App only on
-repositories it should review. Its installation needs contents and Actions read,
-and checks, pull requests and issues write. The workflow requests a token scoped
-to the current repository, with a fresh token before each provider attempt;
-the official token action revokes each token after the job.
+repositories it should review. Runtime-minted tokens request only the permissions
+and repository scopes needed by their role:
+
+| Token role | Repository scope | Installation permissions |
+|------------|------------------|--------------------------|
+| Reviewer API | Current repository only | `contents: read`, `pull_requests: write`, `issues: write`, `actions: read`, and `checks: read` |
+| Reviewer API with `status_checks: enabled` | Current repository only | Same permissions, with `checks: write` replacing `checks: read` |
+| Reviewer API with effective SARIF upload enabled | Current repository only | Same permissions plus `security_events: write` |
+| Git fetch with push disabled | Current repository plus configured cross-repository write targets | `contents: read` |
+| Git fetch/push with push restricted or enabled | Current repository plus configured cross-repository write targets | `contents: write`, `workflows: write` |
+| Cross-repository read checkout | Configured read repositories only | `contents: read` |
+
+The reviewer, Git, and cross-repository read credentials are minted separately
+when their permissions or repository scopes differ. The current repository
+always remains in the reviewer and Git token scopes; configured cross-repository
+targets cannot displace it. Cleanup attempts to revoke every internally minted token,
+including tokens minted before a later role fails. Caller-owned `GH_TOKEN` and
+the job-token fallback are never revoked by mergeCraft.
 
 If the reviewer App is absent or minting fails, review attempts retain the
 job-token fallback. `prApproveEnabled: false` makes normal publication COMMENT,
