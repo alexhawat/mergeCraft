@@ -6,6 +6,7 @@ Implementation: **DG7.2** — bounded negative memory in ``utils/learnings.py``.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from tests.memory.support import make_finding, memory_store_path
@@ -115,3 +116,89 @@ def test_over_suppression_is_detectable(tmp_path: Path) -> None:
     assert report.suppressed_count >= 3
     assert report.audit_entries
     assert any("generated" in entry.reason.lower() for entry in report.audit_entries)
+
+
+def _write_memory_payload(repo: Path, payload: dict[str, object]) -> Path:
+    path = memory_store_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_malformed_rule_entries_are_skipped_per_entry(tmp_path: Path) -> None:
+    """Valid JSON with one bad rule must not abort the whole store."""
+    from mergecraft.utils.memory import NegativeMemoryStore
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    path = _write_memory_payload(
+        repo,
+        {
+            "rules": [
+                {},
+                {"pattern": "p", "when": "w", "reason": "r", "recorded_at": "not-a-date"},
+                {
+                    "pattern": "keep",
+                    "when": "path ends with app.py",
+                    "reason": "kept",
+                    "recorded_at": "2026-09-01T00:00:00+00:00",
+                },
+            ]
+        },
+    )
+
+    store = NegativeMemoryStore(path=path)
+
+    assert [rule.pattern for rule in store.list_rules()] == ["keep"]
+
+
+def test_malformed_audit_entries_are_skipped_per_entry(tmp_path: Path) -> None:
+    """The audit list gets the same per-entry tolerance as the rules list."""
+    from mergecraft.utils.memory import NegativeMemoryStore
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    path = _write_memory_payload(
+        repo,
+        {
+            "rules": [],
+            "audit": [
+                {},
+                {"pattern": "p", "when": "w", "reason": "r", "recorded_at": "nope"},
+                {
+                    "pattern": "kept",
+                    "when": "w",
+                    "reason": "r",
+                    "recorded_at": "2026-09-01T00:00:00+00:00",
+                },
+            ],
+        },
+    )
+
+    store = NegativeMemoryStore(path=path)
+
+    assert [entry.pattern for entry in store.audit_trail()] == ["kept"]
+
+
+def test_audit_trail_is_bounded_and_drops_the_oldest_first(tmp_path: Path) -> None:
+    """Rule churn must not grow the audit trail without bound."""
+    from mergecraft.utils.memory import DEFAULT_MAX_NEGATIVE_RULES, NegativeMemoryStore
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = NegativeMemoryStore(
+        path=memory_store_path(repo), max_entries=DEFAULT_MAX_NEGATIVE_RULES
+    )
+
+    for index in range(300):
+        store.add_rule(
+            pattern=f"pattern-{index}",
+            when="path ends with app.py",
+            reason=f"audit reason {index}",
+        )
+
+    audit = store.audit_trail()
+    assert len(store.list_rules()) == DEFAULT_MAX_NEGATIVE_RULES
+    assert len(audit) <= 4 * DEFAULT_MAX_NEGATIVE_RULES
+    assert audit[-1].pattern == "pattern-299"
+    assert audit[0].pattern != "pattern-0", "the oldest entries must be dropped first"

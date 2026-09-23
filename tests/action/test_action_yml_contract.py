@@ -11,7 +11,6 @@ normalized via ``_normalize_suggest_eval_add``); ``push`` prose says
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +59,6 @@ class TestDeclaredDefaultsParse:
         [
             ("model_pin", "INPUT_MODEL_PIN"),
             ("analyzers", "INPUT_ANALYZERS"),
-            ("sarif_upload", "INPUT_SARIF_UPLOAD"),
             ("allow_pr_target_comments", "INPUT_ALLOW_PR_TARGET_COMMENTS"),
             ("tracing", "INPUT_TRACING"),
             ("tracing-to", "INPUT_TRACING_TO"),
@@ -72,7 +70,6 @@ class TestDeclaredDefaultsParse:
         ids=[
             "model_pin",
             "analyzers",
-            "sarif_upload",
             "allow_pr_target_comments",
             "tracing",
             "tracing-to",
@@ -105,13 +102,6 @@ class TestDeclaredDefaultsParse:
 
             resolved = resolve_tracing_from_action_inputs()
             assert resolved is not None
-        elif input_name == "sarif_upload":
-            from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
-
-            assert (
-                resolve_sarif_upload_enabled(action_input=os.environ[env_var], repo_setting=False)
-                is False
-            )
         elif input_name == "allow_pr_target_comments":
             from mergecraft.utils.payload import _allow_pr_target_comments_optin
 
@@ -282,6 +272,27 @@ class TestActionYmlHygiene:
             assert expr.startswith("${{"), (
                 f"{env_var} hard-codes a value instead of referencing inputs.*: {expr!r}"
             )
+
+    def test_sarif_upload_declares_no_default(self, action_yml: dict[str, Any]) -> None:
+        """A declared default makes the repo-level opt-in unreachable.
+
+        With ``default: disabled`` the input is never empty, so
+        ``resolve_sarif_upload_enabled`` can never defer to
+        ``analyzers.sarifUpload`` — the documented precedence is dead code.
+        """
+        spec = action_yml["inputs"]["sarif_upload"]
+        assert "default" not in spec, (
+            "sarif_upload must not declare a default: an absent input has to reach "
+            "resolve_sarif_upload_enabled as empty so repo config can decide"
+        )
+
+    def test_sarif_upload_description_carries_no_expression(
+        self, action_yml: dict[str, Any]
+    ) -> None:
+        """A ``${{ }}`` in description prose breaks the manifest at load time."""
+        needle = "$" + "{" * 2
+        description = action_yml["inputs"]["sarif_upload"]["description"]
+        assert needle not in description
 
     def test_docker_action_declares_no_output_values(self, action_yml: dict[str, Any]) -> None:
         """Plan W6.3 — ``outputs.*.value`` is inert for a Docker action (``#272``).

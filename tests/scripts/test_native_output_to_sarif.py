@@ -327,3 +327,42 @@ def test_truncated_trufflehog_file_does_not_write_clean_sarif(tmp_path: Path) ->
     src.write_text('{"SourceMetadata":{"Data":', encoding="utf-8")
     assert main(["trufflehog", str(src), str(dest)]) == 1
     assert not dest.exists()
+
+
+def _first_uri(doc: dict) -> str:
+    location = doc["runs"][0]["results"][0]["locations"][0]["physicalLocation"]
+    return location["artifactLocation"]["uri"]
+
+
+def _trufflehog_line(path: str, line: int) -> str:
+    return json.dumps(
+        {
+            "SourceMetadata": {"Data": {"Filesystem": {"file": path, "line": line}}},
+            "DetectorName": "AWSAccessKey",
+            "Verified": False,
+        }
+    )
+
+
+def test_trufflehog_to_sarif_emits_repo_relative_uris_when_given_a_root(
+    tmp_path: Path,
+) -> None:
+    """A host-runner scan must not publish an absolute runner path to consumers."""
+    checkout = tmp_path / "checkout"
+    target = checkout / "config" / "app.env"
+    target.parent.mkdir(parents=True)
+    target.write_text("AWS_KEY=fixture\n", encoding="utf-8")
+
+    try:
+        doc = trufflehog_to_sarif(_trufflehog_line(str(target), 4) + "\n", repo_root=checkout)
+    except TypeError as exc:
+        pytest.fail(f"trufflehog_to_sarif must accept a repo root: {exc}")
+
+    assert _first_uri(doc) == "config/app.env"
+
+
+def test_trufflehog_to_sarif_without_a_root_keeps_the_reported_path() -> None:
+    """With no root there is nothing to resolve against, so the native path stays."""
+    doc = trufflehog_to_sarif(_trufflehog_line("config/.env", 1) + "\n")
+
+    assert _first_uri(doc) == "config/.env"

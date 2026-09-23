@@ -263,3 +263,99 @@ def test_offline_full_comparison_never_claims_a_base_run(
     """The mirror image: offline cannot have compared against base."""
     recorded = _run_full_comparison_pipeline(monkeypatch, tmp_path, offline=True)
     assert recorded == [False]
+
+
+# --------------------------------------------------------------------------- #
+# Quoted and renamed ``diff --git`` headers must resolve to the real path. A
+# header the parser cannot read clears the current file, so its hunks are
+# dropped rather than attached to whatever file came before it.
+# --------------------------------------------------------------------------- #
+
+_UNICODE_HEADER_DIFF = """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1,1 +1,2 @@
+ x
++one
+diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"
+--- "a/caf\\303\\251.py"
++++ "b/caf\\303\\251.py"
+@@ -10,1 +10,2 @@
+ y
++two
+"""
+
+_RENAME_WITH_SPACE_DIFF = """diff --git a/src/old b/x.py b/src/new b/x.py
+rename from src/old b/x.py
+rename to src/new b/x.py
+--- a/src/old b/x.py
++++ b/src/new b/x.py
+@@ -1,1 +1,2 @@
+ x
++one
+"""
+
+_QUOTED_PREIMAGE_DIFF = """diff --git a/caf.py b/caf.py
+--- a/caf.py
++++ "b/caf\\303\\251.py"
+@@ -1,1 +1,2 @@
+ x
++one
+"""
+
+_UNPARSEABLE_HEADER_DIFF = """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1,1 +1,2 @@
+ x
++one
+diff --git "a/broken.py
+index abc1234..def5678 100644
+@@ -10,1 +10,2 @@
+ y
++two
+"""
+
+
+def test_quoted_unicode_header_gets_its_own_hunks_and_added_lines() -> None:
+    """A Git C-quoted header must decode, not collapse onto the previous file."""
+    scope = import_module("mergecraft.analyzers.scope")
+
+    parsed = scope.parse_diff_scope(_UNICODE_HEADER_DIFF)
+    added = list(scope.iter_added_diff_lines(_UNICODE_HEADER_DIFF))
+
+    assert set(parsed.hunk_ranges) == {"a.py", "café.py"}
+    assert parsed.hunk_ranges["a.py"] == [(1, 2)]
+    assert added == [("a.py", 2, "one"), ("café.py", 11, "two")]
+
+
+def test_rename_to_resolves_a_path_containing_a_space_b_prefix() -> None:
+    """``rename to`` is authoritative when the header cannot be split unambiguously."""
+    scope = import_module("mergecraft.analyzers.scope")
+
+    parsed = scope.parse_diff_scope(_RENAME_WITH_SPACE_DIFF)
+
+    assert set(parsed.hunk_ranges) == {"src/new b/x.py"}
+    assert list(scope.iter_added_diff_lines(_RENAME_WITH_SPACE_DIFF)) == [
+        ("src/new b/x.py", 2, "one")
+    ]
+
+
+def test_quoted_post_image_path_decodes_when_the_header_is_plain() -> None:
+    """``+++ b/…`` is a path source, decoded with the same C-style unquoting."""
+    scope = import_module("mergecraft.analyzers.scope")
+
+    parsed = scope.parse_diff_scope(_QUOTED_PREIMAGE_DIFF)
+
+    assert set(parsed.hunk_ranges) == {"café.py"}
+
+
+def test_unparseable_header_clears_the_current_file() -> None:
+    """Dropping a hunk loses a scope hint; misattributing one invents a finding."""
+    scope = import_module("mergecraft.analyzers.scope")
+
+    parsed = scope.parse_diff_scope(_UNPARSEABLE_HEADER_DIFF)
+    added = list(scope.iter_added_diff_lines(_UNPARSEABLE_HEADER_DIFF))
+
+    assert parsed.hunk_ranges == {"a.py": [(1, 2)]}
+    assert added == [("a.py", 2, "one")]
