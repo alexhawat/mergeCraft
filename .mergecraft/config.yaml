@@ -30,3 +30,5 @@ ciEvidence:
 trust:
   selfReview: "full"
   agentSandbox: "same-repo"
+jev:
+  enabled: true
