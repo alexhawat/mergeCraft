@@ -49,6 +49,10 @@ one OTLP span to `logfire-{us,eu}.pydantic.dev/v1/traces`, selected by
 credential; Logfire derives the project from it. Failures are logged and never
 propagate.
 
+If another OpenCode plugin (or environment `OTEL_*` variables) already exports
+OpenCode telemetry to Logfire, set `logfire: false` to avoid a duplicate span —
+the ambient exporter already covers the reviewer subagent session.
+
 ## Compatibility
 
 Uses the V2 `Plugin.define` entrypoint. A V1 `server()` export can be added

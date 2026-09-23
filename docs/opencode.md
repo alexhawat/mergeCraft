@@ -152,6 +152,10 @@ reviews into Logfire, the plugin emits an OTLP span per native review when
 `MERGECRAFT_TRACING_REGION` to pick the `us` or `eu` endpoint. Native and `deep`
 reviews then share one Logfire project.
 
+If you already run an OpenCode OTLP/Logfire plugin (or set `OTEL_*` variables),
+set the mergecraft plugin's `logfire: false` — the ambient exporter already
+captures the reviewer subagent session, and emitting again would double-count.
+
 ## Plugin
 
 The plugin under `integrations/opencode/plugins/mergecraft/` uses the OpenCode V2
