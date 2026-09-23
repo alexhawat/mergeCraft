@@ -75,10 +75,15 @@ never entered, so a rejected input cannot degrade into an unscoped run.
 | --- | --- | --- | --- |
 | A run against the analyzer fixture leaves the checked-in fixture tree byte-identical | functional | edge | `tests/mcp/test_analyzers.py::test_analyzer_run_leaves_the_tracked_fixture_tree_unchanged` |
 
-This is the one contract that cannot be satisfied by the test itself: today the
-suite runs the real pipeline against the in-tree fixture and writes provisioning
-artifacts into it. It is expected to be red until the fixture is bound to an
-isolated copy in the same change that confines the tool's `repo_root`.
+The fixture the file-local `fixture_repo` yields is a `tmp_path` copy of the
+checked-in fixture repo (dropping `analyzer-cache` under `.mergecraft/`, the
+same rule the analyzer-suite conftest uses). The copy is placed **at
+`tmp_path` itself**, not merely under it, because the tool's `repo_root` check
+is an equality against a registered checkout `dir`: `_ctx(tmp_path)` registers
+`tmp_path`, so the analyzed tree and the registered checkout must be the same
+path. The `test_per_analyzer_status_returned` case depends on the same shape.
+Snapshotting the checked-in path (rather than the copy) is what makes the
+byte-identity assertion meaningful; that import is deliberately kept.
 
 ## Attribution — diff headers and renamed paths
 

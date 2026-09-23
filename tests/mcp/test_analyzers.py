@@ -86,11 +86,29 @@ async def test_reports_not_run_when_nothing_enabled(tmp_path: Path) -> None:
         assert all(row["status"] == "unavailable" for row in payload["analyzers"])
 
 
+def _ignore_analyzer_cache(_dir: str, names: list[str]) -> set[str]:
+    """Copy rule shared with ``tests/analyzers/conftest.py`` — drop the cache."""
+    if Path(_dir).name == ".mergecraft":
+        return {"analyzer-cache"}
+    return set()
+
+
 @pytest.fixture
-def fixture_repo() -> Path:
+def fixture_repo(tmp_path: Path) -> Path:
+    """Isolated copy of the checked-in fixture repo, at ``tmp_path`` itself.
+
+    The copy has to *be* the tool state's ``dir``, not merely live under it:
+    the analyzer tool only accepts a ``repo_root`` that resolves to a
+    registered checkout, and the checkout the tests register is ``tmp_path``.
+    Copying there also keeps a real analyzer run (and its lock record) out of
+    the tracked fixture tree.
+    """
+    import shutil
+
     from tests.analyzers.support import FIXTURE_REPO
 
-    return FIXTURE_REPO
+    shutil.copytree(FIXTURE_REPO, tmp_path, ignore=_ignore_analyzer_cache, dirs_exist_ok=True)
+    return tmp_path
 
 
 @pytest.mark.asyncio
