@@ -166,7 +166,7 @@ env:
   # Single Action SHA for all three review rungs (D10 / #532). Bump here only;
   # every `uses: alexhawat/mergeCraft@…` below must match — enforced by
   # `make action-pin-check`.
-  MERGECRAFT_ACTION_SHA: "a591fbc15bfd05656a93442f988c42a684a2411e"
+  MERGECRAFT_ACTION_SHA: "cfd157bc6d501e7e74dfd533e1a694ce0423d5f1"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -614,7 +614,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@a591fbc15bfd05656a93442f988c42a684a2411e # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@cfd157bc6d501e7e74dfd533e1a694ce0423d5f1 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -768,7 +768,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@a591fbc15bfd05656a93442f988c42a684a2411e # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@cfd157bc6d501e7e74dfd533e1a694ce0423d5f1 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -898,7 +898,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now 3ed2c798 (#582).
-        uses: alexhawat/mergeCraft@a591fbc15bfd05656a93442f988c42a684a2411e # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@cfd157bc6d501e7e74dfd533e1a694ce0423d5f1 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
