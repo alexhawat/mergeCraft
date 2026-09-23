@@ -5,23 +5,32 @@ agent: build
 
 Set up Logfire tracing for mergeCraft. $ARGUMENTS
 
-Local (writes `MERGECRAFT_LOGFIRE_TOKEN` and `MERGECRAFT_TRACING_PROJECT` to
-`.env`, never calls GitHub):
+**Local** — `auth logfire` writes the write token and project label to `.env`; it
+does not export them into the current shell. `tracing logfire enable` then reads
+them from `.env`:
 
 ```bash
 mergecraft auth logfire
-mergecraft tracing logfire enable --token "$MERGECRAFT_LOGFIRE_TOKEN" --project "$MERGECRAFT_TRACING_PROJECT"
-mergecraft config tracing
+mergecraft tracing logfire enable --scope local --region us   # or --region eu
+mergecraft config tracing                                     # token redacted
 ```
 
-CI (patches the mergecraft workflow to pass the Actions secret and region):
+Do not expand `$MERGECRAFT_LOGFIRE_TOKEN` / `$MERGECRAFT_TRACING_PROJECT` on the
+command line — they are not exported, so the flags would receive empty values.
+
+**CI** — `wire-workflow` is dry-run by default and prints the diff; pass `--apply`
+to write it:
 
 ```bash
-mergecraft tracing logfire wire-workflow --region us   # or --region eu
+mergecraft tracing logfire wire-workflow --region us          # dry-run: show the diff
+mergecraft tracing logfire wire-workflow --region us --apply  # write it
 ```
 
-The CLI's own tracing covers the `cli`, `deep`, and `mcp` engines. When a Logfire
-token is present, the OpenCode plugin also emits a span for each **native**
-review, so native and deep runs share one Logfire project. Ask the user for the
-token only through `mergecraft auth logfire` — never write a token into a file or
-a prompt yourself.
+Use `--region eu` for an EU write token (`pylf_v{N}_eu_…`); otherwise spans go to
+the US host.
+
+The CLI's own tracing covers the `cli`, `deep`, and `mcp` engines. The plugin
+also emits a span for each **native** review when a Logfire token is present, so
+native and deep runs share one Logfire project. Ask the user for the token only
+through `mergecraft auth logfire` — never write a token into a file or a prompt
+yourself.

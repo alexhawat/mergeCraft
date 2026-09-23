@@ -131,9 +131,10 @@ available as a model there too.
 mergeCraft's tracing covers the `cli`, `deep`, and `mcp` engines.
 
 ```bash
-mergecraft auth logfire                                  # local .env
-mergecraft tracing logfire wire-workflow --region us     # CI, patch the workflow
-mergecraft config tracing                                # resolved sinks, token redacted
+mergecraft auth logfire                                      # local .env
+mergecraft tracing logfire enable --scope local              # reads the token from .env
+mergecraft tracing logfire wire-workflow --region us --apply # CI, patch the workflow
+mergecraft config tracing                                    # resolved sinks, token redacted
 ```
 
 OpenCode V2 has no documented OpenTelemetry export of its own. To get native

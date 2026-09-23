@@ -109,8 +109,9 @@ Both are OpenCode commands as well as CLI features:
 mergecraft jev enable          # writes jev.enabled: true, prompts for TYPESAFE_API_KEY
 mergecraft jev status          # config, credential presence, effective values
 
-mergecraft auth logfire        # local: writes MERGECRAFT_LOGFIRE_TOKEN + project to .env
-mergecraft tracing logfire wire-workflow --region eu   # CI: patches the mergecraft workflow
+mergecraft auth logfire                                # local: writes MERGECRAFT_LOGFIRE_TOKEN + project to .env
+mergecraft tracing logfire enable --scope local        # reads the token from .env
+mergecraft tracing logfire wire-workflow --region eu --apply   # CI: patch the mergecraft workflow
 ```
 
 - **JEV** is the pre-LLM screening gate. It is a *shadow* ranker today —
