@@ -45,8 +45,8 @@ _REAL_SUMMARY = (
             "request_changes",
             "README spelling typo",
             "Trivial",
-            "request_changes",
-            "REQUEST_CHANGES",
+            "approve",
+            "APPROVE",
         ),
         (
             "approve",

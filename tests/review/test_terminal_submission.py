@@ -8,6 +8,7 @@ from mergecraft.agents.registry import AgentBinding, AgentRole, Registry
 from mergecraft.review.terminal_submission import (
     ReviewerRun,
     append_degradation_to_summary,
+    enforce_terminal_verdict_from_finalized_findings,
     format_reviewer_degradation_summary,
     merge_reviewer_findings,
     prepare_terminal_submission,
@@ -59,6 +60,32 @@ def test_verdict_from_merged_findings_branches() -> None:
     assert verdict_from_merged_findings([]) == "approve"
     assert verdict_from_merged_findings([_finding(severity="Minor")]) == "approve"
     assert verdict_from_merged_findings([_finding(severity="Major")]) == "request_changes"
+
+
+def test_enforce_terminal_verdict_from_finalized_findings_branches() -> None:
+    trivial = [_finding(severity="Trivial")]
+    major = [_finding(severity="Major")]
+    assert (
+        enforce_terminal_verdict_from_finalized_findings(
+            requested="request_changes",
+            findings=trivial,
+        )
+        == "approve"
+    )
+    assert (
+        enforce_terminal_verdict_from_finalized_findings(
+            requested="request_changes",
+            findings=[],
+        )
+        == "request_changes"
+    )
+    assert (
+        enforce_terminal_verdict_from_finalized_findings(
+            requested="approve",
+            findings=major,
+        )
+        == "request_changes"
+    )
 
 
 def test_merge_reviewer_findings_logs_errors_and_orders_deterministically() -> None:
