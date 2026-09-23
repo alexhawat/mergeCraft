@@ -66,6 +66,13 @@
 # The job skips gracefully when none are set (e.g. fork PRs). Without
 # NOUS_API_KEY the primary is inert and Codex is the only reviewer; without
 # CODEX_AUTH_JSON / OPENAI_API_KEY, Nous is the only reviewer.
+# TYPESAFE_API_KEY (the Jev credential) is deliberately NOT passed to the review
+# rungs. On a same-repo PR the review runs the Makefile gates it discovers from
+# the PR head, and those gates inherit the Action container's environment, so
+# any secret in a rung's env is readable by PR-authored make targets. Add the
+# key back only once static-check gates run with a default-deny environment.
+# jev.enabled stays on in .mergecraft/config.yaml: with no key, Jev records
+# credential_absent and the review still runs.
 #
 # Trigger: pull_request_target (not pull_request). GitHub skips pull_request
 # workflows when refs/pull/N/merge cannot be built (merge conflicts), so the
