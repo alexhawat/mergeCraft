@@ -61,6 +61,8 @@ jobs:
       || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
@@ -70,7 +72,7 @@ jobs:
       # App-authored ledger records.
       - name: Mint App token
         id: app_token
-        if: secrets.MERGECRAFT_APP_ID != ''
+        if: env.HAS_APP == 'true'
         continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
