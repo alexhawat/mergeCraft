@@ -48,8 +48,24 @@ def _first_case(payload: dict[str, object]) -> dict[str, object]:
     return row
 
 
+def _reset_to_pending(row: dict[str, object]) -> dict[str, object]:
+    """Return ``row`` to the undecided state, whatever the committed decision is."""
+    row.update(decision="pending", decided_at=None, decided_by=None, corrected_fields=None)
+    return row
+
+
 def _load_committed_manifest() -> HumanBatchManifest:
     return load_human_batch(_MANIFEST_PATH, repo_root=_REPO_ROOT)
+
+
+def _manifest_with_pending_row(case_id: str) -> HumanBatchManifest:
+    """The committed manifest with ``case_id`` forced back to ``pending``."""
+    payload = _manifest_payload()
+    cases = payload["cases"]
+    assert isinstance(cases, list)
+    row = next(row for row in cases if row["case_id"] == case_id)
+    _reset_to_pending(row)
+    return HumanBatchManifest.model_validate(payload)
 
 
 def _authoring_case_path(case_id: str, *, repo_root: Path) -> Path:
@@ -178,7 +194,7 @@ def test_adjudicating_a_pending_case_breaks_the_agreement_guard(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The RED case: the CLI can add provenance the manifest never authorised."""
-    manifest = _load_committed_manifest()
+    manifest = _manifest_with_pending_row(_MUTATED_CASE_ID)
     case_dir = _copy_authoring_golden_cases(tmp_path)
     target = case_dir / f"{_MUTATED_CASE_ID}.json"
 
@@ -253,7 +269,7 @@ def test_mutable_source_url_is_rejected() -> None:
 
 def test_pending_decision_cannot_prepopulate_human_identity() -> None:
     payload = _manifest_payload()
-    row = _first_case(payload)
+    row = _reset_to_pending(_first_case(payload))
     row["decided_at"] = "2026-09-22T12:00:00Z"
     row["decided_by"] = "alexhawat"
     with pytest.raises(ValidationError, match="pending decisions must leave"):
@@ -262,7 +278,7 @@ def test_pending_decision_cannot_prepopulate_human_identity() -> None:
 
 def test_abstain_requires_actual_human_identity_but_not_recovered_evidence() -> None:
     payload = _manifest_payload()
-    _first_case(payload)["decision"] = "abstain"
+    _reset_to_pending(_first_case(payload))["decision"] = "abstain"
     with pytest.raises(ValidationError, match="non-pending decisions require"):
         HumanBatchManifest.model_validate(payload)
 

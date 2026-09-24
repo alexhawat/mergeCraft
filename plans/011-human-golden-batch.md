@@ -1,6 +1,6 @@
 # Plan 011: Prepare and complete the first human adjudication batch
 
-- Status: PREPARATION COMPLETE — BLOCKED: all nine rows lack immutable code evidence and Alex's decisions
+- Status: DECIDED — ALL NINE ABSTAINED: no row has immutable code evidence; Alex recorded `abstain` for all nine on 2026-09-24 ([decision](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475)). #780 stays open; independent golden labels need a replacement batch
 - Issue: [#780](https://github.com/alexhawat/mergeCraft/issues/780)
 - Priority: P2; effort: M plus human review; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
