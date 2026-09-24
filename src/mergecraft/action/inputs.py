@@ -26,7 +26,7 @@ from mergecraft.config.runtime_provider_registry import (
     provider_credential_env_suffixes,
 )
 from mergecraft.config.settings import RepoSettings, TraceSinkEntry, TracingSettings
-from mergecraft.config.trust_policy import is_fork_pull_request
+from mergecraft.config.trust_policy import is_fork_pull_request, unbound_target_pull_number
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -427,6 +427,18 @@ def validate_fork_credential_invariant(
     env_map = env if env is not None else os.environ
     if not _provider_credential_present(env_map, settings):
         return
+    unbound_pull = unbound_target_pull_number(event)
+    if unbound_pull is not None:
+        # P-8: name the unavailable thing. The run names a PR but carries no
+        # head — fetching its metadata failed, so it is floored as a fork.
+        # Saying "fork" here would misdirect the operator after the wrong cause.
+        msg = (
+            f"refusing run for pull request #{unbound_pull}: the target pull request "
+            "is unbound — its metadata could not be fetched, so the fork floor "
+            "applies. Skip the review or remove credential env vars for PRs this "
+            "run cannot bind."
+        )
+        raise ForkCredentialInvariantError(msg)
     msg = (
         "refusing fork pull request run: provider credentials are present in the "
         "environment but fork heads must not execute with secrets. Skip the review "

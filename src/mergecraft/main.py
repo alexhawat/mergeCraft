@@ -748,16 +748,44 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.config.trust_policy import (
         agent_sandbox_manifest_fields,
+        bind_target_pull_request,
         bound_head_sha,
         default_branch_from_event,
         log_trust_policy_at_run_start,
         resolve_agent_sandbox_decision,
         resolve_trust_policy,
         trust_policy_manifest_fields,
+        unbound_target_pull_number,
     )
 
     repo_root = Path.cwd()
     gh_event = ctx.gh_event or {}
+
+    # TB-D2 — bind the target PR by fetching, once, before the first trust read.
+    # A comment on a PR (`issue.pull_request`, no head) and a `workflow_dispatch`
+    # that names a PR carry no head, so their fork status is unknown until the
+    # SCM API answers. Fetch here and replace ``ctx.gh_event`` with the bound
+    # event so the credential invariant, the trust policy and the sandbox
+    # decision all read one bound event. A fetch failure leaves the event
+    # unbound — floored as a fork — and is warned, never raised; the invariant
+    # below turns that into a refusal when credentials are present (P-8).
+    unbound_pull = unbound_target_pull_number(gh_event)
+    if unbound_pull is not None:
+        try:
+            pull = await ctx.scm.get_pull(
+                ctx.run_context.repo.owner, ctx.run_context.repo.name, unbound_pull
+            )
+        except Exception as exc:
+            logger.warning(
+                "could not bind pull request #{} for this run; leaving it unbound "
+                "so the fork floor applies: {}",
+                unbound_pull,
+                exc,
+            )
+        else:
+            gh_event = bind_target_pull_request(gh_event, pull)
+            ctx.gh_event = gh_event
+
     try:
         validate_fork_credential_invariant(event=gh_event, env=os.environ, settings=ctx.settings)
     except ForkCredentialInvariantError as exc:

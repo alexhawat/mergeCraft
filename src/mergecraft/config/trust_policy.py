@@ -21,6 +21,7 @@ first. See ``docs/trust-policy.md``.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 — ``config_root.resolve()`` runs at runtime
@@ -120,10 +121,44 @@ def default_branch_from_event(event: dict[str, Any]) -> str:
     return "main"
 
 
+#: A ``workflow_dispatch`` names its review target inside the composed review
+#: input (``.github/workflows/mergecraft.yml`` "Compose review prompt"), e.g.
+#: ``Review pull request #42. …``. No SCM metadata comes with the event, so a
+#: dispatch that matches this shape names a PR it has not bound.
+_DISPATCH_PULL_NUMBER_RE = re.compile(r"pull request #(\d+)", re.IGNORECASE)
+
+
+def _dispatch_named_pull_number(event: dict[str, Any]) -> int | None:
+    """Return the PR number a ``workflow_dispatch`` review input names, if any.
+
+    Only the review input (``inputs.prompt`` and siblings) is read; a dispatch
+    that names no PR returns ``None``. The scan is text-only because the event
+    carries no structured PR reference (TB-D1).
+    """
+    inputs = event.get("inputs")
+    if not isinstance(inputs, dict):
+        return None
+    for value in inputs.values():
+        if not isinstance(value, str):
+            continue
+        match = _DISPATCH_PULL_NUMBER_RE.search(value)
+        if match is not None:
+            return int(match.group(1))
+    return None
+
+
 def _is_fork_pull_request(event: dict[str, Any]) -> bool:
     pull_request = event.get("pull_request")
     if not isinstance(pull_request, dict):
-        return False
+        # No bound head: a comment on a PR, or a dispatch that names a PR, is a
+        # fork until the SCM API proves the head lives in this repo (TB-D1).
+        # "The event does not say where the head lives" is never read as "the
+        # head is ours". A comment on a plain issue and a PR-less dispatch are
+        # unchanged.
+        issue = event.get("issue")
+        if isinstance(issue, dict) and isinstance(issue.get("pull_request"), dict):
+            return True
+        return _dispatch_named_pull_number(event) is not None
     head = pull_request.get("head")
     if not isinstance(head, dict):
         return True
@@ -131,6 +166,54 @@ def _is_fork_pull_request(event: dict[str, Any]) -> bool:
     if not isinstance(repo, dict):
         return True
     return bool(repo.get("fork"))
+
+
+def bind_target_pull_request(event: dict[str, Any], pull: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of *event* with ``pull_request`` bound from fetched *pull*.
+
+    Pure: *event* is never mutated. The bound PR carries only what the fork
+    predicate and the sandbox head resolution read — ``number``, ``head``
+    (``ref``/``sha``/``repo``) and ``base`` (``ref``/``sha``/``repo``) — so
+    binding cannot smuggle PR-authored fields into a trust decision. Missing
+    nested metadata binds to non-dicts, which the fork predicate floors.
+    """
+    raw_head = pull.get("head")
+    head = raw_head if isinstance(raw_head, dict) else {}
+    raw_base = pull.get("base")
+    base = raw_base if isinstance(raw_base, dict) else {}
+    pull_request: dict[str, Any] = {
+        "number": pull.get("number"),
+        "head": {
+            "ref": head.get("ref"),
+            "sha": head.get("sha"),
+            "repo": head.get("repo"),
+        },
+        "base": {
+            "ref": base.get("ref"),
+            "sha": base.get("sha"),
+            "repo": base.get("repo"),
+        },
+    }
+    bound = dict(event)
+    bound["pull_request"] = pull_request
+    return bound
+
+
+def unbound_target_pull_number(event: dict[str, Any]) -> int | None:
+    """Return the PR number *event* names but leaves unbound, else ``None``.
+
+    A comment on a PR names ``issue.number``; a ``workflow_dispatch`` names a PR
+    in its review input. Both carry no head, so ``_resolve_credentials`` must
+    fetch and bind before the first trust read (TB-D2). A bound event
+    (``pull_request`` present) and a comment on a plain issue return ``None``.
+    """
+    if isinstance(event.get("pull_request"), dict):
+        return None
+    issue = event.get("issue")
+    if isinstance(issue, dict) and isinstance(issue.get("pull_request"), dict):
+        number = issue.get("number")
+        return number if isinstance(number, int) else None
+    return _dispatch_named_pull_number(event)
 
 
 def _same_repo_pull_request_target(event_name: str, event: dict[str, Any]) -> bool:
@@ -702,6 +785,7 @@ __all__ = [
     "SelfReviewLevel",
     "TrustPolicy",
     "agent_sandbox_manifest_fields",
+    "bind_target_pull_request",
     "bound_head_sha",
     "default_branch_from_event",
     "is_fork_pull_request",
@@ -709,4 +793,5 @@ __all__ = [
     "resolve_agent_sandbox_decision",
     "resolve_trust_policy",
     "trust_policy_manifest_fields",
+    "unbound_target_pull_number",
 ]

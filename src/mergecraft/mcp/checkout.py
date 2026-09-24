@@ -12,6 +12,7 @@ from loguru import logger
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.settings import load_repo_settings
+from mergecraft.config.trust_policy import is_fork_pull_request
 from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
@@ -317,15 +318,38 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             raise RuntimeError(msg)
 
+        # TB-D4 — refuse a PR the run was not bound to. ``_resolve_credentials``
+        # bound the run to ``ctx.payload.event.issue_number``; the agent's
+        # ``pull_number`` argument must not redirect the checkout elsewhere.
+        bound_number = ctx.payload.event.issue_number
+        if bound_number is not None and pull_number != bound_number:
+            msg = (
+                f"refusing to check out PR #{pull_number}: this run is bound to "
+                f"PR #{bound_number}, the pull request under review."
+            )
+            raise RuntimeError(msg)
+
         pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
         head = pr.get("head") or {}
         base = pr.get("base") or {}
         head_ref = head.get("ref") or ""
         head_sha = head.get("sha") or ""
         base_ref = base.get("ref") or ""
-        is_fork = (head.get("repo") or {}).get("full_name") != (
-            (base.get("repo") or {}).get("full_name")
-        )
+        # TB-D3 — one fork predicate. The ``full_name`` comparison stops being a
+        # decision input; ``is_fork_pull_request`` reads the same ``head.repo.fork``
+        # shape every other fork decision reads.
+        is_fork = is_fork_pull_request({"pull_request": pr})
+
+        # TB-D4 — refuse a fork PR on a run that holds trusted execution or
+        # authority trust. Downgrading mid-run cannot un-run setup or un-mint
+        # credentials, so this must refuse, not merely downgrade.
+        if is_fork and (ctx.trust_tier == "trusted" or ctx.authority_trust == "trusted"):
+            msg = (
+                f"refusing to check out PR #{pull_number}: it is a fork pull request "
+                "but this run holds trusted execution or authority trust."
+            )
+            raise RuntimeError(msg)
+
         local_branch = f"pr-{pull_number}"
 
         # Fetch PR head into local_branch. checkout_pr can run more than once
