@@ -727,6 +727,18 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     return ctx
 
 
+def _composed_prompt_from_payload(ctx: RunContext) -> str | None:
+    """Return the composed review prompt this run actually uses, if any (F1).
+
+    The Action writes the workflow's composed ``steps.prompt.outputs.text`` to the
+    ``prompt`` input; ``resolve_payload`` stores it at ``payload["prompt"]`` (a JSON
+    dispatch payload keeps the same key). Returns ``None`` when no usable prompt is
+    present, so the caller leaves the event untouched.
+    """
+    prompt = (ctx.payload or {}).get("prompt")
+    return prompt if isinstance(prompt, str) and prompt.strip() else None
+
+
 async def _resolve_credentials(ctx: RunContext) -> RunContext:
     """Phase 2 — token brokering + trust-tier derivation. Behaviour-frozen (S4).
 
@@ -748,6 +760,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.config.trust_policy import (
         agent_sandbox_manifest_fields,
+        bind_dispatch_review_prompt,
         bind_target_pull_request,
         bound_head_sha,
         default_branch_from_event,
@@ -760,6 +773,20 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
 
     repo_root = Path.cwd()
     gh_event = ctx.gh_event or {}
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+
+    # F1 (TB-D1) — the live dispatch review path composes "Review pull request
+    # #<n>. …" into the Action's ``prompt`` input, so ``github.event.inputs.prompt``
+    # holds only the operator's raw input (usually empty). Merge the composed prompt
+    # into the event before the first trust read so a dispatch that names a PR is
+    # floored as a fork until ``get_pull`` binds it — exactly as a comment-on-PR run
+    # is. A dispatch that names no PR (and every non-dispatch event) is unchanged.
+    gh_event = bind_dispatch_review_prompt(
+        gh_event,
+        event_name=event_name,
+        prompt=_composed_prompt_from_payload(ctx),
+    )
+    ctx.gh_event = gh_event
 
     # TB-D2 — bind the target PR by fetching, once, before the first trust read.
     # A comment on a PR (`issue.pull_request`, no head) and a `workflow_dispatch`
@@ -791,8 +818,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     except ForkCredentialInvariantError as exc:
         raise _ConfigurationError(str(exc)) from exc
 
-    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-    # D7 — the same ``event_name`` read below for ``resolve_trust_policy``
+    # D7 — the same ``event_name`` read above for ``resolve_trust_policy``
     # also decides whether the settings this snapshot pins are operator-owned
     # (the base ref, which only a ``pull_request_target`` run checks out
     # before ``checkout_pr`` ever runs). Every downstream reader of this

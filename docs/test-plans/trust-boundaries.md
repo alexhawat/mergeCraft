@@ -37,6 +37,8 @@ the guards proving a fix did not widen or weaken a control.
 | Comment on a plain issue (unchanged) | `…::test_comment_on_plain_issue_is_not_a_fork` | unit (guard) |
 | Dispatch naming a PR | `…::test_dispatch_naming_a_pr_is_a_fork_until_bound` | unit |
 | Dispatch naming no PR (unchanged) | `…::test_dispatch_without_a_pr_is_not_a_fork` | unit (guard) |
+| Live dispatch prompt (`payload["prompt"]`) merged into the event | `…::test_bind_dispatch_review_prompt_is_pure_and_binds_the_composed_prompt`, `::test_bind_dispatch_review_prompt_adds_inputs_when_absent` | unit |
+| Non-dispatch / PR-less / pre-populated / empty prompt unchanged | `…::test_bind_dispatch_review_prompt_ignores_a_non_dispatch_event`, `::test_bind_dispatch_review_prompt_ignores_a_pr_less_prompt`, `::test_bind_dispatch_review_prompt_does_not_clobber_an_existing_input`, `::test_bind_dispatch_review_prompt_ignores_a_missing_or_empty_prompt` | unit (guards) |
 | Tier floor from the same predicate | `tests/security/test_trust_fallthrough.py::test_issue_comment_on_pr_without_head_is_untrusted[OWNER/MEMBER/COLLABORATOR]` | unit |
 | Plain-issue tier (unchanged) | `…::test_issue_comment_on_plain_issue_stays_trusted` | unit (guard) |
 
@@ -54,6 +56,11 @@ the guards proving a fix did not widen or weaken a control.
 | `_resolve_credentials` binds before the invariant | `tests/test_main_phases.py::test_resolve_credentials_binds_the_target_pr_before_the_invariant` | integration |
 | Fetch failure leaves the event unbound → refuses naming the unbound PR | `tests/test_main_phases.py::test_resolve_credentials_refuses_when_the_pr_fetch_fails` | integration |
 | Bound same-repo run keeps trust | `tests/test_main_phases.py::test_resolve_credentials_binds_a_same_repo_pr_and_keeps_trust` | integration |
+| Dispatch: PR only in `payload["prompt"]` → binds same-repo | `…::test_resolve_credentials_binds_a_dispatch_pr_from_the_composed_prompt` | integration |
+| Dispatch: fork only in `payload["prompt"]` → refused as a fork | `…::test_resolve_credentials_refuses_a_dispatch_fork_from_the_composed_prompt` | integration |
+| Dispatch: fetch failure → unbound refusal naming the PR | `…::test_resolve_credentials_refuses_a_dispatch_when_the_fetch_fails` | integration |
+| Dispatch: PR-less payload → no fetch, unchanged | `…::test_resolve_credentials_leaves_a_pr_less_dispatch_alone` | integration (guard) |
+| Dispatch: event-shape prompt still binds | `…::test_resolve_credentials_binds_a_dispatch_named_in_the_event_inputs` | integration (guard) |
 | Plain-issue comment fetches nothing | `tests/test_main_phases.py::test_resolve_credentials_does_not_fetch_for_a_plain_issue` | integration (guard) |
 | Uncredentialed fetch failure does not refuse | `tests/test_main_phases.py::test_resolve_credentials_leaves_uncredentialed_comment_runs_alone` | integration (guard) |
 | Unbound message names the PR distinctly from a fork | `tests/action/test_fork_credential_invariant.py::test_comment_on_pr_with_credentials_is_refused` | unit |
@@ -124,6 +131,8 @@ the contract.
 | Skip recorded in the bundle's `refusals` | `…::test_out_of_repo_symlinked_instruction_is_recorded_in_refusals` | unit |
 | Out-of-repo symlinked directory not walked | `…::test_symlinked_directory_outside_repo_is_not_walked` | unit (guard) |
 | In-repo symlink still works | `…::test_in_repo_symlinked_instruction_still_works` | unit (guard) |
+| Read-time refusal of an out-of-root path | `…::test_instruction_body_refuses_a_path_outside_the_root` | unit |
+| Candidate re-pointed outside after discovery is not read (TOCTOU) | `…::test_instruction_repointed_outside_after_discovery_is_not_read` | integration |
 
 ### TB-D9 — remove the D4 switch; do not gate it
 
@@ -151,6 +160,8 @@ the contract.
 | Moved pin → only surfaces that differ between pins | `…::test_moved_pin_reports_only_surfaces_changed_between_pins` | integration |
 | Unchanged surfaces never reported | `…::test_unchanged_surfaces_are_not_reported_as_changed` | integration |
 | Explicit CLI `producer=` keeps whole-index semantics | `…::test_explicit_producer_keeps_whole_index_semantics` | integration (guard) |
+| Real `_base_linked_repo_manifest`: absent vs corrupt vs valid | `tests/mcp/test_checkout_base_manifest_lookup.py::test_absent_base_manifest_reads_as_empty_without_a_reason`, `::test_corrupt_base_manifest_is_marked_unreadable`, `::test_valid_base_manifest_is_parsed`, `::test_binary_base_manifest_is_marked_unreadable`, `::test_no_base_ref_returns_an_empty_lookup` | unit (real git read path) |
+| A readable base manifest drives the real pin-movement findings | `…::test_valid_base_manifest_drives_the_pin_movement_findings` | integration |
 
 ### TB-D12 — every linked-repo omission is in the payload
 
@@ -158,6 +169,8 @@ the contract.
 | --- | --- | --- |
 | Ungranted entry appears in `linkedRepoOmitted` | `tests/xrepo/test_review_change_set.py::test_ungranted_entry_appears_in_linked_repo_omitted` | integration |
 | Unreachable previous pin is an omission, not a full index | `…::test_unreachable_previous_pin_is_an_omission_not_a_full_index` | integration |
+| Absent base manifest (no manifest at `origin/<base>`) → no omission | `tests/mcp/test_checkout_base_manifest_lookup.py::test_absent_base_manifest_yields_no_omission` | integration |
+| Unreadable base manifest → omission per entry, zero findings | `…::test_unreadable_base_manifest_omits_every_reviewable_entry` | integration |
 
 ### TB-D13 — no docs edits / floor numbers / new required check
 
@@ -181,12 +194,14 @@ These are the names the tests target; TB2–TB5 must expose them.
 | Seam | Module | Consumed by |
 | --- | --- | --- |
 | `bind_target_pull_request(event, pull)` | `mergecraft.config.trust_policy` | TB-D2 tests |
+| `bind_dispatch_review_prompt(event, *, event_name, prompt)` | `mergecraft.config.trust_policy` | F1 tests |
 | `is_fork_pull_request(event)` (extended) | `mergecraft.config.trust_policy` | TB-D1/D3 tests |
 | `expected_publisher_logins(ctx)`, `is_mergecraft_authored(item, *, publishers)` | `mergecraft.review.authorship` (new) | TB-D7 tests |
 | `list_mergecraft_reviews(ctx, *, pull_number)` | `mergecraft.mcp.checkout` | TB-D7 tests |
 | `last_reviewed_sha(..., publishers=)`, `review_round_index(..., publishers=)` | `mergecraft.mcp.checkout` | TB-D7 tests |
-| `review_linked_repos(..., base_manifest=)` | `mergecraft.xrepo.review` | TB-D11 tests |
-| `attach_linked_repo_review(..., base_manifest=)` + `linkedRepoOmitted` | `mergecraft.review.linked_repos` | TB-D12 tests |
+| `_base_linked_repo_manifest(*, cwd, base_ref) -> BaseManifestLookup` | `mergecraft.mcp.checkout` | F4 tests |
+| `review_linked_repos(..., base_manifest=, base_manifest_error=)` | `mergecraft.xrepo.review` | TB-D11 / F4 tests |
+| `attach_linked_repo_review(..., base_manifest=, base_manifest_error=)` + `linkedRepoOmitted` | `mergecraft.review.linked_repos` | TB-D12 / F4 tests |
 
 **Documented assumptions (amend at reconciliation if the implementation names
 them differently):**
@@ -258,6 +273,45 @@ must have a base branch the stub resolves. The fixture now names the base branch
 name). TB-D5 is unchanged; the degraded path stays covered by
 `tests/mcp/test_checkout_degraded_diff.py`.
 
+
+### TB6 follow-up coverage (F1, F4, F5, F6 — 2026-09-24)
+
+The Final verifier returned `changes_required` on the TB6 diff. Four findings
+were test-side gaps or silent skips; the product fixes landed with TB6 and this
+section records the coverage added against them. No marker is carried: the
+product behaviour is in place, so every test is a real pass.
+
+- **F1 (blocking) — dispatch PR-naming on the live path.** The TB1 dispatch
+  tests set `event["inputs"]["prompt"]`, but the live review dispatch composes
+  the prompt into the Action `prompt` input (`payload["prompt"]`) and leaves
+  `github.event.inputs.prompt` empty. Added unit tests for the pure
+  `bind_dispatch_review_prompt` (copy, never mutates; only binds a
+  `workflow_dispatch` whose composed prompt names `pull request #<n>` and whose
+  `inputs.prompt` is empty) in
+  `tests/config/test_trust_policy_comment_binding.py`, and live-path
+  `_resolve_credentials` tests in `tests/test_main_phases.py` (same-repo →
+  trusted; fork → refused; fetch failure → unbound refusal naming the PR;
+  PR-less → no fetch; event-shape dispatch still binds). The driver
+  `_drive_credentials` gained `event_name=` / `payload=` parameters.
+- **F4 — base linked-repo manifest absent vs unreadable.** New
+  `tests/mcp/test_checkout_base_manifest_lookup.py` exercises the **real**
+  `_base_linked_repo_manifest` over a checkout with an `origin/<base>` ref
+  (absent → empty, no reason; corrupt/binary → `unreadable_reason`; valid →
+  parsed) and feeds the lookup into `attach_linked_repo_review` (absent → no
+  omission; unreadable → `linkedRepoOmitted` per otherwise-reviewable entry,
+  zero findings; valid → the real pin-movement finding).
+- **F5 — TOCTOU re-check in `_instruction_body`.** Added a direct unit test of
+  the read-time refusal and a live-path test that re-points an accepted symlink
+  outside the repo between discovery and read
+  (`tests/context/test_instruction_discovery.py`). Both fail if the re-check is
+  deleted.
+- **F6 — silent skip in test code.** `tests/mcp/test_checkout.py::_pin_publishers`
+  now imports `mergecraft.review.authorship` directly and patches
+  `checkout.expected_publisher_logins` by direct attribute access (no
+  `try/except ImportError`, no `hasattr`), so a missing seam fails loudly.
+
+**Verification (TB6):** the scoped acceptance command below →
+`0 failed, 0 xfailed, 0 xpassed`; `make lint` + `make typecheck` clean.
 
 ## Verification
 

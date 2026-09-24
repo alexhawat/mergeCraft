@@ -23,7 +23,11 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from mergecraft.config.trust_policy import is_fork_pull_request, resolve_trust_policy
+from mergecraft.config.trust_policy import (
+    bind_dispatch_review_prompt,
+    is_fork_pull_request,
+    resolve_trust_policy,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -296,3 +300,93 @@ def test_dispatch_without_a_pr_stays_trusted(tmp_path: Path) -> None:
         event_name="workflow_dispatch",
     )
     assert policy.execution_trust == "trusted"
+
+
+# ── F1: the composed dispatch prompt is bound before the first trust read ─────
+
+#: The live review dispatch writes the composed review text into the Action
+#: ``prompt`` input (``payload["prompt"]``), so ``github.event.inputs.prompt``
+#: holds only the operator's raw input — usually empty. ``bind_dispatch_review_prompt``
+#: merges the composed prompt into the event so the fork floor sees the PR.
+_COMPOSED_DISPATCH_PROMPT = (
+    "Review pull request #42. First call the mergecraft MCP tool mergecraft_checkout_pr."
+)
+
+
+def _bind_dispatch(
+    event: dict[str, Any],
+    *,
+    event_name: str = "workflow_dispatch",
+    prompt: str | None = _COMPOSED_DISPATCH_PROMPT,
+) -> dict[str, Any]:
+    return bind_dispatch_review_prompt(event, event_name=event_name, prompt=prompt)
+
+
+def test_bind_dispatch_review_prompt_is_pure_and_binds_the_composed_prompt() -> None:
+    """F1/TB-D1 — the live dispatch carries its PR only in the payload prompt.
+
+    The returned event is a copy whose ``inputs.prompt`` names the PR, so the
+    fork floor fires until ``get_pull`` binds the head.
+    """
+    event: dict[str, Any] = {"action": "workflow_dispatch", "inputs": {}}
+
+    bound = _bind_dispatch(event)
+
+    assert bound is not event
+    assert event["inputs"] == {}, "binding must not mutate the input event"
+    assert bound["inputs"]["prompt"] == _COMPOSED_DISPATCH_PROMPT
+    assert is_fork_pull_request(bound) is True
+
+
+def test_bind_dispatch_review_prompt_adds_inputs_when_absent() -> None:
+    """F1 — the Action prompt can arrive with no ``inputs`` mapping at all."""
+    event: dict[str, Any] = {"action": "workflow_dispatch"}
+
+    bound = _bind_dispatch(event)
+
+    assert "inputs" not in event
+    assert bound["inputs"]["prompt"] == _COMPOSED_DISPATCH_PROMPT
+
+
+def test_bind_dispatch_review_prompt_ignores_a_non_dispatch_event() -> None:
+    """Guard — only a ``workflow_dispatch`` event is enriched."""
+    event = _comment_on_pr_event()
+
+    bound = _bind_dispatch(event, event_name="issue_comment")
+
+    assert bound is event
+    assert "inputs" not in bound
+
+
+def test_bind_dispatch_review_prompt_ignores_a_pr_less_prompt() -> None:
+    """Guard — a composed prompt that names no PR leaves the dispatch untouched."""
+    event: dict[str, Any] = {"action": "workflow_dispatch", "inputs": {}}
+
+    bound = _bind_dispatch(event, prompt="Review the current pull request.")
+
+    assert bound is event
+    assert is_fork_pull_request(bound) is False
+
+
+def test_bind_dispatch_review_prompt_does_not_clobber_an_existing_input() -> None:
+    """Guard — an explicit operator ``inputs.prompt`` is already the composed text."""
+    existing = "Review pull request #7. Keep my operator note."
+    event: dict[str, Any] = {"action": "workflow_dispatch", "inputs": {"prompt": existing}}
+
+    bound = _bind_dispatch(event, prompt=_COMPOSED_DISPATCH_PROMPT)
+
+    assert bound is event
+    assert bound["inputs"]["prompt"] == existing
+
+
+@pytest.mark.parametrize("prompt", [None, "", "   "])
+def test_bind_dispatch_review_prompt_ignores_a_missing_or_empty_prompt(
+    prompt: str | None,
+) -> None:
+    """Guard — no composed prompt means nothing to merge."""
+    event: dict[str, Any] = {"action": "workflow_dispatch", "inputs": {}}
+
+    bound = _bind_dispatch(event, prompt=prompt)
+
+    assert bound is event
+    assert bound["inputs"] == {}

@@ -83,22 +83,16 @@ _BOT_USER: dict[str, str] = {"login": _PUBLISHER_LOGIN, "type": "Bot"}
 
 
 def _pin_publishers(monkeypatch: pytest.MonkeyPatch, logins: frozenset[str]) -> None:
-    """Pin the expected-publisher set once the TB3 seam exists.
+    """Pin the expected-publisher set for the checkpoint/round tests (TB-D7).
 
-    Before TB3 the authorship module does not exist and the import is skipped,
-    so the pre-existing pure-function tests keep their current behaviour.
+    Direct attribute access on both modules: a missing seam fails loudly here
+    instead of silently leaving the test to exercise the real lookup.
     """
-    try:
-        import mergecraft.review.authorship as authorship
-    except ImportError:
-        return
-    monkeypatch.setattr(authorship, "expected_publisher_logins", lambda ctx: logins, raising=False)
+    import mergecraft.review.authorship as authorship
     from mergecraft.mcp import checkout as checkout_module
 
-    if hasattr(checkout_module, "expected_publisher_logins"):
-        monkeypatch.setattr(
-            checkout_module, "expected_publisher_logins", lambda ctx: logins, raising=False
-        )
+    monkeypatch.setattr(authorship, "expected_publisher_logins", lambda ctx: logins)
+    monkeypatch.setattr(checkout_module, "expected_publisher_logins", lambda ctx: logins)
 
 
 def test_last_reviewed_sha_picks_the_newest_mergecraft_review() -> None:

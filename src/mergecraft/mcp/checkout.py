@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from mergecraft.mcp.context import ToolContext
-    from mergecraft.xrepo.linked_repos import LinkedReposManifest
+    from mergecraft.xrepo.review import BaseManifestLookup
 
 __all__ = [
     "GitHubClient",
@@ -45,28 +45,55 @@ def _rebaseline_config_after_checkout(ctx: ToolContext) -> None:
     rebaseline_repo_settings_snapshot(ctx)
 
 
-def _base_linked_repo_manifest(*, cwd: str, base_ref: str) -> LinkedReposManifest:
+def _manifest_exists_at_ref(*, cwd: str, ref: str, rel_path: str) -> bool:
+    """Return True when ``ref:rel_path`` names an object in the checkout (TB-D11).
+
+    ``git_show_text`` returns ``None`` both for a path that is absent at the ref
+    and for a blob it cannot decode. Probing existence separately keeps "newly
+    added at the head" (absent at the base) distinct from "exists but unreadable
+    at the base" — the latter is an omission, not a silent zero-finding report.
+    """
+    try:
+        _run_git(["cat-file", "-e", f"{ref}:{rel_path}"], cwd=cwd)
+    except Exception:
+        # Any git failure means "cannot prove it exists" — treat as absent.
+        return False
+    return True
+
+
+def _base_linked_repo_manifest(*, cwd: str, base_ref: str) -> BaseManifestLookup:
     """Read the linked-repo manifest at ``origin/<base>`` (TB-D11).
 
     The review path diffs pins between the base and head manifests, so it needs
-    the base manifest. An unavailable base ref or manifest yields an empty
-    manifest — never a whole-index fallback, which would report contracts the PR
-    did not change.
+    the base manifest. Three outcomes:
+
+    * no base ref is known, or the manifest is genuinely **absent** at the base
+      ref — every head entry is newly added and contributes no change;
+    * the manifest **exists but cannot be decoded or parsed** — an omission with
+      a reason, never a silent zero-finding report (TB-D11/TB-D12);
+    * the manifest is read — the pin-movement baseline.
+
+    Never a whole-index fallback, which would report contracts the PR did not
+    change.
     """
     from mergecraft.context.repo_paths import git_show_text
     from mergecraft.xrepo.linked_repos import LinkedReposManifest, parse_manifest_text
-    from mergecraft.xrepo.review import MANIFEST_REL
+    from mergecraft.xrepo.review import MANIFEST_REL, BaseManifestLookup
 
     empty = LinkedReposManifest(repos=())
     if not base_ref:
-        return empty
-    text = git_show_text(Path(cwd), f"origin/{base_ref}", str(MANIFEST_REL))
+        return BaseManifestLookup(manifest=empty)
+    ref = f"origin/{base_ref}"
+    if not _manifest_exists_at_ref(cwd=cwd, ref=ref, rel_path=str(MANIFEST_REL)):
+        return BaseManifestLookup(manifest=empty)
+    unreadable_reason = f"base manifest unreadable at {ref}"
+    text = git_show_text(Path(cwd), ref, str(MANIFEST_REL))
     if text is None:
-        return empty
+        return BaseManifestLookup(manifest=empty, unreadable_reason=unreadable_reason)
     try:
-        return parse_manifest_text(text)
+        return BaseManifestLookup(manifest=parse_manifest_text(text))
     except ValueError:
-        return empty
+        return BaseManifestLookup(manifest=empty, unreadable_reason=unreadable_reason)
 
 
 # A review authored by mergeCraft carries the run footer, or (for a review whose
@@ -817,10 +844,12 @@ def checkout_pr_tool(ctx: ToolContext):
                 operator_authorized_linked_repos,
             )
 
+            base_lookup = _base_linked_repo_manifest(cwd=cwd, base_ref=base_ref)
             linked = attach_linked_repo_review(
                 Path(cwd),
                 authorized_repos=operator_authorized_linked_repos(),
-                base_manifest=_base_linked_repo_manifest(cwd=cwd, base_ref=base_ref),
+                base_manifest=base_lookup.manifest,
+                base_manifest_error=base_lookup.unreadable_reason,
             )
             if linked is not None:
                 result.update(linked)

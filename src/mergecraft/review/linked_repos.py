@@ -77,6 +77,7 @@ def attach_linked_repo_review(
     *,
     authorized_repos: frozenset[str] | None = None,
     base_manifest: LinkedReposManifest | None = None,
+    base_manifest_error: str | None = None,
 ) -> dict[str, Any] | None:
     """Parse the SHA-pinned manifest and return consumer-impact findings.
 
@@ -93,9 +94,13 @@ def attach_linked_repo_review(
     (``origin/<base>``). When it is supplied, findings report only contracts
     whose pin moved between the base and head manifests (TB-D11). An absent
     base manifest means no movement baseline: the review path reports no
-    changed contract rather than a whole-index report. Every omitted entry —
-    ungranted, missing sibling, pin mismatch, unreachable previous pin — is
-    recorded in ``linkedRepoOmitted`` (TB-D12).
+    changed contract rather than a whole-index report. ``base_manifest_error``
+    names a base manifest that exists but could not be read: the movement
+    baseline is unknown, so every otherwise-reviewable entry is recorded as an
+    omission with that reason rather than silently reported as unchanged
+    (TB-D11). Every omitted entry — ungranted, missing sibling, pin mismatch,
+    unreachable previous pin, unreadable base manifest — is recorded in
+    ``linkedRepoOmitted`` (TB-D12).
     """
     manifest_path = repo_root / MANIFEST_REL
     if not manifest_path.is_file():
@@ -119,6 +124,7 @@ def attach_linked_repo_review(
         repo_root=repo_root,
         authorized_repos=authorized,
         base_manifest=base_manifest if base_manifest is not None else LinkedReposManifest(repos=()),
+        base_manifest_error=base_manifest_error,
     )
     findings = [
         {

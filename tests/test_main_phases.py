@@ -880,6 +880,26 @@ def _pull_metadata(*, number: int, fork: bool) -> dict[str, Any]:
     }
 
 
+def _dispatch_event(*, number: int | None = None) -> dict[str, Any]:
+    """A ``workflow_dispatch`` payload as GitHub delivers it.
+
+    The Action's composed review prompt is *not* on the event — it is on the
+    run payload — so ``inputs`` is empty for the live path.
+    """
+    event: dict[str, Any] = {"action": "workflow_dispatch", "inputs": {}}
+    if number is not None:
+        event["inputs"]["prompt"] = f"Review pull request #{number}. Please review."
+    return event
+
+
+def _dispatch_payload(*, number: int | None = None) -> dict[str, Any]:
+    """The run payload the Action writes: the composed prompt lives under ``prompt``."""
+    payload: dict[str, Any] = {"push": "restricted", "shell": "restricted"}
+    if number is not None:
+        payload["prompt"] = f"Review pull request #{number}. Please review."
+    return payload
+
+
 async def _drive_credentials(
     *,
     monkeypatch: pytest.MonkeyPatch,
@@ -887,20 +907,22 @@ async def _drive_credentials(
     event: dict[str, Any],
     scm: _StubScm,
     credentials: bool,
+    event_name: str = "issue_comment",
+    payload: dict[str, Any] | None = None,
 ) -> RunContext:
     """Call the real ``_resolve_credentials`` with scripted collaborators."""
     if credentials:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     else:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
 
     ctx = RunContext(
         settings=RepoSettings(),
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         run_context=_run_context_data(),
         gh_event=event,
-        payload={"push": "restricted", "shell": "restricted"},
+        payload=payload if payload is not None else {"push": "restricted", "shell": "restricted"},
         scm=scm,  # type: ignore[arg-type]
     )
 
@@ -1006,3 +1028,114 @@ async def test_resolve_credentials_leaves_uncredentialed_comment_runs_alone(
         scm=scm,
         credentials=False,
     )
+
+
+# ── F1 (TB-D1/D2): a dispatch names its PR in the composed payload prompt ─────
+
+
+async def test_resolve_credentials_binds_a_dispatch_pr_from_the_composed_prompt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """F1 — a same-repo dispatch is bound from ``payload["prompt"]`` before trust.
+
+    The event's own ``inputs.prompt`` is empty (the live shape); the PR number
+    lives only in the composed Action prompt. Without the F1 binding the run
+    would be read as PR-less and never bound, leaving trust unknown.
+    """
+    scm = _StubScm(pull=_pull_metadata(number=7, fork=False))
+
+    ctx = await _drive_credentials(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        event=_dispatch_event(),
+        scm=scm,
+        credentials=True,
+        event_name="workflow_dispatch",
+        payload=_dispatch_payload(number=7),
+    )
+
+    assert scm.get_pull_calls == [7]
+    assert ctx.trust_tier == "trusted"
+
+
+async def test_resolve_credentials_refuses_a_dispatch_fork_from_the_composed_prompt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """F1 — a fork dispatch named only in the payload prompt is floored and refused."""
+    scm = _StubScm(pull=_pull_metadata(number=7, fork=True))
+
+    with pytest.raises(Exception, match=r"fork") as excinfo:
+        await _drive_credentials(
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            event=_dispatch_event(),
+            scm=scm,
+            credentials=True,
+            event_name="workflow_dispatch",
+            payload=_dispatch_payload(number=7),
+        )
+
+    assert scm.get_pull_calls == [7]
+    assert "fork" in str(excinfo.value).lower()
+
+
+async def test_resolve_credentials_refuses_a_dispatch_when_the_fetch_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """F1 — a fetch failure leaves the dispatch unbound and names the PR."""
+    scm = _StubScm(fail=True)
+
+    with pytest.raises(Exception, match=r"unbound|could not be bound") as excinfo:
+        await _drive_credentials(
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            event=_dispatch_event(),
+            scm=scm,
+            credentials=True,
+            event_name="workflow_dispatch",
+            payload=_dispatch_payload(number=7),
+        )
+
+    assert scm.get_pull_calls == [7]
+    message = str(excinfo.value).lower()
+    assert "unbound" in message or "could not be bound" in message
+
+
+async def test_resolve_credentials_leaves_a_pr_less_dispatch_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard — a dispatch that names no PR fetches nothing and stays trusted."""
+    scm = _StubScm(fail=True)
+
+    ctx = await _drive_credentials(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        event=_dispatch_event(),
+        scm=scm,
+        credentials=True,
+        event_name="workflow_dispatch",
+        payload=_dispatch_payload(),
+    )
+
+    assert scm.get_pull_calls == []
+    assert ctx.trust_tier == "trusted"
+
+
+async def test_resolve_credentials_binds_a_dispatch_named_in_the_event_inputs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard — the event-shape dispatch (TB1) still binds without a payload prompt."""
+    scm = _StubScm(pull=_pull_metadata(number=7, fork=False))
+
+    ctx = await _drive_credentials(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        event=_dispatch_event(number=7),
+        scm=scm,
+        credentials=True,
+        event_name="workflow_dispatch",
+        payload={"push": "restricted", "shell": "restricted"},
+    )
+
+    assert scm.get_pull_calls == [7]
+    assert ctx.trust_tier == "trusted"

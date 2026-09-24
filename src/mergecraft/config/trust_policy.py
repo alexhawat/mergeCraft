@@ -199,6 +199,43 @@ def bind_target_pull_request(event: dict[str, Any], pull: dict[str, Any]) -> dic
     return bound
 
 
+def bind_dispatch_review_prompt(
+    event: dict[str, Any],
+    *,
+    event_name: str,
+    prompt: str | None,
+) -> dict[str, Any]:
+    """Return a ``workflow_dispatch`` *event* with its composed review prompt bound.
+
+    The live dispatch review path composes the review text (``Review pull request
+    #<n>. …``) into the Action's ``prompt`` input, so ``github.event.inputs.prompt``
+    holds only the operator's raw input — usually empty. Every trust read that asks
+    whether a dispatch names a PR looks at the event's ``inputs``
+    (``_dispatch_named_pull_number``), so the composed prompt must be merged in
+    before the first read; otherwise a PR-naming dispatch is read as PR-less and is
+    never floored or bound (TB-D1/TB-D2).
+
+    The merge happens only when the composed *prompt* names a PR and the event does
+    not already carry a non-empty ``inputs.prompt`` (the workflow passes an explicit
+    operator prompt through verbatim, so it is already the composed text). A
+    non-dispatch event, an empty prompt, and a dispatch that names no PR are all
+    returned unchanged. Pure: *event* is never mutated.
+    """
+    if event_name != "workflow_dispatch":
+        return event
+    if not isinstance(prompt, str) or _DISPATCH_PULL_NUMBER_RE.search(prompt) is None:
+        return event
+    inputs = event.get("inputs")
+    existing = inputs.get("prompt") if isinstance(inputs, dict) else None
+    if isinstance(existing, str) and existing.strip():
+        return event
+    bound_inputs = dict(inputs) if isinstance(inputs, dict) else {}
+    bound_inputs["prompt"] = prompt
+    bound = dict(event)
+    bound["inputs"] = bound_inputs
+    return bound
+
+
 def unbound_target_pull_number(event: dict[str, Any]) -> int | None:
     """Return the PR number *event* names but leaves unbound, else ``None``.
 
@@ -785,6 +822,7 @@ __all__ = [
     "SelfReviewLevel",
     "TrustPolicy",
     "agent_sandbox_manifest_fields",
+    "bind_dispatch_review_prompt",
     "bind_target_pull_request",
     "bound_head_sha",
     "default_branch_from_event",

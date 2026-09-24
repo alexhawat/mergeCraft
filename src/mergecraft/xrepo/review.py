@@ -52,6 +52,23 @@ class LinkedRepoOmission:
 
 
 @dataclass(frozen=True, slots=True)
+class BaseManifestLookup:
+    """Result of reading the base manifest for the pin-movement change set (TB-D11).
+
+    ``unreadable_reason`` is set only when ``origin/<base>:.mergecraft/linked-repos.yaml``
+    **exists but cannot be decoded or parsed**. A manifest that is genuinely absent
+    at the base ref (or when no base ref is known) leaves it ``None``: every head
+    entry is then newly added and contributes no change. The distinction matters
+    because ``git_show_text`` returns ``None`` for both an absent path and a blob it
+    cannot decode — collapsing them silently reported "no findings" for a base
+    manifest that was simply unreadable (TB-D11/TB-D12, P-8).
+    """
+
+    manifest: LinkedReposManifest
+    unreadable_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class XrepoReview:
     """Linked-repo review result: SHA-pinned manifest plus consumer findings."""
 
@@ -260,6 +277,7 @@ def review_linked_repos(
     producer: str | None = None,
     authorized_repos: frozenset[str] | None = None,
     base_manifest: LinkedReposManifest | None = None,
+    base_manifest_error: str | None = None,
 ) -> XrepoReview:
     """Parse the SHA-pinned manifest, index producer contracts, resolve consumers.
 
@@ -274,6 +292,10 @@ def review_linked_repos(
             entries whose pin moved contribute, and only surfaces whose path
             differs between the two pins. When omitted, every indexed surface is
             reported (the legacy whole-index behaviour).
+        base_manifest_error: Optional reason the base manifest could not be read.
+            When set, the base manifest is treated as unknown rather than empty:
+            each otherwise-reviewable entry is recorded as an omission carrying
+            this reason, never silently reported as unchanged (TB-D11/TB-D12).
 
     Returns:
         An ``XrepoReview`` with ``XR-NNN`` findings (empty when no manifest) and
@@ -313,7 +335,7 @@ def review_linked_repos(
 
     producer_entry = manifest.entry_for(producer) if producer else None
     producers = (producer_entry,) if producer_entry is not None else manifest.repos
-    movement = producer is None and base_manifest is not None
+    movement = producer is None and (base_manifest is not None or base_manifest_error is not None)
 
     index_cache: dict[tuple[str, str], ContractIndex] = {}
     changed: list[ChangedContract] = []
@@ -323,7 +345,13 @@ def review_linked_repos(
             continue
         if movement:
             base_entry = _base_entry_for(base_manifest, entry.slug)
-            if base_entry is None or base_entry.commit.lower() == entry.commit.lower():
+            if base_entry is None:
+                if base_manifest_error is not None:
+                    omissions.append(
+                        LinkedRepoOmission(repo=entry.slug, reason=base_manifest_error)
+                    )
+                continue
+            if base_entry.commit.lower() == entry.commit.lower():
                 continue
             try:
                 _rev_parse_commit(root, base_entry.commit)
@@ -378,6 +406,7 @@ def review_linked_repos(
 
 __all__ = [
     "MANIFEST_REL",
+    "BaseManifestLookup",
     "LinkedRepoOmission",
     "XrepoFinding",
     "XrepoReview",
