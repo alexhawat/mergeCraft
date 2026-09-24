@@ -206,20 +206,37 @@ export default Plugin.define({
     // Trace each native review to Logfire when a token is configured.
     if (options.logfire !== false) {
       await guard("tool hook", async () => {
-        const started = new Map<string, number>()
-        const before = await ctx.tool.hook("execute.before", (event) => {
-          if (event.tool !== "subagent") return
+        // Key by the tool call id when the runtime provides one so overlapping
+        // reviewer subagent calls pair exactly. Without it, keep a FIFO queue per
+        // session so parallel reviews still emit one span each instead of
+        // overwriting each other's start time.
+        const started = new Map<string, number[]>()
+        const callKey = (event: { sessionID: string }): string => {
+          const withCall = event as unknown as { callID?: unknown; callId?: unknown }
+          const callID = withCall.callID ?? withCall.callId
+          return typeof callID === "string" && callID !== "" ? callID : event.sessionID
+        }
+        const isReviewerCall = (event: { tool: string; input?: unknown }): boolean => {
+          if (event.tool !== "subagent") return false
           const input = (event.input ?? {}) as Record<string, unknown>
           const agent = typeof input.agent === "string" ? input.agent : ""
-          if (!agent.includes(reviewerAgent)) return
-          started.set(event.sessionID, Date.now())
+          return agent.includes(reviewerAgent)
+        }
+        const before = await ctx.tool.hook("execute.before", (event) => {
+          if (!isReviewerCall(event)) return
+          const key = callKey(event)
+          const queue = started.get(key) ?? []
+          queue.push(Date.now())
+          started.set(key, queue)
         })
         cleanups.push(() => before.dispose())
 
         const after = await ctx.tool.hook("execute.after", (event) => {
-          const start = started.get(event.sessionID)
+          const key = callKey(event)
+          const queue = started.get(key)
+          const start = queue?.shift()
+          if (queue && queue.length === 0) started.delete(key)
           if (start === undefined) return
-          started.delete(event.sessionID)
           void emitLogfireSpan("mergecraft.review.native", {
             "mergecraft.engine": "native",
             "mergecraft.agent": reviewerAgent,

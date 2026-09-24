@@ -39,7 +39,7 @@ directory to `.opencode/plugins/mergecraft/`, or list it explicitly in
 - `session.context` — for the reviewer subagent only, appends the mergeCraft review doctrine, removes `write`/`edit`/`patch` from the toolset, and sets `temperature: 0.2`.
 - `permission.evaluate` — for the reviewer subagent only, forces `edit` and `shell` to `deny`. A configured `deny` is final and is never weakened. `allow`/`ask` decisions are the only ones this hook can change.
 - `shell.create.before` — bounds `mergecraft` shell timeouts at 15 minutes.
-- `tool.execute.before` / `tool.execute.after` — records a `mergecraft.review.native` span per reviewer subagent run.
+- `tool.execute.before` / `tool.execute.after` — records a `mergecraft.review.native` span per reviewer subagent run, paired by tool call id (FIFO per session when the runtime provides none) so overlapping reviews do not overwrite each other.
 
 ## Logfire
 
