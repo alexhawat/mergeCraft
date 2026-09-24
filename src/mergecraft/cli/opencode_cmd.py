@@ -76,10 +76,10 @@ def assets_root() -> Path:
     raise AssertionError("unreachable")  # pragma: no cover - cli_bail exits
 
 
-def _destination_root(*, global_install: bool) -> Path:
+def _destination_root(*, global_install: bool, project_root: Path) -> Path:
     if global_install:
         return Path.home() / ".config" / "opencode"
-    return Path.cwd() / ".opencode"
+    return project_root / ".opencode"
 
 
 def _copy_assets(root: Path, destination: Path, *, force: bool) -> list[str]:
@@ -172,7 +172,8 @@ def install(
 ) -> None:
     """Install OpenCode commands, subagents, plugin, and MCP config."""
     root = assets_root()
-    dest = _destination_root(global_install=global_install)
+    project_root = target if target is not None else Path.cwd()
+    dest = _destination_root(global_install=global_install, project_root=project_root)
     dest.mkdir(parents=True, exist_ok=True)
     written = _copy_assets(root, dest, force=force)
     for path in written:
@@ -187,7 +188,7 @@ def install(
         console.print(_mcp_snippet(config_file))
 
     if router and not global_install:
-        config_path = Path.cwd() / ".mergecraft" / "config.yaml"
+        config_path = project_root / ".mergecraft" / "config.yaml"
         if config_path.is_file():
             current = load_config_dict(config_path).get("harness")
             if current != "opencode":
@@ -209,7 +210,7 @@ def _check(label: str, ok: bool, detail: str) -> tuple[str, bool, str]:
     return label, ok, detail
 
 
-def _doctor_checks(target: Path, root: Path) -> list[tuple[str, bool, str]]:
+def _doctor_checks(target: Path, root: Path, project_root: Path) -> list[tuple[str, bool, str]]:
     checks: list[tuple[str, bool, str]] = []
     checks.append(_check("assets", root.is_dir(), str(root) if root.is_dir() else "not found"))
     checks.append(
@@ -240,7 +241,7 @@ def _doctor_checks(target: Path, root: Path) -> list[tuple[str, bool, str]]:
             )
         )
 
-    repo_config = Path.cwd() / ".mergecraft" / "config.yaml"
+    repo_config = project_root / ".mergecraft" / "config.yaml"
     if repo_config.is_file():
         harness = load_config_dict(repo_config).get("harness")
         checks.append(
@@ -266,7 +267,7 @@ def _doctor_checks(target: Path, root: Path) -> list[tuple[str, bool, str]]:
     logfire_env = any(
         os.environ.get(name, "").strip() for name in ("MERGECRAFT_LOGFIRE_TOKEN", "LOGFIRE_TOKEN")
     )
-    env_file = Path.cwd() / ".env"
+    env_file = project_root / ".env"
     logfire_dotenv = env_file.is_file() and "MERGECRAFT_LOGFIRE_TOKEN" in env_file.read_text(
         encoding="utf-8"
     )
@@ -282,6 +283,9 @@ def _doctor_checks(target: Path, root: Path) -> list[tuple[str, bool, str]]:
 
 @app.command("doctor")
 def doctor(
+    target: Path | None = typer.Option(
+        None, "--target", help="Project root to inspect (default: current directory)."
+    ),
     global_install: bool = typer.Option(
         False, "--global", help="Inspect ~/.config/opencode/ instead of the project."
     ),
@@ -292,8 +296,9 @@ def doctor(
         root = assets_root()
     except SystemExit:
         root = Path("<missing>")
-    target = _destination_root(global_install=global_install)
-    checks = _doctor_checks(target, root)
+    project_root = target if target is not None else Path.cwd()
+    destination = _destination_root(global_install=global_install, project_root=project_root)
+    checks = _doctor_checks(destination, root, project_root)
     failures = 0
     for label, ok, detail in checks:
         mark = "[green]ok[/green]" if ok else "[red]missing[/red]"

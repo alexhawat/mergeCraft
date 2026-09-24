@@ -144,6 +144,11 @@ def test_doctor_succeeds_after_install(tmp_path: Path, monkeypatch: MonkeyPatch)
     monkeypatch.chdir(tmp_path)
     _seed_repo(tmp_path)
     assert runner.invoke(app, ["opencode", "install"]).exit_code == 0
+    monkeypatch.setattr(
+        opencode_cmd.shutil,
+        "which",
+        lambda name: "/usr/local/bin/mergecraft" if name == "mergecraft" else None,
+    )
     monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
     monkeypatch.setenv("MERGECRAFT_LOGFIRE_TOKEN", "pylf_v2_us_test")
 
@@ -151,3 +156,45 @@ def test_doctor_succeeds_after_install(tmp_path: Path, monkeypatch: MonkeyPatch)
 
     assert result.exit_code == 0, result.output
     assert "all checks passed" in result.output
+
+
+def test_install_honors_target(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    project = tmp_path / "consumer"
+    (project / ".mergecraft").mkdir(parents=True)
+    (project / ".mergecraft" / "config.yaml").write_text(
+        "models:\n- anthropic/claude-sonnet\n", encoding="utf-8"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    result = runner.invoke(app, ["opencode", "install", "--target", str(project)])
+
+    assert result.exit_code == 0, result.output
+    assert (project / ".opencode" / "commands" / "mergecraft" / "review.md").is_file()
+    assert (project / ".opencode" / "opencode.json").is_file()
+    assert load_config_dict(project / ".mergecraft" / "config.yaml")["harness"] == "opencode"
+    assert not (elsewhere / ".opencode").exists()
+
+
+def test_doctor_honors_target(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    project = tmp_path / "consumer"
+    (project / ".mergecraft").mkdir(parents=True)
+    (project / ".mergecraft" / "config.yaml").write_text(
+        "models:\n- anthropic/claude-sonnet\n", encoding="utf-8"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert runner.invoke(app, ["opencode", "install", "--target", str(project)]).exit_code == 0
+    monkeypatch.setattr(
+        opencode_cmd.shutil,
+        "which",
+        lambda name: "/usr/local/bin/mergecraft" if name == "mergecraft" else None,
+    )
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+    monkeypatch.setenv("MERGECRAFT_LOGFIRE_TOKEN", "pylf_v2_us_test")
+
+    result = runner.invoke(app, ["opencode", "doctor", "--target", str(project), "--strict"])
+
+    assert result.exit_code == 0, result.output

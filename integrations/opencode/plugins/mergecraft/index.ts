@@ -18,6 +18,8 @@
 
 import { Plugin } from "@opencode/plugin"
 
+import { buildOtlpPayload, logfireTarget, randomHex } from "./otlp"
+
 export type Engine = "native" | "cli" | "deep" | "mcp" | "quick"
 
 export interface MergecraftOptions {
@@ -64,67 +66,22 @@ function redact(text: string): string {
   return out
 }
 
-interface LogfireTarget {
-  url: string
-  token: string
-  project?: string
-}
-
-function logfireTarget(): LogfireTarget | null {
-  const token = process.env.MERGECRAFT_LOGFIRE_TOKEN ?? process.env.LOGFIRE_TOKEN
-  if (!token || token.trim() === "") return null
-  const region = (process.env.MERGECRAFT_TRACING_REGION ?? "us").toLowerCase()
-  const host = region === "eu" ? "logfire-eu.pydantic.dev" : "logfire-us.pydantic.dev"
-  const project = process.env.MERGECRAFT_TRACING_PROJECT
-  return { url: `https://${host}/v1/traces`, token, project }
-}
-
-function hex(bytes: number): string {
-  const list = new Uint8Array(bytes)
-  return Array.from(list, (b) => b.toString(16).padStart(2, "0")).join("")
-}
-
 /**
  * Emit one OTLP span to Logfire. Best-effort: failures are logged, never thrown.
  * Logfire accepts the write token as the Bearer credential and derives the
  * project from the token, so no x-logfire-project header is sent.
  */
 async function emitLogfireSpan(name: string, attributes: Record<string, string | number>): Promise<void> {
-  const target = logfireTarget()
+  const target = logfireTarget(process.env)
   if (!target) return
-  const now = Date.now() * 1_000_000
-  const payload = {
-    resourceSpans: [
-      {
-        resource: {
-          attributes: [
-            { key: "service.name", value: { stringValue: "mergecraft-opencode" } },
-            ...(target.project ? [{ key: "deployment.environment", value: { stringValue: target.project } }] : []),
-          ],
-        },
-        scopeSpans: [
-          {
-            scope: { name: "mergecraft.opencode", version: "1" },
-            spans: [
-              {
-                traceId: hex(16),
-                spanId: hex(8),
-                name,
-                kind: 1,
-                startTimeUnixNano: String(now),
-                endTimeUnixNano: String(now),
-                attributes: Object.entries(attributes).map(([key, value]) =>
-                  typeof value === "number"
-                    ? { key, value: { intValue: String(value) } }
-                    : { key, value: { stringValue: value } },
-                ),
-              },
-            ],
-          },
-        ],
-      },
-    ],
-  }
+  const payload = buildOtlpPayload({
+    name,
+    attributes,
+    traceId: randomHex(16),
+    spanId: randomHex(8),
+    nowMs: Date.now(),
+    project: target.project,
+  })
   try {
     await fetch(target.url, {
       method: "POST",
