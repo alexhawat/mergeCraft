@@ -46,7 +46,7 @@ def test_install_copies_assets_writes_config_and_sets_harness(
     assert (opencode / "agents" / "mergecraft" / "reviewer.md").is_file()
     assert (opencode / "plugins" / "mergecraft" / "index.ts").is_file()
 
-    payload = json.loads((opencode / "opencode.json").read_text(encoding="utf-8"))
+    payload = json.loads((tmp_path / "opencode.json").read_text(encoding="utf-8"))
     assert payload["mcp"]["servers"]["mergecraft"]["type"] == "local"
     assert payload["mcp"]["servers"]["mergecraft"]["command"][0] == "mergecraft"
     assert load_config_dict(config_path)["harness"] == "opencode"
@@ -85,6 +85,40 @@ def test_install_patches_existing_strict_json_config(
     payload = json.loads(existing.read_text(encoding="utf-8"))
     assert payload["model"] == "anthropic/claude"
     assert payload["mcp"]["servers"]["mergecraft"]["type"] == "local"
+
+
+def test_install_patches_project_root_json_config(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    _seed_repo(tmp_path)
+    root_config = tmp_path / "opencode.json"
+    root_config.write_text(
+        json.dumps({"$schema": "x", "model": "anthropic/claude"}), encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["opencode", "install"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(root_config.read_text(encoding="utf-8"))
+    assert payload["model"] == "anthropic/claude"
+    assert payload["mcp"]["servers"]["mergecraft"]["type"] == "local"
+    assert not (tmp_path / ".opencode" / "opencode.json").exists()
+
+
+def test_install_leaves_project_root_jsonc_and_creates_no_shadow(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _seed_repo(tmp_path)
+    original = '{\n  // keep me\n  "model": "anthropic/claude"\n}\n'
+    root_config = tmp_path / "opencode.jsonc"
+    root_config.write_text(original, encoding="utf-8")
+
+    result = runner.invoke(app, ["opencode", "install"])
+
+    assert result.exit_code == 0
+    assert root_config.read_text(encoding="utf-8") == original
+    assert not (tmp_path / ".opencode" / "opencode.json").exists()
+    assert not (tmp_path / ".opencode" / "opencode.jsonc").exists()
 
 
 def test_install_leaves_jsonc_comments_intact(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -172,7 +206,7 @@ def test_install_honors_target(tmp_path: Path, monkeypatch: MonkeyPatch) -> None
 
     assert result.exit_code == 0, result.output
     assert (project / ".opencode" / "commands" / "mergecraft" / "review.md").is_file()
-    assert (project / ".opencode" / "opencode.json").is_file()
+    assert (project / "opencode.json").is_file()
     assert load_config_dict(project / ".mergecraft" / "config.yaml")["harness"] == "opencode"
     assert not (elsewhere / ".opencode").exists()
 

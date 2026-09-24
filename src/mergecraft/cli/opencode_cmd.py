@@ -181,7 +181,8 @@ def install(
     if not written:
         console.print("[dim]assets already present — pass --force to refresh[/dim]")
 
-    config_file, patched = _write_or_patch_config(dest)
+    config_base = dest if global_install else project_root
+    config_file, patched = _write_or_patch_config(config_base)
     if patched:
         console.print(f"wrote MCP block in [green]{config_file}[/green]")
     else:
@@ -210,7 +211,9 @@ def _check(label: str, ok: bool, detail: str) -> tuple[str, bool, str]:
     return label, ok, detail
 
 
-def _doctor_checks(target: Path, root: Path, project_root: Path) -> list[tuple[str, bool, str]]:
+def _doctor_checks(
+    target: Path, root: Path, project_root: Path, config_base: Path
+) -> list[tuple[str, bool, str]]:
     checks: list[tuple[str, bool, str]] = []
     checks.append(_check("assets", root.is_dir(), str(root) if root.is_dir() else "not found"))
     checks.append(
@@ -227,7 +230,7 @@ def _doctor_checks(target: Path, root: Path, project_root: Path) -> list[tuple[s
     plugin = target / "plugins" / "mergecraft" / "index.ts"
     checks.append(_check("plugin", plugin.is_file(), str(plugin)))
 
-    config_file = _find_config_file(target)
+    config_file = _find_config_file(config_base)
     if config_file is None:
         checks.append(_check("MCP config", False, "no opencode.json(c) found"))
     else:
@@ -298,7 +301,8 @@ def doctor(
         root = Path("<missing>")
     project_root = target if target is not None else Path.cwd()
     destination = _destination_root(global_install=global_install, project_root=project_root)
-    checks = _doctor_checks(destination, root, project_root)
+    config_base = destination if global_install else project_root
+    checks = _doctor_checks(destination, root, project_root, config_base)
     failures = 0
     for label, ok, detail in checks:
         mark = "[green]ok[/green]" if ok else "[red]missing[/red]"
