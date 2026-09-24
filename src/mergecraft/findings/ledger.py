@@ -7,6 +7,7 @@ comments are read during migration. Post-merge filing stays in the sweep module.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -186,26 +187,37 @@ def is_sticky_progress_comment(body: str) -> bool:
     )
 
 
+def _expected_publisher_login() -> str:
+    """Return the bot login this run is allowed to treat as its own publisher.
+
+    ``MERGECRAFT_REVIEWER_BOT_LOGIN`` is the App slug plus ``[bot]`` when the
+    workflow minted an App token, and ``github-actions[bot]`` when it fell
+    back to the job token. Any other bot, including another installed App, is
+    not this run.
+    """
+    configured = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    return configured or "github-actions[bot]"
+
+
 def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
-    """Interim trust rule: only a Bot may own a sticky comment or formal review.
+    """Trust a comment or review only when this run's publisher bot wrote it.
 
     A PR participant can quote the heading, the footer or a ledger marker, so a
-    body shape test alone lets a human win selection — after which a later write
-    fails for want of permission and the real ledger is never persisted.
+    body shape test alone lets a human win selection. ``user.type == "Bot"`` is
+    not enough either: another App, or ``github-actions[bot]`` from a different
+    workflow, can post the same public marker. The login must match
+    :func:`_expected_publisher_login`.
 
-    **Residual (LG-D3, closes with plan 51 HS1).** Accepting any ``user.type ==
-    "Bot"`` still admits a bot that is not ours: another App installed on the
-    repo, and ``github-actions[bot]`` from **any** workflow run — including one a
-    same-repo collaborator adds on their own branch under ``pull_request``. The
-    shared authorship helper (``review/authorship.py``, plan 40) narrows this to
-    the run's expected-publisher set for App-published runs; job-token-only
-    consumers keep the residual. This plan does not import that helper because
-    both plans run in the same batch.
+    When the workflow has no App token, the expected login stays
+    ``github-actions[bot]``. That login is shared by every workflow in the
+    repo, so a same-repo collaborator workflow can still post as it.
     """
     user = comment.get("user")
     if not isinstance(user, Mapping):
         return False
-    return str(user.get("type") or "") == "Bot"
+    if str(user.get("type") or "") != "Bot":
+        return False
+    return str(user.get("login") or "") == _expected_publisher_login()
 
 
 def _select_sticky_progress_comment(

@@ -417,16 +417,34 @@ async def test_fetch_sticky_progress_comment_body_prefers_ledger_on_later_page()
             page = int((params or {}).get("page", 1))
             if page == 1:
                 filler = [
-                    {"id": index, "body": f"noise {index}", "user": {"type": "Bot"}}
+                    {
+                        "id": index,
+                        "body": f"noise {index}",
+                        "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    }
                     for index in range(98)
                 ]
                 return [
                     *filler,
-                    {"id": 99, "body": stale_progress_body, "user": {"type": "Bot"}},
-                    {"id": 100, "body": "another comment", "user": {"type": "Bot"}},
+                    {
+                        "id": 99,
+                        "body": stale_progress_body,
+                        "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    },
+                    {
+                        "id": 100,
+                        "body": "another comment",
+                        "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    },
                 ]
             if page == 2:
-                return [{"id": 101, "body": ledger_body, "user": {"type": "Bot"}}]
+                return [
+                    {
+                        "id": 101,
+                        "body": ledger_body,
+                        "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    }
+                ]
             return []
 
     body = await ledger.fetch_sticky_progress_comment_body(_Scm(), "acme", "demo", 7)
@@ -522,6 +540,53 @@ async def test_review_ledger_ignores_a_contributor_forged_marker() -> None:
                     "body": ledger.merge_ledger_into_comment(
                         "<!-- mergecraft-deterministic-record:v1 -->\n",
                         records=bot.records(),
+                    ),
+                },
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    assert found.get_record(_DEFERRED_FP) is None
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_review_ledger_ignores_a_different_bot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
+    ledger = _ledger_mod()
+    other = ledger.FindingLedger()
+    other.record(_DEFERRED_FP, "open", source="inline", round_index=1)
+    ours = ledger.FindingLedger()
+    ours.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return []
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page != 1:
+                return []
+            return [
+                {
+                    "id": 1,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=other.records(),
+                    ),
+                },
+                {
+                    "id": 2,
+                    "user": {"login": "mergecraft[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=ours.records(),
                     ),
                 },
             ]
