@@ -25,6 +25,16 @@ _TRUFFLEHOG_NAMED_FIXTURE_SUPPRESSIONS: dict[str, str] = {
     "tests/scripts/test_native_output_to_sarif.py": (
         "Embeds SARIF secret-shaped samples for the native-to-SARIF converter"
     ),
+    "tests/analyzers/support.py": ("Planted AWS secret constant shared by the analyzer fixtures"),
+    "tests/ci/test_self_review_sarif_extension_w5.py": (
+        "Planted secret constant exercising the self-review SARIF extension"
+    ),
+    "tests/mcp/test_reviewer_resilience_containment.py": (
+        "Token-shaped containment fixture for reviewer resilience coverage"
+    ),
+    "tests/tracing/test_http_spans.py": (
+        "API-key sample asserted by the HTTP span redaction tests"
+    ),
 }
 _TRUFFLEHOG_VENV_MARKERS = frozenset({".venv", ".venv-dev", "venv", "site-packages"})
 

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
 import pytest
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from _pytest.monkeypatch import MonkeyPatch
 
 from mergecraft.review_taxonomy import finding_fingerprint
@@ -452,3 +452,89 @@ def test_record_deferred_from_analyzer_run_skips_withdrawn() -> None:
     book = ledger.ensure_finding_ledger(state)
     states = {record.fingerprint: record.state for record in book.records()}
     assert states == {_DEFERRED_FP: "deferred"}
+
+
+# --------------------------------------------------------------------------- #
+# AN4.4a — an out-of-root SARIF row must key the ledger stably. The path is
+# kept verbatim (AN4.2), so the same document yields the same fingerprint on
+# every run; a basename-collapse would key a different, unrelated file.
+# --------------------------------------------------------------------------- #
+
+_OUTSIDE_REPO_ROOT_LABEL = "outside repository root"
+_ACTIONLINT_MANIFEST = Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
+
+
+def _sarif_document(uri: str) -> str:
+    """One-result SARIF document locating a finding at ``uri``."""
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "actionlint"}},
+                    "results": [
+                        {
+                            "ruleId": "syntax-check",
+                            "level": "warning",
+                            "message": {"text": "out-of-root ledger fixture"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": uri},
+                                        "region": {"startLine": 3},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("uri", "expected_path"),
+    [
+        (
+            "/home/runner/work/mergeCraft/mergeCraft/README",
+            "/home/runner/work/mergeCraft/mergeCraft/README",
+        ),
+        ("file:///etc/README", "file:///etc/README"),
+    ],
+)
+def test_out_of_root_sarif_row_keys_the_ledger_stably(
+    uri: str, expected_path: str, tmp_path: Path
+) -> None:
+    """AN4.4a: two parses of one out-of-root SARIF yield the same ledger key.
+
+    The path is kept verbatim (AN4.2), so the review-taxonomy fingerprint —
+    the ledger key — is deterministic. A basename-collapse would instead key
+    the real, unrelated ``README`` at the repo root.
+    """
+    sarif = importlib.import_module("mergecraft.analyzers.parsers.sarif")
+    manifest = importlib.import_module("mergecraft.analyzers.manifest")
+    m = manifest.load_manifest_file(_ACTIONLINT_MANIFEST)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    # A real file whose basename matches the out-of-root URI: a resolver that
+    # collapsed to a basename would key this row instead.
+    (repo_root / "README").write_text("a real file at the repo root\n", encoding="utf-8")
+
+    raw = _sarif_document(uri)
+    first = sarif.parse_sarif(raw, manifest=m, repo_root=repo_root)
+    second = sarif.parse_sarif(raw, manifest=m, repo_root=repo_root)
+
+    assert len(first) == 1
+    assert len(second) == 1
+    # Verbatim path — never shortened to the root's real "README".
+    assert first[0].path == expected_path
+    assert first[0].path != "README"
+    # AN4.2 label travels with the row in both runs.
+    assert any(_OUTSIDE_REPO_ROOT_LABEL in line for line in first[0].evidence)
+    assert any(_OUTSIDE_REPO_ROOT_LABEL in line for line in second[0].evidence)
+    # Deterministic ledger key, anchored to the verbatim path.
+    assert first[0].fingerprint == second[0].fingerprint
+    assert first[0].fingerprint == finding_fingerprint(path=expected_path, body=first[0].message)
+    assert second[0].fingerprint == finding_fingerprint(path=second[0].path, body=second[0].message)

@@ -52,12 +52,13 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _trufflehog_to_sarif(raw: str) -> object:
+def _trufflehog_to_sarif(raw: str, *, repo_root: Path | None = None) -> object:
     """Convert JSONL via the sibling converter, surfacing failures as EmitError.
 
     ``ConverterError`` subclasses ``ValueError``, so truncated JSONL and an
     error-level scan log both arrive here and become a named emit failure
-    rather than a traceback.
+    rather than a traceback. ``repo_root`` makes the emitted URIs repo-relative
+    so a consumer can anchor them.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
@@ -66,7 +67,7 @@ def _trufflehog_to_sarif(raw: str) -> object:
         msg = f"could not load native_output_to_sarif.py: {exc}"
         raise EmitError(msg) from exc
     try:
-        return trufflehog_to_sarif(raw)
+        return trufflehog_to_sarif(raw, repo_root=repo_root)
     except ValueError as exc:
         msg = f"trufflehog JSONL could not be converted to SARIF: {exc}"
         raise EmitError(msg) from exc
@@ -251,7 +252,7 @@ def emit_trufflehog_sarif(*, out: Path, repo_root: Path | None = None) -> None:
         msg = f"trufflehog scan failed: {tail}"
         raise EmitError(msg)
     document = _drop_suppressed_trufflehog_results(
-        _trufflehog_to_sarif(completed.stdout),
+        _trufflehog_to_sarif(completed.stdout, repo_root=root),
         repo_root=root,
     )
     out.parent.mkdir(parents=True, exist_ok=True)
