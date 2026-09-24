@@ -416,14 +416,17 @@ async def test_fetch_sticky_progress_comment_body_prefers_ledger_on_later_page()
         ) -> list[dict[str, object]]:
             page = int((params or {}).get("page", 1))
             if page == 1:
-                filler = [{"id": index, "body": f"noise {index}"} for index in range(98)]
+                filler = [
+                    {"id": index, "body": f"noise {index}", "user": {"type": "Bot"}}
+                    for index in range(98)
+                ]
                 return [
                     *filler,
-                    {"id": 99, "body": stale_progress_body},
-                    {"id": 100, "body": "another comment"},
+                    {"id": 99, "body": stale_progress_body, "user": {"type": "Bot"}},
+                    {"id": 100, "body": "another comment", "user": {"type": "Bot"}},
                 ]
             if page == 2:
-                return [{"id": 101, "body": ledger_body}]
+                return [{"id": 101, "body": ledger_body, "user": {"type": "Bot"}}]
             return []
 
     body = await ledger.fetch_sticky_progress_comment_body(_Scm(), "acme", "demo", 7)
