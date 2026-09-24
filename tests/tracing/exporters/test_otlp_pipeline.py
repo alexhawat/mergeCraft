@@ -152,16 +152,35 @@ def test_otel_sink_exports_to_arbitrary_endpoint_and_headers(
     # and headers; the fake transport captures the bytes the batch processor
     # flushed. This contract is asserted via the OTLP exporter's own state
     # exposed through the W8 plumbing.
-    from mergecraft.tracing.exporters import last_otel_endpoint, last_otel_headers
+    from mergecraft.tracing.exporters import (
+        _otlp_exporter_headers,
+        _provider_span_processors,
+        last_otel_endpoint,
+        last_otel_headers,
+    )
 
     assert last_otel_endpoint() == "http://127.0.0.1:4318/v1/traces"
-    assert last_otel_headers() == {
-        "x-source": "mergecraft",
-        # Authorization headers are still forwarded to OTLP — the OTLP layer is
-        # *not* the redaction boundary. The redact-on-fan-out layer (D7) is
-        # what protects secrets; the export layer just sends what it got.
-        "authorization": "Bearer canary",
-    }
+    headers = last_otel_headers()
+    assert headers.get("x-source") == "mergecraft"
+    assert "authorization" in headers, (
+        "the module-level header seam keeps the sensitive key name readable"
+    )
+    # The global is a test reader, not a second copy of the credential: it
+    # keeps names and masks sensitive values (D11).
+    assert "canary" not in headers["authorization"], (
+        f"the module-level header seam must mask sensitive values, got {headers['authorization']!r}"
+    )
+    # The live OTLP exporter is the token's real reader; the export layer is
+    # not the redaction boundary, so it still receives the value verbatim.
+    from opentelemetry import trace
+
+    exporter_headers = [
+        _otlp_exporter_headers(getattr(processor, "span_exporter", None))
+        for processor in _provider_span_processors(trace.get_tracer_provider())
+    ]
+    assert any(item.get("authorization") == "Bearer canary" for item in exporter_headers), (
+        "the configured OTLP exporter must still receive the authorization header"
+    )
 
 
 def test_otel_sink_uses_default_endpoint_when_unset() -> None:

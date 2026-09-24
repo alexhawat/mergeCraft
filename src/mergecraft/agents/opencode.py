@@ -30,6 +30,7 @@ from mergecraft.agents.openai_compatible_gateways import (
 )
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.shared import (
+    STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
     AgentUsage,
@@ -38,6 +39,7 @@ from mergecraft.agents.shared import (
     mcp_auth_headers,
     resolve_cache_read,
     spawn_agent_cli,
+    start_stderr_drain,
     with_prompt,
 )
 from mergecraft.mcp.tool_state import primary_repo_state
@@ -95,6 +97,15 @@ _OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S: Final[float] = 1500.0
 # a diagnostic tail, not a log sink: enough to explain a stall, never enough to
 # grow without limit on a long run.
 _SERVER_LOG_TAIL_LINES: Final[int] = 50
+
+# ``opencode serve`` boot budget and wait granularity. Boot waits on the URL
+# event in short slices so a cancel request, an early exit and the deadline are
+# all observed promptly; the wait itself is never a blocking ``readline()``.
+_BOOT_DEADLINE_S: Final[float] = 30.0
+_BOOT_POLL_S: Final[float] = 0.1
+
+# The listening URL the server prints on stdout once it is ready.
+_URL_RE: Final[re.Pattern[str]] = re.compile(r"https?://[^\s]+")
 
 
 def _opencode_provider_http_timeout_s() -> float:
@@ -423,21 +434,31 @@ async def _install(_token: str | None = None) -> str:
 
 
 class _ServerHandle:
-    def __init__(self, base_url: str, proc: subprocess.Popen[bytes]) -> None:
-        self.base_url = base_url
+    def __init__(
+        self,
+        proc: subprocess.Popen[bytes],
+        *,
+        base_url: str = "",
+        url_event: threading.Event | None = None,
+    ) -> None:
         self.proc = proc
+        self.base_url = base_url
         self._closed = False
         self._recent: deque[str] = deque(maxlen=_SERVER_LOG_TAIL_LINES)
         self._recent_lock = threading.Lock()
         self._drains: list[threading.Thread] = []
+        # Set by the stdout drain when the server prints its listening URL.
+        self._url_event = url_event
 
     def start_draining(self) -> None:
-        """Consume the child's pipes for the rest of its life (#449).
+        """Consume the child's pipes from spawn for the rest of its life (#449).
 
-        Boot reads stdout only until the listening URL appears. Without a
-        reader after that, the child blocks in ``write()`` as soon as it fills
-        the ~64KB pipe buffer and stops answering HTTP — a hang with no output,
-        which is exactly what an unexplained provider timeout looks like.
+        Boot waits for the listening URL on an event this stdout drain sets, so
+        both pipes are read from the moment the child exists — not only after
+        the URL appears. Without a reader the child blocks in ``write()`` as
+        soon as it fills the platform pipe buffer and stops answering HTTP — a
+        hang with no output, which is exactly what an unexplained provider
+        timeout looks like.
         """
         for stream, label in ((self.proc.stdout, "out"), (self.proc.stderr, "err")):
             if stream is None:
@@ -466,6 +487,11 @@ class _ServerHandle:
                 # exception — so both sides take this lock.
                 with self._recent_lock:
                     self._recent.append(text)
+                if label == "out" and self._url_event is not None and not self.base_url:
+                    match = _URL_RE.search(text)
+                    if match:
+                        self.base_url = match.group(0).rstrip("/")
+                        self._url_event.set()
                 logger.debug("[opencode serve/{}] {}", label, text)
         except (OSError, ValueError):
             # Pipe closed under us during teardown — expected, not an error.
@@ -477,12 +503,22 @@ class _ServerHandle:
             lines = list(self._recent)
         return "\n".join(lines)
 
-    def close(self) -> None:
+    def close(self, *, already_exited: bool = False) -> None:
+        """Kill (unless the child already exited), reap and unregister the group.
+
+        Every boot failure path funnels here so a failed boot never leaves its
+        process group registered or its child unreaped (P5, N9). Callers that
+        have already observed the child exit pass ``already_exited=True`` so no
+        signal is sent to a dead (and possibly recycled) process group.
+        """
         if self._closed:
             return
         self._closed = True
         pid = self.proc.pid
-        if self.proc.poll() is None:
+        if already_exited:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                self.proc.wait(timeout=5)
+        elif self.proc.poll() is None:
             kill_process_group(pid)
             try:
                 self.proc.wait(timeout=5)
@@ -492,7 +528,26 @@ class _ServerHandle:
         unregister_process_group(pid)
 
 
-def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _ServerHandle:
+def _boot_wait_slice(deadline: float) -> float:
+    """Return the next bounded wait for the boot URL event.
+
+    Never past ``deadline``: a caller's fake clock (or a real one) that has
+    already blown the deadline gets ``0.0`` so the loop re-checks and raises
+    instead of sleeping out the whole budget.
+    """
+    remaining = deadline - time.time()
+    if remaining <= 0:
+        return 0.0
+    return min(_BOOT_POLL_S, remaining)
+
+
+def _boot_opencode_server(
+    *,
+    cli: str,
+    env: dict[str, str],
+    cwd: str,
+    cancel: threading.Event | None = None,
+) -> _ServerHandle:
     # Wrap argv with setpriv, then patch HOME/USER/LOGNAME to match the
     # dropped-to agent user (setpriv does not reset $HOME itself — see
     # mergecraft.utils.privilege.agent_subprocess_env). This is the exact
@@ -510,32 +565,35 @@ def _boot_opencode_server(*, cli: str, env: dict[str, str], cwd: str) -> _Server
         start_new_session=True,
     )
     assert proc.stdout is not None
-    base_url: str | None = None
-    deadline = time.time() + 30
-    buf = b""
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            err = (proc.stderr.read() if proc.stderr else b"").decode()
-            msg = f"opencode serve exited early: {err}"
-            raise RuntimeError(msg)
-        line = proc.stdout.readline()
-        if not line:
-            time.sleep(0.05)
-            continue
-        buf += line
-        text = line.decode("utf-8", errors="replace")
-        logger.debug("[opencode serve] {}", text.strip())
-        match = re.search(r"https?://[^\s]+", text)
-        if match:
-            base_url = match.group(0).rstrip("/")
-            break
-    if not base_url:
-        kill_process_group(proc.pid)
-        msg = "opencode serve did not print a listening URL"
-        raise RuntimeError(msg)
+    # Register at spawn and drain both pipes from spawn: a boot that hangs must
+    # already be visible to run-level cleanup, and an unread stderr would block
+    # the child in ``write()`` before it ever prints its URL (P5, N9).
     register_process_group(proc.pid)
-    handle = _ServerHandle(base_url=base_url, proc=proc)
+    url_event = threading.Event()
+    handle = _ServerHandle(proc=proc, url_event=url_event)
     handle.start_draining()
+
+    deadline = time.time() + _BOOT_DEADLINE_S
+    exited = False
+    try:
+        while not url_event.wait(timeout=_boot_wait_slice(deadline)):
+            if cancel is not None and cancel.is_set():
+                msg = "opencode serve boot cancelled"
+                raise RuntimeError(msg)
+            if proc.poll() is not None:
+                exited = True
+                err = handle.recent_output()
+                if not err and proc.stderr is not None:
+                    with contextlib.suppress(OSError, ValueError):
+                        err = proc.stderr.read().decode("utf-8", errors="replace").strip()
+                msg = f"opencode serve exited early: {err}"
+                raise RuntimeError(msg)
+            if time.time() >= deadline:
+                msg = "opencode serve did not print a listening URL"
+                raise RuntimeError(msg)
+    except BaseException:
+        handle.close(already_exited=exited)
+        raise
     return handle
 
 
@@ -645,8 +703,12 @@ async def _prompt_session_http(
                 f"{base_url}/session/{session_id}/message",
                 json=payload,
             )
-            if resp.status_code >= 400:
-                # Fallback path for older/newer API shapes
+            if resp.status_code in (404, 405):
+                # Fallback path for older/newer API shapes: only "no such
+                # endpoint / method" means the alternate endpoint exists. Every
+                # other >=400 — 429, 5xx — may mean the prompt was accepted and
+                # is still executing, so reposting would start a second agent
+                # turn on the same session and report the wrong status (#444).
                 resp = await client.post(
                     f"{base_url}/session/{session_id}/prompt",
                     json=payload,
@@ -763,18 +825,45 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
     env = build_agent_env("opencode", extras)
 
-    # Prefer serve + HTTP when available; fall back to `opencode run`
-    handle: _ServerHandle | None = None
+    # Prefer serve + HTTP when available; fall back to `opencode run`.
+    #
+    # Boot runs on a worker thread: it waits on a URL event with a deadline and
+    # drains both pipes, so it must never block the event loop (P5). The cancel
+    # event lets ``_run``'s own cancellation reach the worker, which kills and
+    # reaps the serve group before ``_run`` propagates CancelledError (#449).
+    cancel = threading.Event()
+    boot_handle: list[_ServerHandle] = []
+    boot_error: list[Exception] = []
+
+    def _boot() -> None:
+        try:
+            boot_handle.append(
+                _boot_opencode_server(cli=cli, env=env, cwd=os.getcwd(), cancel=cancel)
+            )
+        except Exception as err:
+            boot_error.append(err)
+
+    boot_thread = threading.Thread(target=_boot, name="opencode-serve-boot", daemon=True)
+    boot_thread.start()
     try:
-        handle = _boot_opencode_server(cli=cli, env=env, cwd=os.getcwd())
-    except Exception as err:
-        logger.info("opencode serve unavailable ({}), falling back to run", err)
+        await asyncio.to_thread(boot_thread.join)
+    except asyncio.CancelledError:
+        # Wake the worker, wait for it to kill and reap the group, then
+        # re-raise so the cancellation is never swallowed.
+        cancel.set()
+        await asyncio.to_thread(boot_thread.join)
+        if boot_handle:
+            boot_handle[0].close()
+        raise
+
+    if boot_error:
+        logger.info("opencode serve unavailable ({}), falling back to run", boot_error[0])
         return _apply_integrity_gate(
             await _run_cli_fallback(cli=cli, ctx=ctx, env=env),
             baseline,
         )
 
-    assert handle is not None
+    handle = boot_handle[0]
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             # T2 / D8 — see ``_prompt_session`` for the same wrap; the
@@ -926,6 +1015,9 @@ def _run_opencode_cli_streaming(
 
     stderr_text = ""
     returncode: int = -1
+    # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
+    # first would deadlock a child that fills the stderr pipe buffer.
+    stderr_drain = start_stderr_drain(process.stderr)
     try:
         with track_process_group(process):
             try:
@@ -936,13 +1028,17 @@ def _run_opencode_cli_streaming(
                     accumulator=accumulator,
                     handler=lambda _acc, _event: None,
                 )
-                stderr_text = process.stderr.read() or ""
                 returncode = wait_or_kill_process_group(
                     process,
                     timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
                 )
             except subprocess.TimeoutExpired:
                 return AgentResult(success=False, error="opencode run timed out")
+            finally:
+                # The process group is gone; collect the drained tail so the
+                # reader thread never outlives it.
+                stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
+        stderr_text = stderr_drain.text()
     finally:
         pass
 

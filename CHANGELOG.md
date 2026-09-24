@@ -194,6 +194,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every agent CLI driver and the OpenCode server boot no longer hang when a
+  child fills its stderr pipe. Each driver drains stderr concurrently with the
+  stdout stream it already reads, keeping the two pipes separate so the
+  stream-json parse is unchanged and the stderr tail still reaches failure
+  diagnostics; the buffer is bounded and tail-kept.
+
+- OpenCode server boot no longer blocks the event loop in a blocking
+  `readline()`. The process group is registered at spawn, both pipes are
+  drained from spawn, and boot waits on a URL event under its deadline, so a
+  server that logs a full pipe's worth of stderr before printing its URL now
+  starts instead of timing out, and a hung, exited or cancelled boot kills,
+  unregisters and reaps the group.
+
+- OpenCode falls back to the alternate prompt endpoint only on 404 or 405. Any
+  other error status is reported once, unretried, so a 429 or 5xx can no
+  longer start a second agent turn on the same session.
+
+- The Claude and Gemini reviewers can no longer write files, run shell tools or
+  fetch the web. Their write, edit, shell and web tools are denied
+  unconditionally, including the subagent forms, matching the review-only
+  product boundary; permission prompting stays skipped in headless CI because
+  the deny list is the boundary.
+
+- Tracing no longer clears a bound data-residency allowlist. The tracer factory
+  reads the bound enterprise block instead of re-binding it, makes no
+  enterprise call at all on the disabled path, and scopes repo settings to
+  sink construction only when nothing is bound.
+
+- The OTLP span recorder is a test-only seam again: it is installed on a
+  provider only when a test fixture enables it, never from an environment
+  variable, its payload list is bounded, and the module-level header copy masks
+  sensitive values instead of keeping a bearer token in a global.
+
 - The sticky progress comment keeps the finding ledger and the learnings delta
   across the final deterministic-record write, so a later run hydrates every
   prior record instead of losing it. A later run reuses the existing progress

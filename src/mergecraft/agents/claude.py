@@ -23,6 +23,7 @@ from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_st
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
+    STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
     AgentUsage,
@@ -30,6 +31,7 @@ from mergecraft.agents.shared import (
     log_token_table,
     mcp_http_server_entry,
     spawn_agent_cli,
+    start_stderr_drain,
 )
 from mergecraft.agents.verifier import (
     VERIFIER_AGENT_NAME,
@@ -70,7 +72,22 @@ if TYPE_CHECKING:
     from mergecraft.tracing.tracer import Tracer
 
 CLAUDE_EXEC_TOOLS = ("Bash", "Monitor", "REPL", "Workflow")
-CLAUDE_EXEC_TOOL_DENY_RULES = [*CLAUDE_EXEC_TOOLS, *[f"Agent({t})" for t in CLAUDE_EXEC_TOOLS]]
+# S7 / AR-D7 — prevention, not detection. Every production mode is
+# non-committing (Review / IncrementalReview / Plan), so the reviewer never
+# needs to write files or reach the network. These join the deny list
+# unconditionally, alongside their ``Agent(<tool>)`` subagent forms. The
+# ``--dangerously-skip-permissions`` flag appended in CI removes the last
+# interactive prompt, so this deny list — not a prompt — is the boundary.
+CLAUDE_REVIEW_DENIED_TOOLS = (
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+)
+CLAUDE_DENIED_TOOLS = (*CLAUDE_EXEC_TOOLS, *CLAUDE_REVIEW_DENIED_TOOLS)
+CLAUDE_EXEC_TOOL_DENY_RULES = [*CLAUDE_DENIED_TOOLS, *[f"Agent({t})" for t in CLAUDE_DENIED_TOOLS]]
 CLAUDE_DISALLOWED_TOOLS = ",".join(CLAUDE_EXEC_TOOL_DENY_RULES)
 # O4 (OB3) — the effort level passed as ``--effort`` is the one request
 # parameter the claude harness exposes; the constant keeps the CLI flag and
@@ -170,6 +187,10 @@ def build_agents_json(
     reviewer_denied = [format_mcp_tool_ref("claude", name) for name in subagent_denied_tools]
     if reviewer_denied:
         reviewer["disallowedTools"] = reviewer_denied
+    # AR4.2 / S7 — never emit a ``tools`` allow-list on these definitions. A
+    # subagent spec with a ``tools`` allow-list would re-grant a tool the
+    # top-level ``--disallowedTools`` denies; the subagents are read-only and
+    # carry only a deny list.
     agents = {
         REVIEWER_AGENT_NAME: reviewer,
         VERIFIER_AGENT_NAME: verifier,
@@ -762,7 +783,9 @@ def _run_claude_once(
         cmd.extend(["--model", model])
     if continue_session:
         cmd.append("--continue")
-    # Permission mode: skip interactive prompts in CI
+    # Permission mode: skip interactive prompts in CI. AR4.3 / AR-D7 — this
+    # stays: headless CI cannot answer a prompt, so the boundary is the
+    # ``--disallowedTools`` deny list above, not an interactive confirmation.
     skip_permissions = os.environ.get("CI") == "true"
     if skip_permissions:
         cmd.append("--dangerously-skip-permissions")
@@ -817,6 +840,9 @@ def _run_claude_once(
 
     stderr_text = ""
     returncode: int = -1
+    # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
+    # first would deadlock a child that fills the stderr pipe buffer.
+    stderr_drain = start_stderr_drain(process.stderr)
     try:
         with track_process_group(process):
             try:
@@ -825,13 +851,17 @@ def _run_claude_once(
                     accumulator=accumulator,
                     handler=handler,
                 )
-                stderr_text = process.stderr.read() or ""
                 returncode = wait_or_kill_process_group(
                     process,
                     timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
                 )
             except subprocess.TimeoutExpired:
                 return AgentResult(success=False, error="claude CLI timed out")
+            finally:
+                # The process group is gone; collect the drained tail so the
+                # reader thread never outlives it.
+                stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
+        stderr_text = stderr_drain.text()
     finally:
         # Defensive close: the streaming event order does not guarantee
         # LIFO span closure (e.g. ``message_stop`` before ``tool_result``

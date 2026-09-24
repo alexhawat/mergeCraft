@@ -12,9 +12,14 @@ sink on an uninstalled extra degrades with a clear warning rather than an
 and to :class:`NullSink` with a warning when they are not — exactly one
 factory branch, exactly one failure mode.
 
-The OTLP exporter is constructed with a pluggable transport so tests can
-inject a fake (convention 8 — no network call in ``make ci-resume``). Tests
-import :func:`last_otel_endpoint`, :func:`last_otel_headers`,
+The span recorder is a **test seam**: the module switch
+:data:`_RECORDING_SEAM_ENABLED` is off in production and turned on by the
+tracing/enterprise test fixtures, so ``_RecordingSpanProcessor`` never attaches
+to a live provider outside tests. The recorded header seam
+(:func:`last_otel_headers`) keeps header **names** but masks sensitive
+**values**, so no module global holds a bearer token; the live OTLP exporter
+still receives the real value — it is the token's only reader. Tests import
+:func:`last_otel_endpoint`, :func:`last_otel_headers`,
 :func:`captured_payload`, :func:`captured_payloads_json`, and
 :func:`has_active_tracer_provider` to assert wiring without touching a real
 network.
@@ -23,8 +28,8 @@ Exports:
     OTLPSink — the shared ``logfire`` / ``otel`` sink class.
     resolve_token_ref — read ``tokenRef`` from ``os.environ`` with the env
         fallback mandated by the issue (D5).
-    last_otel_endpoint / last_otel_headers — recorded transport state for tests.
-    captured_payload / captured_payloads_json — recorded OTLP transport bytes.
+    last_otel_endpoint / last_otel_headers — recorded wiring for tests (masked).
+    captured_payload / captured_payloads_json — recorded test-seam span bytes.
     has_active_tracer_provider — true when a live tracer provider is configured.
 """
 
@@ -64,43 +69,65 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# Module-level transport state (recorded for tests; no live network calls).
+# Module-level wiring state (recorded for tests; no live network calls).
 # Convention 8 — tests inspect these to assert endpoint / headers / payload
-# wiring without sending bytes. A no-op transport is wired by default so that
-# any code path that constructs an ``OTLPSink`` (including the absence of
-# the optional extra) records the configuration the tests expect.
+# wiring without sending bytes. The header copy keeps names but masks sensitive
+# values; the payload list is bounded and only filled when the recording seam
+# is enabled by a test fixture.
 # ---------------------------------------------------------------------------
-
-
-class _RecordingTransport:
-    """A no-op HTTP transport that records every serialized payload.
-
-    Mirrors the contract of ``opentelemetry.exporter.otlp.proto.http.trace.exporter``
-    — :meth:`export` receives a serialized protobuf and returns ``None`` for
-    success. Tests assert on the captured bytes via :func:`captured_payload`
-    and :func:`captured_payloads_json`.
-    """
-
-    def __init__(self, endpoint: str, headers: dict[str, str]) -> None:
-        self.endpoint = endpoint
-        self.headers = dict(headers)
-        self.payloads: list[bytes] = []
-
-    def export(self, payload: bytes) -> Any:
-        # Always record the bytes — tests assert the redaction boundary
-        # holds even when no transport error is raised. The transport is
-        # never expected to make a real network call (convention 8).
-        self.payloads.append(payload)
-        return None
-
-    def shutdown(self) -> None:
-        return None
 
 
 _LAST_ENDPOINT: str = ""
 _LAST_HEADERS: dict[str, str] = {}
 _RECORDING_PAYLOADS: list[bytes] = []
 _ACTIVE_TRACER_PROVIDERS: list[Any] = []
+
+# Test-only seam gate. Off in production; the tracing and enterprise package
+# conftests turn it on for their suites. Never an env var (D10) — env is
+# operator- and workflow-influenced.
+_RECORDING_SEAM_ENABLED: bool = False
+# Bounded so the seam cannot trade one leak for an unbounded memory leak (D10).
+_RECORDING_MAX_PAYLOADS: int = 2000
+
+# Header keys whose values are credentials. The module global is a test reader,
+# not a second copy of the token (D11), so these values are masked while the
+# names stay visible.
+_SENSITIVE_HEADER_KEYS: frozenset[str] = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "set-cookie",
+        "x-api-key",
+        "api-key",
+    }
+)
+_SENSITIVE_HEADER_MARKERS: tuple[str, ...] = (
+    "authorization",
+    "api-key",
+    "apikey",
+    "token",
+    "secret",
+    "cookie",
+)
+
+
+def _is_sensitive_header(key: str) -> bool:
+    """Return whether *key* names a credential-bearing HTTP header."""
+    lowered = key.strip().lower()
+    if lowered in _SENSITIVE_HEADER_KEYS:
+        return True
+    return any(marker in lowered for marker in _SENSITIVE_HEADER_MARKERS)
+
+
+def _mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Copy *headers* keeping every name and masking sensitive values.
+
+    The live OTLP exporter is configured with the real headers — it is the
+    token's only reader. This copy exists for tests, so a credential value is
+    replaced with a fixed mask rather than duplicated into module state.
+    """
+    return {key: ("***" if _is_sensitive_header(key) else value) for key, value in headers.items()}
 
 
 def last_otel_endpoint() -> str:
@@ -288,35 +315,33 @@ def _setup_tracer_provider(
     headers: dict[str, str],
     service_name: str,
 ) -> Any | None:
-    """Configure a tracer provider that exports spans to ``endpoint`` and records them.
+    """Configure a tracer provider that exports spans to ``endpoint``.
 
-    Two span processors are attached so the production path and the test seam
-    coexist (D5 / convention 8):
-
-    * A real ``OTLPSpanExporter`` (HTTP) sends spans to ``endpoint`` with
-      ``headers`` — this is what makes spans reach Logfire / a self-hosted
-      collector in production.
-    * The in-memory ``_RecordingSpanProcessor`` keeps capturing spans into
-      :data:`_RECORDING_PAYLOADS` so the test seam continues to assert on the
-      redaction boundary and the D8 payload-cap contract.
+    A real ``OTLPSpanExporter`` (HTTP) sends spans to ``endpoint`` with
+    ``headers`` — this is what makes spans reach Logfire / a self-hosted
+    collector in production. When the test seam switch
+    :data:`_RECORDING_SEAM_ENABLED` is on, the in-memory
+    ``_RecordingSpanProcessor`` is also attached so tests can assert on the
+    redaction boundary and the D8 payload-cap contract. In production the seam
+    is off and only the real exporter is attached.
 
     The ``TracerProvider`` override is guarded: when a real provider is already
     installed in the process (e.g. ``logfire`` activates its own on import, or
     a prior ``OTLPSink`` already set one), OTel raises
     ``Overriding of current TracerProvider is not allowed``. We catch that and
-    REUSE the existing provider instead of silently degrading to a no-op — the
-    recording processor is still appended so the test seam keeps working. This
-    is the fix for spans never reaching Logfire: the unguarded
+    REUSE the existing provider instead of silently degrading to a no-op — when
+    the test seam is on, the recording processor is appended so it keeps
+    working. This is the fix for spans never reaching Logfire: the unguarded
     ``set_tracer_provider`` used to swallow the override error and return
     ``None``, turning the sink into a silent no-op.
 
     **Singleton sink (#293):** when a real provider already exists *and* the
     same ``endpoint`` is already registered as a ``BatchSpanProcessor``, this
     function does **not** stack another exporter pair.  Each unique
-    endpoint+provider combination gets exactly one ``BatchSpanProcessor`` and
-    exactly one ``_RecordingSpanProcessor`` regardless of how many times
-    :func:`_setup_tracer_provider` (or :class:`OTLPSink`) is called with the
-    same configuration.
+    endpoint+provider combination gets exactly one ``BatchSpanProcessor`` (and,
+    when the test seam is on, exactly one ``_RecordingSpanProcessor``)
+    regardless of how many times :func:`_setup_tracer_provider` (or
+    :class:`OTLPSink`) is called with the same configuration.
 
     Returns ``None`` when the optional extra is uninstalled.
     """
@@ -340,7 +365,7 @@ def _setup_tracer_provider(
     BatchSpanProcessor = _BatchSpanProcessor
 
     _LAST_ENDPOINT = endpoint
-    _LAST_HEADERS = dict(headers)
+    _LAST_HEADERS = _mask_sensitive_headers(headers)
     # Reset the recording payload list — the test seam treats each
     # ``OTLPSink`` as owning its own captured spans, and the JSON-array
     # format makes a multi-sink test's concatenated bytes unparseable.
@@ -393,10 +418,12 @@ def _setup_tracer_provider(
                 )
             )
 
-        has_recording = any(isinstance(p, _RecordingSpanProcessor) for p in existing_processors)
-        if not has_recording:
-            # Test seam: keep recording so captured_payload / has_active_tracer_provider
-            # still observe spans.
+        has_recording = _RECORDING_SEAM_ENABLED and any(
+            isinstance(p, _RecordingSpanProcessor) for p in existing_processors
+        )
+        if _RECORDING_SEAM_ENABLED and not has_recording:
+            # Test seam (off in production): keep recording so captured_payload /
+            # has_active_tracer_provider still observe spans.
             provider.add_span_processor(_RecordingSpanProcessor())
 
         _ACTIVE_TRACER_PROVIDERS.append(provider)
@@ -408,9 +435,10 @@ def _setup_tracer_provider(
             existing = trace_mod.get_tracer_provider()
             if type(existing).__name__ != "ProxyTracerProvider":
                 logger.debug("trace otel provider already set; reusing it")
-                exc_processors = _provider_span_processors(existing)
-                if not any(isinstance(p, _RecordingSpanProcessor) for p in exc_processors):
-                    existing.add_span_processor(_RecordingSpanProcessor())
+                if _RECORDING_SEAM_ENABLED:
+                    exc_processors = _provider_span_processors(existing)
+                    if not any(isinstance(p, _RecordingSpanProcessor) for p in exc_processors):
+                        existing.add_span_processor(_RecordingSpanProcessor())
                 _ACTIVE_TRACER_PROVIDERS.append(existing)
                 return existing
         logger.warning("trace otel provider setup failed: {}", exc)
@@ -477,6 +505,11 @@ class _RecordingSpanProcessor:
             # Wrap each payload in a JSON array so the test seam (which
             # ``b"".join``s the payloads and parses as JSON) sees a list.
             _RECORDING_PAYLOADS.append(b"[" + json_dumps(payload) + b"]")
+            # Bound the seam at the append site (not just at install time): a
+            # long-running test that calls ``on_end`` directly must not grow the
+            # list without limit (D10 — drop oldest).
+            if len(_RECORDING_PAYLOADS) > _RECORDING_MAX_PAYLOADS:
+                del _RECORDING_PAYLOADS[:-_RECORDING_MAX_PAYLOADS]
         except Exception as exc:
             logger.warning("trace recording span processor on_end failed: {}", exc)
 
@@ -550,10 +583,11 @@ class OTLPSink:
         self._tracer: Any | None = None
         # Mirror the wiring into the module-level test seam so tests can
         # inspect endpoint / headers at sink-construction time, before the
-        # first ``write()`` lazily initialises the tracer provider.
+        # first ``write()`` lazily initialises the tracer provider. Sensitive
+        # values are masked: this global is a reader, not a second token copy.
         global _LAST_ENDPOINT, _LAST_HEADERS
         _LAST_ENDPOINT = endpoint
-        _LAST_HEADERS = dict(self.headers)
+        _LAST_HEADERS = _mask_sensitive_headers(self.headers)
 
     @classmethod
     def for_logfire(
