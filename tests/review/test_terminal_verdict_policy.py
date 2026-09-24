@@ -29,7 +29,8 @@ from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext, AgentUsage, ResolvedInstructions
 from mergecraft.agents.verifier import AgentFinding
 from mergecraft.analyzers.finding import Finding, make_finding
-from mergecraft.mcp.comment import create_issue_comment_tool, report_progress_tool
+from mergecraft.findings.ledger import LEDGER_MARKER_V2_PREFIX
+from mergecraft.mcp.comment import add_footer, create_issue_comment_tool, report_progress_tool
 from mergecraft.mcp.context import (
     PayloadEvent,
     RepoIdentity,
@@ -942,7 +943,14 @@ async def test_existing_review_and_comment_behaviour_unchanged(tmp_path: Path) -
 
     progress = await report_progress_tool(ctx).execute({"body": "still working"})
     assert progress.is_error is False
-    assert ctx.tool_state.last_progress_body == "still working"
+    # LG-D1: every writer snapshots the pre-footer body it posted, so the
+    # snapshot starts with the posted text and carries the hydrated ledger
+    # marker — never the footer, which the record writer re-derives.
+    posted = ctx.tool_state.last_progress_body
+    assert posted is not None
+    assert posted.startswith("still working")
+    assert LEDGER_MARKER_V2_PREFIX in posted
+    assert add_footer(ctx, "") not in posted
 
 
 @pytest.mark.asyncio

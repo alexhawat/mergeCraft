@@ -133,3 +133,9 @@ Per-implementation-wave marker removal is recorded here. At this wave the
 suite is red by design: thirteen non-strict `xfail` markers name the wave that
 greens each one. No test is skipped or xfailed to mask a contract, and every
 red fails on an assertion, not a collection or import error.
+
+* **LG-D1 amendment (LG2).** `tests/review/test_terminal_verdict_policy.py::test_existing_review_and_comment_behaviour_unchanged`
+  was amended: the progress-comment pin now asserts the LG-D1 snapshot (the
+  pre-footer posted body — starts with the argument, carries the hydrated
+  `LEDGER_MARKER_V2_PREFIX` marker, excludes the footer) instead of the raw
+  argument.
