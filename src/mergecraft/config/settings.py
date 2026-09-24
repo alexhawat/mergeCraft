@@ -787,6 +787,11 @@ class RepoSettings(BaseModel):
     push: PushPermission = "restricted"
     shell: ShellPermission = "restricted"
     pr_approve_enabled: bool = Field(default=False, alias="prApproveEnabled")
+    # Login of the bot that publishes formal reviews. The Action sets
+    # MERGECRAFT_REVIEWER_BOT_LOGIN per run; local ``findings ledger`` and
+    # ``findings carryover`` have no such env and read this instead. Unset
+    # means the job-token bot, ``github-actions[bot]``.
+    reviewer_bot_login: str | None = Field(default=None, alias="reviewerBotLogin")
     auto_merge_enabled: bool = Field(default=False, alias="autoMergeEnabled")
     blast_radius_override: RuleSet = Field(default_factory=RuleSet, alias="blastRadiusOverride")
     signed_commits: bool = Field(default=False, alias="signedCommits")

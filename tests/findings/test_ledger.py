@@ -598,6 +598,65 @@ async def test_review_ledger_ignores_a_different_bot(
     assert kept.state == "deferred"
 
 
+@pytest.mark.asyncio
+async def test_review_ledger_reads_app_reviews_from_repo_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI and carryover have no Action env; repo config names the publisher."""
+    monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
+    ledger = _ledger_mod()
+    monkeypatch.setattr(ledger, "_publisher_login_from_config", None)
+    monkeypatch.setattr(ledger, "_publisher_login_from_repo_config", lambda: "mergecraft[bot]")
+    other = ledger.FindingLedger()
+    other.record(_DEFERRED_FP, "open", source="inline", round_index=1)
+    ours = ledger.FindingLedger()
+    ours.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return []
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page != 1:
+                return []
+            return [
+                {
+                    "id": 1,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=other.records(),
+                    ),
+                },
+                {
+                    "id": 2,
+                    "user": {"login": "mergecraft[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=ours.records(),
+                    ),
+                },
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    assert found.get_record(_DEFERRED_FP) is None
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
+
+
+def test_repo_config_stores_reviewer_bot_login(tmp_path: Path) -> None:
+    from mergecraft.config.settings import load_repo_settings
+
+    config = tmp_path / "config.yaml"
+    config.write_text("reviewerBotLogin: mergecraft[bot]\n", encoding="utf-8")
+    settings = load_repo_settings(config, root=tmp_path, load_learnings_files=False)
+    assert settings.reviewer_bot_login == "mergecraft[bot]"
+
+
 def test_record_deferred_from_analyzer_run_skips_withdrawn() -> None:
     """Deferred overflow rows are not stamped when the fingerprint was withdrawn."""
     from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state

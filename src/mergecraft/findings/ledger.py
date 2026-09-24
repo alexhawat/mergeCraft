@@ -187,16 +187,46 @@ def is_sticky_progress_comment(body: str) -> bool:
     )
 
 
+_DEFAULT_PUBLISHER_LOGIN = "github-actions[bot]"
+_publisher_login_from_config: str | None = None
+
+
+def _publisher_login_from_repo_config() -> str:
+    """Return ``reviewerBotLogin`` from repo config, or ``""`` when unset.
+
+    Cached for the process. The Action env wins over this; the cache only
+    serves read-side CLI and carryover, which do not set that env.
+    """
+    global _publisher_login_from_config
+    if _publisher_login_from_config is not None:
+        return _publisher_login_from_config
+    loaded = ""
+    try:
+        from mergecraft.config.settings import load_repo_settings
+
+        settings = load_repo_settings(load_learnings_files=False)
+        loaded = (settings.reviewer_bot_login or "").strip()
+    except Exception as err:
+        logger.warning("finding ledger: could not read reviewerBotLogin from repo config: {}", err)
+    _publisher_login_from_config = loaded
+    return loaded
+
+
 def _expected_publisher_login() -> str:
     """Return the bot login this run is allowed to treat as its own publisher.
 
     ``MERGECRAFT_REVIEWER_BOT_LOGIN`` is the App slug plus ``[bot]`` when the
     workflow minted an App token, and ``github-actions[bot]`` when it fell
-    back to the job token. Any other bot, including another installed App, is
-    not this run.
+    back to the job token. Read-side commands (``findings ledger``,
+    ``findings carryover``) do not see that env, so they use
+    ``reviewerBotLogin`` from repo config, then the job-token default.
+    Any other bot, including another installed App, is not this publisher.
     """
     configured = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
-    return configured or "github-actions[bot]"
+    if configured:
+        return configured
+    from_config = _publisher_login_from_repo_config()
+    return from_config or _DEFAULT_PUBLISHER_LOGIN
 
 
 def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
