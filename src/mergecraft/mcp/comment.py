@@ -230,7 +230,10 @@ def report_progress_tool(ctx: ToolContext):
             ctx.tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
             action = "created"
 
-        ctx.tool_state.last_progress_body = body
+        # Snapshot exactly what we posted, footer aside: the deterministic
+        # record writer rebuilds the sticky from this base, so it must carry the
+        # learnings delta and the hydrated ledger rather than the raw argument.
+        ctx.tool_state.last_progress_body = body_with_ledger
         ctx.tool_state.was_updated = True
         if not target_plan:
             ctx.tool_state.final_summary_written = True

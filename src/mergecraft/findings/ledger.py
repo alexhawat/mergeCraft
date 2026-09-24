@@ -533,6 +533,7 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
                 int(tool_state.progress_comment.id),
                 body_with_footer,
             )
+            tool_state.last_progress_body = body_with_ledger
             return
 
         sticky = await fetch_sticky_progress_comment(
@@ -542,21 +543,25 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
             int(issue_number),
         )
         if sticky is not None:
+            # A selected sticky is always updated. Guarding on a non-empty body
+            # meant a sticky the selector returned without content fell through
+            # to ``create``, a duplicate; a blank comment is not a sticky but a
+            # selected one must still be written to.
             existing_body = str(sticky.get("body") or "")
-            if existing_body:
-                merged = merge_ledger_into_comment(existing_body, records=ledger.records())
-                body_with_footer = add_footer(ctx, merged)
-                await ctx.scm.update_issue_comment(
-                    ctx.repo.owner,
-                    ctx.repo.name,
-                    int(sticky["id"]),
-                    body_with_footer,
-                )
-                tool_state.progress_comment = ProgressComment(
-                    id=str(sticky["id"]),
-                    type="issue",
-                )
-                return
+            merged = merge_ledger_into_comment(existing_body, records=ledger.records())
+            body_with_footer = add_footer(ctx, merged)
+            await ctx.scm.update_issue_comment(
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(sticky["id"]),
+                body_with_footer,
+            )
+            tool_state.progress_comment = ProgressComment(
+                id=str(sticky["id"]),
+                type="issue",
+            )
+            tool_state.last_progress_body = merged
+            return
 
         result = await ctx.scm.create_issue_comment(
             ctx.repo.owner,
@@ -565,6 +570,7 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
             body_with_footer,
         )
         tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
+        tool_state.last_progress_body = body_with_ledger
     except Exception as err:
         logger.info("finding ledger: could not persist progress comment: {}", err)
 
@@ -922,7 +928,13 @@ def render_deterministic_review_block(
 
 
 async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) -> None:
-    """Upsert the sticky progress comment with the deterministic record (D6)."""
+    """Upsert the sticky progress comment with the deterministic record (D6).
+
+    The record is written over the snapshot the last writer stored, so any
+    ledger record added after that snapshot is re-merged here before the footer
+    is appended. The snapshot keeps the learnings delta; this merge keeps the
+    records; both are pure and need no extra API call (LG-D1).
+    """
     from mergecraft.mcp.comment import add_footer
     from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
     from mergecraft.utils import gha_log
@@ -935,22 +947,29 @@ async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) ->
     if issue_number is None:
         return
 
+    book = tool_state.finding_ledger
+    records = book.records() if book is not None else []
+
     try:
         base_body = str(tool_state.last_progress_body or "").strip()
         body_with_record = merge_deterministic_record_into_comment(
             base_body,
             record_block=record_block,
         )
-        body_with_footer = add_footer(ctx, body_with_record)
+        # Re-merge only when the run's in-memory ledger has records: an empty
+        # ledger must not strip markers a prior run persisted.
+        body_with_ledger = body_with_record
+        if records:
+            body_with_ledger = merge_ledger_into_comment(body_with_record, records=records)
 
         if isinstance(tool_state.progress_comment, ProgressComment):
             await ctx.scm.update_issue_comment(
                 ctx.repo.owner,
                 ctx.repo.name,
                 int(tool_state.progress_comment.id),
-                body_with_footer,
+                add_footer(ctx, body_with_ledger),
             )
-            tool_state.last_progress_body = body_with_footer
+            tool_state.last_progress_body = body_with_ledger
             return
 
         sticky = await fetch_sticky_progress_comment(
@@ -965,28 +984,29 @@ async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) ->
                 existing_body,
                 record_block=record_block,
             )
-            body_with_footer = add_footer(ctx, merged)
+            if records:
+                merged = merge_ledger_into_comment(merged, records=records)
             await ctx.scm.update_issue_comment(
                 ctx.repo.owner,
                 ctx.repo.name,
                 int(sticky["id"]),
-                body_with_footer,
+                add_footer(ctx, merged),
             )
             tool_state.progress_comment = ProgressComment(
                 id=str(sticky["id"]),
                 type="issue",
             )
-            tool_state.last_progress_body = body_with_footer
+            tool_state.last_progress_body = merged
             return
 
         result = await ctx.scm.create_issue_comment(
             ctx.repo.owner,
             ctx.repo.name,
             int(issue_number),
-            body_with_footer,
+            add_footer(ctx, body_with_ledger),
         )
         tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
-        tool_state.last_progress_body = body_with_footer
+        tool_state.last_progress_body = body_with_ledger
     except Exception as err:
         message = f"deterministic record: could not persist progress comment: {err}"
         logger.info(message)
