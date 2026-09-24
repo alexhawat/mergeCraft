@@ -58,24 +58,22 @@ class _Scm:
     def __init__(self) -> None:
         self.reviews: dict[int, str] = {}
         self.comments: dict[int, str] = {}
+        self.authors: dict[int, dict[str, str]] = {}
         self.deleted: list[int] = []
         self.created = 0
 
     async def list_issue_comments(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for key, value in self.comments.items():
-            ours = value.startswith("## mergeCraft progress") or "<!-- mergecraft-" in value
-            rows.append(
-                {
-                    "id": key,
-                    "body": value,
-                    "user": (
-                        {"login": "github-actions[bot]", "type": "Bot"}
-                        if ours
-                        else {"login": "someone", "type": "User"}
-                    ),
-                }
-            )
+            author = self.authors.get(key)
+            if author is None:
+                ours = value.startswith("## mergeCraft progress") or "<!-- mergecraft-" in value
+                author = (
+                    {"login": "github-actions[bot]", "type": "Bot"}
+                    if ours
+                    else {"login": "someone", "type": "User"}
+                )
+            rows.append({"id": key, "body": value, "user": author})
         return rows
 
     async def list_reviews(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
@@ -315,6 +313,40 @@ async def test_legacy_state_moves_to_formal_review_before_comment_deletion(tmp_p
     assert scm.deleted == [42]
     assert scm.comments == {99: "A human's unrelated discussion."}
     assert scm.created == 1
+
+
+@pytest.mark.asyncio
+async def test_user_lookalike_progress_comment_is_not_migrated_or_deleted(tmp_path: Path) -> None:
+    scm = _Scm()
+    ctx = _context(tmp_path, scm)
+    book = ledger.FindingLedger()
+    book.record("b" * 24, "open", source="inline", round_index=1)
+    lookalike = ledger.merge_ledger_into_comment(
+        "## mergeCraft progress\n\n"
+        f"{_PREAMBLE_MARKER}\n### mergeCraft run record\n\n"
+        "### Learnings delta\n\n**Before:** user-secret\n\n**After:** quoted\n",
+        records=book.records(),
+    )
+    scm.comments[77] = lookalike
+    scm.authors[77] = {"login": "contributor", "type": "User"}
+    scm.reviews[1] = (
+        f"{_PREAMBLE_MARKER}\n### mergeCraft run record\n"
+        f"{ledger.REVIEW_BODY_MARKER}\n\nOne accepted summary.\n"
+    )
+    scm.created = 1
+    ctx.tool_state.review = ReviewRecord(id=1, node_id="n1", reviewed_sha="abc123")
+
+    await _publish_deterministic_record()(
+        pull_number=546,
+        packet=_sample_packet(findings=[], verdict="success", reason="approved"),
+        ctx=ctx,
+    )
+
+    body = scm.reviews[1]
+    assert "user-secret" not in body
+    assert ledger.FindingLedger.from_comment_body(body).get_record("b" * 24) is None
+    assert scm.deleted == []
+    assert scm.comments[77] == lookalike
 
 
 @pytest.mark.asyncio

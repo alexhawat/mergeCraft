@@ -390,6 +390,7 @@ async def publish_deterministic_record(
     from mergecraft.findings.ledger import (
         DETERMINISTIC_RECORD_MARKER,
         REVIEW_BODY_MARKER,
+        _is_trusted_sticky_author,
         ensure_finding_ledger,
         fetch_sticky_progress_comment,
         hydrate_finding_ledger_from_progress_comment,
@@ -527,10 +528,13 @@ async def publish_deterministic_record(
             reviewed_sha=None,
         )
 
-    # Only the dedicated legacy record may be removed, and only after the
-    # formal review has accepted all of its persisted state.
+    # Only a bot-authored legacy record may be removed, and only after the
+    # formal review has accepted all of its persisted state. A contributor can
+    # quote the heading and a ledger marker; body shape alone must not delete
+    # that comment or copy it into the review.
     if (
         legacy is not None
+        and _is_trusted_sticky_author(legacy)
         and legacy_body.startswith("## mergeCraft progress")
         and (DETERMINISTIC_RECORD_MARKER in legacy_body or "<!-- mergecraft-ledger:" in legacy_body)
     ):
