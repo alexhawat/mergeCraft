@@ -62,6 +62,15 @@ def _merge_into_canonical(members: list[Finding]) -> Finding:
         if entry not in seen_evidence:
             evidence.append(entry)
             seen_evidence.add(entry)
+        # A member's own evidence must survive clustering, not be replaced by the
+        # provenance line above. In particular ``path=outside repository root``
+        # (set by SARIF ingest, AN-D8) can be the only record that a path escaped
+        # the repository root — dropping it here would silently discard the
+        # label on the analyzer route while the CI-evidence route keeps it.
+        for detail in member.evidence:
+            if detail not in seen_evidence:
+                evidence.append(detail)
+                seen_evidence.add(detail)
         if member is not canonical and member.source in {"analyzer", "ci"}:
             corroboration += 1
 

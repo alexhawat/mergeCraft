@@ -182,7 +182,11 @@ def test_malformed_audit_entries_are_skipped_per_entry(tmp_path: Path) -> None:
 
 def test_audit_trail_is_bounded_and_drops_the_oldest_first(tmp_path: Path) -> None:
     """Rule churn must not grow the audit trail without bound."""
-    from mergecraft.utils.memory import DEFAULT_MAX_NEGATIVE_RULES, NegativeMemoryStore
+    from mergecraft.utils.memory import (
+        DEFAULT_MAX_NEGATIVE_AUDIT_ENTRIES,
+        DEFAULT_MAX_NEGATIVE_RULES,
+        NegativeMemoryStore,
+    )
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -199,6 +203,6 @@ def test_audit_trail_is_bounded_and_drops_the_oldest_first(tmp_path: Path) -> No
 
     audit = store.audit_trail()
     assert len(store.list_rules()) == DEFAULT_MAX_NEGATIVE_RULES
-    assert len(audit) <= 4 * DEFAULT_MAX_NEGATIVE_RULES
+    assert len(audit) == DEFAULT_MAX_NEGATIVE_AUDIT_ENTRIES
     assert audit[-1].pattern == "pattern-299"
     assert audit[0].pattern != "pattern-0", "the oldest entries must be dropped first"

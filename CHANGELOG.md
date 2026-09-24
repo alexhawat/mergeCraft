@@ -173,6 +173,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Managed analyzer caches and the semgrep pip install now live under the
+  operator's cache directory (`$XDG_CACHE_HOME`, else `~/.cache`, plus
+  `mergecraft/analyzer-cache`) instead of `<repo>/.mergecraft/`, so a pull
+  request can no longer commit a binary, a lock row and a receipt that the fast
+  path would then execute. A cache root that resolves inside the checkout is
+  refused with a named skip rather than used. The checkout's
+  `.mergecraft/analyzers.lock` is still written and digested for the pre-merge
+  row, but it never authenticates a binary: a cache hit now requires a receipt
+  binding the archive pin and the extracted binary's digest together. A lock row
+  missing a required key is skipped with a warning instead of raising, and a
+  lock write stages to a temporary file and renames into place under a sidecar
+  lock, so a failed write leaves the previous lock intact.
+
+- Analyzer findings are attributed to the file that actually caused them again.
+  `diff --git` headers are parsed with Git's C-style quoting, the path is taken
+  from `rename to` / `+++ b/` when present, and a header that cannot be parsed
+  drops its hunks instead of attaching them to the previous file. A SARIF URI
+  that points outside the repository is kept verbatim and labelled
+  `outside repository root` rather than shortened to a basename that may name an
+  unrelated file, and the CI trufflehog producer now emits
+  repository-relative URIs.
+
+- The `run_analyzers` tool confines `repo_root` to a directory the run already
+  registered as a checkout, and rejects a supplied `diff_path` that escapes the
+  authorized roots, is missing, is not a regular file, or is not valid UTF-8 —
+  each with a named reason and without running an analyzer. Previously an
+  out-of-root path was ignored in silence and the pipeline ran unscoped.
+
+- Negative memory that cannot be read no longer aborts a trusted run: malformed
+  rules and audit entries are skipped per entry, an unreadable store reports
+  every finding instead of suppressing them, and the audit trail is bounded.
+  The `sarif_upload` action input no longer declares a default, so an unset
+  input now reaches `.mergecraft/config.yaml`'s `analyzers.sarifUpload` as
+  intended; a consumer relying on the implicit `disabled` should set the input
+  or the config key explicitly.
+
 - Offline local diff materialization skips mergeCraft's generated
   `.mergecraft/analyzer-cache/` entries before per-file untracked diff
   generation, preventing a populated managed cache from adding thousands of

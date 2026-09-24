@@ -153,7 +153,11 @@ def test_unreadable_memory_store_reports_every_finding(tmp_path: Path) -> None:
     repo.mkdir()
     memory_path = memory_store_path(repo)
     memory_path.parent.mkdir(parents=True, exist_ok=True)
-    memory_path.write_text('{"rules": [{}]}', encoding="utf-8")
+    # Non-UTF-8 bytes are an input the loader genuinely cannot tolerate:
+    # ``_read_json`` raises ``UnicodeDecodeError`` before any rule is parsed.
+    # ``{"rules": [{}]}`` is tolerated by the hardened loader (it loads as an
+    # empty store), so it never reached the fail-open guard this test names.
+    memory_path.write_bytes(b'\xff\xfe{"rules": []}')
     finding = make_finding(
         message="Real regression",
         path="src/app.py",
