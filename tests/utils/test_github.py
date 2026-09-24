@@ -46,6 +46,31 @@ async def test_github_client_uses_default_api_base_url_when_base_url_omitted(
         await client.aclose()
 
 
+@pytest.mark.asyncio
+async def test_review_update_and_legacy_comment_delete_use_distinct_endpoints() -> None:
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.method == "PUT":
+            assert request.content == b'{"body":"final record"}'
+            return httpx.Response(200, json={"id": 9, "body": "final record"})
+        return httpx.Response(204)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://api.github.com"
+    ) as raw:
+        client = GitHubClient("t", client=raw)
+        updated = await client.update_review("acme", "demo", 7, 9, "final record")
+        await client.delete_issue_comment("acme", "demo", 42)
+
+    assert updated["body"] == "final record"
+    assert calls == [
+        ("PUT", "/repos/acme/demo/pulls/7/reviews/9"),
+        ("DELETE", "/repos/acme/demo/issues/comments/42"),
+    ]
+
+
 def test_parse_repo_context(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/widgets")
     ctx = parse_repo_context()

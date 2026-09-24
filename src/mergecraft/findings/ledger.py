@@ -1,7 +1,7 @@
-"""Cross-round finding ledger — open-PR memory in the sticky progress comment (RC4, D4).
+"""Cross-round finding ledger — open-PR memory in formal reviews (RC4, D4).
 
-Persistence is GitHub-only: HTML markers in the progress comment survive ephemeral
-Action checkouts. Post-merge issue filing stays in :mod:`mergecraft.findings.sweep`.
+HTML markers in review bodies survive ephemeral Action checkouts. Legacy progress
+comments are read during migration. Post-merge filing stays in the sweep module.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ LEDGER_MARKER_PREFIX: str = "<!-- mergecraft-ledger:v1:"
 LEDGER_MARKER_V2_PREFIX: str = "<!-- mergecraft-ledger:v2:"
 LEDGER_SCHEMA_VERSION: str = "v2"
 DETERMINISTIC_RECORD_MARKER: str = "<!-- mergecraft-deterministic-record:v1 -->"
+REVIEW_BODY_MARKER: str = "<!-- mergecraft-review-body:v1 -->"
 
 _PROGRESS_HEADING = "## mergeCraft progress"
 _VIA_MERGECRAFT_MARKER = "*via mergecraft*"
@@ -40,19 +41,15 @@ _LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-
 # terminator is removed on its own by the ``replace`` in the stripper below.
 _DETERMINISTIC_RECORD_BLOCK_RE = re.compile(
     rf"{re.escape(DETERMINISTIC_RECORD_MARKER)}[\s\S]*?"
-    r"(?=\n<!-- mergecraft-ledger:|\n\*via mergecraft\*)",
+    rf"(?=\n{re.escape(REVIEW_BODY_MARKER)}|\n<!-- mergecraft-ledger:|\n\*via mergecraft\*)",
 )
-# Our own progress comment, where the record legitimately ends the body.
-_DETERMINISTIC_RECORD_BLOCK_EOF_RE = re.compile(
-    rf"{re.escape(DETERMINISTIC_RECORD_MARKER)}[\s\S]*?"
-    r"(?=\n<!-- mergecraft-ledger:|\n\*via mergecraft\*|\Z)",
-)
-_RECORD_SLOT = "\x00mergecraft-deterministic-record\x00"
 
 _ISSUE_COMMENT_PAGE_SIZE = 100
 # GitHub issue comments are paginated at 100/page; cap total scanned comments
 # at 1000 (10 pages) to bound API cost on very chatty PRs.
 _MAX_ISSUE_COMMENT_PAGES = 10
+_REVIEW_PAGE_SIZE = 100
+_MAX_REVIEW_PAGES = 10
 
 
 @dataclass
@@ -264,6 +261,38 @@ async def fetch_sticky_progress_comment_body(
     return str(sticky.get("body") or "") if sticky is not None else ""
 
 
+async def fetch_review_record_bodies(
+    scm: ScmProvider, owner: str, repo: str, pull_number: int
+) -> list[str]:
+    """Read mergeCraft review bodies in publication order across GitHub pages."""
+    bodies: list[str] = []
+    for page in range(1, _MAX_REVIEW_PAGES + 1):
+        reviews = await scm.list_reviews(
+            owner, repo, pull_number, params={"per_page": _REVIEW_PAGE_SIZE, "page": page}
+        )
+        for review in reviews:
+            body = str(review.get("body") or "")
+            if body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER):
+                bodies.append(body)
+        if len(reviews) < _REVIEW_PAGE_SIZE:
+            break
+    return bodies
+
+
+async def fetch_review_ledger(
+    scm: ScmProvider, owner: str, repo: str, pull_number: int
+) -> FindingLedger:
+    """Fold historical formal reviews and legacy comment state into one ledger."""
+    ledger = FindingLedger()
+    legacy = await fetch_sticky_progress_comment_body(scm, owner, repo, pull_number)
+    for record in FindingLedger.from_comment_body(legacy).records():
+        ledger.upsert_if_newer(record)
+    for body in await fetch_review_record_bodies(scm, owner, repo, pull_number):
+        for record in FindingLedger.from_comment_body(body).records():
+            ledger.upsert_if_newer(record)
+    return ledger
+
+
 def _record_from_v1_marker(
     fingerprint: str,
     raw_state: str,
@@ -452,7 +481,7 @@ def ensure_finding_ledger(tool_state: ToolState) -> FindingLedger:
 
 
 async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> FindingLedger:
-    """Load the ledger from the sticky progress comment when one is known (D4)."""
+    """Load the ledger from formal reviews and any legacy progress comment."""
     tool_state = ctx.tool_state
     if tool_state.finding_ledger_loaded:
         return ensure_finding_ledger(tool_state)
@@ -460,27 +489,31 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
     from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
 
     ledger = FindingLedger()
-    progress = tool_state.progress_comment
     issue_number = primary_repo_state(tool_state).issue_number or tool_state.pr_number
     try:
+        progress = tool_state.progress_comment
         if isinstance(progress, ProgressComment):
             comment = await ctx.scm.get_issue_comment(
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(progress.id),
+                ctx.repo.owner, ctx.repo.name, int(progress.id)
             )
-            ledger = FindingLedger.from_comment_body(str(comment.get("body") or ""))
+            legacy = str(comment.get("body") or "")
         elif issue_number is not None:
-            body = await fetch_sticky_progress_comment_body(
-                ctx.scm,
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(issue_number),
+            legacy = await fetch_sticky_progress_comment_body(
+                ctx.scm, ctx.repo.owner, ctx.repo.name, int(issue_number)
             )
-            if body:
-                ledger = FindingLedger.from_comment_body(body)
+        else:
+            legacy = ""
+        if legacy:
+            for record in FindingLedger.from_comment_body(legacy).records():
+                ledger.upsert_if_newer(record)
+        if issue_number is not None and hasattr(ctx.scm, "list_reviews"):
+            for body in await fetch_review_record_bodies(
+                ctx.scm, ctx.repo.owner, ctx.repo.name, int(issue_number)
+            ):
+                for record in FindingLedger.from_comment_body(body).records():
+                    ledger.upsert_if_newer(record)
     except Exception as err:
-        logger.info("finding ledger: could not read progress comment: {}", err)
+        logger.info("finding ledger: could not read review history: {}", err)
 
     existing = tool_state.finding_ledger
     if existing is not None:
@@ -495,117 +528,14 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
     return ledger
 
 
-async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
-    """Persist the in-memory ledger into the sticky progress comment (RC4, M9)."""
-    from mergecraft.mcp.comment import add_footer
-    from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
-    from mergecraft.utils.learnings import (
-        ensure_learnings_review_delta,
-        merge_learnings_delta_into_review_body,
-    )
-
-    tool_state = ctx.tool_state
-    if tool_state.progress_comment is False:
-        return
-
-    ledger = ensure_finding_ledger(tool_state)
-    if not ledger.records():
-        return
-
-    issue_number = primary_repo_state(tool_state).issue_number or tool_state.pr_number
-    if issue_number is None:
-        return
-
-    try:
-        base_body = str(tool_state.last_progress_body or "").strip()
-        if not base_body:
-            base_body = f"{_PROGRESS_HEADING}\n\nReview published."
-
-        await ensure_learnings_review_delta(tool_state)
-        body_with_delta = merge_learnings_delta_into_review_body(tool_state, base_body)
-        body_with_ledger = merge_ledger_into_comment(body_with_delta, records=ledger.records())
-        body_with_footer = add_footer(ctx, body_with_ledger)
-
-        if isinstance(tool_state.progress_comment, ProgressComment):
-            await ctx.scm.update_issue_comment(
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(tool_state.progress_comment.id),
-                body_with_footer,
-            )
-            return
-
-        sticky = await fetch_sticky_progress_comment(
-            ctx.scm,
-            ctx.repo.owner,
-            ctx.repo.name,
-            int(issue_number),
-        )
-        if sticky is not None:
-            existing_body = str(sticky.get("body") or "")
-            if existing_body:
-                merged = merge_ledger_into_comment(existing_body, records=ledger.records())
-                body_with_footer = add_footer(ctx, merged)
-                await ctx.scm.update_issue_comment(
-                    ctx.repo.owner,
-                    ctx.repo.name,
-                    int(sticky["id"]),
-                    body_with_footer,
-                )
-                tool_state.progress_comment = ProgressComment(
-                    id=str(sticky["id"]),
-                    type="issue",
-                )
-                return
-
-        result = await ctx.scm.create_issue_comment(
-            ctx.repo.owner,
-            ctx.repo.name,
-            int(issue_number),
-            body_with_footer,
-        )
-        tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
-    except Exception as err:
-        logger.info("finding ledger: could not persist progress comment: {}", err)
-
-
 def _strip_deterministic_record_markers(body: str) -> str:
     """Remove forged or stale deterministic-record markers from agent prose."""
     without_block = _DETERMINISTIC_RECORD_BLOCK_RE.sub("", body)
-    return without_block.replace(DETERMINISTIC_RECORD_MARKER, "").strip()
-
-
-def merge_deterministic_record_into_comment(body: str, *, record_block: str) -> str:
-    """Insert or replace the deterministic record block in a progress comment.
-
-    When the comment already carries a record, the new one replaces it **in
-    place** so any surrounding prose keeps its position. The replacement is
-    staged through a sentinel because the rendered block itself opens with
-    ``DETERMINISTIC_RECORD_MARKER``; substituting it directly would leave the
-    freshly-inserted block matching the same pattern as the stale ones being
-    cleared.
-    """
-    block = record_block.strip()
-    if DETERMINISTIC_RECORD_MARKER in body:
-        staged = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub(_RECORD_SLOT, body, count=1)
-        staged = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub("", staged)
-        staged = staged.replace(DETERMINISTIC_RECORD_MARKER, "")
-        if _PROGRESS_HEADING not in staged:
-            staged = f"{_PROGRESS_HEADING}\n\n{staged.lstrip()}"
-        return f"{staged.replace(_RECORD_SLOT, block).strip()}\n"
-    cleaned = _DETERMINISTIC_RECORD_BLOCK_EOF_RE.sub("", body)
-    cleaned = cleaned.replace(DETERMINISTIC_RECORD_MARKER, "").strip()
-    if not cleaned:
-        return f"{_PROGRESS_HEADING}\n\n{block}\n"
-    if _PROGRESS_HEADING not in cleaned:
-        cleaned = f"{_PROGRESS_HEADING}\n\n{cleaned}"
-    parts = cleaned.split("\n", 1)
-    if parts[0].strip() == _PROGRESS_HEADING:
-        tail = parts[1].strip() if len(parts) > 1 else ""
-        if tail:
-            return f"{_PROGRESS_HEADING}\n\n{block}\n\n{tail}\n"
-        return f"{_PROGRESS_HEADING}\n\n{block}\n"
-    return f"{block}\n\n{cleaned}\n"
+    return (
+        without_block.replace(DETERMINISTIC_RECORD_MARKER, "")
+        .replace(REVIEW_BODY_MARKER, "")
+        .strip()
+    )
 
 
 _INCONCLUSIVE_OUTCOME = "inconclusive"
@@ -714,8 +644,7 @@ def render_deterministic_review_block(
 ) -> str:
     """Render the authoritative deterministic review record (D6/D7).
 
-    Pure leaf: no I/O. Both the sticky progress comment and the review-body
-    preamble render from this single function so the two surfaces cannot drift.
+    Pure leaf: no I/O. This is the formal review's server-owned record.
     """
     from mergecraft.analyzers.finding import Finding
 
@@ -781,6 +710,25 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Verdict diagnostic:** `{diagnostic}`")
     if decision is not None:
         header_lines.append(f"- **Decision:** `{decision.verdict}` — {decision.reason}")
+    change_id = str(getattr(packet, "change_id", "") or "").strip()
+    if change_id:
+        header_lines.append(f"- **Change:** `{change_id}`")
+    changed_files = list(getattr(packet, "files_changed", []) or [])
+    if changed_files:
+        header_lines.append(
+            "- **Reviewed files:** " + ", ".join(f"`{path}`" for path in changed_files)
+        )
+    if agent_meta is not None:
+        provider = str(getattr(agent_meta, "provider", "") or "").strip()
+        if provider:
+            header_lines.append(f"- **Provider:** `{provider}`")
+        requested = str(getattr(agent_meta, "requested_model", "") or "").strip()
+        if requested and requested != model:
+            header_lines.append(f"- **Requested model:** `{requested}`")
+        if getattr(agent_meta, "fallback_occurred", False):
+            header_lines.append(
+                f"- **Model fallback:** attempt {getattr(agent_meta, 'fallback_index', 0)}"
+            )
     if model:
         header_lines.append(f"- **Model:** `{model}`")
     if attempt_count is not None:
@@ -871,13 +819,14 @@ def render_deterministic_review_block(
             if stripped:
                 pre_merge_lines.append(f"- **Credential gap:** {stripped}")
 
-    finding_lines = ["", "### Change-scoped findings", ""]
+    finding_lines = ["", "<details>", "<summary>Change-scoped findings</summary>", ""]
     if change_findings:
         for finding in change_findings:
             location = f"`{finding.path}` — " if finding.path else ""
             finding_lines.append(f"- **{finding.severity}** · {location}{finding.message}")
     else:
         finding_lines.append("_No change-scoped findings recorded._")
+    finding_lines.extend(["", "</details>"])
 
     run_health_lines: list[str] = []
     if run_findings:
@@ -908,9 +857,14 @@ def render_deterministic_review_block(
         # packet pipeline never produces — ``decide_approval`` always returns a
         # ``PacketDecision`` — so a refused run rendered identically to a clean
         # one. The structural decision and the refusal are separate facts.
+        label = (
+            "No agent verdict published"
+            if rejection_reason == "terminal_publication_failed"
+            else "No agent verdict recorded"
+        )
         verdict_lines += [
             "",
-            f"**No agent verdict recorded — reason:** `{rejection_reason}`",
+            f"**{label} — reason:** `{rejection_reason}`",
         ]
 
     return (
@@ -921,78 +875,6 @@ def render_deterministic_review_block(
     )
 
 
-async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) -> None:
-    """Upsert the sticky progress comment with the deterministic record (D6)."""
-    from mergecraft.mcp.comment import add_footer
-    from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
-    from mergecraft.utils import gha_log
-
-    tool_state = ctx.tool_state
-    if tool_state.progress_comment is False:
-        return
-
-    issue_number = primary_repo_state(tool_state).issue_number or tool_state.pr_number
-    if issue_number is None:
-        return
-
-    try:
-        base_body = str(tool_state.last_progress_body or "").strip()
-        body_with_record = merge_deterministic_record_into_comment(
-            base_body,
-            record_block=record_block,
-        )
-        body_with_footer = add_footer(ctx, body_with_record)
-
-        if isinstance(tool_state.progress_comment, ProgressComment):
-            await ctx.scm.update_issue_comment(
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(tool_state.progress_comment.id),
-                body_with_footer,
-            )
-            tool_state.last_progress_body = body_with_footer
-            return
-
-        sticky = await fetch_sticky_progress_comment(
-            ctx.scm,
-            ctx.repo.owner,
-            ctx.repo.name,
-            int(issue_number),
-        )
-        if sticky is not None:
-            existing_body = str(sticky.get("body") or "")
-            merged = merge_deterministic_record_into_comment(
-                existing_body,
-                record_block=record_block,
-            )
-            body_with_footer = add_footer(ctx, merged)
-            await ctx.scm.update_issue_comment(
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(sticky["id"]),
-                body_with_footer,
-            )
-            tool_state.progress_comment = ProgressComment(
-                id=str(sticky["id"]),
-                type="issue",
-            )
-            tool_state.last_progress_body = body_with_footer
-            return
-
-        result = await ctx.scm.create_issue_comment(
-            ctx.repo.owner,
-            ctx.repo.name,
-            int(issue_number),
-            body_with_footer,
-        )
-        tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
-        tool_state.last_progress_body = body_with_footer
-    except Exception as err:
-        message = f"deterministic record: could not persist progress comment: {err}"
-        logger.info(message)
-        gha_log.warning(message)
-
-
 __all__ = [
     "DETERMINISTIC_RECORD_MARKER",
     "LEDGER_MARKER_PREFIX",
@@ -1000,19 +882,18 @@ __all__ = [
     "LEDGER_SCHEMA_VERSION",
     "FindingLedger",
     "ensure_finding_ledger",
+    "fetch_review_ledger",
+    "fetch_review_record_bodies",
     "fetch_sticky_progress_comment",
     "fetch_sticky_progress_comment_body",
     "hydrate_finding_ledger_from_progress_comment",
     "is_sticky_progress_comment",
     "ledger_round_index",
-    "merge_deterministic_record_into_comment",
     "merge_ledger_into_comment",
-    "persist_finding_ledger_to_progress_comment",
     "record_deferred_from_analyzer_run",
     "record_over_budget_verifications",
     "record_published_findings_in_ledger",
     "record_withdrawn_in_ledger",
     "render_deterministic_review_block",
     "sticky_progress_comment_body",
-    "upsert_sticky_progress_comment",
 ]

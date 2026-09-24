@@ -52,6 +52,7 @@ async def test_publish_emit_false_writes_deterministic_record_and_step_summary(
 ) -> None:
     tool_context = _make_ctx(tmp_path)
     tool_context.tool_state.pr_number = 546
+    tool_context.tool_state.selected_mode = "Review"
     prepared = prepare_run_packet(tool_context, run_succeeded=True)
     assert prepared is not None
     tool_context.tool_state.prepared_run_packet = prepared
@@ -90,6 +91,77 @@ async def test_publish_emit_false_writes_deterministic_record_and_step_summary(
 
 
 @pytest.mark.asyncio
+async def test_failed_formal_record_update_reports_neutral_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool_context = _make_ctx(tmp_path)
+    tool_context.tool_state.pr_number = 546
+    tool_context.tool_state.selected_mode = "Review"
+    prepared = prepare_run_packet(tool_context, run_succeeded=True)
+    assert prepared is not None
+    tool_context.tool_state.prepared_run_packet = prepared
+    conclusions: list[str] = []
+
+    async def _boom(**_kwargs: Any) -> None:
+        raise RuntimeError("review update failed")
+
+    async def _status(*_args: Any, **kwargs: Any) -> None:
+        conclusions.append(str(kwargs["conclusion"]))
+
+    async def _noop(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    import mergecraft.main as main_mod
+
+    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
+    monkeypatch.setattr(main_mod, "report_status_checks", _status)
+    monkeypatch.setattr(main_mod, "publish_deterministic_record", _boom)
+
+    with pytest.raises(RuntimeError, match="review update failed"):
+        await _publish()(
+            RunContext(settings=RepoSettings(), tool_context=tool_context),
+            outcome=RunOutcome.passed,
+            failure_reason=None,
+            emit=False,
+        )
+    assert conclusions == ["neutral"]
+
+
+@pytest.mark.asyncio
+async def test_non_review_pr_run_does_not_create_a_formal_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool_context = _make_ctx(tmp_path)
+    tool_context.tool_state.pr_number = 546
+    tool_context.tool_state.selected_mode = "Build"
+    prepared = prepare_run_packet(tool_context, run_succeeded=True)
+    assert prepared is not None
+    tool_context.tool_state.prepared_run_packet = prepared
+
+    async def _unexpected(**_kwargs: Any) -> None:
+        pytest.fail("Build mode must not create a PR review")
+
+    async def _noop(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    import mergecraft.main as main_mod
+    import mergecraft.utils.step_summary as step_summary_mod
+
+    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
+    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
+    monkeypatch.setattr(main_mod, "publish_deterministic_record", _unexpected)
+    monkeypatch.setattr(step_summary_mod, "append_step_summary", lambda _body: None)
+    await _publish()(
+        RunContext(settings=RepoSettings(), tool_context=tool_context),
+        outcome=RunOutcome.passed,
+        failure_reason=None,
+        emit=False,
+    )
+
+
+@pytest.mark.asyncio
 async def test_publish_names_the_refused_terminal_verdict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -103,6 +175,7 @@ async def test_publish_names_the_refused_terminal_verdict(
     """
     tool_context = _make_ctx(tmp_path)
     tool_context.tool_state.pr_number = 546
+    tool_context.tool_state.selected_mode = "Review"
     tool_context.tool_state.last_terminal_rejection = "scope_unavailable"
     prepared = prepare_run_packet(tool_context, run_succeeded=False)
     assert prepared is not None
@@ -164,6 +237,7 @@ async def test_publish_resolves_pull_number_from_issue_number(
 ) -> None:
     tool_context = _make_ctx(tmp_path)
     tool_context.tool_state.pr_number = None
+    tool_context.tool_state.selected_mode = "Review"
     tool_context.payload.event.issue_number = 99
     prepared = prepare_run_packet(tool_context, run_succeeded=True)
     assert prepared is not None
@@ -204,6 +278,7 @@ async def test_publish_passes_rejection_reason_for_no_verdict_packet(
 ) -> None:
     tool_context = _make_ctx(tmp_path)
     tool_context.tool_state.pr_number = 546
+    tool_context.tool_state.selected_mode = "Review"
     packet = build_packet(
         change_id="acme/demo#546",
         agent_id="claude",

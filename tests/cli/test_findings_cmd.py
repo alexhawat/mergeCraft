@@ -76,6 +76,9 @@ class _FakeClient:
     ) -> list[dict[str, Any]]:
         return []
 
+    async def list_reviews(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
     async def create_label(self, owner: str, repo: str, **kwargs: Any) -> dict[str, Any]:
         return {"name": kwargs.get("name")}
 

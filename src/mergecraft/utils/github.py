@@ -535,6 +535,19 @@ class GitHubClient:
             )
         )
 
+    async def update_review(
+        self, owner: str, repo: str, pull_number: int, review_id: int, body: str
+    ) -> dict[str, Any]:
+        return _as_dict(
+            await self.put(
+                f"/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}",
+                json={"body": body},
+            )
+        )
+
+    async def delete_issue_comment(self, owner: str, repo: str, comment_id: int) -> None:
+        await self.delete(f"/repos/{owner}/{repo}/issues/comments/{comment_id}")
+
     async def submit_review(
         self,
         owner: str,

@@ -369,7 +369,7 @@ async def publish_deterministic_record(
     run_outcome: RunOutcome | None = None,
     verdict_diagnostic: Any | None = None,
 ) -> None:
-    """Publish the deterministic sticky record for a resolved PR (D6, plan 13 A4).
+    """Complete the formal review with the final deterministic run record.
 
     Plan 13 ``run_post_run_retry_loop`` routes non-retryable rejections here.
     Stable signature for cross-plan callers::
@@ -385,11 +385,21 @@ async def publish_deterministic_record(
             verdict_diagnostic: VerdictDiagnostic | None = None,
         ) -> None
     """
+    import re
+
     from mergecraft.findings.ledger import (
+        DETERMINISTIC_RECORD_MARKER,
+        REVIEW_BODY_MARKER,
+        ensure_finding_ledger,
+        fetch_sticky_progress_comment,
+        hydrate_finding_ledger_from_progress_comment,
+        merge_ledger_into_comment,
         render_deterministic_review_block,
-        upsert_sticky_progress_comment,
     )
+    from mergecraft.mcp.comment import add_footer
+    from mergecraft.mcp.review import REVIEW_BODY_MAX_CHARS
     from mergecraft.scm.github import create_github_scm
+    from mergecraft.utils.learnings import merge_learnings_delta_into_review_body
     from mergecraft.utils.status_checks import _run_url
 
     resolved_ctx = ctx
@@ -409,7 +419,7 @@ async def publish_deterministic_record(
         )
 
     tool_state = resolved_ctx.tool_state
-    submission = tool_state.terminal_submission
+    await hydrate_finding_ledger_from_progress_comment(resolved_ctx)
     analyzer_run = tool_state.analyzer_run
     block = render_deterministic_review_block(
         packet=packet,
@@ -418,7 +428,8 @@ async def publish_deterministic_record(
         run_outcome=run_outcome,
         verdict_diagnostic=verdict_diagnostic,
         analyzer_summary=analyzer_run.pre_merge_summary if analyzer_run is not None else None,
-        agent_summary=submission.summary if submission is not None else None,
+        # The accepted summary already lives in the formal review body.
+        agent_summary=None,
         trust_tier=resolved_ctx.trust_tier,
         attempt_count=len(tool_state.usage_entries) if tool_state.usage_entries else None,
         token_summary=_token_summary(
@@ -431,8 +442,102 @@ async def publish_deterministic_record(
         image_source_sha=_image_source_sha(),
         review_skills=loaded_review_skills_for_ledger(tool_state),
         review_mcp_servers=_loaded_review_mcp(tool_state),
+        publication_entrypoint=tool_state.review_publication_entrypoint,
+        inline_comments_demoted=tool_state.review_inline_comments_demoted,
+        comment_fallback_applied=tool_state.review_comment_fallback_applied,
+        review_body_truncated=tool_state.review_body_truncated,
     )
-    await upsert_sticky_progress_comment(resolved_ctx, block)
+    owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
+    review = tool_state.review
+    existing_body = ""
+    run_url = _run_url(resolved_ctx)
+    if review is None and run_url:
+        # A publish response can be lost after GitHub accepted the review.
+        # Reuse the review for this exact Actions run on retry.
+        from mergecraft.mcp.tool_state import ReviewRecord
+
+        for page in range(1, 11):
+            reviews = await resolved_ctx.scm.list_reviews(
+                owner, repo, pull_number, params={"per_page": 100, "page": page}
+            )
+            matched = next(
+                (
+                    item
+                    for item in reviews
+                    if str(item.get("body") or "").lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
+                    and f"- **Run:** {run_url}" in str(item.get("body") or "")
+                ),
+                None,
+            )
+            if matched is not None:
+                review = ReviewRecord(
+                    id=int(matched["id"]),
+                    node_id=str(matched.get("node_id") or ""),
+                    reviewed_sha=str(matched.get("commit_id") or "") or None,
+                )
+                tool_state.review = review
+                break
+            if len(reviews) < 100:
+                break
+    if review is not None:
+        existing = await resolved_ctx.scm.get_review(owner, repo, pull_number, review.id)
+        existing_body = str(existing.get("body") or "")
+
+    legacy = await fetch_sticky_progress_comment(resolved_ctx.scm, owner, repo, pull_number)
+    legacy_body = str(legacy.get("body") or "") if legacy is not None else ""
+    # Preserve the old comment's ephemeral learnings before retiring it. Its
+    # run record and finding markers are rendered anew in this formal review.
+    legacy_delta = re.search(
+        r"### Learnings delta[\s\S]*?(?=\n<!-- mergecraft-ledger:|\n\*via mergecraft\*|\Z)",
+        legacy_body,
+    )
+    tail = (
+        existing_body.split(REVIEW_BODY_MARKER, 1)[1].strip()
+        if REVIEW_BODY_MARKER in existing_body
+        else ""
+    )
+    if legacy_delta is not None and "### Learnings delta" not in tail:
+        tail = f"{tail}\n\n{legacy_delta.group(0).strip()}".strip()
+    tail = merge_learnings_delta_into_review_body(tool_state, tail)
+    body = f"{block.rstrip()}\n{REVIEW_BODY_MARKER}\n"
+    if tail:
+        body += f"\n{tail}\n"
+    body = merge_ledger_into_comment(body, records=ensure_finding_ledger(tool_state).records())
+    body = add_footer(resolved_ctx, body)
+    if len(body) > REVIEW_BODY_MAX_CHARS:
+        msg = "formal review record exceeds GitHub's review body limit"
+        raise ValueError(msg)
+
+    if review is not None:
+        await resolved_ctx.scm.update_review(owner, repo, pull_number, review.id, body)
+    else:
+        # No model verdict was accepted or published. A diagnostic COMMENT
+        # review records the failure without implying an approval or adding a
+        # second summary-only review beside an accepted verdict.
+        result = await resolved_ctx.scm.create_review(
+            owner, repo, pull_number, event="COMMENT", body=body
+        )
+        from mergecraft.mcp.tool_state import ReviewRecord
+
+        tool_state.review = ReviewRecord(
+            id=int(result["id"]),
+            node_id=str(result.get("node_id") or ""),
+            reviewed_sha=None,
+        )
+
+    # Only the dedicated legacy record may be removed, and only after the
+    # formal review has accepted all of its persisted state.
+    if (
+        legacy is not None
+        and legacy_body.startswith("## mergeCraft progress")
+        and (DETERMINISTIC_RECORD_MARKER in legacy_body or "<!-- mergecraft-ledger:" in legacy_body)
+    ):
+        try:
+            await resolved_ctx.scm.delete_issue_comment(owner, repo, int(legacy["id"]))
+        except Exception as err:
+            logger.warning("legacy review record could not be retired: {}", err)
+        else:
+            tool_state.progress_comment = False
 
 
 def _action_pin_sha() -> str | None:
@@ -488,13 +593,6 @@ async def _publish(
 
     async def _learnings_and_status() -> None:
         await persist_learnings(tool_context)
-        await report_status_checks(
-            tool_context,
-            run_succeeded=run_ok,
-            failure_reason=failure_reason,
-            conclusion=RUN_OUTCOME_CONCLUSION[outcome],
-            packet=prepared,
-        )
         pull_number = tool_context.tool_state.pr_number
         if pull_number is None and tool_context.payload.event.issue_number is not None:
             pull_number = int(tool_context.payload.event.issue_number)
@@ -505,18 +603,46 @@ async def _publish(
         # ``PacketDecision``, so that condition never holds and the reason never
         # reached the record — a refused run read as a clean one (plan 13 D5).
         rejection_reason = tool_context.tool_state.last_terminal_rejection
-        if rejection_reason is None and prepared is not None and prepared.decision is None:
-            rejection_reason = failure_reason
-        if pull_number is not None and prepared is not None:
-            await publish_deterministic_record(
-                pull_number=int(pull_number),
-                packet=prepared,
-                rejection_reason=rejection_reason,
-                tmpdir=tool_context.tmpdir,
-                ctx=tool_context,
-                run_outcome=outcome,
-                verdict_diagnostic=verdict_diagnostic,
-            )
+        review_run = tool_context.tool_state.selected_mode in {"Review", "IncrementalReview"}
+        if rejection_reason is None and tool_context.tool_state.terminal_publication_failed:
+            rejection_reason = "terminal_publication_failed"
+        if (
+            rejection_reason is None
+            and review_run
+            and tool_context.tool_state.terminal_submission is None
+        ):
+            rejection_reason = failure_reason or "no_accepted_model_verdict"
+        if (
+            pull_number is not None
+            and prepared is not None
+            and (review_run or tool_context.tool_state.review is not None)
+        ):
+            try:
+                await publish_deterministic_record(
+                    pull_number=int(pull_number),
+                    packet=prepared,
+                    rejection_reason=rejection_reason,
+                    tmpdir=tool_context.tmpdir,
+                    ctx=tool_context,
+                    run_outcome=outcome,
+                    verdict_diagnostic=verdict_diagnostic,
+                )
+            except Exception:
+                await report_status_checks(
+                    tool_context,
+                    run_succeeded=False,
+                    failure_reason="formal review record publication failed",
+                    conclusion="neutral",
+                    packet=prepared,
+                )
+                raise
+        await report_status_checks(
+            tool_context,
+            run_succeeded=run_ok,
+            failure_reason=failure_reason,
+            conclusion=RUN_OUTCOME_CONCLUSION[outcome],
+            packet=prepared,
+        )
         if prepared is not None:
             from mergecraft.utils.status_checks import _run_url
             from mergecraft.utils.step_summary import append_step_summary, render_step_summary

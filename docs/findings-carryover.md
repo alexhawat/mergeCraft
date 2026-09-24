@@ -64,8 +64,8 @@ which is what makes it safe on a trigger that can fire more than once.
 
 ## Open-PR finding ledger
 
-While a pull request is open, mergeCraft also keeps a **finding ledger** in the
-sticky progress comment (`## mergeCraft progress`). Each row is an HTML marker:
+While a pull request is open, mergeCraft keeps a **finding ledger** in its
+formal PR reviews. Each row is an HTML marker:
 
 `<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->`
 
@@ -74,8 +74,8 @@ States include `open`, `deferred`, `unpublished`, and `withdrawn` — findings
 that overflow the inline budget, miss the verification budget, or are dropped by
 the verifier before publication.
 
-The ledger survives ephemeral Action checkouts (GitHub-only persistence). Read
-it with:
+The ledger survives ephemeral Action checkouts. Review history is folded across
+runs, and legacy progress comments are read during migration. Read it with:
 
 ```bash
 mergecraft findings ledger --pr 161 --output-format json
