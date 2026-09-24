@@ -669,14 +669,34 @@ _APPROVAL_SHAPED_DIAGNOSTIC = "approved"
 # #775 — posture lines. G0 item 4 fixes the mapping: `inconclusive` is mergeCraft's
 # internal outcome (GitHub's check conclusion stays `neutral`, which it already is).
 # When no credentialed reviewer ran, the record may not read as an approval.
+# The note states no outcome: the reconciled `Outcome:` line is the only outcome
+# claim in the record (LG-D8), so `inconclusive` is not asserted here.
 _NO_CREDENTIALED_REVIEWER_NOTE = (
-    "no credentialed reviewer ran — the review is `inconclusive`; the analyzers "
-    "that ran and were withheld are listed above, and this record is not an approval"
+    "no credentialed reviewer ran; the analyzers that ran and were withheld are "
+    "listed above, and this record is not an approval"
 )
 _TERMINAL_REQUEST_CHANGES_NOTE = (
-    "the reviewer's terminal verdict was `request_changes` — the review is "
-    "`inconclusive`; this record is not an approval"
+    "the reviewer's terminal verdict was `request_changes`; this record is not an approval"
 )
+
+
+def _credential_gap_with_verdict_note(model: str) -> str:
+    """Name the skipped roster slot(s) and the model behind a recorded verdict.
+
+    Rendered when a roster reviewer slot was skipped for missing credentials
+    **and** a typed terminal verdict was recorded: the record may not claim no
+    reviewer ran, so it names the producer of the verdict instead (LG-D7). The
+    note states no outcome — the reconciled ``Outcome:`` line is the only outcome
+    claim (LG-D8) — and keeps the not-an-approval posture.
+    """
+    if model:
+        producer = f"the recorded terminal verdict was produced by `{model}`"
+    else:
+        producer = "the recorded terminal verdict was produced by a model not recorded here"
+    return (
+        "the roster reviewer slot(s) above were skipped for missing credentials and "
+        f"{producer}; this record is not an approval"
+    )
 
 
 def _record_value(value: Any) -> str:
@@ -704,6 +724,18 @@ def _terminal_request_changes(packet: Any, decision: Any) -> bool:
         return True
     reason = str(getattr(decision, "reason", "") or "").lower()
     return "request_changes" in reason
+
+
+def _typed_terminal_verdict(packet: Any) -> str:
+    """Return the typed terminal verdict recorded on the packet (empty when unset).
+
+    ``_terminal_request_changes`` also honours the decision reason as a fallback,
+    but the reason is a derived summary. The record may only say "no credentialed
+    reviewer ran" when **no** typed terminal verdict was recorded (LG-D7), so the
+    renderer keys that distinction on the authoritative typed field, not the
+    reason.
+    """
+    return _record_value(getattr(packet, "agent_terminal_verdict", None)).strip()
 
 
 def record_is_not_an_approval(
@@ -797,6 +829,7 @@ def render_deterministic_review_block(
     # reconciliation never hides a real failure.
     credential_gap = _credential_gap_present(credential_degradations)
     terminal_request_changes = _terminal_request_changes(packet, decision)
+    typed_terminal_verdict = _typed_terminal_verdict(packet)
     not_an_approval = record_is_not_an_approval(
         packet=packet, credential_degradations=credential_degradations
     )
@@ -874,7 +907,16 @@ def render_deterministic_review_block(
         )
 
     pre_merge_lines = ["", "### Pre-merge checks", ""]
-    if credential_gap:
+    if credential_gap and typed_terminal_verdict:
+        # LG-D7 — a reviewer ran and recorded a typed verdict; the record names
+        # the skipped roster slot(s) (the `Credential gap` lines below name them)
+        # and the model that produced the verdict, and states no outcome (LG-D8).
+        # Keyed on the typed verdict, not the decision-reason fallback: only a
+        # recorded typed verdict proves a reviewer ran.
+        pre_merge_lines.append(
+            f"- **Review integrity:** {_credential_gap_with_verdict_note(model)}"
+        )
+    elif credential_gap:
         pre_merge_lines.append(f"- **Review integrity:** {_NO_CREDENTIALED_REVIEWER_NOTE}")
     elif terminal_request_changes:
         pre_merge_lines.append(f"- **Review integrity:** {_TERMINAL_REQUEST_CHANGES_NOTE}")
