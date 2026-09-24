@@ -40,3 +40,16 @@ def _restore_network_env() -> Iterator[None]:
             os.environ.pop(name, None)
         else:
             os.environ[name] = value
+
+
+@pytest.fixture(autouse=True)
+def _enable_recording_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enable the test-only OTLP span recorder for this suite.
+
+    ``tracing/exporters.py`` gates ``_RecordingSpanProcessor`` behind a module
+    switch that is off in production; the enterprise telemetry tests are a
+    consumer of that recorder, so it is on here.
+    """
+    from mergecraft.tracing import exporters
+
+    monkeypatch.setattr(exporters, "_RECORDING_SEAM_ENABLED", True, raising=False)
