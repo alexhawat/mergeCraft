@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
@@ -20,6 +22,15 @@ if TYPE_CHECKING:
     from mergecraft.types import AgentId
 
 MAX_STDERR_LINES = 20
+# AR-D3 — the concurrent stderr drain keeps at most this many lines (tail-kept,
+# oldest dropped). 2,000 is well above the 20-line diagnostic tail the drivers
+# log and what ``is_retryable_cli_failure`` scans, while bounding memory on a
+# child that floods stderr.
+STDERR_DRAIN_MAX_LINES = 2000
+# Bounded wait for the drain reader after the child (or its group) is gone. The
+# pipe reaches EOF promptly once the process exits; a grandchild holding it open
+# must not stall the driver, so the join is always bounded.
+STDERR_DRAIN_JOIN_TIMEOUT_S = 5.0
 MAX_POST_RUN_RETRIES = 3
 
 
@@ -81,6 +92,69 @@ def spawn_agent_cli(
         bufsize=1,
         start_new_session=True,
     )
+
+
+@dataclass(slots=True)
+class StderrDrain:
+    """Handle for a concurrent, bounded stderr reader (AR-D2 / AR-D3).
+
+    Returned by :func:`start_stderr_drain`. :meth:`join` waits for the reader
+    thread (optionally bounded); :meth:`text` returns the buffered tail — the
+    oldest lines are dropped once ``max_lines`` is exceeded.
+    """
+
+    _thread: threading.Thread
+    _lines: deque[str]
+
+    def join(self, timeout: float | None = None) -> None:
+        """Wait up to ``timeout`` seconds for the reader thread to finish."""
+        self._thread.join(timeout)
+
+    def text(self) -> str:
+        """Return the drained stderr tail as one string (may be empty)."""
+        return "".join(self._lines)
+
+
+def start_stderr_drain(stream: Any, *, max_lines: int = STDERR_DRAIN_MAX_LINES) -> StderrDrain:
+    """Drain a child's ``stderr`` on a daemon thread from spawn (AR-D2).
+
+    P4: a driver that reads stdout to EOF before touching stderr deadlocks a
+    child that fills the platform pipe buffer in ``write()``. The fix is to
+    *read* stderr concurrently — a deadline is not a drain. Callers start this
+    before ``consume_stream`` and collect :meth:`StderrDrain.text` after the
+    wait; the pipes stay separate so the stdout stream-json parse is untouched.
+
+    The buffer is bounded and tail-kept (AR-D3): at most ``max_lines`` lines
+    survive, oldest dropped, so a flood cannot grow memory without limit. The
+    reader tolerates a pipe closed mid-read (the thread ends, keeping what it
+    read) and accepts both ``readline``-capable streams (real pipes,
+    ``io.StringIO``) and ``read``-only fakes.
+    """
+    lines: deque[str] = deque(maxlen=max_lines)
+    readline: Any = getattr(stream, "readline", None)
+    read: Any = getattr(stream, "read", None)
+
+    def _pump() -> None:
+        try:
+            if readline is not None:
+                while True:
+                    line = readline()
+                    if not line:
+                        break
+                    lines.append(str(line))
+                return
+            if read is not None:
+                text = str(read() or "")
+                lines.extend(text.splitlines(keepends=True))
+        except Exception as exc:
+            # A pipe closed under us (or an exhausted fake) ends the drain; the
+            # lines already read stay in the buffer. Never re-raised: the drain
+            # must not outlive the process group as a crash.
+            logger.debug("agent stderr drain stopped early: {}", exc)
+
+    thread = threading.Thread(target=_pump, name="agent-stderr-drain", daemon=True)
+    thread.start()
+    return StderrDrain(_thread=thread, _lines=lines)
 
 
 def get_git_status(cwd: str | None = None) -> str:
