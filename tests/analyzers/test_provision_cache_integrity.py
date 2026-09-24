@@ -148,6 +148,237 @@ def test_cache_without_a_receipt_is_reprovisioned(tmp_path: Path, fake_download:
     assert len(fake_download) == 2
 
 
+def test_committed_receipt_without_the_pin_binding_is_not_a_cache_hit(
+    tmp_path: Path, fake_download: list[str]
+) -> None:
+    """A binary plus a matching single-digest receipt does not authenticate itself.
+
+    The receipt the checkout can carry proves only that *some* binary was once
+    installed under this key. A genuine receipt binds the archive pin and the
+    extracted-binary digest together, so a legacy single-digest sidecar is a
+    miss and the entry is re-provisioned from the pin.
+    """
+    provision = import_module("mergecraft.analyzers.provision")
+    cache_root = provision._cache_path(tmp_path / "cache", "faketool", _PLATFORM, _PAYLOAD_SHA)
+    cache_root.mkdir(parents=True)
+    (cache_root / "faketool").write_bytes(_PAYLOAD)
+    (cache_root / provision.RECEIPT_NAME).write_text(f"{_PAYLOAD_SHA}\n", encoding="utf-8")
+
+    result = _provision(tmp_path / "cache")
+
+    assert result.source == "download"
+    assert fake_download == ["https://example.invalid/faketool"]
+
+
+def test_lock_row_does_not_authenticate_a_checkout_placed_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lock row whose digest matches a committed binary is a record, not a voucher.
+
+    Both sides of the old comparison came from the checkout, so a PR could
+    commit a binary and the lock row that blessed it. Resolution must go back
+    to the pin instead of executing the committed file.
+    """
+    provision = import_module("mergecraft.analyzers.provision")
+    lockfile = import_module("mergecraft.analyzers.lockfile")
+    manifest = _manifest()
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
+    attacker = b"#!/bin/sh\necho attacker 9.9.9\n"
+    cache_file = (
+        provision._cache_path(cache_dir, manifest.id, _PLATFORM, _PAYLOAD_SHA) / manifest.command[0]
+    )
+    cache_file.parent.mkdir(parents=True)
+    cache_file.write_bytes(attacker)
+    lock_path = repo_root / ".mergecraft" / "analyzers.lock"
+    lockfile.write_lock(
+        lock_path,
+        [
+            lockfile.LockEntry(
+                tool_id=manifest.id,
+                version=manifest.version,
+                mode="managed",
+                source="cache",
+                sha256=hashlib.sha256(attacker).hexdigest(),
+            )
+        ],
+    )
+    provisioned: list[str] = []
+
+    def _fake_provision(**_kwargs: Any) -> Any:
+        provisioned.append("provision")
+        return provision.ProvisionResult(
+            resolved_path=tmp_path / "pinned" / manifest.command[0],
+            sha256=_PAYLOAD_SHA,
+            version=manifest.version,
+            source="download",
+        )
+
+    monkeypatch.setattr(provision, "provision_managed_binary", _fake_provision)
+
+    result = provision.resolve_with_lock(
+        manifest=manifest, lock_path=lock_path, cache_dir=cache_dir, platform=_PLATFORM
+    )
+
+    assert provisioned == ["provision"], "the checkout lock must not satisfy resolution"
+    assert result.resolved_path != cache_file
+    assert result.sha256 != hashlib.sha256(attacker).hexdigest()
+
+
+def test_managed_cache_directory_is_outside_the_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The managed binary cache must not live in the tree under review."""
+    execution = import_module("mergecraft.analyzers.execution")
+    provision = import_module("mergecraft.analyzers.provision")
+    resolve = import_module("mergecraft.analyzers.resolve")
+    monkeypatch.delenv("MERGECRAFT_ANALYZERS", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    cache_home = tmp_path / "xdg-cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    captured: dict[str, Path] = {}
+
+    def _fake_resolve_with_lock(
+        *, manifest: Any, lock_path: Path, cache_dir: Path, platform: str
+    ) -> Any:
+        _ = (manifest, platform)
+        captured["cache_dir"] = Path(cache_dir)
+        captured["lock_path"] = Path(lock_path)
+        return provision.ProvisionResult(
+            resolved_path=Path(cache_dir) / "faketool",
+            sha256=_PAYLOAD_SHA,
+            version="1.0.0",
+            source="download",
+        )
+
+    monkeypatch.setattr(execution, "resolve_with_lock", _fake_resolve_with_lock)
+    manifest = _manifest()
+    plan = resolve.AnalyzerPlan(
+        manifest_id=manifest.id, mode="managed", argv=tuple(manifest.command)
+    )
+
+    assert execution.provision_managed_argv(plan, manifest=manifest, repo_root=repo_root)
+
+    cache_dir = captured["cache_dir"].resolve()
+    assert repo_root.resolve() not in cache_dir.parents
+    assert cache_home.resolve() in cache_dir.parents
+    # The lock stays a checkout-side record even though the cache moved.
+    assert (
+        captured["lock_path"].resolve() == (repo_root / ".mergecraft" / "analyzers.lock").resolve()
+    )
+
+
+def test_semgrep_pip_cache_directory_is_outside_the_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Semgrep's pip install has no digest check, so its root must leave the checkout."""
+    execution = import_module("mergecraft.analyzers.execution")
+    pattern = import_module("mergecraft.analyzers.pattern")
+    registry = import_module("mergecraft.analyzers.registry")
+    resolve = import_module("mergecraft.analyzers.resolve")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    cache_home = tmp_path / "xdg-cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    captured: dict[str, Path] = {}
+
+    def _fake_provision_pip_script(
+        *, package: str, version: str, script: str, cache_dir: Path
+    ) -> Path:
+        _ = (package, version)
+        captured["cache_dir"] = Path(cache_dir)
+        fake_script = Path(cache_dir) / "bin" / script
+        fake_script.parent.mkdir(parents=True, exist_ok=True)
+        fake_script.write_text("#!/bin/sh\n", encoding="utf-8")
+        return fake_script
+
+    monkeypatch.setattr(pattern, "provision_pip_script", _fake_provision_pip_script)
+    manifest = registry.get_manifest("semgrep")
+    plan = resolve.AnalyzerPlan(
+        manifest_id=manifest.id, mode="managed", argv=tuple(manifest.command)
+    )
+
+    assert execution.provision_managed_argv(plan, manifest=manifest, repo_root=repo_root)
+
+    cache_dir = captured["cache_dir"].resolve()
+    assert repo_root.resolve() not in cache_dir.parents
+    assert cache_home.resolve() in cache_dir.parents
+
+
+def test_cache_root_inside_the_checkout_is_refused_with_a_named_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A trusted root that resolves inside the checkout is not trusted at all."""
+    execution = import_module("mergecraft.analyzers.execution")
+    provision = import_module("mergecraft.analyzers.provision")
+    resolve = import_module("mergecraft.analyzers.resolve")
+    monkeypatch.delenv("MERGECRAFT_ANALYZERS", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setenv("XDG_CACHE_HOME", str(repo_root / "xdg-cache"))
+    monkeypatch.setattr(execution, "provision_platform_key", lambda: _PLATFORM)
+
+    def _offline(url: str, dest: Path) -> None:
+        _ = (url, dest)
+        msg = "offline fixture"
+        raise provision.ProvisionError(msg)
+
+    monkeypatch.setattr(provision, "_download_pinned_url", _offline)
+    manifest = _manifest()
+    plan = resolve.AnalyzerPlan(
+        manifest_id=manifest.id, mode="managed", argv=tuple(manifest.command)
+    )
+
+    with pytest.raises(provision.ProvisionError) as exc_info:
+        execution.provision_managed_argv(plan, manifest=manifest, repo_root=repo_root)
+
+    message = str(exc_info.value)
+    assert str(repo_root) in message
+    assert "cache" in message.casefold()
+
+
+def test_refused_cache_root_surfaces_as_a_named_skip_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal reaches the run as a skip reason naming the tool and the cache."""
+    execution = import_module("mergecraft.analyzers.execution")
+    provision = import_module("mergecraft.analyzers.provision")
+    resolve = import_module("mergecraft.analyzers.resolve")
+    monkeypatch.delenv("MERGECRAFT_ANALYZERS", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.setenv("XDG_CACHE_HOME", str(repo_root / "xdg-cache"))
+    monkeypatch.setattr(execution, "provision_platform_key", lambda: _PLATFORM)
+
+    def _offline(url: str, dest: Path) -> None:
+        _ = (url, dest)
+        msg = "offline fixture"
+        raise provision.ProvisionError(msg)
+
+    monkeypatch.setattr(provision, "_download_pinned_url", _offline)
+    manifest = _manifest()
+    plan = resolve.AnalyzerPlan(
+        manifest_id=manifest.id, mode="managed", argv=tuple(manifest.command)
+    )
+    monkeypatch.setattr(execution, "resolve_analyzer", lambda **_kwargs: plan)
+
+    raw, reason, findings = execution.run_argv(
+        manifest=manifest,
+        repo_root=repo_root,
+        argv=plan.argv,
+        changed_files=[],
+        tier="trusted",
+    )
+
+    assert raw is None
+    assert findings == []
+    assert reason is not None
+    assert manifest.id in reason
+    assert "cache" in reason.casefold()
+
+
 def test_lock_resolution_reprovisions_a_mutated_cache(
     tmp_path: Path, fake_download: list[str]
 ) -> None:

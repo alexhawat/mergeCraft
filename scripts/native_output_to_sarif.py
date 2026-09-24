@@ -244,7 +244,7 @@ def _reject_trufflehog_scan_error(item: dict[str, object]) -> None:
     raise ConverterError(msg)
 
 
-def trufflehog_to_sarif(raw: str) -> SarifLog:
+def trufflehog_to_sarif(raw: str, *, repo_root: Path | None = None) -> SarifLog:
     """Convert TruffleHog ``-j`` JSONL into SARIF.
 
     Empty stdout (or only progress logs) is a real clean scan: emit a valid
@@ -253,6 +253,10 @@ def trufflehog_to_sarif(raw: str) -> SarifLog:
     exits 0 after a per-file scan failure, so a skipped file would otherwise
     be reported clean. Finding ``Raw`` / ``RawV2`` values never enter the
     SARIF message — only detector name, path, and line.
+
+    ``repo_root`` maps a native (often absolute host-runner) path to a
+    repo-relative URI so a consumer can anchor the finding. With no root there
+    is nothing to resolve against, so the reported path is kept verbatim.
     """
     results: list[SarifResult] = []
     for line in raw.splitlines():
@@ -272,7 +276,7 @@ def trufflehog_to_sarif(raw: str) -> SarifLog:
         metadata = parsed.get("SourceMetadata") or {}
         if not isinstance(metadata, dict):
             metadata = {}
-        path = path_from_metadata(metadata, repo_root=None)
+        path = path_from_metadata(metadata, repo_root=repo_root)
         try:
             start = require_line(line_from_metadata(metadata), default=1)
         except ValueError as exc:

@@ -37,6 +37,9 @@ _CONFIDENCE_ALIASES: dict[str, str] = {
     "unverified": "possible",
 }
 
+# Evidence label for a SARIF URI that cannot be mapped into the repository root.
+OUTSIDE_REPO_ROOT_LABEL = "outside repository root"
+
 
 def taxonomy_category(manifest: AnalyzerManifest) -> str:
     """Map manifest category shorthand to a review_taxonomy category."""
@@ -78,30 +81,63 @@ def resolve_repo_relative_path(
     uri_base_id: str | None = None,
 ) -> str:
     """Resolve SARIF artifactLocation URIs to repo-relative paths."""
+    path, _outside = resolve_path_and_origin(uri, repo_root=repo_root, uri_base_id=uri_base_id)
+    return path
+
+
+def resolve_path_and_origin(
+    uri: str,
+    *,
+    repo_root: Path | None = None,
+    uri_base_id: str | None = None,
+) -> tuple[str, bool]:
+    """Resolve a SARIF URI to ``(path, outside_repo_root)``.
+
+    A URI that maps into ``repo_root`` becomes repo-relative and reports
+    ``False``. A URI outside the root — whether a ``file://`` URL or a bare
+    absolute path — keeps its original form and reports ``True``. It is never
+    shortened to a basename: the basename of an out-of-root path can name a
+    real, unrelated file at the repo root, so a shortened path looks like an
+    answer that cannot be anchored. A ``%SRCROOT%`` URI that escapes the root
+    stays a rejection whose error names the URI (fail-closed).
+    """
     cleaned = uri.strip()
     if cleaned.startswith("file://"):
         parsed = urlparse(cleaned)
         path = unquote(parsed.path)
         if repo_root is not None:
-            try:
-                return Path(path).resolve().relative_to(repo_root.resolve()).as_posix()
-            except ValueError:
-                return Path(path).name
-        return path.lstrip("/")
+            relative = _relative_to_root(Path(path), repo_root)
+            if relative is not None:
+                return relative, False
+            return cleaned, True
+        return path.lstrip("/"), False
 
     path_obj = Path(cleaned)
     if repo_root is not None and path_obj.is_absolute():
-        try:
-            return path_obj.resolve().relative_to(repo_root.resolve()).as_posix()
-        except ValueError:
-            pass
+        relative = _relative_to_root(path_obj, repo_root)
+        if relative is not None:
+            return relative, False
+        return cleaned, True
 
     if uri_base_id in {"%SRCROOT%", "SRCROOT"} and repo_root is not None:
-        return (repo_root / cleaned).resolve().relative_to(repo_root.resolve()).as_posix()
+        try:
+            resolved = (repo_root / cleaned).resolve().relative_to(repo_root.resolve())
+        except ValueError:
+            msg = f"SARIF URI {cleaned!r} (uriBaseId {uri_base_id!r}) escapes the repository root"
+            raise ValueError(msg) from None
+        return resolved.as_posix(), False
 
     if cleaned.startswith("./"):
-        return cleaned[2:]
-    return cleaned
+        return cleaned[2:], False
+    return cleaned, False
+
+
+def _relative_to_root(path: Path, repo_root: Path) -> str | None:
+    """Return ``path`` relative to ``repo_root``, or ``None`` when it escapes."""
+    try:
+        return path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        return None
 
 
 def load_json(raw: str) -> object:

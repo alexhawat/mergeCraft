@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -66,3 +67,115 @@ def test_export_round_trips_to_valid_sarif() -> None:
     )
     exported = sarif_mod.export_sarif([sample])
     sarif_mod.validate_sarif_document(exported)
+
+
+# --------------------------------------------------------------------------- #
+# A URI that cannot be mapped into the repo must be labelled as such, never
+# shortened into a plausible-looking file that happens to exist at the root.
+# --------------------------------------------------------------------------- #
+
+_OUTSIDE_LABEL = "outside repository root"
+_ACTIONLINT_MANIFEST = Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
+
+
+def _sarif_document(uri: str, *, uri_base_id: str | None = None) -> str:
+    artifact: dict[str, str] = {"uri": uri}
+    if uri_base_id is not None:
+        artifact["uriBaseId"] = uri_base_id
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "actionlint"}},
+                    "results": [
+                        {
+                            "ruleId": "syntax-check",
+                            "level": "warning",
+                            "message": {"text": "outside-root fixture"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": artifact,
+                                        "region": {"startLine": 3},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def _actionlint_manifest() -> object:
+    manifest = import_module("mergecraft.analyzers.manifest")
+    return manifest.load_manifest_file(_ACTIONLINT_MANIFEST)
+
+
+def test_file_uri_outside_the_root_is_not_shortened_to_a_basename(tmp_path: Path) -> None:
+    """The basename of an out-of-root ``file://`` can be a real, unrelated file."""
+    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "README").write_text("a real file at the repo root\n", encoding="utf-8")
+
+    findings = sarif.parse_sarif(
+        _sarif_document("file:///etc/README"),
+        manifest=_actionlint_manifest(),
+        repo_root=repo_root,
+    )
+
+    assert findings[0].path != "README"
+    assert any(_OUTSIDE_LABEL in line for line in findings[0].evidence)
+
+
+def test_bare_absolute_path_outside_the_root_keeps_its_path_and_is_labelled(
+    tmp_path: Path,
+) -> None:
+    """A runner path is kept verbatim and labelled, never stripped of its prefix."""
+    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    uri = "/home/runner/work/mergeCraft/mergeCraft/README"
+
+    findings = sarif.parse_sarif(
+        _sarif_document(uri), manifest=_actionlint_manifest(), repo_root=repo_root
+    )
+
+    assert findings[0].path == uri
+    assert any(_OUTSIDE_LABEL in line for line in findings[0].evidence)
+
+
+def test_srcroot_escape_error_names_the_uri(tmp_path: Path) -> None:
+    """The rejection is correct; the message must say which URI caused it."""
+    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    with pytest.raises(ValueError, match=r"passwd") as exc_info:
+        sarif.parse_sarif(
+            _sarif_document("../../etc/passwd", uri_base_id="%SRCROOT%"),
+            manifest=_actionlint_manifest(),
+            repo_root=repo_root,
+        )
+
+    assert "../../etc/passwd" in str(exc_info.value)
+
+
+def test_file_uri_inside_the_root_still_resolves_repo_relative(tmp_path: Path) -> None:
+    """A path that does map into the repo keeps resolving to its relative form."""
+    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    repo_root = tmp_path / "repo"
+    target = repo_root / "src" / "app.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("x = 1\n", encoding="utf-8")
+
+    findings = sarif.parse_sarif(
+        _sarif_document(f"file://{target}"),
+        manifest=_actionlint_manifest(),
+        repo_root=repo_root,
+    )
+
+    assert findings[0].path == "src/app.py"

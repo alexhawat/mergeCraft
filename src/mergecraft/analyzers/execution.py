@@ -85,6 +85,31 @@ def provision_platform_key() -> str:
     return "linux-amd64"
 
 
+def trusted_analyzer_cache_dir(repo_root: Path) -> Path:
+    """Return the managed-analyzer cache root, outside the tree under review.
+
+    The cache lives under the operator's user cache directory — ``$XDG_CACHE_HOME``
+    (else ``~/.cache``) plus ``mergecraft/analyzer-cache``, the same root
+    ``analyzers/impact.py`` uses for ast-grep — never under ``repo_root``. A cache
+    the reviewed tree can write is a cache that tree can poison: it could commit a
+    binary, a lock row and a receipt, and the fast path would run the committed
+    file.
+
+    A root that resolves inside ``repo_root`` is refused with a named reason rather
+    than used, so the failure reaches the run as a skip instead of an execution.
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    cache_dir = (Path(base) / "mergecraft" / "analyzer-cache").resolve()
+    resolved_repo = repo_root.resolve()
+    if cache_dir == resolved_repo or resolved_repo in cache_dir.parents:
+        msg = (
+            f"refusing to provision analyzers from an untrusted cache root: "
+            f"cache directory {cache_dir} resolves inside the checkout {repo_root}"
+        )
+        raise ProvisionError(msg)
+    return cache_dir
+
+
 def finalize_plan(
     plan: AnalyzerPlan,
     *,
@@ -145,7 +170,7 @@ def provision_managed_argv(
     if manifest.id == "semgrep":
         from mergecraft.analyzers.pattern import provision_pip_script
 
-        cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
+        cache_dir = trusted_analyzer_cache_dir(repo_root)
         try:
             script = provision_pip_script(
                 package="semgrep",
@@ -177,7 +202,7 @@ def provision_managed_argv(
         return replace(plan, argv=tuple(argv))
 
     platform_key = provision_platform_key()
-    cache_dir = repo_root / ".mergecraft" / "analyzer-cache"
+    cache_dir = trusted_analyzer_cache_dir(repo_root)
     lock_path = repo_root / ".mergecraft" / "analyzers.lock"
     for attempt in range(1, _PROVISION_MAX_ATTEMPTS + 1):
         try:
@@ -291,4 +316,5 @@ __all__ = [
     "provision_resolved_plan",
     "provisioning_failure_reason",
     "run_argv",
+    "trusted_analyzer_cache_dir",
 ]
