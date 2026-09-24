@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-class OpenCode integration under `integrations/opencode/`: `/mergecraft/*`
+  slash commands for six review engines (native, cli, deep, mcp, quick,
+  thirdparty), a read-only `mergecraft/reviewer` subagent, a `mergecraft/fixer`
+  subagent for the review-only loop, and an `opencode.jsonc` template. The
+  generated `skills/opencode/mergecraft/SKILL.md` now carries an
+  OpenCode-specific install section instead of the generic body. A companion
+  change adds the plugin, `mergecraft opencode install`, and JEV/Logfire wiring.
+
+- `docs/opencode.md` documents the integration: engine selection, commands,
+  subagents, V2 MCP wiring, JEV scope, and Logfire tracing.
+
+### Changed
+
+- `docs/mcp.md` OpenCode install now shows the OpenCode V2 shape — servers nested
+  under `mcp.servers` with `disabled`, not the V1 top-level `mcp` map with
+  `enabled` — and includes the `opencode mcp add` one-liner.
+
+- `skills/harnesses.yaml` OpenCode row gains an `install_section` covering
+  commands, subagents, MCP, and JEV/Logfire, so the generated package matches the
+  install path OpenCode actually reads (`.opencode/skills/`).
+
 - `mergecraft eval publish-benchmark` validates two saved provider runs against
   an approved campaign manifest, independently adjudicated label and judge
   receipts, immutable artifact and model identities, shared protocol pins, and
@@ -205,6 +226,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   provider only when a test fixture enables it, never from an environment
   variable, its payload list is bounded, and the module-level header copy masks
   sensitive values instead of keeping a bearer token in a global.
+
+- The sticky progress comment keeps the finding ledger and the learnings delta
+  across the final deterministic-record write, so a later run hydrates every
+  prior record instead of losing it. A later run reuses the existing progress
+  comment rather than posting a second one, and only bot-authored comments are
+  read as progress state. The run record names the reviewer slot skipped for
+  missing credentials and the model that produced the recorded verdict, instead
+  of claiming no reviewer ran.
 
 - Managed analyzer caches and the semgrep pip install now live under the
   operator's cache directory (`$XDG_CACHE_HOME`, else `~/.cache`, plus
