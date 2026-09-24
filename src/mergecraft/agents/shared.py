@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.types import AgentId
 
-MAX_STDERR_LINES = 20
 MAX_POST_RUN_RETRIES = 3
 
 
