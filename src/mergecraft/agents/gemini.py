@@ -59,6 +59,22 @@ if TYPE_CHECKING:
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 GOOGLE_GENERATIVE_AI_API_KEY_ENV = "GOOGLE_GENERATIVE_AI_API_KEY"
 
+# S7 / AR-D16 — the Gemini sibling of the Claude deny list. Every production
+# mode is non-committing, so the reviewer never needs Gemini's *built-in*
+# write, shell or web tools; they are excluded unconditionally via the
+# top-level ``excludeTools`` in the written settings (it feeds
+# ``Config.excludeTools`` -> ``getExcludeTools``). ``-y`` below removes the
+# interactive prompt in headless CI, so this exclusion list is the boundary.
+# AR0 recorded these names against the pinned Gemini CLI (0.53.0 local /
+# 0.59.0 Docker).
+GEMINI_BUILTIN_DENIED_TOOLS = (
+    "write_file",
+    "replace",
+    "run_shell_command",
+    "web_fetch",
+    "google_web_search",
+)
+
 
 def _strip_provider_prefix(specifier: str) -> str:
     slash = specifier.find("/")
@@ -138,6 +154,10 @@ def write_mcp_config(
         "context": {
             "fileName": "GEMINI.md",
         },
+        # S7 / AR-D16 — the top-level ``excludeTools`` covers Gemini's built-in
+        # tools. The per-MCP-server ``excludeTools`` above only filters that
+        # server's MCP tools, so the built-ins must be named here.
+        "excludeTools": list(GEMINI_BUILTIN_DENIED_TOOLS),
     }
     config_path = gemini_home / "settings.json"
     config_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
