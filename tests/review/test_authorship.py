@@ -8,8 +8,15 @@ leave a PR review can paste it. mergeCraft authorship is the marker **and** an
 author login in the run's expected-publisher set:
 
 * the configured reviewer App's bot login (``<app-slug>[bot]``);
-* ``github-actions[bot]`` only when job-token publication is enabled;
 * a PAT's login (``GET /user``) only when the run publishes with a PAT.
+
+The shared Actions job bot (``github-actions[bot]``) is **never** accepted: any
+same-repo collaborator with workflow permissions can post a marker-bearing
+review as that login, so a forged ``commit_id`` could become the checkpoint and
+the next incremental review would diff *from* it. A run whose only candidate is
+the shared bot therefore publishes no attributable identity at all — the set is
+empty (fail-closed) and the withholding is warned once, naming the identity and
+the App/PAT remedy.
 
 A lookup failure drops that login from the set; it never widens the match.
 
@@ -44,8 +51,15 @@ def _expected_publishers(ctx: ToolContext) -> frozenset[str]:
 class _StubScm:
     """Records ``get`` calls and answers (or raises) on demand."""
 
-    def __init__(self, *, app_response: Any = None, fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        app_response: Any = None,
+        user_response: Any = None,
+        fail: bool = False,
+    ) -> None:
         self._app_response = app_response
+        self._user_response = user_response
         self._fail = fail
         self.get_calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -56,13 +70,15 @@ class _StubScm:
             raise RuntimeError(msg)
         if path.rstrip("/").endswith("/app"):
             return self._app_response
+        if path.rstrip("/").endswith("/user"):
+            return self._user_response
         return None
 
     async def aclose(self) -> None:
         return None
 
 
-def _ctx(scm: _StubScm) -> ToolContext:
+def _ctx(scm: _StubScm, *, token: str = "") -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=".")
     return ToolContext(
         agent_id="claude",
@@ -70,7 +86,29 @@ def _ctx(scm: _StubScm) -> ToolContext:
         payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request_synchronize")),
         scm=scm,  # type: ignore[arg-type]
         tool_state=state,
+        github_installation_token=token,
     )
+
+
+@pytest.fixture(autouse=True)
+def _clean_authorship_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every case hermetic: the authorship rule reads the process env."""
+    for name in (
+        "MERGECRAFT_REVIEWER_BOT_LOGIN",
+        "GITHUB_APP_ID",
+        "GITHUB_APP_PRIVATE_KEY",
+        "INPUT_TOKEN",
+        "GITHUB_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _capture_loguru_warnings() -> tuple[list[str], int]:
+    from loguru import logger as loguru_logger
+
+    captured: list[str] = []
+    sink_id = loguru_logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
+    return captured, sink_id
 
 
 # ── is_mergecraft_authored: marker AND publisher ─────────────────────────────
@@ -183,3 +221,135 @@ async def test_failed_lookup_from_a_running_loop_never_widens() -> None:
     assert isinstance(publishers, frozenset)
     marker = {"body": _MERGECRAFT_BODY, "user": {"login": "mergecraft[bot]", "type": "Bot"}}
     assert _is_authored(marker, publishers) is False
+
+
+# ── The shared Actions job bot is never accepted (fail-closed, P-6/P-8) ──────
+#
+# ``github-actions[bot]`` is a shared identity, not an App identity: any
+# same-repo collaborator with workflow permissions can add a ``pull_request``
+# workflow on their branch that posts a marker-bearing review as that login,
+# moving the checkpoint to a commit of their choosing. The declared login and
+# the publication token are therefore *withheld*, and a run with no App and no
+# PAT resolves to the empty set and says so once at ``warning`` — never a silent
+# empty set, never a trusted job bot.
+
+_APP_BOT_BODY = "### Review\n\n---\n*via mergecraft*"
+
+
+def test_declared_github_actions_bot_login_is_withheld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The no-App workflow's declared shared login is withdrawn, not added."""
+    from mergecraft.review.authorship import GITHUB_ACTIONS_BOT_LOGIN
+
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", GITHUB_ACTIONS_BOT_LOGIN)
+    publishers = _expected_publishers(_ctx(_StubScm(app_response=None)))
+
+    assert publishers == frozenset()
+    assert GITHUB_ACTIONS_BOT_LOGIN not in publishers
+
+
+@pytest.mark.parametrize("declared", ["github-actions[bot]", "GitHub-Actions[Bot]"])
+def test_withheld_shared_bot_login_is_matched_case_insensitively(
+    declared: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The withholding cannot be bypassed by a case variant of the login."""
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", declared)
+    publishers = _expected_publishers(_ctx(_StubScm(app_response=None)))
+
+    assert publishers == frozenset()
+
+
+def test_declared_app_bot_login_is_still_added(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real App bot login declared by the review step remains a publisher."""
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "myapp[bot]")
+    publishers = _expected_publishers(_ctx(_StubScm(app_response=None)))
+
+    assert publishers == frozenset({"myapp[bot]"})
+
+
+def test_declared_shared_bot_does_not_suppress_a_real_app_login(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard — with an App present the withheld login must not empty the set."""
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "github-actions[bot]")
+    publishers = _expected_publishers(_ctx(_StubScm(app_response={"slug": "mergecraft"})))
+
+    assert "mergecraft[bot]" in publishers
+
+
+def test_job_token_publication_adds_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Actions job token is indistinguishable from another workflow's."""
+    monkeypatch.setenv("INPUT_TOKEN", "job-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "job-token")
+    publishers = _expected_publishers(_ctx(_StubScm(app_response=None), token="job-token"))
+
+    assert publishers == frozenset()
+
+
+def test_pat_publication_adds_the_viewer_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller PAT answers ``GET /user``, so its login is a publisher."""
+    monkeypatch.delenv("INPUT_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    publishers = _expected_publishers(
+        _ctx(
+            _StubScm(app_response=None, user_response={"login": "mergecraft-ci"}),
+            token="pat-token",
+        )
+    )
+
+    assert publishers == frozenset({"mergecraft-ci"})
+
+
+def test_withheld_shared_bot_warns_once_naming_the_identity_and_remedy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P-8 — an empty set is stated once, naming the identity and the remedy."""
+    from loguru import logger as loguru_logger
+
+    from mergecraft.review.authorship import GITHUB_ACTIONS_BOT_LOGIN
+
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", GITHUB_ACTIONS_BOT_LOGIN)
+    captured, sink_id = _capture_loguru_warnings()
+    try:
+        publishers = _expected_publishers(_ctx(_StubScm(app_response=None)))
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert publishers == frozenset()
+    assert len(captured) == 1
+    message = captured[0]
+    assert GITHUB_ACTIONS_BOT_LOGIN in message
+    assert "Incremental checkpoints" in message
+    assert "reviewer App" in message or "PAT" in message
+
+
+def test_job_token_withholding_warns_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P-8 — the withheld job-token provenance is also announced, once."""
+    from loguru import logger as loguru_logger
+
+    monkeypatch.setenv("INPUT_TOKEN", "job-token")
+    captured, sink_id = _capture_loguru_warnings()
+    try:
+        publishers = _expected_publishers(_ctx(_StubScm(app_response=None), token="job-token"))
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert publishers == frozenset()
+    assert len(captured) == 1
+    assert "github-actions[bot]" in captured[0]
+
+
+def test_is_mergecraft_authored_refuses_the_job_bot_on_a_job_token_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job-token run cannot claim authorship: the marker alone proves nothing."""
+    monkeypatch.setenv("INPUT_TOKEN", "job-token")
+    publishers = _expected_publishers(_ctx(_StubScm(app_response=None), token="job-token"))
+
+    forged = {
+        "body": _APP_BOT_BODY,
+        "user": {"login": "github-actions[bot]", "type": "Bot"},
+    }
+    assert publishers == frozenset()
+    assert _is_authored(forged, publishers) is False

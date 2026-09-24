@@ -10,18 +10,22 @@ known to publish as:
 * the configured reviewer App's bot login (``<app-slug>[bot]``) — read from
   ``GET /app`` and, inside the Action, from the ``MERGECRAFT_REVIEWER_BOT_LOGIN``
   the review step declares;
-* ``github-actions[bot]`` **only** when the run publishes with the Actions job
-  token;
 * a caller PAT's login (``GET /user``) **only** when the run publishes with a
   PAT.
 
+The shared Actions job bot (``github-actions[bot]``) is **never** accepted. It is
+a shared identity, not an App identity: any same-repo collaborator with workflow
+permissions can add a ``pull_request`` workflow on their branch that posts a
+marker-bearing review as that login, moving the checkpoint to a commit of their
+choosing. No marker, run id, or header can distinguish that forged review from a
+real one, so job-token publication proves **nothing**. A run with no App and no
+PAT therefore publishes no attributable identity at all: the expected-publisher
+set is empty (fail-closed, P-6) and the withholding is stated once at ``warning``
+naming the identity and the consequence (P-8). Configure the reviewer App or a
+PAT to restore incremental checkpoints.
+
 The set is built once per run and cached on the context. A lookup failure drops
 that login; it never widens the match (P-6).
-
-Residual (recorded, not fixed — P-17): in job-token mode a same-repo
-collaborator can add a ``pull_request`` workflow on their branch that posts a
-marked review as ``github-actions[bot]`` and moves the checkpoint. Runs
-published by the reviewer App close this.
 """
 
 from __future__ import annotations
@@ -51,10 +55,9 @@ __all__ = [
 # body was suppressed — at least one finding marker.
 MERGECRAFT_REVIEW_MARKERS: tuple[str, ...] = ("*via mergecraft*", "mergecraft-finding:v1:")
 
-# The login the Actions job token publishes as. ``mergecraft.yml`` sets
-# ``MERGECRAFT_REVIEWER_BOT_LOGIN`` to this string exactly in the no-App
-# fallback, so a set built with it trusts the job bot only when the job token
-# was the publisher.
+# The login the Actions job token publishes as. It is a **shared** identity that
+# any same-repo collaborator can forge, so it is never added to the
+# expected-publisher set; it is named only in the withheld-reason warning.
 GITHUB_ACTIONS_BOT_LOGIN = "github-actions[bot]"
 
 
@@ -106,26 +109,39 @@ def expected_publisher_logins(ctx: ToolContext) -> frozenset[str]:
 
 
 def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
-    """Resolve the expected-publisher set, dropping every failed lookup."""
+    """Resolve the expected-publisher set, dropping every failed lookup.
+
+    Only an App or PAT publisher proves mergeCraft authorship. The shared
+    Actions job bot is withheld — never added from the declared login or from
+    the publication token — so a run that publishes as it yields an empty set,
+    warned once with the reason (P-8).
+    """
     logins: set[str] = set()
+    job_bot_only = False
 
     # (1) The reviewer App's bot login. ``mergecraft.yml`` declares it in
-    # ``MERGECRAFT_REVIEWER_BOT_LOGIN`` (``<app-slug>[bot]``, or
-    # ``github-actions[bot]`` when no App minted); a client authenticated with
-    # the App JWT can instead read it from ``GET /app``. Both are authorities
-    # the PR cannot write.
+    # ``MERGECRAFT_REVIEWER_BOT_LOGIN`` (``<app-slug>[bot]``, or an empty string
+    # when no App minted); a client authenticated with the App JWT can instead
+    # read it from ``GET /app``. Both are authorities the PR cannot write — as
+    # long as the declared login is not the shared job bot itself.
     declared = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
     if declared:
-        logins.add(declared)
+        if declared.casefold() == GITHUB_ACTIONS_BOT_LOGIN:
+            # A no-App workflow historically declared the shared job bot here.
+            # It is not an app identity, so it is withheld, never trusted.
+            job_bot_only = True
+        else:
+            logins.add(declared)
     app_slug = _app_bot_slug(ctx)
     if app_slug:
         logins.add(f"{app_slug}[bot]")
 
     # (2) With no App declared, the publication token names the publisher. A
     # caller PAT answers ``GET /user`` with a login; the Actions job token
-    # cannot, and is trusted as ``github-actions[bot]`` only when it is the job
-    # token this process sees. A configured App whose login could not be read is
-    # the publisher, so the job bot must not be trusted for it — fail closed.
+    # cannot be told apart from another workflow's, so it is never trusted — a
+    # job-token run publishes no attributable identity at all (P-6). A
+    # configured App whose login could not be read is the publisher, so the job
+    # bot must not be trusted for it — fail closed.
     if not declared and not app_slug and not _app_configured():
         token = str(ctx.github_installation_token or "").strip()
         if token:
@@ -133,7 +149,17 @@ def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
             if viewer:
                 logins.add(viewer)
             elif _is_job_token(token):
-                logins.add(GITHUB_ACTIONS_BOT_LOGIN)
+                job_bot_only = True
+
+    if not logins and job_bot_only:
+        logger.warning(
+            "mergeCraft authorship withheld: the only identity this run can publish as is "
+            "the shared Actions login {!r}, which any same-repo collaborator can forge. "
+            "Incremental checkpoints and round counting are unavailable; configure the "
+            "reviewer App (secrets MERGECRAFT_APP_ID / MERGECRAFT_APP_PRIVATE_KEY) or "
+            "publish with a PAT.",
+            GITHUB_ACTIONS_BOT_LOGIN,
+        )
 
     logger.debug("expected mergeCraft publisher logins for this run: {}", sorted(logins))
     return frozenset(logins)

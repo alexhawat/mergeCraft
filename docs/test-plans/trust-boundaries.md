@@ -128,6 +128,18 @@ the contract.
 | `list_mergecraft_reviews` oldest-first | `…::test_list_mergecraft_reviews_returns_oldest_first` | integration |
 | `list_mergecraft_reviews` filters other authors | `…::test_list_mergecraft_reviews_drops_marker_reviews_from_other_authors` | integration |
 | Existing checkpoint/round/incremental behaviour | `tests/mcp/test_checkout.py` (existing `last_reviewed_sha_*`, `test_incremental_*`) | unit + integration (guards) |
+| Declared shared `github-actions[bot]` login is withheld | `…::test_declared_github_actions_bot_login_is_withheld` | unit |
+| Withholding is case-insensitive | `…::test_withheld_shared_bot_login_is_matched_case_insensitively[github-actions[bot]/GitHub-Actions[Bot]]` | unit (edge) |
+| A real declared App bot login is still added | `…::test_declared_app_bot_login_is_still_added` | unit (guard) |
+| Declared shared bot does not suppress a real App login | `…::test_declared_shared_bot_does_not_suppress_a_real_app_login` | unit (guard) |
+| Job-token publication adds nothing | `…::test_job_token_publication_adds_nothing` | unit |
+| PAT publication adds the `GET /user` login | `…::test_pat_publication_adds_the_viewer_login` | unit (guard) |
+| Withheld shared bot → exactly one warning naming identity + remedy | `…::test_withheld_shared_bot_warns_once_naming_the_identity_and_remedy` | unit (P-8) |
+| Job-token withholding also warns once | `…::test_job_token_withholding_warns_once` | unit (P-8) |
+| `is_mergecraft_authored` refuses the shared bot on a job-token run | `…::test_is_mergecraft_authored_refuses_the_job_bot_on_a_job_token_run` | unit |
+| `last_reviewed_sha` ignores a shared-bot marker on a job-token run | `tests/mcp/test_checkout.py::test_last_reviewed_sha_does_not_adopt_a_github_actions_bot_review_on_a_job_token_run` | integration |
+| `review_round_index` ignores a shared-bot marker on a job-token run | `…::test_review_round_index_ignores_a_github_actions_bot_review_on_a_job_token_run` | integration |
+| App-publisher path still advances checkpoint and round | `…::test_app_publisher_still_advances_the_checkpoint_and_round` | integration (guard) |
 
 ### TB-D8 — instruction files read only inside the resolved repo root
 
@@ -214,6 +226,31 @@ the bound, same-repo PR resolves `trusted`. The raw floor is recorded under
 | Bound same-repo run → `review.trust_tier == tool_state.trust_tier == "trusted"`, floor still `untrusted` | `…::test_bound_same_repo_run_stamps_the_resolved_tier_and_keeps_the_floor` | integration |
 | Both attribute spellings present and distinct | same test | integration |
 | Stamping with no bound context is a total no-op | `…::test_stamp_is_a_noop_without_a_bound_context` | unit (guard) |
+
+### TB6 — the shared Actions job bot is never accepted as proof of authorship
+
+PR #866 review follow-up. The earlier TB-D7 rule added `github-actions[bot]` to
+the expected-publisher set when the run published with the Actions job token.
+That is unsound: `github-actions[bot]` is a *shared* identity, so any same-repo
+collaborator with workflow permissions can add a `pull_request` workflow on
+their branch that posts a marker-bearing review as that login, moving the
+incremental checkpoint (`last_reviewed_sha`) to a commit of their choosing; the
+next IncrementalReview then diffs *from* it and omits the commits in between.
+Only an App bot login (`<slug>[bot]`) or a PAT login (`GET /user`) is accepted.
+A run whose only candidate is the shared bot resolves to the **empty** set
+(fail-closed) and says so exactly once at `warning`, naming the identity and the
+App/PAT remedy (never a silent empty set).
+
+`test_authorship.py`'s module doctrine bullet was corrected from "only when
+job-token publication is enabled" to "never". The cases drive the real
+`_collect_publisher_logins` path (no monkeypatched `publishers=`), so a
+reverted product fix fails all of them except the intentional App/PAT guards.
+
+| Scenario | Tests | Layer |
+| --- | --- | --- |
+| Declared shared login withheld; job token adds nothing; App and PAT logins unaffected | `tests/review/test_authorship.py` (12 cases above) | unit |
+| Job-token run's empty set refuses `github-actions[bot]` for checkpoint and round | `tests/mcp/test_checkout.py::test_last_reviewed_sha_does_not_adopt_a_github_actions_bot_review_on_a_job_token_run`, `::test_review_round_index_ignores_a_github_actions_bot_review_on_a_job_token_run` | integration |
+| Over-correction guard: App publisher still advances both | `…::test_app_publisher_still_advances_the_checkpoint_and_round` | integration (guard) |
 
 ## Pinned implementation seams
 

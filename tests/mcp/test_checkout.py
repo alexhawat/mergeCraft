@@ -179,6 +179,103 @@ def test_review_round_index_ignores_unexpected_authors() -> None:
     assert review_round_index(reviews, publishers=frozenset({_PUBLISHER_LOGIN})) == 2
 
 
+# ── TB6 pin: the shared Actions job bot never advances the checkpoint ────────
+#
+# These drive the *real* expected-publisher resolution (no monkeypatched
+# ``publishers=``) so they pin the integration seam: a job-token run resolves to
+# the empty set because ``github-actions[bot]`` is withheld, and therefore a
+# marker review authored by it cannot move ``last_reviewed_sha`` or the round
+# count. The App-publisher path still advances both — the over-correction guard.
+
+_JOB_BOT_USER: dict[str, str] = {"login": "github-actions[bot]", "type": "Bot"}
+
+
+class _AuthorshipScm:
+    """Minimal SCM stub answering the authorship lookups (``/app``, ``/user``)."""
+
+    def __init__(self, *, app_response: Any = None, user_response: Any = None) -> None:
+        self._app_response = app_response
+        self._user_response = user_response
+
+    async def get(self, path: str, **kwargs: Any) -> Any:
+        if path.rstrip("/").endswith("/app"):
+            return self._app_response
+        if path.rstrip("/").endswith("/user"):
+            return self._user_response
+        return None
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _real_publishers(
+    monkeypatch: pytest.MonkeyPatch,
+    dir_: str,
+    *,
+    token: str,
+    app_response: Any = None,
+    user_response: Any = None,
+) -> frozenset[str]:
+    """Resolve the run's expected-publisher set from production code."""
+    for name in ("MERGECRAFT_REVIEWER_BOT_LOGIN", "GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    state = init_tool_state(owner="acme", name="demo", dir=dir_)
+    ctx = ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner="acme", name="demo"),
+        payload=ResolvedPayload(event=PayloadEvent(trigger="pull_request_synchronize")),
+        scm=_AuthorshipScm(app_response=app_response, user_response=user_response),  # type: ignore[arg-type]
+        tool_state=state,
+        github_installation_token=token,
+        tmpdir=dir_,
+    )
+    from mergecraft.review.authorship import expected_publisher_logins
+
+    return expected_publisher_logins(ctx)
+
+
+def _job_token_run_publishers(monkeypatch: pytest.MonkeyPatch, dir_: str) -> frozenset[str]:
+    monkeypatch.setenv("INPUT_TOKEN", "job-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "job-token")
+    return _real_publishers(monkeypatch, dir_, token="job-token")
+
+
+def test_last_reviewed_sha_does_not_adopt_a_github_actions_bot_review_on_a_job_token_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A forged checkpoint via the shared job bot must be refused (P-17)."""
+    publishers = _job_token_run_publishers(monkeypatch, str(tmp_path))
+    reviews = [{"commit_id": "a" * 40, "body": _MERGECRAFT_BODY, "user": _JOB_BOT_USER}]
+
+    assert publishers == frozenset()
+    assert last_reviewed_sha(reviews, head_sha="d" * 40, publishers=publishers) is None
+
+
+def test_review_round_index_ignores_a_github_actions_bot_review_on_a_job_token_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The round count must not advance on a forged shared-bot review (P-17)."""
+    publishers = _job_token_run_publishers(monkeypatch, str(tmp_path))
+    reviews = [{"commit_id": "a" * 40, "body": _MERGECRAFT_BODY, "user": _JOB_BOT_USER}]
+
+    assert publishers == frozenset()
+    assert review_round_index(reviews, publishers=publishers) == 1
+
+
+def test_app_publisher_still_advances_the_checkpoint_and_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard — the App-published path is never collateral damage."""
+    publishers = _real_publishers(
+        monkeypatch, str(tmp_path), token="", app_response={"slug": "mergecraft"}
+    )
+    reviews = [{"commit_id": "a" * 40, "body": _MERGECRAFT_BODY, "user": _BOT_USER}]
+
+    assert "mergecraft[bot]" in publishers
+    assert last_reviewed_sha(reviews, head_sha="d" * 40, publishers=publishers) == "a" * 40
+    assert review_round_index(reviews, publishers=publishers) == 2
+
+
 class _PagedReviewsGitHub(GitHubClient):
     """Serves review history page by page, recording the pages requested."""
 
