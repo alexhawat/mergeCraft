@@ -432,6 +432,59 @@ async def test_fetch_sticky_progress_comment_body_prefers_ledger_on_later_page()
     assert _DEFERRED_FP in body
 
 
+@pytest.mark.asyncio
+async def test_review_ledger_reads_later_pages_and_prefers_newer_state() -> None:
+    ledger = _ledger_mod()
+    old = ledger.FindingLedger()
+    old.record(
+        _DEFERRED_FP,
+        "deferred",
+        source="overflow",
+        round_index=1,
+        recorded_at="2026-08-20T10:00:00Z",
+    )
+    newer = ledger.FindingLedger()
+    newer.record(
+        _DEFERRED_FP,
+        "open",
+        source="inline",
+        round_index=2,
+        recorded_at="2026-08-21T10:00:00Z",
+    )
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return [
+                {
+                    "id": 42,
+                    "body": ledger.merge_ledger_into_comment(
+                        "## mergeCraft progress\n", records=old.records()
+                    ),
+                }
+            ]
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page == 1:
+                return [{"id": index, "body": "Human review"} for index in range(100)]
+            return [
+                {
+                    "id": 101,
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n", records=newer.records()
+                    ),
+                }
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    record = found.get_record(_DEFERRED_FP)
+    assert record is not None
+    assert record.state == "open"
+    assert record.round_index == 2
+
+
 def test_record_deferred_from_analyzer_run_skips_withdrawn() -> None:
     """Deferred overflow rows are not stamped when the fingerprint was withdrawn."""
     from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state

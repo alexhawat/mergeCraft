@@ -55,12 +55,10 @@ class _FakeClient:
         issue_number: int,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": 42,
-                "body": f"## mergeCraft progress\n\n{_LEDGER_MARKER}\n",
-            }
-        ]
+        return []
+
+    async def list_reviews(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        return [{"id": 1, "body": f"<!-- mergecraft-deterministic-record:v1 -->\n{_LEDGER_MARKER}"}]
 
     async def list_issues(self, owner: str, repo: str, **kwargs: Any) -> list[dict[str, Any]]:
         return []

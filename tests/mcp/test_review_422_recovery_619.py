@@ -205,6 +205,29 @@ async def test_overlong_review_body_is_truncated_before_posting(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_truncation_preserves_formal_review_state(tmp_path: Path) -> None:
+    github = RecordingGitHub(loop_guard=20)
+    ctx = _ctx(tmp_path, github)
+    body = (
+        "<!-- mergecraft-deterministic-record:v1 -->\n"
+        "### mergeCraft run record\n"
+        "<!-- mergecraft-review-body:v1 -->\n"
+        + "x" * (REVIEW_BODY_MAX_CHARS + 5000)
+        + "\n### Learnings delta\n\nAfter: saved"
+        + "\n<!-- mergecraft-ledger:v1:aaaaaaaaaaaaaaaaaaaaaaaa:open -->\n"
+    )
+    await _create_github_review_with_anchor_recovery(
+        ctx, pull_number=7, payload={"event": "COMMENT", "body": body}
+    )
+    posted = str(github.review_payloads[-1]["body"])
+    assert len(posted) <= REVIEW_BODY_MAX_CHARS
+    assert "After: saved" in posted
+    assert "<!-- mergecraft-ledger:v1:aaaaaaaaaaaaaaaaaaaaaaaa:open -->" in posted
+    assert "### mergeCraft run record" in posted
+    assert "truncated" in posted
+
+
+@pytest.mark.asyncio
 async def test_body_within_cap_is_not_truncated(tmp_path: Path) -> None:
     """Green guard — a normal-sized body is posted verbatim."""
     github = RecordingGitHub(loop_guard=20)

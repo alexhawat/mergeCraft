@@ -40,7 +40,7 @@ from mergecraft.cli.typer_group import MergecraftTyperGroup
 from mergecraft.findings.ledger import (
     LEDGER_SCHEMA_VERSION,
     FindingLedger,
-    fetch_sticky_progress_comment_body,
+    fetch_review_ledger,
 )
 from mergecraft.findings.select import (
     DEFAULT_LABEL,
@@ -244,21 +244,16 @@ def _ledger_record_payload(record: LifecycleRecord) -> dict[str, Any]:
     }
 
 
-async def _fetch_progress_comment_body(
+async def _fetch_review_ledger(
     client: GitHubClient,
     owner: str,
     name: str,
     pull_number: int,
-) -> str:
+) -> FindingLedger:
     from mergecraft.scm.github import GitHubScmAdapter
 
     adapter = GitHubScmAdapter(client)
-    return await fetch_sticky_progress_comment_body(
-        adapter,
-        owner,
-        name,
-        pull_number,
-    )
+    return await fetch_review_ledger(adapter, owner, name, pull_number)
 
 
 def _render_ledger_markdown(records: list[LifecycleRecord], *, pull_number: int) -> str:
@@ -295,7 +290,7 @@ def ledger(
         ),
     ] = None,
 ) -> None:
-    """Print the open-PR finding ledger from the sticky progress comment. Never writes."""
+    """Print the open-PR finding ledger from formal reviews. Never writes."""
     if output_format is not None and output_format not in {"json", "markdown"}:
         console.print("[red]--output-format must be 'json' or 'markdown'[/red]")
         raise typer.Exit(CLI_USAGE_EXIT_CODE)
@@ -309,8 +304,8 @@ def ledger(
     async def _run() -> list[LifecycleRecord]:
         client = _client()
         try:
-            body = await _fetch_progress_comment_body(client, owner, name, pr)
-            return FindingLedger.from_comment_body(body).records()
+            ledger = await _fetch_review_ledger(client, owner, name, pr)
+            return ledger.records()
         finally:
             await client.aclose()
 
@@ -443,8 +438,8 @@ def carryover(
     async def _run() -> tuple[CarryoverPlan, CarryoverOutcome | None]:
         client = _client()
         try:
-            progress_body = await _fetch_progress_comment_body(client, owner, name, pr)
-            ledger_records = FindingLedger.from_comment_body(progress_body).records()
+            ledger = await _fetch_review_ledger(client, owner, name, pr)
+            ledger_records = ledger.records()
             plan = await plan_carryover(
                 client,
                 owner,

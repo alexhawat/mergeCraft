@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 from mergecraft.analyzers.budget import DEFERRED_SECTION_HEADING
+from mergecraft.findings.ledger import FindingLedger
 from mergecraft.mcp.context import (
     PayloadEvent,
     RepoIdentity,
@@ -126,7 +128,7 @@ def test_merge_recall_skips_findings_already_in_deferred() -> None:
 async def test_withdrawn_agent_finding_not_reappears_in_deferred_on_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify → drop → publish with recallPass: dropped finding stays out of deferred."""
+    """A dropped finding stays invisible while its withdrawn state remains durable."""
     cfg_dir = tmp_path / ".mergecraft"
     cfg_dir.mkdir(parents=True)
     (cfg_dir / "config.yaml").write_text("review:\n  recallPass: true\n", encoding="utf-8")
@@ -182,9 +184,13 @@ async def test_withdrawn_agent_finding_not_reappears_in_deferred_on_publish(
     )
 
     published_body = str(github_client_from_ctx(ctx).review_payload.get("body") or "")
-    assert dropped_body not in published_body
-    assert dropped_fp not in published_body
-    assert recall_body in published_body
+    visible_body = re.sub(r"<!--.*?-->", "", published_body, flags=re.DOTALL)
+    assert dropped_body not in visible_body
+    assert dropped_fp not in visible_body
+    assert recall_body in visible_body
+    withdrawn_record = FindingLedger.from_comment_body(published_body).get_record(dropped_fp)
+    assert withdrawn_record is not None
+    assert withdrawn_record.state == "withdrawn"
     inline_comments = list(github_client_from_ctx(ctx).review_payload.get("comments") or [])
     inline_paths = {str(row.get("path") or "") for row in inline_comments}
     assert "src/app.py" not in inline_paths
