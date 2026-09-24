@@ -73,6 +73,9 @@ The fingerprint is the same review-taxonomy hash stamped on inline comments.
 States include `open`, `deferred`, `unpublished`, and `withdrawn` — findings
 that overflow the inline budget, miss the verification budget, or are dropped by
 the verifier before publication.
+These markers are hidden in GitHub's rendered review. A withdrawn fingerprint
+remains in the ledger for later runs, but its finding is absent from the visible
+review body and inline comments.
 
 The ledger survives ephemeral Action checkouts. Review history is folded across
 runs, and legacy progress comments are read during migration. Read it with:
