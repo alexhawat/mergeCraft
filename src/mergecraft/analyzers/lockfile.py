@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import os
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
+from loguru import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -16,16 +18,26 @@ if TYPE_CHECKING:
 
 LockMode = Literal["repo-native", "ci-result", "managed", "container"]
 
+#: Keys a lock row must carry before it can become a :class:`LockEntry`. The lock
+#: is written inside the tree a review runs over, so a row may arrive malformed.
+_REQUIRED_ENTRY_KEYS = ("tool_id", "version", "sha256")
+
 
 @contextlib.contextmanager
-def _lockfile_transaction(path: Path) -> Iterator[Any]:
-    """Serialize lockfile read/modify/write across parallel analyzer runs."""
+def _lockfile_transaction(path: Path) -> Iterator[None]:
+    """Serialize lockfile read/modify/write across parallel analyzer runs.
+
+    The lock is a sidecar file, never the data file itself: the write path
+    replaces the data file atomically, and a ``flock`` held on the file being
+    replaced would orphan every waiter onto the old inode.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as handle:
+    lock_path = path.with_name(f"{path.name}.lock")
+    with lock_path.open("a+", encoding="utf-8") as handle:
         if sys.platform != "win32":
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
-            yield handle
+            yield
         finally:
             if sys.platform != "win32":
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
@@ -50,6 +62,28 @@ def _coerce_entry(raw: dict[str, Any]) -> LockEntry:
     )
 
 
+def _coerce_entries(raws: Any) -> list[LockEntry]:
+    """Coerce lock rows, skipping (with a warning) any row missing a required key.
+
+    The lock lives in the tree under review, so a malformed row a PR committed
+    must never abort a run — it is dropped, not raised.
+    """
+    entries: list[LockEntry] = []
+    for item in raws:
+        if not isinstance(item, dict):
+            continue
+        missing = [key for key in _REQUIRED_ENTRY_KEYS if key not in item]
+        if missing:
+            logger.warning(
+                "skipping malformed lock row (missing {}): {!r}",
+                ", ".join(missing),
+                item,
+            )
+            continue
+        entries.append(_coerce_entry(item))
+    return entries
+
+
 def read_lock(path: Path) -> list[LockEntry]:
     """Read ``.mergecraft/analyzers.lock`` entries."""
     if not path.is_file():
@@ -60,29 +94,7 @@ def read_lock(path: Path) -> list[LockEntry]:
     tools = data.get("tools")
     if not isinstance(tools, list):
         return []
-    entries: list[LockEntry] = []
-    for item in tools:
-        if isinstance(item, dict):
-            entries.append(_coerce_entry(item))
-    return entries
-
-
-def _read_lock_handle(handle: Any) -> list[LockEntry]:
-    handle.seek(0)
-    raw = handle.read()
-    if not raw.strip():
-        return []
-    data = yaml.safe_load(raw)
-    if not isinstance(data, dict):
-        return []
-    tools = data.get("tools")
-    if not isinstance(tools, list):
-        return []
-    entries: list[LockEntry] = []
-    for item in tools:
-        if isinstance(item, dict):
-            entries.append(_coerce_entry(item))
-    return entries
+    return _coerce_entries(tools)
 
 
 def write_lock(
@@ -91,13 +103,18 @@ def write_lock(
     *,
     merge: bool = False,
 ) -> None:
-    """Write lock entries; ``merge`` retains other tool ids already on disk."""
+    """Write lock entries; ``merge`` retains other tool ids already on disk.
+
+    The payload is staged to a sibling temp file and moved into place with
+    ``os.replace`` while the sidecar lock is held, so a failure part-way through
+    leaves the previous record intact instead of a truncated one.
+    """
     normalized = [
         entry if isinstance(entry, LockEntry) else _coerce_entry(entry) for entry in entries
     ]
-    with _lockfile_transaction(path) as handle:
+    with _lockfile_transaction(path):
         if merge:
-            by_id = {entry.tool_id: entry for entry in _read_lock_handle(handle)}
+            by_id = {entry.tool_id: entry for entry in read_lock(path)}
             for entry in normalized:
                 by_id[entry.tool_id] = entry
             normalized = list(by_id.values())
@@ -115,9 +132,10 @@ def write_lock(
                 for entry in normalized
             ],
         }
-        handle.seek(0)
-        handle.truncate()
-        handle.write(yaml.safe_dump(payload, sort_keys=False))
+        text = yaml.safe_dump(payload, sort_keys=False)
+        staging = path.with_name(f".{path.name}.staging")
+        staging.write_text(text, encoding="utf-8")
+        os.replace(staging, path)
 
 
 def lock_digest(path: Path) -> str:

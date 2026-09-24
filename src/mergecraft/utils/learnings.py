@@ -817,8 +817,16 @@ def apply_repo_memory_to_findings(
         surviving.append(finding)
     if not memory_path.is_file():
         return surviving
-    store = NegativeMemoryStore(path=memory_path)
-    result = apply_negative_memory(findings=surviving, store=store, repo_root=repo_root)
+    try:
+        store = NegativeMemoryStore(path=memory_path)
+        result = apply_negative_memory(findings=surviving, store=store, repo_root=repo_root)
+    except Exception as exc:
+        logger.warning(
+            "Skipping repo memory suppression — unreadable {}: {}",
+            memory_path,
+            exc,
+        )
+        return surviving
     return result.reported
 
 

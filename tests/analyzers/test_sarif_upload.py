@@ -39,6 +39,7 @@ from __future__ import annotations
 import base64
 import gzip
 import json
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -243,6 +244,34 @@ def test_default_off_across_every_surface_that_can_enable_it() -> None:
     assert spec.get("required") is not True
     assert str(spec.get("default", "")).strip().lower() in {"", "disabled", "false"}
     assert action["runs"]["env"]["INPUT_SARIF_UPLOAD"] == "${{ inputs.sarif_upload }}"
+
+
+def test_action_manifest_does_not_force_the_sarif_upload_flag() -> None:
+    """The shipped manifest must let an absent input reach the resolver as empty."""
+    action = yaml.safe_load((REPO_ROOT / "action.yml").read_text(encoding="utf-8"))
+    assert "default" not in action["inputs"]["sarif_upload"]
+
+
+def test_unset_action_input_defers_to_repo_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the Action input absent, ``analyzers.sarifUpload: true`` enables the upload."""
+    from mergecraft.config import load_repo_settings
+
+    monkeypatch.delenv("INPUT_SARIF_UPLOAD", raising=False)
+    config_dir = tmp_path / ".mergecraft"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("analyzers:\n  sarifUpload: true\n", encoding="utf-8")
+
+    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
+
+    assert (
+        resolve_sarif_upload_enabled(
+            action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+            repo_setting=settings.analyzers.sarif_upload,
+        )
+        is True
+    )
 
 
 @pytest.mark.parametrize(

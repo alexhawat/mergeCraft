@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests.memory.support import feedback_store_path, make_finding, memory_store_path
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_precision_pipeline_applies_repo_memory_before_publication(tmp_path: Path) -> None:
@@ -139,3 +143,58 @@ def test_corrupt_feedback_json_does_not_crash_review_memory(tmp_path: Path) -> N
     )
 
     assert dismissed in surviving
+
+
+def test_unreadable_memory_store_reports_every_finding(tmp_path: Path) -> None:
+    """A suppression store that cannot be read must fail open, not closed."""
+    from mergecraft.utils.learnings import apply_repo_memory_to_findings
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    memory_path = memory_store_path(repo)
+    memory_path.parent.mkdir(parents=True, exist_ok=True)
+    # Non-UTF-8 bytes are an input the loader genuinely cannot tolerate:
+    # ``_read_json`` raises ``UnicodeDecodeError`` before any rule is parsed.
+    # ``{"rules": [{}]}`` is tolerated by the hardened loader (it loads as an
+    # empty store), so it never reached the fail-open guard this test names.
+    memory_path.write_bytes(b'\xff\xfe{"rules": []}')
+    finding = make_finding(
+        message="Real regression",
+        path="src/app.py",
+        start_line=4,
+        end_line=4,
+    )
+
+    surviving = apply_repo_memory_to_findings([finding], repo_root=repo, trust_tier="trusted")
+
+    assert surviving == [finding]
+
+
+def test_memory_store_construction_failure_reports_every_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unexpected store failure skips suppression rather than dropping findings."""
+    import mergecraft.utils.memory as memory_mod
+    from mergecraft.utils.learnings import apply_repo_memory_to_findings
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    memory_path = memory_store_path(repo)
+    memory_path.parent.mkdir(parents=True, exist_ok=True)
+    memory_path.write_text('{"rules": []}', encoding="utf-8")
+
+    def _explode(**_kwargs: object) -> object:
+        msg = "malformed memory store"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(memory_mod, "NegativeMemoryStore", _explode)
+    finding = make_finding(
+        message="Real regression",
+        path="src/app.py",
+        start_line=4,
+        end_line=4,
+    )
+
+    surviving = apply_repo_memory_to_findings([finding], repo_root=repo, trust_tier="trusted")
+
+    assert surviving == [finding]

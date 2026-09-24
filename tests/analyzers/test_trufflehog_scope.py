@@ -8,12 +8,11 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
 
 from tests.analyzers.support import import_module
-
-if TYPE_CHECKING:
-    import pytest
 
 # Observed noise on run 34542726646 — each exemption names why, not a path glob.
 _NAMED_FIXTURES: tuple[tuple[str, str], ...] = (
@@ -164,3 +163,82 @@ def test_emit_trufflehog_sarif_named_suppressions_do_not_blanket_skip_tests(
     assert _UNNAMED_TEST_SECRET in uris
     for path in named:
         assert path not in uris, f"CI SARIF still emits named fixture {path}"
+
+
+# --------------------------------------------------------------------------- #
+# Intentional fixtures confirmed by inspection get a named entry with a reason.
+# A newly committed file under tests/ or docs/ that nobody named is scanned.
+# --------------------------------------------------------------------------- #
+
+_CONFIRMED_FIXTURES: tuple[tuple[str, str], ...] = (
+    ("tests/analyzers/support.py", "planted"),
+    ("tests/ci/test_self_review_sarif_extension_w5.py", "planted"),
+    ("tests/mcp/test_reviewer_resilience_containment.py", "token"),
+    ("tests/tracing/test_http_spans.py", "redaction"),
+)
+
+# Paths nobody has named: they must still reach the scanner.
+_UNNAMED_SCANNED_PATHS: tuple[str, ...] = (
+    "tests/newly_committed_secret.env",
+    "tests/analyzers/test_brand_new_case.py",
+    "docs/new_secret_example.md",
+    "src/mergecraft/utils/new_secret_source.py",
+)
+
+
+def test_confirmed_fixture_suppressions_are_named_with_a_reason() -> None:
+    config = _config()
+    suppressions = dict(config.trufflehog_named_fixture_suppressions())
+    for path, needle in _CONFIRMED_FIXTURES:
+        assert path in suppressions, f"missing named suppression for {path}"
+        reason = suppressions[path]
+        assert reason.strip(), f"suppression for {path} must name why it is exempt"
+        assert needle.casefold() in reason.casefold(), reason
+
+
+def test_confirmed_fixture_paths_are_suppressed() -> None:
+    config = _config()
+    for path, _needle in _CONFIRMED_FIXTURES:
+        assert config.is_trufflehog_path_suppressed(path) is True, path
+
+
+@pytest.mark.parametrize("path", _UNNAMED_SCANNED_PATHS)
+def test_an_unnamed_file_is_still_scanned(path: str) -> None:
+    """No ``tests/**`` or ``docs/**`` glob: an unnamed path is not exempt."""
+    config = _config()
+    assert config.is_trufflehog_path_suppressed(path) is False
+
+
+def test_suppression_keys_are_literal_paths_not_globs() -> None:
+    config = _config()
+    for path in config.trufflehog_named_fixture_suppressions():
+        assert not any(marker in path for marker in ("*", "?", "[")), path
+
+
+def test_ci_emit_keeps_the_confirmed_fixtures_out_of_sarif(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    confirmed = tuple(path for path, _needle in _CONFIRMED_FIXTURES)
+    uris = _sarif_uris(_emit_trufflehog_with_paths(tmp_path, monkeypatch, confirmed))
+    for path in confirmed:
+        assert path not in uris, f"CI SARIF still emits confirmed fixture {path}"
+
+
+def test_ci_emit_keeps_an_unnamed_file_in_sarif(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    doc = _emit_trufflehog_with_paths(tmp_path, monkeypatch, _UNNAMED_SCANNED_PATHS)
+    assert set(_UNNAMED_SCANNED_PATHS) <= _sarif_uris(doc)
+
+
+def test_ci_trufflehog_uris_are_repo_relative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A host-runner scan must publish paths a consumer can anchor to."""
+    absolute = tmp_path / "config" / "app.env"
+    absolute.parent.mkdir(parents=True, exist_ok=True)
+    absolute.write_text("AWS_KEY=fixture\n", encoding="utf-8")
+
+    doc = _emit_trufflehog_with_paths(tmp_path, monkeypatch, (str(absolute),))
+
+    assert _sarif_uris(doc) == {"config/app.env"}

@@ -51,14 +51,18 @@ for the nine golden rows tracked by #780. Render its review sheet with:
 make eval-human-batch
 ```
 
-The committed manifest names `alexhawat` as the intended adjudicator, but all
-nine rows remain `evidence_status: missing` and `decision: pending`. Repository
-history shows that commit `3ff1bb39d6a5c2035c19c793131c493b591cf98d`
-introduced the metadata files; it contains no source patch, originating
-repository, PR, or immutable code snapshot and is therefore history, not
-substantive evidence for the claims. The review sheet keeps every row visibly
-unanswered. No row may receive human provenance until immutable evidence is
-recovered and the named human supplies an actual decision.
+The committed manifest names `alexhawat` as the adjudicator. All nine rows
+are `evidence_status: missing`, and on 2026-09-24 the adjudicator recorded
+`abstain` for every one of them
+([decision](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475)):
+0 confirm, 0 correct, 9 abstain, 0 pending. Repository history shows that commit
+`3ff1bb39d6a5c2035c19c793131c493b591cf98d` introduced the metadata files; it
+contains no source patch, originating repository, PR, or immutable code
+snapshot and is therefore history, not substantive evidence for the claims.
+Abstained rows stay in the corpus without human provenance, so the golden
+subset still has no `independent`-tier labels. Independent golden labels need
+replacement cases that point at real, commit-pinned changes, recorded in a
+later batch.
 
 The manifest validates source URLs as commit-pinned, confines any local
 fixture to `evals/fixtures/golden/<case-id>/`, and verifies its SHA-256 before

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -263,3 +264,194 @@ def test_offline_full_comparison_never_claims_a_base_run(
     """The mirror image: offline cannot have compared against base."""
     recorded = _run_full_comparison_pipeline(monkeypatch, tmp_path, offline=True)
     assert recorded == [False]
+
+
+# --------------------------------------------------------------------------- #
+# Quoted and renamed ``diff --git`` headers must resolve to the real path. A
+# header the parser cannot read clears the current file, so its hunks are
+# dropped rather than attached to whatever file came before it.
+# --------------------------------------------------------------------------- #
+
+_UNICODE_HEADER_DIFF = """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1,1 +1,2 @@
+ x
++one
+diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"
+--- "a/caf\\303\\251.py"
++++ "b/caf\\303\\251.py"
+@@ -10,1 +10,2 @@
+ y
++two
+"""
+
+_RENAME_WITH_SPACE_DIFF = """diff --git a/src/old b/x.py b/src/new b/x.py
+rename from src/old b/x.py
+rename to src/new b/x.py
+--- a/src/old b/x.py
++++ b/src/new b/x.py
+@@ -1,1 +1,2 @@
+ x
++one
+"""
+
+_QUOTED_PREIMAGE_DIFF = """diff --git a/caf.py b/caf.py
+--- a/caf.py
++++ "b/caf\\303\\251.py"
+@@ -1,1 +1,2 @@
+ x
++one
+"""
+
+_UNPARSEABLE_HEADER_DIFF = """diff --git a/a.py b/a.py
+--- a/a.py
++++ b/a.py
+@@ -1,1 +1,2 @@
+ x
++one
+diff --git "a/broken.py
+index abc1234..def5678 100644
+@@ -10,1 +10,2 @@
+ y
++two
+"""
+
+
+def test_quoted_unicode_header_gets_its_own_hunks_and_added_lines() -> None:
+    """A Git C-quoted header must decode, not collapse onto the previous file."""
+    scope = import_module("mergecraft.analyzers.scope")
+
+    parsed = scope.parse_diff_scope(_UNICODE_HEADER_DIFF)
+    added = list(scope.iter_added_diff_lines(_UNICODE_HEADER_DIFF))
+
+    assert set(parsed.hunk_ranges) == {"a.py", "café.py"}
+    assert parsed.hunk_ranges["a.py"] == [(1, 2)]
+    assert added == [("a.py", 2, "one"), ("café.py", 11, "two")]
+
+
+def test_rename_to_resolves_a_path_containing_a_space_b_prefix() -> None:
+    """``rename to`` is authoritative when the header cannot be split unambiguously."""
+    scope = import_module("mergecraft.analyzers.scope")
+
+    parsed = scope.parse_diff_scope(_RENAME_WITH_SPACE_DIFF)
+
+    assert set(parsed.hunk_ranges) == {"src/new b/x.py"}
+    assert list(scope.iter_added_diff_lines(_RENAME_WITH_SPACE_DIFF)) == [
+        ("src/new b/x.py", 2, "one")
+    ]
+
+
+def test_quoted_post_image_path_decodes_when_the_header_is_plain() -> None:
+    """``+++ b/…`` is a path source, decoded with the same C-style unquoting."""
+    scope = import_module("mergecraft.analyzers.scope")
+
+    parsed = scope.parse_diff_scope(_QUOTED_PREIMAGE_DIFF)
+
+    assert set(parsed.hunk_ranges) == {"café.py"}
+
+
+def test_unparseable_header_clears_the_current_file() -> None:
+    """Dropping a hunk loses a scope hint; misattributing one invents a finding."""
+    scope = import_module("mergecraft.analyzers.scope")
+
+    parsed = scope.parse_diff_scope(_UNPARSEABLE_HEADER_DIFF)
+    added = list(scope.iter_added_diff_lines(_UNPARSEABLE_HEADER_DIFF))
+
+    assert parsed.hunk_ranges == {"a.py": [(1, 2)]}
+    assert added == [("a.py", 2, "one")]
+
+
+# --------------------------------------------------------------------------- #
+# AN-D8 / AN6-F1 — the ``outside repository root`` label must survive the
+# *publication* seam, not just the parser.
+#
+# ``parse_sarif`` sets the label, but the analyzer route rebuilds each canonical
+# finding's ``evidence`` from ``cluster._merge_into_canonical`` (dropping the
+# member's own evidence) before ``pipeline._serialize_finding`` publishes it.
+# These tests drive the real ``run_analyzer_pipeline`` with only ``run_adapter``
+# stubbed to invoke the real ``parse_output_file`` — the same seam the
+# CI-evidence route already preserves the label through. A bare absolute path
+# and a ``file://`` URI must both keep the verbatim URI *and* carry the label.
+# --------------------------------------------------------------------------- #
+
+_OUTSIDE_REPO_ROOT_LABEL = "outside repository root"
+
+
+def _sarif_with_uri(uri: str) -> str:
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "actionlint"}},
+                    "results": [
+                        {
+                            "ruleId": "syntax-check",
+                            "level": "warning",
+                            "message": {"text": "out-of-root fixture"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": uri},
+                                        "region": {"startLine": 3},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "/home/runner/work/mergeCraft/mergeCraft/README",
+        "file:///etc/README",
+    ],
+    ids=["bare-absolute", "file-uri"],
+)
+def test_out_of_root_sarif_label_survives_to_the_published_finding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, uri: str
+) -> None:
+    """AN-D8: the published finding keeps the verbatim URI *and* the label."""
+    from mergecraft.analyzers import adapters, pipeline
+    from mergecraft.analyzers.parse import parse_output_file
+    from mergecraft.analyzers.registry import get_manifest
+
+    settings_mod = import_module("mergecraft.config.settings")
+    monkeypatch.setattr(
+        pipeline, "_analyzers_settings", lambda _root: settings_mod.AnalyzersSettings()
+    )
+
+    manifest = get_manifest("actionlint")
+    monkeypatch.setattr(pipeline, "detect_enabled", lambda **_: [manifest])
+
+    output_path = tmp_path / "actionlint.sarif.json"
+    output_path.write_text(_sarif_with_uri(uri), encoding="utf-8")
+
+    def _run_adapter(**_kwargs: Any) -> adapters.AdapterRunResult:
+        # Only execution is stubbed; parsing stays the real persisted-file path.
+        findings = parse_output_file(output_path, manifest=manifest, repo_root=tmp_path)
+        return adapters.AdapterRunResult(findings=findings, skipped=False)
+
+    monkeypatch.setattr(adapters, "run_adapter", _run_adapter)
+
+    state = pipeline.run_analyzer_pipeline(
+        repo_root=tmp_path,
+        changed_files=[".github/workflows/ci.yml"],
+        tier="trusted",
+        diff_text="",
+        shell="restricted",
+    )
+
+    assert state.ran is True
+    assert len(state.findings) == 1
+    published = state.findings[0]
+    assert published["path"] == uri, "an out-of-root URI must never be shortened to a basename"
+    assert f"path={_OUTSIDE_REPO_ROOT_LABEL}" in published["evidence"], (
+        "the parser's out-of-root label must survive clustering and publication"
+    )
