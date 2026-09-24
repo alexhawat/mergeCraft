@@ -36,6 +36,7 @@ from mergecraft.tracing.review_context import (
     current_review_context,
     resolve_review_id,
     review_env_for_subprocess,
+    stamp_review_context,
 )
 from mergecraft.tracing.sinks import (
     JSONLFileSink,
@@ -145,6 +146,7 @@ __all__ = [
     "response_attrs",
     "review_env_for_subprocess",
     "sink_factory",
+    "stamp_review_context",
     "thinking_attrs",
     "usage_attrs",
 ]

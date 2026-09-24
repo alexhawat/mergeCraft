@@ -109,23 +109,62 @@ def reference_link_targets(body: str) -> list[str]:
     ]
 
 
-def discover_instruction_paths(
+def _resolved_within_root(path: Path, root: Path) -> bool:
+    """True when *path*'s resolved location stays inside the resolved *root*.
+
+    The same rule the skill-reference resolver uses: resolve, then
+    ``relative_to``, and treat a failure as an escape. A symlink whose target
+    lives outside the repository is not an instruction file, however its
+    target is named (U6 / TB-D8).
+    """
+    try:
+        path.resolve().relative_to(root)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _scan_instruction_candidates(
     repo_root: Path,
-    extra_filenames: Sequence[str] = (),
-) -> list[Path]:
-    """Enumerate instruction and skill paths under ``repo_root``."""
+    extra_filenames: Sequence[str],
+) -> tuple[list[tuple[Path, str]], list[str]]:
+    """Walk *repo_root* for instruction candidates, splitting accepted from refusals.
+
+    ``Path.rglob`` descends symlinked directories on the 3.11/3.12 floor, so a
+    candidate can be reached through a link. A candidate whose resolved location
+    left the resolved root is refused and recorded, never read.
+    """
     root = repo_root.resolve()
     extras = frozenset(extra_filenames)
-    paths: list[Path] = []
+    accepted: list[tuple[Path, str]] = []
+    refusals: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file() or _is_skipped(path, root):
             continue
         rel = path.relative_to(root).as_posix()
         if _is_excluded_product_skill(rel):
             continue
-        if _is_instruction_rel(rel, extras=extras):
-            paths.append(path)
-    return paths
+        if not _is_instruction_rel(rel, extras=extras):
+            continue
+        if not _resolved_within_root(path, root):
+            refusals.append(f"({_REFUSED_LABEL}: {rel} resolves outside the repository root)")
+            continue
+        accepted.append((path, rel))
+    return accepted, refusals
+
+
+def discover_instruction_paths(
+    repo_root: Path,
+    extra_filenames: Sequence[str] = (),
+) -> list[Path]:
+    """Enumerate instruction and skill paths under ``repo_root``.
+
+    A path is kept only when its resolved location is inside the resolved root,
+    so a symlinked file or a symlinked directory that escapes the checkout is
+    not discovered (U6 / TB-D8).
+    """
+    accepted, _refusals = _scan_instruction_candidates(repo_root, extra_filenames)
+    return [path for path, _rel in accepted]
 
 
 def hash_injected_instructions(sources: Mapping[str, str]) -> dict[str, str]:
@@ -336,13 +375,14 @@ def _assemble_instruction_bundle(
     reference_byte_cap: int,
 ) -> _InstructionBundle:
     root = repo_root.resolve()
-    discovered = _discover_instruction_paths(root, extra_filenames=extra_filenames)
+    accepted, scan_refusals = _scan_instruction_candidates(root, extra_filenames)
+    discovered = [rel for _path, rel in accepted]
     review_rels = [rel for rel in discovered if is_review_skill_path(rel)]
     review_rels.sort(key=review_skill_sort_key)
     other_rels = [rel for rel in discovered if rel not in review_rels]
 
     limitations: list[str] = []
-    refusals: list[str] = []
+    refusals: list[str] = list(scan_refusals)
     injected: list[str] = []
     resolved_refs: list[str] = []
     dropped: list[str] = []
@@ -365,7 +405,7 @@ def _assemble_instruction_bundle(
     for rel_path in review_rels:
         path = root / rel_path
         skill_dir = path.parent
-        body = _instruction_body(path, rel_path)
+        body = _instruction_body(path, rel_path, repo_root=root)
         if body is None:
             dropped.append(rel_path)
             continue
@@ -594,7 +634,7 @@ def _render_review_skill_reference_blocks(
             continue
 
         rel_ref = resolved_path.relative_to(repo_root).as_posix()
-        ref_body = _instruction_body(resolved_path, rel_ref)
+        ref_body = _instruction_body(resolved_path, rel_ref, repo_root=repo_root)
         if ref_body is None:
             note = f"({_LIMITATION_LABEL}: unreadable reference {rel_ref})"
             limitations.append(note)
@@ -668,7 +708,7 @@ def _block_for_instruction(
     fence: Fence,
 ) -> str | None:
     path = repo_root / rel_path
-    body = _instruction_body(path, rel_path)
+    body = _instruction_body(path, rel_path, repo_root=repo_root)
     if body is None:
         return None
     block = f"### `{rel_path}` @ {commit_sha}\n\n{body.strip()}"
@@ -683,19 +723,16 @@ def _block_for_instruction(
     )
 
 
-def _discover_instruction_paths(
-    repo_root: Path,
-    *,
-    extra_filenames: Sequence[str] = (),
-) -> list[str]:
-    """Enumerate instruction and skill manifest paths under ``repo_root``."""
-    return [
-        path.relative_to(repo_root).as_posix()
-        for path in discover_instruction_paths(repo_root, extra_filenames=extra_filenames)
-    ]
+def _instruction_body(path: Path, rel_path: str, *, repo_root: Path) -> str | None:
+    """Read one instruction file, re-checking the resolved path at read time.
 
-
-def _instruction_body(path: Path, rel_path: str) -> str | None:
+    Discovery already refused escaping candidates; this applies the same rule
+    again at the point of the read, so a link swapped between the two steps is
+    still refused rather than followed (TB-D8). It is a re-check, not a second
+    policy.
+    """
+    if not _resolved_within_root(path, repo_root.resolve()):
+        return None
     document = parse_skill_file(path, repo_relative=rel_path)
     if document is not None:
         return document.fields.get("body") or document.fields.get("content") or ""

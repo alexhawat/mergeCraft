@@ -12,6 +12,7 @@ from loguru import logger
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.settings import load_repo_settings
+from mergecraft.config.trust_policy import is_fork_pull_request
 from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
@@ -23,9 +24,18 @@ from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
-    from mergecraft.mcp.context import ToolContext
+    from collections.abc import Mapping
 
-__all__ = ["GitHubClient", "checkout_pr_tool", "ensure_local_base_branch_alias", "get_git_status"]
+    from mergecraft.mcp.context import ToolContext
+    from mergecraft.xrepo.review import BaseManifestLookup
+
+__all__ = [
+    "GitHubClient",
+    "checkout_pr_tool",
+    "ensure_local_base_branch_alias",
+    "get_git_status",
+    "list_mergecraft_reviews",
+]
 
 
 def _rebaseline_config_after_checkout(ctx: ToolContext) -> None:
@@ -35,13 +45,103 @@ def _rebaseline_config_after_checkout(ctx: ToolContext) -> None:
     rebaseline_repo_settings_snapshot(ctx)
 
 
+def _manifest_exists_at_ref(*, cwd: str, ref: str, rel_path: str) -> bool:
+    """Return True when ``ref:rel_path`` names an object in the checkout (TB-D11).
+
+    ``git_show_text`` returns ``None`` both for a path that is absent at the ref
+    and for a blob it cannot decode. Probing existence separately keeps "newly
+    added at the head" (absent at the base) distinct from "exists but unreadable
+    at the base" — the latter is an omission, not a silent zero-finding report.
+    """
+    try:
+        _run_git(["cat-file", "-e", f"{ref}:{rel_path}"], cwd=cwd)
+    except Exception:
+        # Any git failure means "cannot prove it exists" — treat as absent.
+        return False
+    return True
+
+
+def _base_ref_resolves(*, cwd: str, ref: str) -> bool:
+    """Return True when ``ref`` resolves to a commit object in the checkout (TB6).
+
+    ``git cat-file -e <ref>:<path>`` fails identically for "the ref is
+    missing" and "the path is absent at a present ref". Probing the ref first
+    keeps those two apart before :func:`_base_linked_repo_manifest` decides
+    whether an absent manifest is benign.
+    """
+    try:
+        _run_git(["rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=cwd)
+    except Exception:
+        return False
+    return True
+
+
+def _base_linked_repo_manifest(
+    *,
+    cwd: str,
+    base_ref: str,
+    base_fetch_failure: str | None = None,
+) -> BaseManifestLookup:
+    """Read the linked-repo manifest at ``origin/<base>`` (TB-D11).
+
+    The review path diffs pins between the base and head manifests, so it needs
+    the base manifest. Four outcomes:
+
+    * no base ref is known — every head entry is newly added and contributes
+      no change;
+    * the base ref **did not resolve** (its fetch soft-failed, so
+      ``origin/<base>`` is missing) — the movement baseline is unknown, not
+      empty: a manifest the PR added is indistinguishable from one we could
+      not reach, so an omission with a reason is recorded for every
+      otherwise-reviewable entry, never a silent zero-finding report
+      (TB-D11/TB-D12, P-8);
+    * the manifest is genuinely **absent** at a resolved base ref — every head
+      entry is newly added and contributes no change;
+    * the manifest **exists but cannot be decoded or parsed** — an omission
+      with a reason, never a silent zero-finding report (TB-D11/TB-D12).
+
+    Never a whole-index fallback, which would report contracts the PR did not
+    change.
+    """
+    from mergecraft.context.repo_paths import git_show_text
+    from mergecraft.xrepo.linked_repos import LinkedReposManifest, parse_manifest_text
+    from mergecraft.xrepo.review import MANIFEST_REL, BaseManifestLookup
+
+    empty = LinkedReposManifest(repos=())
+    if not base_ref:
+        return BaseManifestLookup(manifest=empty)
+    ref = f"origin/{base_ref}"
+    if not _base_ref_resolves(cwd=cwd, ref=ref):
+        # The base ref never resolved. When the base fetch soft-failed the
+        # movement baseline is unknown, not empty: an "absent" manifest here
+        # may just be a ref we could not fetch, so each otherwise-reviewable
+        # entry becomes an omission with a reason (TB-D11/TB-D12, P-8).
+        reason = f"base ref {ref} could not be resolved"
+        if base_fetch_failure:
+            reason = f"{reason}: {base_fetch_failure}"
+        return BaseManifestLookup(manifest=empty, unreadable_reason=reason)
+    if not _manifest_exists_at_ref(cwd=cwd, ref=ref, rel_path=str(MANIFEST_REL)):
+        return BaseManifestLookup(manifest=empty)
+    unreadable_reason = f"base manifest unreadable at {ref}"
+    text = git_show_text(Path(cwd), ref, str(MANIFEST_REL))
+    if text is None:
+        return BaseManifestLookup(manifest=empty, unreadable_reason=unreadable_reason)
+    try:
+        return BaseManifestLookup(manifest=parse_manifest_text(text))
+    except ValueError:
+        return BaseManifestLookup(manifest=empty, unreadable_reason=unreadable_reason)
+
+
 # A review authored by mergeCraft carries the run footer, or (for a review whose
 # body was suppressed) at least one finding marker. Reviews from humans and other
 # bots carry neither, and their commit ids must never be mistaken for "the head
-# mergeCraft last reviewed".
-_MERGECRAFT_REVIEW_MARKERS = ("*via mergecraft*", "mergecraft-finding:v1:")
-
+# mergeCraft last reviewed". The marker check lives in ``review.authorship``
+# (P-17 / TB-D7) so the checkpoint and the history filter share one rule.
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+# TB-D5 — the review scope recorded when the diff came from the GitHub files
+# API after a successful checkout. Not ``api-only``: the head *is* checked out,
+# so head-side file reads work; only the local diff failed.
+FILES_API_DIFF_SCOPE = "files-api-diff"
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
 _CHECKOUT_PR_INPUT_SCHEMA: JsonSchema = {
     "type": "object",
@@ -69,13 +169,50 @@ def ensure_local_base_branch_alias(*, cwd: str, base_ref: str) -> None:
     _run_git(["branch", "-f", base_ref, f"origin/{base_ref}"], cwd=cwd)
 
 
-def last_reviewed_sha(reviews: list[dict[str, Any]], *, head_sha: str) -> str | None:
+def _is_authored_review(review: Mapping[str, Any], publishers: frozenset[str] | None) -> bool:
+    """Return True when ``review`` is a mergeCraft review for this run.
+
+    ``publishers=None`` keeps the legacy marker-only match for callers whose
+    history is already filtered by :func:`list_mergecraft_reviews`; every
+    production checkpoint passes the run's expected-publisher set so the marker
+    alone can never move it (P-17 / TB-D7).
+    """
+    from mergecraft.review.authorship import has_mergecraft_marker, is_mergecraft_authored
+
+    if publishers is None:
+        return has_mergecraft_marker(review)
+    return is_mergecraft_authored(review, publishers=publishers)
+
+
+def expected_publisher_logins(ctx: ToolContext) -> frozenset[str]:
+    """Return the run's expected-publisher logins (P-17 / TB-D7).
+
+    Thin module-level seam over :func:`mergecraft.review.authorship.expected_publisher_logins`:
+    imported lazily because ``mergecraft.review``'s package ``__init__`` pulls
+    in the agent registry, which imports this module — a top-level import would
+    cycle. Exposed as a module attribute so callers and tests can pin it.
+    """
+    from mergecraft.review.authorship import expected_publisher_logins as _impl
+
+    return _impl(ctx)
+
+
+def last_reviewed_sha(
+    reviews: list[dict[str, Any]],
+    *,
+    head_sha: str,
+    publishers: frozenset[str] | None = None,
+) -> str | None:
     """Return the head SHA of the most recent mergeCraft review, if one is recoverable.
 
     Args:
         reviews: Raw review objects as returned by ``GET /pulls/{n}/reviews``,
             oldest first (GitHub's documented order).
         head_sha: The PR head this run is about to review.
+        publishers: The run's expected-publisher logins (``TB-D7``). When given,
+            a review must carry the marker **and** be authored by one of them;
+            when ``None`` the caller's history is already filtered, so the
+            marker alone is matched.
 
     Returns:
         The ``commit_id`` of the newest mergeCraft-authored review that names a
@@ -91,26 +228,82 @@ def last_reviewed_sha(reviews: list[dict[str, Any]], *, head_sha: str) -> str | 
             continue
         if head_sha and commit_id == head_sha.strip().lower():
             continue
-        body = str(review.get("body") or "")
-        if not any(marker in body for marker in _MERGECRAFT_REVIEW_MARKERS):
+        if not _is_authored_review(review, publishers):
             continue
         return commit_id
     return None
 
 
-def review_round_index(reviews: list[dict[str, Any]]) -> int:
+def review_round_index(
+    reviews: list[dict[str, Any]],
+    *,
+    publishers: frozenset[str] | None = None,
+) -> int:
     """Return the 1-based review round from prior mergeCraft-authored PR reviews (RC12).
 
-    Counts prior reviews whose body carries a mergeCraft marker — the same
-    recovery signal ``last_reviewed_sha`` uses — and adds one for the run about
-    to start. This is the single source of truth for round-aware budgets (W9.2c).
+    Counts prior reviews that pass the same authorship rule ``last_reviewed_sha``
+    uses, and adds one for the run about to start. This is the single source of
+    truth for round-aware budgets (W9.2c).
     """
-    prior_rounds = sum(
-        1
-        for review in reviews or []
-        if any(marker in str(review.get("body") or "") for marker in _MERGECRAFT_REVIEW_MARKERS)
-    )
+    prior_rounds = sum(1 for review in reviews or [] if _is_authored_review(review, publishers))
     return prior_rounds + 1
+
+
+# ``pulls/{n}/reviews`` is paginated at 100 per page; a PR with a longer review
+# history would hide the newest mergeCraft review behind the first page.
+_REVIEWS_PAGE_SIZE = 100
+# A history longer than this is pathological; stop paging and warn rather than
+# loop unbounded against a paginating API.
+_REVIEWS_MAX_PAGES = 30
+
+
+async def list_mergecraft_reviews(ctx: ToolContext, *, pull_number: int) -> list[dict[str, Any]]:
+    """Return the PR's mergeCraft-authored reviews, oldest first (TB-D7).
+
+    Paginates through the review history (not just the first page), filters it
+    through the P-17 authorship rule (marker **and** an expected publisher), and
+    warns when the page cap truncates the history. A listing failure returns
+    ``[]`` — a missing review history is advisory, never fatal.
+    """
+    raw: list[dict[str, Any]] = []
+    try:
+        for page in range(1, _REVIEWS_MAX_PAGES + 1):
+            batch = list(
+                await ctx.scm.list_reviews(
+                    ctx.repo.owner,
+                    ctx.repo.name,
+                    pull_number,
+                    params={"per_page": _REVIEWS_PAGE_SIZE, "page": page},
+                )
+                or []
+            )
+            raw.extend(batch)
+            if len(batch) < _REVIEWS_PAGE_SIZE:
+                break
+        else:
+            logger.warning(
+                "mergeCraft review history: stopped after {} pages for #{}; "
+                "the history may be incomplete",
+                _REVIEWS_MAX_PAGES,
+                pull_number,
+            )
+    except Exception as err:  # advisory; a missing review history is not fatal
+        logger.info("incremental diff: listing prior reviews soft-failed: {}", err)
+        return []
+    # A review without the marker cannot be mergeCraft's, so skip the publisher
+    # lookup entirely when there is nothing to attribute.
+    from mergecraft.review.authorship import has_mergecraft_marker, is_mergecraft_authored
+
+    if not any(has_mergecraft_marker(review) for review in raw):
+        return []
+    publishers = expected_publisher_logins(ctx)
+    return [review for review in raw if is_mergecraft_authored(review, publishers=publishers)]
+
+
+async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head_sha: str) -> str:
+    """Fetch prior reviews and return the last mergeCraft-reviewed SHA (``""`` if none)."""
+    reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
+    return last_reviewed_sha(reviews, head_sha=head_sha) or ""
 
 
 def changed_paths_in_diff(diff_text: str) -> list[str]:
@@ -119,24 +312,6 @@ def changed_paths_in_diff(diff_text: str) -> list[str]:
     for match in _DIFF_FILE_RE.finditer(diff_text):
         seen.setdefault(match.group("to"), None)
     return list(seen)
-
-
-async def _list_pull_reviews(ctx: ToolContext, *, pull_number: int) -> list[dict[str, Any]]:
-    """Return PR reviews oldest-first, or ``[]`` when listing soft-fails."""
-    try:
-        reviews = await ctx.scm.list_reviews(
-            ctx.repo.owner, ctx.repo.name, pull_number, params={"per_page": 100}
-        )
-    except Exception as err:  # advisory; a missing review history is not fatal
-        logger.info("incremental diff: listing prior reviews soft-failed: {}", err)
-        return []
-    return list(reviews or [])
-
-
-async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head_sha: str) -> str:
-    """Fetch prior reviews and return the last mergeCraft-reviewed SHA (``""`` if none)."""
-    reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
-    return last_reviewed_sha(reviews, head_sha=head_sha) or ""
 
 
 def _remote_url_for_cwd(cwd: str) -> str:
@@ -194,9 +369,50 @@ async def pull_request_path_expectations(
     return required, allowed
 
 
-async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> str:
-    """Build a unified diff from the PR files API, following pagination."""
+class _FilesApiDiff(str):
+    """Unified diff text plus the omissions the files API forced (TB-D6).
+
+    Subclasses ``str`` so the diff keeps working everywhere a plain ``str`` is
+    expected (writing the file, impact extraction), while the checkout callers
+    read the recorded omissions off it via ``unreviewable_paths`` and
+    ``truncated``.
+    """
+
+    unreviewable_paths: list[str]
+    truncated: bool
+
+    __slots__ = ("truncated", "unreviewable_paths")
+
+    def __new__(
+        cls,
+        text: str,
+        *,
+        unreviewable_paths: list[str],
+        truncated: bool,
+    ) -> _FilesApiDiff:
+        obj = super().__new__(cls, text)
+        obj.unreviewable_paths = unreviewable_paths
+        obj.truncated = truncated
+        return obj
+
+
+async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _FilesApiDiff:
+    """Build a unified diff from the PR files API, following pagination.
+
+    Returns the diff text carrying ``unreviewable_paths`` and ``truncated``
+    (TB-D6):
+
+    * ``unreviewable_paths`` — files GitHub reports line changes for but sends
+      no ``patch`` for (a text diff too large to inline); the header alone
+      cannot be reviewed.
+    * ``truncated`` — the page cap was reached, so later files were never seen.
+
+    A file with no ``patch`` **and** no line changes is a binary (or empty)
+    header, written as today and not flagged.
+    """
     parts: list[str] = []
+    unreviewable: list[str] = []
+    truncated = False
     endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
     for page in range(1, _PULL_FILES_MAX_PAGES + 1):
         files = await ctx.scm.get(
@@ -204,19 +420,66 @@ async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> str:
         )
         batch = list(files or [])
         for f in batch:
-            parts.append(f"diff --git a/{f.get('filename')} b/{f.get('filename')}\n")
+            filename = str(f.get("filename") or "").strip()
+            parts.append(f"diff --git a/{filename} b/{filename}\n")
             if f.get("patch"):
                 parts.append(f.get("patch") + "\n")
+            elif filename and _line_change_count(f) > 0:
+                # GitHub omits ``patch`` for binary files *and* for text diffs
+                # too large to inline; the line counts tell them apart.
+                unreviewable.append(filename)
         if len(batch) < _PULL_FILES_PAGE_SIZE:
             break
     else:
+        truncated = True
         logger.warning(
             "api-only diff: stopped after {} pages of pull files for #{}; "
             "the diff may be incomplete",
             _PULL_FILES_MAX_PAGES,
             pull_number,
         )
-    return "".join(parts)
+    return _FilesApiDiff("".join(parts), unreviewable_paths=unreviewable, truncated=truncated)
+
+
+def _line_change_count(file: Mapping[str, Any]) -> int:
+    """Return ``additions + deletions`` for a files-API entry, tolerating junk."""
+    total = 0
+    for key in ("additions", "deletions"):
+        try:
+            total += int(file.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _append_diff_degradations(reason: str, *, truncated: bool, unreviewable: list[str]) -> str:
+    """Append recorded files-API omissions (TB-D6) to a degradation reason."""
+    notes = [reason.rstrip().removesuffix(".")]
+    if truncated:
+        notes.append(f"the files-API diff was truncated at the {_PULL_FILES_MAX_PAGES}-page cap")
+    if unreviewable:
+        notes.append(f"{len(unreviewable)} file(s) had no inline patch and are unreviewable")
+    return "; ".join(notes) + "."
+
+
+def _files_api_diff_reason(
+    *,
+    diff_detail: str,
+    base_fetch_failure: str | None,
+    truncated: bool,
+    unreviewable: list[str],
+) -> str:
+    """Reason naming a git-diff failure and the base-fetch state (TB-D5/TB-D6)."""
+    if base_fetch_failure is None:
+        base_state = "the base fetch had succeeded, so the base ref was available"
+    else:
+        base_state = f"the base fetch had already failed ({base_fetch_failure})"
+    reason = (
+        f"the local `git diff` failed ({diff_detail}) while {base_state}; the "
+        f"review diff is built from the GitHub files API ({FILES_API_DIFF_SCOPE}), "
+        "not from the local checkout"
+    )
+    return _append_diff_degradations(reason, truncated=truncated, unreviewable=unreviewable)
 
 
 def _fetch_head_with_retry(
@@ -317,15 +580,49 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             raise RuntimeError(msg)
 
+        # TB-D4 — refuse a PR the run was not bound to. The bound number lives on
+        # the run's **bound** event (``_resolve_credentials`` writes the fetched
+        # ``pull_request`` onto ``ctx.gh_event``); the resolved payload therefore
+        # is empty for a comment-on-PR and a PR-naming ``workflow_dispatch``,
+        # whose ``issue_number`` is never set — reading the payload alone left
+        # the guard inert for dispatches. Prefer the bound event, then fall back
+        # to the payload so a run with no bound number is unchanged.
+        bound_pr = ctx.gh_event.get("pull_request") if isinstance(ctx.gh_event, dict) else None
+        bound_number: int | None = (
+            bound_pr.get("number")
+            if isinstance(bound_pr, dict) and isinstance(bound_pr.get("number"), int)
+            else None
+        )
+        if bound_number is None:
+            bound_number = ctx.payload.event.issue_number
+        if bound_number is not None and pull_number != bound_number:
+            msg = (
+                f"refusing to check out PR #{pull_number}: this run is bound to "
+                f"PR #{bound_number}, the pull request under review."
+            )
+            raise RuntimeError(msg)
+
         pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
         head = pr.get("head") or {}
         base = pr.get("base") or {}
         head_ref = head.get("ref") or ""
         head_sha = head.get("sha") or ""
         base_ref = base.get("ref") or ""
-        is_fork = (head.get("repo") or {}).get("full_name") != (
-            (base.get("repo") or {}).get("full_name")
-        )
+        # TB-D3 — one fork predicate. The ``full_name`` comparison stops being a
+        # decision input; ``is_fork_pull_request`` reads the same ``head.repo.fork``
+        # shape every other fork decision reads.
+        is_fork = is_fork_pull_request({"pull_request": pr})
+
+        # TB-D4 — refuse a fork PR on a run that holds trusted execution or
+        # authority trust. Downgrading mid-run cannot un-run setup or un-mint
+        # credentials, so this must refuse, not merely downgrade.
+        if is_fork and (ctx.trust_tier == "trusted" or ctx.authority_trust == "trusted"):
+            msg = (
+                f"refusing to check out PR #{pull_number}: it is a fork pull request "
+                "but this run holds trusted execution or authority trust."
+            )
+            raise RuntimeError(msg)
+
         local_branch = f"pr-{pull_number}"
 
         # Fetch PR head into local_branch. checkout_pr can run more than once
@@ -345,12 +642,17 @@ def checkout_pr_tool(ctx: ToolContext):
         diff_path = str(Path(temp) / f"pr-{pull_number}.diff")
 
         if not fetched:
-            degraded_reason = degraded_checkout_reason(
+            fetch_degraded = degraded_checkout_reason(
                 detail=(fetch_err or "git fetch failed").splitlines()[0]
             )
-            warning(degraded_reason)
-            diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
-            Path(diff_path).write_text(diff, encoding="utf-8")
+            fetch_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            fetch_unreviewable = fetch_diff.unreviewable_paths
+            fetch_truncated = fetch_diff.truncated
+            fetch_degraded = _append_diff_degradations(
+                fetch_degraded, truncated=fetch_truncated, unreviewable=fetch_unreviewable
+            )
+            warning(fetch_degraded)
+            Path(diff_path).write_text(fetch_diff, encoding="utf-8")
             state.issue_number = pull_number
             state.checkout_sha = head_sha
             from mergecraft.mcp.review_context import hydrate_review_context
@@ -363,8 +665,9 @@ def checkout_pr_tool(ctx: ToolContext):
                 review_scope=API_ONLY_SCOPE,
             )
             _rebaseline_config_after_checkout(ctx)
-            prior_reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
-            round_index = review_round_index(prior_reviews)
+            prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
+            publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
+            round_index = review_round_index(prior_reviews, publishers=publishers)
             ctx.tool_state.review_round_index = round_index
             result: dict[str, Any] = {
                 "pullNumber": pull_number,
@@ -377,9 +680,13 @@ def checkout_pr_tool(ctx: ToolContext):
                 "title": pr.get("title"),
                 "url": pr.get("html_url"),
                 "scope": API_ONLY_SCOPE,
-                "degraded": degraded_reason,
+                "degraded": fetch_degraded,
                 "reviewPhase": ReviewPhase.ESTABLISH_SCOPE.value,
             }
+            if fetch_unreviewable:
+                result["unreviewablePaths"] = fetch_unreviewable
+            if fetch_truncated:
+                result["diffTruncated"] = True
 
             await hydrate_review_context(
                 ctx,
@@ -396,6 +703,7 @@ def checkout_pr_tool(ctx: ToolContext):
         _run_git(["checkout", local_branch], cwd=cwd)
         # Ensure base is available for merge-base diffs
         base_env, base_remote_url = _git_env_for_cwd(cwd, ctx.git_token)
+        base_fetch_failure: str | None = None
         try:
             _run_git(
                 [
@@ -410,6 +718,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 remote_url=base_remote_url or None,
             )
         except Exception as err:
+            base_fetch_failure = str(err).splitlines()[0] if str(err) else "git fetch failed"
             logger.info("base fetch soft-failed: {}", err)
         if base_ref:
             try:
@@ -433,18 +742,43 @@ def checkout_pr_tool(ctx: ToolContext):
             else:
                 state.push_url = f"https://github.com/{ctx.repo.owner}/{ctx.repo.name}"
 
-        # Write a basic diff file for reviewers
+        # Write a basic diff file for reviewers. A failed ``git diff`` falls back
+        # to the GitHub files API; that fallback is labelled as exactly what it
+        # is (TB-D5) and its omissions are recorded on the result (TB-D6).
+        diff_failure: str | None = None
+        unreviewable: list[str] = []
+        diff_truncated = False
         try:
             diff = _run_git(
                 ["diff", "--merge-base", f"origin/{base_ref}", "HEAD"],
                 cwd=cwd,
             )
-        except Exception:
-            diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+        except Exception as err:
+            diff_failure = str(err).splitlines()[0] if str(err) else "git diff failed"
+            files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            diff = files_diff
+            unreviewable = files_diff.unreviewable_paths
+            diff_truncated = files_diff.truncated
         Path(diff_path).write_text(diff, encoding="utf-8")
         from mergecraft.mcp.verdict import register_review_scope
 
-        register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
+        degraded_reason: str | None = None
+        if diff_failure is not None:
+            degraded_reason = _files_api_diff_reason(
+                diff_detail=diff_failure,
+                base_fetch_failure=base_fetch_failure,
+                truncated=diff_truncated,
+                unreviewable=unreviewable,
+            )
+            warning(degraded_reason)
+            register_review_scope(
+                ctx.tool_state,
+                diff_path=diff_path,
+                provenance="api",
+                review_scope=FILES_API_DIFF_SCOPE,
+            )
+        else:
+            register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
         _rebaseline_config_after_checkout(ctx)
 
         result = {
@@ -458,9 +792,16 @@ def checkout_pr_tool(ctx: ToolContext):
             "title": pr.get("title"),
             "url": pr.get("html_url"),
         }
+        if degraded_reason is not None:
+            result["degraded"] = degraded_reason
+        if unreviewable:
+            result["unreviewablePaths"] = unreviewable
+        if diff_truncated:
+            result["diffTruncated"] = True
 
-        prior_reviews = await _list_pull_reviews(ctx, pull_number=pull_number)
-        round_index = review_round_index(prior_reviews)
+        prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
+        publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
+        round_index = review_round_index(prior_reviews, publishers=publishers)
         ctx.tool_state.review_round_index = round_index
 
         # A re-review should pay for the new commits, not the whole PR. The key is
@@ -468,7 +809,14 @@ def checkout_pr_tool(ctx: ToolContext):
         # read this path first, so advertising a path that does not resolve is
         # worse than not advertising one at all.
         if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
-            prior_sha = last_reviewed_sha(prior_reviews, head_sha=state.checkout_sha or "") or ""
+            prior_sha = (
+                last_reviewed_sha(
+                    prior_reviews,
+                    head_sha=state.checkout_sha or "",
+                    publishers=publishers,
+                )
+                or ""
+            )
             if prior_sha:
                 written = _write_incremental_diff(
                     cwd=cwd,
@@ -543,9 +891,14 @@ def checkout_pr_tool(ctx: ToolContext):
                 operator_authorized_linked_repos,
             )
 
+            base_lookup = _base_linked_repo_manifest(
+                cwd=cwd, base_ref=base_ref, base_fetch_failure=base_fetch_failure
+            )
             linked = attach_linked_repo_review(
                 Path(cwd),
                 authorized_repos=operator_authorized_linked_repos(),
+                base_manifest=base_lookup.manifest,
+                base_manifest_error=base_lookup.unreadable_reason,
             )
             if linked is not None:
                 result.update(linked)

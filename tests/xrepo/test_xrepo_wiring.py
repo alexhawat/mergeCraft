@@ -173,7 +173,7 @@ def test_pr_manifest_cannot_authorize_an_ungranted_sibling(tmp_path: Path) -> No
     denied = attach_linked_repo_review(primary)
     assert denied is not None
     assert denied["linkedRepoFindings"] == []
-    granted = attach_linked_repo_review(primary, authorized_repos=frozenset({"api-contracts"}))
+    granted = attach_linked_repo_review(primary, authorized_repos=frozenset({"acme/api-contracts"}))
     assert granted is not None
     joined = " ".join(
         f"{row['consumer']} {row['producer']}" for row in granted["linkedRepoFindings"]

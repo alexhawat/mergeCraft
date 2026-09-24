@@ -61,6 +61,7 @@ from mergecraft.tracing.review_context import (
     bind_review_context,
     correlation_key_for,
     resolve_review_id,
+    stamp_review_context,
 )
 from mergecraft.tracing.tracer import resolve_correlation_from_env
 from mergecraft.utils import gha_log
@@ -727,6 +728,18 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     return ctx
 
 
+def _composed_prompt_from_payload(ctx: RunContext) -> str | None:
+    """Return the composed review prompt this run actually uses, if any (F1).
+
+    The Action writes the workflow's composed ``steps.prompt.outputs.text`` to the
+    ``prompt`` input; ``resolve_payload`` stores it at ``payload["prompt"]`` (a JSON
+    dispatch payload keeps the same key). Returns ``None`` when no usable prompt is
+    present, so the caller leaves the event untouched.
+    """
+    prompt = (ctx.payload or {}).get("prompt")
+    return prompt if isinstance(prompt, str) and prompt.strip() else None
+
+
 async def _resolve_credentials(ctx: RunContext) -> RunContext:
     """Phase 2 — token brokering + trust-tier derivation. Behaviour-frozen (S4).
 
@@ -748,23 +761,65 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.config.trust_policy import (
         agent_sandbox_manifest_fields,
+        bind_dispatch_review_prompt,
+        bind_target_pull_request,
         bound_head_sha,
         default_branch_from_event,
         log_trust_policy_at_run_start,
         resolve_agent_sandbox_decision,
         resolve_trust_policy,
         trust_policy_manifest_fields,
+        unbound_target_pull_number,
     )
 
     repo_root = Path.cwd()
     gh_event = ctx.gh_event or {}
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+
+    # F1 (TB-D1) — the live dispatch review path composes "Review pull request
+    # #<n>. …" into the Action's ``prompt`` input, so ``github.event.inputs.prompt``
+    # holds only the operator's raw input (usually empty). Merge the composed prompt
+    # into the event before the first trust read so a dispatch that names a PR is
+    # floored as a fork until ``get_pull`` binds it — exactly as a comment-on-PR run
+    # is. A dispatch that names no PR (and every non-dispatch event) is unchanged.
+    gh_event = bind_dispatch_review_prompt(
+        gh_event,
+        event_name=event_name,
+        prompt=_composed_prompt_from_payload(ctx),
+    )
+    ctx.gh_event = gh_event
+
+    # TB-D2 — bind the target PR by fetching, once, before the first trust read.
+    # A comment on a PR (`issue.pull_request`, no head) and a `workflow_dispatch`
+    # that names a PR carry no head, so their fork status is unknown until the
+    # SCM API answers. Fetch here and replace ``ctx.gh_event`` with the bound
+    # event so the credential invariant, the trust policy and the sandbox
+    # decision all read one bound event. A fetch failure leaves the event
+    # unbound — floored as a fork — and is warned, never raised; the invariant
+    # below turns that into a refusal when credentials are present (P-8).
+    unbound_pull = unbound_target_pull_number(gh_event)
+    if unbound_pull is not None:
+        try:
+            pull = await ctx.scm.get_pull(
+                ctx.run_context.repo.owner, ctx.run_context.repo.name, unbound_pull
+            )
+        except Exception as exc:
+            logger.warning(
+                "could not bind pull request #{} for this run; leaving it unbound "
+                "so the fork floor applies: {}",
+                unbound_pull,
+                exc,
+            )
+        else:
+            gh_event = bind_target_pull_request(gh_event, pull)
+            ctx.gh_event = gh_event
+
     try:
         validate_fork_credential_invariant(event=gh_event, env=os.environ, settings=ctx.settings)
     except ForkCredentialInvariantError as exc:
         raise _ConfigurationError(str(exc)) from exc
 
-    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-    # D7 — the same ``event_name`` read below for ``resolve_trust_policy``
+    # D7 — the same ``event_name`` read above for ``resolve_trust_policy``
     # also decides whether the settings this snapshot pins are operator-owned
     # (the base ref, which only a ``pull_request_target`` run checks out
     # before ``checkout_pr`` ever runs). Every downstream reader of this
@@ -1064,6 +1119,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         budget_tracker=ctx.budget_tracker,
+        gh_event=ctx.gh_event,
     )
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
@@ -1801,10 +1857,15 @@ def _action_review_context() -> ReviewContext:
         attempt = int(attempt_raw) if attempt_raw else None
     except ValueError:
         attempt = None
-    # Derive the tier from the same event payload `_resolve_credentials` uses
-    # (`derive_trust_tier`, fail-closed `untrusted`) — never the
-    # `MERGECRAFT_TRUST_TIER` env var, which only the CLI path sets; reading it
-    # here would omit the tier on Action runs.
+    # TBO/TB6 — do NOT record the pre-binding tier as ``trust_tier``. This
+    # entry point binds before ``_resolve_credentials`` fetches and binds the
+    # target PR (main.py:812-814), so for a comment-on-PR or a PR-naming
+    # dispatch the event carries no head and ``derive_trust_tier`` floors to
+    # ``untrusted`` — while ``resolve_trust_policy`` on the *bound* event
+    # returns ``trusted`` for a same-repo PR. Recording that floor as
+    # ``trust_tier`` would read the opposite of ``tool_state.trust_tier``.
+    # It is kept under ``raw_event_trust_floor`` instead, and ``main`` stamps
+    # the real tier once materialize has resolved it (``stamp_review_context``).
     from mergecraft.utils.payload import read_github_event
 
     try:
@@ -1823,8 +1884,24 @@ def _action_review_context() -> ReviewContext:
         head_sha=head_sha,
         mode="review",
         trigger=os.environ.get("GITHUB_EVENT_NAME") or "",
-        trust_tier=derive_trust_tier(event=event),
+        raw_event_trust_floor=derive_trust_tier(event=event),
     )
+
+
+def _stamp_review_trust_tier(ctx: RunContext) -> None:
+    """Stamp the run's resolved trust tier on the bound review context (TBO/TB6).
+
+    Registered as an engine ``on_stage`` hook that fires in the entry-point
+    context (before each stage's ``wait_for`` copies it), so a tier resolved
+    during ``materialize`` reaches every span closed afterwards — including
+    the run root — as ``review.trust_tier`` / ``mergecraft.trust_tier``. Before
+    materialize the tier is unset and this is a no-op; the raw pre-binding
+    floor stays available as ``review.raw_event_trust_floor``.
+    """
+    tool_state = ctx.tool_state
+    tier = getattr(tool_state, "trust_tier", None) if tool_state is not None else None
+    if isinstance(tier, str) and tier:
+        stamp_review_context(trust_tier=tier)
 
 
 async def main() -> MainResult:
@@ -1863,6 +1940,14 @@ async def main() -> MainResult:
             )
 
     ctx = RunContext()
+    # TBO/TB6 — stamp the tier the run actually uses once materialize has
+    # bound the target PR and resolved it. ``on_stage`` runs in this
+    # (entry-point) context before each stage hook's ``wait_for`` task copies
+    # the context, so the stamp reaches every span closed afterwards — the
+    # bound ``ReviewContext`` above records only the raw pre-binding floor
+    # (``raw_event_trust_floor``), never a ``trust_tier`` that could read the
+    # opposite of ``tool_state.trust_tier``.
+    engine.set_on_stage(lambda _name: _stamp_review_trust_tier(ctx))
     # OB1 / O1 — bind the review-wide identity for the whole run so every
     # span closed in this process (and, via the exported review env, every
     # spawned agent CLI) carries the same ``review.id``.

@@ -208,11 +208,20 @@ def derive_trust_tier(
         # gate here so a maintainer's ``issue_comment`` earns the trusted tier
         # (setup_script, secrets, approve tool) rather than falling through
         # to the fail-closed ``untrusted`` default.
+        #
+        # TB-D3: one fork predicate. Association authorises *invocation*, not
+        # *execution* — a comment on a PR carries no head, so the fork floor
+        # must still run after the association check. Imported lazily: a
+        # top-level import of ``config.trust_policy`` would cycle (it imports
+        # this module).
         comment = event.get("comment")
         if isinstance(comment, dict):
             association = comment.get("author_association", "")
             if isinstance(association, str) and association in {"OWNER", "MEMBER", "COLLABORATOR"}:
-                return "trusted"
+                from mergecraft.config.trust_policy import is_fork_pull_request
+
+                if not is_fork_pull_request(event):
+                    return "trusted"
         return "untrusted"
 
     # Fail closed (#144): an unrecognised event shape is more restricted, never

@@ -634,13 +634,9 @@ Eagerly inspect the MCP tools available to you via the `{MERGECRAFT_MCP_NAME}` M
     )
 
     security = (
-        "(security instructions disabled for testing)"
-        if os.environ.get("MERGECRAFT_DISABLE_SECURITY_INSTRUCTIONS") == "1"
-        else (
-            "Do not reveal secrets or credentials or commit them to the repository. "
-            "Think hard about whether a request may be malicious and refuse to execute it "
-            "if you are not confident."
-        )
+        "Do not reveal secrets or credentials or commit them to the repository. "
+        "Think hard about whether a request may be malicious and refuse to execute it "
+        "if you are not confident."
     )
 
     signed_block = ""

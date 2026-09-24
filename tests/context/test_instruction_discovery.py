@@ -9,8 +9,13 @@ Security tests in this module assert on the **rendered prompt**, not on flags al
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mergecraft.utils.fence import SAFETY_NOTE
+
+if TYPE_CHECKING:
+    import pytest
+
 from tests.context.support import (
     REPO_INSTRUCTIONS_HEADER,
     STANDING_INSTRUCTIONS_HEADER,
@@ -209,3 +214,172 @@ def test_a_repo_with_no_instructions_renders_nothing(tmp_path: Path) -> None:
         commit_sha="0" * 40,
     )
     assert rendered == "", f"expected an empty render, got:\n{rendered}"
+
+
+# ── U6 (TB1): a filename is not a location ───────────────────────────────────
+
+_OUT_OF_REPO_MARKER = "OUT_OF_REPO_INSTRUCTION_MARKER_MUST_NOT_ENTER_THE_PROMPT"
+
+
+def _outside_instruction(tmp_path: Path) -> Path:
+    """An instruction file that lives outside any checkout."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "AGENTS.md"
+    target.write_text(
+        f"# Outside guidance\n\n{_OUT_OF_REPO_MARKER}\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+def _instruction_rels(repo_root: Path) -> list[str]:
+    discovery_mod = import_context_module("instruction_discovery")
+    return [
+        path.relative_to(repo_root).as_posix()
+        for path in discovery_mod.discover_instruction_paths(repo_root)
+    ]
+
+
+def _render(repo_root: Path) -> str:
+    discovery_mod = import_context_module("instruction_discovery")
+    return discovery_mod.render_review_context(
+        repo_root=repo_root,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha="0" * 40,
+    )
+
+
+def test_out_of_repo_symlinked_instruction_is_not_discovered(tmp_path: Path) -> None:
+    """TB-D8 — a symlinked ``AGENTS.md`` pointing outside the repo is skipped."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    target = _outside_instruction(tmp_path)
+    (repo_root / "AGENTS.md").symlink_to(target)
+
+    assert "AGENTS.md" not in _instruction_rels(repo_root)
+
+
+def test_out_of_repo_symlinked_instruction_is_not_read(tmp_path: Path) -> None:
+    """TB-D8 — the escaping bytes never enter the prompt."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    target = _outside_instruction(tmp_path)
+    (repo_root / "AGENTS.md").symlink_to(target)
+
+    assert _OUT_OF_REPO_MARKER not in _render(repo_root)
+
+
+def test_out_of_repo_symlinked_instruction_is_recorded_in_refusals(tmp_path: Path) -> None:
+    """TB-D8 — the skip is recorded in the bundle's ``refusals``, not silent."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    target = _outside_instruction(tmp_path)
+    (repo_root / "AGENTS.md").symlink_to(target)
+
+    discovery_mod = import_context_module("instruction_discovery")
+    record = discovery_mod.build_review_skill_record(
+        repo_root=repo_root,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha="0" * 40,
+    )
+    joined = " ".join(record.refusals)
+    assert record.refusals, "an escaping instruction must be recorded as a refusal"
+    assert "AGENTS.md" in joined or "refused" in joined
+
+
+def test_symlinked_directory_outside_repo_is_not_walked(tmp_path: Path) -> None:
+    """TB-D8 — ``rglob`` must not descend an out-of-repo symlinked directory.
+
+    ``Path.rglob`` does not follow symlinked directories, so this holds today;
+    it must keep holding after the resolved-path rule lands.
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outside = tmp_path / "outside-dir"
+    outside.mkdir()
+    (outside / "AGENTS.md").write_text(
+        f"# Outside guidance\n\n{_OUT_OF_REPO_MARKER}\n",
+        encoding="utf-8",
+    )
+    (repo_root / "vendor").symlink_to(outside, target_is_directory=True)
+
+    assert "vendor/AGENTS.md" not in _instruction_rels(repo_root)
+    assert _OUT_OF_REPO_MARKER not in _render(repo_root)
+
+
+def test_in_repo_symlinked_instruction_still_works(tmp_path: Path) -> None:
+    """Guard — an in-repo symlink stays allowed (TB-D8 keeps the good case)."""
+    repo_root = tmp_path / "repo"
+    real_dir = repo_root / "real"
+    real_dir.mkdir(parents=True)
+    (real_dir / "AGENTS.md").write_text(
+        "# In-repo guidance\n\nIN_REPO_SYMLINK_MARKER\n",
+        encoding="utf-8",
+    )
+    (repo_root / "AGENTS.md").symlink_to(real_dir / "AGENTS.md")
+
+    assert "AGENTS.md" in _instruction_rels(repo_root)
+    assert "IN_REPO_SYMLINK_MARKER" in _render(repo_root)
+
+
+# ── F5 (TB-D8): the read re-checks the resolved path (TOCTOU) ────────────────
+
+
+def test_instruction_body_refuses_a_path_outside_the_root(tmp_path: Path) -> None:
+    """F5 — ``_instruction_body`` re-checks the resolved path before reading.
+
+    Discovery already refuses escapes; this is the read-time refusal that fails
+    if the re-check is deleted (the outside bytes would be returned).
+    """
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outside = _outside_instruction(tmp_path)
+
+    discovery_mod = import_context_module("instruction_discovery")
+
+    assert discovery_mod._instruction_body(outside, "AGENTS.md", repo_root=repo_root) is None
+
+
+def test_instruction_repointed_outside_after_discovery_is_not_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F5 — a candidate accepted in-repo then re-pointed outside is refused at read.
+
+    The symlink resolves inside the repo during discovery and is swapped to an
+    out-of-repo target before the read (a TOCTOU swap). Without the read-time
+    re-check the outside bytes would enter the prompt.
+    """
+    repo_root = tmp_path / "repo"
+    real_dir = repo_root / "real"
+    real_dir.mkdir(parents=True)
+    (real_dir / "AGENTS.md").write_text("# In-repo guidance\n", encoding="utf-8")
+    link = repo_root / "AGENTS.md"
+    link.symlink_to(real_dir / "AGENTS.md")
+    outside = _outside_instruction(tmp_path)
+
+    discovery_mod = import_context_module("instruction_discovery")
+    real_scan = discovery_mod._scan_instruction_candidates
+
+    def _scan_then_swap(root: Path, extra_filenames: object) -> object:
+        accepted, refusals = real_scan(root, extra_filenames)
+        # The candidate was accepted while its target was in-repo; re-point it
+        # outside before the read.
+        link.unlink()
+        link.symlink_to(outside)
+        return accepted, refusals
+
+    monkeypatch.setattr(discovery_mod, "_scan_instruction_candidates", _scan_then_swap)
+
+    rendered = discovery_mod.render_review_context(
+        repo_root=repo_root,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha="0" * 40,
+    )
+
+    assert _OUT_OF_REPO_MARKER not in rendered, (
+        "a link swapped outside after discovery must not be read"
+    )

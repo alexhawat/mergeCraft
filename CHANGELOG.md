@@ -1640,6 +1640,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+### Fixed
+
+- Comment-triggered reviews now resolve the pull request they will check out
+  before any trust, credential, or sandbox decision, so a maintainer's review
+  command on a fork pull request no longer runs with provider credentials or a
+  trusted sandbox; a pull request whose metadata cannot be fetched fails closed
+  with a message naming the unbound pull request. A `workflow_dispatch` review
+  that names a pull request is bound the same way, reading the composed review
+  prompt rather than only the operator's raw input.
+
+- The checkout tool refuses a pull request number other than the one the run was
+  bound to, and refuses a fork pull request on a run trusted for execution or
+  authority.
+
+- A checkout that falls back to the files API after a failed `git diff` now
+  records itself as a files-API diff with the reason instead of registering as a
+  full checkout; text patches GitHub omits from the files API are listed as
+  unreviewable, a page-cap truncation is recorded, and binary files are not
+  flagged.
+
+- The incremental checkpoint and review-round index accept a mergeCraft marker
+  only from the run's own expected publishers — an App bot login
+  (`<slug>[bot]`) or the `GET /user` login of a non-shared publication token —
+  and read paginated review history, so a marked review by any other author no
+  longer moves the checkpoint. A run that can only publish as the shared
+  `github-actions[bot]` has no attributable identity, so incremental checkpoints
+  and round counting stay unavailable until the reviewer App or a PAT is
+  configured.
+
+- Repository instruction files are discovered and read only when their resolved
+  path stays inside the repository, so a symlinked `AGENTS.md` or a symlinked
+  directory pointing outside the checkout is skipped and recorded as a refusal.
+
+- The `MERGECRAFT_DISABLE_SECURITY_INSTRUCTIONS` environment switch is removed;
+  the security paragraph is always in the system prompt.
+
+- Inside GitHub Actions the CLI no longer loads a `.env` from the checked-out
+  workspace at startup; set `MERGECRAFT_ENV` to load an explicit file. Local
+  (non-Actions) runs are unchanged.
+
+- Linked-repo grants now match an exact lowercase `owner/name`; a bare name no
+  longer authorizes a same-named repository, and two manifest entries sharing a
+  name are both refused.
+
+- Linked-repo findings report only contracts changed by a moved pin, and every
+  omission — ungranted, missing sibling, pin mismatch, unreachable pin, an
+  unreadable base manifest, or a manifest whose entries share a name — is listed
+  in the review payload.
+
 ## [0.1.0] — 2026-08-14
 
 Initial public release: mergeCraft is a standalone, BYOK GitHub Action for
