@@ -125,7 +125,11 @@ async def test_blank_body_selected_sticky_is_updated_not_duplicated(
         *,
         known_comment_id: int | None = None,
     ) -> dict[str, Any]:
-        return {"id": _BLANK_STICKY_ID, "body": "", "user": {"type": "Bot"}}
+        return {
+            "id": _BLANK_STICKY_ID,
+            "body": "",
+            "user": {"login": "github-actions[bot]", "type": "Bot"},
+        }
 
     monkeypatch.setattr(ledger, "fetch_sticky_progress_comment", _select_blank)
 

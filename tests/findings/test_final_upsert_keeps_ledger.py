@@ -45,9 +45,11 @@ class _FakeScm:
 
     def __init__(self) -> None:
         self.comments: dict[int, dict[str, Any]] = {}
+        self.reviews: dict[int, dict[str, Any]] = {}
         self.creates = 0
         self.updates = 0
         self._next_id = 100
+        self._next_review_id = 500
 
     async def list_issue_comments(
         self,
@@ -83,6 +85,48 @@ class _FakeScm:
     ) -> dict[str, Any]:
         self.updates += 1
         row = self.comments[int(comment_id)]
+        row["body"] = body
+        return dict(row)
+
+    async def delete_issue_comment(self, owner: str, repo: str, comment_id: int) -> None:
+        self.comments.pop(int(comment_id), None)
+
+    async def list_reviews(
+        self,
+        owner: str,
+        repo: str,
+        pull_number: int,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        page = int((params or {}).get("page", 1))
+        if page != 1:
+            return []
+        return [dict(row) for row in self.reviews.values()]
+
+    async def get_review(
+        self, owner: str, repo: str, pull_number: int, review_id: int
+    ) -> dict[str, Any]:
+        return dict(self.reviews[int(review_id)])
+
+    async def create_review(
+        self, owner: str, repo: str, pull_number: int, **kwargs: Any
+    ) -> dict[str, Any]:
+        self._next_review_id += 1
+        row = {
+            "id": self._next_review_id,
+            "node_id": f"R_{self._next_review_id}",
+            "commit_id": "",
+            "body": str(kwargs.get("body") or ""),
+            "user": {"login": "github-actions[bot]", "type": "Bot"},
+        }
+        self.reviews[self._next_review_id] = row
+        return dict(row)
+
+    async def update_review(
+        self, owner: str, repo: str, pull_number: int, review_id: int, body: str
+    ) -> dict[str, Any]:
+        row = self.reviews[int(review_id)]
         row["body"] = body
         return dict(row)
 
@@ -151,10 +195,9 @@ def _packet() -> Any:
     return packet
 
 
-def _posted_body(scm: _FakeScm, ctx: ToolContext) -> str:
-    progress = ctx.tool_state.progress_comment
-    assert isinstance(progress, ProgressComment)
-    return str(scm.comments[int(progress.id)]["body"])
+def _posted_body(scm: _FakeScm) -> str:
+    assert scm.reviews, "the final record must be the formal review"
+    return str(next(iter(scm.reviews.values()))["body"])
 
 
 async def _hydrate_second_run(scm: _FakeScm, tmp_path: Path) -> list[str]:
@@ -190,7 +233,7 @@ async def test_path_a_report_progress_then_record_keeps_ledger(tmp_path: Path) -
         ctx=ctx,
     )
 
-    body = _posted_body(scm, ctx)
+    body = _posted_body(scm)
     _assert_ledger_and_delta_survive(body, fingerprints)
     assert scm.creates == 1, "path A reuses the comment report_progress created"
     assert scm.updates >= 1
@@ -217,7 +260,7 @@ async def test_path_b_persist_creates_then_record_keeps_ledger(tmp_path: Path) -
         ctx=ctx,
     )
 
-    body = _posted_body(scm, ctx)
+    body = _posted_body(scm)
     _assert_ledger_and_delta_survive(body, fingerprints)
     assert scm.creates == 1, "the record upsert must update the sticky, not post again"
 

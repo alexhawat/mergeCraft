@@ -13,6 +13,7 @@ from mergecraft.findings.ledger import (
 )
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ProgressComment, ReviewReplyRecord, primary_repo_state
+from mergecraft.types import INCREMENTAL_REVIEW_MODE
 from mergecraft.utils.learnings import (
     ensure_learnings_review_delta,
     merge_learnings_delta_into_review_body,
@@ -183,6 +184,10 @@ def report_progress_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         body = str(params["body"])
         target_plan = bool(params.get("target_plan_comment"))
+        if ctx.tool_state.selected_mode in {"Review", INCREMENTAL_REVIEW_MODE} and not target_plan:
+            ctx.tool_state.last_progress_body = body
+            ctx.tool_state.final_summary_written = True
+            return {"success": True, "action": "recorded_in_review"}
         if ctx.tool_state.progress_comment is False and not target_plan:
             return {
                 "success": True,

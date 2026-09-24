@@ -1,12 +1,14 @@
-"""Cross-round finding ledger — open-PR memory in the sticky progress comment (RC4, D4).
+"""Cross-round finding ledger — open-PR memory in formal reviews (RC4, D4).
 
-Persistence is GitHub-only: HTML markers in the progress comment survive ephemeral
-Action checkouts. Post-merge issue filing stays in :mod:`mergecraft.findings.sweep`.
+HTML markers in review bodies survive ephemeral Action checkouts. Legacy progress
+comments are read during migration. Post-merge filing stays in the sweep module.
 """
 
 from __future__ import annotations
 
+import contextvars
 import json
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -29,6 +31,7 @@ LEDGER_MARKER_PREFIX: str = "<!-- mergecraft-ledger:v1:"
 LEDGER_MARKER_V2_PREFIX: str = "<!-- mergecraft-ledger:v2:"
 LEDGER_SCHEMA_VERSION: str = "v2"
 DETERMINISTIC_RECORD_MARKER: str = "<!-- mergecraft-deterministic-record:v1 -->"
+REVIEW_BODY_MARKER: str = "<!-- mergecraft-review-body:v1 -->"
 
 _PROGRESS_HEADING = "## mergeCraft progress"
 _VIA_MERGECRAFT_MARKER = "*via mergecraft*"
@@ -41,7 +44,7 @@ _LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-
 # terminator is removed on its own by the ``replace`` in the stripper below.
 _DETERMINISTIC_RECORD_BLOCK_RE = re.compile(
     rf"{re.escape(DETERMINISTIC_RECORD_MARKER)}[\s\S]*?"
-    r"(?=\n<!-- mergecraft-ledger:|\n\*via mergecraft\*)",
+    rf"(?=\n{re.escape(REVIEW_BODY_MARKER)}|\n<!-- mergecraft-ledger:|\n\*via mergecraft\*)",
 )
 # Our own progress comment, where the record legitimately ends the body.
 _DETERMINISTIC_RECORD_BLOCK_EOF_RE = re.compile(
@@ -54,6 +57,8 @@ _ISSUE_COMMENT_PAGE_SIZE = 100
 # GitHub issue comments are paginated at 100/page; cap total scanned comments
 # at 1000 (10 pages) to bound API cost on very chatty PRs.
 _MAX_ISSUE_COMMENT_PAGES = 10
+_REVIEW_PAGE_SIZE = 100
+_MAX_REVIEW_PAGES = 10
 
 
 @dataclass
@@ -183,26 +188,138 @@ def is_sticky_progress_comment(body: str) -> bool:
     )
 
 
+_DEFAULT_PUBLISHER_LOGIN = "github-actions[bot]"
+_APPROVAL_CHECK_NAME = "mergecraft-approval"
+_publisher_login_from_config: str | None = None
+_publisher_logins_override: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
+    "mergecraft_publisher_logins",
+    default=None,
+)
+
+
+def _publisher_login_from_repo_config() -> str:
+    """Return ``reviewerBotLogin`` from repo config, or ``""`` when unset.
+
+    Cached for the process. The Action env wins over this; the cache only
+    serves read-side CLI and carryover, which do not set that env.
+    """
+    global _publisher_login_from_config
+    if _publisher_login_from_config is not None:
+        return _publisher_login_from_config
+    loaded = ""
+    try:
+        from mergecraft.config.settings import load_repo_settings
+
+        settings = load_repo_settings(load_learnings_files=False)
+        loaded = (settings.reviewer_bot_login or "").strip()
+    except Exception as err:
+        logger.warning("finding ledger: could not read reviewerBotLogin from repo config: {}", err)
+    _publisher_login_from_config = loaded
+    return loaded
+
+
+def _expected_publisher_login() -> str:
+    """Return the bot login this run is allowed to treat as its own publisher.
+
+    ``MERGECRAFT_REVIEWER_BOT_LOGIN`` is the App slug plus ``[bot]`` when the
+    workflow minted an App token, and ``github-actions[bot]`` when it fell
+    back to the job token. Read-side commands (``findings ledger``,
+    ``findings carryover``) do not see that env, so they use
+    ``reviewerBotLogin`` from repo config, then the job-token default.
+    Any other bot, including another installed App, is not this publisher.
+    """
+    configured = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    if configured:
+        return configured
+    override = _publisher_logins_override.get()
+    if override:
+        return next(iter(override))
+    from_config = _publisher_login_from_repo_config()
+    return from_config or _DEFAULT_PUBLISHER_LOGIN
+
+
+def _allowed_publisher_logins() -> frozenset[str]:
+    """Logins that may own a formal review or legacy sticky comment."""
+    configured = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    if configured:
+        return frozenset({configured})
+    override = _publisher_logins_override.get()
+    if override:
+        return override
+    from_config = _publisher_login_from_repo_config()
+    return frozenset({from_config or _DEFAULT_PUBLISHER_LOGIN})
+
+
+def _check_run_rows(payload: object) -> list[Mapping[str, object]]:
+    raw: object
+    if isinstance(payload, Mapping):
+        raw = payload.get("check_runs")
+        if not isinstance(raw, list):
+            raw = payload.get("items")
+    else:
+        raw = getattr(payload, "items", None)
+    if not isinstance(raw, list):
+        return []
+    return [row for row in raw if isinstance(row, Mapping)]
+
+
+async def _publisher_logins_from_approval_checks(
+    scm: ScmProvider, owner: str, repo: str, pull_number: int
+) -> frozenset[str]:
+    """Derive ``{app-slug}[bot]`` from ``mergecraft-approval`` checks on the head.
+
+    The review workflow mints that check with the same token that publishes
+    the formal review. Read-side CLI and carryover have no Action env, so the
+    check's app slug is the publisher identity. No slug means no derivation.
+    """
+    get_pull = getattr(scm, "get_pull", None)
+    list_checks = getattr(scm, "list_check_runs_for_ref", None)
+    if get_pull is None or list_checks is None:
+        return frozenset()
+    try:
+        pull = await get_pull(owner, repo, pull_number)
+        head = pull.get("head") if isinstance(pull, Mapping) else None
+        sha = str(head.get("sha") or "") if isinstance(head, Mapping) else ""
+        if not sha:
+            return frozenset()
+        # Do not pass check_name=: GitHubClient.list_check_runs_for_ref forwards
+        # leftover keywords to get(), which only accepts params/json/headers.
+        payload = await list_checks(owner, repo, sha)
+    except Exception as err:
+        logger.warning("finding ledger: could not derive publisher from approval checks: {}", err)
+        return frozenset()
+    logins: set[str] = set()
+    for run in _check_run_rows(payload):
+        if str(run.get("name") or _APPROVAL_CHECK_NAME) != _APPROVAL_CHECK_NAME:
+            continue
+        app = run.get("app")
+        if not isinstance(app, Mapping):
+            continue
+        slug = str(app.get("slug") or "").strip()
+        if slug:
+            logins.add(f"{slug}[bot]")
+    return frozenset(logins)
+
+
 def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
-    """Interim sticky trust rule: only a Bot-authored comment may be the sticky.
+    """Trust a comment or review only when this run's publisher bot wrote it.
 
     A PR participant can quote the heading, the footer or a ledger marker, so a
-    body shape test alone lets a human win selection — after which a later write
-    fails for want of permission and the real ledger is never persisted.
+    body shape test alone lets a human win selection. ``user.type == "Bot"`` is
+    not enough either: another App, or ``github-actions[bot]`` from a different
+    workflow, can post the same public marker. The login must match
+    :func:`_expected_publisher_login`.
 
-    **Residual (LG-D3, closes with plan 51 HS1).** Accepting any ``user.type ==
-    "Bot"`` still admits a bot that is not ours: another App installed on the
-    repo, and ``github-actions[bot]`` from **any** workflow run — including one a
-    same-repo collaborator adds on their own branch under ``pull_request``. The
-    shared authorship helper (``review/authorship.py``, plan 40) narrows this to
-    the run's expected-publisher set for App-published runs; job-token-only
-    consumers keep the residual. This plan does not import that helper because
-    both plans run in the same batch.
+    When the workflow has no App token, the expected login stays
+    ``github-actions[bot]``. That login is shared by every workflow in the
+    repo, so a same-repo collaborator workflow can still post as it.
     """
     user = comment.get("user")
     if not isinstance(user, Mapping):
         return False
-    return str(user.get("type") or "") == "Bot"
+    if str(user.get("type") or "") != "Bot":
+        return False
+    return str(user.get("login") or "") in _allowed_publisher_logins()
 
 
 def _select_sticky_progress_comment(
@@ -305,6 +422,53 @@ async def fetch_sticky_progress_comment_body(
         known_comment_id=known_comment_id,
     )
     return str(sticky.get("body") or "") if sticky is not None else ""
+
+
+async def fetch_review_record_bodies(
+    scm: ScmProvider, owner: str, repo: str, pull_number: int
+) -> list[str]:
+    """Read mergeCraft review bodies in publication order across GitHub pages."""
+    bodies: list[str] = []
+    for page in range(1, _MAX_REVIEW_PAGES + 1):
+        reviews = await scm.list_reviews(
+            owner, repo, pull_number, params={"per_page": _REVIEW_PAGE_SIZE, "page": page}
+        )
+        for review in reviews:
+            body = str(review.get("body") or "")
+            if body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER) and _is_trusted_sticky_author(
+                review
+            ):
+                bodies.append(body)
+        if len(reviews) < _REVIEW_PAGE_SIZE:
+            break
+    return bodies
+
+
+async def fetch_review_ledger(
+    scm: ScmProvider, owner: str, repo: str, pull_number: int
+) -> FindingLedger:
+    """Fold historical formal reviews and legacy comment state into one ledger."""
+    token: contextvars.Token[frozenset[str] | None] | None = None
+    if not os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip():
+        derived = set(await _publisher_logins_from_approval_checks(scm, owner, repo, pull_number))
+        from_config = _publisher_login_from_repo_config()
+        if from_config:
+            derived.add(from_config)
+        if not derived:
+            derived.add(_DEFAULT_PUBLISHER_LOGIN)
+        token = _publisher_logins_override.set(frozenset(derived))
+    try:
+        ledger = FindingLedger()
+        legacy = await fetch_sticky_progress_comment_body(scm, owner, repo, pull_number)
+        for record in FindingLedger.from_comment_body(legacy).records():
+            ledger.upsert_if_newer(record)
+        for body in await fetch_review_record_bodies(scm, owner, repo, pull_number):
+            for record in FindingLedger.from_comment_body(body).records():
+                ledger.upsert_if_newer(record)
+        return ledger
+    finally:
+        if token is not None:
+            _publisher_logins_override.reset(token)
 
 
 def _record_from_v1_marker(
@@ -495,7 +659,7 @@ def ensure_finding_ledger(tool_state: ToolState) -> FindingLedger:
 
 
 async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> FindingLedger:
-    """Load the ledger from the sticky progress comment when one is known (D4)."""
+    """Load the ledger from formal reviews and any legacy progress comment."""
     tool_state = ctx.tool_state
     if tool_state.finding_ledger_loaded:
         return ensure_finding_ledger(tool_state)
@@ -503,27 +667,31 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
     from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
 
     ledger = FindingLedger()
-    progress = tool_state.progress_comment
     issue_number = primary_repo_state(tool_state).issue_number or tool_state.pr_number
     try:
+        progress = tool_state.progress_comment
         if isinstance(progress, ProgressComment):
             comment = await ctx.scm.get_issue_comment(
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(progress.id),
+                ctx.repo.owner, ctx.repo.name, int(progress.id)
             )
-            ledger = FindingLedger.from_comment_body(str(comment.get("body") or ""))
+            legacy = str(comment.get("body") or "")
         elif issue_number is not None:
-            body = await fetch_sticky_progress_comment_body(
-                ctx.scm,
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(issue_number),
+            legacy = await fetch_sticky_progress_comment_body(
+                ctx.scm, ctx.repo.owner, ctx.repo.name, int(issue_number)
             )
-            if body:
-                ledger = FindingLedger.from_comment_body(body)
+        else:
+            legacy = ""
+        if legacy:
+            for record in FindingLedger.from_comment_body(legacy).records():
+                ledger.upsert_if_newer(record)
+        if issue_number is not None and hasattr(ctx.scm, "list_reviews"):
+            for body in await fetch_review_record_bodies(
+                ctx.scm, ctx.repo.owner, ctx.repo.name, int(issue_number)
+            ):
+                for record in FindingLedger.from_comment_body(body).records():
+                    ledger.upsert_if_newer(record)
     except Exception as err:
-        logger.info("finding ledger: could not read progress comment: {}", err)
+        logger.info("finding ledger: could not read review history: {}", err)
 
     existing = tool_state.finding_ledger
     if existing is not None:
@@ -621,18 +789,21 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
 def _strip_deterministic_record_markers(body: str) -> str:
     """Remove forged or stale deterministic-record markers from agent prose."""
     without_block = _DETERMINISTIC_RECORD_BLOCK_RE.sub("", body)
-    return without_block.replace(DETERMINISTIC_RECORD_MARKER, "").strip()
+    return (
+        without_block.replace(DETERMINISTIC_RECORD_MARKER, "")
+        .replace(REVIEW_BODY_MARKER, "")
+        .strip()
+    )
 
 
 def merge_deterministic_record_into_comment(body: str, *, record_block: str) -> str:
     """Insert or replace the deterministic record block in a progress comment.
 
-    When the comment already carries a record, the new one replaces it **in
-    place** so any surrounding prose keeps its position. The replacement is
+    When the comment already carries a record, the new one replaces it in
+    place so any surrounding prose keeps its position. The replacement is
     staged through a sentinel because the rendered block itself opens with
-    ``DETERMINISTIC_RECORD_MARKER``; substituting it directly would leave the
-    freshly-inserted block matching the same pattern as the stale ones being
-    cleared.
+    the record marker; substituting it directly would leave the freshly
+    inserted block matching the same pattern as the stale ones being cleared.
     """
     block = record_block.strip()
     if DETERMINISTIC_RECORD_MARKER in body:
@@ -795,8 +966,7 @@ def render_deterministic_review_block(
 ) -> str:
     """Render the authoritative deterministic review record (D6/D7).
 
-    Pure leaf: no I/O. Both the sticky progress comment and the review-body
-    preamble render from this single function so the two surfaces cannot drift.
+    Pure leaf: no I/O. This is the formal review's server-owned record.
     """
     from mergecraft.analyzers.finding import Finding
 
@@ -863,6 +1033,25 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Verdict diagnostic:** `{diagnostic}`")
     if decision is not None:
         header_lines.append(f"- **Decision:** `{decision.verdict}` — {decision.reason}")
+    change_id = str(getattr(packet, "change_id", "") or "").strip()
+    if change_id:
+        header_lines.append(f"- **Change:** `{change_id}`")
+    changed_files = list(getattr(packet, "files_changed", []) or [])
+    if changed_files:
+        header_lines.append(
+            "- **Reviewed files:** " + ", ".join(f"`{path}`" for path in changed_files)
+        )
+    if agent_meta is not None:
+        provider = str(getattr(agent_meta, "provider", "") or "").strip()
+        if provider:
+            header_lines.append(f"- **Provider:** `{provider}`")
+        requested = str(getattr(agent_meta, "requested_model", "") or "").strip()
+        if requested and requested != model:
+            header_lines.append(f"- **Requested model:** `{requested}`")
+        if getattr(agent_meta, "fallback_occurred", False):
+            header_lines.append(
+                f"- **Model fallback:** attempt {getattr(agent_meta, 'fallback_index', 0)}"
+            )
     if model:
         header_lines.append(f"- **Model:** `{model}`")
     if attempt_count is not None:
@@ -962,13 +1151,14 @@ def render_deterministic_review_block(
             if stripped:
                 pre_merge_lines.append(f"- **Credential gap:** {stripped}")
 
-    finding_lines = ["", "### Change-scoped findings", ""]
+    finding_lines = ["", "<details>", "<summary>Change-scoped findings</summary>", ""]
     if change_findings:
         for finding in change_findings:
             location = f"`{finding.path}` — " if finding.path else ""
             finding_lines.append(f"- **{finding.severity}** · {location}{finding.message}")
     else:
         finding_lines.append("_No change-scoped findings recorded._")
+    finding_lines.extend(["", "</details>"])
 
     run_health_lines: list[str] = []
     if run_findings:
@@ -999,9 +1189,14 @@ def render_deterministic_review_block(
         # packet pipeline never produces — ``decide_approval`` always returns a
         # ``PacketDecision`` — so a refused run rendered identically to a clean
         # one. The structural decision and the refusal are separate facts.
+        label = (
+            "No agent verdict published"
+            if rejection_reason == "terminal_publication_failed"
+            else "No agent verdict recorded"
+        )
         verdict_lines += [
             "",
-            f"**No agent verdict recorded — reason:** `{rejection_reason}`",
+            f"**{label} — reason:** `{rejection_reason}`",
         ]
 
     return (
@@ -1105,6 +1300,8 @@ __all__ = [
     "LEDGER_SCHEMA_VERSION",
     "FindingLedger",
     "ensure_finding_ledger",
+    "fetch_review_ledger",
+    "fetch_review_record_bodies",
     "fetch_sticky_progress_comment",
     "fetch_sticky_progress_comment_body",
     "hydrate_finding_ledger_from_progress_comment",

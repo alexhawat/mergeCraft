@@ -137,14 +137,20 @@ class ProviderHarnessServer:
             def _send_bytes(
                 self, status: int, body: bytes, headers: dict[str, str] | None = None
             ) -> None:
-                self.send_response(status)
-                for key, value in (headers or {}).items():
-                    self.send_header(key, value)
-                if "Content-Type" not in (headers or {}):
-                    self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.send_response(status)
+                    for key, value in (headers or {}).items():
+                        self.send_header(key, value)
+                    if "Content-Type" not in (headers or {}):
+                        self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    # The client closed after sending the request. The response
+                    # is already recorded; a traceback here contains "error" and
+                    # fails CLI tests that scrape stderr.
+                    return
 
             def _send_json(
                 self, status: int, payload: object, headers: dict[str, str] | None = None

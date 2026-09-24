@@ -12,7 +12,6 @@ from __future__ import annotations
 from mergecraft.findings.ledger import (
     DETERMINISTIC_RECORD_MARKER,
     _strip_deterministic_record_markers,
-    merge_deterministic_record_into_comment,
 )
 
 _FOOTER = "*via mergecraft*"
@@ -48,33 +47,3 @@ def test_a_real_terminated_block_is_still_removed() -> None:
 
     assert "forged" not in stripped
     assert "## Review" in stripped
-
-
-def test_replacing_an_existing_record_keeps_surrounding_prose() -> None:
-    """The in-place replacement branch must actually run, not fall through."""
-    body = (
-        "## mergeCraft progress\n\n"
-        f"{DETERMINISTIC_RECORD_MARKER}\n"
-        "### mergeCraft run record\n"
-        "- **Decision:** `stale`\n"
-        f"\n{_FOOTER}\n"
-    )
-    fresh = f"{DETERMINISTIC_RECORD_MARKER}\n### mergeCraft run record\n- **Decision:** `fresh`"
-
-    merged = merge_deterministic_record_into_comment(body, record_block=fresh)
-
-    assert "`fresh`" in merged
-    assert "`stale`" not in merged
-    assert _FOOTER in merged
-    assert merged.count(DETERMINISTIC_RECORD_MARKER) == 1
-
-
-def test_inserting_into_a_comment_without_a_record() -> None:
-    body = "## mergeCraft progress\n\nEarlier prose that must survive.\n"
-    fresh = f"{DETERMINISTIC_RECORD_MARKER}\n### mergeCraft run record\n- **Decision:** `fresh`"
-
-    merged = merge_deterministic_record_into_comment(body, record_block=fresh)
-
-    assert "Earlier prose that must survive." in merged
-    assert "`fresh`" in merged
-    assert merged.count(DETERMINISTIC_RECORD_MARKER) == 1

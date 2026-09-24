@@ -68,6 +68,15 @@ class _FakeClient:
             }
         ]
 
+    async def list_reviews(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": 1,
+                "body": f"<!-- mergecraft-deterministic-record:v1 -->\n{_LEDGER_MARKER}",
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            }
+        ]
+
     async def list_issues(self, owner: str, repo: str, **kwargs: Any) -> list[dict[str, Any]]:
         return []
 
@@ -100,6 +109,9 @@ class _ScriptedClient(_FakeClient):
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         return [dict(row) for row in self._comments]
+
+    async def list_reviews(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        return []
 
 
 def _patch_with(monkeypatch: MonkeyPatch, comments: list[dict[str, Any]]) -> None:

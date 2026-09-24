@@ -417,22 +417,360 @@ async def test_fetch_sticky_progress_comment_body_prefers_ledger_on_later_page()
             page = int((params or {}).get("page", 1))
             if page == 1:
                 filler = [
-                    {"id": index, "body": f"noise {index}", "user": {"type": "Bot"}}
+                    {
+                        "id": index,
+                        "body": f"noise {index}",
+                        "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    }
                     for index in range(98)
                 ]
                 return [
                     *filler,
-                    {"id": 99, "body": stale_progress_body, "user": {"type": "Bot"}},
-                    {"id": 100, "body": "another comment", "user": {"type": "Bot"}},
+                    {
+                        "id": 99,
+                        "body": stale_progress_body,
+                        "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    },
+                    {
+                        "id": 100,
+                        "body": "another comment",
+                        "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    },
                 ]
             if page == 2:
-                return [{"id": 101, "body": ledger_body, "user": {"type": "Bot"}}]
+                return [
+                    {
+                        "id": 101,
+                        "body": ledger_body,
+                        "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    }
+                ]
             return []
 
     body = await ledger.fetch_sticky_progress_comment_body(_Scm(), "acme", "demo", 7)
 
     assert body == ledger_body
     assert _DEFERRED_FP in body
+
+
+@pytest.mark.asyncio
+async def test_review_ledger_reads_later_pages_and_prefers_newer_state() -> None:
+    ledger = _ledger_mod()
+    old = ledger.FindingLedger()
+    old.record(
+        _DEFERRED_FP,
+        "deferred",
+        source="overflow",
+        round_index=1,
+        recorded_at="2026-08-20T10:00:00Z",
+    )
+    newer = ledger.FindingLedger()
+    newer.record(
+        _DEFERRED_FP,
+        "open",
+        source="inline",
+        round_index=2,
+        recorded_at="2026-08-21T10:00:00Z",
+    )
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return [
+                {
+                    "id": 42,
+                    "body": ledger.merge_ledger_into_comment(
+                        "## mergeCraft progress\n", records=old.records()
+                    ),
+                }
+            ]
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page == 1:
+                return [{"id": index, "body": "Human review"} for index in range(100)]
+            return [
+                {
+                    "id": 101,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n", records=newer.records()
+                    ),
+                }
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    record = found.get_record(_DEFERRED_FP)
+    assert record is not None
+    assert record.state == "open"
+    assert record.round_index == 2
+
+
+@pytest.mark.asyncio
+async def test_review_ledger_ignores_a_contributor_forged_marker() -> None:
+    ledger = _ledger_mod()
+    forged = ledger.FindingLedger()
+    forged.record(_DEFERRED_FP, "open", source="inline", round_index=1)
+    bot = ledger.FindingLedger()
+    bot.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return []
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page != 1:
+                return []
+            return [
+                {
+                    "id": 1,
+                    "user": {"login": "contributor", "type": "User"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=forged.records(),
+                    ),
+                },
+                {
+                    "id": 2,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=bot.records(),
+                    ),
+                },
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    assert found.get_record(_DEFERRED_FP) is None
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_review_ledger_ignores_a_different_bot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
+    ledger = _ledger_mod()
+    other = ledger.FindingLedger()
+    other.record(_DEFERRED_FP, "open", source="inline", round_index=1)
+    ours = ledger.FindingLedger()
+    ours.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return []
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page != 1:
+                return []
+            return [
+                {
+                    "id": 1,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=other.records(),
+                    ),
+                },
+                {
+                    "id": 2,
+                    "user": {"login": "mergecraft[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=ours.records(),
+                    ),
+                },
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    assert found.get_record(_DEFERRED_FP) is None
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_review_ledger_reads_app_reviews_from_repo_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLI and carryover have no Action env; repo config names the publisher."""
+    monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
+    ledger = _ledger_mod()
+    monkeypatch.setattr(ledger, "_publisher_login_from_config", None)
+    monkeypatch.setattr(ledger, "_publisher_login_from_repo_config", lambda: "mergecraft[bot]")
+    other = ledger.FindingLedger()
+    other.record(_DEFERRED_FP, "open", source="inline", round_index=1)
+    ours = ledger.FindingLedger()
+    ours.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return []
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page != 1:
+                return []
+            return [
+                {
+                    "id": 1,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=other.records(),
+                    ),
+                },
+                {
+                    "id": 2,
+                    "user": {"login": "mergecraft[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=ours.records(),
+                    ),
+                },
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    assert found.get_record(_DEFERRED_FP) is None
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_review_ledger_derives_app_login_from_approval_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Read-side ledger uses the mergecraft-approval check's app slug."""
+    monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
+    ledger = _ledger_mod()
+    monkeypatch.setattr(ledger, "_publisher_login_from_config", "")
+    other = ledger.FindingLedger()
+    other.record(_DEFERRED_FP, "open", source="inline", round_index=1)
+    ours = ledger.FindingLedger()
+    ours.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return []
+
+        async def get_pull(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {"head": {"sha": "abc123"}}
+
+        async def list_check_runs_for_ref(
+            self, *_args: object, **_kwargs: object
+        ) -> dict[str, object]:
+            return {
+                "check_runs": [
+                    {"name": "mergecraft-approval", "app": {"slug": "mergecraft"}},
+                    {"name": "other", "app": {"slug": "stranger"}},
+                ]
+            }
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page != 1:
+                return []
+            return [
+                {
+                    "id": 1,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=other.records(),
+                    ),
+                },
+                {
+                    "id": 2,
+                    "user": {"login": "mergecraft[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=ours.records(),
+                    ),
+                },
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    assert found.get_record(_DEFERRED_FP) is None
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_publisher_derivation_uses_the_real_check_run_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``check_name=`` is not a GitHubClient.get parameter; the real client must not raise."""
+    from mergecraft.scm.github import GitHubScmAdapter
+    from mergecraft.utils.github import GitHubClient
+
+    monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
+    ledger = _ledger_mod()
+    monkeypatch.setattr(ledger, "_publisher_login_from_config", "")
+    ours = ledger.FindingLedger()
+    ours.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+    body = ledger.merge_ledger_into_comment(
+        "<!-- mergecraft-deterministic-record:v1 -->\n",
+        records=ours.records(),
+    )
+    client = GitHubClient(token="test")
+
+    async def _get(
+        path: str,
+        *,
+        params: dict[str, object] | None = None,
+        json: object = None,
+        headers: dict[str, str] | None = None,
+    ) -> object:
+        del params, json, headers
+        if path.endswith("/pulls/7"):
+            return {"head": {"sha": "abc123"}}
+        if path.endswith("/check-runs"):
+            return {
+                "total_count": 1,
+                "check_runs": [{"name": "mergecraft-approval", "app": {"slug": "mergecraft"}}],
+            }
+        if path.endswith("/reviews"):
+            return [{"id": 2, "user": {"login": "mergecraft[bot]", "type": "Bot"}, "body": body}]
+        return []
+
+    client.get = _get  # type: ignore[method-assign]
+    try:
+        found = await ledger.fetch_review_ledger(GitHubScmAdapter(client), "acme", "demo", 7)
+    finally:
+        await client.aclose()
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
+
+
+def test_carryover_workflow_exports_the_publisher_login() -> None:
+    text = Path(".github/workflows/findings-carryover.yml").read_text(encoding="utf-8")
+    assert "MERGECRAFT_REVIEWER_BOT_LOGIN" in text
+    assert "steps.app_token.outputs.app-slug" in text
+
+
+def test_repo_config_stores_reviewer_bot_login(tmp_path: Path) -> None:
+    from mergecraft.config.settings import load_repo_settings
+
+    config = tmp_path / "config.yaml"
+    config.write_text("reviewerBotLogin: mergecraft[bot]\n", encoding="utf-8")
+    settings = load_repo_settings(config, root=tmp_path, load_learnings_files=False)
+    assert settings.reviewer_bot_login == "mergecraft[bot]"
 
 
 def test_record_deferred_from_analyzer_run_skips_withdrawn() -> None:

@@ -99,6 +99,9 @@ class GitHubScmAdapter:
     ) -> dict[str, Any]:
         return await self._client.update_issue_comment(owner, repo, comment_id, body)
 
+    async def delete_issue_comment(self, owner: str, repo: str, comment_id: int) -> None:
+        await self._client.delete_issue_comment(owner, repo, comment_id)
+
     async def list_issues(self, owner: str, repo: str, **kwargs: Any) -> list[dict[str, Any]]:
         return await self._client.list_issues(owner, repo, **kwargs)
 
@@ -147,6 +150,11 @@ class GitHubScmAdapter:
         self, owner: str, repo: str, pull_number: int, **fields: Any
     ) -> dict[str, Any]:
         return await self._client.create_review(owner, repo, pull_number, **fields)
+
+    async def update_review(
+        self, owner: str, repo: str, pull_number: int, review_id: int, body: str
+    ) -> dict[str, Any]:
+        return await self._client.update_review(owner, repo, pull_number, review_id, body)
 
     async def submit_review(
         self,

@@ -79,6 +79,7 @@ def merge_deterministic_preamble_into_review_body(
     """Prepend the server-owned deterministic record; agent copies cannot win (D7)."""
     from mergecraft.findings.ledger import (
         DETERMINISTIC_RECORD_MARKER,
+        REVIEW_BODY_MARKER,
         _strip_deterministic_record_markers,
     )
 
@@ -87,8 +88,8 @@ def merge_deterministic_preamble_into_review_body(
     if not block.startswith(DETERMINISTIC_RECORD_MARKER):
         block = f"{DETERMINISTIC_RECORD_MARKER}\n{block}"
     if cleaned_agent:
-        return f"{block.rstrip()}\n\n{cleaned_agent.strip()}\n"
-    return f"{block.rstrip()}\n"
+        return f"{block.rstrip()}\n{REVIEW_BODY_MARKER}\n\n{cleaned_agent.strip()}\n"
+    return f"{block.rstrip()}\n{REVIEW_BODY_MARKER}\n"
 
 
 def _merge_review_body_with_deterministic_preamble(
@@ -149,8 +150,8 @@ def _deterministic_review_block(
     tool_state = ctx.tool_state
     analyzer_run = tool_state.analyzer_run
     analyzer_summary = analyzer_run.pre_merge_summary if analyzer_run is not None else None
-    submission = tool_state.terminal_submission
-    agent_summary = submission.summary if submission is not None else None
+    # The terminal summary remains in the review body below the server-owned
+    # record; rendering it here would publish the same summary twice.
     attempt_count = len(tool_state.usage_entries) if tool_state.usage_entries else None
     token_summary = token_summary_from_usage(
         tool_state.usage_entries or [],
@@ -163,7 +164,7 @@ def _deterministic_review_block(
         run_outcome=run_outcome,
         verdict_diagnostic=verdict_diagnostic,
         analyzer_summary=analyzer_summary,
-        agent_summary=agent_summary,
+        agent_summary=None,
         trust_tier=ctx.trust_tier,
         attempt_count=attempt_count,
         token_summary=token_summary,
@@ -719,7 +720,28 @@ def _truncate_review_body_for_github(
     if len(body) <= REVIEW_BODY_MAX_CHARS:
         return payload
     marker = _REVIEW_BODY_TRUNCATION_MARKER
-    keep = max(REVIEW_BODY_MAX_CHARS - len(marker), 0)
+    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, REVIEW_BODY_MARKER
+
+    if body.startswith(DETERMINISTIC_RECORD_MARKER) and REVIEW_BODY_MARKER in body:
+        record, prose = body.split(REVIEW_BODY_MARKER, 1)
+        # The deterministic record, learnings delta and ledger markers are
+        # durable state. Only free-form review prose may be shortened.
+        suffix_positions = [
+            position
+            for token in ("\n### Learnings delta", "\n<!-- mergecraft-ledger:")
+            if (position := prose.find(token)) >= 0
+        ]
+        suffix_at = min(suffix_positions) if suffix_positions else len(prose)
+        prose, durable_suffix = prose[:suffix_at], prose[suffix_at:]
+        prefix = record + REVIEW_BODY_MARKER
+        keep = REVIEW_BODY_MAX_CHARS - len(prefix) - len(durable_suffix) - len(marker)
+        if keep < 0:
+            msg = "review record and durable metadata exceed GitHub's review body limit"
+            raise ValueError(msg)
+        shortened = prefix + prose[:keep] + marker + durable_suffix
+    else:
+        keep = max(REVIEW_BODY_MAX_CHARS - len(marker), 0)
+        shortened = body[:keep] + marker
     logger.warning(
         "review body for PR #{} was {} chars, over GitHub's {}-character cap; truncating",
         pull_number,
@@ -728,7 +750,7 @@ def _truncate_review_body_for_github(
     )
     ctx.tool_state.review_body_truncated = True
     updated = dict(payload)
-    updated["body"] = body[:keep] + marker
+    updated["body"] = shortened
     return updated
 
 
@@ -918,6 +940,38 @@ async def _create_github_review_with_anchor_recovery(
                 raise
             current = _last_resort_comment_payload(ctx, current, pull_number=pull_number)
             last_resort_attempted = True
+
+
+async def _recover_review_after_lost_receipt(
+    ctx: ToolContext, *, pull_number: int, commit_id: str | None
+) -> dict[str, Any] | None:
+    """Find a review GitHub accepted before its response was lost."""
+    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, _is_trusted_sticky_author
+    from mergecraft.utils.status_checks import _run_url
+
+    run_url = _run_url(ctx)
+    if not run_url:
+        return None
+    for page in range(1, 11):
+        reviews = await ctx.scm.list_reviews(
+            ctx.repo.owner,
+            ctx.repo.name,
+            pull_number,
+            params={"per_page": 100, "page": page},
+        )
+        for review in reviews:
+            body = str(review.get("body") or "")
+            reviewed_commit = str(review.get("commit_id") or "")
+            if (
+                _is_trusted_sticky_author(review)
+                and body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
+                and f"- **Run:** {run_url}" in body
+                and (not commit_id or not reviewed_commit or reviewed_commit == commit_id)
+            ):
+                return review
+        if len(reviews) < 100:
+            break
+    return None
 
 
 def _finding_rows_for_provenance(ctx: ToolContext) -> list[dict[str, Any]]:
@@ -1135,31 +1189,45 @@ async def _publish_github_review(
     if demoted_bodies:
         ctx.tool_state.review_inline_comments_demoted = True
         agent_body = append_demoted_inline_comments(agent_body, demoted_bodies)
+    from mergecraft.findings.ledger import (
+        hydrate_finding_ledger_from_progress_comment,
+        merge_ledger_into_comment,
+        record_published_findings_in_ledger,
+    )
+
+    await hydrate_finding_ledger_from_progress_comment(ctx)
+    record_published_findings_in_ledger(ctx.tool_state, inline)
     body_with_preamble = _merge_review_body_with_deterministic_preamble(
         ctx,
         agent_body=agent_body,
         packet=packet,
     )
-    payload["body"] = add_footer(ctx, body_with_preamble)
+    payload["body"] = merge_ledger_into_comment(
+        add_footer(ctx, body_with_preamble),
+        records=ctx.tool_state.finding_ledger.records() if ctx.tool_state.finding_ledger else [],
+    )
     if inline:
         payload["comments"] = inline
     else:
         payload.pop("comments", None)
 
-    from mergecraft.findings.ledger import (
-        persist_finding_ledger_to_progress_comment,
-        record_published_findings_in_ledger,
-    )
-
-    record_published_findings_in_ledger(ctx.tool_state, inline)
-
     try:
-        result, approve_fallback = await _create_github_review_with_anchor_recovery(
-            ctx,
-            pull_number=pull_number,
-            payload=payload,
-            packet=packet,
+        recovered = (
+            await _recover_review_after_lost_receipt(
+                ctx, pull_number=pull_number, commit_id=payload.get("commit_id")
+            )
+            if ctx.tool_state.terminal_publication_failed
+            else None
         )
+        if recovered is not None:
+            result, approve_fallback = recovered, False
+        else:
+            result, approve_fallback = await _create_github_review_with_anchor_recovery(
+                ctx,
+                pull_number=pull_number,
+                payload=payload,
+                packet=packet,
+            )
     except Exception:
         # #619 Task 3a — the terminal submission is already recorded on
         # ``ToolState`` (that happened before this function ran), but the
@@ -1208,7 +1276,6 @@ async def _publish_github_review(
     )
     if resolved:
         response["resolvedThreads"] = resolved
-    await persist_finding_ledger_to_progress_comment(ctx)
     return response
 
 
