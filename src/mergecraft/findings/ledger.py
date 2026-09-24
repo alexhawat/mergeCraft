@@ -6,6 +6,7 @@ comments are read during migration. Post-merge filing stays in the sweep module.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
@@ -188,7 +189,12 @@ def is_sticky_progress_comment(body: str) -> bool:
 
 
 _DEFAULT_PUBLISHER_LOGIN = "github-actions[bot]"
+_APPROVAL_CHECK_NAME = "mergecraft-approval"
 _publisher_login_from_config: str | None = None
+_publisher_logins_override: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
+    "mergecraft_publisher_logins",
+    default=None,
+)
 
 
 def _publisher_login_from_repo_config() -> str:
@@ -225,8 +231,72 @@ def _expected_publisher_login() -> str:
     configured = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
     if configured:
         return configured
+    override = _publisher_logins_override.get()
+    if override:
+        return next(iter(override))
     from_config = _publisher_login_from_repo_config()
     return from_config or _DEFAULT_PUBLISHER_LOGIN
+
+
+def _allowed_publisher_logins() -> frozenset[str]:
+    """Logins that may own a formal review or legacy sticky comment."""
+    configured = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    if configured:
+        return frozenset({configured})
+    override = _publisher_logins_override.get()
+    if override:
+        return override
+    from_config = _publisher_login_from_repo_config()
+    return frozenset({from_config or _DEFAULT_PUBLISHER_LOGIN})
+
+
+def _check_run_rows(payload: object) -> list[Mapping[str, object]]:
+    raw: object
+    if isinstance(payload, Mapping):
+        raw = payload.get("check_runs")
+        if not isinstance(raw, list):
+            raw = payload.get("items")
+    else:
+        raw = getattr(payload, "items", None)
+    if not isinstance(raw, list):
+        return []
+    return [row for row in raw if isinstance(row, Mapping)]
+
+
+async def _publisher_logins_from_approval_checks(
+    scm: ScmProvider, owner: str, repo: str, pull_number: int
+) -> frozenset[str]:
+    """Derive ``{app-slug}[bot]`` from ``mergecraft-approval`` checks on the head.
+
+    The review workflow mints that check with the same token that publishes
+    the formal review. Read-side CLI and carryover have no Action env, so the
+    check's app slug is the publisher identity. No slug means no derivation.
+    """
+    get_pull = getattr(scm, "get_pull", None)
+    list_checks = getattr(scm, "list_check_runs_for_ref", None)
+    if get_pull is None or list_checks is None:
+        return frozenset()
+    try:
+        pull = await get_pull(owner, repo, pull_number)
+        head = pull.get("head") if isinstance(pull, Mapping) else None
+        sha = str(head.get("sha") or "") if isinstance(head, Mapping) else ""
+        if not sha:
+            return frozenset()
+        payload = await list_checks(owner, repo, sha, check_name=_APPROVAL_CHECK_NAME)
+    except Exception as err:
+        logger.warning("finding ledger: could not derive publisher from approval checks: {}", err)
+        return frozenset()
+    logins: set[str] = set()
+    for run in _check_run_rows(payload):
+        if str(run.get("name") or _APPROVAL_CHECK_NAME) != _APPROVAL_CHECK_NAME:
+            continue
+        app = run.get("app")
+        if not isinstance(app, Mapping):
+            continue
+        slug = str(app.get("slug") or "").strip()
+        if slug:
+            logins.add(f"{slug}[bot]")
+    return frozenset(logins)
 
 
 def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
@@ -247,7 +317,7 @@ def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
         return False
     if str(user.get("type") or "") != "Bot":
         return False
-    return str(user.get("login") or "") == _expected_publisher_login()
+    return str(user.get("login") or "") in _allowed_publisher_logins()
 
 
 def _select_sticky_progress_comment(
@@ -376,14 +446,27 @@ async def fetch_review_ledger(
     scm: ScmProvider, owner: str, repo: str, pull_number: int
 ) -> FindingLedger:
     """Fold historical formal reviews and legacy comment state into one ledger."""
-    ledger = FindingLedger()
-    legacy = await fetch_sticky_progress_comment_body(scm, owner, repo, pull_number)
-    for record in FindingLedger.from_comment_body(legacy).records():
-        ledger.upsert_if_newer(record)
-    for body in await fetch_review_record_bodies(scm, owner, repo, pull_number):
-        for record in FindingLedger.from_comment_body(body).records():
+    token: contextvars.Token[frozenset[str] | None] | None = None
+    if not os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip():
+        derived = set(await _publisher_logins_from_approval_checks(scm, owner, repo, pull_number))
+        from_config = _publisher_login_from_repo_config()
+        if from_config:
+            derived.add(from_config)
+        if not derived:
+            derived.add(_DEFAULT_PUBLISHER_LOGIN)
+        token = _publisher_logins_override.set(frozenset(derived))
+    try:
+        ledger = FindingLedger()
+        legacy = await fetch_sticky_progress_comment_body(scm, owner, repo, pull_number)
+        for record in FindingLedger.from_comment_body(legacy).records():
             ledger.upsert_if_newer(record)
-    return ledger
+        for body in await fetch_review_record_bodies(scm, owner, repo, pull_number):
+            for record in FindingLedger.from_comment_body(body).records():
+                ledger.upsert_if_newer(record)
+        return ledger
+    finally:
+        if token is not None:
+            _publisher_logins_override.reset(token)
 
 
 def _record_from_v1_marker(

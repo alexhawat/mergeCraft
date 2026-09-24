@@ -65,9 +65,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/bootstrap
 
+      # Same publisher identity the review workflow stamps on formal reviews.
+      # Without it, carryover falls back to github-actions[bot] and drops
+      # App-authored ledger records.
+      - name: Mint App token
+        id: app_token
+        if: secrets.MERGECRAFT_APP_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: read
+
       - name: Sweep unresolved findings
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token.outputs.app-slug && format('{0}[bot]', steps.app_token.outputs.app-slug) || 'github-actions[bot]' }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
           # Merges write only once the repo opts in; manual runs write on request.
