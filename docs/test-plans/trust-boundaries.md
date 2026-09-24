@@ -216,8 +216,35 @@ them differently):**
 | --- | --- | --- | --- |
 | TB2 | `green after TB2:` | `tests/config/test_trust_policy_comment_binding.py`, `tests/security/test_trust_fallthrough.py`, `tests/action/test_fork_credential_invariant.py`, `tests/test_main_phases.py`, `tests/mcp/test_checkout_target_binding.py` | ✅ reconciled 2026-09-24 (all markers removed, real passes) |
 | TB3 | `green after TB3:` | `tests/mcp/test_checkout.py`, `tests/mcp/test_checkout_degraded_diff.py`, `tests/review/test_authorship.py` | ✅ reconciled 2026-09-24 (all markers removed, real passes) |
-| TB4 | `green after TB4:` | `tests/context/test_instruction_discovery.py`, `tests/utils/test_instructions.py`, `tests/cli/test_local_env_loader.py` | still xfail (pending TB4) |
-| TB5 | `green after TB5:` | `tests/xrepo/test_linked_repos.py`, `tests/xrepo/test_review_change_set.py` | still xfail (pending TB5) |
+| TB4 | `green after TB4:` | `tests/context/test_instruction_discovery.py`, `tests/utils/test_instructions.py`, `tests/cli/test_local_env_loader.py` | ✅ reconciled 2026-09-24 (all markers removed, real passes) |
+| TB5 | `green after TB5:` | `tests/xrepo/test_linked_repos.py`, `tests/xrepo/test_review_change_set.py` | ✅ reconciled 2026-09-24 (all markers removed, real passes) |
+
+### TB5 test-creator reconciliation (2026-09-24)
+
+All TB4/TB5 markers are removed; the trust-boundaries suite now carries **zero**
+`xfail`/`xpass` markers. Three test-side fixes landed with the reconciliation:
+
+1. **Fixture bug** — `tests/xrepo/test_review_change_set.py::test_ungranted_entry_appears_in_linked_repo_omitted`
+   called `git_commit_all(secrets)` without `git_init_repo(secrets)`, so `git add -A`
+   exited 128 inside the fixture before any product code ran. Added the missing
+   `git_init_repo(secrets)` (the pattern `tests/xrepo/test_xrepo_wiring.py` already
+   uses). This was the last remaining XFAIL.
+2. **Superseded bare-grant guard** — `tests/xrepo/test_linked_repos.py::test_authorized_linked_repo_content_is_read_from_checkout`
+   pinned the pre-TB-D10 behaviour (`RunGrant({"api-contracts"})` authorizing
+   `repo="api-contracts"`). Under TB-D10 a bare-name grant matches nothing, so the
+   test now grants the slug `{"acme/api-contracts"}` and reads `repo="acme/api-contracts"`
+   (`repo_roots` stays keyed by the bare `entry.name`, mirroring
+   `discover_linked_repo_roots`). The assertion is unchanged: content is still read
+   from the granted repo's checkout root.
+3. **`tests/xrepo/test_xrepo_wiring.py:176`** — the plan's TB5.2 bare grant became a
+   slug grant (`frozenset({"acme/api-contracts"})`), so the wiring test exercises the
+   grant path instead of staying green only because bare names are inert.
+
+**Verification:** `MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/xrepo tests/context
+tests/utils/test_instructions.py tests/cli/test_local_env_loader.py
+tests/cli/test_local_env_path.py tests/instructions -q -p no:randomly` →
+**150 passed, 0 failed, 0 xfailed, 0 xpassed**; `make lint` → exit 0;
+`make typecheck` → `Success: no issues found`.
 
 ### TB3 amendment — `init_pr_clone` base branch (2026-09-24)
 

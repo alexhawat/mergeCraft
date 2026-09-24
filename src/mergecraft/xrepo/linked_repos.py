@@ -52,21 +52,38 @@ class RunGrant:
     authorized_repos: frozenset[str]
 
     def is_authorized(self, repo: str) -> bool:
-        """Return True when ``repo`` is in the grant set (bare name or slug tail)."""
+        """Return True only when ``repo`` is an exact lowercase ``owner/name`` slug.
+
+        TB-D10: a grant names a repository, not a directory. Tail matching is
+        dropped, and a bare name is not a slug: a bare-name operator entry
+        matches nothing, so a slug grant cannot be widened by a same-name
+        sibling.
+        """
         normalized = repo.strip().lower()
-        tail = normalized.rsplit("/", 1)[-1]
-        return normalized in self.authorized_repos or tail in self.authorized_repos
+        if "/" not in normalized:
+            return False
+        return normalized in self.authorized_repos
 
 
 def parse_manifest(path: Path) -> LinkedReposManifest:
     """Parse ``.mergecraft/linked-repos.yaml`` into a typed manifest."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return parse_manifest_text(path.read_text(encoding="utf-8"))
+
+
+def parse_manifest_text(text: str) -> LinkedReposManifest:
+    """Parse linked-repo manifest YAML text into a typed manifest.
+
+    Reads a manifest from a git object (for example ``origin/<base>``) as well
+    as from disk, so the review path can diff pins between the base and head
+    manifests (TB-D11).
+    """
+    raw = yaml.safe_load(text)
     if not isinstance(raw, dict):
-        msg = f"linked-repo manifest must be a mapping: {path}"
+        msg = "linked-repo manifest must be a mapping"
         raise ValueError(msg)
     repos_raw = raw.get("repos", [])
     if not isinstance(repos_raw, list):
-        msg = f"linked-repo manifest 'repos' must be a list: {path}"
+        msg = "linked-repo manifest 'repos' must be a list"
         raise ValueError(msg)
     entries: list[LinkedRepoEntry] = []
     for item in repos_raw:
@@ -148,5 +165,6 @@ __all__ = [
     "RunGrant",
     "load_linked_repo_content",
     "parse_manifest",
+    "parse_manifest_text",
     "render_linked_repo_context",
 ]

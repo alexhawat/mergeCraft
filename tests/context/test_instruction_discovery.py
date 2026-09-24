@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from mergecraft.utils.fence import SAFETY_NOTE
 from tests.context.support import (
     REPO_INSTRUCTIONS_HEADER,
@@ -215,7 +213,6 @@ def test_a_repo_with_no_instructions_renders_nothing(tmp_path: Path) -> None:
 
 # ── U6 (TB1): a filename is not a location ───────────────────────────────────
 
-_TB4 = "green after TB4: instruction reads confined to the resolved repo root"
 _OUT_OF_REPO_MARKER = "OUT_OF_REPO_INSTRUCTION_MARKER_MUST_NOT_ENTER_THE_PROMPT"
 
 
@@ -249,7 +246,6 @@ def _render(repo_root: Path) -> str:
     )
 
 
-@pytest.mark.xfail(reason=_TB4, strict=False)
 def test_out_of_repo_symlinked_instruction_is_not_discovered(tmp_path: Path) -> None:
     """TB-D8 — a symlinked ``AGENTS.md`` pointing outside the repo is skipped."""
     repo_root = tmp_path / "repo"
@@ -260,7 +256,6 @@ def test_out_of_repo_symlinked_instruction_is_not_discovered(tmp_path: Path) -> 
     assert "AGENTS.md" not in _instruction_rels(repo_root)
 
 
-@pytest.mark.xfail(reason=_TB4, strict=False)
 def test_out_of_repo_symlinked_instruction_is_not_read(tmp_path: Path) -> None:
     """TB-D8 — the escaping bytes never enter the prompt."""
     repo_root = tmp_path / "repo"
@@ -271,7 +266,6 @@ def test_out_of_repo_symlinked_instruction_is_not_read(tmp_path: Path) -> None:
     assert _OUT_OF_REPO_MARKER not in _render(repo_root)
 
 
-@pytest.mark.xfail(reason=_TB4, strict=False)
 def test_out_of_repo_symlinked_instruction_is_recorded_in_refusals(tmp_path: Path) -> None:
     """TB-D8 — the skip is recorded in the bundle's ``refusals``, not silent."""
     repo_root = tmp_path / "repo"

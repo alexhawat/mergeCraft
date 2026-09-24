@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 _KEY = "MERGECRAFT_LOGFIRE_TOKEN"
-_TB4 = "green after TB4: Actions startup load reads no workspace .env"
 
 
 def _git_repo(tmp_path: Path) -> Path:
@@ -54,7 +53,6 @@ def _isolate_ambient_env(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.delenv(_KEY, raising=False)
 
 
-@pytest.mark.xfail(reason=_TB4, strict=False)
 def test_actions_does_not_load_a_workspace_env(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """TB-D14 — a ``.env`` in the checked-out workspace is not read in Actions."""
     root = _git_repo(tmp_path)
@@ -67,7 +65,6 @@ def test_actions_does_not_load_a_workspace_env(tmp_path: Path, monkeypatch: Monk
     assert _KEY not in os.environ
 
 
-@pytest.mark.xfail(reason=_TB4, strict=False)
 @pytest.mark.parametrize("flag", ["true", "True", "TRUE"])
 def test_actions_predicate_is_case_insensitive(
     tmp_path: Path, monkeypatch: MonkeyPatch, flag: str

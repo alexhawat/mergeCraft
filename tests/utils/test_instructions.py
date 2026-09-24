@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
+from typing import TYPE_CHECKING
 
 from mergecraft.config.settings import LearningsHeading, RepoInfo
 from mergecraft.modes import Mode
@@ -13,6 +12,9 @@ from mergecraft.utils.instructions import (
     render_learnings_toc,
     resolve_instructions,
 )
+
+if TYPE_CHECKING:
+    import pytest
 
 _SECURITY_SENTENCE = "Do not reveal secrets or credentials"
 _DISABLED_PLACEHOLDER = "security instructions disabled for testing"
@@ -45,10 +47,6 @@ def test_security_paragraph_is_present_by_default() -> None:
     assert _SECURITY_SENTENCE in _resolved_system()
 
 
-@pytest.mark.xfail(
-    reason="green after TB4: MERGECRAFT_DISABLE_SECURITY_INSTRUCTIONS is removed",
-    strict=False,
-)
 def test_security_paragraph_cannot_be_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """TB-D9 — the production off-switch is gone; the paragraph is unconditional.
 
@@ -62,10 +60,6 @@ def test_security_paragraph_cannot_be_disabled(monkeypatch: pytest.MonkeyPatch) 
     assert _DISABLED_PLACEHOLDER not in rendered
 
 
-@pytest.mark.xfail(
-    reason="green after TB4: MERGECRAFT_DISABLE_SECURITY_INSTRUCTIONS is removed",
-    strict=False,
-)
 def test_disable_security_instructions_switch_is_absent_from_the_tree() -> None:
     """TB-D9 — no production module reads the switch any more."""
     import mergecraft

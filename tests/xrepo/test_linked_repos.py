@@ -82,11 +82,11 @@ def test_authorized_linked_repo_content_is_read_from_checkout(tmp_path: Path) ->
 
     linked_mod = import_xrepo_module("linked_repos")
     manifest = linked_mod.parse_manifest(manifest_path)
-    grant = linked_mod.RunGrant(authorized_repos=frozenset({"api-contracts"}))
+    grant = linked_mod.RunGrant(authorized_repos=frozenset({"acme/api-contracts"}))
 
     content = linked_mod.load_linked_repo_content(
         manifest=manifest,
-        repo="api-contracts",
+        repo="acme/api-contracts",
         grant=grant,
         repo_roots={"api-contracts": linked_root},
     )
@@ -141,7 +141,6 @@ def test_linked_repo_content_is_fenced_as_untrusted(tmp_path: Path) -> None:
 
 # ── N2 (TB1): grants match exact lowercase owner/name ────────────────────────
 
-_N2 = "green after TB5: grants match exact owner/name slugs"
 _PIN = "abc111" * 5
 
 
@@ -171,7 +170,6 @@ def test_grant_matches_exact_slug_not_a_tail() -> None:
     assert grant.is_authorized("attacker/foo") is False
 
 
-@pytest.mark.xfail(reason=_N2, strict=False)
 def test_bare_name_grant_matches_nothing() -> None:
     """TB-D10 — a bare-name operator entry matches no repository at all."""
     linked_mod = import_xrepo_module("linked_repos")
@@ -180,7 +178,6 @@ def test_bare_name_grant_matches_nothing() -> None:
     assert grant.is_authorized("attacker/foo") is False
 
 
-@pytest.mark.xfail(reason=_N2, strict=False)
 def test_intersect_manifest_grant_adds_slugs_only() -> None:
     """TB-D10 — the intersection must not re-expand a slug to its bare name.
 
@@ -192,7 +189,6 @@ def test_intersect_manifest_grant_adds_slugs_only() -> None:
     assert "foo" not in allowed
 
 
-@pytest.mark.xfail(reason=_N2, strict=False)
 def test_slug_grant_does_not_authorize_a_same_name_other_owner() -> None:
     """TB-D10 — ``myorg/foo`` does not leak a grant to ``attacker/foo``."""
     linked_mod = import_xrepo_module("linked_repos")
@@ -202,7 +198,6 @@ def test_slug_grant_does_not_authorize_a_same_name_other_owner() -> None:
     assert downstream.is_authorized("attacker/foo") is False
 
 
-@pytest.mark.xfail(reason=_N2, strict=False)
 def test_two_manifest_entries_sharing_a_name_are_both_refused() -> None:
     """TB-D10 — same-name entries read the same sibling, so both are refused."""
     manifest = _manifest([("myorg", "foo"), ("attacker", "foo")])

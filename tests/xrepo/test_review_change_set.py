@@ -17,14 +17,13 @@ Locked contracts:
 * **TB-D12** — every linked-repo omission is in the payload
   (``linkedRepoOmitted: [{repo, reason}]`` alongside findings).
 
-RED markers are non-strict and name the wave that greens them.
+Reconciled after TB5 — the suite is green with no RED markers.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from tests.xrepo.support import (
     git_commit_all,
     git_init_repo,
@@ -39,7 +38,6 @@ from mergecraft.xrepo.review import review_linked_repos
 if TYPE_CHECKING:
     from pathlib import Path
 
-_TB5 = "green after TB5: change set from moved pins, omissions in the payload"
 _ALL_SURFACES = ("openapi.yaml", "schema.graphql", "service.proto", "src/demo/__init__.py")
 
 
@@ -98,7 +96,6 @@ def _moved_pin_fixture(tmp_path: Path) -> dict[str, Any]:
     }
 
 
-@pytest.mark.xfail(reason=_TB5, strict=False)
 def test_unmoved_pin_yields_zero_findings(tmp_path: Path) -> None:
     """TB-D11 — a PR that does not move a pin changes no linked contract."""
     fixture = _moved_pin_fixture(tmp_path)
@@ -116,7 +113,6 @@ def test_unmoved_pin_yields_zero_findings(tmp_path: Path) -> None:
     assert review.findings == ()
 
 
-@pytest.mark.xfail(reason=_TB5, strict=False)
 def test_moved_pin_reports_only_surfaces_changed_between_pins(tmp_path: Path) -> None:
     """TB-D11 — only the openapi surface differs between the two pins."""
     fixture = _moved_pin_fixture(tmp_path)
@@ -135,7 +131,6 @@ def test_moved_pin_reports_only_surfaces_changed_between_pins(tmp_path: Path) ->
     assert paths == {"openapi.yaml"}, f"unexpected changed surfaces: {paths}"
 
 
-@pytest.mark.xfail(reason=_TB5, strict=False)
 def test_unchanged_surfaces_are_not_reported_as_changed(tmp_path: Path) -> None:
     """TB-D11 — graphql/proto/exports are identical at both pins."""
     fixture = _moved_pin_fixture(tmp_path)
@@ -172,7 +167,6 @@ def test_explicit_producer_keeps_whole_index_semantics(tmp_path: Path) -> None:
     assert len(paths) > 1
 
 
-@pytest.mark.xfail(reason=_TB5, strict=False)
 def test_ungranted_entry_appears_in_linked_repo_omitted(tmp_path: Path) -> None:
     """TB-D12 — 'nothing was checked' is distinguishable from 'no findings'."""
     primary = tmp_path / "primary"
@@ -180,6 +174,7 @@ def test_ungranted_entry_appears_in_linked_repo_omitted(tmp_path: Path) -> None:
     secrets = tmp_path / "secrets-store"
     primary.mkdir()
     secrets.mkdir()
+    git_init_repo(secrets)
     (secrets / "secret.txt").write_text("classified\n", encoding="utf-8")
     secret_commit = git_commit_all(secrets)
     contracts_commit = write_contract_fixture_repo(contracts)
@@ -202,7 +197,6 @@ def test_ungranted_entry_appears_in_linked_repo_omitted(tmp_path: Path) -> None:
     assert all(row.get("reason") for row in omitted)
 
 
-@pytest.mark.xfail(reason=_TB5, strict=False)
 def test_unreachable_previous_pin_is_an_omission_not_a_full_index(tmp_path: Path) -> None:
     """TB-D11/D12 — a base pin this checkout cannot resolve omits, never reports."""
     fixture = _moved_pin_fixture(tmp_path)

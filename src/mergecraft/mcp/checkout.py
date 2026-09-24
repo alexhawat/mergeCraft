@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.xrepo.linked_repos import LinkedReposManifest
 
 __all__ = [
     "GitHubClient",
@@ -42,6 +43,30 @@ def _rebaseline_config_after_checkout(ctx: ToolContext) -> None:
     from mergecraft.config.settings_snapshot import rebaseline_repo_settings_snapshot
 
     rebaseline_repo_settings_snapshot(ctx)
+
+
+def _base_linked_repo_manifest(*, cwd: str, base_ref: str) -> LinkedReposManifest:
+    """Read the linked-repo manifest at ``origin/<base>`` (TB-D11).
+
+    The review path diffs pins between the base and head manifests, so it needs
+    the base manifest. An unavailable base ref or manifest yields an empty
+    manifest — never a whole-index fallback, which would report contracts the PR
+    did not change.
+    """
+    from mergecraft.context.repo_paths import git_show_text
+    from mergecraft.xrepo.linked_repos import LinkedReposManifest, parse_manifest_text
+    from mergecraft.xrepo.review import MANIFEST_REL
+
+    empty = LinkedReposManifest(repos=())
+    if not base_ref:
+        return empty
+    text = git_show_text(Path(cwd), f"origin/{base_ref}", str(MANIFEST_REL))
+    if text is None:
+        return empty
+    try:
+        return parse_manifest_text(text)
+    except ValueError:
+        return empty
 
 
 # A review authored by mergeCraft carries the run footer, or (for a review whose
@@ -795,6 +820,7 @@ def checkout_pr_tool(ctx: ToolContext):
             linked = attach_linked_repo_review(
                 Path(cwd),
                 authorized_repos=operator_authorized_linked_repos(),
+                base_manifest=_base_linked_repo_manifest(cwd=cwd, base_ref=base_ref),
             )
             if linked is not None:
                 result.update(linked)
