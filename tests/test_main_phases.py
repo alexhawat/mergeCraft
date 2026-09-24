@@ -44,9 +44,15 @@ import mergecraft.main as main_mod
 import mergecraft.utils.token as token_mod
 from mergecraft.agents.shared import AgentResult
 from mergecraft.analyzers.trust import derive_trust_tier
-from mergecraft.config.settings import AnalyzersSettings, GatesSettings, RepoSettings
-from mergecraft.main import MainResult, RunOutcome
+from mergecraft.config.settings import (
+    AnalyzersSettings,
+    GatesSettings,
+    RepoSettings,
+    RunContextData,
+)
+from mergecraft.main import MainResult, RunContext, RunOutcome
 from mergecraft.mcp.tool_state import ProgressComment as CtxProgressComment
+from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.utils.payload import JsonPayload, resolve_prompt_input
 from mergecraft.utils.token import resolve_tokens
@@ -798,3 +804,210 @@ class TestFinalizeCarriesTheVerdictDiagnostic:
             f"{scenario} never classified a verdict protocol but reported "
             f"{rec.result.verdict_diagnostic!r}"
         )
+
+
+# ── S4 (TB1): _resolve_credentials binds the target PR before the invariant ──
+
+_TB2 = "green after TB2: bind the target PR before the credential invariant"
+
+
+class _FakeTokenRef:
+    """Minimal ``TokenRef`` stand-in for the credential phase."""
+
+    mcp_token = "ghs_fake_mcp_token"
+    git_token = "ghs_fake_git_token"
+    read_token: str | None = None
+
+    async def aclose(self) -> None:
+        return None
+
+
+class _StubScm:
+    """Answers ``get_pull`` from a scripted payload, or fails on demand."""
+
+    def __init__(self, *, pull: dict[str, Any] | None = None, fail: bool = False) -> None:
+        self._pull = pull
+        self._fail = fail
+        self.get_pull_calls: list[int] = []
+
+    async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]:
+        self.get_pull_calls.append(pull_number)
+        if self._fail:
+            msg = "pull request lookup failed"
+            raise RuntimeError(msg)
+        return self._pull or {}
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _run_context_data() -> RunContextData:
+    return RunContextData.model_validate(
+        {
+            "repo": {"owner": "acme", "name": "demo", "data": {}},
+            "repoSettings": RepoSettings().model_dump(by_alias=True),
+            "apiToken": "",
+            "oss": True,
+            "plan": "none",
+        }
+    )
+
+
+def _comment_on_pr_event(*, number: int = 7, association: str = "OWNER") -> dict[str, Any]:
+    return {
+        "action": "created",
+        "issue": {
+            "number": number,
+            "pull_request": {"url": f"https://api.github.com/repos/acme/demo/pulls/{number}"},
+        },
+        "comment": {"author_association": association, "body": "@mergecraft review"},
+    }
+
+
+def _comment_on_plain_issue_event() -> dict[str, Any]:
+    return {
+        "action": "created",
+        "issue": {"number": 9},
+        "comment": {"author_association": "OWNER", "body": "@mergecraft review"},
+    }
+
+
+def _pull_metadata(*, number: int, fork: bool) -> dict[str, Any]:
+    base_repo = {"full_name": "acme/demo", "fork": False}
+    head_repo = {"full_name": "contributor/demo", "fork": True} if fork else base_repo
+    return {
+        "number": number,
+        "head": {"ref": "feature", "sha": "a" * 40, "repo": head_repo},
+        "base": {"ref": "main", "sha": "b" * 40, "repo": base_repo},
+    }
+
+
+async def _drive_credentials(
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    event: dict[str, Any],
+    scm: _StubScm,
+    credentials: bool,
+) -> RunContext:
+    """Call the real ``_resolve_credentials`` with scripted collaborators."""
+    if credentials:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    else:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+
+    ctx = RunContext(
+        settings=RepoSettings(),
+        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+        run_context=_run_context_data(),
+        gh_event=event,
+        payload={"push": "restricted", "shell": "restricted"},
+        scm=scm,  # type: ignore[arg-type]
+    )
+
+    async def _fake_resolve_tokens(**_kwargs: Any) -> _FakeTokenRef:
+        return _FakeTokenRef()
+
+    monkeypatch.setattr(main_mod, "resolve_tokens", _fake_resolve_tokens)
+    monkeypatch.setattr(main_mod, "GitHubClient", lambda *a, **k: object())
+    monkeypatch.setattr(main_mod, "create_github_scm", lambda *a, **k: scm)
+    await main_mod._resolve_credentials(ctx)
+    return ctx
+
+
+@pytest.mark.xfail(reason=_TB2, strict=False)
+async def test_resolve_credentials_binds_the_target_pr_before_the_invariant(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """TB-D2 — the fetched fork is bound before the credential invariant runs.
+
+    Without binding, the comment-on-PR event carries no head and the invariant
+    would not fire; the refusal proves the fetch happened first.
+    """
+    scm = _StubScm(pull=_pull_metadata(number=7, fork=True))
+
+    with pytest.raises(Exception, match=r"fork") as excinfo:
+        await _drive_credentials(
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            event=_comment_on_pr_event(),
+            scm=scm,
+            credentials=True,
+        )
+
+    assert scm.get_pull_calls == [7]
+    assert "fork" in str(excinfo.value).lower()
+
+
+@pytest.mark.xfail(reason=_TB2, strict=False)
+async def test_resolve_credentials_refuses_when_the_pr_fetch_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """TB-D2 — a fetch failure leaves the event unbound and floors a credentialed run."""
+    scm = _StubScm(fail=True)
+
+    with pytest.raises(Exception, match=r"unbound|could not be bound") as excinfo:
+        await _drive_credentials(
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            event=_comment_on_pr_event(),
+            scm=scm,
+            credentials=True,
+        )
+
+    assert scm.get_pull_calls == [7]
+    message = str(excinfo.value).lower()
+    assert "unbound" in message or "could not be bound" in message
+
+
+@pytest.mark.xfail(reason=_TB2, strict=False)
+async def test_resolve_credentials_binds_a_same_repo_pr_and_keeps_trust(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """TB-D2 — a same-repo comment-on-PR stays trusted once bound."""
+    scm = _StubScm(pull=_pull_metadata(number=7, fork=False))
+
+    ctx = await _drive_credentials(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        event=_comment_on_pr_event(),
+        scm=scm,
+        credentials=True,
+    )
+
+    assert scm.get_pull_calls == [7]
+    assert ctx.trust_tier == "trusted"
+
+
+async def test_resolve_credentials_does_not_fetch_for_a_plain_issue(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard — a comment on a plain issue names no PR to fetch."""
+    scm = _StubScm(fail=True)
+
+    ctx = await _drive_credentials(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        event=_comment_on_plain_issue_event(),
+        scm=scm,
+        credentials=False,
+    )
+
+    assert scm.get_pull_calls == []
+    assert ctx.trust_tier == "trusted"
+
+
+async def test_resolve_credentials_leaves_uncredentialed_comment_runs_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard — a fetch failure with no credentials present does not refuse."""
+    scm = _StubScm(fail=True)
+
+    await _drive_credentials(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        event=_comment_on_pr_event(),
+        scm=scm,
+        credentials=False,
+    )

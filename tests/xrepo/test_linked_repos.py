@@ -137,3 +137,73 @@ def test_linked_repo_content_is_fenced_as_untrusted(tmp_path: Path) -> None:
     assert _INJECTION_TEXT in joined
     assert SAFETY_NOTE in joined
     assert "field=linked_repo_content" in joined or "field=linked_repo" in joined
+
+
+# ── N2 (TB1): grants match exact lowercase owner/name ────────────────────────
+
+_N2 = "green after TB5: grants match exact owner/name slugs"
+_PIN = "abc111" * 5
+
+
+def _manifest(repos: list[tuple[str, str]]) -> object:
+    from mergecraft.xrepo.linked_repos import LinkedRepoEntry, LinkedReposManifest
+
+    return LinkedReposManifest(
+        repos=tuple(LinkedRepoEntry(owner=owner, name=name, commit=_PIN) for owner, name in repos)
+    )
+
+
+def _intersect(manifest: object, grant: frozenset[str]) -> frozenset[str]:
+    from mergecraft.review.linked_repos import _intersect_manifest_grant
+
+    return _intersect_manifest_grant(manifest, operator_grant=grant)  # type: ignore[arg-type]
+
+
+def test_grant_matches_exact_slug_not_a_tail() -> None:
+    """Guard — ``myorg/foo`` never authorizes ``attacker/foo`` by tail.
+
+    (The widening routes are the bare-name grant and the manifest-grant
+    re-expansion; this exact-slug case already holds.)
+    """
+    linked_mod = import_xrepo_module("linked_repos")
+    grant = linked_mod.RunGrant(authorized_repos=frozenset({"myorg/foo"}))
+    assert grant.is_authorized("myorg/foo") is True
+    assert grant.is_authorized("attacker/foo") is False
+
+
+@pytest.mark.xfail(reason=_N2, strict=False)
+def test_bare_name_grant_matches_nothing() -> None:
+    """TB-D10 — a bare-name operator entry matches no repository at all."""
+    linked_mod = import_xrepo_module("linked_repos")
+    grant = linked_mod.RunGrant(authorized_repos=frozenset({"foo"}))
+    assert grant.is_authorized("foo") is False
+    assert grant.is_authorized("attacker/foo") is False
+
+
+@pytest.mark.xfail(reason=_N2, strict=False)
+def test_intersect_manifest_grant_adds_slugs_only() -> None:
+    """TB-D10 — the intersection must not re-expand a slug to its bare name.
+
+    The bare name would then authorize any same-name entry the PR adds.
+    """
+    manifest = _manifest([("myorg", "foo")])
+    allowed = _intersect(manifest, frozenset({"myorg/foo"}))
+    assert allowed == frozenset({"myorg/foo"})
+    assert "foo" not in allowed
+
+
+@pytest.mark.xfail(reason=_N2, strict=False)
+def test_slug_grant_does_not_authorize_a_same_name_other_owner() -> None:
+    """TB-D10 — ``myorg/foo`` does not leak a grant to ``attacker/foo``."""
+    linked_mod = import_xrepo_module("linked_repos")
+    manifest = _manifest([("myorg", "foo"), ("attacker", "foo")])
+    allowed = _intersect(manifest, frozenset({"myorg/foo"}))
+    downstream = linked_mod.RunGrant(authorized_repos=allowed)
+    assert downstream.is_authorized("attacker/foo") is False
+
+
+@pytest.mark.xfail(reason=_N2, strict=False)
+def test_two_manifest_entries_sharing_a_name_are_both_refused() -> None:
+    """TB-D10 — same-name entries read the same sibling, so both are refused."""
+    manifest = _manifest([("myorg", "foo"), ("attacker", "foo")])
+    assert _intersect(manifest, frozenset({"myorg/foo"})) == frozenset()

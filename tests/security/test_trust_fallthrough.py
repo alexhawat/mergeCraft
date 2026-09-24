@@ -21,7 +21,8 @@ result without raising.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from mergecraft.analyzers.trust import (
     allow_repo_command_overrides,
@@ -35,9 +36,6 @@ from tests.analyzers.support import (
     SAME_REPO_PULL_REQUEST_EVENT,
     import_module,
 )
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_unknown_event_name_is_untrusted(
@@ -340,3 +338,53 @@ def test_issue_comment_wrong_type_association_is_untrusted(
     monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
     tier = derive_trust_tier(event={"comment": {"author_association": 42}})
     assert tier == "untrusted"
+
+
+# ── S4 (TB1): a comment on a PR with no bound head is a fork ─────────────────
+
+_TB2 = "green after TB2: comment-on-PR floors derive_trust_tier"
+
+
+def _comment_on_pr_event(*, association: str = "OWNER") -> dict[str, object]:
+    return {
+        "action": "created",
+        "issue": {
+            "number": 7,
+            "pull_request": {"url": "https://api.github.com/repos/acme/demo/pulls/7"},
+        },
+        "comment": {"author_association": association, "body": "@mergecraft review"},
+    }
+
+
+def _comment_on_plain_issue_event(*, association: str = "OWNER") -> dict[str, object]:
+    return {
+        "action": "created",
+        "issue": {"number": 9},
+        "comment": {"author_association": association, "body": "@mergecraft review"},
+    }
+
+
+@pytest.mark.xfail(reason=_TB2, strict=False)
+@pytest.mark.parametrize("association", ["OWNER", "MEMBER", "COLLABORATOR"])
+def test_issue_comment_on_pr_without_head_is_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+    association: str,
+) -> None:
+    """S4 — the commenter's association authorises invocation, not execution.
+
+    The event carries ``issue.pull_request`` (a URL stub) and no top-level
+    ``pull_request``, so the head location is unknown: the fork floor applies
+    and the tier is ``untrusted`` however trusted the commenter is.
+    """
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(event=_comment_on_pr_event(association=association))
+    assert tier == "untrusted"
+
+
+def test_issue_comment_on_plain_issue_stays_trusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard — a maintainer comment on a plain issue keeps the trusted tier."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+    tier = derive_trust_tier(event=_comment_on_plain_issue_event())
+    assert tier == "trusted"
