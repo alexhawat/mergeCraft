@@ -249,6 +249,37 @@ class RedactingSink:
 _DEFAULT_LOCAL_TRACES_PATH = ".mergecraft/traces/"
 
 
+def _reset_exporter_test_seam() -> None:
+    """Clear the exporter module's test seam (see :func:`sink_factory`).
+
+    The seam (``_ACTIVE_TRACER_PROVIDERS`` / ``_LAST_ENDPOINT`` / …) is
+    test-only state that production code never reads; it is reset here so a
+    *disabled* resolution is observed as disabled even when a prior test in
+    the same session constructed an ``OTLPSink``. The W7.8 contract pins this
+    through ``has_active_tracer_provider() is False``. The import is lazy so
+    the factory stays usable when the ``[tracing]`` extra is absent.
+    """
+    try:
+        from mergecraft.tracing.exporters import _reset_test_seam
+
+        _reset_test_seam()
+    except ImportError:
+        pass
+
+
+def _null_sink(tracing_settings: Any) -> Any:
+    """Build a tagged :class:`NullSink`, resetting the exporter test seam.
+
+    Every :class:`NullSink` outcome of :func:`sink_factory` funnels through
+    here so the disabled path, the "enabled but no remote children" path
+    (telemetry off / opt-out), and the post-dedupe empty path cannot drift:
+    each must leave ``has_active_tracer_provider()`` observing a disabled
+    resolution.
+    """
+    _reset_exporter_test_seam()
+    return _tag_tracing_sink(NullSink(), tracing_settings)
+
+
 def sink_factory(tracing_settings: Any) -> Any:
     """Resolve :class:`TracingSettings` to a live sink.
 
@@ -257,19 +288,13 @@ def sink_factory(tracing_settings: Any) -> Any:
     ``sinks`` entry, wraps them in :class:`MultiSink`, then :class:`RedactingSink`
     (D7). ``logfire`` and ``otel`` are reserved for the ``[tracing]`` extra
     that ships in W8 — until then they raise ``NotImplementedError``.
+
+    Every :class:`NullSink` outcome goes through :func:`_null_sink`, which
+    resets the exporter test seam so the disabled invariant holds regardless
+    of which branch produced the no-op sink.
     """
     if not getattr(tracing_settings, "enabled", False):
-        # Reset the exporter test seam so the disabled path is observed as
-        # disabled even when a prior test in the same session constructed
-        # an ``OTLPSink``. The W7.8 contract pins this through
-        # ``has_active_tracer_provider() is False``.
-        try:
-            from mergecraft.tracing.exporters import _reset_test_seam
-
-            _reset_test_seam()
-        except ImportError:
-            pass
-        return _tag_tracing_sink(NullSink(), tracing_settings)
+        return _null_sink(tracing_settings)
 
     children: list[Any] = []
     for entry in tracing_settings.sinks:
@@ -307,12 +332,12 @@ def sink_factory(tracing_settings: Any) -> Any:
         raise ValueError(msg)
 
     if not children:
-        return _tag_tracing_sink(NullSink(), tracing_settings)
+        return _null_sink(tracing_settings)
     from mergecraft.tracing.exporters import dedupe_otlp_sinks
 
     children = dedupe_otlp_sinks(children)
     if not children:
-        return _tag_tracing_sink(NullSink(), tracing_settings)
+        return _null_sink(tracing_settings)
     resolved = _tag_tracing_sink(RedactingSink(MultiSink(children)), tracing_settings)
     _PENDING_SINK.set(resolved)
     return resolved

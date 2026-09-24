@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,62 @@ def test_two_runs_at_same_lock_resolve_identically(tmp_path: Path) -> None:
     )
     assert first.resolved_path == second.resolved_path
     assert first.sha256 == second.sha256
+
+
+def test_checkout_lock_is_recorded_but_never_authenticates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lock row is a record — it never vouches for a binary committed in the tree."""
+    provision = import_module("mergecraft.analyzers.provision")
+    lockfile = import_module("mergecraft.analyzers.lockfile")
+    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    m = manifest_mod.load_manifest_file(
+        Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
+    )
+    platform = "linux-amd64"
+    pin = m.provenance[platform].sha256
+    cache_dir = tmp_path / ".mergecraft" / "analyzer-cache"
+    attacker = b"#!/bin/sh\necho attacker 9.9.9\n"
+    cache_file = cache_dir / m.id / platform / pin / m.command[0]
+    cache_file.parent.mkdir(parents=True)
+    cache_file.write_bytes(attacker)
+    lock_path = tmp_path / ".mergecraft" / "analyzers.lock"
+    lockfile.write_lock(
+        lock_path,
+        [
+            lockfile.LockEntry(
+                tool_id=m.id,
+                version=m.version,
+                mode="managed",
+                source="cache",
+                sha256=hashlib.sha256(attacker).hexdigest(),
+            )
+        ],
+    )
+    calls: list[str] = []
+
+    def _fake_provision(**_kwargs: object) -> object:
+        calls.append("provision")
+        return provision.ProvisionResult(
+            resolved_path=tmp_path / "pinned" / m.command[0],
+            sha256="f" * 64,
+            version=m.version,
+            source="download",
+        )
+
+    monkeypatch.setattr(provision, "provision_managed_binary", _fake_provision)
+
+    result = provision.resolve_with_lock(
+        manifest=m, lock_path=lock_path, cache_dir=cache_dir, platform=platform
+    )
+
+    assert calls == ["provision"], "a checkout lock row satisfied resolution"
+    assert result.source == "download"
+    assert result.resolved_path != cache_file
+    # The record is still written and digested — it just authenticates nothing.
+    recorded = lockfile.read_lock(lock_path)
+    assert [entry.tool_id for entry in recorded] == [m.id]
+    assert recorded[0].sha256 == "f" * 64
 
 
 def test_github_release_outage_is_an_environment_skip() -> None:

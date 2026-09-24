@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- First-class OpenCode integration under `integrations/opencode/`: `/mergecraft/*`
+  slash commands for six review engines (native, cli, deep, mcp, quick,
+  thirdparty), a read-only `mergecraft/reviewer` subagent, a `mergecraft/fixer`
+  subagent for the review-only loop, and an `opencode.jsonc` template. The
+  generated `skills/opencode/mergecraft/SKILL.md` now carries an
+  OpenCode-specific install section instead of the generic body. A companion
+  change adds the plugin, `mergecraft opencode install`, and JEV/Logfire wiring.
+
+- `docs/opencode.md` documents the integration: engine selection, commands,
+  subagents, V2 MCP wiring, JEV scope, and Logfire tracing.
+
+### Changed
+
+- `docs/mcp.md` OpenCode install now shows the OpenCode V2 shape — servers nested
+  under `mcp.servers` with `disabled`, not the V1 top-level `mcp` map with
+  `enabled` — and includes the `opencode mcp add` one-liner.
+
+- `skills/harnesses.yaml` OpenCode row gains an `install_section` covering
+  commands, subagents, MCP, and JEV/Logfire, so the generated package matches the
+  install path OpenCode actually reads (`.opencode/skills/`).
+
 - `mergecraft eval publish-benchmark` validates two saved provider runs against
   an approved campaign manifest, independently adjudicated label and judge
   receipts, immutable artifact and model identities, shared protocol pins, and
@@ -172,6 +193,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `tests/` still fires.
 
 ### Fixed
+
+- Every agent CLI driver and the OpenCode server boot no longer hang when a
+  child fills its stderr pipe. Each driver drains stderr concurrently with the
+  stdout stream it already reads, keeping the two pipes separate so the
+  stream-json parse is unchanged and the stderr tail still reaches failure
+  diagnostics; the buffer is bounded and tail-kept.
+
+- OpenCode server boot no longer blocks the event loop in a blocking
+  `readline()`. The process group is registered at spawn, both pipes are
+  drained from spawn, and boot waits on a URL event under its deadline, so a
+  server that logs a full pipe's worth of stderr before printing its URL now
+  starts instead of timing out, and a hung, exited or cancelled boot kills,
+  unregisters and reaps the group.
+
+- OpenCode falls back to the alternate prompt endpoint only on 404 or 405. Any
+  other error status is reported once, unretried, so a 429 or 5xx can no
+  longer start a second agent turn on the same session.
+
+- The Claude and Gemini reviewers can no longer write files, run shell tools or
+  fetch the web. Their write, edit, shell and web tools are denied
+  unconditionally, including the subagent forms, matching the review-only
+  product boundary; permission prompting stays skipped in headless CI because
+  the deny list is the boundary.
+
+- Tracing no longer clears a bound data-residency allowlist. The tracer factory
+  reads the bound enterprise block instead of re-binding it, makes no
+  enterprise call at all on the disabled path, and scopes repo settings to
+  sink construction only when nothing is bound.
+
+- The OTLP span recorder is a test-only seam again: it is installed on a
+  provider only when a test fixture enables it, never from an environment
+  variable, its payload list is bounded, and the module-level header copy masks
+  sensitive values instead of keeping a bearer token in a global.
+
+- The sticky progress comment keeps the finding ledger and the learnings delta
+  across the final deterministic-record write, so a later run hydrates every
+  prior record instead of losing it. A later run reuses the existing progress
+  comment rather than posting a second one, and only bot-authored comments are
+  read as progress state. The run record names the reviewer slot skipped for
+  missing credentials and the model that produced the recorded verdict, instead
+  of claiming no reviewer ran.
+
+- Managed analyzer caches and the semgrep pip install now live under the
+  operator's cache directory (`$XDG_CACHE_HOME`, else `~/.cache`, plus
+  `mergecraft/analyzer-cache`) instead of `<repo>/.mergecraft/`, so a pull
+  request can no longer commit a binary, a lock row and a receipt that the fast
+  path would then execute. A cache root that resolves inside the checkout is
+  refused with a named skip rather than used. The checkout's
+  `.mergecraft/analyzers.lock` is still written and digested for the pre-merge
+  row, but it never authenticates a binary: a cache hit now requires a receipt
+  binding the archive pin and the extracted binary's digest together. A lock row
+  missing a required key is skipped with a warning instead of raising, and a
+  lock write stages to a temporary file and renames into place under a sidecar
+  lock, so a failed write leaves the previous lock intact.
+
+- Analyzer findings are attributed to the file that actually caused them again.
+  `diff --git` headers are parsed with Git's C-style quoting, the path is taken
+  from `rename to` / `+++ b/` when present, and a header that cannot be parsed
+  drops its hunks instead of attaching them to the previous file. A SARIF URI
+  that points outside the repository is kept verbatim and labelled
+  `outside repository root` rather than shortened to a basename that may name an
+  unrelated file, and the CI trufflehog producer now emits
+  repository-relative URIs.
+
+- The `run_analyzers` tool confines `repo_root` to a directory the run already
+  registered as a checkout, and rejects a supplied `diff_path` that escapes the
+  authorized roots, is missing, is not a regular file, or is not valid UTF-8 —
+  each with a named reason and without running an analyzer. Previously an
+  out-of-root path was ignored in silence and the pipeline ran unscoped.
+
+- Negative memory that cannot be read no longer aborts a trusted run: malformed
+  rules and audit entries are skipped per entry, an unreadable store reports
+  every finding instead of suppressing them, and the audit trail is bounded.
+  The `sarif_upload` action input no longer declares a default, so an unset
+  input now reaches `.mergecraft/config.yaml`'s `analyzers.sarifUpload` as
+  intended; a consumer relying on the implicit `disabled` should set the input
+  or the config key explicitly.
 
 - Offline local diff materialization skips mergeCraft's generated
   `.mergecraft/analyzer-cache/` entries before per-file untracked diff

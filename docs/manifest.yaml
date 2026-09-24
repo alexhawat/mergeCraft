@@ -85,6 +85,12 @@ pages:
     generator: null
     purpose: Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries.
 
+  - path: docs/opencode.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: OpenCode integration — commands, reviewer subagent, plugin, MCP wiring, and JEV/Logfire setup.
+
   - path: docs/blast-radius.md
     audience: contributor
     template: contributor

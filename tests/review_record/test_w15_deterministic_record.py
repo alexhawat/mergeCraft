@@ -62,7 +62,21 @@ class _Scm:
         self.created = 0
 
     async def list_issue_comments(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        return [{"id": key, "body": value} for key, value in self.comments.items()]
+        rows: list[dict[str, Any]] = []
+        for key, value in self.comments.items():
+            ours = value.startswith("## mergeCraft progress") or "<!-- mergecraft-" in value
+            rows.append(
+                {
+                    "id": key,
+                    "body": value,
+                    "user": (
+                        {"login": "github-actions[bot]", "type": "Bot"}
+                        if ours
+                        else {"login": "someone", "type": "User"}
+                    ),
+                }
+            )
+        return rows
 
     async def list_reviews(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         return [{"id": key, "body": value} for key, value in self.reviews.items()]

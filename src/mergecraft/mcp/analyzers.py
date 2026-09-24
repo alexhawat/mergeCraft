@@ -21,10 +21,61 @@ if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 
-def _load_diff_text(diff_path: Path | None) -> str:
-    if diff_path is None or not diff_path.is_file():
+def _authorized_repo_dirs(ctx: ToolContext) -> tuple[Path, ...]:
+    """Resolved checkout directories this run may read (AN-D5).
+
+    ``init_tool_state`` stores the raw ``dir`` string per repo, so both sides of
+    every comparison below are resolved before they are compared.
+    """
+    return tuple(Path(repo.dir).resolve() for repo in ctx.tool_state.repos.values())
+
+
+def _confine_repo_root(ctx: ToolContext, repo_root: Path) -> Path:
+    """Resolve ``repo_root`` or raise ``ValueError`` if it is not a registered checkout.
+
+    AN-D5 — this is an *equality* check against ``tool_state.repos[*].dir``, not
+    a containment check: a directory merely *under* a registered checkout is not
+    a registered checkout, and reading it would load settings from a tree the
+    run never checked out.
+    """
+    resolved = repo_root.resolve()
+    if resolved not in _authorized_repo_dirs(ctx):
+        msg = (
+            f"repo_root {str(repo_root)!r} is not a registered checkout directory; "
+            "run_analyzers only reads a repo dir registered in tool_state.repos"
+        )
+        raise ValueError(msg)
+    return resolved
+
+
+def _load_diff_text(diff_path: Path | None, *, ctx: ToolContext) -> str:
+    """Read a supplied diff, or raise a named ``ValueError`` (AN-D5 / AN-D6).
+
+    ``None`` means no diff was supplied, so the pipeline runs unscoped. A
+    *supplied* path is rejected — never silently ignored — unless, symlinks
+    followed, it resolves under a registered checkout dir or ``ctx.tmpdir``, is
+    a regular file, and decodes as strict UTF-8. Each failure names the check.
+    """
+    if diff_path is None:
         return ""
-    return diff_path.read_text(encoding="utf-8")
+    resolved = diff_path.resolve()
+    roots = list(_authorized_repo_dirs(ctx))
+    if ctx.tmpdir:
+        roots.append(Path(ctx.tmpdir).resolve())
+    if not any(resolved.is_relative_to(root) for root in roots):
+        msg = (
+            f"diff_path {str(diff_path)!r} resolves outside the authorized roots "
+            "(a registered checkout dir or the run tmpdir)"
+        )
+        raise ValueError(msg)
+    if not resolved.is_file():
+        msg = f"diff_path {str(diff_path)!r} is not a regular file"
+        raise ValueError(msg)
+    try:
+        return resolved.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        msg = f"diff_path {str(diff_path)!r} is not valid UTF-8"
+        raise ValueError(msg) from error
 
 
 def _resolve_tier(ctx: ToolContext) -> str:
@@ -154,10 +205,10 @@ def _store_run_state(ctx: ToolContext, state: AnalyzerRunState) -> None:
 def run_analyzers_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         state = primary_repo_state(ctx.tool_state)
-        repo_root = Path(params.get("repo_root") or state.dir)
+        repo_root = _confine_repo_root(ctx, Path(params.get("repo_root") or state.dir))
         changed = [str(f) for f in (params.get("changed_files") or [])]
         diff_path = params.get("diff_path")
-        diff_text = _load_diff_text(Path(diff_path)) if diff_path else ""
+        diff_text = _load_diff_text(Path(diff_path) if diff_path else None, ctx=ctx)
 
         from mergecraft.config import load_repo_settings
 
@@ -271,11 +322,20 @@ def run_analyzers_tool(ctx: ToolContext):
                 },
                 "repo_root": {
                     "type": "string",
-                    "description": "Optional repo root override (defaults to the checked-out repo).",
+                    "description": (
+                        "Optional repo root override. Must resolve to a directory this run "
+                        "already registered as a checkout; any other path is rejected and no "
+                        "analyzer runs."
+                    ),
                 },
                 "diff_path": {
                     "type": "string",
-                    "description": "Optional on-disk unified diff for scoping findings to hunks.",
+                    "description": (
+                        "Optional on-disk unified diff for scoping findings to hunks. Must "
+                        "resolve under a registered checkout dir or the run tmpdir, be a "
+                        "regular file, and be valid UTF-8; any other supplied path is "
+                        "rejected rather than silently ignored."
+                    ),
                 },
                 "base_ref": {
                     "type": "string",

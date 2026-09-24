@@ -6,11 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
+    OUTSIDE_REPO_ROOT_LABEL,
     coerce_line,
     map_confidence,
     map_native_severity,
     require_json_object,
-    resolve_repo_relative_path,
+    resolve_path_and_origin,
     taxonomy_category,
 )
 
@@ -53,12 +54,12 @@ def _parse_location(
     location: dict[str, Any],
     *,
     repo_root: Path,
-) -> tuple[str, int, int]:
+) -> tuple[str, int, int, bool]:
     physical = location.get("physicalLocation") or {}
     artifact = physical.get("artifactLocation") or {}
     uri = str(artifact.get("uri") or "")
     uri_base_id = artifact.get("uriBaseId")
-    path = resolve_repo_relative_path(
+    path, outside_root = resolve_path_and_origin(
         uri,
         repo_root=repo_root,
         uri_base_id=str(uri_base_id) if uri_base_id is not None else None,
@@ -68,7 +69,7 @@ def _parse_location(
     end = coerce_line(region.get("endLine", start), default=start)
     if end < start:
         end = start
-    return path, start, end
+    return path, start, end, outside_root
 
 
 def _is_suppressed(result: dict[str, Any]) -> bool:
@@ -115,8 +116,10 @@ def _parse_run(
         location = locations[0] if locations else {}
         if not isinstance(location, dict):
             location = {}
-        path, start_line, end_line = _parse_location(location, repo_root=repo_root)
+        path, start_line, end_line, outside_root = _parse_location(location, repo_root=repo_root)
         evidence: list[str] = []
+        if outside_root:
+            evidence.append(f"path={OUTSIDE_REPO_ROOT_LABEL}")
         fingerprints = result.get("partialFingerprints")
         if isinstance(fingerprints, dict):
             for key, value in sorted(fingerprints.items()):

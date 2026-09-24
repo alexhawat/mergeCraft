@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-_DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$")
 _NEW_FILE_RE = re.compile(r"^new file mode ")
 _DEV_NULL_RE = re.compile(r"^--- /dev/null")
 _MIGRATION_PREFIXES: tuple[str, ...] = (
@@ -24,6 +23,199 @@ _MIGRATION_PREFIXES: tuple[str, ...] = (
     "migrations/",
     "alembic/versions/",
 )
+
+# ── diff header parsing (AN-D7) ───────────────────────────────────────────────
+# A ``diff --git`` header is not ``a/<old> b/<new>`` split on whitespace: Git
+# C-quotes a path that contains a space, a quote, a backslash, a control
+# character, or a non-ASCII byte. Splitting the raw header on `` b/`` therefore
+# misreads a quoted or space-bearing path, attaching the next file's hunks to
+# the previous file. Every path source is decoded the same way, and a header
+# that cannot be read clears the current file so its hunks are dropped rather
+# than misattributed.
+_DIFF_GIT_PREFIX = "diff --git "
+_RENAME_TO_PREFIX = "rename to "
+_POSTIMAGE_PREFIX = "+++ "
+_DEV_NULL_PATH = "/dev/null"
+_A_PREFIX = "a/"
+_B_PREFIX = "b/"
+
+# Header-line kinds returned by :func:`_classify_header_line`.
+_HEADER_FILE = "file"
+_HEADER_RENAME = "rename"
+_HEADER_POSTIMAGE = "postimage"
+
+_C_ESCAPES: dict[str, int] = {
+    "a": 0x07,
+    "b": 0x08,
+    "f": 0x0C,
+    "n": 0x0A,
+    "r": 0x0D,
+    "t": 0x09,
+    "v": 0x0B,
+    '"': 0x22,
+    "\\": 0x5C,
+}
+_OCTAL_DIGITS = frozenset("01234567")
+
+
+def _unquote_git_path(token: str) -> str | None:
+    """Decode a Git C-style quoted path, or return an unquoted token unchanged.
+
+    Git wraps a path in double quotes and escapes it C-style (``\\t``, ``\\n``,
+    ``\\"``, ``\\\\``, and octal ``\\NNN`` for a non-ASCII byte) when the path
+    needs it. The decoded bytes are interpreted as UTF-8. Returns ``None`` for
+    malformed quoting or bytes that are not valid UTF-8.
+    """
+    if not token.startswith('"'):
+        return token
+    if len(token) < 2 or not token.endswith('"'):
+        return None
+    body = token[1:-1]
+    out = bytearray()
+    index = 0
+    length = len(body)
+    while index < length:
+        char = body[index]
+        if char != "\\":
+            out.extend(char.encode("utf-8"))
+            index += 1
+            continue
+        index += 1
+        if index >= length:
+            return None
+        escape = body[index]
+        mapped = _C_ESCAPES.get(escape)
+        if mapped is not None:
+            out.append(mapped)
+            index += 1
+            continue
+        if escape in _OCTAL_DIGITS:
+            octal = body[index : index + 3]
+            if len(octal) != 3 or any(digit not in _OCTAL_DIGITS for digit in octal):
+                return None
+            out.append(int(octal, 8) & 0xFF)
+            index += 3
+            continue
+        return None
+    try:
+        return out.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _take_quoted_token(text: str) -> tuple[str | None, str]:
+    """Split a leading C-quoted token from ``text`` and decode it."""
+    if not text.startswith('"'):
+        return None, text
+    index = 1
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == '"':
+            return _unquote_git_path(text[: index + 1]), text[index + 1 :]
+        index += 1
+    return None, text
+
+
+def _strip_diff_prefix(path: str, prefix: str) -> str:
+    """Drop a leading ``a/`` or ``b/`` diff prefix when present."""
+    return path[len(prefix) :] if path.startswith(prefix) else path
+
+
+def _split_diff_git_paths(body: str) -> tuple[str, str] | None:
+    """Split ``a/<old> b/<new>`` into the two unquoted paths.
+
+    Returns ``None`` when the body cannot be read as two prefixed paths.
+    """
+    if body.startswith('"'):
+        old, rest = _take_quoted_token(body)
+        if old is None:
+            return None
+        new, tail = _take_quoted_token(rest.lstrip(" "))
+        if new is None or tail.strip():
+            return None
+        return _strip_diff_prefix(old, _A_PREFIX), _strip_diff_prefix(new, _B_PREFIX)
+    separator = body.find(" b/")
+    if separator == -1:
+        return None
+    old_raw = body[:separator]
+    new_raw = body[separator + 1 :]
+    if not old_raw.startswith(_A_PREFIX) or not new_raw.startswith(_B_PREFIX):
+        return None
+    return old_raw[len(_A_PREFIX) :], new_raw[len(_B_PREFIX) :]
+
+
+def _path_from_rename(raw_line: str) -> str | None:
+    """Return the post-image path named by a ``rename to`` line."""
+    token = raw_line[len(_RENAME_TO_PREFIX) :].strip()
+    if not token:
+        return None
+    return _unquote_git_path(token)
+
+
+def _path_from_postimage(raw_line: str) -> str | None:
+    """Return the post-image path named by a ``+++`` line, or ``None``."""
+    token = raw_line[len(_POSTIMAGE_PREFIX) :].strip()
+    if not token or token == _DEV_NULL_PATH:
+        return None
+    decoded = _unquote_git_path(token)
+    if decoded is None:
+        return None
+    return _strip_diff_prefix(decoded, _B_PREFIX)
+
+
+def _classify_header_line(raw_line: str, *, in_hunk: bool) -> tuple[str, str | None] | None:
+    """Classify a diff header line as ``(kind, path)``, or ``None``.
+
+    ``kind`` is ``"file"`` for a ``diff --git`` header (``path`` is ``None``
+    when the header cannot be parsed, which clears the current file),
+    ``"rename"`` for a ``rename to`` directive, or ``"postimage"`` for a
+    ``+++`` line. A ``+++`` line is a path source only before the file's first
+    hunk: inside a hunk, added content starting with ``++ `` renders as
+    ``+++ `` and must not be read as a header.
+    """
+    if raw_line.startswith(_DIFF_GIT_PREFIX):
+        paths = _split_diff_git_paths(raw_line[len(_DIFF_GIT_PREFIX) :])
+        return (_HEADER_FILE, paths[1] if paths is not None else None)
+    if raw_line.startswith(_RENAME_TO_PREFIX):
+        return (_HEADER_RENAME, _path_from_rename(raw_line))
+    if not in_hunk and raw_line.startswith(_POSTIMAGE_PREFIX):
+        return (_HEADER_POSTIMAGE, _path_from_postimage(raw_line))
+    return None
+
+
+class _DiffPathTracker:
+    """Resolve the current file path while walking a unified diff.
+
+    Shared by :func:`parse_diff_scope` and :func:`iter_added_diff_lines` so the
+    two cannot disagree about which file a hunk belongs to.
+    """
+
+    __slots__ = ("current_path", "in_hunk")
+
+    def __init__(self) -> None:
+        self.current_path: str | None = None
+        self.in_hunk = False
+
+    def consume(self, raw_line: str) -> bool:
+        """Update the tracker from ``raw_line``; return True if it was a header."""
+        header = _classify_header_line(raw_line, in_hunk=self.in_hunk)
+        if header is None:
+            return False
+        kind, path = header
+        if kind == _HEADER_FILE:
+            self.current_path = path
+            self.in_hunk = False
+        elif path is not None:
+            self.current_path = path
+        return True
+
+    def enter_hunk(self) -> None:
+        """Mark that the first hunk of the current file has been seen."""
+        self.in_hunk = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,18 +239,18 @@ def parse_diff_scope(diff_text: str) -> DiffScope:
     changed_migrations: set[str] = set()
     changed_dependency_manifests: set[str] = set()
 
-    current_path: str | None = None
+    tracker = _DiffPathTracker()
     new_line = 0
     hunk_end = 0
     is_new_file = False
 
     for raw_line in diff_text.splitlines():
-        file_match = _DIFF_FILE_RE.match(raw_line)
-        if file_match:
-            current_path = file_match.group(2)
-            is_new_file = False
+        if tracker.consume(raw_line):
+            if raw_line.startswith(_DIFF_GIT_PREFIX):
+                is_new_file = False
             continue
 
+        current_path = tracker.current_path
         if current_path is None:
             continue
 
@@ -77,6 +269,7 @@ def parse_diff_scope(diff_text: str) -> DiffScope:
             new_line = int(hunk_match.group(1))
             count = int(hunk_match.group(2) or "1")
             hunk_end = new_line + max(count, 1) - 1
+            tracker.enter_hunk()
             hunk_ranges.setdefault(current_path, []).append((new_line, hunk_end))
             _record_exception_paths(
                 current_path,
@@ -115,24 +308,24 @@ def parse_diff_scope(diff_text: str) -> DiffScope:
 
 def iter_added_diff_lines(diff_text: str) -> Iterator[tuple[str, int, str]]:
     """Yield ``(path, new-file line number, added line content)`` from a unified diff."""
-    current_path: str | None = None
+    tracker = _DiffPathTracker()
     new_line = 0
 
     for raw_line in diff_text.splitlines():
-        file_match = _DIFF_FILE_RE.match(raw_line)
-        if file_match:
-            current_path = file_match.group(2)
+        if tracker.consume(raw_line):
             continue
 
+        current_path = tracker.current_path
         if current_path is None:
             continue
 
         hunk_match = _HUNK_RE.match(raw_line)
         if hunk_match:
             new_line = int(hunk_match.group(1))
+            tracker.enter_hunk()
             continue
 
-        if raw_line.startswith(("--- ", "+++ ")):
+        if not tracker.in_hunk and raw_line.startswith(("--- ", "+++ ")):
             continue
 
         prefix = raw_line[:1]

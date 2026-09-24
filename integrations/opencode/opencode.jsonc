@@ -1,0 +1,42 @@
+{
+  // mergeCraft for OpenCode — copy the parts you need into your project or
+  // global opencode.jsonc. See integrations/opencode/README.md.
+  "$schema": "https://opencode.ai/config.json",
+
+  // The plugin (companion change) auto-registers the mergecraft MCP server,
+  // commands, agent, and skill. Listing it explicitly is only required when it
+  // lives outside .opencode/plugins/, or when you want to pass options.
+  "plugins": [
+    {
+      "package": "./.opencode/plugins/mergecraft",
+      "options": {
+        // native | cli | deep | mcp — the default engine for /mergecraft/review.
+        "engine": "native",
+        // Register the public stdio MCP server automatically.
+        "mcp": true,
+        // Register the read-only reviewer and fixer subagents.
+        "agents": true,
+        // Emit a Logfire span for each native review when a token is present.
+        "logfire": true
+      }
+    }
+  ],
+
+  // V2 nests servers under mcp.servers and uses disabled, not enabled.
+  "mcp": {
+    "servers": {
+      "mergecraft": {
+        "type": "local",
+        "command": [
+          "mergecraft",
+          "mcp",
+          "serve",
+          "--role",
+          "public",
+          "--transport",
+          "stdio"
+        ]
+      }
+    }
+  }
+}

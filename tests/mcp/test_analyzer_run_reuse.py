@@ -24,6 +24,7 @@ from mergecraft.mcp.tool_state import (
     AnalyzerRunState,
     AnalyzerStatusRow,
     analyzer_run_key,
+    ensure_repo_state,
     init_tool_state,
 )
 from mergecraft.modes import compute_modes
@@ -231,10 +232,17 @@ async def test_any_differing_keyed_input_reruns(
 async def test_different_repo_root_reruns(
     tmp_path: Path, diff_path: Path, pipeline_calls: list[dict[str, Any]]
 ) -> None:
+    """A second *registered* checkout is a different keyed input, so it reruns.
+
+    ``repo_root`` is confined to a registered checkout dir (AN-D5, equality not
+    containment), so the second root is registered rather than merely nested
+    under the first.
+    """
     ctx = _ctx(tmp_path)
     ctx.tool_state.analyzer_run = _prepass_state(tmp_path)
     other = tmp_path / "other"
     other.mkdir()
+    ensure_repo_state(ctx.tool_state, owner="acme", name="other", dir=str(other), access="read")
 
     await _run(ctx, changed_files=CHANGED, diff_path=str(diff_path), repo_root=str(other))
 

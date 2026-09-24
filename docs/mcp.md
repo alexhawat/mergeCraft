@@ -165,28 +165,41 @@ Remote OAuth MCP is not supported.
 
 ### OpenCode
 
-OpenCode `opencode.json` / `opencode.jsonc` (global or project). Local stdio servers
-require `type: "local"` and a `command` array (executable plus args):
+OpenCode V2 nests servers under `mcp.servers` and uses `disabled` (not
+`enabled`). Add to `opencode.jsonc` (global or project):
 
-```json
+```jsonc
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "mergecraft": {
-      "type": "local",
-      "enabled": true,
-      "command": [
-        "mergecraft",
-        "mcp",
-        "serve",
-        "--role",
-        "public",
-        "--transport",
-        "stdio"
-      ]
+    "servers": {
+      "mergecraft": {
+        "type": "local",
+        "command": [
+          "mergecraft",
+          "mcp",
+          "serve",
+          "--role",
+          "public",
+          "--transport",
+          "stdio"
+        ]
+      }
     }
   }
 }
 ```
+
+Or let the CLI write it, then confirm the connection:
+
+```bash
+opencode mcp add mergecraft -- mergecraft mcp serve --role public --transport stdio
+opencode mcp list
+```
+
+The mergeCraft OpenCode integration ships commands, a read-only reviewer
+subagent, and a plugin that registers this server automatically — see
+[`docs/opencode.md`](opencode.md).
 
 ### OpenAI / ChatGPT (Apps, connectors, Codex cloud)
 

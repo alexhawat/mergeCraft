@@ -7,6 +7,7 @@ tests can isolate it.
 Exports:
     bind_enterprise_from_settings: Apply proxy, CA, telemetry, residency, retention.
     bind_enterprise_after_trust: Bind after trust; skip network mutations when untrusted.
+    scoped_enterprise_binding: Bind ``settings.enterprise`` for a block only when unbound.
     current_enterprise_settings: Return the bound block (or inert defaults).
     remote_export_allowed: Whether Logfire/OTLP export may run.
     effective_retention_days: Optional enterprise override for JSONL retention.
@@ -17,6 +18,7 @@ Exports:
 
 from __future__ import annotations
 
+import contextlib
 import os
 from contextvars import ContextVar
 from pathlib import Path
@@ -32,6 +34,8 @@ from mergecraft.enterprise.telemetry import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mergecraft.config.settings import RepoSettings
 
 __all__ = [
@@ -43,6 +47,7 @@ __all__ = [
     "enforce_routed_model_residency",
     "remote_export_allowed",
     "reset_enterprise_runtime",
+    "scoped_enterprise_binding",
 ]
 
 _AGENT_NETWORK_ENV: tuple[str, ...] = (
@@ -104,6 +109,46 @@ def bind_enterprise_from_settings(
         load_custom_ca(ca_path)
         os.environ["SSL_CERT_FILE"] = str(ca_path)
         os.environ["REQUESTS_CA_BUNDLE"] = str(ca_path)
+
+
+@contextlib.contextmanager
+def scoped_enterprise_binding(
+    settings: RepoSettings | EnterpriseSettings,
+) -> Iterator[None]:
+    """Bind ``settings.enterprise`` for the ``with`` body, only when unbound.
+
+    A caller that reads enterprise controls (sink construction consults
+    retention and :func:`remote_export_allowed`) must not *replace* a block a
+    prior trust-resolution step bound. So:
+
+    * **Bound** — the existing block wins; this is a no-op and is never
+      overwritten.
+    * **Unbound** — ``settings.enterprise`` (or *settings* itself when it is an
+      :class:`EnterpriseSettings` block) is bound for the body via a
+      :class:`ContextVar` token and reset by that token on exit, so the block
+      never leaks past the call.
+
+    No proxy / CA side effects run — a default-constructed caller must not
+    mutate process network state.
+
+    Args:
+        settings: A :class:`RepoSettings` (uses its ``enterprise`` field) or an
+            :class:`EnterpriseSettings` block directly.
+    """
+    if _BOUND.get() is not None:
+        yield
+        return
+
+    block = (
+        settings
+        if isinstance(settings, EnterpriseSettings)
+        else getattr(settings, "enterprise", EnterpriseSettings())
+    )
+    token = _BOUND.set(block)
+    try:
+        yield
+    finally:
+        _BOUND.reset(token)
 
 
 def bind_enterprise_after_trust(settings: RepoSettings, tier: str) -> None:

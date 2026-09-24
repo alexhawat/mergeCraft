@@ -12,6 +12,20 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+@pytest.fixture(autouse=True)
+def _enable_recording_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enable the test-only OTLP span recorder for this suite.
+
+    ``tracing/exporters.py`` gates ``_RecordingSpanProcessor`` behind a module
+    switch that is off in production. The tracing and enterprise suites are
+    its consumers, so the fixture turns it on for them; a module that asserts
+    the production default overrides this fixture by name to opt out.
+    """
+    from mergecraft.tracing import exporters
+
+    monkeypatch.setattr(exporters, "_RECORDING_SEAM_ENABLED", True, raising=False)
+
+
 def as_sink_value(value: str) -> str:
     """String span attrs as stored by ``MemorySink`` (post-``redact_secrets``)."""
     from mergecraft.analyzers.redact import redact_secrets

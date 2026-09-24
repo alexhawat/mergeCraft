@@ -63,11 +63,12 @@ def _verify_sha256(path: Path, expected: str) -> None:
         raise ProvisionError(msg)
 
 
-#: Sidecar recording the sha256 of the binary that was actually installed into a
-#: sha-keyed cache directory. The directory key is the *archive* pin, so it says
-#: nothing about the extracted binary once a tool rewrites itself in place (e.g.
-#: TruffleHog's built-in updater). The receipt closes that gap for every managed
-#: analyzer: a cached binary is only reused when it still hashes to what we wrote.
+#: Sidecar recording the *archive* pin and the sha256 of the binary that was
+#: actually installed into a sha-keyed cache directory. The directory key is the
+#: archive pin, so it says nothing about the extracted binary once a tool rewrites
+#: itself in place (e.g. TruffleHog's built-in updater). The receipt binds both
+#: together: a cached binary is only reused when it still hashes to what we wrote
+#: *and* the receipt names the pin this manifest pins.
 RECEIPT_NAME = ".provisioned-sha256"
 
 _PROVISION_LOCK_NAME = ".provision.lock"
@@ -78,37 +79,87 @@ def _receipt_path(cache_root: Path) -> Path:
     return cache_root / RECEIPT_NAME
 
 
-def read_provision_receipt(cache_root: Path) -> str | None:
-    """Return the recorded binary sha256 for a cache directory, or ``None``."""
+def _receipt_lines(cache_root: Path) -> list[str]:
     try:
         raw = _receipt_path(cache_root).read_text(encoding="utf-8")
     except OSError:
+        return []
+    return [line.strip().casefold() for line in raw.splitlines() if line.strip()]
+
+
+def read_provision_receipt(cache_root: Path) -> str | None:
+    """Return the recorded binary sha256 for a cache directory, or ``None``.
+
+    Accepts both the pin-bound receipt this module writes (two lines: the
+    artifact pin, then the binary digest) and a legacy single-digest sidecar.
+    Legacy content is readable here but never satisfies
+    :func:`_verified_cache_hit`, which requires the pin binding.
+    """
+    lines = _receipt_lines(cache_root)
+    if len(lines) == 1:
+        return lines[0] if _HEX64_RE.fullmatch(lines[0]) else None
+    if len(lines) == 2 and all(_HEX64_RE.fullmatch(line) for line in lines):
+        return lines[1]
+    return None
+
+
+def _read_bound_receipt(cache_root: Path) -> tuple[str, str] | None:
+    """Return ``(artifact_pin, binary_sha256)`` when the receipt binds both.
+
+    A legacy single-digest receipt, or anything else malformed, is not a bound
+    receipt: it proves only that *some* binary was once installed under this key,
+    not which pinned artifact it came from.
+    """
+    lines = _receipt_lines(cache_root)
+    if len(lines) != 2 or not all(_HEX64_RE.fullmatch(line) for line in lines):
         return None
-    candidate = raw.strip().casefold()
-    return candidate if _HEX64_RE.fullmatch(candidate) else None
+    return lines[0], lines[1]
 
 
-def _write_provision_receipt(cache_root: Path, digest: str) -> None:
+def _write_provision_receipt(
+    cache_root: Path, digest: str, *, artifact_pin: str | None = None
+) -> None:
+    """Record the artifact pin and the installed binary digest together.
+
+    ``artifact_pin`` defaults to the cache directory's own name, which is the
+    archive pin in the standard ``<cache>/<tool>/<platform>/<pin>`` layout.
+    """
+    pin = (artifact_pin or cache_root.name).strip().casefold()
     receipt = _receipt_path(cache_root)
     receipt.parent.mkdir(parents=True, exist_ok=True)
     staging = receipt.with_name(f".{receipt.name}.staging")
-    staging.write_text(f"{digest.casefold()}\n", encoding="utf-8")
+    staging.write_text(f"{pin}\n{digest.casefold()}\n", encoding="utf-8")
     os.replace(staging, receipt)
 
 
-def _verified_cache_hit(*, cached: Path, cache_root: Path, manifest_id: str) -> str | None:
-    """Return the cached binary's sha256 when it still matches its receipt.
+def _verified_cache_hit(
+    *, cached: Path, cache_root: Path, manifest_id: str, artifact_pin: str
+) -> str | None:
+    """Return the cached binary's sha256 when it still matches its bound receipt.
 
-    Returns ``None`` when the cache entry is unusable — no receipt (provisioned by
-    an older mergeCraft, or the receipt was removed) or a digest that no longer
-    matches. Callers must re-provision instead of executing the file.
+    Returns ``None`` when the cache entry is unusable — no pin-bound receipt
+    (provisioned by an older mergeCraft, or the receipt was removed), a receipt
+    bound to a different pin, or a digest that no longer matches. Callers must
+    re-provision instead of executing the file.
     """
-    recorded = read_provision_receipt(cache_root)
-    if recorded is None:
+    bound = _read_bound_receipt(cache_root)
+    if bound is None:
         logger.info(
-            "no provisioning receipt for cached {} binary at {} — re-provisioning from the pin",
+            "no pin-bound provisioning receipt for cached {} binary at {} — "
+            "re-provisioning from the pin",
             manifest_id,
             cached,
+        )
+        return None
+    recorded_pin, recorded = bound
+    expected_pin = artifact_pin.strip().casefold()
+    if recorded_pin != expected_pin:
+        logger.warning(
+            "cached {} binary was provisioned from pin {} (expected {}) — "
+            "discarding and re-provisioning from the pin",
+            manifest_id,
+            recorded_pin,
+            expected_pin,
         )
         return None
     actual = _sha256_file(cached)
@@ -265,15 +316,15 @@ def _cache_provision_lock(cache_root: Path) -> Iterator[None]:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _install_cached_binary(*, staged: Path, cached: Path) -> str:
-    """Install the staged binary into the cache and record its sha256 receipt."""
+def _install_cached_binary(*, staged: Path, cached: Path, artifact_pin: str) -> str:
+    """Install the staged binary into the cache and record its bound receipt."""
     cached.parent.mkdir(parents=True, exist_ok=True)
     staging = cached.with_name(f".{cached.name}.staging")
     staging.write_bytes(staged.read_bytes())
     staging.chmod(staging.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     digest = _sha256_file(staging)
     os.replace(staging, cached)
-    _write_provision_receipt(cached.parent, digest)
+    _write_provision_receipt(cached.parent, digest, artifact_pin=artifact_pin)
     return digest
 
 
@@ -307,7 +358,10 @@ def provision_managed_binary(
     cached = cache_root / binary_name
     if cached.is_file():
         verified = _verified_cache_hit(
-            cached=cached, cache_root=cache_root, manifest_id=manifest.id
+            cached=cached,
+            cache_root=cache_root,
+            manifest_id=manifest.id,
+            artifact_pin=artifact_pin,
         )
         if verified is not None:
             return ProvisionResult(
@@ -320,7 +374,10 @@ def provision_managed_binary(
     with _cache_provision_lock(cache_root):
         if cached.is_file():
             verified = _verified_cache_hit(
-                cached=cached, cache_root=cache_root, manifest_id=manifest.id
+                cached=cached,
+                cache_root=cache_root,
+                manifest_id=manifest.id,
+                artifact_pin=artifact_pin,
             )
             if verified is not None:
                 return ProvisionResult(
@@ -360,7 +417,9 @@ def provision_managed_binary(
             else:
                 staged = download_path
 
-            binary_sha = _install_cached_binary(staged=staged, cached=cached)
+            binary_sha = _install_cached_binary(
+                staged=staged, cached=cached, artifact_pin=artifact_pin
+            )
 
     return ProvisionResult(
         resolved_path=cached,
@@ -377,26 +436,14 @@ def resolve_with_lock(
     cache_dir: Path,
     platform: str,
 ) -> ProvisionResult:
-    """Provision using lockfile for reproducibility (D24)."""
-    from mergecraft.analyzers.lockfile import LockEntry, read_lock, write_lock
+    """Provision the managed binary and record the resolution in the lockfile.
 
-    for entry in read_lock(lock_path):
-        if entry.tool_id != manifest.id:
-            continue
-        provenance_pin = manifest.provenance.get(platform)
-        if provenance_pin is None:
-            break
-        cache_file = (
-            _cache_path(cache_dir, manifest.id, platform, provenance_pin.sha256)
-            / manifest.command[0]
-        )
-        if cache_file.is_file() and _sha256_file(cache_file) == entry.sha256:
-            return ProvisionResult(
-                resolved_path=cache_file,
-                sha256=entry.sha256,
-                version=entry.version,
-                source=entry.source,
-            )
+    ``.mergecraft/analyzers.lock`` is a record, never an authenticator: it is
+    still written (merged) so the pre-merge row can digest it, but nothing is
+    ever served *from* it. A cached binary is only reused after the pin-bound
+    receipt check inside :func:`provision_managed_binary`.
+    """
+    from mergecraft.analyzers.lockfile import LockEntry, write_lock
 
     result = provision_managed_binary(manifest=manifest, platform=platform, cache_dir=cache_dir)
     write_lock(

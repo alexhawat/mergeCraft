@@ -16,6 +16,7 @@ from loguru import logger
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
+    STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
     AgentUsage,
@@ -23,6 +24,7 @@ from mergecraft.agents.shared import (
     log_token_table,
     mcp_auth_headers,
     spawn_agent_cli,
+    start_stderr_drain,
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
@@ -56,6 +58,22 @@ if TYPE_CHECKING:
 
 GEMINI_API_KEY_ENV = "GEMINI_API_KEY"
 GOOGLE_GENERATIVE_AI_API_KEY_ENV = "GOOGLE_GENERATIVE_AI_API_KEY"
+
+# S7 / AR-D16 — the Gemini sibling of the Claude deny list. Every production
+# mode is non-committing, so the reviewer never needs Gemini's *built-in*
+# write, shell or web tools; they are excluded unconditionally via the
+# top-level ``excludeTools`` in the written settings (it feeds
+# ``Config.excludeTools`` -> ``getExcludeTools``). ``-y`` below removes the
+# interactive prompt in headless CI, so this exclusion list is the boundary.
+# AR0 recorded these names against the pinned Gemini CLI (0.53.0 local /
+# 0.59.0 Docker).
+GEMINI_BUILTIN_DENIED_TOOLS = (
+    "write_file",
+    "replace",
+    "run_shell_command",
+    "web_fetch",
+    "google_web_search",
+)
 
 
 def _strip_provider_prefix(specifier: str) -> str:
@@ -136,6 +154,10 @@ def write_mcp_config(
         "context": {
             "fileName": "GEMINI.md",
         },
+        # S7 / AR-D16 — the top-level ``excludeTools`` covers Gemini's built-in
+        # tools. The per-MCP-server ``excludeTools`` above only filters that
+        # server's MCP tools, so the built-ins must be named here.
+        "excludeTools": list(GEMINI_BUILTIN_DENIED_TOOLS),
     }
     config_path = gemini_home / "settings.json"
     config_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
@@ -297,6 +319,9 @@ def _run_gemini_streaming(
 
     stderr_text = ""
     returncode: int = -1
+    # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
+    # first would deadlock a child that fills the stderr pipe buffer.
+    stderr_drain = start_stderr_drain(process.stderr)
     try:
         with track_process_group(process):
             try:
@@ -305,13 +330,17 @@ def _run_gemini_streaming(
                     accumulator=accumulator,
                     handler=handler,
                 )
-                stderr_text = process.stderr.read() or ""
                 returncode = wait_or_kill_process_group(
                     process,
                     timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
                 )
             except subprocess.TimeoutExpired:
                 return with_prompt(AgentResult(success=False, error="gemini CLI timed out"), prompt)
+            finally:
+                # The process group is gone; collect the drained tail so the
+                # reader thread never outlives it.
+                stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
+        stderr_text = stderr_drain.text()
     finally:
         try:
             close_all_open_spans()

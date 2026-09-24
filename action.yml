@@ -61,18 +61,17 @@ inputs:
   sarif_upload:
     description: >-
       Upload catalog-analyzer findings to GitHub code scanning as SARIF 2.1.0:
-      disabled (default) or enabled. Complementary evidence for when the review
-      narrative is thin or findings overflow the inline comment budget — never a
-      gate: an upload failure is logged and the run still completes. Requires
-      `security-events: write` on the job, and code scanning to be available on
-      the repository. Only findings from catalog analyzers that this run's trust
-      tier, shell policy and `analyzers:` mode actually admitted are uploaded,
-      after secret redaction. CI-sourced and agent-sourced findings are never
-      uploaded. An unrecognised value resolves to disabled, with a warning. When
-      unset, `.mergecraft/config.yaml`'s `analyzers.sarifUpload` decides
-      (default false). See issue #39.
+      enabled or disabled. When unset, `.mergecraft/config.yaml`'s
+      `analyzers.sarifUpload` decides (default false). Complementary evidence for
+      when the review narrative is thin or findings overflow the inline comment
+      budget — never a gate: an upload failure is logged and the run still
+      completes. Requires `security-events: write` on the job, and code scanning
+      to be available on the repository. Only findings from catalog analyzers
+      that this run's trust tier, shell policy and `analyzers:` mode actually
+      admitted are uploaded, after secret redaction. CI-sourced and
+      agent-sourced findings are never uploaded. An unrecognised value resolves
+      to disabled, with a warning. See issue #39.
     required: false
-    default: disabled
   allow_pr_target_comments:
     description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72."
     required: false
@@ -230,7 +229,7 @@ runs:
   # Slim image published by ci-cd.yml (SHA tag + digest retag). Pin by digest, never
   # :latest / :rc. Bump with scripts/check_action_image_digest.py after each
   # build-images push for the workflow Action SHA (#526).
-  image: "docker://ghcr.io/alexhawat/mergecraft@sha256:5bf5ad205149983121ded23f7734a94318598ffa4ca509d3c50d439a4b04f709"
+  image: "docker://ghcr.io/alexhawat/mergecraft@sha256:14aec3352a55ab9dbaec297f6fe9f173cd9a9795c53c96259547c45ab5d83d9e"
   entrypoint: "/entrypoint.sh"
   args:
     - "gha"
