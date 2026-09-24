@@ -121,10 +121,6 @@ def _assert_snapshot_is_pre_footer(stored: str | None, posted: str) -> None:
     assert _LEARNINGS_DELTA in stored, "the snapshot keeps the learnings delta"
 
 
-@pytest.mark.xfail(
-    reason="green after LG2: report_progress stores the body it posted",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_first_call_stores_the_pre_footer_body(tmp_path: Path) -> None:
     scm = _FakeScm()
@@ -141,10 +137,6 @@ async def test_first_call_stores_the_pre_footer_body(tmp_path: Path) -> None:
     assert fingerprint in stored, "the hydrated ledger must be part of the snapshot"
 
 
-@pytest.mark.xfail(
-    reason="green after LG2: report_progress stores the body it posted",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_update_call_stores_the_pre_footer_body(tmp_path: Path) -> None:
     """The in-place update branch snapshots its body the same way the create branch does."""

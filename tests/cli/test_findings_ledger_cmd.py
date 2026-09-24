@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -152,36 +151,28 @@ def test_ledger_command_reads_a_bot_sticky(monkeypatch: MonkeyPatch) -> None:
     assert payload["records"][0]["fingerprint"] == _DEFERRED_FP
 
 
-@pytest.mark.xfail(
-    reason="green after LG3: only bot-authored comments are read as progress state",
-    strict=False,
-)
 def test_ledger_command_ignores_a_human_comment_with_ledger_markers(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    _patch_with(
-        monkeypatch,
-        [
-            {
-                "id": 77,
-                "body": f"## mergeCraft progress\n\n{_HUMAN_MARKER}\n",
-                "user": {"login": "some-human", "type": "User"},
-            }
-        ],
+    human_comment = {
+        "id": 77,
+        "body": f"## mergeCraft progress\n\n{_HUMAN_MARKER}\n",
+        "user": {"login": "some-human", "type": "User"},
+    }
+    assert _HUMAN_MARKER in str(human_comment["body"]), (
+        "the fixture must carry a marker, else the absence assertion is vacuous"
     )
+    _patch_with(monkeypatch, [human_comment])
 
     result = _invoke_ledger()
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
+    assert payload["schema_version"], "the command must have run and emitted its payload"
     assert payload["count"] == 0
     assert payload["records"] == []
 
 
-@pytest.mark.xfail(
-    reason="green after LG3: only bot-authored comments are read as progress state",
-    strict=False,
-)
 def test_ledger_command_prefers_the_bot_sticky_over_a_human_marker(
     monkeypatch: MonkeyPatch,
 ) -> None:

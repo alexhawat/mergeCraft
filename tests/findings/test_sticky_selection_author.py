@@ -131,12 +131,12 @@ def _seed_record(ctx: ToolContext) -> str:
     return fingerprint
 
 
-@pytest.mark.xfail(
-    reason="green after LG3: the selector applies the bot-author trust rule",
-    strict=False,
-)
 def test_a_human_comment_with_a_ledger_marker_is_not_selected() -> None:
-    comments: list[dict[str, Any]] = [_human_comment()]
+    human = _human_comment()
+    assert ledger.LEDGER_MARKER_V2_PREFIX in str(human["body"]), (
+        "the fixture must carry a marker, else the absence assertion is vacuous"
+    )
+    comments: list[dict[str, Any]] = [human]
     assert ledger.sticky_progress_comment(comments) is None
     assert ledger.sticky_progress_comment_body(comments) == ""
 
@@ -162,24 +162,20 @@ def test_ledger_marker_preference_holds_among_bot_comments() -> None:
     assert ledger.sticky_progress_comment_body(comments) == _ledger_body()
 
 
-@pytest.mark.xfail(
-    reason="green after LG3: hydrate only reads bot-authored progress state",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_hydrate_ignores_a_human_ledger_marker(tmp_path: Path) -> None:
     scm = _FakeScm([_human_comment()])
     ctx = _ctx(tmp_path, scm)
+    assert ledger.LEDGER_MARKER_V2_PREFIX in str(scm.comments[_HUMAN_COMMENT_ID]["body"]), (
+        "the fixture must carry a marker, else the absence assertion is vacuous"
+    )
 
     loaded = await ledger.hydrate_finding_ledger_from_progress_comment(ctx)
 
+    assert isinstance(loaded, ledger.FindingLedger), "hydrate must return the run's ledger"
     assert loaded.records() == [], "a human comment must not seed the run's ledger"
 
 
-@pytest.mark.xfail(
-    reason="green after LG3: persist only writes to bot-authored stickies",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_persist_ignores_a_human_ledger_marker(tmp_path: Path) -> None:
     scm = _FakeScm([_human_comment()])
@@ -196,10 +192,6 @@ async def test_persist_ignores_a_human_ledger_marker(tmp_path: Path) -> None:
     assert fingerprint in created["body"]
 
 
-@pytest.mark.xfail(
-    reason="green after LG3: upsert only writes to bot-authored stickies",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_upsert_ignores_a_human_ledger_marker(tmp_path: Path) -> None:
     scm = _FakeScm([_human_comment()])
@@ -214,3 +206,5 @@ async def test_upsert_ignores_a_human_ledger_marker(tmp_path: Path) -> None:
     assert scm.creates == 1, "the record must land in a new bot-owned comment"
     assert scm.updates == 0, "the human's comment must not be written to"
     assert scm.comments[_HUMAN_COMMENT_ID]["body"] == human_body_before
+    created = scm.comments[max(scm.comments)]
+    assert ledger.DETERMINISTIC_RECORD_MARKER in str(created["body"])

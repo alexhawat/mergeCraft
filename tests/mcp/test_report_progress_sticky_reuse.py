@@ -112,10 +112,6 @@ def _action(result: Any) -> str:
     return str(payload["action"])
 
 
-@pytest.mark.xfail(
-    reason="green after LG3: report_progress reuses a trusted existing sticky",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_second_run_first_call_reuses_the_existing_sticky(tmp_path: Path) -> None:
     scm = _FakeScm()

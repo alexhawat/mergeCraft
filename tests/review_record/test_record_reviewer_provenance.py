@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.packet import Decision
@@ -86,10 +84,6 @@ def _integrity_line(block: str) -> str:
     return next(line for line in block.splitlines() if _INTEGRITY_MARKER in line)
 
 
-@pytest.mark.xfail(
-    reason="green after LG4: the integrity note names the skipped slot and the verdict's model",
-    strict=False,
-)
 def test_skipped_slot_with_a_recorded_verdict_names_the_model() -> None:
     """A reviewer ran and requested changes: the record must not deny it."""
     block = _render(_packet(terminal_verdict="request_changes"))

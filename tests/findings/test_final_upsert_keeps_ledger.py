@@ -171,10 +171,6 @@ def _assert_ledger_and_delta_survive(body: str, fingerprints: list[str]) -> None
     assert ledger.FindingLedger.from_comment_body(body).records(), body
 
 
-@pytest.mark.xfail(
-    reason="green after LG2: every writer stores the pre-footer body it posted",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_path_a_report_progress_then_record_keeps_ledger(tmp_path: Path) -> None:
     """Agent called ``report_progress``: the final record must keep the ledger."""
@@ -203,10 +199,6 @@ async def test_path_a_report_progress_then_record_keeps_ledger(tmp_path: Path) -
     assert set(recovered) == set(fingerprints)
 
 
-@pytest.mark.xfail(
-    reason="green after LG2: persist stores the pre-footer body it posted",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_path_b_persist_creates_then_record_keeps_ledger(tmp_path: Path) -> None:
     """Agent never called ``report_progress``: ``persist`` creates the sticky."""

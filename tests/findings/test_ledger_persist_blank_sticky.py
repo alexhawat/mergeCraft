@@ -103,10 +103,6 @@ def _seed_record(ctx: ToolContext) -> str:
     return fingerprint
 
 
-@pytest.mark.xfail(
-    reason="green after LG2: a selected sticky is always updated",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_blank_body_selected_sticky_is_updated_not_duplicated(
     tmp_path: Path,
@@ -143,5 +139,8 @@ async def test_blank_body_selected_sticky_is_updated_not_duplicated(
 def test_a_blank_comment_is_not_selected_as_the_sticky() -> None:
     """Selection must not be widened to blank bodies to make the guard unnecessary."""
     comments: list[dict[str, Any]] = [{"id": 1, "body": ""}, {"id": 2, "body": "   "}]
+    assert all(not str(row["body"]).strip() for row in comments), (
+        "the fixture must be blank, else the absence assertion is vacuous"
+    )
     assert ledger.sticky_progress_comment(comments) is None
     assert ledger.sticky_progress_comment_body(comments) == ""
