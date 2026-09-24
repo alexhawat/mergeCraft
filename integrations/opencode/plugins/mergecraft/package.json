@@ -1,0 +1,26 @@
+{
+  "name": "@mergecraft/opencode-plugin",
+  "version": "0.1.0",
+  "description": "mergeCraft for OpenCode — MCP registration, review commands, and review-only hooks.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "files": [
+    "index.ts",
+    "otlp.ts",
+    "README.md"
+  ],
+  "dependencies": {
+    "@opencode/plugin": "^2.0.0"
+  },
+  "peerDependencies": {
+    "opencode": ">=2.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexhawat/mergeCraft.git",
+    "directory": "integrations/opencode/plugins/mergecraft"
+  }
+}

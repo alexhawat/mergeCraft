@@ -209,10 +209,10 @@ harness. Install with uv, run `mergecraft init`, then set in
 Read docs/authentication.md and tell me exactly which
 MERGECRAFT_CUSTOM_PROVIDER_BASE_URL / MERGECRAFT_CUSTOM_PROVIDER_API_KEY pair
 to set as GitHub secrets for my endpoint. Do not handle the key yourself.
-Copy skills/opencode/mergecraft/ into .opencode/skills/mergecraft/, then copy
-integrations/opencode/commands/ and integrations/opencode/agents/ into .opencode/
-so I get the /mergecraft/* commands and the mergecraft/reviewer subagent. Add the
-mcp.servers.mergecraft block from integrations/opencode/opencode.jsonc. Open a PR.
+Copy skills/opencode/mergecraft/ into .opencode/skills/mergecraft/, then run
+`mergecraft opencode install` to add the /mergecraft/* commands, the
+mergecraft/reviewer subagent, the plugin, and the mcp.servers.mergecraft block.
+Open a PR.
 ```
 
 **Gemini CLI:**

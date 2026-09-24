@@ -39,6 +39,7 @@ from mergecraft.cli import (
     memory_cmd,
     model_cmd,
     models_cmd,
+    opencode_cmd,
     pipeline_cmd,
     plan_cmd,
     policy_cmd,
@@ -116,6 +117,7 @@ app.add_typer(jev_cmd.app, name="jev")
 app.add_typer(model_cmd.app, name="model")
 app.add_typer(workflow_cmd.app, name="workflow")
 app.add_typer(models_cmd.app, name="models")
+app.add_typer(opencode_cmd.app, name="opencode")
 app.add_typer(analyzers_cmd.app, name="analyzers")
 app.command("init")(init_cmd.run)
 app.command("watch")(watch_cmd.run)

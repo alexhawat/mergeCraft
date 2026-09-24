@@ -42,16 +42,28 @@ harnesses:
 
       mergeCraft ships a first-class OpenCode integration under
       ``integrations/opencode/``: slash commands (``/mergecraft/review`` and its
-      engine variants), a read-only ``mergecraft/reviewer`` subagent, and a
-      ``mergecraft/fixer`` subagent for the review-only loop. A companion change
-      adds a plugin that registers the public MCP server, the commands, the agent,
-      and the skill automatically.
+      engine variants), a read-only ``mergecraft/reviewer`` subagent, a
+      ``mergecraft/fixer`` subagent for the review-only loop, and a plugin that
+      registers the public MCP server, the commands, the agent, and the skill
+      automatically.
+
+      Install it in one step:
+
+      ```bash
+      mergecraft opencode install
+      ```
+
+      The installer copies commands, subagents, and the plugin into ``.opencode/``,
+      writes the ``mcp.servers.mergecraft`` block, and sets ``harness: opencode``.
+      ``mergecraft opencode doctor --strict`` verifies the result. Manual
+      alternative:
 
       ```bash
       git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft-src
       mkdir -p .opencode
       cp -R /tmp/mergecraft-src/integrations/opencode/commands .opencode/
       cp -R /tmp/mergecraft-src/integrations/opencode/agents   .opencode/
+      cp -R /tmp/mergecraft-src/integrations/opencode/plugins  .opencode/
       mkdir -p .opencode/skills
       cp -R /tmp/mergecraft-src/skills/opencode/mergecraft .opencode/skills/mergecraft
       rm -rf /tmp/mergecraft-src

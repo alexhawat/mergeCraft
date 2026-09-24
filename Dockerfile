@@ -116,6 +116,9 @@ WORKDIR /opt/mergecraft
 COPY pyproject.toml uv.lock README.md hatch_build.py ./
 COPY src/mergecraft ./src/mergecraft
 COPY evals/corpora/recall_pass_corpus.json ./evals/corpora/recall_pass_corpus.json
+# The wheel force-includes integrations/opencode as mergecraft/data/opencode, so
+# the build context must carry it or `uv sync` cannot resolve the Hatch path.
+COPY integrations/opencode ./integrations/opencode
 
 # ``--extra tracing`` installs logfire + the OpenTelemetry SDK/exporter. Without
 # it the sink factory degrades a ``logfire`` / ``otel`` sink to ``NullSink``

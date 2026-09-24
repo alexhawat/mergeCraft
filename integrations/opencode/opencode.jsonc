@@ -3,9 +3,9 @@
   // global opencode.jsonc. See integrations/opencode/README.md.
   "$schema": "https://opencode.ai/config.json",
 
-  // The plugin (companion change) auto-registers the mergecraft MCP server,
-  // commands, agent, and skill. Listing it explicitly is only required when it
-  // lives outside .opencode/plugins/, or when you want to pass options.
+  // The plugin auto-registers the mergecraft MCP server, commands, agent, and
+  // skill. Listing it explicitly is only required when it lives outside
+  // .opencode/plugins/, or when you want to pass options.
   "plugins": [
     {
       "package": "./.opencode/plugins/mergecraft",

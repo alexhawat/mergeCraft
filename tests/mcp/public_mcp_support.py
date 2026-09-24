@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from tests.ci.workflow_support import REPO_ROOT
 from typer.testing import CliRunner
 
@@ -17,8 +19,6 @@ from mergecraft.mcp.endpoints import MCP_PUBLIC_ENDPOINT
 from mergecraft.mcp.public import PUBLIC_TOOL_NAMES
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from _pytest.monkeypatch import MonkeyPatch
 
 
@@ -156,14 +156,35 @@ def is_auth_rejection(status_code: int, body: dict[str, Any]) -> bool:
     return isinstance(error, dict) and error.get("code") in {-32600, -32001}
 
 
+_ENTRYPOINT = "import sys; from mergecraft.cli.app import main; sys.exit(main())"
+
+
+def _venv_console_scripts() -> list[Path]:
+    """Console-script candidates from the active environment, newest first."""
+    candidates: list[Path] = []
+    virtual_env = os.environ.get("VIRTUAL_ENV", "").strip()
+    if virtual_env:
+        candidates.append(Path(virtual_env) / "bin" / "mergecraft")
+    candidates.append(Path(sys.executable).with_name("mergecraft"))
+    candidates.append(REPO_ROOT / ".venv" / "bin" / "mergecraft")
+    return candidates
+
+
 def _mergecraft_argv() -> list[str]:
-    venv_bin = REPO_ROOT / ".venv" / "bin" / "mergecraft"
-    if venv_bin.is_file():
-        return [str(venv_bin)]
+    """Resolve a mergecraft launcher for the stdio MCP subprocess.
+
+    Prefer a console script from the active environment and run it through
+    ``sys.executable`` rather than its shebang, so a shard whose venv is not
+    ``.venv`` (or whose script interpreter moved) still starts. Fall back to the
+    installed entry point so a missing script never leaves the gate red.
+    """
+    for script in _venv_console_scripts():
+        if script.is_file():
+            return [sys.executable, str(script)]
     binary = shutil.which("mergecraft")
     if binary:
-        return [binary]
-    pytest.fail("mergecraft CLI not found on PATH or in .venv/bin")
+        return [sys.executable, binary]
+    return [sys.executable, "-c", _ENTRYPOINT]
 
 
 def stdio_rpc_exchange(
