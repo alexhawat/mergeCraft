@@ -105,14 +105,23 @@ class StderrDrain:
 
     _thread: threading.Thread
     _lines: deque[str]
+    _lock: threading.Lock
 
     def join(self, timeout: float | None = None) -> None:
         """Wait up to ``timeout`` seconds for the reader thread to finish."""
         self._thread.join(timeout)
 
     def text(self) -> str:
-        """Return the drained stderr tail as one string (may be empty)."""
-        return "".join(self._lines)
+        """Return the drained stderr tail as one string (may be empty).
+
+        The snapshot is taken under the buffer lock: :meth:`join` may return
+        while the daemon reader is still appending (a grandchild can keep the
+        pipe open), and iterating a ``deque`` concurrently with mutation
+        raises ``RuntimeError: deque mutated during iteration``. The lock
+        makes the timeout path return the tail instead of crashing.
+        """
+        with self._lock:
+            return "".join(self._lines)
 
 
 def start_stderr_drain(stream: Any, *, max_lines: int = STDERR_DRAIN_MAX_LINES) -> StderrDrain:
@@ -131,6 +140,7 @@ def start_stderr_drain(stream: Any, *, max_lines: int = STDERR_DRAIN_MAX_LINES) 
     ``io.StringIO``) and ``read``-only fakes.
     """
     lines: deque[str] = deque(maxlen=max_lines)
+    lock = threading.Lock()
     readline: Any = getattr(stream, "readline", None)
     read: Any = getattr(stream, "read", None)
 
@@ -141,11 +151,13 @@ def start_stderr_drain(stream: Any, *, max_lines: int = STDERR_DRAIN_MAX_LINES) 
                     line = readline()
                     if not line:
                         break
-                    lines.append(str(line))
+                    with lock:
+                        lines.append(str(line))
                 return
             if read is not None:
                 text = str(read() or "")
-                lines.extend(text.splitlines(keepends=True))
+                with lock:
+                    lines.extend(text.splitlines(keepends=True))
         except Exception as exc:
             # A pipe closed under us (or an exhausted fake) ends the drain; the
             # lines already read stay in the buffer. Never re-raised: the drain
@@ -154,7 +166,7 @@ def start_stderr_drain(stream: Any, *, max_lines: int = STDERR_DRAIN_MAX_LINES) 
 
     thread = threading.Thread(target=_pump, name="agent-stderr-drain", daemon=True)
     thread.start()
-    return StderrDrain(_thread=thread, _lines=lines)
+    return StderrDrain(_thread=thread, _lines=lines, _lock=lock)
 
 
 def get_git_status(cwd: str | None = None) -> str:

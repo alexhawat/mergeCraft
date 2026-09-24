@@ -364,3 +364,106 @@ def test_drain_accepts_a_read_only_fake_process_stream() -> None:
     handle.join(timeout=5)
 
     assert "tail-one" in handle.text()
+
+
+# ---------------------------------------------------------------------------
+# AR8.3(a) — ``text()`` must snapshot a live buffer without raising.
+#
+# ``join`` is bounded: a grandchild holding the stderr pipe open means the
+# reader thread is still appending when the driver collects the tail. Before
+# AR8.2 ``text()`` did ``"".join(self._lines)`` with no synchronisation, so
+# iterating the ``deque`` while the reader appended could raise
+# ``RuntimeError: deque mutated during iteration`` on exactly that path.
+# ---------------------------------------------------------------------------
+
+_RELEASE_READER_S = 5.0
+_SNAPSHOT_PROBES = 200
+
+
+class _StayOpenStream:
+    """A stderr stream with no EOF until the test releases it.
+
+    Mirrors a grandchild that keeps the child's stderr pipe open: ``readline``
+    keeps returning lines, so the drain's reader thread is still active when a
+    bounded ``join`` returns. The ``threading.Event`` bounds the shutdown wait
+    — the test never sleeps for an unbounded time.
+    """
+
+    def __init__(self, stop: threading.Event) -> None:
+        self._stop = stop
+        self._index = 0
+
+    def readline(self) -> str:
+        if self._stop.is_set():
+            self._stop.wait(timeout=_RELEASE_READER_S)
+            return ""
+        self._index += 1
+        return f"line-{self._index:05d}\n"
+
+
+def test_text_returns_tail_while_the_reader_is_still_appending() -> None:
+    """An early ``join`` must not poison a snapshot of the live buffer.
+
+    The reader never reaches EOF, so ``join(timeout=<short>)`` returns while it
+    is still appending. Repeated ``text()`` calls must return the tail read so
+    far — a string with no torn lines — and must never raise ``RuntimeError``.
+    """
+    stop = threading.Event()
+    drain = _drain_helper()(_StayOpenStream(stop))
+    try:
+        drain.join(timeout=0.05)
+        assert drain._thread.is_alive(), (
+            "the stream has no EOF, so the bounded join must return with the "
+            "reader still active (the path this pin targets)"
+        )
+
+        for _ in range(_SNAPSHOT_PROBES):
+            snapshot = drain.text()
+            assert isinstance(snapshot, str)
+            for line in snapshot.splitlines():
+                assert line.startswith("line-"), f"torn snapshot line: {line!r}"
+    finally:
+        stop.set()
+        drain.join(timeout=_RELEASE_READER_S)
+
+    assert drain.text().splitlines(), "the reader produced lines before EOF"
+
+
+class _LockGuardedBuffer:
+    """Iterable that raises like a concurrently-mutated ``deque``.
+
+    ``deque`` raises ``RuntimeError: deque mutated during iteration`` when it is
+    iterated while another thread mutates it. The pre-AR8.2 ``text()`` iterated
+    without the buffer lock, so this raises; the fixed snapshot holds the lock
+    across ``"".join(...)`` and returns the lines.
+    """
+
+    def __init__(self, lock: threading.Lock | None, lines: list[str]) -> None:
+        self._lock = lock
+        self._lines = lines
+
+    def __iter__(self) -> Iterator[str]:
+        if self._lock is None or not self._lock.locked():
+            raise RuntimeError("deque mutated during iteration")
+        return iter(self._lines)
+
+
+def test_text_snapshot_is_taken_under_the_buffer_lock() -> None:
+    """The deterministic half of the AR8.3(a) pin.
+
+    A real drain handle's buffer is swapped for one that only tolerates
+    iteration while the drain's own lock is held. Pre-fix (bare
+    ``"".join(self._lines)``, no ``_lock``) the iteration is unsynchronised and
+    raises ``RuntimeError``; the fixed ``text()`` snapshots under the lock.
+    """
+
+    stop = threading.Event()
+    drain = _drain_helper()(_StayOpenStream(stop))
+    try:
+        lock = getattr(drain, "_lock", None)
+        drain._lines = _LockGuardedBuffer(lock, ["alpha\n", "beta\n"])
+
+        assert drain.text() == "alpha\nbeta\n"
+    finally:
+        stop.set()
+        drain.join(timeout=_RELEASE_READER_S)
