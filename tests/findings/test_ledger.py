@@ -475,6 +475,7 @@ async def test_review_ledger_reads_later_pages_and_prefers_newer_state() -> None
             return [
                 {
                     "id": 101,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
                     "body": ledger.merge_ledger_into_comment(
                         "<!-- mergecraft-deterministic-record:v1 -->\n", records=newer.records()
                     ),
@@ -486,6 +487,50 @@ async def test_review_ledger_reads_later_pages_and_prefers_newer_state() -> None
     assert record is not None
     assert record.state == "open"
     assert record.round_index == 2
+
+
+@pytest.mark.asyncio
+async def test_review_ledger_ignores_a_contributor_forged_marker() -> None:
+    ledger = _ledger_mod()
+    forged = ledger.FindingLedger()
+    forged.record(_DEFERRED_FP, "open", source="inline", round_index=1)
+    bot = ledger.FindingLedger()
+    bot.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+
+    class _Scm:
+        async def list_issue_comments(
+            self, *_args: object, **_kwargs: object
+        ) -> list[dict[str, object]]:
+            return []
+
+        async def list_reviews(self, *_args: object, **kwargs: object) -> list[dict[str, object]]:
+            page = int(kwargs["params"]["page"])  # type: ignore[index]
+            if page != 1:
+                return []
+            return [
+                {
+                    "id": 1,
+                    "user": {"login": "contributor", "type": "User"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=forged.records(),
+                    ),
+                },
+                {
+                    "id": 2,
+                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "body": ledger.merge_ledger_into_comment(
+                        "<!-- mergecraft-deterministic-record:v1 -->\n",
+                        records=bot.records(),
+                    ),
+                },
+            ]
+
+    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)
+    assert found.get_record(_DEFERRED_FP) is None
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
 
 
 def test_record_deferred_from_analyzer_run_skips_withdrawn() -> None:

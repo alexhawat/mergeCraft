@@ -187,7 +187,7 @@ def is_sticky_progress_comment(body: str) -> bool:
 
 
 def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
-    """Interim sticky trust rule: only a Bot-authored comment may be the sticky.
+    """Interim trust rule: only a Bot may own a sticky comment or formal review.
 
     A PR participant can quote the heading, the footer or a ledger marker, so a
     body shape test alone lets a human win selection — after which a later write
@@ -321,7 +321,9 @@ async def fetch_review_record_bodies(
         )
         for review in reviews:
             body = str(review.get("body") or "")
-            if body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER):
+            if body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER) and _is_trusted_sticky_author(
+                review
+            ):
                 bodies.append(body)
         if len(reviews) < _REVIEW_PAGE_SIZE:
             break

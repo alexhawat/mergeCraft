@@ -465,7 +465,8 @@ async def publish_deterministic_record(
                 (
                     item
                     for item in reviews
-                    if str(item.get("body") or "").lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
+                    if _is_trusted_sticky_author(item)
+                    and str(item.get("body") or "").lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
                     and f"- **Run:** {run_url}" in str(item.get("body") or "")
                 ),
                 None,

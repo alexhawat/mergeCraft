@@ -946,7 +946,7 @@ async def _recover_review_after_lost_receipt(
     ctx: ToolContext, *, pull_number: int, commit_id: str | None
 ) -> dict[str, Any] | None:
     """Find a review GitHub accepted before its response was lost."""
-    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER
+    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, _is_trusted_sticky_author
     from mergecraft.utils.status_checks import _run_url
 
     run_url = _run_url(ctx)
@@ -963,7 +963,8 @@ async def _recover_review_after_lost_receipt(
             body = str(review.get("body") or "")
             reviewed_commit = str(review.get("commit_id") or "")
             if (
-                body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
+                _is_trusted_sticky_author(review)
+                and body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
                 and f"- **Run:** {run_url}" in body
                 and (not commit_id or not reviewed_commit or reviewed_commit == commit_id)
             ):

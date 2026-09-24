@@ -118,6 +118,7 @@ class _FakeScm:
             "node_id": f"R_{self._next_review_id}",
             "commit_id": "",
             "body": str(kwargs.get("body") or ""),
+            "user": {"login": "github-actions[bot]", "type": "Bot"},
         }
         self.reviews[self._next_review_id] = row
         return dict(row)
