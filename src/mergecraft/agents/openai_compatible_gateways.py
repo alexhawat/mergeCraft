@@ -36,11 +36,9 @@ PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
 # (no renumbering).
 INDEXED_CUSTOM_PROVIDER_BASE_URL_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_(\d+)$")
 INDEXED_CUSTOM_PROVIDER_API_KEY_RE = re.compile(r"^MERGECRAFT_CUSTOM_PROVIDER_API_KEY_(\d+)$")
-INDEXED_LLM_PROVIDER_API_KEY_RE = re.compile(r"^LLM_PROVIDER_(\d+)_API_KEY$")
 INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS_{n}"
 # Provider-id derivation rule (operator locked): ``"provider_" + str(N)`` for
 # indexed pairs; ``"default"`` for the singleton back-compat alias.
-INDEXED_PROVIDER_ID_FMT = "provider_{n}"
 SINGLETON_PROVIDER_ID = "default"
 
 # Closed capability vocabulary (HA1 / D12). ``context_limit`` is a sibling
