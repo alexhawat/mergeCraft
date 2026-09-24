@@ -173,6 +173,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The sticky progress comment keeps the finding ledger and the learnings delta
+  across the final deterministic-record write, so a later run hydrates every
+  prior record instead of losing it. A later run reuses the existing progress
+  comment rather than posting a second one, and only bot-authored comments are
+  read as progress state. The run record names the reviewer slot skipped for
+  missing credentials and the model that produced the recorded verdict, instead
+  of claiming no reviewer ran.
+
 - Offline local diff materialization skips mergeCraft's generated
   `.mergecraft/analyzer-cache/` entries before per-file untracked diff
   generation, preventing a populated managed cache from adding thousands of
