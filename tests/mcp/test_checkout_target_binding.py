@@ -31,8 +31,6 @@ from mergecraft.utils.github import GitHubClient
 if TYPE_CHECKING:
     from pathlib import Path
 
-_TB2 = "green after TB2: checkout refuses an unbound or re-classified PR"
-
 
 def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
@@ -121,7 +119,6 @@ async def _call(ctx: ToolContext, pull_number: int) -> tuple[bool, str]:
     return result.is_error, str(result.content[0]["text"])
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 @pytest.mark.asyncio
 async def test_checkout_refuses_a_pull_number_the_run_was_not_bound_to(tmp_path: Path) -> None:
     """TB-D4 — the agent cannot redirect the run to a different PR."""
@@ -134,7 +131,6 @@ async def test_checkout_refuses_a_pull_number_the_run_was_not_bound_to(tmp_path:
     assert "bound" in text.lower() or "not the reviewed" in text.lower(), text
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 @pytest.mark.asyncio
 async def test_checkout_refuses_a_fork_pr_on_a_trusted_run(tmp_path: Path) -> None:
     """TB-D4 — a trusted run may not check out a fork head."""
@@ -147,7 +143,6 @@ async def test_checkout_refuses_a_fork_pr_on_a_trusted_run(tmp_path: Path) -> No
     assert "fork" in text.lower(), text
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 @pytest.mark.asyncio
 async def test_checkout_refuses_a_fork_pr_when_authority_trust_is_trusted(tmp_path: Path) -> None:
     """TB-D4 — either trust axis being ``trusted`` refuses the fork."""

@@ -55,7 +55,10 @@ def init_pr_clone(tmp_path: Path) -> tuple[Path, str]:
     (work / "README.md").write_text("base\n", encoding="utf-8")
     _git(work, "add", "README.md")
     _git(work, "commit", "-m", "base")
-    _git(work, "branch", "-M", "base")
+    # TB3 / P10: the stub PR's ``base.ref`` is ``main``; the base branch must
+    # match so the base fetch and the merge-base ``git diff`` genuinely succeed
+    # and ``checkout_pr`` records ``provenance="checkout"`` (non-degraded).
+    _git(work, "branch", "-M", "main")
     _git(work, "checkout", "-b", "feature")
     (work / "app.py").write_text("x = 1\n", encoding="utf-8")
     _git(work, "add", "app.py")

@@ -13,25 +13,18 @@ author login in the run's expected-publisher set:
 
 A lookup failure drops that login from the set; it never widens the match.
 
-RED markers are non-strict and name the wave that greens them.
+RED markers were reconciled after TB3 landed; every case here is a real pass.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 
-_TB3 = "green after TB3: expected-publisher authorship helper"
 _MERGECRAFT_BODY = "### Review\n\n---\n*via mergecraft*"
 _MARKER = frozenset({"mergecraft[bot]"})
-
-# Every test here drives ``mergecraft.review.authorship``, which does not exist
-# until TB3 — so the whole module is a non-strict cross-wave RED.
-pytestmark = pytest.mark.xfail(reason=_TB3, strict=False)
 
 
 def _is_authored(item: dict[str, Any], publishers: frozenset[str]) -> bool:

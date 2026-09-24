@@ -212,12 +212,25 @@ them differently):**
 
 ## xfail reconciliation ledger
 
-| Wave | Marker prefix | Files to reconcile |
-| --- | --- | --- |
-| TB2 | `green after TB2:` | `tests/config/test_trust_policy_comment_binding.py`, `tests/security/test_trust_fallthrough.py`, `tests/action/test_fork_credential_invariant.py`, `tests/test_main_phases.py`, `tests/mcp/test_checkout_target_binding.py` |
-| TB3 | `green after TB3:` | `tests/mcp/test_checkout.py`, `tests/mcp/test_checkout_degraded_diff.py`, `tests/review/test_authorship.py` |
-| TB4 | `green after TB4:` | `tests/context/test_instruction_discovery.py`, `tests/utils/test_instructions.py`, `tests/cli/test_local_env_loader.py` |
-| TB5 | `green after TB5:` | `tests/xrepo/test_linked_repos.py`, `tests/xrepo/test_review_change_set.py` |
+| Wave | Marker prefix | Files to reconcile | Status |
+| --- | --- | --- | --- |
+| TB2 | `green after TB2:` | `tests/config/test_trust_policy_comment_binding.py`, `tests/security/test_trust_fallthrough.py`, `tests/action/test_fork_credential_invariant.py`, `tests/test_main_phases.py`, `tests/mcp/test_checkout_target_binding.py` | ✅ reconciled 2026-09-24 (all markers removed, real passes) |
+| TB3 | `green after TB3:` | `tests/mcp/test_checkout.py`, `tests/mcp/test_checkout_degraded_diff.py`, `tests/review/test_authorship.py` | ✅ reconciled 2026-09-24 (all markers removed, real passes) |
+| TB4 | `green after TB4:` | `tests/context/test_instruction_discovery.py`, `tests/utils/test_instructions.py`, `tests/cli/test_local_env_loader.py` | still xfail (pending TB4) |
+| TB5 | `green after TB5:` | `tests/xrepo/test_linked_repos.py`, `tests/xrepo/test_review_change_set.py` | still xfail (pending TB5) |
+
+### TB3 amendment — `init_pr_clone` base branch (2026-09-24)
+
+`tests/mcp/reviewer_resilience_support.py::init_pr_clone` created the work repo's
+base branch as `base`, while the shared `_StubGitHub.get_pull` in
+`tests/mcp/test_reviewer_resilience_degraded_scope.py` returns `base.ref == "main"`.
+After TB3/P10 an unresolvable base correctly degrades to `files-api-diff`, so the
+non-degraded test `test_successful_checkout_pr_sets_scope_provenance_checkout`
+must have a base branch the stub resolves. The fixture now names the base branch
+`main` (safe: exactly one test consumes it, and no assertion depends on the old
+name). TB-D5 is unchanged; the degraded path stays covered by
+`tests/mcp/test_checkout_degraded_diff.py`.
+
 
 ## Verification
 

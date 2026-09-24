@@ -80,7 +80,6 @@ _MERGECRAFT_BODY = "### Review\n\n---\n*via mergecraft*"
 # ``tests/review/test_authorship.py``.
 _PUBLISHER_LOGIN = "mergecraft[bot]"
 _BOT_USER: dict[str, str] = {"login": _PUBLISHER_LOGIN, "type": "Bot"}
-_TB3 = "green after TB3: expected-publisher authorship"
 
 
 def _pin_publishers(monkeypatch: pytest.MonkeyPatch, logins: frozenset[str]) -> None:
@@ -132,7 +131,6 @@ def test_last_reviewed_sha_ignores_other_authors_and_the_current_head() -> None:
 # ── TB-D7: the checkpoint trusts marker AND publisher ────────────────────────
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 def test_last_reviewed_sha_ignores_a_marker_from_an_unexpected_author() -> None:
     """A marker posted by anyone who can review must not move the checkpoint."""
     reviews = [
@@ -148,7 +146,6 @@ def test_last_reviewed_sha_ignores_a_marker_from_an_unexpected_author() -> None:
     )
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 def test_last_reviewed_sha_ignores_a_marker_from_another_app_bot() -> None:
     """Another App's bot is bot-shaped but is not this run's publisher."""
     reviews = [
@@ -164,7 +161,6 @@ def test_last_reviewed_sha_ignores_a_marker_from_another_app_bot() -> None:
     )
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 def test_last_reviewed_sha_counts_a_marker_from_the_publishing_login() -> None:
     """A PAT-published run's own login is an expected publisher."""
     reviews = [
@@ -180,7 +176,6 @@ def test_last_reviewed_sha_counts_a_marker_from_the_publishing_login() -> None:
     )
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 def test_review_round_index_ignores_unexpected_authors() -> None:
     """The round count uses the same authorship rule as the checkpoint."""
     reviews = [
@@ -219,7 +214,6 @@ def _reviews_ctx(github: GitHubClient, tmp_path: Path) -> ToolContext:
     )
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 @pytest.mark.asyncio
 async def test_list_mergecraft_reviews_paginates_to_find_the_newest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -246,7 +240,6 @@ async def test_list_mergecraft_reviews_paginates_to_find_the_newest(
     assert github.page_requests == [1, 2]
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 @pytest.mark.asyncio
 async def test_list_mergecraft_reviews_returns_oldest_first(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -265,7 +258,6 @@ async def test_list_mergecraft_reviews_returns_oldest_first(
     assert reviews == [older, newer]
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 @pytest.mark.asyncio
 async def test_list_mergecraft_reviews_drops_marker_reviews_from_other_authors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -12,9 +12,9 @@ Locked contracts exercised here (test-plan ``docs/test-plans/trust-boundaries.md
   returns a copy of the event with ``pull_request`` set from fetched metadata.
 * **TB-D3** — one fork predicate serves the trust tier (``resolve_trust_policy``).
 
-RED markers are non-strict and name the wave that greens them. A comment on a
-plain issue stays trusted today and must keep doing so — those guards carry no
-marker.
+RED markers were reconciled after TB2 landed; every case here is a real pass.
+A comment on a plain issue stays trusted today and must keep doing so — those
+guards carry no marker.
 """
 
 from __future__ import annotations
@@ -27,8 +27,6 @@ from mergecraft.config.trust_policy import is_fork_pull_request, resolve_trust_p
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-_TB2 = "green after TB2: bind the target PR before trust"
 
 _SAME_REPO = "acme/demo"
 _FORK_REPO = "contributor/demo"
@@ -130,14 +128,12 @@ def _bind(event: dict[str, Any], pull: dict[str, Any]) -> dict[str, Any]:
 # ── TB-D1: comment on a PR with no bound head is a fork ──────────────────────
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 def test_comment_on_pr_without_pull_request_is_a_fork() -> None:
     """TB-D1 — ``issue.pull_request`` present and no top-level ``pull_request``."""
     event = _comment_on_pr_event()
     assert is_fork_pull_request(event) is True
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 @pytest.mark.parametrize("association", ["OWNER", "MEMBER", "COLLABORATOR"])
 def test_comment_on_pr_is_a_fork_regardless_of_commenter(association: str) -> None:
     """The floor is about the code under review, never who commented."""
@@ -150,7 +146,6 @@ def test_comment_on_plain_issue_is_not_a_fork() -> None:
     assert is_fork_pull_request(_comment_on_plain_issue_event()) is False
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 def test_dispatch_naming_a_pr_is_a_fork_until_bound() -> None:
     """TB-D1 — a dispatch that names a PR carries no bound head yet."""
     assert is_fork_pull_request(_dispatch_event_naming_pr(42)) is True
@@ -164,7 +159,6 @@ def test_dispatch_without_a_pr_is_not_a_fork() -> None:
 # ── TB-D2: bind by fetching, once ────────────────────────────────────────────
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 def test_bind_target_pull_request_is_pure_and_sets_the_bound_head() -> None:
     """TB-D2 — ``bind_target_pull_request`` returns a copy, original untouched."""
     event = _comment_on_pr_event(number=7)
@@ -181,7 +175,6 @@ def test_bind_target_pull_request_is_pure_and_sets_the_bound_head() -> None:
     assert pr["base"]["repo"]["full_name"] == _SAME_REPO
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 def test_binding_a_same_repo_pr_clears_the_fork_floor() -> None:
     """TB-D2 — once the same-repo head is bound, the event is not a fork."""
     bound = _bind(
@@ -191,7 +184,6 @@ def test_binding_a_same_repo_pr_clears_the_fork_floor() -> None:
     assert is_fork_pull_request(bound) is False
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 def test_binding_a_fork_pr_keeps_the_fork_floor() -> None:
     """TB-D2 — binding a fork confirms the floor rather than lifting it."""
     bound = _bind(
@@ -204,7 +196,6 @@ def test_binding_a_fork_pr_keeps_the_fork_floor() -> None:
 # ── TB-D1/D3: resolve_trust_policy applies the one fork predicate ────────────
 
 
-@pytest.mark.xfail(reason=f"{_TB2}: comment-on-PR resolves untrusted on both axes", strict=False)
 def test_comment_on_pr_resolves_untrusted_both_axes(tmp_path: Path) -> None:
     """TB-D1/D3 — an unbound comment-on-PR floors both trust axes."""
     policy = resolve_trust_policy(
@@ -216,7 +207,6 @@ def test_comment_on_pr_resolves_untrusted_both_axes(tmp_path: Path) -> None:
     assert policy.authority_trust == "untrusted"
 
 
-@pytest.mark.xfail(reason=f"{_TB2}: bound same-repo comment run stays trusted", strict=False)
 def test_comment_after_binding_same_repo_is_trusted(tmp_path: Path) -> None:
     """TB-D2/D3 — a maintainer comment on a same-repo PR stays trusted once bound."""
     bound = _bind(
@@ -232,7 +222,6 @@ def test_comment_after_binding_same_repo_is_trusted(tmp_path: Path) -> None:
     assert policy.authority_trust == "trusted"
 
 
-@pytest.mark.xfail(reason=f"{_TB2}: bound fork comment run is untrusted", strict=False)
 def test_comment_after_binding_a_fork_is_untrusted(tmp_path: Path) -> None:
     """TB-D2/D3 — binding a fork keeps the floor on a maintainer comment."""
     bound = _bind(
@@ -259,7 +248,6 @@ def test_comment_on_plain_issue_stays_trusted(tmp_path: Path) -> None:
     assert policy.authority_trust == "trusted"
 
 
-@pytest.mark.xfail(reason=f"{_TB2}: PR-naming dispatch floors before credentials", strict=False)
 def test_dispatch_naming_a_pr_resolves_untrusted_before_binding(tmp_path: Path) -> None:
     """TB-D1 — a dispatch that names a PR but has no bound head is floored."""
     policy = resolve_trust_policy(
@@ -271,7 +259,6 @@ def test_dispatch_naming_a_pr_resolves_untrusted_before_binding(tmp_path: Path) 
     assert policy.authority_trust == "untrusted"
 
 
-@pytest.mark.xfail(reason=f"{_TB2}: bound same-repo dispatch is trusted", strict=False)
 def test_dispatch_after_binding_same_repo_is_trusted(tmp_path: Path) -> None:
     """TB-D2 — a dispatch naming a same-repo PR is trusted once bound."""
     bound = _bind(
@@ -286,7 +273,6 @@ def test_dispatch_after_binding_same_repo_is_trusted(tmp_path: Path) -> None:
     assert policy.execution_trust == "trusted"
 
 
-@pytest.mark.xfail(reason=f"{_TB2}: bound fork dispatch is untrusted", strict=False)
 def test_dispatch_after_binding_a_fork_is_untrusted(tmp_path: Path) -> None:
     """TB-D2 — a dispatch naming a fork PR is floored once bound."""
     bound = _bind(

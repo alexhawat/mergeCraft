@@ -342,8 +342,6 @@ def test_issue_comment_wrong_type_association_is_untrusted(
 
 # ── S4 (TB1): a comment on a PR with no bound head is a fork ─────────────────
 
-_TB2 = "green after TB2: comment-on-PR floors derive_trust_tier"
-
 
 def _comment_on_pr_event(*, association: str = "OWNER") -> dict[str, object]:
     return {
@@ -364,7 +362,6 @@ def _comment_on_plain_issue_event(*, association: str = "OWNER") -> dict[str, ob
     }
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 @pytest.mark.parametrize("association", ["OWNER", "MEMBER", "COLLABORATOR"])
 def test_issue_comment_on_pr_without_head_is_untrusted(
     monkeypatch: pytest.MonkeyPatch,

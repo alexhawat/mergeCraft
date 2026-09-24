@@ -14,7 +14,7 @@ record; the plan requires:
   and no line changes is a binary/empty header, as today; the page-cap exit is
   recorded as a truncation.
 
-RED markers are non-strict and name the wave that greens them.
+RED markers were reconciled after TB3 landed; every case here is a real pass.
 """
 
 from __future__ import annotations
@@ -35,8 +35,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
-
-_TB3 = "green after TB3: degraded checkout records its provenance"
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -132,7 +130,6 @@ async def _checkout(ctx: ToolContext) -> tuple[bool, dict[str, Any] | str]:
     return False, json.loads(result.content[0]["text"])
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 @pytest.mark.asyncio
 async def test_git_diff_failure_is_labelled_a_files_api_diff(
     tmp_path: Path, monkeypatch: MonkeyPatch
@@ -167,7 +164,6 @@ async def test_git_diff_failure_is_labelled_a_files_api_diff(
     assert warnings, "a degraded diff must emit a warning"
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 @pytest.mark.asyncio
 async def test_missing_text_patch_is_recorded_as_unreviewable(
     tmp_path: Path, monkeypatch: MonkeyPatch
@@ -225,7 +221,6 @@ async def test_zero_line_missing_patch_is_not_unreviewable(
     assert "logo.png" not in payload.get("unreviewablePaths", [])
 
 
-@pytest.mark.xfail(reason=_TB3, strict=False)
 @pytest.mark.asyncio
 async def test_page_cap_records_a_truncation(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """TB-D6 — hitting the page cap is recorded, not only logged."""

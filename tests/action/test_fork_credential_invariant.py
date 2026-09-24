@@ -45,8 +45,6 @@ def test_fork_invariant_is_independent_of_agent_sandbox_tier(monkeypatch: Monkey
 
 # ── S4 (TB1): comment-on-PR events and the unbound message ───────────────────
 
-_TB2 = "green after TB2: unbound PR is refused distinctly from a fork"
-
 
 def _comment_on_pr_event(*, number: int = 7) -> dict[str, object]:
     return {
@@ -59,7 +57,6 @@ def _comment_on_pr_event(*, number: int = 7) -> dict[str, object]:
     }
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 def test_comment_on_pr_with_credentials_is_refused() -> None:
     """S4 — a maintainer comment on a PR is a fork floor until bound.
 

@@ -808,8 +808,6 @@ class TestFinalizeCarriesTheVerdictDiagnostic:
 
 # ── S4 (TB1): _resolve_credentials binds the target PR before the invariant ──
 
-_TB2 = "green after TB2: bind the target PR before the credential invariant"
-
 
 class _FakeTokenRef:
     """Minimal ``TokenRef`` stand-in for the credential phase."""
@@ -916,7 +914,6 @@ async def _drive_credentials(
     return ctx
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 async def test_resolve_credentials_binds_the_target_pr_before_the_invariant(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -940,7 +937,6 @@ async def test_resolve_credentials_binds_the_target_pr_before_the_invariant(
     assert "fork" in str(excinfo.value).lower()
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 async def test_resolve_credentials_refuses_when_the_pr_fetch_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -961,7 +957,6 @@ async def test_resolve_credentials_refuses_when_the_pr_fetch_fails(
     assert "unbound" in message or "could not be bound" in message
 
 
-@pytest.mark.xfail(reason=_TB2, strict=False)
 async def test_resolve_credentials_binds_a_same_repo_pr_and_keeps_trust(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

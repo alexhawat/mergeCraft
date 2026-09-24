@@ -106,6 +106,11 @@ class ToolContext:
     budget_tracker: BudgetTracker | None = None
     repo_settings_snapshot: RepoSettingsSnapshot | None = None
     trace_parent: TraceParent | None = None
+    # P-17 / TB-D7 — the expected-publisher logins for this run, built once by
+    # ``mergecraft.review.authorship.expected_publisher_logins`` and cached here.
+    # ``None`` means "not resolved yet"; an empty frozenset is a resolved answer
+    # (no expected publisher), not a cache miss.
+    publisher_logins: frozenset[str] | None = None
 
     def __init__(
         self,
@@ -206,6 +211,7 @@ class ToolContext:
         self.suggest_eval_add = suggest_eval_add
         self.budget_tracker = budget_tracker
         self.repo_settings_snapshot = repo_settings_snapshot
+        self.publisher_logins = None
         if trace_parent is None:
             from mergecraft.tracing.tracer import current_trace_parent
 
