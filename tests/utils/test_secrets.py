@@ -185,3 +185,89 @@ def test_build_agent_env_propagates_bound_proxy_and_ca(
     assert env["NO_PROXY"] == "localhost"
     assert env["SSL_CERT_FILE"] == "/tmp/enterprise-ca.pem"
     assert env["REQUESTS_CA_BUNDLE"] == "/tmp/enterprise-ca.pem"
+
+
+# ── GitHub / runner passthrough is an explicit name list ─────────────────────
+
+#: Credential-shaped names that only share a *prefix* with documented runner
+#: variables; they must not ride the passthrough.
+_PREFIX_LOOKALIKE_CREDENTIALS = ("GITHUB_PAT", "GITHUB_APP_PEM", "RUNNER_BLOB")
+
+#: Documented runner/workflow variables and versioned toolchain homes that must
+#: still reach child processes.
+_DOCUMENTED_PASSTHROUGH = (
+    "GITHUB_WORKSPACE",
+    "GITHUB_REPOSITORY",
+    "GITHUB_EVENT_PATH",
+    "RUNNER_TEMP",
+    "JAVA_HOME_17_X64",
+)
+
+
+@pytest.mark.parametrize("name", _PREFIX_LOOKALIKE_CREDENTIALS)
+@pytest.mark.xfail(reason="green after the env-name allowlist wave lands", strict=False)
+def test_prefix_lookalike_credentials_are_not_passed_through(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """A name that merely starts with ``GITHUB_``/``RUNNER_`` is not safe."""
+    clear_env_allowlist()
+    monkeypatch.setenv(name, "planted-secret")
+    assert name not in filter_env({name: "planted-secret", "PATH": "/bin"})
+    assert name not in resolve_env("restricted")
+    assert name not in build_agent_env("claude")
+
+
+@pytest.mark.parametrize("name", _DOCUMENTED_PASSTHROUGH)
+def test_documented_runner_names_stay_passed_through(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Documented runner variables and versioned toolchain homes are kept."""
+    clear_env_allowlist()
+    monkeypatch.setenv(name, "kept-value")
+    assert filter_env({name: "kept-value", "PATH": "/bin"})[name] == "kept-value"
+    assert resolve_env("restricted")[name] == "kept-value"
+    assert build_agent_env("claude")[name] == "kept-value"
+
+
+def test_env_allowlist_readmits_a_prefix_lookalike_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``set_env_allowlist`` stays the operator escape hatch for one name."""
+    clear_env_allowlist()
+    try:
+        set_env_allowlist("GITHUB_PAT")
+        monkeypatch.setenv("GITHUB_PAT", "planted-secret")
+        assert filter_env({"GITHUB_PAT": "planted-secret"})["GITHUB_PAT"] == "planted-secret"
+        assert resolve_env("restricted")["GITHUB_PAT"] == "planted-secret"
+    finally:
+        clear_env_allowlist()
+
+
+def test_active_provider_key_reinjection_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The active agent's provider key is still re-injected after the strip."""
+    clear_env_allowlist()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-planted")
+    env = build_agent_env("claude")
+    assert env["ANTHROPIC_API_KEY"] == "sk-ant-planted"
+
+
+def test_bedrock_and_vertex_reinjection_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cloud BYOK vars are re-injected only when their USE flag selects them."""
+    clear_env_allowlist()
+    monkeypatch.setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIA-planted")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret-planted")
+    monkeypatch.setenv("CLAUDE_CODE_USE_VERTEX", "1")
+    monkeypatch.setenv("VERTEX_SERVICE_ACCOUNT_JSON", '{"type":"service_account"}')
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "planted-project")
+
+    env = build_agent_env("claude")
+
+    assert env["AWS_ACCESS_KEY_ID"] == "AKIA-planted"
+    assert env["AWS_SECRET_ACCESS_KEY"] == "aws-secret-planted"
+    assert env["VERTEX_SERVICE_ACCOUNT_JSON"] == '{"type":"service_account"}'
+    assert env["GOOGLE_CLOUD_PROJECT"] == "planted-project"

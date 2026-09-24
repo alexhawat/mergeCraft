@@ -303,21 +303,23 @@ async def test_revoke_installation_token_never_raises(
     assert await revoke_installation_token("ghs_x") is None
 
 
-@pytest.mark.parametrize("status_code", [403, 500])
-async def test_revoke_installation_token_logs_http_failures_without_raising(
+@pytest.mark.parametrize("status_code", [401, 403, 500])
+@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
+async def test_revoke_installation_token_logs_http_failures_at_warning(
     monkeypatch: pytest.MonkeyPatch,
     status_code: int,
 ) -> None:
+    """A rejected revocation is reported at warning, without the token value."""
     _install_client(
         monkeypatch,
         _FakeClient(delete_response=_FakeResponse(status_code=status_code)),
     )
     messages: list[str] = []
 
-    def _record_info(message: str, *args: object) -> None:
+    def _record_warning(message: str, *args: object) -> None:
         messages.append(message.format(*args))
 
-    monkeypatch.setattr(token_mod.logger, "info", _record_info)
+    monkeypatch.setattr(token_mod.logger, "warning", _record_warning)
 
     assert await revoke_installation_token("ghs_secret_value") is None
     assert messages == [f"Failed to revoke installation token: HTTP {status_code}"]

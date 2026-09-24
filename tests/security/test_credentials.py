@@ -15,8 +15,10 @@ Contracts:
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 from pathlib import Path
+from typing import Any
 
 import pytest
 from loguru import logger
@@ -24,7 +26,10 @@ from loguru import logger
 from mergecraft.agents import claude, codex, gemini
 from mergecraft.agents import opencode as opencode_mod
 from mergecraft.security.broker import CODEX_BROKER_BEARER_ENV
+from mergecraft.utils import git_setup as git_setup_mod
 from mergecraft.utils.git_setup import (
+    _secure_overwrite_file,
+    cleanup_temp_directory,
     register_created_path,
     reviewer_askpass_credentials_dir,
     setup_git,
@@ -345,3 +350,206 @@ def test_askpass_script_contents_never_logged(tmp_path: Path) -> None:
         logger.remove(sink_id)
     joined = "\n".join(captured)
     assert token not in joined, "askpass token leaked into logs"
+
+
+# ── Cleanup failures are logged, name what survived, and never raise ─────────
+
+
+def _capture_warnings() -> tuple[list[str], int]:
+    """Attach a WARNING-level sink and return its messages plus its handler id."""
+    warnings: list[str] = []
+
+    def _sink(message: Any) -> None:
+        warnings.append(str(message.record["message"]))
+
+    sink_id = logger.add(_sink, level="WARNING")
+    return warnings, sink_id
+
+
+@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
+def test_secure_overwrite_warns_when_the_file_cannot_be_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scrub that cannot open the file warns with the path and never raises."""
+    target = tmp_path / "git-askpass.sh"
+    target.write_text("token-value\n", encoding="utf-8")
+    real_open = Path.open
+
+    def _refuse(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == target:
+            raise OSError("read-only file")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", _refuse)
+    warnings, sink_id = _capture_warnings()
+    try:
+        _secure_overwrite_file(target)  # must not raise
+    finally:
+        logger.remove(sink_id)
+
+    assert len(warnings) == 1, warnings
+    assert str(target) in warnings[0]
+    assert "token-value" not in warnings[0]
+
+
+def test_secure_overwrite_success_emits_no_warning(tmp_path: Path) -> None:
+    """A scrub that succeeds is silent — the warning is tied to the failure."""
+    target = tmp_path / "git-askpass.sh"
+    target.write_text("token-value\n", encoding="utf-8")
+    warnings, sink_id = _capture_warnings()
+    try:
+        _secure_overwrite_file(target)
+    finally:
+        logger.remove(sink_id)
+    assert warnings == []
+
+
+@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
+def test_cleanup_warns_when_the_askpass_unlink_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed askpass unlink warns with the path and does not raise."""
+    root = tmp_path / "run"
+    askpass = root / "credentials" / "git-askpass.sh"
+    askpass.parent.mkdir(parents=True)
+    askpass.write_text("token-value\n", encoding="utf-8")
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", str(root))
+    monkeypatch.setenv("MERGECRAFT_TEMP_DIR", str(root))
+    real_unlink = Path.unlink
+
+    def _refuse(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == askpass:
+            raise OSError("locked")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _refuse)
+    warnings, sink_id = _capture_warnings()
+    try:
+        cleanup_temp_directory()  # must not raise
+    finally:
+        logger.remove(sink_id)
+
+    assert len(warnings) == 1, warnings
+    assert str(askpass) in warnings[0]
+    assert "token-value" not in warnings[0]
+
+
+@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
+def test_cleanup_warns_when_rmtree_reports_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tree removal uses an error callback that logs each failed path."""
+    root = tmp_path / "run"
+    askpass = root / "credentials" / "git-askpass.sh"
+    askpass.parent.mkdir(parents=True)
+    askpass.write_text("token-value\n", encoding="utf-8")
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", str(root))
+    monkeypatch.setenv("MERGECRAFT_TEMP_DIR", str(root))
+
+    def _failing_rmtree(
+        path: str | os.PathLike[str],
+        ignore_errors: bool = False,
+        onerror: Any = None,
+        **_kwargs: Any,
+    ) -> None:
+        # Emulate the per-path callback the contract requires; doing nothing
+        # when it is absent leaves the caller silent (and this test red).
+        if onerror is None:
+            return
+        error = OSError("directory not empty")
+        onerror(shutil.rmtree, str(path), (OSError, error, error.__traceback__))
+
+    monkeypatch.setattr(shutil, "rmtree", _failing_rmtree)
+    warnings, sink_id = _capture_warnings()
+    try:
+        cleanup_temp_directory()
+    finally:
+        logger.remove(sink_id)
+
+    assert warnings, "rmtree reported a failure but nothing was logged"
+    assert any(str(root) in message for message in warnings)
+    assert all("token-value" not in message for message in warnings)
+
+
+@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
+def test_cleanup_warns_when_the_askpass_file_survives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A residual credential file is named after the removal attempt."""
+    root = tmp_path / "run"
+    askpass = root / "credentials" / "git-askpass.sh"
+    askpass.parent.mkdir(parents=True)
+    askpass.write_text("token-value\n", encoding="utf-8")
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", str(root))
+    monkeypatch.setenv("MERGECRAFT_TEMP_DIR", str(root))
+    monkeypatch.setattr(git_setup_mod, "_secure_overwrite_file", lambda _path: None)
+    real_unlink = Path.unlink
+
+    def _skip_askpass(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == askpass:
+            return None
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _skip_askpass)
+
+    def _noop_rmtree(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(shutil, "rmtree", _noop_rmtree)
+    warnings, sink_id = _capture_warnings()
+    try:
+        cleanup_temp_directory()
+    finally:
+        logger.remove(sink_id)
+
+    assert warnings, "a surviving askpass file produced no warning"
+    assert any(str(askpass) in message or str(root) in message for message in warnings), warnings
+    assert all("token-value" not in message for message in warnings)
+
+
+def test_cleanup_success_emits_no_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A clean removal is silent and leaves nothing behind."""
+    root = tmp_path / "run"
+    askpass = root / "credentials" / "git-askpass.sh"
+    askpass.parent.mkdir(parents=True)
+    askpass.write_text("token-value\n", encoding="utf-8")
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", str(root))
+    monkeypatch.setenv("MERGECRAFT_TEMP_DIR", str(root))
+    warnings, sink_id = _capture_warnings()
+    try:
+        cleanup_temp_directory()
+    finally:
+        logger.remove(sink_id)
+
+    assert warnings == []
+    assert not root.exists()
+
+
+@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
+def test_wipe_warns_when_a_registered_path_cannot_be_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A leak-surface wipe that fails warns with the path and does not raise."""
+    target = tmp_path / "leak.sh"
+    target.write_text("token-value\n", encoding="utf-8")
+    resolved = str(target.resolve())
+    monkeypatch.setattr(git_setup_mod, "_created_paths", {resolved})
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", None)
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    real_unlink = Path.unlink
+
+    def _refuse(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == target:
+            raise OSError("locked")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", _refuse)
+    warnings, sink_id = _capture_warnings()
+    try:
+        wipe_runner_leak_surface()  # must not raise
+    finally:
+        logger.remove(sink_id)
+
+    assert warnings, "a failed leak-surface wipe produced no warning"
+    assert any(str(target) in message for message in warnings)
+    assert all("token-value" not in message for message in warnings)

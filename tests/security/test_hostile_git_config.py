@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import base64
+import contextlib
+import http.server
 import subprocess
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from mergecraft.mcp.git import _run_git
+from mergecraft.utils.git_setup import git_env_for_token
 from mergecraft.xrepo.review import _rev_parse_commit
 from tests.security.hostile_git_fixtures import HostileGitRepo, build_hostile_git_repo
 
@@ -185,3 +191,87 @@ def test_xrepo_checkout_is_equally_protected(hostile_git_repo: HostileGitRepo) -
 @pytest.fixture
 def hostile_git_repo(tmp_path: Path) -> HostileGitRepo:
     return build_hostile_git_repo(tmp_path)
+
+
+@contextlib.contextmanager
+def _http_stub() -> Iterator[str]:
+    """A local HTTP server that answers every git request with 404.
+
+    The stub exists so ``git ls-remote`` performs a real HTTP exchange without
+    reaching the network; nothing needs to succeed for the leak assertions.
+    """
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return None
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.xfail(reason="green after the git-env hardening wave lands", strict=False)
+def test_ambient_git_trace_cannot_capture_the_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ambient ``GIT_TRACE_CURL`` file is never written by the git child."""
+    trace_file = tmp_path / "curl-trace.txt"
+    monkeypatch.setenv("GIT_TRACE_CURL", str(trace_file))
+    token = "ghs_trace_leak_secret"
+    encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+
+    with _http_stub() as base_url:
+        remote = f"{base_url}/acme/demo.git"
+        env = git_env_for_token(token, remote_url=remote)
+        completed = subprocess.run(
+            ["git", "ls-remote", remote],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    combined = completed.stdout + completed.stderr
+    assert not trace_file.exists(), "ambient git tracing captured the request"
+    assert token not in combined
+    assert encoded not in combined
+
+
+@pytest.mark.xfail(reason="green after the git-env hardening wave lands", strict=False)
+def test_ambient_credential_helper_is_unreachable_from_returned_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A child run with the returned env reads no ambient credential helper."""
+    # Ignore the operator's file-based config so only the injection under test
+    # can contribute a helper.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'credential.helper'='store'")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.helper")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "store")
+
+    env = git_env_for_token("ghs_real_token", remote_url="https://github.com/acme/demo.git")
+    completed = subprocess.run(
+        ["git", "config", "--get-all", "credential.helper"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.stdout.strip() == "", (
+        "git child resolved a credential helper from ambient config"
+    )
