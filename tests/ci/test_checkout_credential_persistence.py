@@ -32,7 +32,9 @@ from tests.ci.workflow_support import REPO_ROOT
 _WORKFLOWS = (
     ".github/workflows/mergecraft.yml",
     "examples/workflows/mergecraft-hardened.yml",
+    "examples/workflows/mergecraft.yml",
     "scripts/example_workflows/hardened.yml.tpl",
+    "scripts/example_workflows/minimal.yml.tpl",
     "docs/artifacts/dogfood-mergecraft.yml",
 )
 
@@ -151,10 +153,15 @@ def test_workflow_templates_export_the_pin_placeholder(relative: str) -> None:
     for step in steps:
         env_block = step.get("env") or {}
         assert isinstance(env_block, dict)
-        assert env_block.get("MERGECRAFT_ACTION_SHA") == "__ACTION_PIN__", (
-            f"{relative}: the mergeCraft step must export "
-            "MERGECRAFT_ACTION_SHA: __ACTION_PIN__ so the generated example "
-            "records the pin it runs"
+        uses = step.get("uses")
+        assert isinstance(uses, str)
+        ref = uses.rsplit("@", 1)[1].strip()
+        assert env_block.get("MERGECRAFT_ACTION_SHA") == ref, (
+            f"{relative}: the mergeCraft step exports "
+            f"MERGECRAFT_ACTION_SHA={env_block.get('MERGECRAFT_ACTION_SHA')!r} "
+            f"but runs {ref!r}; the generated example would record the wrong pin. "
+            "The template keeps its `uses:` ref and its export in lockstep — the "
+            "immutable-SHA placeholder tracks the SHA ref, not the release tag."
         )
 
 
@@ -198,4 +205,37 @@ def test_readme_examples_honour_a_dispatch_prompt_they_declare() -> None:
         assert "github.event.inputs.prompt" in block or "inputs.prompt" in block, (
             "README example declares a workflow_dispatch prompt input but never "
             "passes it to the action; a dispatched run would ignore it"
+        )
+
+
+# ── the minimal surfaces consumers copy request read-only contents ─────────
+
+
+_MINIMAL_SURFACES = (
+    "examples/workflows/mergecraft.yml",
+    "scripts/example_workflows/minimal.yml.tpl",
+)
+
+
+@pytest.mark.xfail(
+    reason="green after SW3.2: minimal example requests read-only contents",
+    strict=False,
+)
+@pytest.mark.parametrize("relative", _MINIMAL_SURFACES)
+def test_minimal_surfaces_request_read_only_contents(relative: str) -> None:
+    """A review needs no content write, and must not leave its token in .git/config."""
+    doc = yaml.safe_load((Path(REPO_ROOT) / relative).read_text(encoding="utf-8"))
+    assert isinstance(doc, dict)
+    permissions = doc.get("permissions")
+    assert isinstance(permissions, dict), f"{relative}: no top-level permissions block"
+    assert permissions.get("contents") == "read", (
+        f"{relative}: contents must default to read; a review needs no push"
+    )
+    steps = _checkout_steps(doc)
+    assert steps, f"{relative} has no actions/checkout step to check"
+    for step in steps:
+        with_block = step.get("with") or {}
+        assert isinstance(with_block, dict)
+        assert str(with_block.get("persist-credentials")).lower() == "false", (
+            f"{relative}: actions/checkout must explicitly set persist-credentials: false"
         )
