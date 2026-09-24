@@ -176,8 +176,9 @@ is deleted rather than reworded.
 outcome, the verdict diagnostic, and the packet decision — and does not
 reconcile them.
 
-- F10/F11: with a credential-degradation line present (no credentialed
-  reviewer ran), the record must report `inconclusive`, must not contain
+- F10/F11: with a credential-degradation line present and no typed terminal
+  verdict recorded on the packet (no credentialed reviewer ran), the record
+  must report `inconclusive`, must not contain
   `Outcome: passed` or `Verdict diagnostic: approved`, must carry the
   degradation line, must state the analyzer ran/withheld summary, and must say
   no credentialed reviewer participated. The exact phrase is matched

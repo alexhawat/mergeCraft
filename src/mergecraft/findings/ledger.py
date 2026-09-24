@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -18,7 +19,7 @@ from loguru import logger
 from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState, validate_lifecycle_state
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Sequence
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import AnalyzerRunState, ToolState
@@ -165,7 +166,13 @@ def ledger_round_index(tool_state: ToolState) -> int:
 
 
 def is_sticky_progress_comment(body: str) -> bool:
-    """Return whether ``body`` looks like the mergeCraft sticky progress comment."""
+    """Return whether ``body`` looks like the mergeCraft sticky progress comment.
+
+    This is a body-only shape test: it answers "could this text be our
+    comment?", not "is this comment ours?". Author trust is decided by the
+    selector (:func:`_select_sticky_progress_comment`), which applies the
+    interim bot-author rule before this shape check counts for anything.
+    """
     lowered = body.lower()
     return (
         DETERMINISTIC_RECORD_MARKER in body
@@ -176,23 +183,59 @@ def is_sticky_progress_comment(body: str) -> bool:
     )
 
 
+def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
+    """Interim sticky trust rule: only a Bot-authored comment may be the sticky.
+
+    A PR participant can quote the heading, the footer or a ledger marker, so a
+    body shape test alone lets a human win selection — after which a later write
+    fails for want of permission and the real ledger is never persisted.
+
+    **Residual (LG-D3, closes with plan 51 HS1).** Accepting any ``user.type ==
+    "Bot"`` still admits a bot that is not ours: another App installed on the
+    repo, and ``github-actions[bot]`` from **any** workflow run — including one a
+    same-repo collaborator adds on their own branch under ``pull_request``. The
+    shared authorship helper (``review/authorship.py``, plan 40) narrows this to
+    the run's expected-publisher set for App-published runs; job-token-only
+    consumers keep the residual. This plan does not import that helper because
+    both plans run in the same batch.
+    """
+    user = comment.get("user")
+    if not isinstance(user, Mapping):
+        return False
+    return str(user.get("type") or "") == "Bot"
+
+
 def _select_sticky_progress_comment(
     comments: Sequence[Mapping[str, object]],
     *,
     return_body: bool,
 ) -> str | dict[str, Any] | None:
-    """Select the sticky progress comment; ledger markers win over heading heuristics."""
+    """Select the sticky progress comment; ledger markers win over heading heuristics.
+
+    Only a trusted (bot-authored) comment is considered; an untrusted comment
+    that carries a sticky shape is skipped with a warning naming its id, so a
+    forged marker is visible in the run log rather than silently trusted. The
+    ledger-marker preference is applied after that author filter (LG-D4).
+    """
     progress_body = ""
     progress: dict[str, Any] | None = None
     for comment in comments:
         body = str(comment.get("body") or "")
+        if not is_sticky_progress_comment(body):
+            continue
+        if not _is_trusted_sticky_author(comment):
+            logger.warning(
+                "finding ledger: ignoring comment {} as a sticky progress comment: "
+                "author is not a bot",
+                comment.get("id"),
+            )
+            continue
         if LEDGER_MARKER_PREFIX in body or LEDGER_MARKER_V2_PREFIX in body:
             return body if return_body else dict(comment)
-        if is_sticky_progress_comment(body):
-            if return_body:
-                progress_body = body
-            else:
-                progress = dict(comment)
+        if return_body:
+            progress_body = body
+        else:
+            progress = dict(comment)
     return progress_body if return_body else progress
 
 
@@ -533,6 +576,7 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
                 int(tool_state.progress_comment.id),
                 body_with_footer,
             )
+            tool_state.last_progress_body = body_with_ledger
             return
 
         sticky = await fetch_sticky_progress_comment(
@@ -542,21 +586,25 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
             int(issue_number),
         )
         if sticky is not None:
+            # A selected sticky is always updated. Guarding on a non-empty body
+            # meant a sticky the selector returned without content fell through
+            # to ``create``, a duplicate; a blank comment is not a sticky but a
+            # selected one must still be written to.
             existing_body = str(sticky.get("body") or "")
-            if existing_body:
-                merged = merge_ledger_into_comment(existing_body, records=ledger.records())
-                body_with_footer = add_footer(ctx, merged)
-                await ctx.scm.update_issue_comment(
-                    ctx.repo.owner,
-                    ctx.repo.name,
-                    int(sticky["id"]),
-                    body_with_footer,
-                )
-                tool_state.progress_comment = ProgressComment(
-                    id=str(sticky["id"]),
-                    type="issue",
-                )
-                return
+            merged = merge_ledger_into_comment(existing_body, records=ledger.records())
+            body_with_footer = add_footer(ctx, merged)
+            await ctx.scm.update_issue_comment(
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(sticky["id"]),
+                body_with_footer,
+            )
+            tool_state.progress_comment = ProgressComment(
+                id=str(sticky["id"]),
+                type="issue",
+            )
+            tool_state.last_progress_body = merged
+            return
 
         result = await ctx.scm.create_issue_comment(
             ctx.repo.owner,
@@ -565,6 +613,7 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
             body_with_footer,
         )
         tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
+        tool_state.last_progress_body = body_with_ledger
     except Exception as err:
         logger.info("finding ledger: could not persist progress comment: {}", err)
 
@@ -620,14 +669,34 @@ _APPROVAL_SHAPED_DIAGNOSTIC = "approved"
 # #775 — posture lines. G0 item 4 fixes the mapping: `inconclusive` is mergeCraft's
 # internal outcome (GitHub's check conclusion stays `neutral`, which it already is).
 # When no credentialed reviewer ran, the record may not read as an approval.
+# The note states no outcome: the reconciled `Outcome:` line is the only outcome
+# claim in the record (LG-D8), so `inconclusive` is not asserted here.
 _NO_CREDENTIALED_REVIEWER_NOTE = (
-    "no credentialed reviewer ran — the review is `inconclusive`; the analyzers "
-    "that ran and were withheld are listed above, and this record is not an approval"
+    "no credentialed reviewer ran; the analyzers that ran and were withheld are "
+    "listed above, and this record is not an approval"
 )
 _TERMINAL_REQUEST_CHANGES_NOTE = (
-    "the reviewer's terminal verdict was `request_changes` — the review is "
-    "`inconclusive`; this record is not an approval"
+    "the reviewer's terminal verdict was `request_changes`; this record is not an approval"
 )
+
+
+def _credential_gap_with_verdict_note(model: str) -> str:
+    """Name the skipped roster slot(s) and the model behind a recorded verdict.
+
+    Rendered when a roster reviewer slot was skipped for missing credentials
+    **and** a typed terminal verdict was recorded: the record may not claim no
+    reviewer ran, so it names the producer of the verdict instead (LG-D7). The
+    note states no outcome — the reconciled ``Outcome:`` line is the only outcome
+    claim (LG-D8) — and keeps the not-an-approval posture.
+    """
+    if model:
+        producer = f"the recorded terminal verdict was produced by `{model}`"
+    else:
+        producer = "the recorded terminal verdict was produced by a model not recorded here"
+    return (
+        "the roster reviewer slot(s) above were skipped for missing credentials and "
+        f"{producer}; this record is not an approval"
+    )
 
 
 def _record_value(value: Any) -> str:
@@ -655,6 +724,18 @@ def _terminal_request_changes(packet: Any, decision: Any) -> bool:
         return True
     reason = str(getattr(decision, "reason", "") or "").lower()
     return "request_changes" in reason
+
+
+def _typed_terminal_verdict(packet: Any) -> str:
+    """Return the typed terminal verdict recorded on the packet (empty when unset).
+
+    ``_terminal_request_changes`` also honours the decision reason as a fallback,
+    but the reason is a derived summary. The record may only say "no credentialed
+    reviewer ran" when **no** typed terminal verdict was recorded (LG-D7), so the
+    renderer keys that distinction on the authoritative typed field, not the
+    reason.
+    """
+    return _record_value(getattr(packet, "agent_terminal_verdict", None)).strip()
 
 
 def record_is_not_an_approval(
@@ -748,6 +829,7 @@ def render_deterministic_review_block(
     # reconciliation never hides a real failure.
     credential_gap = _credential_gap_present(credential_degradations)
     terminal_request_changes = _terminal_request_changes(packet, decision)
+    typed_terminal_verdict = _typed_terminal_verdict(packet)
     not_an_approval = record_is_not_an_approval(
         packet=packet, credential_degradations=credential_degradations
     )
@@ -825,7 +907,16 @@ def render_deterministic_review_block(
         )
 
     pre_merge_lines = ["", "### Pre-merge checks", ""]
-    if credential_gap:
+    if credential_gap and typed_terminal_verdict:
+        # LG-D7 — a reviewer ran and recorded a typed verdict; the record names
+        # the skipped roster slot(s) (the `Credential gap` lines below name them)
+        # and the model that produced the verdict, and states no outcome (LG-D8).
+        # Keyed on the typed verdict, not the decision-reason fallback: only a
+        # recorded typed verdict proves a reviewer ran.
+        pre_merge_lines.append(
+            f"- **Review integrity:** {_credential_gap_with_verdict_note(model)}"
+        )
+    elif credential_gap:
         pre_merge_lines.append(f"- **Review integrity:** {_NO_CREDENTIALED_REVIEWER_NOTE}")
     elif terminal_request_changes:
         pre_merge_lines.append(f"- **Review integrity:** {_TERMINAL_REQUEST_CHANGES_NOTE}")
@@ -922,7 +1013,13 @@ def render_deterministic_review_block(
 
 
 async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) -> None:
-    """Upsert the sticky progress comment with the deterministic record (D6)."""
+    """Upsert the sticky progress comment with the deterministic record (D6).
+
+    The record is written over the snapshot the last writer stored, so any
+    ledger record added after that snapshot is re-merged here before the footer
+    is appended. The snapshot keeps the learnings delta; this merge keeps the
+    records; both are pure and need no extra API call (LG-D1).
+    """
     from mergecraft.mcp.comment import add_footer
     from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
     from mergecraft.utils import gha_log
@@ -935,22 +1032,29 @@ async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) ->
     if issue_number is None:
         return
 
+    book = tool_state.finding_ledger
+    records = book.records() if book is not None else []
+
     try:
         base_body = str(tool_state.last_progress_body or "").strip()
         body_with_record = merge_deterministic_record_into_comment(
             base_body,
             record_block=record_block,
         )
-        body_with_footer = add_footer(ctx, body_with_record)
+        # Re-merge only when the run's in-memory ledger has records: an empty
+        # ledger must not strip markers a prior run persisted.
+        body_with_ledger = body_with_record
+        if records:
+            body_with_ledger = merge_ledger_into_comment(body_with_record, records=records)
 
         if isinstance(tool_state.progress_comment, ProgressComment):
             await ctx.scm.update_issue_comment(
                 ctx.repo.owner,
                 ctx.repo.name,
                 int(tool_state.progress_comment.id),
-                body_with_footer,
+                add_footer(ctx, body_with_ledger),
             )
-            tool_state.last_progress_body = body_with_footer
+            tool_state.last_progress_body = body_with_ledger
             return
 
         sticky = await fetch_sticky_progress_comment(
@@ -965,28 +1069,29 @@ async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) ->
                 existing_body,
                 record_block=record_block,
             )
-            body_with_footer = add_footer(ctx, merged)
+            if records:
+                merged = merge_ledger_into_comment(merged, records=records)
             await ctx.scm.update_issue_comment(
                 ctx.repo.owner,
                 ctx.repo.name,
                 int(sticky["id"]),
-                body_with_footer,
+                add_footer(ctx, merged),
             )
             tool_state.progress_comment = ProgressComment(
                 id=str(sticky["id"]),
                 type="issue",
             )
-            tool_state.last_progress_body = body_with_footer
+            tool_state.last_progress_body = merged
             return
 
         result = await ctx.scm.create_issue_comment(
             ctx.repo.owner,
             ctx.repo.name,
             int(issue_number),
-            body_with_footer,
+            add_footer(ctx, body_with_ledger),
         )
         tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
-        tool_state.last_progress_body = body_with_footer
+        tool_state.last_progress_body = body_with_ledger
     except Exception as err:
         message = f"deterministic record: could not persist progress comment: {err}"
         logger.info(message)

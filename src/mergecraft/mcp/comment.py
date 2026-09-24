@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.findings.ledger import (
+    fetch_sticky_progress_comment,
     hydrate_finding_ledger_from_progress_comment,
     merge_ledger_into_comment,
 )
@@ -224,13 +225,49 @@ def report_progress_tool(ctx: ToolContext):
             )
             action = "updated"
         else:
-            result = await ctx.scm.create_issue_comment(
-                ctx.repo.owner, ctx.repo.name, issue_number, body_with_footer
-            )
-            ctx.tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
-            action = "created"
+            # A fresh Action run starts with no pinned comment. Look up the
+            # PR's trusted sticky so the first call reuses it instead of posting
+            # a second comment (P6). A lookup failure falls back to create: the
+            # tool must never raise for want of an issue-comment listing.
+            existing_sticky: dict[str, Any] | None = None
+            if not target_plan:
+                try:
+                    existing_sticky = await fetch_sticky_progress_comment(
+                        ctx.scm,
+                        ctx.repo.owner,
+                        ctx.repo.name,
+                        int(issue_number),
+                    )
+                except Exception as err:
+                    logger.warning(
+                        "report_progress: could not read the existing progress "
+                        "comment, creating a new one: {}",
+                        err,
+                    )
+            if existing_sticky is not None:
+                result = await ctx.scm.update_issue_comment(
+                    ctx.repo.owner,
+                    ctx.repo.name,
+                    int(existing_sticky["id"]),
+                    body_with_footer,
+                )
+                ctx.tool_state.progress_comment = ProgressComment(
+                    id=str(existing_sticky["id"]), type="issue"
+                )
+                action = "updated"
+            else:
+                result = await ctx.scm.create_issue_comment(
+                    ctx.repo.owner, ctx.repo.name, issue_number, body_with_footer
+                )
+                ctx.tool_state.progress_comment = ProgressComment(
+                    id=str(result["id"]), type="issue"
+                )
+                action = "created"
 
-        ctx.tool_state.last_progress_body = body
+        # Snapshot exactly what we posted, footer aside: the deterministic
+        # record writer rebuilds the sticky from this base, so it must carry the
+        # learnings delta and the hydrated ledger rather than the raw argument.
+        ctx.tool_state.last_progress_body = body_with_ledger
         ctx.tool_state.was_updated = True
         if not target_plan:
             ctx.tool_state.final_summary_written = True
@@ -249,7 +286,8 @@ def report_progress_tool(ctx: ToolContext):
         mutates=True,
         description=(
             "Share progress on the associated GitHub issue/PR. "
-            "The first call creates a comment; subsequent calls update it in place."
+            "Reuses the PR's existing progress comment when one is present, "
+            "otherwise creates it; later calls update it in place."
         ),
         input_schema={
             "type": "object",
