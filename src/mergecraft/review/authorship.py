@@ -145,11 +145,20 @@ def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
     if not declared and not app_slug and not _app_configured():
         token = str(ctx.github_installation_token or "").strip()
         if token:
-            viewer = _viewer_login(ctx)
-            if viewer:
-                logins.add(viewer)
-            elif _is_job_token(token):
+            if _is_job_token(token):
+                # The job token is a shared identity, and ``GET /user`` answers
+                # ``github-actions[bot]`` for it — a truthy viewer that would be
+                # added before any withholding could happen (MC-e4a36e). Do not
+                # consult it at all.
                 job_bot_only = True
+            else:
+                viewer = _viewer_login(ctx)
+                if viewer and viewer.casefold() != GITHUB_ACTIONS_BOT_LOGIN:
+                    logins.add(viewer)
+                elif viewer:
+                    # Defensive: a viewer that answers with the shared bot proves
+                    # nothing, whatever the token was.
+                    job_bot_only = True
 
     if not logins and job_bot_only:
         logger.warning(

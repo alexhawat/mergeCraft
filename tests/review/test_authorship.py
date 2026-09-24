@@ -340,6 +340,43 @@ def test_job_token_withholding_warns_once(monkeypatch: pytest.MonkeyPatch) -> No
     assert "github-actions[bot]" in captured[0]
 
 
+def test_job_token_viewer_answering_with_the_shared_bot_is_withheld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MC-e4a36e — ``GET /user`` answers ``github-actions[bot]`` for the job token.
+
+    A truthy viewer must not be added before the withholding: that ordering
+    would put the shared bot back in the set and let a same-repo PR forge a
+    marker-bearing review to move the incremental checkpoint.
+    """
+    from loguru import logger as loguru_logger
+
+    monkeypatch.setenv("INPUT_TOKEN", "job-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "job-token")
+    scm = _StubScm(app_response=None, user_response={"login": "github-actions[bot]"})
+    captured, sink_id = _capture_loguru_warnings()
+    try:
+        publishers = _expected_publishers(_ctx(scm, token="job-token"))
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert publishers == frozenset()
+    assert len(captured) == 1
+    assert "github-actions[bot]" in captured[0]
+    # The job token is never consulted: only the ``/app`` probe may run.
+    assert not [path for path, _ in scm.get_calls if path.rstrip("/").endswith("/user")]
+
+
+def test_viewer_answering_with_the_shared_bot_is_withheld_off_the_job_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defensive — a viewer that answers with the shared bot proves nothing."""
+    scm = _StubScm(app_response=None, user_response={"login": "GitHub-Actions[Bot]"})
+    publishers = _expected_publishers(_ctx(scm, token="some-installation-token"))
+
+    assert publishers == frozenset()
+
+
 def test_is_mergecraft_authored_refuses_the_job_bot_on_a_job_token_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
