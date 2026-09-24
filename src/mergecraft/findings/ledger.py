@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -18,7 +19,7 @@ from loguru import logger
 from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState, validate_lifecycle_state
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Sequence
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import AnalyzerRunState, ToolState
@@ -165,7 +166,13 @@ def ledger_round_index(tool_state: ToolState) -> int:
 
 
 def is_sticky_progress_comment(body: str) -> bool:
-    """Return whether ``body`` looks like the mergeCraft sticky progress comment."""
+    """Return whether ``body`` looks like the mergeCraft sticky progress comment.
+
+    This is a body-only shape test: it answers "could this text be our
+    comment?", not "is this comment ours?". Author trust is decided by the
+    selector (:func:`_select_sticky_progress_comment`), which applies the
+    interim bot-author rule before this shape check counts for anything.
+    """
     lowered = body.lower()
     return (
         DETERMINISTIC_RECORD_MARKER in body
@@ -176,23 +183,59 @@ def is_sticky_progress_comment(body: str) -> bool:
     )
 
 
+def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
+    """Interim sticky trust rule: only a Bot-authored comment may be the sticky.
+
+    A PR participant can quote the heading, the footer or a ledger marker, so a
+    body shape test alone lets a human win selection — after which a later write
+    fails for want of permission and the real ledger is never persisted.
+
+    **Residual (LG-D3, closes with plan 51 HS1).** Accepting any ``user.type ==
+    "Bot"`` still admits a bot that is not ours: another App installed on the
+    repo, and ``github-actions[bot]`` from **any** workflow run — including one a
+    same-repo collaborator adds on their own branch under ``pull_request``. The
+    shared authorship helper (``review/authorship.py``, plan 40) narrows this to
+    the run's expected-publisher set for App-published runs; job-token-only
+    consumers keep the residual. This plan does not import that helper because
+    both plans run in the same batch.
+    """
+    user = comment.get("user")
+    if not isinstance(user, Mapping):
+        return False
+    return str(user.get("type") or "") == "Bot"
+
+
 def _select_sticky_progress_comment(
     comments: Sequence[Mapping[str, object]],
     *,
     return_body: bool,
 ) -> str | dict[str, Any] | None:
-    """Select the sticky progress comment; ledger markers win over heading heuristics."""
+    """Select the sticky progress comment; ledger markers win over heading heuristics.
+
+    Only a trusted (bot-authored) comment is considered; an untrusted comment
+    that carries a sticky shape is skipped with a warning naming its id, so a
+    forged marker is visible in the run log rather than silently trusted. The
+    ledger-marker preference is applied after that author filter (LG-D4).
+    """
     progress_body = ""
     progress: dict[str, Any] | None = None
     for comment in comments:
         body = str(comment.get("body") or "")
+        if not is_sticky_progress_comment(body):
+            continue
+        if not _is_trusted_sticky_author(comment):
+            logger.warning(
+                "finding ledger: ignoring comment {} as a sticky progress comment: "
+                "author is not a bot",
+                comment.get("id"),
+            )
+            continue
         if LEDGER_MARKER_PREFIX in body or LEDGER_MARKER_V2_PREFIX in body:
             return body if return_body else dict(comment)
-        if is_sticky_progress_comment(body):
-            if return_body:
-                progress_body = body
-            else:
-                progress = dict(comment)
+        if return_body:
+            progress_body = body
+        else:
+            progress = dict(comment)
     return progress_body if return_body else progress
 
 
