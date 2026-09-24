@@ -105,6 +105,13 @@ class ToolContext:
     suggest_eval_add: bool = False
     budget_tracker: BudgetTracker | None = None
     repo_settings_snapshot: RepoSettingsSnapshot | None = None
+    # The run's bound GitHub event (``RunContext.gh_event``) after
+    # ``_resolve_credentials`` bound the target PR from the SCM API (TB-D2).
+    # A tool that must compare against the run's bound PR reads this rather than
+    # ``payload.event``: a comment-on-PR and a PR-naming ``workflow_dispatch``
+    # carry no ``issue_number`` on the resolved payload, but the bound event
+    # carries ``pull_request.number`` (TB-D4).
+    gh_event: dict[str, Any] | None = None
     trace_parent: TraceParent | None = None
     # P-17 / TB-D7 — the expected-publisher logins for this run, built once by
     # ``mergecraft.review.authorship.expected_publisher_logins`` and cached here.
@@ -156,6 +163,7 @@ class ToolContext:
         suggest_eval_add: bool = False,
         budget_tracker: BudgetTracker | None = None,
         repo_settings_snapshot: RepoSettingsSnapshot | None = None,
+        gh_event: dict[str, Any] | None = None,
         trace_parent: TraceParent | None = None,
     ) -> None:
         from mergecraft.scm.github import GitHubScmAdapter
@@ -211,6 +219,7 @@ class ToolContext:
         self.suggest_eval_add = suggest_eval_add
         self.budget_tracker = budget_tracker
         self.repo_settings_snapshot = repo_settings_snapshot
+        self.gh_event = gh_event
         self.publisher_logins = None
         if trace_parent is None:
             from mergecraft.tracing.tracer import current_trace_parent

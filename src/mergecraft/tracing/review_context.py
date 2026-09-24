@@ -31,6 +31,7 @@ never fail a review): absent context yields empty mappings, never errors.
         resolve_review_id — Env-inherited ``MERGECRAFT_REVIEW_ID`` → uuid4.
         correlation_key_for — Deterministic attempt-colliding key (D3).
         review_env_for_subprocess — Env mapping for spawned agent CLIs (O2).
+        stamp_review_context — Stamp resolved fields onto the bound context.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
@@ -67,6 +68,7 @@ class ReviewContext:
     mode: str = ""
     trigger: str = ""
     trust_tier: str = ""
+    raw_event_trust_floor: str = ""
 
     def attrs(self) -> dict[str, Any]:
         """Span attributes for this context, dropping empty values.
@@ -74,6 +76,14 @@ class ReviewContext:
         A local patch review has no repo/pr/head context, so
         ``correlation_key`` is empty — emitting a null/empty attribute would
         be a misleading constant, so empty values are omitted entirely.
+
+        ``raw_event_trust_floor`` is the tier the *pre-binding* event implies,
+        recorded under a name that cannot be mistaken for the run tier (a
+        comment-on-PR or PR-naming dispatch carries no head until the target
+        PR is fetched, so the pre-binding event floors to ``untrusted`` even
+        for a same-repo PR). It is kept only for trace consumers that want the
+        fail-closed floor; the tier the run actually used is ``trust_tier``,
+        stamped after the resolver binds the PR.
 
         Returns:
             dict[str, Any]: ``review.*`` attributes with no empty values.
@@ -109,6 +119,9 @@ class ReviewContext:
             # entry point (never the CLI-only env guess), so both spellings
             # reach Action and CLI spans alike.
             attrs["mergecraft.trust_tier"] = self.trust_tier
+        if self.raw_event_trust_floor:
+            attrs["review.raw_event_trust_floor"] = self.raw_event_trust_floor
+            attrs["mergecraft.raw_event_trust_floor"] = self.raw_event_trust_floor
         return attrs
 
 
@@ -143,6 +156,36 @@ def bind_review_context(ctx: ReviewContext) -> Iterator[ReviewContext]:
         yield ctx
     finally:
         _CURRENT.reset(token)
+
+
+def stamp_review_context(**overrides: Any) -> ReviewContext | None:
+    """Replace the bound context with a copy carrying ``overrides`` (TBO/TB6).
+
+    The Action entry point binds a :class:`ReviewContext` before credentials
+    are resolved, when the tier recorded from the raw event is not yet the
+    tier the run will use: a comment-on-PR or PR-naming dispatch carries no
+    head until ``_resolve_credentials`` fetches and binds the target PR, so
+    the pre-binding reading floors to ``untrusted`` even for a same-repo PR.
+    Once the resolver has picked the tier, the entry point stamps it here so
+    every span closed afterwards records the tier the run actually executed
+    with — a reader never sees ``untrusted`` for a run that ran trusted.
+
+    Total and non-throwing (convention 3 — tracing must never fail a review):
+    with no bound context this is a no-op returning ``None``.
+
+    Args:
+        **overrides (Any): Field overrides for the :class:`ReviewContext`
+            copy (e.g. ``trust_tier="trusted"``).
+
+    Returns:
+        ReviewContext | None: The updated context, or ``None`` when unbound.
+    """
+    current = _CURRENT.get()
+    if current is None:
+        return None
+    updated = replace(current, **overrides)
+    _CURRENT.set(updated)
+    return updated
 
 
 def resolve_review_id() -> str:
@@ -214,4 +257,5 @@ __all__ = [
     "current_review_context",
     "resolve_review_id",
     "review_env_for_subprocess",
+    "stamp_review_context",
 ]

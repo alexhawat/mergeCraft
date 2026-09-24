@@ -217,3 +217,151 @@ def test_unreachable_previous_pin_is_an_omission_not_a_full_index(tmp_path: Path
     assert omitted, "an unreachable previous pin must be recorded as an omission"
     reasons = " ".join(str(row.get("reason", "")).lower() for row in omitted)
     assert "pin" in reasons or "unreachable" in reasons
+
+
+# ── TB6 — the change set walks the base index too (deletions and renames) ────
+#
+# ``_changed_between_pins`` used to walk only the head index, so a moved pin
+# that deleted or renamed a surface a consumer referenced at the base pin
+# produced no finding at all. The base index is now walked too; a removed
+# surface is anchored at ``base_commit`` (the pin where it still existed).
+
+
+def _deletion_fixture(tmp_path: Path) -> dict[str, Any]:
+    """Producer at two pins: the head pin deletes a consumer-referenced surface."""
+    producer = tmp_path / "api-contracts"
+    consumer = tmp_path / "web-client"
+    primary = tmp_path / "primary"
+    primary.mkdir()
+
+    first_pin = write_contract_fixture_repo(producer)
+    (producer / "schema.graphql").unlink()
+    second_pin = git_commit_all(producer, "drop schema.graphql")
+    consumer_pin = _consumer_repo(consumer, contracts_commit=first_pin)
+
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": second_pin},
+            {"owner": "acme", "name": "web-client", "commit": consumer_pin},
+        ],
+    )
+    git_init_repo(primary)
+    git_commit_all(primary)
+    return {
+        "primary": primary,
+        "first_pin": first_pin,
+        "second_pin": second_pin,
+        "consumer_pin": consumer_pin,
+        "grant": frozenset({"acme/api-contracts", "acme/web-client"}),
+    }
+
+
+def _rename_fixture(tmp_path: Path) -> dict[str, Any]:
+    """Producer at two pins: the head pin renames ``openapi.yaml`` → ``openapi.yml``.
+
+    Both names are indexed as OpenAPI surfaces, so the moved pin removes one
+    path and adds another (the ``git diff --name-status`` rename shape).
+    """
+    producer = tmp_path / "api-contracts"
+    consumer = tmp_path / "web-client"
+    primary = tmp_path / "primary"
+    primary.mkdir()
+
+    first_pin = write_contract_fixture_repo(producer)
+    (producer / "openapi.yaml").rename(producer / "openapi.yml")
+    second_pin = git_commit_all(producer, "rename openapi surface")
+    consumer_pin = _consumer_repo(consumer, contracts_commit=first_pin)
+
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": second_pin},
+            {"owner": "acme", "name": "web-client", "commit": consumer_pin},
+        ],
+    )
+    git_init_repo(primary)
+    git_commit_all(primary)
+    return {
+        "primary": primary,
+        "first_pin": first_pin,
+        "second_pin": second_pin,
+        "consumer_pin": consumer_pin,
+        "grant": frozenset({"acme/api-contracts", "acme/web-client"}),
+    }
+
+
+def test_deleted_surface_is_a_finding_anchored_at_the_base_pin(tmp_path: Path) -> None:
+    """TB6 — a moved pin that deletes a surface still reports the removal.
+
+    The consumer references ``schema.graphql`` at the base pin; the head pin
+    removed it. The finding must name the removed path and be anchored at the
+    pin where it existed (``base_commit``), not silently vanish.
+    """
+    fixture = _deletion_fixture(tmp_path)
+    base = _manifest(
+        ("acme", "api-contracts", fixture["first_pin"]),
+        ("acme", "web-client", fixture["consumer_pin"]),
+    )
+
+    review = review_linked_repos(
+        repo_root=fixture["primary"],
+        base_manifest=base,
+        authorized_repos=fixture["grant"],
+    )
+
+    removed = [
+        finding
+        for finding in review.findings
+        if finding.impact.changed_contract.path == "schema.graphql"
+    ]
+    assert removed, [
+        (finding.impact.changed_contract.path, finding.impact.changed_contract.commit)
+        for finding in review.findings
+    ]
+    # One row per indexed symbol on the removed surface; every row is anchored at
+    # the base pin where the path still existed.
+    assert {finding.impact.changed_contract.commit for finding in removed} == {fixture["first_pin"]}
+
+
+def test_renamed_surface_yields_both_pins(tmp_path: Path) -> None:
+    """TB6 — a rename is two rows: old path at ``base_commit``, new path at ``head_commit``."""
+    fixture = _rename_fixture(tmp_path)
+    base = _manifest(
+        ("acme", "api-contracts", fixture["first_pin"]),
+        ("acme", "web-client", fixture["consumer_pin"]),
+    )
+
+    review = review_linked_repos(
+        repo_root=fixture["primary"],
+        base_manifest=base,
+        authorized_repos=fixture["grant"],
+    )
+
+    rows = {
+        (finding.impact.changed_contract.path, finding.impact.changed_contract.commit)
+        for finding in review.findings
+    }
+    assert ("openapi.yaml", fixture["first_pin"]) in rows, rows
+    assert ("openapi.yml", fixture["second_pin"]) in rows, rows
+    assert {path for path, _ in rows} == {"openapi.yaml", "openapi.yml"}, rows
+
+
+def test_surface_identical_at_both_pins_is_still_not_reported(tmp_path: Path) -> None:
+    """TB6 guard — walking the base index does not start reporting unchanged surfaces."""
+    fixture = _rename_fixture(tmp_path)
+    base = _manifest(
+        ("acme", "api-contracts", fixture["first_pin"]),
+        ("acme", "web-client", fixture["consumer_pin"]),
+    )
+
+    review = review_linked_repos(
+        repo_root=fixture["primary"],
+        base_manifest=base,
+        authorized_repos=fixture["grant"],
+    )
+
+    paths = {finding.impact.changed_contract.path for finding in review.findings}
+    assert paths.isdisjoint({"schema.graphql", "service.proto", "src/demo/__init__.py"}), paths
+    assert "openapi.yaml" in paths
+    assert "openapi.yml" in paths

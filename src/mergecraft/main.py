@@ -61,6 +61,7 @@ from mergecraft.tracing.review_context import (
     bind_review_context,
     correlation_key_for,
     resolve_review_id,
+    stamp_review_context,
 )
 from mergecraft.tracing.tracer import resolve_correlation_from_env
 from mergecraft.utils import gha_log
@@ -1118,6 +1119,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         budget_tracker=ctx.budget_tracker,
+        gh_event=ctx.gh_event,
     )
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
@@ -1855,10 +1857,15 @@ def _action_review_context() -> ReviewContext:
         attempt = int(attempt_raw) if attempt_raw else None
     except ValueError:
         attempt = None
-    # Derive the tier from the same event payload `_resolve_credentials` uses
-    # (`derive_trust_tier`, fail-closed `untrusted`) — never the
-    # `MERGECRAFT_TRUST_TIER` env var, which only the CLI path sets; reading it
-    # here would omit the tier on Action runs.
+    # TBO/TB6 — do NOT record the pre-binding tier as ``trust_tier``. This
+    # entry point binds before ``_resolve_credentials`` fetches and binds the
+    # target PR (main.py:812-814), so for a comment-on-PR or a PR-naming
+    # dispatch the event carries no head and ``derive_trust_tier`` floors to
+    # ``untrusted`` — while ``resolve_trust_policy`` on the *bound* event
+    # returns ``trusted`` for a same-repo PR. Recording that floor as
+    # ``trust_tier`` would read the opposite of ``tool_state.trust_tier``.
+    # It is kept under ``raw_event_trust_floor`` instead, and ``main`` stamps
+    # the real tier once materialize has resolved it (``stamp_review_context``).
     from mergecraft.utils.payload import read_github_event
 
     try:
@@ -1877,8 +1884,24 @@ def _action_review_context() -> ReviewContext:
         head_sha=head_sha,
         mode="review",
         trigger=os.environ.get("GITHUB_EVENT_NAME") or "",
-        trust_tier=derive_trust_tier(event=event),
+        raw_event_trust_floor=derive_trust_tier(event=event),
     )
+
+
+def _stamp_review_trust_tier(ctx: RunContext) -> None:
+    """Stamp the run's resolved trust tier on the bound review context (TBO/TB6).
+
+    Registered as an engine ``on_stage`` hook that fires in the entry-point
+    context (before each stage's ``wait_for`` copies it), so a tier resolved
+    during ``materialize`` reaches every span closed afterwards — including
+    the run root — as ``review.trust_tier`` / ``mergecraft.trust_tier``. Before
+    materialize the tier is unset and this is a no-op; the raw pre-binding
+    floor stays available as ``review.raw_event_trust_floor``.
+    """
+    tool_state = ctx.tool_state
+    tier = getattr(tool_state, "trust_tier", None) if tool_state is not None else None
+    if isinstance(tier, str) and tier:
+        stamp_review_context(trust_tier=tier)
 
 
 async def main() -> MainResult:
@@ -1917,6 +1940,14 @@ async def main() -> MainResult:
             )
 
     ctx = RunContext()
+    # TBO/TB6 — stamp the tier the run actually uses once materialize has
+    # bound the target PR and resolved it. ``on_stage`` runs in this
+    # (entry-point) context before each stage hook's ``wait_for`` task copies
+    # the context, so the stamp reaches every span closed afterwards — the
+    # bound ``ReviewContext`` above records only the raw pre-binding floor
+    # (``raw_event_trust_floor``), never a ``trust_tier`` that could read the
+    # opposite of ``tool_state.trust_tier``.
+    engine.set_on_stage(lambda _name: _stamp_review_trust_tier(ctx))
     # OB1 / O1 — bind the review-wide identity for the whole run so every
     # span closed in this process (and, via the exported review env, every
     # spawned agent CLI) carries the same ``review.id``.

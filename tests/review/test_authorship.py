@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 
@@ -148,3 +150,36 @@ def test_expected_publishers_returns_a_frozenset_without_an_app() -> None:
     ctx = _ctx(_StubScm(app_response=None))
     publishers = _expected_publishers(ctx)
     assert isinstance(publishers, frozenset)
+
+
+# ── TB6 — the running-loop branch production actually uses ───────────────────
+#
+# ``expected_publisher_logins`` is synchronous by contract, but the production
+# caller (``list_mergecraft_reviews``) is async, so ``_await_sync`` takes its
+# ``asyncio.get_running_loop()`` branch and drives the single ``ctx.scm.get`` in
+# a worker thread. The sync tests above exercise the other branch; these call
+# the helper from inside a running loop so the production branch is the one
+# under test.
+
+
+@pytest.mark.asyncio
+async def test_expected_publishers_resolves_from_a_running_loop() -> None:
+    """TB6 — the App lookup is driven to completion from inside a running loop."""
+    ctx = _ctx(_StubScm(app_response={"slug": "mergecraft"}))
+
+    publishers = _expected_publishers(ctx)
+
+    assert isinstance(publishers, frozenset)
+    assert "mergecraft[bot]" in publishers
+
+
+@pytest.mark.asyncio
+async def test_failed_lookup_from_a_running_loop_never_widens() -> None:
+    """TB6 — a lookup failure on the running-loop branch drops the login."""
+    ctx = _ctx(_StubScm(fail=True))
+
+    publishers = _expected_publishers(ctx)
+
+    assert isinstance(publishers, frozenset)
+    marker = {"body": _MERGECRAFT_BODY, "user": {"login": "mergecraft[bot]", "type": "Bot"}}
+    assert _is_authored(marker, publishers) is False

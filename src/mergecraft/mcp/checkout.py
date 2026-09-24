@@ -61,17 +61,44 @@ def _manifest_exists_at_ref(*, cwd: str, ref: str, rel_path: str) -> bool:
     return True
 
 
-def _base_linked_repo_manifest(*, cwd: str, base_ref: str) -> BaseManifestLookup:
+def _base_ref_resolves(*, cwd: str, ref: str) -> bool:
+    """Return True when ``ref`` resolves to a commit object in the checkout (TB6).
+
+    ``git cat-file -e <ref>:<path>`` fails identically for "the ref is
+    missing" and "the path is absent at a present ref". Probing the ref first
+    keeps those two apart before :func:`_base_linked_repo_manifest` decides
+    whether an absent manifest is benign.
+    """
+    try:
+        _run_git(["rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=cwd)
+    except Exception:
+        return False
+    return True
+
+
+def _base_linked_repo_manifest(
+    *,
+    cwd: str,
+    base_ref: str,
+    base_fetch_failure: str | None = None,
+) -> BaseManifestLookup:
     """Read the linked-repo manifest at ``origin/<base>`` (TB-D11).
 
     The review path diffs pins between the base and head manifests, so it needs
-    the base manifest. Three outcomes:
+    the base manifest. Four outcomes:
 
-    * no base ref is known, or the manifest is genuinely **absent** at the base
-      ref — every head entry is newly added and contributes no change;
-    * the manifest **exists but cannot be decoded or parsed** — an omission with
-      a reason, never a silent zero-finding report (TB-D11/TB-D12);
-    * the manifest is read — the pin-movement baseline.
+    * no base ref is known — every head entry is newly added and contributes
+      no change;
+    * the base ref **did not resolve** (its fetch soft-failed, so
+      ``origin/<base>`` is missing) — the movement baseline is unknown, not
+      empty: a manifest the PR added is indistinguishable from one we could
+      not reach, so an omission with a reason is recorded for every
+      otherwise-reviewable entry, never a silent zero-finding report
+      (TB-D11/TB-D12, P-8);
+    * the manifest is genuinely **absent** at a resolved base ref — every head
+      entry is newly added and contributes no change;
+    * the manifest **exists but cannot be decoded or parsed** — an omission
+      with a reason, never a silent zero-finding report (TB-D11/TB-D12).
 
     Never a whole-index fallback, which would report contracts the PR did not
     change.
@@ -84,6 +111,15 @@ def _base_linked_repo_manifest(*, cwd: str, base_ref: str) -> BaseManifestLookup
     if not base_ref:
         return BaseManifestLookup(manifest=empty)
     ref = f"origin/{base_ref}"
+    if not _base_ref_resolves(cwd=cwd, ref=ref):
+        # The base ref never resolved. When the base fetch soft-failed the
+        # movement baseline is unknown, not empty: an "absent" manifest here
+        # may just be a ref we could not fetch, so each otherwise-reviewable
+        # entry becomes an omission with a reason (TB-D11/TB-D12, P-8).
+        reason = f"base ref {ref} could not be resolved"
+        if base_fetch_failure:
+            reason = f"{reason}: {base_fetch_failure}"
+        return BaseManifestLookup(manifest=empty, unreadable_reason=reason)
     if not _manifest_exists_at_ref(cwd=cwd, ref=ref, rel_path=str(MANIFEST_REL)):
         return BaseManifestLookup(manifest=empty)
     unreadable_reason = f"base manifest unreadable at {ref}"
@@ -544,10 +580,21 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             raise RuntimeError(msg)
 
-        # TB-D4 — refuse a PR the run was not bound to. ``_resolve_credentials``
-        # bound the run to ``ctx.payload.event.issue_number``; the agent's
-        # ``pull_number`` argument must not redirect the checkout elsewhere.
-        bound_number = ctx.payload.event.issue_number
+        # TB-D4 — refuse a PR the run was not bound to. The bound number lives on
+        # the run's **bound** event (``_resolve_credentials`` writes the fetched
+        # ``pull_request`` onto ``ctx.gh_event``); the resolved payload therefore
+        # is empty for a comment-on-PR and a PR-naming ``workflow_dispatch``,
+        # whose ``issue_number`` is never set — reading the payload alone left
+        # the guard inert for dispatches. Prefer the bound event, then fall back
+        # to the payload so a run with no bound number is unchanged.
+        bound_pr = ctx.gh_event.get("pull_request") if isinstance(ctx.gh_event, dict) else None
+        bound_number: int | None = (
+            bound_pr.get("number")
+            if isinstance(bound_pr, dict) and isinstance(bound_pr.get("number"), int)
+            else None
+        )
+        if bound_number is None:
+            bound_number = ctx.payload.event.issue_number
         if bound_number is not None and pull_number != bound_number:
             msg = (
                 f"refusing to check out PR #{pull_number}: this run is bound to "
@@ -844,7 +891,9 @@ def checkout_pr_tool(ctx: ToolContext):
                 operator_authorized_linked_repos,
             )
 
-            base_lookup = _base_linked_repo_manifest(cwd=cwd, base_ref=base_ref)
+            base_lookup = _base_linked_repo_manifest(
+                cwd=cwd, base_ref=base_ref, base_fetch_failure=base_fetch_failure
+            )
             linked = attach_linked_repo_review(
                 Path(cwd),
                 authorized_repos=operator_authorized_linked_repos(),

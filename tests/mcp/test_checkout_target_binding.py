@@ -36,8 +36,8 @@ def _git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
-def _pr_repo(tmp_path: Path) -> Path:
-    """Build an origin serving ``refs/pull/1/head`` and return the clone."""
+def _pr_repo(tmp_path: Path, *, pull_number: int = 1) -> Path:
+    """Build an origin serving ``refs/pull/<pull_number>/head`` and return the clone."""
     origin = tmp_path / "origin.git"
     work = tmp_path / "work"
     work.mkdir()
@@ -53,7 +53,7 @@ def _pr_repo(tmp_path: Path) -> Path:
     _git(work, "add", "feature.py")
     _git(work, "commit", "-m", "feature")
     _git(work, "clone", "--bare", str(work), str(origin))
-    _git(work, "push", str(origin), "feature:refs/pull/1/head")
+    _git(work, "push", str(origin), f"feature:refs/pull/{pull_number}/head")
     clone = tmp_path / "clone"
     _git(tmp_path, "clone", str(origin), str(clone))
     return clone
@@ -95,22 +95,28 @@ def _ctx_for(
     bound_pr: int | None,
     trust_tier: Literal["trusted", "untrusted"] = "trusted",
     authority_trust: Literal["trusted", "untrusted"] | None = None,
+    payload_event: PayloadEvent | None = None,
+    gh_event: dict[str, Any] | None = None,
 ) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(repo))
     state.selected_mode = "Review"
     (tmp_path / "artifacts").mkdir(parents=True, exist_ok=True)
+    event = (
+        payload_event
+        if payload_event is not None
+        else PayloadEvent(trigger="issue_comment_created", issue_number=bound_pr, is_pr=True)
+    )
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
-        payload=ResolvedPayload(
-            event=PayloadEvent(trigger="issue_comment_created", issue_number=bound_pr, is_pr=True)
-        ),
+        payload=ResolvedPayload(event=event),
         github=github,
         tool_state=state,
         trust_tier=trust_tier,
         authority_trust=authority_trust,
         modes=compute_modes("claude"),
         tmpdir=str(tmp_path / "artifacts"),
+        gh_event=gh_event,
     )
 
 
@@ -189,6 +195,123 @@ async def test_checkout_without_a_bound_pr_does_not_refuse_on_number(tmp_path: P
     """Guard — an unbound run (no PR number on the payload) is unchanged."""
     repo = _pr_repo(tmp_path)
     ctx = _ctx_for(repo, _StubGitHub(fork=False), tmp_path, bound_pr=None)
+
+    is_error, text = await _call(ctx, 1)
+
+    assert is_error is False, text
+
+
+# ── TB6 — the bound number is read from ``ctx.gh_event``, not only the payload ─
+#
+# A ``workflow_dispatch`` (and a comment-on-PR) resolves no ``issue_number`` on
+# the payload, so the pre-TB6 guard — which read ``ctx.payload.event.issue_number``
+# alone — was inert on those runs. ``_resolve_credentials`` binds the fetched PR
+# onto ``ctx.gh_event``; the guard now prefers that bound ``pull_request.number``
+# and only falls back to the payload when the bound event has none.
+
+_DISPATCH_EVENT = PayloadEvent(trigger="workflow_dispatch")
+
+
+@pytest.mark.asyncio
+async def test_checkout_refuses_a_dispatch_pull_number_the_run_was_not_bound_to(
+    tmp_path: Path,
+) -> None:
+    """TB-D4 — on a dispatch run the bound number still governs the checkout.
+
+    The payload carries no ``issue_number``; only ``ctx.gh_event`` knows the run
+    is bound to PR #42. Checking out #43 must be refused.
+    """
+    repo = _pr_repo(tmp_path, pull_number=42)
+    ctx = _ctx_for(
+        repo,
+        _StubGitHub(fork=False),
+        tmp_path,
+        bound_pr=None,
+        payload_event=_DISPATCH_EVENT,
+        gh_event={"pull_request": {"number": 42}},
+    )
+
+    is_error, text = await _call(ctx, 43)
+
+    assert is_error is True, text
+    assert "bound" in text.lower() or "not the reviewed" in text.lower(), text
+
+
+@pytest.mark.asyncio
+async def test_checkout_allows_the_dispatch_bound_pull_number(tmp_path: Path) -> None:
+    """TB-D4 — the dispatch run's own bound PR #42 still checks out."""
+    repo = _pr_repo(tmp_path, pull_number=42)
+    ctx = _ctx_for(
+        repo,
+        _StubGitHub(fork=False),
+        tmp_path,
+        bound_pr=None,
+        payload_event=_DISPATCH_EVENT,
+        gh_event={"pull_request": {"number": 42}},
+    )
+
+    is_error, text = await _call(ctx, 42)
+
+    assert is_error is False, text
+
+
+@pytest.mark.asyncio
+async def test_checkout_falls_back_to_the_payload_number_without_a_bound_pull_request(
+    tmp_path: Path,
+) -> None:
+    """TB-D4 — ``gh_event`` present but with no ``pull_request`` still binds from the payload."""
+    repo = _pr_repo(tmp_path)
+    ctx = _ctx_for(
+        repo,
+        _StubGitHub(fork=False),
+        tmp_path,
+        bound_pr=1,
+        gh_event={"action": "created"},
+    )
+
+    is_error, text = await _call(ctx, 2)
+
+    assert is_error is True, text
+    assert "bound" in text.lower() or "not the reviewed" in text.lower(), text
+
+
+@pytest.mark.asyncio
+async def test_checkout_ignores_a_non_integer_bound_number(tmp_path: Path) -> None:
+    """TB-D4 — a non-integer ``number`` on the bound event is not a bound number.
+
+    A naive ``bound_pr.get("number") is not None`` guard would compare ``1`` (a
+    real PR number) against the string ``"42"`` and refuse the PR the run was
+    actually bound to. A non-integer value does not bind.
+    """
+    repo = _pr_repo(tmp_path)
+    ctx = _ctx_for(
+        repo,
+        _StubGitHub(fork=False),
+        tmp_path,
+        bound_pr=None,
+        payload_event=_DISPATCH_EVENT,
+        gh_event={"pull_request": {"number": "42"}},
+    )
+
+    is_error, text = await _call(ctx, 1)
+
+    assert is_error is False, text
+
+
+@pytest.mark.asyncio
+async def test_checkout_without_a_bound_number_on_a_dispatch_is_permissive(
+    tmp_path: Path,
+) -> None:
+    """Guard — a dispatch with no bound number anywhere keeps today's behaviour."""
+    repo = _pr_repo(tmp_path)
+    ctx = _ctx_for(
+        repo,
+        _StubGitHub(fork=False),
+        tmp_path,
+        bound_pr=None,
+        payload_event=_DISPATCH_EVENT,
+        gh_event={"action": "created"},
+    )
 
     is_error, text = await _call(ctx, 1)
 

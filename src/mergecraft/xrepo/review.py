@@ -173,15 +173,24 @@ def _changed_between_pins(
     base_index: ContractIndex,
     head_index: ContractIndex,
 ) -> list[ChangedContract]:
-    """Return head surfaces whose path differs between the two pinned commits (TB-D11).
+    """Return surfaces whose path differs between the two pinned commits (TB-D11).
 
-    A surface is changed when its path is new at the head pin or its blob differs
-    between the pins. Surfaces whose file is byte-identical at both pins are not
-    reported: the PR did not change them.
+    A surface is changed when its path is new at the head pin, its blob differs
+    between the pins, or its path existed at the base pin and is **gone** at the
+    head pin (a deletion or a rename). Surfaces whose file is byte-identical at
+    both pins are not reported: the PR did not change them.
+
+    A removed surface has no head entry to anchor at, so it is anchored at
+    ``base_commit`` — the pin where it still existed — keeping the removal in
+    the change set instead of dropping it silently. Consumers pinned at the base
+    commit are then checked against the surface the pin move took away.
     """
-    base_paths = {surface.path for surface in _indexed_surfaces(base_index)}
+    head_surfaces = _indexed_surfaces(head_index)
+    base_surfaces = _indexed_surfaces(base_index)
+    base_paths = {surface.path for surface in base_surfaces}
+    head_paths = {surface.path for surface in head_surfaces}
     changed: list[ChangedContract] = []
-    for surface in _indexed_surfaces(head_index):
+    for surface in head_surfaces:
         if surface.path in base_paths and git_blob_sha(
             repo_root, base_commit, surface.path
         ) == git_blob_sha(repo_root, head_commit, surface.path):
@@ -190,6 +199,18 @@ def _changed_between_pins(
             ChangedContract(
                 repo=repo,
                 commit=head_commit,
+                path=surface.path,
+                kind=surface.kind or "contract",
+                operation_id=surface.symbol,
+            )
+        )
+    for surface in base_surfaces:
+        if surface.path in head_paths:
+            continue
+        changed.append(
+            ChangedContract(
+                repo=repo,
+                commit=base_commit,
                 path=surface.path,
                 kind=surface.kind or "contract",
                 operation_id=surface.symbol,

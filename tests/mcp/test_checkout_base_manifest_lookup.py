@@ -240,6 +240,84 @@ def test_unreadable_base_manifest_omits_every_reviewable_entry(tmp_path: Path) -
     assert all(row["reason"] == lookup.unreadable_reason for row in omitted)
 
 
+# ── TB6: a failed base fetch is an omission, not a silent zero ───────────────
+
+
+def test_unresolved_base_ref_with_a_fetch_failure_marks_the_manifest_unreadable(
+    tmp_path: Path,
+) -> None:
+    """TB6 — a base fetch that failed is unknown, not empty: reason names the failure."""
+    clone = _primary_clone(tmp_path)
+
+    lookup = _base_linked_repo_manifest(
+        cwd=str(clone),
+        base_ref="release",  # never fetched → ``origin/release`` does not resolve
+        base_fetch_failure="could not fetch origin/release",
+    )
+
+    assert lookup.manifest.repos == ()
+    assert lookup.unreadable_reason is not None
+    assert "could not fetch origin/release" in lookup.unreadable_reason
+    assert "resolve" in lookup.unreadable_reason.lower()
+
+
+def test_failed_base_fetch_omits_every_reviewable_entry(tmp_path: Path) -> None:
+    """TB6 — an unresolvable base ref yields ``linkedRepoOmitted`` per entry, zero findings."""
+    producer = tmp_path / "api-contracts"
+    pin = write_contract_fixture_repo(producer)
+    clone = _primary_clone(tmp_path)
+    _commit_head_manifest(
+        clone,
+        repos=[{"owner": "acme", "name": "api-contracts", "commit": pin}],
+    )
+
+    lookup = _base_linked_repo_manifest(
+        cwd=str(clone),
+        base_ref="release",
+        base_fetch_failure="could not fetch origin/release",
+    )
+    assert lookup.unreadable_reason is not None
+
+    payload = attach_linked_repo_review(
+        clone,
+        authorized_repos=frozenset({"acme/api-contracts"}),
+        base_manifest=lookup.manifest,
+        base_manifest_error=lookup.unreadable_reason,
+    )
+
+    assert payload is not None
+    assert payload["linkedRepoFindings"] == []
+    omitted = payload.get("linkedRepoOmitted") or []
+    assert [row["repo"] for row in omitted] == ["acme/api-contracts"]
+    assert all("could not fetch origin/release" in row["reason"] for row in omitted)
+
+
+def test_absent_manifest_with_no_fetch_failure_stays_omission_free(tmp_path: Path) -> None:
+    """F4 guard — a genuinely absent manifest at a resolved base ref is not an omission."""
+    producer = tmp_path / "api-contracts"
+    pin = write_contract_fixture_repo(producer)
+    clone = _primary_clone(tmp_path)
+    _commit_head_manifest(
+        clone,
+        repos=[{"owner": "acme", "name": "api-contracts", "commit": pin}],
+    )
+
+    lookup = _base_linked_repo_manifest(cwd=str(clone), base_ref="main", base_fetch_failure=None)
+
+    assert lookup.manifest.repos == ()
+    assert lookup.unreadable_reason is None
+
+    payload = attach_linked_repo_review(
+        clone,
+        authorized_repos=frozenset({"acme/api-contracts"}),
+        base_manifest=lookup.manifest,
+        base_manifest_error=lookup.unreadable_reason,
+    )
+
+    assert payload is not None
+    assert payload.get("linkedRepoOmitted") == []
+
+
 def test_valid_base_manifest_drives_the_pin_movement_findings(tmp_path: Path) -> None:
     """F4 — a readable base manifest gives the real change set (non-empty glue)."""
     producer = tmp_path / "api-contracts"

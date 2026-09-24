@@ -84,6 +84,11 @@ the contract.
 | Bound same-repo PR allowed | `…::test_checkout_allows_the_bound_same_repo_pull_number` | functional (guard) |
 | Fork PR on an untrusted run allowed | `…::test_checkout_allows_a_fork_pr_on_an_untrusted_run` | functional (guard) |
 | No bound PR number → no number refusal | `…::test_checkout_without_a_bound_pr_does_not_refuse_on_number` | functional (guard) |
+| Dispatch payload, bound `ctx.gh_event` #42 → checking out #43 refused | `…::test_checkout_refuses_a_dispatch_pull_number_the_run_was_not_bound_to` | functional |
+| Dispatch payload, bound `ctx.gh_event` #42 → #42 allowed | `…::test_checkout_allows_the_dispatch_bound_pull_number` | functional |
+| `gh_event` present but no `pull_request` → payload number fallback | `…::test_checkout_falls_back_to_the_payload_number_without_a_bound_pull_request` | functional |
+| Non-integer bound `number` does not bind | `…::test_checkout_ignores_a_non_integer_bound_number` | functional (guard) |
+| Dispatch with no bound number anywhere → permissive | `…::test_checkout_without_a_bound_number_on_a_dispatch_is_permissive` | functional (guard) |
 
 ### TB-D5 — a files-API diff after a successful checkout is labelled as exactly that
 
@@ -113,6 +118,8 @@ the contract.
 | Lookup failure drops the login, never widens | `…::test_failed_lookup_drops_the_login_and_never_widens` | unit |
 | Set built once per run (cached) | `…::test_expected_publishers_is_built_once_per_run` | unit |
 | Helper is total with no App configured | `…::test_expected_publishers_returns_a_frozenset_without_an_app` | unit (guard) |
+| Running-loop branch (the production path) resolves the App login | `…::test_expected_publishers_resolves_from_a_running_loop` | unit (async) |
+| A failure on the running-loop branch never widens | `…::test_failed_lookup_from_a_running_loop_never_widens` | unit (async, guard) |
 | `last_reviewed_sha` ignores an unexpected author | `tests/mcp/test_checkout.py::test_last_reviewed_sha_ignores_a_marker_from_an_unexpected_author` | unit |
 | `last_reviewed_sha` ignores another App's bot | `…::test_last_reviewed_sha_ignores_a_marker_from_another_app_bot` | unit |
 | `last_reviewed_sha` counts the publishing login (PAT run) | `…::test_last_reviewed_sha_counts_a_marker_from_the_publishing_login` | unit |
@@ -159,6 +166,9 @@ the contract.
 | Unmoved pin → zero findings | `tests/xrepo/test_review_change_set.py::test_unmoved_pin_yields_zero_findings` | integration |
 | Moved pin → only surfaces that differ between pins | `…::test_moved_pin_reports_only_surfaces_changed_between_pins` | integration |
 | Unchanged surfaces never reported | `…::test_unchanged_surfaces_are_not_reported_as_changed` | integration |
+| Deleted surface reported at `base_commit` | `…::test_deleted_surface_is_a_finding_anchored_at_the_base_pin` | integration |
+| Rename → old path at `base_commit`, new path at `head_commit` | `…::test_renamed_surface_yields_both_pins` | integration |
+| Byte-identical surfaces still not reported after the base walk | `…::test_surface_identical_at_both_pins_is_still_not_reported` | integration (guard) |
 | Explicit CLI `producer=` keeps whole-index semantics | `…::test_explicit_producer_keeps_whole_index_semantics` | integration (guard) |
 | Real `_base_linked_repo_manifest`: absent vs corrupt vs valid | `tests/mcp/test_checkout_base_manifest_lookup.py::test_absent_base_manifest_reads_as_empty_without_a_reason`, `::test_corrupt_base_manifest_is_marked_unreadable`, `::test_valid_base_manifest_is_parsed`, `::test_binary_base_manifest_is_marked_unreadable`, `::test_no_base_ref_returns_an_empty_lookup` | unit (real git read path) |
 | A readable base manifest drives the real pin-movement findings | `…::test_valid_base_manifest_drives_the_pin_movement_findings` | integration |
@@ -171,6 +181,9 @@ the contract.
 | Unreachable previous pin is an omission, not a full index | `…::test_unreachable_previous_pin_is_an_omission_not_a_full_index` | integration |
 | Absent base manifest (no manifest at `origin/<base>`) → no omission | `tests/mcp/test_checkout_base_manifest_lookup.py::test_absent_base_manifest_yields_no_omission` | integration |
 | Unreadable base manifest → omission per entry, zero findings | `…::test_unreadable_base_manifest_omits_every_reviewable_entry` | integration |
+| Failed base fetch → `unreadable_reason` names the failure | `…::test_unresolved_base_ref_with_a_fetch_failure_marks_the_manifest_unreadable` | unit (real git read path) |
+| Failed base fetch → omission per otherwise-reviewable entry | `…::test_failed_base_fetch_omits_every_reviewable_entry` | integration |
+| Absent manifest with no fetch failure → still no omission | `…::test_absent_manifest_with_no_fetch_failure_stays_omission_free` | integration (guard) |
 
 ### TB-D13 — no docs edits / floor numbers / new required check
 
@@ -187,6 +200,21 @@ No test; enforced by TB6's strictness sweep and `make ci-static`.
 | Pre-set keys still win (`override=False`) | `…::test_preset_keys_still_win_over_the_env_file` | functional (guard) |
 | No file in Actions is a silent no-op | `…::test_actions_with_no_env_file_is_a_silent_noop` | functional (guard) |
 
+### TB6 — the recorded review tier matches the run's tier
+
+The Action entry point binds its `ReviewContext` before credentials resolve, so
+for a comment-on-PR run the pre-binding event floors to `untrusted` even when
+the bound, same-repo PR resolves `trusted`. The raw floor is recorded under
+`review.raw_event_trust_floor`; the tier the run actually used is stamped onto
+`review.trust_tier` / `mergecraft.trust_tier` once materialize has resolved it.
+
+| Scenario | Tests | Layer |
+| --- | --- | --- |
+| Pre-binding context records the raw floor and no run tier | `tests/tracing/test_review_trust_stamp.py::test_action_context_records_the_raw_floor_and_no_run_tier` | integration |
+| Bound same-repo run → `review.trust_tier == tool_state.trust_tier == "trusted"`, floor still `untrusted` | `…::test_bound_same_repo_run_stamps_the_resolved_tier_and_keeps_the_floor` | integration |
+| Both attribute spellings present and distinct | same test | integration |
+| Stamping with no bound context is a total no-op | `…::test_stamp_is_a_noop_without_a_bound_context` | unit (guard) |
+
 ## Pinned implementation seams
 
 These are the names the tests target; TB2–TB5 must expose them.
@@ -202,6 +230,8 @@ These are the names the tests target; TB2–TB5 must expose them.
 | `_base_linked_repo_manifest(*, cwd, base_ref) -> BaseManifestLookup` | `mergecraft.mcp.checkout` | F4 tests |
 | `review_linked_repos(..., base_manifest=, base_manifest_error=)` | `mergecraft.xrepo.review` | TB-D11 / F4 tests |
 | `attach_linked_repo_review(..., base_manifest=, base_manifest_error=)` + `linkedRepoOmitted` | `mergecraft.review.linked_repos` | TB-D12 / F4 tests |
+| `_base_linked_repo_manifest(*, cwd, base_ref, base_fetch_failure=)` | `mergecraft.mcp.checkout` | F4 / TB6 fetch-failure tests |
+| `stamp_review_context(**overrides)`, `_stamp_review_trust_tier(ctx)` | `mergecraft.tracing.review_context`, `mergecraft.main` | TB6 tier-stamp tests |
 
 **Documented assumptions (amend at reconciliation if the implementation names
 them differently):**
@@ -323,6 +353,51 @@ states the environment it means. `tests/cli/test_local_env_loader.py` already
 pinned non-Actions in its fixture; its docstring now records that contract. No
 assertion weakened, no source touched.
 
+### TB6 post-PR test pinning (2026-09-24)
+
+Both mergeCraft reviews of PR #866 flagged five behaviours the post-review fixes
+in the working tree address. This pass pins each fix; no marker is carried, so
+the suite ends with zero `xfail`/`xpass`. Every test below was confirmed to fail
+against a temporary local revert of its product change (removed again before
+this document was updated).
+
+1. **Checkout binds the PR from `ctx.gh_event`, not only the payload (TB-D4).**
+   `_resolve_credentials` writes the fetched `pull_request.number` onto
+   `ctx.gh_event`, but `checkout_pr` read only `ctx.payload.event.issue_number` —
+   empty on a `workflow_dispatch` (and a comment-on-PR), so the mismatch guard
+   was inert there. `tests/mcp/test_checkout_target_binding.py` gains the
+   dispatch-shaped cases (bound #42 refuses #43; allows #42), the payload
+   fallback when the bound event has no `pull_request`, the non-integer `number`
+   guard, and the dispatch-unbound permissive guard. `_pr_repo` now takes a
+   `pull_number`; `_ctx_for` takes `payload_event=` / `gh_event=`.
+2. **The change set walks the base index too (TB-D11).** A moved pin that
+   deleted or renamed a surface a consumer referenced at the base pin produced
+   no finding. `tests/xrepo/test_review_change_set.py` gains deletion and rename
+   fixtures: a removed surface is anchored at `base_commit` (one row per indexed
+   symbol), a rename yields the old path at `base_commit` and the new path at
+   `head_commit`, and byte-identical surfaces still yield nothing.
+3. **The authorship running-loop branch is under test (TB-D7).** Production calls
+   `expected_publisher_logins` from async code, so `_await_sync` takes its
+   `asyncio.get_running_loop()` branch; the sync tests exercised the other one.
+   `tests/review/test_authorship.py` gains two `async def` tests calling the
+   helper from a running loop (App login resolves; a failure never widens).
+4. **The recorded review tier matches the run's tier (TB6).**
+   `tests/tracing/test_review_trust_stamp.py` (new) records the raw floor for a
+   comment-on-PR event with no run tier, then stamps the resolved
+   `tool_state.trust_tier` and asserts `review.trust_tier` /
+   `mergecraft.trust_tier` are `trusted` while
+   `review.raw_event_trust_floor` stays `untrusted`.
+5. **A failed base fetch is an omission (F4).**
+   `tests/mcp/test_checkout_base_manifest_lookup.py` gains the
+   `base_fetch_failure` path (unresolvable `origin/<base>` → `unreadable_reason`
+   naming the failure; `attach_linked_repo_review` omits each otherwise-reviewable
+   entry) and an explicit absent-manifest/no-fetch-failure guard.
+
+**Verification (post-PR pinning):**
+`MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/mcp tests/xrepo tests/review tests/tracing tests/config tests/test_main_phases.py -q -p no:randomly`
+→ **1899 passed, 45 skipped, 0 failed, 0 xfailed, 0 xpassed**; `make lint` →
+exit 0; `make typecheck` → `Success: no issues found in 539 source files`.
+
 ## Verification
 
 ```bash
@@ -335,12 +410,14 @@ MERGECRAFT_PYTEST_JOBS=0 uv run pytest -q -rX \
   tests/mcp/test_checkout.py \
   tests/mcp/test_checkout_target_binding.py \
   tests/mcp/test_checkout_degraded_diff.py \
+  tests/mcp/test_checkout_base_manifest_lookup.py \
   tests/review/test_authorship.py \
   tests/context/test_instruction_discovery.py \
   tests/utils/test_instructions.py \
   tests/cli/test_local_env_loader.py \
   tests/xrepo/test_linked_repos.py \
-  tests/xrepo/test_review_change_set.py
+  tests/xrepo/test_review_change_set.py \
+  tests/tracing/test_review_trust_stamp.py
 make lint
 make typecheck
 ```
