@@ -115,3 +115,32 @@ def test_live_container_gets_only_its_selected_credential(
         passed = set(arguments.read_text().splitlines())
         assert passed.intersection(keys) == {expected_key}
         assert "nonsecret-fixture" not in passed
+
+
+def test_unconfigured_live_slice_warns_as_unavailable(
+    tmp_path: Path, live_step_script: str
+) -> None:
+    """No model is not a skip: warn, record unavailable, and stay green."""
+    summary = tmp_path / "step-summary"
+    summary.write_text("", encoding="utf-8")
+    environment = {
+        **os.environ,
+        "MERGECRAFT_E2E_LIVE_MODEL": "",
+        "GITHUB_STEP_SUMMARY": str(summary),
+    }
+    result = subprocess.run(
+        ["bash", "-c", live_step_script],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, output
+    assert "::warning" in output, f"an unconfigured live slice must emit a warning:\n{output}"
+    assert "unavailable" in summary.read_text(encoding="utf-8").lower(), (
+        "the step summary must record the live slice as unavailable"
+    )
+    assert "skipped" not in output.lower(), (
+        f"'skipped' claims a test that never ran; say unavailable instead:\n{output}"
+    )

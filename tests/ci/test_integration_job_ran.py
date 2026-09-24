@@ -7,12 +7,21 @@ TH2 wires ``scripts/check_integration_ran.py`` (or equivalent) into the workflow
 
 from __future__ import annotations
 
+import ast
 import importlib.util
+import re
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
+from tests.ci.workflow_support import (
+    REPO_ROOT,
+    job,
+    load_workflow,
+    makefile_target_body,
+    read_text,
+)
 
 
 def test_integration_job_runs_supported_python_matrix() -> None:
@@ -93,3 +102,83 @@ def test_count_executed_uses_last_summary_line_only() -> None:
         "============================= 2 passed in 0.42s ==============================\n"
     )
     assert count_executed(log) == 2
+
+
+_META_MARKERS = {"integration", "hermetic_integration"}
+
+# The genuinely hermetic integration files: no secret, no binary, no root.
+_HERMETIC_FILES = (
+    "tests/integration/test_provider_failures.py",
+    "tests/integration/test_nous_404_failover_466.py",
+)
+
+
+def _marker_names(node: ast.AST) -> set[str]:
+    found: set[str] = set()
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr in _META_MARKERS
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+    ):
+        found.add(node.attr)
+    if isinstance(node, (ast.List, ast.Tuple)):
+        for element in node.elts:
+            found |= _marker_names(element)
+    return found
+
+
+def _declared_markers(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    markers: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "pytestmark" for target in node.targets
+        ):
+            markers |= _marker_names(node.value)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                markers |= _marker_names(decorator)
+    return markers
+
+
+def test_no_ci_meta_test_carries_integration_or_hermetic_markers() -> None:
+    """A tests/ci/ meta-test must never be able to satisfy the integration gate."""
+    offenders = []
+    for path in sorted((REPO_ROOT / "tests" / "ci").rglob("test_*.py")):
+        declared = _declared_markers(path)
+        if declared & _META_MARKERS:
+            rel = path.relative_to(REPO_ROOT)
+            offenders.append(f"{rel}: {sorted(declared & _META_MARKERS)}")
+    assert not offenders, (
+        "these tests/ci/ tests carry an integration marker and can satisfy the "
+        f"integration meta-gate: {offenders}"
+    )
+
+
+def test_test_integration_selects_the_hermetic_marker() -> None:
+    body = makefile_target_body("test-integration")
+    assert "hermetic_integration" in body, (
+        f"make test-integration must select hermetic_integration:\n{body}"
+    )
+    assert "integration and not live" in body, (
+        "the live-integration contract checker reads this substring; keep it"
+    )
+
+
+def test_hermetic_marker_is_registered_in_pytest_ini() -> None:
+    section = read_text("pyproject.toml").split("[tool.pytest.ini_options]", 1)[1]
+    assert re.search(r'^\s*"hermetic_integration:', section, re.MULTILINE), (
+        "hermetic_integration must be registered in [tool.pytest.ini_options].markers"
+    )
+
+
+@pytest.mark.parametrize("relative", _HERMETIC_FILES)
+def test_hermetic_integration_files_are_marked_and_skip_free(relative: str) -> None:
+    text = read_text(relative)
+    assert "hermetic_integration" in text, (
+        f"{relative} must carry pytest.mark.hermetic_integration so the PR job runs it"
+    )
+    assert "pytest.skip" not in text, f"{relative} must not skip; it is keyless and hermetic"
+    assert "skipif" not in text, f"{relative} must not gate itself with skipif"

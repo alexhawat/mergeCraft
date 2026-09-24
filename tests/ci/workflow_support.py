@@ -24,6 +24,31 @@ def read_text(relative: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def makefile_target_body(target: str, text: str | None = None) -> str:
+    """Return the ``target:`` header plus its tab-indented recipe lines.
+
+    The recipe is read as text (not executed) so a workflow step and the Make
+    target it calls can both be inspected for the env or node id they carry.
+    """
+    makefile = read_text("Makefile") if text is None else text
+    pattern = re.compile(rf"^{re.escape(target)}:[^\n]*\n(?:[ \t][^\n]*\n?)*", re.MULTILINE)
+    match = pattern.search(makefile)
+    assert match is not None, f"{target} target missing from Makefile"
+    return match.group(0)
+
+
+def workflow_run_scripts(doc: dict[str, Any]) -> list[str]:
+    """Return every ``run:`` script in a workflow document, across all jobs."""
+    scripts: list[str] = []
+    for value in (doc.get("jobs") or {}).values():
+        if not isinstance(value, dict):
+            continue
+        for step in value.get("steps") or []:
+            if isinstance(step, dict) and isinstance(step.get("run"), str):
+                scripts.append(step["run"])
+    return scripts
+
+
 def load_workflow(name: str) -> dict[str, Any]:
     path = WORKFLOWS / name
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
