@@ -710,6 +710,54 @@ async def test_review_ledger_derives_app_login_from_approval_check(
     assert kept.state == "deferred"
 
 
+@pytest.mark.asyncio
+async def test_publisher_derivation_uses_the_real_check_run_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``check_name=`` is not a GitHubClient.get parameter; the real client must not raise."""
+    from mergecraft.scm.github import GitHubScmAdapter
+    from mergecraft.utils.github import GitHubClient
+
+    monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
+    ledger = _ledger_mod()
+    monkeypatch.setattr(ledger, "_publisher_login_from_config", "")
+    ours = ledger.FindingLedger()
+    ours.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
+    body = ledger.merge_ledger_into_comment(
+        "<!-- mergecraft-deterministic-record:v1 -->\n",
+        records=ours.records(),
+    )
+    client = GitHubClient(token="test")
+
+    async def _get(
+        path: str,
+        *,
+        params: dict[str, object] | None = None,
+        json: object = None,
+        headers: dict[str, str] | None = None,
+    ) -> object:
+        del params, json, headers
+        if path.endswith("/pulls/7"):
+            return {"head": {"sha": "abc123"}}
+        if path.endswith("/check-runs"):
+            return {
+                "total_count": 1,
+                "check_runs": [{"name": "mergecraft-approval", "app": {"slug": "mergecraft"}}],
+            }
+        if path.endswith("/reviews"):
+            return [{"id": 2, "user": {"login": "mergecraft[bot]", "type": "Bot"}, "body": body}]
+        return []
+
+    client.get = _get  # type: ignore[method-assign]
+    try:
+        found = await ledger.fetch_review_ledger(GitHubScmAdapter(client), "acme", "demo", 7)
+    finally:
+        await client.aclose()
+    kept = found.get_record(_DROPPED_FP)
+    assert kept is not None
+    assert kept.state == "deferred"
+
+
 def test_carryover_workflow_exports_the_publisher_login() -> None:
     text = Path(".github/workflows/findings-carryover.yml").read_text(encoding="utf-8")
     assert "MERGECRAFT_REVIEWER_BOT_LOGIN" in text

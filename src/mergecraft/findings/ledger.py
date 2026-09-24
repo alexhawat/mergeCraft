@@ -282,7 +282,9 @@ async def _publisher_logins_from_approval_checks(
         sha = str(head.get("sha") or "") if isinstance(head, Mapping) else ""
         if not sha:
             return frozenset()
-        payload = await list_checks(owner, repo, sha, check_name=_APPROVAL_CHECK_NAME)
+        # Do not pass check_name=: GitHubClient.list_check_runs_for_ref forwards
+        # leftover keywords to get(), which only accepts params/json/headers.
+        payload = await list_checks(owner, repo, sha)
     except Exception as err:
         logger.warning("finding ledger: could not derive publisher from approval checks: {}", err)
         return frozenset()
