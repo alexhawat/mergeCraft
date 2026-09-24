@@ -43,15 +43,21 @@ def _git_repo(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def _isolate_from_ambient_repos(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """Stop the walk-up at *tmp_path* so ``$TMPDIR``'s ancestry cannot leak in.
+    """Stop ambient runner state leaking into the local-path cases.
 
     The "outside a repository" cases assert that no root is found. That is only
     true while ``$TMPDIR`` happens to sit outside every checkout — an ambient
     property of the runner, not of the code under test. ``GIT_CEILING_DIRECTORIES``
     pins it.
+
+    This module covers *local* (non-Actions) resolution, so the explicit env
+    override is cleared and the Actions flag is cleared too — E5 / TB-D14 makes
+    the startup load skip a workspace ``.env`` inside Actions, and that path has
+    its own module (``tests/cli/test_local_env_loader.py``).
     """
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.resolve()))
     monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
 
 # ── the ``--cwd`` anchor: literal, paired with the config path ───────────────
@@ -114,7 +120,14 @@ def test_process_cwd_anchor_uses_the_repo_root_from_a_subdirectory(
 def test_cli_loader_reads_repo_root_env_from_subdirectory(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    """The startup load and the writers must agree on one file (#221)."""
+    """The startup load and the writers must agree on one file (#221).
+
+    This pins the *non-Actions* load path: E5 / TB-D14 makes
+    ``_load_local_env`` skip a workspace ``.env`` inside GitHub Actions. The
+    autouse fixture clears ``GITHUB_ACTIONS`` so the assertion below states the
+    local behaviour it means; the Actions path has its own module
+    (``tests/cli/test_local_env_loader.py``).
+    """
     root = _git_repo(tmp_path)
     (root / ".env").write_text("MERGECRAFT_LOGFIRE_TOKEN=tk-from-root-env\n", encoding="utf-8")
     monkeypatch.delenv("MERGECRAFT_LOGFIRE_TOKEN", raising=False)

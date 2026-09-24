@@ -46,7 +46,14 @@ def _git_repo(tmp_path: Path) -> Path:
 
 @pytest.fixture(autouse=True)
 def _isolate_ambient_env(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """Stop the walk-up and clear the env keys this module asserts on."""
+    """Stop the walk-up and clear the env keys this module asserts on.
+
+    The default for these tests is the *non-Actions* environment: ``GITHUB_ACTIONS``
+    is cleared here, and the Actions cases opt back in with an explicit
+    ``monkeypatch.setenv("GITHUB_ACTIONS", ...)``. That keeps each test's
+    expectation (inside vs outside Actions) stated at the point of use rather
+    than inherited from the runner (TB-D14).
+    """
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.resolve()))
     monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)

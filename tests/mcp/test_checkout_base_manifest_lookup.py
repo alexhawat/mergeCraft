@@ -64,6 +64,11 @@ def _primary_clone(tmp_path: Path) -> Path:
     _git(work, "clone", "--bare", str(work), str(origin))
     clone = tmp_path / "clone"
     _git(tmp_path, "clone", str(origin), str(clone))
+    # The clone gets its own identity: every commit below runs with ``clone`` as
+    # cwd, and CI runners have no global ``user.email``/``user.name`` to fall
+    # back on (``git commit`` would exit 128).
+    _git(clone, "config", "user.email", "test@example.com")
+    _git(clone, "config", "user.name", "Test")
     return clone
 
 

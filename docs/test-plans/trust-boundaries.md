@@ -313,6 +313,16 @@ product behaviour is in place, so every test is a real pass.
 **Verification (TB6):** the scoped acceptance command below →
 `0 failed, 0 xfailed, 0 xpassed`; `make lint` + `make typecheck` clean.
 
+**TB6 CI amendment — state the Actions environment (2026-09-24).** GitHub
+Actions surfaced `tests/cli/test_local_env_path.py::test_cli_loader_reads_repo_root_env_from_subdirectory`
+as red: it asserted the workspace `.env` loads, but the TB1 / TB-D14 startup rule
+skips it inside Actions and CI sets `GITHUB_ACTIONS`. The test's intent — proving
+the local load path from a subdirectory — is unchanged; the module's autouse
+fixture now clears `GITHUB_ACTIONS` (alongside `MERGECRAFT_ENV`) so each case
+states the environment it means. `tests/cli/test_local_env_loader.py` already
+pinned non-Actions in its fixture; its docstring now records that contract. No
+assertion weakened, no source touched.
+
 ## Verification
 
 ```bash
