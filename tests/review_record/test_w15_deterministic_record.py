@@ -176,6 +176,43 @@ async def test_retry_updates_one_formal_review_in_place(
 
 
 @pytest.mark.asyncio
+async def test_finalizing_truncated_review_preserves_durable_state(tmp_path: Path) -> None:
+    scm = _Scm()
+    ctx = _context(tmp_path, scm)
+    ctx.tool_state.review = ReviewRecord(id=1, node_id="n1", reviewed_sha="abc123")
+    book = ledger.ensure_finding_ledger(ctx.tool_state)
+    fingerprint = "a" * 24
+    book.record(fingerprint, "withdrawn", source="verifier-drop", round_index=1)
+    oversized = (
+        f"{_PREAMBLE_MARKER}\nBrief record.\n{ledger.REVIEW_BODY_MARKER}\n"
+        + "x" * (review_mod.REVIEW_BODY_MAX_CHARS + 1000)
+        + "\n### Learnings delta\n\n**After:** saved\n"
+    )
+    oversized = ledger.merge_ledger_into_comment(oversized, records=book.records())
+    scm.reviews[1] = str(
+        review_mod._truncate_review_body_for_github(ctx, {"body": oversized}, pull_number=546)[
+            "body"
+        ]
+    )
+    assert len(scm.reviews[1]) == review_mod.REVIEW_BODY_MAX_CHARS
+
+    await _publish_deterministic_record()(
+        pull_number=546,
+        packet=_sample_packet(findings=[], verdict="success", reason="approved"),
+        ctx=ctx,
+    )
+
+    finalized = scm.reviews[1]
+    assert len(finalized) <= review_mod.REVIEW_BODY_MAX_CHARS
+    assert "review body truncated" in finalized
+    assert "### Learnings delta\n\n**After:** saved" in finalized
+    record = ledger.FindingLedger.from_comment_body(finalized).get_record(fingerprint)
+    assert record is not None
+    assert record.state == "withdrawn"
+    assert scm.created == 0
+
+
+@pytest.mark.asyncio
 async def test_lost_review_receipt_reuses_same_run_review(tmp_path: Path) -> None:
     scm = _Scm()
     ctx = _context(tmp_path, scm)

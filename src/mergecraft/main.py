@@ -397,7 +397,7 @@ async def publish_deterministic_record(
         render_deterministic_review_block,
     )
     from mergecraft.mcp.comment import add_footer
-    from mergecraft.mcp.review import REVIEW_BODY_MAX_CHARS
+    from mergecraft.mcp.review import _truncate_review_body_for_github
     from mergecraft.scm.github import create_github_scm
     from mergecraft.utils.learnings import merge_learnings_delta_into_review_body
     from mergecraft.utils.status_checks import _run_url
@@ -504,9 +504,11 @@ async def publish_deterministic_record(
         body += f"\n{tail}\n"
     body = merge_ledger_into_comment(body, records=ensure_finding_ledger(tool_state).records())
     body = add_footer(resolved_ctx, body)
-    if len(body) > REVIEW_BODY_MAX_CHARS:
-        msg = "formal review record exceeds GitHub's review body limit"
-        raise ValueError(msg)
+    body = str(
+        _truncate_review_body_for_github(resolved_ctx, {"body": body}, pull_number=pull_number)[
+            "body"
+        ]
+    )
 
     if review is not None:
         await resolved_ctx.scm.update_review(owner, repo, pull_number, review.id, body)
