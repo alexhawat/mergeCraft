@@ -868,11 +868,10 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     # the live sink. The resolver falls back to ``os.environ`` and config
     # auto-discovery, keeping parity with the YAML-only path when no env/CLI
     # overrides are set.
-    from mergecraft.enterprise.runtime import bind_enterprise_from_settings
-
-    bind_enterprise_from_settings(settings, apply_network=False)
     active_tracing = resolve_active_tracing(config=settings.tracing)
     if not active_tracing.enabled:
+        # Disabled is a no-op (docs/TRACING.md § Behaviour guarantees): return
+        # before touching enterprise state at all.
         return NullTracer()
 
     active = _ACTIVE_SPAN.get()
@@ -883,8 +882,15 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     if _PROCESS_TRACER is not None and fingerprint == _PROCESS_TRACING_FINGERPRINT:
         return _PROCESS_TRACER
 
+    from mergecraft.enterprise.runtime import scoped_enterprise_binding
+
     try:
-        sink = claim_sink(active_tracing)
+        # Sink construction reads enterprise controls (retention,
+        # ``remote_export_allowed``). Scope ``settings.enterprise`` to that
+        # construction only, and only when nothing is bound: a bound block is
+        # read, never replaced — a default caller must not erase it.
+        with scoped_enterprise_binding(settings):
+            sink = claim_sink(active_tracing)
     except Exception as exc:
         logger.warning("trace sink initialization failed: {}", exc)
         return NullTracer()
