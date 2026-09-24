@@ -55,5 +55,7 @@ the ambient exporter already covers the reviewer subagent session.
 
 ## Compatibility
 
-Uses the V2 `Plugin.define` entrypoint. A V1 `server()` export can be added
-alongside it for mixed fleets (see the OpenCode V1→V2 plugin migration guide).
+V2 only. The plugin uses the `Plugin.define` entrypoint from `@opencode/plugin`
+`^2.0.0` and requires OpenCode `>=2.0.0`; V1 plugin implementations do not run
+in V2, so there is no V1 `server()` fallback here. See the OpenCode V1→V2 plugin
+migration guide if you need a V1 port.

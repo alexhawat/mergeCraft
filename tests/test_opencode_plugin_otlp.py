@@ -16,6 +16,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OTLP_TS = REPO_ROOT / "integrations" / "opencode" / "plugins" / "mergecraft" / "otlp.ts"
+MANIFEST = REPO_ROOT / "integrations" / "opencode" / "plugins" / "mergecraft" / "package.json"
 
 _SCRIPT = """
 const m = await import(__MODULE__);
@@ -83,6 +84,17 @@ def test_otlp_payload_shape_and_attributes() -> None:
     assert span["startTimeUnixNano"] == "1700000000000000000"
     assert span["attributes"][0] == {"key": "mergecraft.engine", "value": {"stringValue": "native"}}
     assert span["attributes"][1] == {"key": "mergecraft.duration_ms", "value": {"intValue": "12"}}
+
+
+def test_plugin_manifest_targets_v2_contract() -> None:
+    """The plugin is V2-only; the manifest must not advertise V1 compatibility."""
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    dependency = data["dependencies"]["@opencode/plugin"]
+    peer = data["peerDependencies"]["opencode"]
+    assert dependency != "latest"
+    assert dependency.startswith(("^2", ">=2"))
+    assert peer.startswith(">=2")
+    assert "1.18" not in peer
 
 
 def test_logfire_target_region_and_absence() -> None:

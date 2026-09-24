@@ -121,8 +121,9 @@ mergecraft tracing logfire wire-workflow --region eu --apply   # CI: patch the m
 
 ## Compatibility
 
-Targets OpenCode V2. The plugin uses the V2 `Plugin.define` entrypoint and can
-carry a V1 `server()` export for mixed fleets; see
+Targets OpenCode V2 (`@opencode/plugin` `^2.0.0`, OpenCode `>=2.0.0`). The
+plugin uses the V2 `Plugin.define` entrypoint only — V1 implementations do not
+run in V2, so there is no V1 `server()` fallback. See
 [`docs/opencode.md`](../../docs/opencode.md) for the API surface it relies on.
 
 ## Contributing

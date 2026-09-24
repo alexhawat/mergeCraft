@@ -12,10 +12,10 @@
     "README.md"
   ],
   "dependencies": {
-    "@opencode/plugin": "latest"
+    "@opencode/plugin": "^2.0.0"
   },
   "peerDependencies": {
-    "opencode": ">=1.18.29"
+    "opencode": ">=2.0.0"
   },
   "license": "MIT",
   "repository": {

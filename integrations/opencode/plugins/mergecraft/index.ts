@@ -1,8 +1,8 @@
 /**
  * mergeCraft for OpenCode — plugin entrypoint.
  *
- * Targets the OpenCode V2 plugin API (`Plugin.define` + `setup(ctx)`), with a
- * V1 `server()` export for mixed fleets. Everything here is defensive: a missing
+ * Targets the OpenCode V2 plugin API (`Plugin.define` + `setup(ctx)`) on the
+ * `@opencode/plugin` 2.x contract. Everything here is defensive: a missing
  * or renamed domain method is logged and skipped rather than breaking the host.
  *
  * Responsibilities:
