@@ -377,6 +377,20 @@ def test_viewer_answering_with_the_shared_bot_is_withheld_off_the_job_token(
     assert publishers == frozenset()
 
 
+def test_app_slug_answering_with_the_shared_bot_is_withheld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MC-e4a36e — the invariant holds over **every** source, not just two.
+
+    ``GET /app`` requires a JWT today, so this path is latent rather than live;
+    the set-level filter is what makes it unreachable if that ever changes.
+    """
+    scm = _StubScm(app_response={"slug": "github-actions"}, user_response=None)
+    publishers = _expected_publishers(_ctx(scm, token="job-token"))
+
+    assert publishers == frozenset()
+
+
 def test_is_mergecraft_authored_refuses_the_job_bot_on_a_job_token_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -160,6 +160,16 @@ def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
                     # nothing, whatever the token was.
                     job_bot_only = True
 
+    # The shared Actions bot is a shared identity, so **no** path above may put
+    # it in the set — declared login, ``GET /app`` slug, or ``/user`` viewer
+    # (MC-e4a36e). Enforce the invariant once, over every source, instead of
+    # trusting each path to withhold it: ``_app_bot_slug`` would also yield
+    # ``github-actions`` if ``GET /app`` ever answered for a job token.
+    shared_bot = {login for login in logins if login.casefold() == GITHUB_ACTIONS_BOT_LOGIN}
+    if shared_bot:
+        logins -= shared_bot
+        job_bot_only = True
+
     if not logins and job_bot_only:
         logger.warning(
             "mergeCraft authorship withheld: the only identity this run can publish as is "
