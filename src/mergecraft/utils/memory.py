@@ -17,6 +17,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 if TYPE_CHECKING:
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
 MEMORY_FILE_NAME = "memory.json"
 FEEDBACK_FILE_NAME = "feedback.json"
 DEFAULT_MAX_NEGATIVE_RULES = 64
+# The audit trail records every add and every eviction, so it grows in step with
+# rule churn. Bound it well above the active-rule cap so the recent history
+# survives while a runaway writer cannot grow memory.json without limit.
+DEFAULT_MAX_NEGATIVE_AUDIT_ENTRIES = 4 * DEFAULT_MAX_NEGATIVE_RULES
 DEFAULT_ACTIVE_MEMORY_TTL_DAYS = 365
 
 
@@ -242,31 +247,43 @@ class NegativeMemoryStore:
         data = _read_json(self.path)
         rules: list[NegativeMemoryRule] = []
         audit: list[NegativeMemoryAuditEntry] = []
+        # One malformed entry must not abort the whole store (mirrors
+        # ``load_feedback_store``): skip it with a warning and keep the rest.
         for item in data.get("rules", []) if isinstance(data.get("rules"), list) else []:
             if not isinstance(item, dict):
                 continue
-            ts = _parse_dt(str(item.get("recorded_at", _now().isoformat())))
-            rules.append(
-                NegativeMemoryRule(
-                    pattern=str(item["pattern"]),
-                    when=str(item["when"]),
-                    reason=str(item["reason"]),
-                    recorded_at=ts,
+            try:
+                ts_raw = item.get("recorded_at")
+                ts = _parse_dt(str(ts_raw)) if ts_raw else _now()
+                rules.append(
+                    NegativeMemoryRule(
+                        pattern=str(item["pattern"]),
+                        when=str(item["when"]),
+                        reason=str(item["reason"]),
+                        recorded_at=ts,
+                    )
                 )
-            )
+            except (KeyError, ValueError, ValidationError) as exc:  # fmt: skip
+                logger.warning("Skipping malformed negative-memory rule in {}: {}", self.path, exc)
         for item in data.get("audit", []) if isinstance(data.get("audit"), list) else []:
             if not isinstance(item, dict):
                 continue
-            ts = _parse_dt(str(item.get("recorded_at", _now().isoformat())))
-            audit.append(
-                NegativeMemoryAuditEntry(
-                    pattern=str(item["pattern"]),
-                    when=str(item["when"]),
-                    reason=str(item["reason"]),
-                    recorded_at=ts,
-                    evicted=bool(item.get("evicted", False)),
+            try:
+                ts_raw = item.get("recorded_at")
+                ts = _parse_dt(str(ts_raw)) if ts_raw else _now()
+                audit.append(
+                    NegativeMemoryAuditEntry(
+                        pattern=str(item["pattern"]),
+                        when=str(item["when"]),
+                        reason=str(item["reason"]),
+                        recorded_at=ts,
+                        evicted=bool(item.get("evicted", False)),
+                    )
                 )
-            )
+            except (KeyError, ValueError, ValidationError) as exc:  # fmt: skip
+                logger.warning(
+                    "Skipping malformed negative-memory audit entry in {}: {}", self.path, exc
+                )
         return NegativeMemoryPayload(rules=rules, audit=audit)
 
     def _save(self) -> None:
@@ -300,14 +317,6 @@ class NegativeMemoryStore:
             pattern=pattern.strip(), when=when.strip(), reason=reason.strip(), recorded_at=ts
         )
         self._payload.rules.append(rule)
-        self._payload.audit.append(
-            NegativeMemoryAuditEntry(
-                pattern=rule.pattern,
-                when=rule.when,
-                reason=rule.reason,
-                recorded_at=ts,
-            )
-        )
         while len(self._payload.rules) > self.max_entries:
             evicted = self._payload.rules.pop(0)
             self._payload.audit.append(
@@ -319,6 +328,19 @@ class NegativeMemoryStore:
                     evicted=True,
                 )
             )
+        self._payload.audit.append(
+            NegativeMemoryAuditEntry(
+                pattern=rule.pattern,
+                when=rule.when,
+                reason=rule.reason,
+                recorded_at=ts,
+            )
+        )
+        # The audit trail is bounded: drop the oldest entries first so the most
+        # recent add stays visible and a churning writer cannot grow it forever.
+        excess = len(self._payload.audit) - DEFAULT_MAX_NEGATIVE_AUDIT_ENTRIES
+        if excess > 0:
+            del self._payload.audit[:excess]
         self._save()
         return rule
 
@@ -685,6 +707,7 @@ def import_memory_bundle(*, repo: Path, bundle: dict[str, Any]) -> None:
 
 
 __all__ = [
+    "DEFAULT_MAX_NEGATIVE_AUDIT_ENTRIES",
     "DEFAULT_MAX_NEGATIVE_RULES",
     "FEEDBACK_FILE_NAME",
     "MEMORY_FILE_NAME",
