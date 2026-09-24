@@ -363,8 +363,44 @@ def test_job_token_viewer_answering_with_the_shared_bot_is_withheld(
     assert publishers == frozenset()
     assert len(captured) == 1
     assert "github-actions[bot]" in captured[0]
-    # The job token is never consulted: only the ``/app`` probe may run.
-    assert not [path for path, _ in scm.get_calls if path.rstrip("/").endswith("/user")]
+    # The login is consulted (a PAT carried through INPUT_TOKEN is only
+    # distinguishable by its ``/user`` answer); the shared-bot answer is what
+    # must never be admitted.
+    assert [path for path, _ in scm.get_calls if path.rstrip("/").endswith("/user")]
+
+
+def test_pat_carried_in_the_action_token_input_is_a_publisher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MC-e4a36e — a PAT supplied via the Action's ``token:`` input lands in INPUT_TOKEN.
+
+    Classifying the token by provenance would call this PAT the shared job bot
+    and silently drop its login; only the ``/user`` answer can decide.
+    """
+    monkeypatch.setenv("INPUT_TOKEN", "pat-token")
+    scm = _StubScm(app_response=None, user_response={"login": "mergecraft-ci"})
+    publishers = _expected_publishers(_ctx(scm, token="pat-token"))
+
+    assert publishers == frozenset({"mergecraft-ci"})
+
+
+def test_app_configured_without_a_declared_login_still_warns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P-8 — an empty set never stays silent, whichever path emptied it."""
+    from loguru import logger as loguru_logger
+
+    monkeypatch.setenv("GITHUB_APP_ID", "12345")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN KEY-----")
+    captured, sink_id = _capture_loguru_warnings()
+    try:
+        publishers = _expected_publishers(_ctx(_StubScm(app_response=None), token="job-token"))
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert publishers == frozenset()
+    assert len(captured) == 1
+    assert "unavailable" in captured[0]
 
 
 def test_viewer_answering_with_the_shared_bot_is_withheld_off_the_job_token(

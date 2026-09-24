@@ -120,6 +120,21 @@ def _grant_for_manifest(
     return RunGrant(authorized_repos=frozenset(entry.slug.lower() for entry in manifest.repos))
 
 
+def _duplicate_manifest_names(manifest: LinkedReposManifest) -> set[str]:
+    """Return the lowercased ``name``s shared by more than one manifest entry.
+
+    Two entries sharing a ``name`` resolve to the same sibling directory, so a
+    grant cannot distinguish them; both are refused (TB-D10). Shared with the
+    omission loop so a refused entry is never silently absent from the payload
+    (TB-D12).
+    """
+    counts: dict[str, int] = {}
+    for entry in manifest.repos:
+        key = entry.name.lower()
+        counts[key] = counts.get(key, 0) + 1
+    return {key for key, count in counts.items() if count > 1}
+
+
 def _authorized_roots(
     *,
     roots: dict[str, Path],
@@ -131,13 +146,10 @@ def _authorized_roots(
     Two manifest entries sharing a ``name`` resolve to the same sibling
     directory, so neither is authorized: the grant cannot distinguish them.
     """
-    name_counts: dict[str, int] = {}
-    for entry in manifest.repos:
-        key = entry.name.lower()
-        name_counts[key] = name_counts.get(key, 0) + 1
+    duplicates = _duplicate_manifest_names(manifest)
     authorized: dict[str, Path] = {}
     for entry in manifest.repos:
-        if name_counts[entry.name.lower()] > 1:
+        if entry.name.lower() in duplicates:
             continue
         if not grant.is_authorized(entry.slug):
             continue
@@ -331,10 +343,18 @@ def review_linked_repos(
     roots = _authorized_roots(roots=all_roots, grant=grant, manifest=manifest)
 
     omissions: list[LinkedRepoOmission] = []
+    duplicates = _duplicate_manifest_names(manifest)
     for entry in manifest.repos:
         if not grant.is_authorized(entry.slug):
             omissions.append(
                 LinkedRepoOmission(repo=entry.slug, reason="not authorized for this run")
+            )
+        elif entry.name.lower() in duplicates:
+            omissions.append(
+                LinkedRepoOmission(
+                    repo=entry.slug,
+                    reason="duplicate manifest name: the grant cannot distinguish it",
+                )
             )
         elif all_roots.get(entry.name) is None:
             omissions.append(

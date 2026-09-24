@@ -219,6 +219,42 @@ def test_unreachable_previous_pin_is_an_omission_not_a_full_index(tmp_path: Path
     assert "pin" in reasons or "unreachable" in reasons
 
 
+def test_same_name_entries_are_omitted_not_silently_dropped(tmp_path: Path) -> None:
+    """TB-D10/D12 — entries sharing a ``name`` are refused *and* recorded.
+
+    An explicit grant authorizes both slugs, and the sibling root for their
+    shared name exists, so neither the "not authorized" nor the "sibling
+    checkout not found" branch fires: without a dedicated reason the entry
+    vanished from the findings *and* the omissions — the silent skip TB-D12
+    exists to forbid. (``attach_linked_repo_review`` intersects its grant and so
+    reaches the first branch instead; this pins the lower-level contract.)
+    """
+    primary = tmp_path / "primary"
+    contracts = tmp_path / "api-contracts"
+    primary.mkdir()
+    contracts_commit = write_contract_fixture_repo(contracts)
+    write_linked_repos_manifest(
+        primary,
+        repos=[
+            {"owner": "acme", "name": "api-contracts", "commit": contracts_commit},
+            {"owner": "evil", "name": "api-contracts", "commit": contracts_commit},
+        ],
+    )
+    git_init_repo(primary)
+    git_commit_all(primary)
+
+    review = review_linked_repos(
+        repo_root=primary,
+        authorized_repos=frozenset({"acme/api-contracts", "evil/api-contracts"}),
+    )
+
+    assert review.findings == ()
+    repos = {omission.repo for omission in review.omissions}
+    assert repos == {"acme/api-contracts", "evil/api-contracts"}
+    reasons = " ".join(omission.reason.lower() for omission in review.omissions)
+    assert "duplicate" in reasons
+
+
 # ── TB6 — the change set walks the base index too (deletions and renames) ────
 #
 # ``_changed_between_pins`` used to walk only the head index, so a moved pin

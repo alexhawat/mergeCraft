@@ -1614,10 +1614,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flagged.
 
 - The incremental checkpoint and review-round index accept a mergeCraft marker
-  only from the run's own expected publishers (the reviewer App, the job token
-  when it publishes, or the configured token's own login) and read paginated
-  review history, so a marked review by any other author no longer moves the
-  checkpoint.
+  only from the run's own expected publishers — an App bot login
+  (`<slug>[bot]`) or the `GET /user` login of a non-shared publication token —
+  and read paginated review history, so a marked review by any other author no
+  longer moves the checkpoint. A run that can only publish as the shared
+  `github-actions[bot]` has no attributable identity, so incremental checkpoints
+  and round counting stay unavailable until the reviewer App or a PAT is
+  configured.
 
 - Repository instruction files are discovered and read only when their resolved
   path stays inside the repository, so a symlinked `AGENTS.md` or a symlinked
@@ -1635,8 +1638,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name are both refused.
 
 - Linked-repo findings report only contracts changed by a moved pin, and every
-  omission — ungranted, missing sibling, pin mismatch, unreachable pin, or an
-  unreadable base manifest — is listed in the review payload.
+  omission — ungranted, missing sibling, pin mismatch, unreachable pin, an
+  unreadable base manifest, or a manifest whose entries share a name — is listed
+  in the review payload.
 
 ## [0.1.0] — 2026-08-14
 

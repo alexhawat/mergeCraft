@@ -117,68 +117,76 @@ def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
     warned once with the reason (P-8).
     """
     logins: set[str] = set()
-    job_bot_only = False
+    withheld_shared_bot = False
 
     # (1) The reviewer App's bot login. ``mergecraft.yml`` declares it in
     # ``MERGECRAFT_REVIEWER_BOT_LOGIN`` (``<app-slug>[bot]``, or an empty string
     # when no App minted); a client authenticated with the App JWT can instead
     # read it from ``GET /app``. Both are authorities the PR cannot write — as
-    # long as the declared login is not the shared job bot itself.
+    # long as the login is not the shared job bot itself.
     declared = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
     if declared:
         if declared.casefold() == GITHUB_ACTIONS_BOT_LOGIN:
             # A no-App workflow historically declared the shared job bot here.
             # It is not an app identity, so it is withheld, never trusted.
-            job_bot_only = True
+            withheld_shared_bot = True
         else:
             logins.add(declared)
-    app_slug = _app_bot_slug(ctx)
+    # ``GET /app`` needs the App JWT, so once a real declared login answers the
+    # question the probe can only fail; skip the round trip (and the caller's
+    # event loop it blocks) instead of making it unconditionally. A withheld
+    # shared-bot declaration answers nothing, so the probe still runs for it.
+    app_slug = (
+        "" if declared and declared.casefold() != GITHUB_ACTIONS_BOT_LOGIN else _app_bot_slug(ctx)
+    )
     if app_slug:
         logins.add(f"{app_slug}[bot]")
 
-    # (2) With no App declared, the publication token names the publisher. A
-    # caller PAT answers ``GET /user`` with a login; the Actions job token
-    # cannot be told apart from another workflow's, so it is never trusted — a
-    # job-token run publishes no attributable identity at all (P-6). A
-    # configured App whose login could not be read is the publisher, so the job
-    # bot must not be trusted for it — fail closed.
+    # (2) With no App identity, the publication token names the publisher:
+    # ``GET /user`` answers with the login it acts as. Consult the **login**
+    # first — the token's provenance cannot separate a caller PAT from the job
+    # token, because a PAT supplied through the Action's ``token:`` input lands
+    # in ``INPUT_TOKEN`` exactly like the job token does. Only the resolved
+    # login can decide: a PAT (or App installation token) login is a publisher,
+    # while the shared job bot answers ``github-actions[bot]`` — or refuses the
+    # endpoint — and proves nothing.
     if not declared and not app_slug and not _app_configured():
         token = str(ctx.github_installation_token or "").strip()
         if token:
-            if _is_job_token(token):
-                # The job token is a shared identity, and ``GET /user`` answers
-                # ``github-actions[bot]`` for it — a truthy viewer that would be
-                # added before any withholding could happen (MC-e4a36e). Do not
-                # consult it at all.
-                job_bot_only = True
+            viewer = _viewer_login(ctx)
+            if viewer and viewer.casefold() != GITHUB_ACTIONS_BOT_LOGIN:
+                logins.add(viewer)
             else:
-                viewer = _viewer_login(ctx)
-                if viewer and viewer.casefold() != GITHUB_ACTIONS_BOT_LOGIN:
-                    logins.add(viewer)
-                elif viewer:
-                    # Defensive: a viewer that answers with the shared bot proves
-                    # nothing, whatever the token was.
-                    job_bot_only = True
+                withheld_shared_bot = True
 
-    # The shared Actions bot is a shared identity, so **no** path above may put
-    # it in the set — declared login, ``GET /app`` slug, or ``/user`` viewer
-    # (MC-e4a36e). Enforce the invariant once, over every source, instead of
-    # trusting each path to withhold it: ``_app_bot_slug`` would also yield
+    # The shared Actions bot is a shared identity, so no path above may put it in
+    # the set (MC-e4a36e). Enforce the invariant once, over every source, rather
+    # than trusting each path to withhold it: ``_app_bot_slug`` would also yield
     # ``github-actions`` if ``GET /app`` ever answered for a job token.
     shared_bot = {login for login in logins if login.casefold() == GITHUB_ACTIONS_BOT_LOGIN}
     if shared_bot:
         logins -= shared_bot
-        job_bot_only = True
+        withheld_shared_bot = True
 
-    if not logins and job_bot_only:
-        logger.warning(
-            "mergeCraft authorship withheld: the only identity this run can publish as is "
-            "the shared Actions login {!r}, which any same-repo collaborator can forge. "
-            "Incremental checkpoints and round counting are unavailable; configure the "
-            "reviewer App (secrets MERGECRAFT_APP_ID / MERGECRAFT_APP_PRIVATE_KEY) or "
-            "publish with a PAT.",
-            GITHUB_ACTIONS_BOT_LOGIN,
-        )
+    # P-8 — an empty set is never silent, whichever way it emptied.
+    if not logins:
+        if withheld_shared_bot:
+            logger.warning(
+                "mergeCraft authorship withheld: the only identity this run can publish as is "
+                "the shared Actions login {!r}, which any same-repo collaborator can forge. "
+                "Incremental checkpoints and round counting are unavailable; configure the "
+                "reviewer App (env GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY, set from the "
+                "MERGECRAFT_APP_ID / MERGECRAFT_APP_PRIVATE_KEY secrets) or publish with a PAT.",
+                GITHUB_ACTIONS_BOT_LOGIN,
+            )
+        else:
+            logger.warning(
+                "mergeCraft authorship unavailable: no publisher identity could be resolved "
+                "for this run, so incremental checkpoints and round counting are unavailable. "
+                "Configure the reviewer App (env GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY, set "
+                "from the MERGECRAFT_APP_ID / MERGECRAFT_APP_PRIVATE_KEY secrets) or publish "
+                "with a PAT."
+            )
 
     logger.debug("expected mergeCraft publisher logins for this run: {}", sorted(logins))
     return frozenset(logins)
@@ -216,15 +224,6 @@ def _viewer_login(ctx: ToolContext) -> str:
     if isinstance(payload, dict):
         return str(payload.get("login") or "").strip()
     return ""
-
-
-def _is_job_token(token: str) -> bool:
-    """Return True when ``token`` is the Actions job token this process sees."""
-    for name in ("INPUT_TOKEN", "GITHUB_TOKEN"):
-        candidate = os.environ.get(name, "").strip()
-        if candidate and candidate == token:
-            return True
-    return False
 
 
 def _scm_get_sync(ctx: ToolContext, path: str) -> Any:
