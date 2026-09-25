@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.ci.blame import BlameVerdict, blame_failure
 from mergecraft.ci.flaky import FlakyVerdict, classify_failure
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation, truncation_notice
-from mergecraft.ci.verification import annotate_caused_by_pr, annotate_not_caused_by_pr
+from mergecraft.ci.verification import (
+    annotate_caused_by_pr,
+    annotate_not_caused_by_pr,
+    annotate_unattributed,
+)
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -25,6 +29,7 @@ class CiReviewStats:
     cluster_count: int
     flaky_count: int
     pr_attributed_count: int
+    unattributed_count: int
     truncated: bool
 
 
@@ -63,6 +68,41 @@ def _default_blame(failure: dict[str, Any]) -> BlameVerdict:
     )
 
 
+def _matching_base_runs(
+    fingerprint: str, base_branch_runs: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return the base runs keyed to ``fingerprint`` (the rule ``flaky.py`` uses)."""
+    return [run for run in base_branch_runs if str(run.get("fingerprint", "")) == fingerprint]
+
+
+def _base_status_for_cluster(
+    fingerprint: str,
+    *,
+    base_branch_runs: list[dict[str, Any]],
+    base_branch_status: str | None,
+    cluster_count: int,
+) -> str | None:
+    """Resolve the base-branch conclusion for one cluster (BL-D5).
+
+    A ``base_branch_runs`` entry matching the cluster fingerprint is authoritative.
+    The scalar ``base_branch_status`` applies only when the analysis produced
+    exactly one cluster; with two or more it cannot describe both fingerprints and
+    is ignored for attribution.
+    """
+    matching = _matching_base_runs(fingerprint, base_branch_runs)
+    if matching:
+        failing = [
+            run for run in matching if str(run.get("conclusion", "")).strip().lower() == "failure"
+        ]
+        if failing:
+            return "failure"
+        conclusion = str(matching[0].get("conclusion", "")).strip()
+        return conclusion or None
+    if cluster_count == 1:
+        return base_branch_status
+    return None
+
+
 def analyze_ci_failures(
     failures: list[dict[str, Any]],
     *,
@@ -93,6 +133,7 @@ def analyze_ci_failures(
     reports: list[CiClusterReport] = []
     flaky_count = 0
     pr_attributed_count = 0
+    unattributed_count = 0
 
     normalized_by_fingerprint: dict[str, dict[str, Any]] = {}
     for item in normalized:
@@ -111,7 +152,12 @@ def analyze_ci_failures(
         blame = blame_failure(
             failure=representative,
             pr_diff_paths=diff_paths,
-            base_branch_status=base_branch_status,
+            base_branch_status=_base_status_for_cluster(
+                fingerprint,
+                base_branch_runs=base_branch_runs,
+                base_branch_status=base_branch_status,
+                cluster_count=len(clustered),
+            ),
         )
         if flaky.classification == "flaky":
             flaky_count += 1
@@ -119,6 +165,9 @@ def analyze_ci_failures(
         elif blame.attribution == "caused_by_pr":
             pr_attributed_count += 1
             finding = annotate_caused_by_pr(finding)
+        elif blame.attribution == "unknown":
+            unattributed_count += 1
+            finding = annotate_unattributed(finding)
         else:
             finding = annotate_not_caused_by_pr(finding)
 
@@ -136,6 +185,7 @@ def analyze_ci_failures(
         cluster_count=len(reports),
         flaky_count=flaky_count,
         pr_attributed_count=pr_attributed_count,
+        unattributed_count=unattributed_count,
         truncated=overflow > 0,
     )
     return reports, stats, overflow
@@ -148,6 +198,7 @@ def build_ci_pre_merge_summary(stats: CiReviewStats) -> str:
         f"{stats.cluster_count} clusters",
         f"{stats.flaky_count} flaky",
         f"{stats.pr_attributed_count} PR-attributed",
+        f"{stats.unattributed_count} unattributed",
     ]
     if stats.truncated:
         parts.append("truncated")

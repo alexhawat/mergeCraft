@@ -39,8 +39,11 @@ def analyze_ci_failures_tool(ctx: ToolContext):
         description=(
             "Fetch failing CI workflow logs for a check suite, cluster root causes, classify "
             "flaky and blame verdicts, and return review-ready output: section (CI failures "
-            "heading), preMergeSummary (CI pre-merge row), inline comments, and stats. Use this "
-            "instead of manually clustering raw get_check_suite_logs output."
+            "heading), preMergeSummary (CI pre-merge row), inline comments, and stats. Each "
+            "cluster gets one blame verdict: caused_by_pr (a failure path overlaps the PR "
+            "diff), probably_not_this_pr (a same-fingerprint base run concluded failure), or "
+            "unknown (evidence does not decide — the cluster stays unattributed and blocks). "
+            "Use this instead of manually clustering raw get_check_suite_logs output."
         ),
         input_schema={
             "type": "object",
@@ -57,8 +60,11 @@ def analyze_ci_failures_tool(ctx: ToolContext):
                 "base_branch_status": {
                     "type": "string",
                     "description": (
-                        "Optional base-branch conclusion for the same fingerprint "
-                        "(failure/success) when known."
+                        "Optional base-branch conclusion for the same fingerprint. Applies only "
+                        "to a single-cluster analysis; with two or more clusters it is ignored "
+                        "for attribution — supply base_branch_runs instead. Only `failure` "
+                        "exonerates; success and every other conclusion leave the cluster "
+                        "unknown."
                     ),
                 },
                 "base_branch_runs": {

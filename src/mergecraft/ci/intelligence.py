@@ -100,6 +100,7 @@ def build_ci_intelligence_payload(
             "clusterCount": stats.cluster_count,
             "flakyCount": stats.flaky_count,
             "prAttributedCount": stats.pr_attributed_count,
+            "unattributedCount": stats.unattributed_count,
             "truncated": stats.truncated,
             "overflow": overflow,
         },
@@ -175,6 +176,7 @@ def _unavailable_ci_intelligence(
             "clusterCount": 0,
             "flakyCount": 0,
             "prAttributedCount": 0,
+            "unattributedCount": 0,
             "truncated": False,
             "overflow": 0,
         },
@@ -257,9 +259,12 @@ async def run_ci_intelligence(
     Also *records* what it derived (#36). Before this, the clustered findings
     existed only inside the rendered markdown the agent pasted into its review —
     nothing structural kept them, so the merge evidence packet could not see that
-    CI had failed at all. They are recorded carrying their blame annotations, so a
-    flaky failure stays ``Minor`` / ``introduced_by_pr="false"`` and cannot block
-    (D11).
+    CI had failed at all. They are recorded carrying their blame annotations: a
+    flaky or pre-existing failure stays ``Minor`` / ``introduced_by_pr="false"``
+    and cannot block, while an *unattributed* failure — no diff overlap and no
+    same-fingerprint base failure — is ``Major`` / ``introduced_by_pr="unknown"``
+    and blocks the packet verdict until evidence (a base-branch failure or a retry
+    flip) clears it (D11).
     """
     from mergecraft.ci.evidence import (
         ci_evidence_findings,
