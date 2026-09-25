@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.analyzers.redact import redact_analyzer_output
+from mergecraft.utils.secrets import filter_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -249,10 +250,13 @@ def _run_subprocess(
     """Run the analyzer subprocess; a caught timeout/OSError becomes a terminal outcome."""
     try:
         with contextlib.ExitStack() as resources:
-            environment = plan.env or None
+            # SX-D5: an empty/None plan.env must resolve to the default-deny
+            # filter, never to ``None`` (which inherits ``os.environ``) or to a
+            # raw copy of the orchestrator's environment.
+            environment = plan.env or filter_env()
             pass_fds: tuple[int, ...] = ()
             if sandboxed:
-                payload_env = plan.env or dict(os.environ)
+                payload_env = plan.env or filter_env()
                 if os.geteuid() == 0 and isinstance(preexec_fn, _SandboxPreexec):
                     # SX2: a payload dropped to the agent user cannot write the
                     # runner-owned HOME it inherited; point it at the writable

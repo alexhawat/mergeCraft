@@ -131,6 +131,12 @@ class SandboxContext:
     network_allowlist: list[str]
     network_default: NetworkDefault
     unavailable_capabilities: tuple[str, ...] = ()
+    # SX-D7: present the checkout as a disposable copy-on-write view. Set for
+    # untrusted static checks, whose gates may write build output or `.venv`
+    # into the tree: the real checkout is a read-only lower layer and every
+    # write lands in scratch. Analyzer runs keep the read-only bind (False),
+    # so their argv is unchanged.
+    copy_on_write_repo: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,6 +453,7 @@ def build_sandbox_context(
     network_allowlist: list[str],
     read_only_source: bool,
     caps: SandboxCapabilities | None = None,
+    copy_on_write_repo: bool = False,
 ) -> SandboxContext:
     probed = caps if caps is not None else probe_capabilities()
     _ = probed
@@ -461,6 +468,7 @@ def build_sandbox_context(
         network_allowlist=list(network_allowlist),
         network_default="deny",
         unavailable_capabilities=tuple(probed.unavailable_reasons),
+        copy_on_write_repo=copy_on_write_repo,
     )
 
 
@@ -472,6 +480,7 @@ def plan_sandbox(
     tier: TrustTier | None = None,
     trust_tier: TrustTier | None = None,
     manifests: tuple[AnalyzerManifest, ...] = (),
+    copy_on_write_repo: bool = False,
 ) -> SandboxPlan:
     """Plan sandbox execution; skip untrusted analyzers when isolation is missing (D7)."""
     effective_tier = tier if tier is not None else trust_tier
@@ -527,6 +536,7 @@ def plan_sandbox(
         network_allowlist=network_allowlist,
         read_only_source=effective_tier == "untrusted",
         caps=caps,
+        copy_on_write_repo=copy_on_write_repo,
     )
     return SandboxPlan(can_run=True, context=context)
 
@@ -551,6 +561,8 @@ def _shell_single_quote(value: str) -> str:
 
 def analyzer_isolation_mount_fragment(context: SandboxContext) -> str:
     """Shell fragment: read-only repo bind and tmpfs scratch for untrusted analyzers."""
+    if context.copy_on_write_repo:
+        return _copy_on_write_repo_mount_fragment(context)
     repo = _shell_single_quote(str(context.repo_root.resolve()))
     scratch = _shell_single_quote(str(context.scratch_dir.resolve()))
     return (
@@ -558,6 +570,41 @@ def analyzer_isolation_mount_fragment(context: SandboxContext) -> str:
         f"mount --bind {repo} {repo} || exit 1; "
         f"mount -o remount,bind,ro {repo} || exit 1; "
         f"mount -t tmpfs tmpfs {scratch} || exit 1; "
+    )
+
+
+def _copy_on_write_repo_mount_fragment(context: SandboxContext) -> str:
+    """Shell fragment: present the checkout as a disposable copy-on-write view (SX-D7).
+
+    An untrusted static check may write build output or ``.venv`` into the tree,
+    so a read-only bind would fail gates that have nothing to do with the diff.
+    The real checkout becomes the read-only **lower** layer of an overlayfs mount
+    whose upper and work directories live on scratch; the merged view is bound
+    over the checkout path and ``cd`` re-resolves the cwd through it, so the
+    gate reads the real tree and writes only scratch. When the kernel cannot
+    mount an overlay (no unprivileged overlayfs), a scratch **copy** of the
+    checkout is bound in its place — the recorded fallback. Either way the real
+    checkout is never written.
+    """
+    repo = _shell_single_quote(str(context.repo_root.resolve()))
+    scratch = _shell_single_quote(str(context.scratch_dir.resolve()))
+    upper = f"{scratch}/repo-upper"
+    work = f"{scratch}/repo-work"
+    merged = f"{scratch}/repo-merged"
+    copy = f"{scratch}/repo-copy"
+    return (
+        f"mkdir -p {scratch}; "
+        f"mount -t tmpfs tmpfs {scratch} || exit 1; "
+        f"if mkdir -p {upper} {work} {merged} 2>/dev/null "
+        f"&& mount -t overlay overlay "
+        f"-o lowerdir={repo},upperdir={upper},workdir={work} {merged} 2>/dev/null; then "
+        f"mount --bind {merged} {repo} || exit 1; "
+        f"else "
+        f"mkdir -p {copy} || exit 1; "
+        f"cp -a {repo}/. {copy}/ || exit 1; "
+        f"mount --bind {copy} {repo} || exit 1; "
+        f"fi; "
+        f"cd {repo} || exit 1; "
     )
 
 

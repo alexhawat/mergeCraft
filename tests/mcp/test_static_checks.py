@@ -379,14 +379,14 @@ async def test_sandboxed_gate_write_never_reaches_the_real_checkout(
     sandboxed_upper = tmp_path / "sandboxed-upper"
     sandboxed_upper.mkdir()
 
-    def _run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def _fake_subprocess_run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         # The write lands where the process actually is: a namespace-wrapped gate
         # writes the disposable upper layer, a bare gate corrupts the checkout.
         target = sandboxed_upper if "unshare" in argv else repo
         (target / "build-output.txt").write_text("built\n", encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, "ok", "")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
     ctx = _ctx(
         repo,
         static_checks=[StaticCheckConfig(name="lint", command="gate")],
