@@ -352,6 +352,13 @@ jobs:
       MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
       CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
       CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
+    # The verdict the approval gate enforces is taken from this job's own rung
+    # outputs, not from a check-run another workflow could post. A job output
+    # can only be written by the run that declares it, so binding the gate to
+    # one is binding it to this run.
+    outputs:
+      approval_verdict: ${{ steps.approval_verdict.outputs.approval_verdict }}
+      approval_rung: ${{ steps.approval_verdict.outputs.approval_rung }}
 
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -372,6 +379,43 @@ jobs:
           # passes `env=_git_env(ctx.git_token)`, so the action authenticates
           # from its `token:` input and needs nothing in .git/config.
           persist-credentials: false
+
+      # This is the last point at which the workspace is provably the trusted
+      # default-branch checkout. The mergeCraft steps below mount the workspace
+      # into a container that checks the PR head out into it, so everything the
+      # job reads from the workspace afterwards belongs to the branch under
+      # review. Stage the fallback decision scripts out of the workspace now, in
+      # the runner home the container never mounts, and publish their content
+      # hash so each decide step can re-verify the copy it is about to run.
+      - name: Stage the fallback scripts outside the workspace
+        id: trusted_scripts
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "${head}" != "${GITHUB_SHA}" ]; then
+            echo "::error title=mergecraft trusted scripts::checked-out HEAD ${head} does not match GITHUB_SHA ${GITHUB_SHA}; refusing to stage the fallback scripts from an unverified tree."
+            exit 1
+          fi
+          root="${HOME}/mergecraft-trusted-${GITHUB_RUN_ID}"
+          rm -rf "${root}"
+          mkdir -p "${root}/scripts/lib"
+          scripts=(
+            scripts/decide_codex_fallback.sh
+            scripts/decide_claude_fallback.sh
+            scripts/lib/provider_verdict_guard.sh
+          )
+          for rel in "${scripts[@]}"; do
+            cp -p "${rel}" "${root}/${rel}"
+            echo "staged ${rel} -> ${root}/${rel}"
+          done
+          {
+            echo "root=${root}"
+            echo "sha256<<MERGECRAFT_TRUSTED_EOF"
+            for rel in "${scripts[@]}"; do
+              printf '%s %s\n' "$(sha256sum "${root}/${rel}" | awk '{print $1}')" "${rel}"
+            done
+            echo "MERGECRAFT_TRUSTED_EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Ensure PR base ref exists locally
         if: github.event_name == 'pull_request_target'
@@ -499,7 +543,7 @@ jobs:
           set -euo pipefail
           id=""
           for attempt in $(seq 1 3); do
-            if id="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+            if id="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?check_name=mergecraft-approval&filter=all&per_page=100" \
               --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
               | sort_by(.completed_at // .started_at) | last | .id // ""')"; then
               break
@@ -649,11 +693,11 @@ jobs:
         env:
           PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
         run: |
-          # $GITHUB_WORKSPACE is created by the Action container's volume
-          # mount and owned by root — this job never checks out, so no
-          # runner-owned directory exists there. Writing the packet into
-          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
-          # always writable by the runner user.
+          # A mergeCraft rung checks the PR head out into the workspace and the
+          # container leaves root-owned files behind, so by now the tree holds
+          # content the pull request controls and the runner user cannot write
+          # into. $RUNNER_TEMP stays runner-owned, which is why the packet is
+          # written there rather than into the workspace.
           if [ -z "${PACKET:-}" ]; then
             echo "no evidence packet emitted by this rung; nothing to persist"
             exit 0
@@ -688,7 +732,22 @@ jobs:
           BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
           NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
           NOUS_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
-        run: ./scripts/decide_codex_fallback.sh
+          TRUSTED_ROOT: ${{ steps.trusted_scripts.outputs.root }}
+          TRUSTED_HASHES: ${{ steps.trusted_scripts.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          # Re-verify the staged copy against the hash recorded before any
+          # container mounted the workspace, then run that copy — never the
+          # workspace path, which by now holds the branch under review.
+          while read -r hash rel; do
+            [ -z "${hash}" ] && continue
+            actual="$(sha256sum "${TRUSTED_ROOT}/${rel}" | awk '{print $1}')"
+            if [ "${actual}" != "${hash}" ]; then
+              echo "::error title=mergecraft trusted scripts::hash mismatch for ${rel} (recorded ${hash}, found ${actual}) — refusing to run a copy that is not the reviewed one."
+              exit 1
+            fi
+          done <<< "${TRUSTED_HASHES}"
+          "${TRUSTED_ROOT}/scripts/decide_codex_fallback.sh"
 
       # Mint per attempt: the full cascade can outlive a one-hour token.
       - name: Mint App token for Codex
@@ -799,11 +858,11 @@ jobs:
         env:
           PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
         run: |
-          # $GITHUB_WORKSPACE is created by the Action container's volume
-          # mount and owned by root — this job never checks out, so no
-          # runner-owned directory exists there. Writing the packet into
-          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
-          # always writable by the runner user.
+          # A mergeCraft rung checks the PR head out into the workspace and the
+          # container leaves root-owned files behind, so by now the tree holds
+          # content the pull request controls and the runner user cannot write
+          # into. $RUNNER_TEMP stays runner-owned, which is why the packet is
+          # written there rather than into the workspace.
           if [ -z "${PACKET:-}" ]; then
             echo "no evidence packet emitted by this rung; nothing to persist"
             exit 0
@@ -856,7 +915,21 @@ jobs:
           CODEX_OUTCOME: ${{ steps.mergecraft_codex.outcome }}
           NOUS_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
           CODEX_PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
-        run: ./scripts/decide_claude_fallback.sh
+          TRUSTED_ROOT: ${{ steps.trusted_scripts.outputs.root }}
+          TRUSTED_HASHES: ${{ steps.trusted_scripts.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          # Same re-verification as the Nous -> Codex decide step: run the
+          # trusted copy, not the workspace path a rung has since rewritten.
+          while read -r hash rel; do
+            [ -z "${hash}" ] && continue
+            actual="$(sha256sum "${TRUSTED_ROOT}/${rel}" | awk '{print $1}')"
+            if [ "${actual}" != "${hash}" ]; then
+              echo "::error title=mergecraft trusted scripts::hash mismatch for ${rel} (recorded ${hash}, found ${actual}) — refusing to run a copy that is not the reviewed one."
+              exit 1
+            fi
+          done <<< "${TRUSTED_HASHES}"
+          "${TRUSTED_ROOT}/scripts/decide_claude_fallback.sh"
 
       # Mint per attempt: the full cascade can outlive a one-hour token.
       - name: Mint App token for Claude
@@ -924,11 +997,11 @@ jobs:
         env:
           PACKET: ${{ steps.mergecraft_claude.outputs.evidence_packet }}
         run: |
-          # $GITHUB_WORKSPACE is created by the Action container's volume
-          # mount and owned by root — this job never checks out, so no
-          # runner-owned directory exists there. Writing the packet into
-          # the workspace fails with "Permission denied"; $RUNNER_TEMP is
-          # always writable by the runner user.
+          # A mergeCraft rung checks the PR head out into the workspace and the
+          # container leaves root-owned files behind, so by now the tree holds
+          # content the pull request controls and the runner user cannot write
+          # into. $RUNNER_TEMP stays runner-owned, which is why the packet is
+          # written there rather than into the workspace.
           if [ -z "${PACKET:-}" ]; then
             echo "no evidence packet emitted by this rung; nothing to persist"
             exit 0
@@ -967,6 +1040,40 @@ jobs:
         run: |
           echo "::notice title=mergecraft incomplete::Review step did not finish successfully (see its log — e.g. provider session limit or a runtime error). Approval enforcement in the approval-gate job will fail closed on this."
 
+      # Record the terminal verdict from the last rung that produced an evidence
+      # packet. Claude runs last, then Codex, then Nous — take the first rung in
+      # that order whose packet is present, so the running order is reflected
+      # without re-deriving it from step outcomes. Only this run can write the
+      # job outputs these become, which is what makes the gate's verdict
+      # unforgeable by a PR-side workflow. `always()` keeps the step running
+      # when a rung failed under `continue-on-error`.
+      - name: Record the approval verdict from the last review rung
+        if: always()
+        id: approval_verdict
+        env:
+          NOUS_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet }}
+          CODEX_PACKET: ${{ steps.mergecraft_codex.outputs.evidence_packet }}
+          CLAUDE_PACKET: ${{ steps.mergecraft_claude.outputs.evidence_packet }}
+        run: |
+          set -euo pipefail
+          packet=""; rung=""
+          if [ -n "${CLAUDE_PACKET:-}" ]; then
+            packet="${CLAUDE_PACKET}"; rung="claude"
+          elif [ -n "${CODEX_PACKET:-}" ]; then
+            packet="${CODEX_PACKET}"; rung="codex"
+          elif [ -n "${NOUS_PACKET:-}" ]; then
+            packet="${NOUS_PACKET}"; rung="nous"
+          fi
+          verdict=""
+          if [ -n "${packet}" ]; then
+            verdict="$(printf '%s' "${packet}" | jq -r '.decision.verdict // empty' 2>/dev/null || true)"
+          fi
+          echo "approval verdict from rung=${rung:-none} verdict=${verdict:-none}"
+          {
+            echo "approval_verdict=${verdict}"
+            echo "approval_rung=${rung}"
+          } >> "${GITHUB_OUTPUT}"
+
   approval-gate:
     name: mergecraft review
     needs: review
@@ -994,25 +1101,18 @@ jobs:
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - name: Fail when mergeCraft would not approve
-        # Gate directly on the `mergecraft-approval` check-run, decoupled from the
-        # review step's own exit code (which can be non-zero on a benign output
-        # hiccup even when the review + approval check posted fine). Runs on every
-        # PR where auth is present.
+        # The verdict comes from this run's own review job output, which no other
+        # workflow can write. A `mergecraft-approval` check-run only corroborates
+        # it: the check must sit on this head, be issued by an actor this
+        # repository trusts, carry this run's `<run id>:<attempt>` external id,
+        # and its conclusion must agree with the output verdict. An empty output,
+        # a check that cannot be attributed, a disagreement, or a missing check
+        # all fail closed.
         #
-        # This job `needs:` the review-attempts job so the gate cannot sample
-        # check-runs until every attempt in that job (including Codex fallback)
-        # has finished — fixing the #433 race where a legitimate Codex approval
-        # read as "review did not complete".
-        #
-        # FAIL CLOSED on every non-success outcome. PR #194 showed the review can
-        # fail outright (there, a bwrap sandbox namespace failure), posting no
-        # `mergecraft-approval` check at all — the prior version treated that
-        # ("no check posted") and a check-runs API
-        # outage identically as fail-open, so a PR could merge with zero review
-        # signal and nothing visibly red. The only passing outcome now is a
-        # definitive conclusion=success: a review that actually ran and approved.
-        # Retries below only smooth over a single transient API blip; once
-        # retries are exhausted without success, this step exits 1.
+        # This job `needs:` the review-attempts job so the gate reads that job's
+        # outputs after it has recorded them, and so the check it corroborates
+        # cannot be sampled until every attempt (including the fallbacks) has
+        # finished.
         if: >-
           github.event_name == 'pull_request_target' &&
           env.HAS_AUTH == 'true'
@@ -1020,18 +1120,28 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          APPROVAL_VERDICT: ${{ needs.review.outputs.approval_verdict }}
+          APPROVAL_RUNG: ${{ needs.review.outputs.approval_rung }}
+          EXPECTED_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
         run: |
           set -euo pipefail
-          # The action posts a `mergecraft-approval` check-run on the PR head SHA:
-          # conclusion=success => no outstanding feedback; anything else (failure,
-          # no check posted at all, or the query itself failing after retries)
-          # means the review was never confirmed successful, so none of those
-          # paths may pass this gate.
-          conclusion=""; queried=""
+          verdict="${APPROVAL_VERDICT:-}"
+          rung="${APPROVAL_RUNG:-none}"
+          if [ -z "${verdict}" ]; then
+            # FAIL CLOSED: no packet means the review recorded no verdict, so
+            # there is nothing a check-run could corroborate. This is the shape
+            # of a run whose review never completed.
+            echo "::error title=mergecraft review incomplete::The review job recorded no approval verdict (rung=${rung}); no evidence packet was produced. Failing closed."
+            exit 1
+          fi
+
+          # Name-filtered and paged so a large CI matrix cannot push the check off
+          # the first page; the server-side filter keeps this query and the shared
+          # routing library judging the same set.
+          expected_external="${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}"
+          checks=""; queried=""
           for attempt in $(seq 1 5); do
-            if conclusion="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
-              --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
-              | sort_by(.completed_at // .started_at) | last | .conclusion // ""')"; then
+            if checks="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?check_name=mergecraft-approval&filter=all&per_page=100")"; then
               queried="yes"; break
             fi
             echo "check-runs query failed (attempt ${attempt}/5); retrying in 5s…" >&2
@@ -1040,26 +1150,39 @@ jobs:
           if [ -z "${queried}" ]; then
             # FAIL CLOSED: an unreachable check-runs API after retries is not
             # evidence a review ran and approved, so it cannot pass the gate.
-            # This deliberately accepts that a sustained GitHub API outage blocks
-            # merges on gated branches until the query succeeds (or someone
-            # re-runs the job) — "the review actually ran and approved" is the
-            # only condition that may pass, full stop.
             echo "::error title=mergecraft approval unknown::Could not query check-runs for ${HEAD_SHA} after retries — cannot confirm mergecraft-approval. Failing closed."
             exit 1
           fi
-          case "${conclusion}" in
-            success)
-              echo "mergecraft approval: no outstanding review feedback."
-              ;;
-            failure)
-              echo "::error title=mergecraft requested changes::mergecraft-approval check failed — address the review feedback on this PR."
-              exit 1
-              ;;
-            *)
-              # No mergecraft-approval check at all: the review failed to produce
-              # any verdict — e.g. PR #194, where a Codex sandbox crash left zero
-              # review signal. Fail closed rather than merge unreviewed.
-              echo "::error title=mergecraft review incomplete::No mergecraft-approval check on ${HEAD_SHA} — the review did not complete (see the review job's logs). Failing closed: this gate only passes once mergeCraft has actually reviewed and approved."
-              exit 1
-              ;;
-          esac
+
+          # Corroborate: same head, this run's external id, and an issuer this
+          # repository trusts — github-actions, or the configured App when an App
+          # id is set. The newest attributable check is the one compared; a check
+          # that cannot be attributed is ignored, never trusted.
+          check="$(printf '%s' "${checks}" | jq -r \
+            --arg head "${HEAD_SHA}" \
+            --arg ext "${expected_external}" \
+            --arg app "${EXPECTED_APP_ID:-}" '
+              [ .check_runs[]?
+                | select(.name == "mergecraft-approval")
+                | select(.head_sha == $head)
+                | select(.external_id == $ext)
+                | select((.app.slug // "") == "github-actions"
+                         or ($app != "" and ((.app.id // 0) | tostring) == $app))
+              ]
+              | sort_by(.completed_at // .started_at)
+              | last
+              | "\(.conclusion // "")"
+            ' 2>/dev/null || true)"
+          if [ -z "${check}" ]; then
+            echo "::error title=mergecraft review incomplete::No mergecraft-approval check attributable to this run (rung=${rung}) on ${HEAD_SHA} — it must be issued by github-actions or the configured App with external id ${expected_external}. Failing closed."
+            exit 1
+          fi
+          if [ "${check}" != "${verdict}" ]; then
+            echo "::error title=mergecraft requested changes::mergecraft-approval corroboration disagrees with this run's verdict (verdict=${verdict}, check=${check}, rung=${rung}). Failing closed."
+            exit 1
+          fi
+          if [ "${verdict}" != "success" ]; then
+            echo "::error title=mergecraft requested changes::mergecraft review verdict is ${verdict} (rung=${rung}) — address the review feedback on this PR."
+            exit 1
+          fi
+          echo "mergecraft approval: verdict=success corroborated by an attributable check on ${HEAD_SHA}."

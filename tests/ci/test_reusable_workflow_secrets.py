@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import WORKFLOWS
@@ -35,10 +34,6 @@ def _workflow_files() -> list[Path]:
     return sorted(WORKFLOWS.glob("*.yml"))
 
 
-@pytest.mark.xfail(
-    reason="green after SW2.6: changelog preview drops secrets entirely",
-    strict=False,
-)
 def test_no_external_reusable_workflow_receives_every_secret() -> None:
     offenders: list[str] = []
     for path in _workflow_files():

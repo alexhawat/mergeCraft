@@ -172,3 +172,13 @@ uv run pytest tests/ci tests/cli tests/pins tests/harbor tests/agents/test_roste
 The suite is expected RED until the implementation waves land. Each `xfail`
 marker names the wave that will satisfy it; the markers are removed during
 post-wave reconciliation so the branch ends on real passes.
+
+## Reconciliation log
+
+- 2026-09-25 — SW2 landed the self-workflow hardening, so the four
+  trusted-script tests, the three self-gate structural/routing tests, and the
+  reusable-workflow-secrets test turned green and their non-strict `xfail`
+  markers came off. The behavioural provenance matrix keeps its expected-red
+  cases, but now per parameter (`hardened`, `dogfood`) rather than on the whole
+  function: those two consumer surfaces are SW3's to green. The self-workflow
+  gate cases run as real passes.

@@ -59,7 +59,17 @@ class GateTarget:
 _SELF = GateTarget("self", ".github/workflows/mergecraft.yml", "approval-gate")
 _HARDENED = GateTarget("hardened", "scripts/example_workflows/hardened.yml.tpl", "review")
 _DOGFOOD = GateTarget("dogfood", "docs/artifacts/dogfood-mergecraft.yml", "review")
-_TARGETS = (_SELF, _HARDENED, _DOGFOOD)
+# SW2 hardened the self-workflow's gate; the hardened example and the dogfood
+# artifact are SW3's to update, so only their cases stay expected-red.
+_XFAIL_CONSUMER_GATE = pytest.mark.xfail(
+    reason="green after SW3.3 / SW3.7: hardened example and dogfood gate hardening",
+    strict=False,
+)
+_TARGET_PARAMS: list[Any] = [
+    pytest.param(_SELF, id="self"),
+    pytest.param(_HARDENED, id="hardened", marks=_XFAIL_CONSUMER_GATE),
+    pytest.param(_DOGFOOD, id="dogfood", marks=_XFAIL_CONSUMER_GATE),
+]
 # The hardened example and the dogfood artifact keep their documented
 # fail-open behaviour when no mergecraft-approval check exists at all.
 _FAIL_OPEN_WHEN_CHECK_ABSENT = {_HARDENED.name, _DOGFOOD.name}
@@ -242,15 +252,13 @@ def _assert_passes(target: GateTarget, tmp_path: Path, **kwargs: Any) -> None:
 # ── structural wiring ──────────────────────────────────────────────────────
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: gate reads its own output", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_gate_reads_this_runs_own_output(target: GateTarget) -> None:
     key, _ = _output_env(_gate_step(target))
     assert key
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: name-filtered check query", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_gate_queries_the_check_by_name_with_an_explicit_page(target: GateTarget) -> None:
     run = str(_gate_step(target).get("run"))
     assert "check_name=mergecraft-approval" in run, (
@@ -261,7 +269,6 @@ def test_gate_queries_the_check_by_name_with_an_explicit_page(target: GateTarget
     assert "filter=all" in run
 
 
-@pytest.mark.xfail(reason="green after SW2.3: review job exposes run outputs", strict=False)
 def test_self_workflow_exposes_the_run_verdict_as_job_outputs() -> None:
     """Another run cannot write a job output, so binding to one is run binding."""
     outputs = job(load_workflow("mergecraft.yml"), "review").get("outputs") or {}
@@ -276,7 +283,6 @@ def test_self_workflow_exposes_the_run_verdict_as_job_outputs() -> None:
     ), "approval-gate must read needs.review.outputs.approval_verdict"
 
 
-@pytest.mark.xfail(reason="green after SW2.4: shared query filter", strict=False)
 def test_shared_routing_lib_uses_the_same_name_filtered_query() -> None:
     text = (REPO_ROOT / "scripts/lib/provider_verdict_guard.sh").read_text(encoding="utf-8")
     assert "check_name=mergecraft-approval" in text
@@ -287,8 +293,7 @@ def test_shared_routing_lib_uses_the_same_name_filtered_query() -> None:
 # ── behavioral matrix ──────────────────────────────────────────────────────
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: foreign check ignored", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_newer_foreign_success_cannot_mask_a_genuine_success(
     target: GateTarget, tmp_path: Path
 ) -> None:
@@ -308,10 +313,7 @@ def test_newer_foreign_success_cannot_mask_a_genuine_success(
     )
 
 
-@pytest.mark.xfail(
-    reason="green after SW2.3 / SW3.3: output verdict is authoritative", strict=False
-)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_output_failure_blocks_despite_a_newer_foreign_success(
     target: GateTarget, tmp_path: Path
 ) -> None:
@@ -330,16 +332,14 @@ def test_output_failure_blocks_despite_a_newer_foreign_success(
     )
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: run-bound corroboration", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_github_actions_check_with_matching_attempt_corroborates_success(
     target: GateTarget, tmp_path: Path
 ) -> None:
     _assert_passes(target, tmp_path, verdict="success", checks=[_check()])
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: configured App id accepted", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_configured_app_check_corroborates_success(target: GateTarget, tmp_path: Path) -> None:
     _assert_passes(
         target,
@@ -350,10 +350,7 @@ def test_configured_app_check_corroborates_success(target: GateTarget, tmp_path:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after SW2.3 / SW3.3: wrong attempt is unattributable", strict=False
-)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_wrong_external_id_is_unattributable_and_blocks(target: GateTarget, tmp_path: Path) -> None:
     _assert_blocks(
         target,
@@ -363,8 +360,7 @@ def test_wrong_external_id_is_unattributable_and_blocks(target: GateTarget, tmp_
     )
 
 
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: empty output fails closed", strict=False)
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_empty_output_with_no_check(target: GateTarget, tmp_path: Path) -> None:
     """A missing packet and a missing check: self fails closed, examples notice."""
     returncode = _run_gate(target, tmp_path, verdict="", checks=[])
@@ -374,14 +370,12 @@ def test_empty_output_with_no_check(target: GateTarget, tmp_path: Path) -> None:
         assert returncode != 0, "self review must fail closed with no verdict and no check"
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: empty output fails closed", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_empty_output_with_a_corroborating_check_blocks(target: GateTarget, tmp_path: Path) -> None:
     _assert_blocks(target, tmp_path, verdict="", checks=[_check()])
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: forged check cannot pass", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 @pytest.mark.parametrize("verdict", ["failure", "neutral"])
 def test_forged_github_actions_success_cannot_pass_a_non_success_run(
     target: GateTarget, tmp_path: Path, verdict: str
@@ -390,8 +384,7 @@ def test_forged_github_actions_success_cannot_pass_a_non_success_run(
     _assert_blocks(target, tmp_path, verdict=verdict, checks=[_check()])
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: disagreement fails closed", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_matching_check_with_failure_conclusion_blocks(target: GateTarget, tmp_path: Path) -> None:
     _assert_blocks(
         target,
@@ -401,8 +394,7 @@ def test_matching_check_with_failure_conclusion_blocks(target: GateTarget, tmp_p
     )
 
 
-@pytest.mark.xfail(reason="green after SW2.3 / SW3.3: foreign check cannot pass", strict=False)
-@pytest.mark.parametrize("target", _TARGETS, ids=[t.name for t in _TARGETS])
+@pytest.mark.parametrize("target", _TARGET_PARAMS)
 def test_a_lone_foreign_check_cannot_pass(target: GateTarget, tmp_path: Path) -> None:
     _assert_blocks(
         target,
@@ -433,7 +425,6 @@ def test_routing_prefers_the_packet_verdict_over_a_foreign_check(
     )
 
 
-@pytest.mark.xfail(reason="green after SW2.4: lib ignores a foreign check", strict=False)
 def test_routing_never_treats_a_foreign_check_as_a_verdict(tmp_path: Path) -> None:
     root = stage_trusted_copy(tmp_path)
     gh_dir = write_gh_mock(

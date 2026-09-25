@@ -71,10 +71,6 @@ def _trusted_copy_step(
     )
 
 
-@pytest.mark.xfail(
-    reason="green after SW2.2: decide steps run the staged copy, not the workspace",
-    strict=False,
-)
 def test_no_workspace_relative_script_runs_after_a_mergecraft_step() -> None:
     """Once a rung has switched the workspace to the PR head, stop reading it."""
     steps = _review_steps()
@@ -90,10 +86,6 @@ def test_no_workspace_relative_script_runs_after_a_mergecraft_step() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after SW2.1: trusted-copy step is added ahead of every rung",
-    strict=False,
-)
 def test_a_trusted_copy_is_staged_before_the_first_mergecraft_step() -> None:
     """Copy the three scripts out of the trusted checkout, hash them, hide them."""
     steps = _review_steps()
@@ -138,10 +130,6 @@ def test_a_trusted_copy_is_staged_before_the_first_mergecraft_step() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after SW2.2: decide steps reference the verified copy root",
-    strict=False,
-)
 def test_decide_steps_run_the_verified_copy() -> None:
     steps = _review_steps()
     _, copy_step = _trusted_copy_step(steps)
@@ -162,10 +150,6 @@ def test_decide_steps_run_the_verified_copy() -> None:
         )
 
 
-@pytest.mark.xfail(
-    reason="green after SW2.5: comments state the true reason, not never-checks-out",
-    strict=False,
-)
 def test_no_workflow_comment_claims_the_job_never_checks_out() -> None:
     """The false premise that hid the workspace-ownership change must be gone."""
     text = (REPO_ROOT / ".github/workflows/mergecraft.yml").read_text(encoding="utf-8")
