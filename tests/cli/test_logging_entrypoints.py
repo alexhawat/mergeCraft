@@ -63,7 +63,6 @@ class _FakeCliContext:
     obj: Any = None
 
 
-@pytest.mark.xfail(reason="green after the composed-patcher wave lands", strict=False)
 def test_root_callback_keeps_context_and_redaction() -> None:
     """The callback installs both behaviours in one composed patcher."""
     apply_global_cli_options(
@@ -83,7 +82,6 @@ def test_root_callback_keeps_context_and_redaction() -> None:
 
 
 @pytest.mark.parametrize("argv", _ENTRYPOINTS)
-@pytest.mark.xfail(reason="green after the composed-patcher wave lands", strict=False)
 def test_entrypoint_logging_state_keeps_context_and_redaction(argv: list[str]) -> None:
     """Invoking an entrypoint through the root callback leaves both installed."""
     result = runner.invoke(app, argv)

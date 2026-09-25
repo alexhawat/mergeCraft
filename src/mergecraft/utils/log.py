@@ -5,10 +5,13 @@ from __future__ import annotations
 import atexit
 import os
 import sys
+from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
 
 from loguru import logger
+
+MessageRedactor = Callable[[str], str]
 
 _CONFIGURED = False
 _STDERR_HANDLER_ID: int | None = None
@@ -19,6 +22,10 @@ _BOUND_CONTEXT: dict[str, Any] = {
     "pr": None,
     "phase": None,
 }
+# Process-wide redactor slot. ``configure_logging`` installs a patcher that
+# reads it; ``analyzers.redact`` fills it without ``utils.log`` importing the
+# analyzer package (CR-D3 inversion).
+_MESSAGE_REDACTOR: MessageRedactor | None = None
 
 
 def is_debug_enabled() -> bool:
@@ -87,6 +94,35 @@ def _patch_bound_context(record: dict[str, Any]) -> None:
             extra[key] = value
 
 
+def _patch_record(record: dict[str, Any]) -> None:
+    """Composed patcher: bound context first, then the message redactor (CR-D3).
+
+    The redactor is read from the module slot on every record, so installing it
+    before or after ``configure_logging`` leaves both behaviours in place.
+    """
+    _patch_bound_context(record)
+    redactor = _MESSAGE_REDACTOR
+    if redactor is not None:
+        record["message"] = redactor(str(record["message"]))
+
+
+def set_message_redactor(redactor: MessageRedactor | None) -> None:
+    """Register (or clear) the process-wide message redactor.
+
+    The redactor is applied to ``record["message"]`` by the composed patcher
+    every ``configure_logging`` installs. Setting it reinstalls that patcher so
+    the slot takes effect whether it lands before or after ``configure_logging``.
+    """
+    global _MESSAGE_REDACTOR
+    _MESSAGE_REDACTOR = redactor
+    _install_patcher()
+
+
+def _install_patcher() -> None:
+    """Install the composed record patcher — the single ``logger.configure`` site."""
+    logger.configure(patcher=_patch_record)  # type: ignore[arg-type]  # — loguru patcher stub is overly restrictive; _patch_record(record) signature is compatible at runtime
+
+
 def _remove_stderr_handler() -> None:
     global _STDERR_HANDLER_ID
     if _STDERR_HANDLER_ID is not None:
@@ -116,7 +152,7 @@ def configure_logging(*, force: bool = False, level: str | None = None) -> None:
     elif not _CONFIGURED:
         with suppress(ValueError):
             logger.remove(0)
-    logger.configure(patcher=_patch_bound_context)  # type: ignore[arg-type]  # — loguru patcher stub is overly restrictive; _patch_bound_context(record) signature is compatible at runtime
+    _install_patcher()
 
     if log_format == "json":
         _STDERR_HANDLER_ID = logger.add(
@@ -169,6 +205,7 @@ def register_log_drain_at_exit() -> None:
 configure_logging()
 
 __all__ = [
+    "MessageRedactor",
     "bind_run_context",
     "clear_run_context",
     "configure_logging",
@@ -178,4 +215,5 @@ __all__ = [
     "register_log_drain_at_exit",
     "resolve_log_format",
     "resolve_log_level",
+    "set_message_redactor",
 ]

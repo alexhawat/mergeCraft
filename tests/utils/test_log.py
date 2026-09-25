@@ -133,7 +133,6 @@ def _assert_context_and_redaction(records: list[Any]) -> None:
     assert _CANARY not in message
 
 
-@pytest.mark.xfail(reason="green after the composed-patcher wave lands", strict=False)
 def test_configure_then_install_keeps_context_and_redaction() -> None:
     """A record keeps its bound correlation fields and loses the planted canary.
 
@@ -151,7 +150,6 @@ def test_configure_then_install_keeps_context_and_redaction() -> None:
     _assert_context_and_redaction(records)
 
 
-@pytest.mark.xfail(reason="green after the composed-patcher wave lands", strict=False)
 def test_install_then_configure_keeps_context_and_redaction() -> None:
     """Installing redaction first and reconfiguring after still keeps both.
 
@@ -169,7 +167,6 @@ def test_install_then_configure_keeps_context_and_redaction() -> None:
     _assert_context_and_redaction(records)
 
 
-@pytest.mark.xfail(reason="green after the composed-patcher wave lands", strict=False)
 def test_repeated_configure_after_install_keeps_redaction() -> None:
     """A later ``configure_logging(force=True)`` must not drop the redactor."""
     install_loguru_redaction_filter()

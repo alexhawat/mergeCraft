@@ -65,15 +65,21 @@ vs explicit remote, repeated configuration, residual files), and error handling
 (monkeypatched `OSError`/failure callbacks, HTTP 401/403/500, teardown steps
 raising) with assertions on emitted warnings and their contents.
 
-## Red / green status at authoring time
+## Red / green status
 
-Every contract above whose implementation is missing is marked with a
-non-strict `xfail(reason=...)` and is red today; the guards are plain passing
-tests. The red set:
+The composed-patcher group (CR2) has landed: its tests are plain passing
+assertions and enforce for real. The remaining red contracts are marked with a
+non-strict `xfail(reason=...)` until their implementation lands.
 
-- `tests/utils/test_log.py` — 3 tests (composed patcher).
-- `tests/cli/test_logging_entrypoints.py` — 5 tests (root callback, 4 entrypoints).
-- `tests/test_main_phases.py` — 5 tests (preamble; 4 teardown steps).
+Green (enforced):
+
+- `tests/utils/test_log.py` — 3 composed-patcher tests.
+- `tests/cli/test_logging_entrypoints.py` — 5 root-callback / entrypoint tests.
+- `tests/test_main_phases.py` — the `main()` preamble bound-context test.
+
+Still red (xfail):
+
+- `tests/test_main_phases.py` — 4 teardown-step tests (cleanup/revocation).
 - `tests/utils/test_git_setup.py` — 29 tests (config families, trace/redirect names).
 - `tests/security/test_hostile_git_config.py` — 2 tests (trace capture, credential helper).
 - `tests/utils/test_secrets.py` — 3 tests (lookalike credential names).

@@ -1181,7 +1181,6 @@ class _CanaryAgent(FakeAgent):
         return await super().run(ctx)
 
 
-@pytest.mark.xfail(reason="green after the composed-patcher wave lands", strict=False)
 async def test_preamble_keeps_bound_context_after_redaction_install(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
