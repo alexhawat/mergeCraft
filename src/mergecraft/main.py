@@ -56,6 +56,7 @@ from mergecraft.scm.github import (
     create_github_scm,
     github_client_from_scm,
 )
+from mergecraft.security.review_integrity import scan_local_sinks_for_secrets
 from mergecraft.tracing.review_context import (
     ReviewContext,
     bind_review_context,
@@ -1834,6 +1835,68 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         return await _dispatch_agent_with_deadline(ctx)
 
 
+_SINK_SCAN_ARTIFACT_SOURCES: tuple[str, ...] = (
+    "packet-nous.json",
+    "packet-codex.json",
+    "packet-claude.json",
+    "mergecraft/run-packet.json",
+    "shadow-compare.jsonl",
+)
+"""Artifact sources the evidence/trace uploads are assembled from (SX-D10).
+
+Every one lives under ``RUNNER_TEMP`` — the GitHub-provided per-job scratch
+directory the workflow's ``actions/upload-artifact`` steps read. ``.json`` is
+deliberately *not* a sink suffix, so the packet files are named explicitly and
+scanned by path; the globs pick up the packet's real slug-prefixed spelling
+and the shadow-compare JSONL wherever it lands beneath the runner temp dir.
+"""
+
+
+def _runner_temp_artifact_sources() -> list[Path]:
+    """Resolve the in-scope artifact sources under ``RUNNER_TEMP``."""
+    runner_temp = os.environ.get("RUNNER_TEMP", "").strip()
+    if not runner_temp:
+        return []
+    base = Path(runner_temp)
+    sources = [base / rel for rel in _SINK_SCAN_ARTIFACT_SOURCES]
+    sources.extend(sorted(base.glob("packet-*.json")))
+    sources.extend(sorted((base / "mergecraft").glob("*run-packet.json")))
+    sources.extend(sorted((base / "mergecraft").glob("*.jsonl")))
+    return list(dict.fromkeys(sources))
+
+
+def _run_sink_scan_secret_values(ctx: RunContext) -> list[str]:
+    """Return the credential *values* the run holds, for the post-run sink scan.
+
+    Covers every provider credential env name the registry can consume (D2's
+    single authority, so a new provider cannot be missed) plus the SCM tokens
+    and API/DB secrets carried on the run context. Values only — the scan
+    compares them and never records them.
+    """
+    from mergecraft.config.runtime_provider_registry import provider_credential_env_names
+
+    values: list[str] = []
+
+    def _add(value: str | None) -> None:
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+
+    for name in provider_credential_env_names(ctx.settings):
+        _add(os.environ.get(name))
+    token_ref = ctx.token_ref
+    if token_ref is not None:
+        _add(token_ref.git_token)
+        _add(token_ref.mcp_token)
+        _add(token_ref.read_token)
+    _add(ctx.job_token)
+    run_context = ctx.run_context
+    if run_context is not None:
+        _add(run_context.api_token)
+        for secret in (run_context.db_secrets or {}).values():
+            _add(secret)
+    return list(dict.fromkeys(values))
+
+
 async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
@@ -1853,6 +1916,36 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
                 agent_result = await finalize_agent_result(ctx.run_ctx, agent_result)
             except Exception as exc:
                 logger.debug("post-run finalize skipped: {}", exc)
+
+    # SX-D10 / F2=A — post-run sink scan of the run temp dir *and* every
+    # artifact source the evidence uploads read. It runs here: after the agent
+    # finished (``finalize_agent_result`` above), before the outcome is
+    # classified and published, and before the ``finally`` block's
+    # ``cleanup_temp_directory()`` would remove the sinks. A hit means the
+    # credential already left the agent's process, so the response is to stop
+    # the run, name the sink path — never its contents — force the approval
+    # conclusion to ``failure`` and delete the sink before artifact upload.
+    sink_scan_error: str | None = None
+    sink_scan_secrets = _run_sink_scan_secret_values(ctx)
+    if sink_scan_secrets:
+        sink_hits = scan_local_sinks_for_secrets(
+            Path(ctx.tmpdir) if ctx.tmpdir else None,
+            secrets=sink_scan_secrets,
+            explicit_paths=_runner_temp_artifact_sources(),
+        )
+        if sink_hits:
+            sink_scan_error = (
+                "credential material found in local sink(s) after the run: "
+                + ", ".join(str(path) for path in sink_hits)
+                + " — rotate the exposed credential(s)"
+            )
+            for path in sink_hits:
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    logger.warning("» could not remove exposed local sink {}: {}", path, exc)
+                else:
+                    logger.warning("» removed local sink holding credential material: {}", path)
 
     # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
     # ``inconclusive`` when review-relevant dependency prep failed OR a
@@ -1897,6 +1990,12 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             final_summary_written=tool_state.final_summary_written,
             terminal_publication_failed=tool_state.terminal_publication_failed,
         )
+    if sink_scan_error is not None:
+        # A sink hit outranks the published verdict: the run failed, whatever
+        # the review said, and ``failure_reason`` names the sink path so the
+        # operator knows what to rotate. The matched contents never appear.
+        outcome = RunOutcome.failed
+        failure_reason = sink_scan_error
     verdict_publish = _verdict_protocol_publish(
         result=agent_result,
         mode=tool_state.selected_mode,
