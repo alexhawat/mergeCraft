@@ -20,6 +20,7 @@ from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.review_checks import declared_cannot_run_outcomes, plan_checks, run_checks
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.sandbox import SandboxPlan
     from mergecraft.ci.evidence import GateSubstitution
     from mergecraft.mcp.context import ToolContext
     from mergecraft.review_checks import StaticCheck, StaticCheckOutcome
@@ -156,6 +157,19 @@ def _withheld_reason(ctx: ToolContext) -> str:
     )
 
 
+def _cannot_isolate_reason(ctx: ToolContext, plan: SandboxPlan) -> str:
+    """Wording for a gate withheld because the untrusted sandbox cannot run.
+
+    Names the missing isolation from the sandbox plan (SX-D7). The ``shell``
+    setting does not appear: an untrusted gate is PR-authored code, so an
+    unavailable sandbox withholds it regardless of shell permission.
+    """
+    base = _withheld_reason(ctx)
+    if plan.skip_reason:
+        return f"{base} — {plan.skip_reason}"
+    return base
+
+
 def _sandbox_scratch_dir(ctx: ToolContext) -> Path:
     return Path(ctx.tmpdir) / "static-checks-scratch"
 
@@ -207,9 +221,12 @@ async def _run_untrusted_checks(
 
     Returns ``(outcomes, substitutions, reason)``. When isolation is available
     the checkout is presented as a disposable copy-on-write view and
-    sandbox-caused failures are classified. When it is not, a shell-disabled run
-    withholds with a declared-but-cannot-run row; an available shell keeps the
-    existing bare execution, since the shell permission is the execution opt-in.
+    sandbox-caused failures are classified. When it is **not** available the
+    gates are withheld as declared-but-cannot-run — **regardless of ``shell``**.
+    The shell permission is an execution opt-in, not a sandbox guarantee; an
+    untrusted gate is PR-authored code, so it must never run bare on the real
+    checkout (that would bypass the copy-on-write view, network isolation and
+    the fail-closed policy the sandbox applies).
     """
     from mergecraft.analyzers.sandbox import plan_sandbox
 
@@ -239,22 +256,18 @@ async def _run_untrusted_checks(
         )
         return outcomes, substitutions, _UNAVAILABLE_REASON
 
-    if ctx.payload.shell == "disabled":
-        reason = _withheld_reason(ctx)
-        declared = declared_cannot_run_outcomes(checks, reason=reason)
-        outcomes, substitutions = await _apply_ci_evidence(ctx, declared)
-        return outcomes, substitutions, reason
-
-    outcomes = run_checks(checks, root=root, tier="untrusted")
-    outcomes, substitutions = await _apply_ci_evidence(ctx, outcomes)
-    executed = [o for o in outcomes if o.ran]
+    # No isolation for an untrusted gate: fail closed. Every gate is withheld,
+    # whatever the `shell` setting says, because shell permission is an
+    # execution opt-in, not a sandbox guarantee (SX-D7).
+    reason = _cannot_isolate_reason(ctx, plan)
+    declared = declared_cannot_run_outcomes(checks, reason=reason)
+    outcomes, substitutions = await _apply_ci_evidence(ctx, declared)
     logger.info(
-        "static checks: {} executed, {} failing, {} unavailable",
-        len(executed),
-        sum(1 for o in executed if not o.passed),
-        len(outcomes) - len(executed),
+        "static checks: no untrusted sandbox isolation (shell={}) — withheld {} gate(s)",
+        ctx.payload.shell,
+        len(outcomes),
     )
-    return outcomes, substitutions, _UNAVAILABLE_REASON
+    return outcomes, substitutions, reason
 
 
 def run_static_checks_tool(ctx: ToolContext):
@@ -287,8 +300,9 @@ def run_static_checks_tool(ctx: ToolContext):
         # The withhold decision is about execution, not provenance: a gate
         # discovered from the repo's Makefile shell-executes exactly like a
         # declared one, and on an untrusted event that Makefile is part of the
-        # diff under review. Both route through the untrusted sandbox; only the
-        # wording differs when isolation is unavailable.
+        # diff under review. Both route through the untrusted sandbox, and both
+        # are withheld when isolation is unavailable; only the wording differs
+        # by provenance.
         tier = ctx.trust_tier
         if tier == "untrusted":
             outcomes, substitutions, reason = await _run_untrusted_checks(
@@ -316,9 +330,11 @@ def run_static_checks_tool(ctx: ToolContext):
             "else discovered Makefile lint/typecheck targets) and return each gate's "
             "status and output. Use during review to turn a style observation into a "
             "named failing gate. Returns ran:false when the repo declares no gate, or "
-            "when none of its gates are installed in this environment; either way "
-            "report the check as skipped rather than running a linter or interpreter "
-            "of your own, whose version may not match the repo's. Per-gate status is "
+            "when none of its gates can run here — they are not installed, or (for an "
+            "untrusted change) the sandbox isolation the gates run under is unavailable; "
+            "either way report the check as skipped rather than running a linter or "
+            "interpreter of your own, whose version may not match the repo's. Per-gate "
+            "status is "
             "passed, failed, timed_out, unavailable, declared-but-cannot-run, or "
             "satisfied-by-ci — only `failed` says anything about the diff. "
             "`satisfied-by-ci` means the repo declared a CI check run as proof of that "

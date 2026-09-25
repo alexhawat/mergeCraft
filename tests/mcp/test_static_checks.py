@@ -204,15 +204,26 @@ async def test_discovered_makefile_gates_run_when_shell_disabled_but_trusted(
 
 @requires_make
 @pytest.mark.asyncio
-async def test_discovered_makefile_gates_run_under_permissive_shell(tmp_path: Path) -> None:
-    """An untrusted event with shell available keeps running discovered gates."""
+async def test_discovered_makefile_gates_are_withheld_when_no_isolation_under_permissive_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shell permission is an execution opt-in, not a sandbox guarantee (SX-D7).
+
+    Gate discovery still works — the Makefile `lint` target is planned — but an
+    untrusted gate must never run bare on the real checkout when the untrusted
+    sandbox cannot run, whatever ``shell`` says. Under ``shell: restricted`` the
+    gate is withheld as declared-but-cannot-run, naming the missing isolation.
+    """
+    _force_missing_isolation(monkeypatch)
     _write_makefile(tmp_path)
     ctx = _ctx(tmp_path, shell="restricted", static_checks=[], enabled=True)
     ctx.trust_tier = "untrusted"
     payload = await _run(ctx)
-    assert payload["ran"] is True
-    assert payload["allPassed"] is True
-    assert payload["checks"][0]["status"] == "passed"
+    assert payload["ran"] is False
+    checks = payload.get("checks") or []
+    assert [check["status"] for check in checks] == ["declared-but-cannot-run"]
+    assert checks[0]["name"] == "lint"
+    assert "sandbox isolation" in str(payload.get("reason", "")).lower()
 
 
 @pytest.mark.asyncio
@@ -250,6 +261,27 @@ def _full_caps() -> sandbox_mod.SandboxCapabilities:
 def _force_untrusted_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sandbox_mod, "probe_capabilities", _full_caps)
     monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    shell_mod._reset_shell_detection_globals()
+
+
+def _no_isolation_caps() -> sandbox_mod.SandboxCapabilities:
+    """A host with none of the isolation an untrusted gate requires."""
+    return sandbox_mod.SandboxCapabilities(
+        pid_namespace=False,
+        network_namespace=False,
+        read_only_bind=False,
+        tmpfs=False,
+        cgroup_memory=False,
+        rlimit_nproc=False,
+        pid_namespace_method="none",
+        user_namespace=False,
+        unavailable_reasons=["pid namespace unavailable (unshare failed)"],
+    )
+
+
+def _force_missing_isolation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deterministically plan no untrusted sandbox, whatever the host supports."""
+    monkeypatch.setattr(sandbox_mod, "probe_capabilities", _no_isolation_caps)
     shell_mod._reset_shell_detection_globals()
 
 
@@ -311,6 +343,46 @@ async def test_untrusted_gates_run_sandboxed_with_scratch_env(
         value = payload_env.get(key)
         assert value, f"{key} must be pointed at scratch, got {value!r}"
         assert str(tmp_path) in value, f"{key}={value!r} is outside the run tmpdir"
+
+
+@pytest.mark.parametrize("shell", ["restricted", "enabled"])
+@pytest.mark.asyncio
+async def test_untrusted_gates_never_run_bare_when_isolation_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str
+) -> None:
+    """No untrusted sandbox ⇒ every gate withheld, and no child process launched.
+
+    The removed fallback ran an untrusted gate bare on the real checkout
+    whenever ``shell`` allowed it. With isolation missing, every gate — declared
+    here — reports ``declared-but-cannot-run`` naming the missing isolation for
+    both ``restricted`` and ``enabled``, and the child boundary is never
+    crossed.
+    """
+    _force_missing_isolation(monkeypatch)
+    captured = _capture_child(monkeypatch)
+
+    ctx = _ctx(
+        tmp_path,
+        shell=shell,
+        static_checks=[
+            StaticCheckConfig(name="lint", command="gate"),
+            StaticCheckConfig(name="typecheck", command="gate"),
+        ],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    assert payload["ran"] is False, payload
+    assert [check["status"] for check in payload["checks"]] == [
+        "declared-but-cannot-run",
+        "declared-but-cannot-run",
+    ], payload
+    reason = str(payload.get("reason", ""))
+    assert "sandbox isolation" in reason.lower(), payload
+    assert "isolation unavailable" in reason.lower(), payload
+    assert captured["argv"] == [], payload
+    assert captured["env"] is None, payload
 
 
 @pytest.mark.parametrize(
