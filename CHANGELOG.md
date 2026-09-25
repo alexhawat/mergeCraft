@@ -1689,6 +1689,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unreadable base manifest, or a manifest whose entries share a name — is listed
   in the review payload.
 
+### Security
+
+- A single log patcher now both redacts secrets and carries the bound run
+  context, so every entrypoint — the Action, `mergecraft review` /
+  `diff-review` (including Harbor), and `mcp serve` — logs records that are
+  redacted **and** attributable to their run, repository, pull request and
+  phase. Previously the two patchers replaced each other, leaving the Action
+  redacted but uncorrelated and every other entrypoint correlated but not
+  redacted.
+
+- Git subprocesses no longer inherit environment-injected git configuration or
+  credential redirection: ambient `GIT_CONFIG_*` pairs, git trace variables
+  (`GIT_TRACE*`, `GIT_CURL_VERBOSE`), and askpass / ssh / proxy / exec-path
+  overrides are dropped before the subprocess environment is built, so an
+  ambient `credential.helper` or trace target cannot capture the brokered
+  credential. File-based configuration (`GIT_CONFIG_GLOBAL`, `~/.gitconfig`,
+  system) is left to the operator.
+
+- GitHub Actions and runner metadata reach child processes by explicit
+  documented name rather than by prefix, so lookalike credential variables such
+  as `GITHUB_PAT` or `RUNNER_BLOB` no longer pass into agents, the restricted
+  shell, or analyzers. `envAllowlist` remains the explicit escape hatch.
+
+- Cleanup and token-revocation failures are logged as warnings naming the step
+  and path — including a residual askpass file — instead of being suppressed.
+  Cleanup stays best-effort: no failure changes the run outcome.
+
 ## [0.1.0] — 2026-08-14
 
 Initial public release: mergeCraft is a standalone, BYOK GitHub Action for
