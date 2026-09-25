@@ -35,6 +35,10 @@ class _FakePwEntry:
 
 def _fake_drop_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make ``setpriv`` and the agent user resolvable regardless of host."""
+    # This models the agent-user drop: clear any ambient sudo envelope so the
+    # helper cannot drift onto the sudo-elevated numeric drop.
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    monkeypatch.delenv("SUDO_GID", raising=False)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(pwd, "getpwnam", lambda name: _FakePwEntry(name))
     monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
@@ -130,6 +134,8 @@ def test_missing_setpriv_refuses_before_spawning(
     """Without ``setpriv`` the shell must fail closed, not run as root."""
     from mergecraft.main import _ConfigurationError
 
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    monkeypatch.delenv("SUDO_GID", raising=False)
     monkeypatch.setattr(os, "getuid", lambda: 0)
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.setattr(shutil, "which", lambda name: None if name == "setpriv" else "/bin/true")
@@ -162,6 +168,8 @@ def test_unresolvable_agent_user_refuses_before_spawning(
     """A user missing from the passwd database is a configuration error."""
     from mergecraft.main import _ConfigurationError
 
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    monkeypatch.delenv("SUDO_GID", raising=False)
     monkeypatch.setattr(os, "getuid", lambda: 0)
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
@@ -215,6 +223,41 @@ def test_non_root_unshare_argv_is_unchanged(
     wrapped = argv[-1]
     assert "setpriv" not in wrapped
     assert wrapped.endswith("echo ok")
+
+
+def test_root_unshare_shell_under_sudo_drops_to_the_sudo_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Root via sudo outside the image drops to SUDO_UID/GID, not a missing agent user."""
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.delenv("IS_SANDBOX", raising=False)
+    monkeypatch.delenv("MERGECRAFT_ALLOW_ROOT", raising=False)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1000")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    # The runner has no agent account: a fallback to the agent-user drop must
+    # fail loudly rather than silently resolve a user that is not there.
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: (_ for _ in ()).throw(KeyError(name)))
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: False)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: False)
+
+    argv = _spawn(monkeypatch, "echo ok", cwd=str(tmp_path))
+    wrapped = argv[-1]
+    assert "exec setpriv" in wrapped, wrapped
+    for flag in (
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--bounding-set=-all",
+        "--reuid=1000",
+        "--regid=1000",
+        "--clear-groups",
+    ):
+        assert flag in wrapped, f"missing {flag} in {wrapped!r}"
+    assert "--reuid=mergecraft" not in wrapped, wrapped
 
 
 @pytest.fixture(autouse=True)

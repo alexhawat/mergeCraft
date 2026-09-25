@@ -6,6 +6,7 @@ import functools
 import os
 import re
 import resource
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -764,12 +765,77 @@ def analyzer_egress_skip_reason(
 
 _DROP_SENTINEL = "__mergecraft_privilege_drop__"
 
+# SX-D1/SX-D2: every drop prefix carries the capability clear, whatever identity
+# it lands on. Kept in one place beside the two builders so the spellings cannot
+# drift apart.
+_CAPABILITY_DROP_FLAGS = (
+    "--no-new-privs",
+    "--inh-caps=-all",
+    "--ambient-caps=-all",
+    "--bounding-set=-all",
+)
+
 
 def _privilege_configuration_error(message: str) -> Exception:
     """Return a ``main._ConfigurationError`` (imported lazily; no import cycle)."""
     from mergecraft.main import _ConfigurationError
 
     return _ConfigurationError(message)
+
+
+def _require_hardened_setpriv() -> None:
+    """Refuse when ``setpriv`` cannot carry the hardened drop (SX-D2 fail-closed).
+
+    The agent-user backend reaches these checks through
+    :func:`mergecraft.utils.privilege.wrap_agent_command`. The sudo-elevated
+    backend resolves its own numeric identity, so it must re-assert the same
+    precondition rather than emitting a truncated prefix on a ``setpriv`` that
+    cannot clear the bounding set (util-linux < 2.33).
+    """
+    from mergecraft.utils.privilege import _setpriv_supports_bounding_set
+
+    if shutil.which("setpriv") is None:
+        raise _privilege_configuration_error(
+            "setpriv is not on PATH; the sandbox privilege drop is unavailable and "
+            "the run cannot proceed as root"
+        )
+    if not _setpriv_supports_bounding_set():
+        raise _privilege_configuration_error(
+            "setpriv does not support --bounding-set in this image; the hardened "
+            "privilege drop (--inh-caps=-all, --bounding-set=-all, --no-new-privs) "
+            "cannot be applied and the run cannot proceed as root"
+        )
+
+
+def _sudo_elevated_target() -> tuple[int, int] | None:
+    """Return the unprivileged ``(uid, gid)`` a sudo-elevated process drops to.
+
+    ``sudo`` records the invoking account in ``SUDO_UID``/``SUDO_GID``. A sandbox
+    started root through ``sudo`` is *dropping* root, not starting the agent as
+    it, so it lands on that account rather than on the action image's agent user
+    (SX-D2). Both variables must be present and parse; a target of ``0`` is
+    refused rather than accepted as a root-preserving "drop". Returns ``None``
+    when no elevation is recorded, so the caller falls through to the agent-user
+    backend.
+    """
+    raw_uid = os.environ.get("SUDO_UID", "").strip()
+    raw_gid = os.environ.get("SUDO_GID", "").strip()
+    if not raw_uid and not raw_gid:
+        return None
+    try:
+        uid = int(raw_uid)
+        gid = int(raw_gid)
+    except ValueError as exc:
+        raise _privilege_configuration_error(
+            "sudo-elevated sandbox cannot drop identity: SUDO_UID/SUDO_GID "
+            f"({raw_uid!r}/{raw_gid!r}) are not numeric"
+        ) from exc
+    if uid == 0 or gid == 0:
+        raise _privilege_configuration_error(
+            "sudo-elevated sandbox cannot drop identity: SUDO_UID/SUDO_GID resolve "
+            f"to {uid}:{gid}; a privilege drop to a root account cannot land"
+        )
+    return uid, gid
 
 
 def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
@@ -783,15 +849,24 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
 
     Two identities, one spelling:
 
-    * ``to_orchestrator=False`` — the root orchestrator. The payload drops to the
-      agent user through :func:`mergecraft.utils.privilege.wrap_agent_command`,
-      reusing its fail-closed resolution (missing ``setpriv``, missing user, or a
-      user resolving to UID/GID 0 all raise ``main._ConfigurationError``). Returns
-      ``[]`` when the current process is not euid 0, i.e. no drop applies.
-    * ``to_orchestrator=True`` — the sudo-elevated shell. A non-root orchestrator
-      elevated the namespace through ``sudo``, so the payload drops back to the
-      orchestrator's own numeric UID/GID with ``--clear-groups``. Raises when that
-      UID/GID is 0.
+    * ``to_orchestrator=True`` — the ``sudo-unshare`` shell built by a non-root
+      orchestrator. The payload drops back to the orchestrator's own numeric
+      UID/GID with ``--clear-groups``. Raises when that UID/GID is 0.
+    * ``to_orchestrator=False`` — the analyzer sandbox. Returns ``[]`` when the
+      current process is not euid 0, i.e. no drop applies. At euid 0 it resolves
+      the drop in this order:
+
+      1. **sudo-elevated** (``SUDO_UID``/``SUDO_GID`` recorded) — the payload
+         drops to the orchestrator's own numeric UID/GID with ``--clear-groups``
+         (SX-D2). This is deliberately *not* routed through
+         :func:`mergecraft.utils.privilege.wrap_agent_command`: that helper
+         enforces the agent-CLI policy refusing to *start* as root outside the
+         action image, which is the opposite direction from a sandbox dropping
+         root and would refuse a legitimate sudo-elevated run.
+      2. otherwise — the agent user, through
+         :func:`mergecraft.utils.privilege.wrap_agent_command`, reusing its
+         fail-closed resolution (missing ``setpriv``, missing user, or a user
+         resolving to UID/GID 0 all raise ``main._ConfigurationError``).
 
     Every returned prefix carries ``--no-new-privs --inh-caps=-all
     --ambient-caps=-all --bounding-set=-all``. The function raises rather than
@@ -807,16 +882,24 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
             )
         return [
             "setpriv",
-            "--no-new-privs",
-            "--inh-caps=-all",
-            "--ambient-caps=-all",
-            "--bounding-set=-all",
+            *_CAPABILITY_DROP_FLAGS,
             f"--reuid={uid}",
             f"--regid={gid}",
             "--clear-groups",
         ]
     if os.geteuid() != 0:
         return []
+    sudo_target = _sudo_elevated_target()
+    if sudo_target is not None:
+        _require_hardened_setpriv()
+        uid, gid = sudo_target
+        return [
+            "setpriv",
+            *_CAPABILITY_DROP_FLAGS,
+            f"--reuid={uid}",
+            f"--regid={gid}",
+            "--clear-groups",
+        ]
     from mergecraft.utils.privilege import wrap_agent_command
 
     # wrap_agent_command validates setpriv, the user record and the UID/GID and

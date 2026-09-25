@@ -85,6 +85,7 @@ now green against the landed fixes):
   (`tests/mcp/test_static_checks.py` · `test_untrusted_gates_request_the_copy_on_write_checkout_view`);
 - the run's `mergecraft-approval` conclusion on a sink hit
   (`tests/security/test_sink_scan_post_run.py` · `test_canary_sink_fails_the_run_names_the_path_and_is_deleted`);
+- the sudo-elevated identity resolution: root via `sudo` off the action image drops to the invoking `SUDO_UID`/`SUDO_GID` with `--clear-groups`, a zero sudo id still fails closed, and the agent-user fallback is unchanged (`tests/analyzers/test_sandbox.py`, `tests/mcp/test_shell_spawn_argv.py`);
 - the copy-on-write write-view cases in
   `tests/security/test_untrusted_gate_write_view.py` (root-gated). Two were
   added after a later round: a denied write on a short, dot-free root-owned

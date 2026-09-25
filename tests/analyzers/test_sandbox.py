@@ -11,12 +11,10 @@ import os
 import pwd
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from tests.analyzers.support import import_module
-
-if TYPE_CHECKING:
-    import pytest
 
 
 class _FakePwEntry:
@@ -43,6 +41,10 @@ def _full_caps_with_user_namespace() -> object:
 
 
 def _fake_drop_tools(monkeypatch: pytest.MonkeyPatch, *, uid: int) -> None:
+    # This models the agent-user drop: clear any ambient sudo envelope so the
+    # helper cannot drift onto the sudo-elevated numeric drop.
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    monkeypatch.delenv("SUDO_GID", raising=False)
     monkeypatch.setattr(os, "getuid", lambda: uid)
     monkeypatch.setattr(os, "geteuid", lambda: uid)
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
@@ -50,6 +52,32 @@ def _fake_drop_tools(monkeypatch: pytest.MonkeyPatch, *, uid: int) -> None:
     from mergecraft.utils import privilege
 
     monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
+
+
+def _fake_sudo_elevation(
+    monkeypatch: pytest.MonkeyPatch, *, uid: int = 1000, gid: int = 1000
+) -> None:
+    """Model root via ``sudo`` outside the action image with no agent user.
+
+    The privileged filtered-egress job runs as uid 0 under ``sudo`` on a runner
+    that is not the action image (no ``IS_SANDBOX``, no ``/opt/mergecraft``, no
+    ``mergecraft`` account). ``SUDO_UID``/``SUDO_GID`` carry the invoking
+    identity the drop must land on.
+    """
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.delenv("IS_SANDBOX", raising=False)
+    monkeypatch.delenv("MERGECRAFT_ALLOW_ROOT", raising=False)
+    monkeypatch.setenv("SUDO_UID", str(uid))
+    monkeypatch.setenv("SUDO_GID", str(gid))
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    # The runner has no agent account: a fallback to the agent-user drop must
+    # fail loudly rather than silently resolve a user that is not there.
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: (_ for _ in ()).throw(KeyError(name)))
+    from mergecraft.utils import privilege
+
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: False)
     monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
 
 
@@ -97,6 +125,146 @@ def test_non_root_analyzer_argv_keeps_map_root_user_and_no_reuid(
     assert "--map-root-user" in argv, argv
     assert "--reuid" not in joined, argv
     assert "--regid" not in joined, argv
+
+
+def test_sudo_elevated_root_drop_is_numeric_off_the_action_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Root via sudo drops to the invoking numeric identity, no agent user needed."""
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    _fake_sudo_elevation(monkeypatch, uid=1000, gid=1000)
+
+    drop = sandbox.build_privilege_drop_argv()
+
+    assert drop[0] == "setpriv", drop
+    for flag in (
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--bounding-set=-all",
+        "--reuid=1000",
+        "--regid=1000",
+        "--clear-groups",
+    ):
+        assert flag in drop, drop
+    assert "--reuid=mergecraft" not in drop, drop
+    assert "--init-groups" not in drop, drop
+
+
+def test_sudo_elevated_drop_does_not_route_through_wrap_agent_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agent-image root policy must not fire on the sudo-elevated path."""
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    _fake_sudo_elevation(monkeypatch)
+    from mergecraft.utils import privilege
+
+    def _unreachable(*_args: object, **_kwargs: object) -> list[str]:
+        raise AssertionError("the sudo-elevated drop must not call wrap_agent_command")
+
+    monkeypatch.setattr(privilege, "wrap_agent_command", _unreachable)
+
+    drop = sandbox.build_privilege_drop_argv()
+
+    assert "--reuid=1000" in drop, drop
+    assert "--regid=1000" in drop, drop
+
+
+@pytest.mark.parametrize(
+    ("sudo_uid", "sudo_gid"),
+    [("0", "1000"), ("1000", "0")],
+    ids=["sudo_uid_zero", "sudo_gid_zero"],
+)
+def test_sudo_elevated_drop_refuses_a_zero_sudo_identity(
+    monkeypatch: pytest.MonkeyPatch, sudo_uid: str, sudo_gid: str
+) -> None:
+    """A zero SUDO_UID/GID is never a drop; the configuration error stands."""
+    from mergecraft.main import _ConfigurationError
+
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    _fake_sudo_elevation(monkeypatch)
+    monkeypatch.setenv("SUDO_UID", sudo_uid)
+    monkeypatch.setenv("SUDO_GID", sudo_gid)
+
+    with pytest.raises(_ConfigurationError):
+        sandbox.build_privilege_drop_argv()
+
+
+def test_root_drop_refuses_an_unresolvable_agent_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no sudo identity the agent-user drop stays fail-closed."""
+    from mergecraft.main import _ConfigurationError
+    from mergecraft.utils import privilege
+
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    monkeypatch.delenv("SUDO_GID", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: (_ for _ in ()).throw(KeyError(name)))
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
+
+    with pytest.raises(_ConfigurationError, match="mergecraft"):
+        sandbox.build_privilege_drop_argv()
+
+
+def test_root_drop_uses_the_agent_user_inside_the_action_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no sudo identity the action image keeps today's agent-user drop."""
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    _fake_drop_tools(monkeypatch, uid=0)
+
+    drop = sandbox.build_privilege_drop_argv()
+
+    assert drop[0] == "setpriv", drop
+    for flag in (
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--bounding-set=-all",
+        "--reuid=mergecraft",
+        "--regid=mergecraft",
+        "--init-groups",
+    ):
+        assert flag in drop, drop
+    assert "--clear-groups" not in drop, drop
+
+
+@pytest.mark.parametrize(
+    "sudo_env", [False, True], ids=["no_sudo_identity", "sudo_identity_present"]
+)
+def test_non_root_drop_is_empty(monkeypatch: pytest.MonkeyPatch, sudo_env: bool) -> None:
+    """Off the root backend no drop applies, sudo envelope or not."""
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    _fake_drop_tools(monkeypatch, uid=4242)
+    if sudo_env:
+        monkeypatch.setenv("SUDO_UID", "1000")
+        monkeypatch.setenv("SUDO_GID", "1000")
+    else:
+        monkeypatch.delenv("SUDO_UID", raising=False)
+        monkeypatch.delenv("SUDO_GID", raising=False)
+
+    assert sandbox.build_privilege_drop_argv() == []
+
+
+def test_sudo_elevated_analyzer_argv_carries_the_numeric_drop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The analyzer sandbox uses the sudo identity prefix, not the agent user."""
+    _fake_sudo_elevation(monkeypatch, uid=1000, gid=1000)
+
+    argv = _analyzer_argv(tmp_path, monkeypatch)
+    joined = " ".join(argv)
+
+    assert "--reuid=1000" in joined, argv
+    assert "--regid=1000" in joined, argv
+    assert "--clear-groups" in joined, argv
+    assert "--reuid=mergecraft" not in joined, argv
+    assert "--init-groups" not in joined, argv
 
 
 def test_capability_probe_records_unavailable_primitives_by_name() -> None:
