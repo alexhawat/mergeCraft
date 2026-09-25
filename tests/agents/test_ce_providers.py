@@ -6,7 +6,6 @@ cost per review (evaluation / #140). D6: do not edit tracing exporters.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
@@ -217,9 +216,8 @@ def test_nightly_smoke_callable_is_registered() -> None:
     assert callable(smoke)
 
 
-@pytest.mark.skipif(os.environ.get("MERGECRAFT_LIVE_E2E") != "1", reason="skipped: no live gate")
-def test_live_provider_smoke_runs_when_gated() -> None:
-    """Functional: nightly smoke executes only under ``MERGECRAFT_LIVE_E2E=1``."""
+def test_live_provider_smoke_runs_keylessly() -> None:
+    """Functional: the catalog-drift smoke needs no credential, so it always runs."""
     module = require_module(PROVIDER_HEALTH_MODULE)
     smoke = require_callable(module, "nightly_provider_smoke")
     report = smoke()

@@ -6,6 +6,12 @@ that added it) — no regression coverage for the negative paths a reviewer
 flagged: mismatched rev, a missing pyproject dev pin, and a missing
 ``.pre-commit-config.yaml`` hook entry. Without these, a change that made
 the guard always pass would re-enable the exact silent drift G-F11 found.
+
+The guard also grows a generic rule: every non-local hook repository's ``rev``
+must be a 40-character SHA followed by its ``# v<version>`` comment, so a
+moving tag can never reach CI again. The fixtures below therefore build revs
+as a SHA plus a comment; the version the ruff pairing reads comes from that
+comment, not from the YAML scalar.
 """
 
 from __future__ import annotations
@@ -32,6 +38,9 @@ def _load_check_hook_pins() -> Any:
 
 
 _RUFF_REPO = "https://github.com/astral-sh/ruff-pre-commit"
+_GITLEAKS_REPO = "https://github.com/gitleaks/gitleaks"
+_RUFF_SHA = "a" * 40
+_OTHER_SHA = "b" * 40
 
 
 def _pyproject_text(ruff_pin: str | None) -> str:
@@ -44,9 +53,13 @@ dev = [
 """
 
 
+def _ruff_rev(version: str) -> str:
+    return f"{_RUFF_SHA}  # {version}"
+
+
 _OTHER_HOOK = (
     "  - repo: https://github.com/pre-commit/pre-commit-hooks\n"
-    "    rev: v9.9.9\n    hooks:\n      - id: check-yaml\n"
+    f"    rev: {_OTHER_SHA}  # v9.9.9\n    hooks:\n      - id: check-yaml\n"
 )
 
 
@@ -55,11 +68,20 @@ def _pre_commit_text(ruff_rev: str | None) -> str:
     so the "missing entry" fixture matches a realistic config rather than an
     empty `repos:` (see test_hook_revs_handles_null_repos_key for that edge)."""
     repo_block = (
-        f"  - repo: {_RUFF_REPO}\n    rev: {ruff_rev}\n    hooks:\n      - id: ruff\n"
+        f"  - repo: {_RUFF_REPO}\n    rev: {_ruff_rev(ruff_rev)}\n    hooks:\n      - id: ruff\n"
         if ruff_rev is not None
         else _OTHER_HOOK
     )
     return f"repos:\n{repo_block}"
+
+
+def _tag_pinned_config() -> str:
+    """A config where every non-local rev is a moving tag, matching the pins."""
+    return (
+        "repos:\n"
+        f"  - repo: {_RUFF_REPO}\n    rev: v0.16.2\n    hooks:\n      - id: ruff\n"
+        f"  - repo: {_GITLEAKS_REPO}\n    rev: v8.30.1\n    hooks:\n      - id: gitleaks\n"
+    )
 
 
 def _write_fixture(
@@ -95,7 +117,7 @@ class TestHookRevs:
     def test_parses_repo_revs(self) -> None:
         module = _load_check_hook_pins()
         revs = module._hook_revs(_pre_commit_text("v0.16.2"))
-        assert revs[_RUFF_REPO] == "v0.16.2"
+        assert revs[_RUFF_REPO] == _RUFF_SHA
 
     def test_empty_repos_list_is_empty_dict(self) -> None:
         module = _load_check_hook_pins()
@@ -144,6 +166,21 @@ class TestMainDriftDetection:
         assert module.main() != 0
         assert "no `.pre-commit-config.yaml` entry" in capsys.readouterr().err
 
+    def test_rejects_a_non_sha_rev_on_a_non_local_repo(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Every other repo must freeze too, not just the one with a pyproject pin."""
+        module = _load_check_hook_pins()
+        module.PYPROJECT = tmp_path / "pyproject.toml"
+        module.PYPROJECT.write_text(_pyproject_text("0.16.2"), encoding="utf-8")
+        module.PRE_COMMIT_CONFIG = tmp_path / ".pre-commit-config.yaml"
+        module.PRE_COMMIT_CONFIG.write_text(_tag_pinned_config(), encoding="utf-8")
+        assert module.main() != 0, "a moving tag rev on a non-local repo must be rejected"
+        err = capsys.readouterr().err
+        assert _GITLEAKS_REPO in err or _RUFF_REPO in err, (
+            f"the failure must name the offending repository, got:\n{err}"
+        )
+
     def test_fails_closed_when_pre_commit_config_missing(self, tmp_path: Path) -> None:
         module = _load_check_hook_pins()
         module.PYPROJECT = tmp_path / "pyproject.toml"
@@ -159,16 +196,17 @@ class TestMainDriftDetection:
         assert module.main() != 0
 
     def test_repo_untracked_hooks_have_no_effect(self, tmp_path: Path) -> None:
-        """A drifted hook this script doesn't track (unlisted `dep_name`) must not fail the guard."""
+        """A frozen hook this script doesn't track (unlisted `dep_name`) must not fail it."""
         module = _load_check_hook_pins()
         pyproject = tmp_path / "pyproject.toml"
         pre_commit = tmp_path / ".pre-commit-config.yaml"
         pyproject.write_text(_pyproject_text("0.16.2"), encoding="utf-8")
         pre_commit.write_text(
             "repos:\n"
-            f"  - repo: {_RUFF_REPO}\n    rev: v0.16.2\n    hooks:\n      - id: ruff\n"
+            f"  - repo: {_RUFF_REPO}\n    rev: {_ruff_rev('v0.16.2')}\n"
+            "    hooks:\n      - id: ruff\n"
             "  - repo: https://github.com/pre-commit/pre-commit-hooks\n"
-            "    rev: v9.9.9\n    hooks:\n      - id: check-yaml\n",
+            f"    rev: {_OTHER_SHA}  # v9.9.9\n    hooks:\n      - id: check-yaml\n",
             encoding="utf-8",
         )
         module.PYPROJECT = pyproject
