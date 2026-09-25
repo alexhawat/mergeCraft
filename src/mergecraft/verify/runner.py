@@ -371,15 +371,17 @@ def _criterion_status(
     reason: str | None = None
     if not page.strip():
         status = "unverified"
+    elif _has_negation_cue(text):
+        # Fail closed (P-6, EV-D5): the heuristic must not pass a negation it
+        # cannot judge, and it names why (P-8). Consulted before the
+        # "still visible" / "mismatch" special cases so a criterion carrying a
+        # negation cue cannot escape the rule by wording.
+        status = "unverified"
+        reason = _negation_unverified_reason("criterion", text)
     elif "still visible" in criterion:
         status = "fail" if "still visible" in lowered else "pass"
     elif "mismatch" in criterion:
         status = "fail" if "mismatch" in lowered else "pass"
-    elif _has_negation_cue(text):
-        # Fail closed (P-6): the heuristic must not pass a negation it cannot
-        # judge, and it names why (P-8).
-        status = "unverified"
-        reason = _negation_unverified_reason("criterion", text)
     elif _page_matches_expected(text, page):
         status = "pass"
     else:

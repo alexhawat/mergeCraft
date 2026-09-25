@@ -74,6 +74,16 @@ benchmark-number claim). Commands used in EV1:
 
 ### Local negation is never a verdict (implementation EV3)
 
+> **EV3 remediation — 2026-09-25 (PR #894 self-review).** EV3 placed the
+> negation guard *after* the hard-coded `"still visible"` / `"mismatch"`
+> branches, so a criterion that was both negated and phrased with one of those
+> phrases escaped the fail-closed rule (`"The image is not still visible"` →
+> `pass` on `"Error shown"`; `"No mismatch is shown"` → `fail` on
+> `"layout mismatch in footer"`). EV-D5 says a negated criterion is always
+> `unverified`, so the guard must be consulted first; the special cases stay for
+> non-negated criteria. The three rows below pin both sides of that ordering and
+> are the RED evidence for the follow-up fix.
+
 | Contract | Test(s) | File | RED today? |
 | --- | --- | --- | --- |
 | `"No error is shown"` / `"Error is not shown"` on `"Error shown"` → `unverified`, named reason, report not `pass` | `test_audited_negated_criteria_against_the_opposite_page_are_unverified` | `tests/verify/test_local_negation.py` (new) | yes — passes today |
@@ -81,6 +91,9 @@ benchmark-number claim). Commands used in EV1:
 | A plain positive criterion still passes on a matching page | `test_plain_positive_criterion_still_passes_on_a_matching_page` | `tests/verify/test_local_negation.py` (new) | no — must stay green |
 | Negated reproduce expectation is `partial`, never `reproduced` | `test_negated_reproduce_expectation_is_partial_never_reproduced` | `tests/verify/test_local_negation.py` (new) | yes — reports `reproduced` |
 | `"still visible"` special case unchanged (fail when still visible, pass when gone) | `test_still_visible_special_case_is_unchanged_when_it_is_still_visible`, `test_still_visible_special_case_is_unchanged_when_it_is_gone` | `tests/verify/test_local_negation.py` (new) | no — must stay green |
+| The negation guard outranks the special cases: a negated criterion combining a cue with `"still visible"` / `"mismatch"` is `unverified` (named reason) even when the page does not show the phrase | `test_negation_wins_over_a_special_case_phrase_on_the_opposite_page[...]` | `tests/verify/test_local_negation.py` | yes — guard at `runner.py:378` runs after the `:374-377` special cases |
+| The same guard holds when the page *does* show the special-case phrase (the guard is not the old branch re-stated) | `test_negation_wins_over_a_special_case_phrase_when_the_page_shows_it[...]` | `tests/verify/test_local_negation.py` | yes — scores `fail` today |
+| Non-negated `"mismatch"` criterion keeps the special-case verdict (fail when shown, pass when not) | `test_non_negated_mismatch_special_case_is_unchanged[...]` | `tests/verify/test_local_negation.py` | no — regression guard, must stay green |
 
 ### `--allow-stub` is a fallback; reports sign their driver (implementation EV3)
 

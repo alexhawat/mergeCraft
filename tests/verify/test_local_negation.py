@@ -14,6 +14,15 @@ reason, and a negated reproduce expectation is ``partial`` — never
 ``reproduced``. The two hard-coded ``"still visible"`` / ``"mismatch"``
 special cases are unchanged.
 
+The guard must be consulted *before* the two hard-coded special cases: a
+criterion that carries a negation cue *and* is phrased with ``"still visible"``
+or ``"mismatch"`` (``"The image is not still visible"``, ``"No mismatch is
+shown"``) otherwise escapes the fail-closed rule and scores ``pass`` on a page
+that does not show the phrase — the special-case branch never reaches the
+negation check. The tests pinning that ordering are red until the guard moves
+ahead of the special cases; the special cases themselves stay for non-negated
+criteria.
+
 All red today: no negation guard exists, so the audited criteria report
 ``pass`` / ``reproduced`` at call time. The positive criterion and the
 ``"still visible"`` cases below are regression guards that already pass.
@@ -40,6 +49,29 @@ _NEGATED_CRITERIA = (
     "Error without a warning is shown",
     "Error cannot appear",
     "Error isn't shown",
+)
+
+#: A negation cue *and* one of the two hard-coded special-case phrases. The cue
+#: must outrank the special case (EV-D5), so the criterion is ``unverified``
+#: whatever the page says.
+_NEGATED_SPECIAL_CASE_CRITERIA = (
+    "The image is not still visible",
+    "The image is never still visible",
+    "No mismatch is shown",
+    "There is no mismatch",
+)
+
+#: The same cues against a page that *does* show the special-case phrase —
+#: proof the guard is not just the old special-case branch in disguise.
+_NEGATED_SPECIAL_CASE_ON_MATCHING_PAGE = (
+    ("The image is not still visible", "image still visible on screen"),
+    ("No mismatch is shown", "layout mismatch in footer"),
+)
+
+#: The non-negated ``"mismatch"`` special case, pinned unchanged.
+_NON_NEGATED_MISMATCH_CASES = (
+    ("layout mismatch in footer", "layout mismatch in footer", "fail"),
+    ("layout mismatch in footer", "Error shown", "pass"),
 )
 
 
@@ -85,6 +117,52 @@ async def test_every_negation_cue_is_never_a_local_pass(criterion: str) -> None:
     reasons = " ".join(report.skipped_or_unverified).lower()
     assert reasons, "an unverified criterion must name why"
     assert criterion.lower() in reasons or "negat" in reasons
+
+
+@pytest.mark.parametrize("criterion", _NEGATED_SPECIAL_CASE_CRITERIA)
+async def test_negation_wins_over_a_special_case_phrase_on_the_opposite_page(
+    criterion: str,
+) -> None:
+    """EV-D5: a negated criterion is ``unverified`` even when it also carries a
+    ``"still visible"`` / ``"mismatch"`` special-case phrase and the page does
+    not show that phrase. The pre-fix ordering scored ``pass`` here, so a
+    fail-closed rule could be bypassed by wording."""
+    report = await _verify(criterion, "Error shown")
+
+    assert report.acceptance_criteria[0].status == "unverified"
+    assert report.status == "partial"
+    assert report.status != "pass"
+    reasons = " ".join(report.skipped_or_unverified).lower()
+    assert reasons, "an unverified criterion must name why"
+    assert criterion.lower() in reasons or "negat" in reasons
+
+
+@pytest.mark.parametrize(("criterion", "page"), _NEGATED_SPECIAL_CASE_ON_MATCHING_PAGE)
+async def test_negation_wins_over_a_special_case_phrase_when_the_page_shows_it(
+    criterion: str, page: str
+) -> None:
+    """EV-D5: the negation guard also outranks the special cases when the page
+    *does* show ``"still visible"`` / ``"mismatch"`` — otherwise the guard would
+    only be the old branch re-stated."""
+    report = await _verify(criterion, page)
+
+    assert report.acceptance_criteria[0].status == "unverified"
+    assert report.status == "partial"
+    assert report.status != "pass"
+    assert report.skipped_or_unverified
+
+
+@pytest.mark.parametrize(("criterion", "page", "expected"), _NON_NEGATED_MISMATCH_CASES)
+async def test_non_negated_mismatch_special_case_is_unchanged(
+    criterion: str, page: str, expected: str
+) -> None:
+    """Regression guard: without a negation cue the ``"mismatch"`` special case
+    keeps its old verdict — ``fail`` when the page shows it, ``pass`` when it
+    does not."""
+    report = await _verify(criterion, page)
+
+    assert report.acceptance_criteria[0].status == expected
+    assert report.status == expected
 
 
 async def test_plain_positive_criterion_still_passes_on_a_matching_page() -> None:
