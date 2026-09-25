@@ -462,6 +462,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- On the root Linux backend (`CAP_SYS_ADMIN`), the MCP shell sandbox and the
+  analyzer sandbox now drop root identity in the same `exec` that installs their
+  masks, so the kernel enforces the read-only binds, the scratch mount, and the
+  cleared capability sets against a process that can no longer lift them; a
+  `sudo`-elevated shell drops back to the orchestrator's own UID/GID, and macOS
+  `sandbox-exec` and unprivileged hosts are unchanged.
+
+- Static checks now run with an explicit default-deny environment keyed on the
+  trust tier, and path-safe `{files}` arguments: an entry that resolves outside
+  the checkout is dropped, an option-shaped relative entry reaches the gate as a
+  `./`-path, and no `--` separator is inserted.
+
+- Untrusted static checks run inside the sandbox against a disposable
+  copy-on-write view of the checkout. A gate that fails only because the sandbox
+  denied it the network or a write is reported as `declared-but-cannot-run`,
+  never as a finding about the diff, and the real checkout is left unchanged.
+
+- The image runtime tree under `/opt/mergecraft` stays root-owned — bytecode is
+  compiled at build time — instead of being chowned to the agent user, so a
+  process dropped to that user cannot rewrite the code the root orchestrator
+  imports.
+
+- Local log sinks are scanned for credentials after the run. A hit fails the run
+  and the approval gate, names the sink path without ever printing its contents,
+  and removes the sink before artifact upload.
+
 - Transitive `soupsieve` 2.8.4→2.9.2 in `uv.lock` for `pip-audit`
   (CVE-2026-85999, CVE-2026-86000) (#728)
 - Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
