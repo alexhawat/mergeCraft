@@ -203,6 +203,17 @@ _DOCUMENTED_PASSTHROUGH = (
     "JAVA_HOME_17_X64",
 )
 
+#: Writable GitHub Actions command-file channels. They are parent-only plumbing:
+#: a child that inherits one can append ``KEY=VALUE`` lines to alter later steps'
+#: environment or ``PATH``, or overwrite this action's outputs/summary. They are
+#: not metadata a child process needs.
+_ACTIONS_COMMAND_FILES = (
+    "GITHUB_ENV",
+    "GITHUB_PATH",
+    "GITHUB_OUTPUT",
+    "GITHUB_STEP_SUMMARY",
+)
+
 
 @pytest.mark.parametrize("name", _PREFIX_LOOKALIKE_CREDENTIALS)
 def test_prefix_lookalike_credentials_are_not_passed_through(
@@ -226,6 +237,30 @@ def test_documented_runner_names_stay_passed_through(
     assert filter_env({name: "kept-value", "PATH": "/bin"})[name] == "kept-value"
     assert resolve_env("restricted")[name] == "kept-value"
     assert build_agent_env("claude")[name] == "kept-value"
+
+
+def test_actions_command_file_channels_are_not_passed_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Writable Actions command-file paths are not child-env metadata."""
+    clear_env_allowlist()
+    for command_file in _ACTIONS_COMMAND_FILES:
+        monkeypatch.setenv(command_file, f"/runner/_temp/{command_file.lower()}")
+
+    surfaces = (
+        ("filter_env", filter_env()),
+        ("resolve_env", resolve_env("restricted")),
+        ("build_agent_env", build_agent_env("claude")),
+    )
+    for surface, env in surfaces:
+        for command_file in _ACTIONS_COMMAND_FILES:
+            assert command_file not in env, f"{command_file} leaked through {surface}"
+
+    # Contrast: documented child metadata still passes.
+    monkeypatch.setenv("GITHUB_WORKSPACE", "/runner/workspace")
+    assert filter_env()["GITHUB_WORKSPACE"] == "/runner/workspace"
+    assert resolve_env("restricted")["GITHUB_WORKSPACE"] == "/runner/workspace"
+    assert build_agent_env("claude")["GITHUB_WORKSPACE"] == "/runner/workspace"
 
 
 def test_env_allowlist_readmits_a_prefix_lookalike_credential(

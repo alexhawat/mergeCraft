@@ -1711,7 +1711,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions and runner metadata reach child processes by explicit
   documented name rather than by prefix, so lookalike credential variables such
   as `GITHUB_PAT` or `RUNNER_BLOB` no longer pass into agents, the restricted
-  shell, or analyzers. `envAllowlist` remains the explicit escape hatch.
+  shell, or analyzers. The Actions command-file channels (`GITHUB_ENV`,
+  `GITHUB_PATH`, `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`) are excluded from the
+  child environment: they are writable control channels for later steps and for
+  this action's outputs, not child metadata. `envAllowlist` remains the explicit
+  escape hatch.
 
 - Cleanup and token-revocation failures are logged as warnings naming the step
   and path — including a residual askpass file — instead of being suppressed.

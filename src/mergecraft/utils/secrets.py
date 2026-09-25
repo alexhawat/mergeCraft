@@ -63,6 +63,18 @@ SAFE_ENV_NAMES: frozenset[str] = frozenset(
         "GHCUP_INSTALL_BASE_PREFIX",
         # GitHub Actions documented default variables (explicit names, not a
         # prefix: ``GITHUB_PAT``/``GITHUB_APP_PEM`` must not ride the passthrough).
+        #
+        # The Actions *command-file* channels -- ``GITHUB_ENV``, ``GITHUB_PATH``,
+        # ``GITHUB_OUTPUT`` and ``GITHUB_STEP_SUMMARY`` -- are deliberately NOT
+        # listed here: they are writable control channels for later workflow
+        # steps and this action's own outputs/summary, not child metadata. A
+        # child that inherited one could append ``KEY=VALUE`` lines to alter a
+        # later step's environment or ``PATH``. Omitting them from this allowlist
+        # keeps them out of every ``filter_env`` consumer (``build_agent_env``,
+        # ``resolve_env("restricted")``, analyzers, agent drivers). The
+        # documented read-only metadata (``GITHUB_WORKSPACE``,
+        # ``GITHUB_REPOSITORY``, ``GITHUB_EVENT_NAME``, ``GITHUB_EVENT_PATH``,
+        # ``RUNNER_TEMP``, …) stays.
         "GITHUB_ACTION",
         "GITHUB_ACTION_PATH",
         "GITHUB_ACTION_REPOSITORY",
@@ -73,14 +85,11 @@ SAFE_ENV_NAMES: frozenset[str] = frozenset(
         "GITHUB_ARTIFACTS",
         "GITHUB_ARTIFACTS_LIST",
         "GITHUB_BASE_REF",
-        "GITHUB_ENV",
         "GITHUB_EVENT_NAME",
         "GITHUB_EVENT_PATH",
         "GITHUB_GRAPHQL_URL",
         "GITHUB_HEAD_REF",
         "GITHUB_JOB",
-        "GITHUB_OUTPUT",
-        "GITHUB_PATH",
         "GITHUB_REF",
         "GITHUB_REF_NAME",
         "GITHUB_REF_PROTECTED",
@@ -95,7 +104,6 @@ SAFE_ENV_NAMES: frozenset[str] = frozenset(
         "GITHUB_RUN_NUMBER",
         "GITHUB_SERVER_URL",
         "GITHUB_SHA",
-        "GITHUB_STEP_SUMMARY",
         "GITHUB_TRIGGERING_ACTOR",
         "GITHUB_WORKFLOW",
         "GITHUB_WORKFLOW_REF",
