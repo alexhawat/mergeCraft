@@ -56,9 +56,30 @@ def test_analyze_ci_failures_orchestrator_path_renders_verdict_lines() -> None:
     section = payload["section"]
     assert "**Flaky verdict:**" in section
     assert "**Blame verdict:** probably_not_this_pr" in section
-    assert "probably not this pr" in section.lower()
+    # A decided exoneration names what the base concluded; it does not hedge.
+    assert "probably not this pr" not in section.lower()
+    assert "fail" in section.lower()
     assert payload["preMergeSummary"]
     assert payload["stats"]["prAttributedCount"] == 0
+    assert payload["stats"]["unattributedCount"] == 0
+
+
+def test_unattributed_cluster_is_counted_and_gets_no_inline_comment() -> None:
+    """An ``unknown`` cluster stays unattributed, at the blocking severity."""
+    review_ci = import_module("mergecraft.ci.review")
+    fixture = load_fixture("blame_maps_to_diff_hunk.json")
+    reports, stats, overflow = review_ci.analyze_ci_failures(
+        [fixture["job"]],
+        pr_diff_paths=["README.md"],
+    )
+
+    assert overflow == 0
+    assert reports[0].blame.attribution == "unknown"
+    assert reports[0].finding.introduced_by_pr == "unknown"
+    assert reports[0].finding.severity == "Major"
+    assert stats.unattributed_count == 1
+    assert "1 unattributed" in review_ci.build_ci_pre_merge_summary(stats)
+    assert review_ci.build_ci_review_comments(reports) == []
 
 
 def test_analyze_ci_failures_end_to_end_from_raw_jobs() -> None:

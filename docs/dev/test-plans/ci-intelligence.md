@@ -35,13 +35,27 @@ Stable hash derived from **normalized command + error signature** after redactio
 
 ## Flaky / blame decision matrix
 
+Target matrix (authored RED in the CI-blame plan, then greened by its
+`ci/paths.py` / `ci/flaky.py` / `ci/blame.py` waves):
+
 | Condition | Expected classification | Blame on author? | Primary tests |
 |-----------|-------------------------|------------------|---------------|
 | Same fingerprint, attempt 1 fail → attempt 2 pass | `flaky` | No | `test_flaky.py`, `flaky_retry_pass.json` |
-| Same fingerprint failing on base branch | `pre_existing` or `flaky` | No | `test_flaky.py`, `pre_existing_unrelated_failure.json` |
-| Failure path in PR diff | `caused_by_pr` | Yes (subject to verifier) | `test_blame.py`, `blame_maps_to_diff_hunk.json` |
-| Failure path outside PR diff | `probably_not_this_pr` | No | `test_blame.py`, `blame_unrelated_to_pr.json` |
-| No path overlap, base unknown | `unknown` / `probably_not_this_pr` | No | `test_blame.py` |
+| Matching base run concluded `failure` | `pre_existing` (summary names the ref and `failed`) | No | `test_flaky.py`, `pre_existing_unrelated_failure.json` |
+| Base run concluded `success` (or unrecognised) + failing attempts | `stable` (summary names the ref and `passed`) | Yes | `test_flaky.py` |
+| Mixed base outcomes with ≥1 `failure` | `pre_existing`, naming the failing run's ref | No | `test_flaky.py` |
+| Failure path in PR diff (normalised both sides) | `caused_by_pr` | Yes (subject to verifier) | `test_blame.py`, `blame_maps_to_diff_hunk.json` |
+| No overlap, matching base run concluded `failure` | `probably_not_this_pr` | No | `test_blame.py`, `blame_unrelated_to_pr.json` |
+| No overlap, base `success` / `cancelled` / absent | `unknown` (recorded `introduced_by_pr: "unknown"`, `Major`, blocks) | No — but blocking | `test_blame.py` |
+| No path extracted at all, no base `failure` | `unknown`, `hunk is None`, no `ci/pipeline` sentinel | No — but blocking | `test_blame.py` |
+| Two or more clusters + one scalar base status | scalar ignored; per-fingerprint `base_branch_runs` decide | — | `test_ci_intelligence.py` |
+
+`caused_by_pr` still requires path overlap, and a passing base branch never promotes a
+failure to it. Only a same-fingerprint base **failure** exonerates (compared after
+`.strip().lower()`). Extraction reads failure context only — root files, `(line,col)`
+and `./` forms included — so a `PASSED` line, a collection line, a command echo or a
+bare URL is never a failure location. The `unknown` row is the honest third outcome:
+it is recorded `"unknown"` (never `"false"`) and keeps the blocker.
 
 ## Recorded fixtures (K0.1)
 

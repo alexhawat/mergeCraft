@@ -1,4 +1,4 @@
-"""End-to-end CI intelligence pipeline tests (K3 MCP seam)."""
+"""End-to-end CI intelligence pipeline tests (U1 / U2, K3 MCP seam)."""
 
 from __future__ import annotations
 
@@ -6,26 +6,81 @@ from mergecraft.ci.intelligence import intelligence_from_failures
 from tests.ci.support import CI_SECTION_HEADING, import_module, load_fixture
 
 
-def test_mixed_failures_cluster_and_attribute_correctly() -> None:
+def _two_cluster_fixtures() -> tuple[list[dict[str, object]], list[str], str]:
     multi = load_fixture("multi_job_single_root_cause.json")
     unrelated = load_fixture("pre_existing_unrelated_failure.json")
     failures = [multi["jobs"][0], *unrelated["jobs"]]
-    pr_diff_paths = unrelated["pr_diff_paths"]
+    normalize = import_module("mergecraft.ci.normalize")
+    unrelated_fingerprint = str(
+        normalize.normalize_failure(unrelated["jobs"][0])["failure_fingerprint"]
+    )
+    return failures, unrelated["pr_diff_paths"], unrelated_fingerprint
+
+
+def test_mixed_failures_cluster_and_attribute_correctly() -> None:
+    """Per-fingerprint base evidence exonerates exactly the matching cluster."""
+    multi = load_fixture("multi_job_single_root_cause.json")
+    unrelated = load_fixture("pre_existing_unrelated_failure.json")
+    failures = [multi["jobs"][0], *unrelated["jobs"]]
+    normalize = import_module("mergecraft.ci.normalize")
+    unrelated_fingerprint = str(
+        normalize.normalize_failure(unrelated["jobs"][0])["failure_fingerprint"]
+    )
 
     payload = intelligence_from_failures(
         failures,
-        pr_diff_paths=pr_diff_paths,
-        base_branch_status=unrelated["base_branch"]["same_fingerprint_conclusion"],
+        pr_diff_paths=unrelated["pr_diff_paths"],
+        base_branch_runs=[
+            {
+                "ref": unrelated["base_branch"]["ref"],
+                "conclusion": unrelated["base_branch"]["same_fingerprint_conclusion"],
+                "fingerprint": unrelated_fingerprint,
+            }
+        ],
     )
 
     assert payload["stats"]["failureCount"] == len(failures)
     assert payload["stats"]["clusterCount"] == 2
     assert payload["stats"]["prAttributedCount"] == 0
-    assert "probably not this pr" in payload["section"].lower()
+    assert payload["stats"]["unattributedCount"] == 1
+    verdicts = {cluster["fingerprint"]: cluster["blameVerdict"] for cluster in payload["clusters"]}
+    assert verdicts[unrelated_fingerprint] == "probably_not_this_pr"
+    assert "unknown" in verdicts.values()
+    assert "1 unattributed" in payload["preMergeSummary"]
     assert "**Flaky verdict:**" in payload["section"]
     assert "**Blame verdict:**" in payload["section"]
     assert CI_SECTION_HEADING in payload["section"]
-    assert "1 clusters" in payload["preMergeSummary"] or "2 clusters" in payload["preMergeSummary"]
+
+
+def test_two_clusters_ignore_a_single_scalar_base_status() -> None:
+    """One scalar ``failure`` cannot describe two fingerprints."""
+    failures, pr_diff_paths, _ = _two_cluster_fixtures()
+
+    payload = intelligence_from_failures(
+        failures,
+        pr_diff_paths=pr_diff_paths,
+        base_branch_status="failure",
+    )
+
+    assert payload["stats"]["clusterCount"] == 2
+    assert payload["stats"]["prAttributedCount"] == 0
+    assert payload["stats"]["unattributedCount"] == 2
+    assert {cluster["blameVerdict"] for cluster in payload["clusters"]} == {"unknown"}
+
+
+def test_single_cluster_scalar_base_status_still_applies() -> None:
+    """With exactly one cluster the legacy scalar is still authoritative."""
+    unrelated = load_fixture("pre_existing_unrelated_failure.json")
+
+    payload = intelligence_from_failures(
+        unrelated["jobs"],
+        pr_diff_paths=unrelated["pr_diff_paths"],
+        base_branch_status=unrelated["base_branch"]["same_fingerprint_conclusion"],
+    )
+
+    assert payload["stats"]["clusterCount"] == 1
+    assert payload["stats"]["unattributedCount"] == 0
+    assert payload["clusters"][0]["blameVerdict"] == "probably_not_this_pr"
 
 
 def test_flaky_retry_surfaces_in_section_and_pre_merge_row() -> None:

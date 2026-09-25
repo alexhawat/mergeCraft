@@ -33,6 +33,7 @@ from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.scm.types import ListedItems
 from mergecraft.utils.github import GitHubClient
+from tests.ci.support import load_fixture
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -361,7 +362,12 @@ class _ZipTransport(httpx.AsyncBaseTransport):
 
 @pytest.mark.asyncio
 async def test_analyze_ci_failures_records_its_clusters_as_ci_evidence(tmp_path: Path) -> None:
-    """The clustered findings already existed; nothing kept them. Now they persist."""
+    """The clustered findings already existed; nothing kept them. Now they persist.
+
+    No diff paths were supplied, so the failure is unattributed: it is recorded
+    ``introduced_by_pr: "unknown"`` at the blocking severity — never ``"false"``,
+    which would silently clear it.
+    """
     from mergecraft.mcp.ci_intelligence import analyze_ci_failures_tool
 
     log_text = "##[error]make: *** [lint] Error 1\nFAILED src/app.py::test_thing\n"
@@ -375,9 +381,45 @@ async def test_analyze_ci_failures_records_its_clusters_as_ci_evidence(tmp_path:
     recorded = ctx.tool_state.ci_evidence.findings
     assert recorded, "analyze_ci_failures clustered findings but recorded none"
     assert {row["source"] for row in recorded} == {"ci"}
-    # No diff paths were supplied, so nothing may be attributed to this PR.
-    assert {row["introduced_by_pr"] for row in recorded} == {"false"}
-    assert {row["severity"] for row in recorded}.isdisjoint({"Critical", "Major"})
+    assert {row["introduced_by_pr"] for row in recorded} == {"unknown"}
+    assert {row["severity"] for row in recorded} == {"Major"}
+
+
+def test_unattributed_ci_finding_is_unknown_and_never_routed_to_the_verifier() -> None:
+    """``annotate_unattributed`` is the explicit "not proven" arm (BL-D2)."""
+    from mergecraft.ci.verification import annotate_unattributed, requires_verification
+
+    finding = check_run_to_finding(_check_run("Verify (drift gates)", "failure"))
+    assert finding is not None
+
+    unattributed = annotate_unattributed(finding)
+
+    assert unattributed.introduced_by_pr == "unknown"
+    assert unattributed.severity == "Major"
+    assert requires_verification(unattributed) is False
+
+
+def test_unattributed_ci_cluster_blocks_the_packet_verdict(tmp_path: Path) -> None:
+    """The mirror of the PR-attributed packet test, through the review seam.
+
+    An ``unknown`` cluster must reach the packet as a blocker — otherwise
+    "reported, not blamed" would clear any CI failure the reviewer cannot place.
+    """
+    from mergecraft.ci.review import analyze_ci_failures
+
+    fixture = load_fixture("blame_maps_to_diff_hunk.json")
+    reports, _stats, _overflow = analyze_ci_failures(
+        [fixture["job"]],
+        pr_diff_paths=["README.md"],
+    )
+    assert {report.finding.introduced_by_pr for report in reports} == {"unknown"}
+
+    ctx = _ctx(tmp_path)
+    record_ci_findings(ctx.tool_state, [report.finding for report in reports])
+
+    packet = _packet(ctx, tmp_path)
+
+    assert packet["decision"]["verdict"] == "failure"
 
 
 @pytest.mark.asyncio
@@ -438,6 +480,7 @@ async def test_recorded_finding_count_is_merged_evidence_length(
             cluster_count=1,
             flaky_count=0,
             pr_attributed_count=0,
+            unattributed_count=0,
             truncated=False,
         )
         return [report], stats, 0

@@ -97,7 +97,11 @@ async def test_analyze_ci_failures_tool_returns_review_payload(tmp_path: Path) -
     assert CI_SECTION_HEADING in payload["section"]
     assert "**Blame verdict:**" in payload["section"]
     assert "**Flaky verdict:**" in payload["section"]
-    assert "probably not this pr" in payload["section"].lower()
+    # The base concluded `failure` for this fingerprint: a decided exoneration.
+    # Assert the substance (base failure named, nothing attributed to the PR)
+    # rather than the retired "probably not this pr" phrase.
+    assert payload["clusters"][0]["blameVerdict"] == "probably_not_this_pr"
+    assert "fail" in payload["clusters"][0]["blameSummary"].lower()
     assert payload["stats"]["prAttributedCount"] == 0
     assert payload["stats"]["clusterCount"] == 1
     assert "clusters" in payload["preMergeSummary"]
