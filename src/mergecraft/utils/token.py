@@ -79,7 +79,7 @@ async def revoke_installation_token(token: str) -> None:
             response.raise_for_status()
         logger.debug("» installation token revoked")
     except Exception as exc:
-        logger.info("Failed to revoke installation token: {}", exc)
+        logger.warning("Failed to revoke installation token: {}", exc)
 
 
 def _app_jwt() -> str | None:

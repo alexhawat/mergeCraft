@@ -9,8 +9,6 @@ import re
 from re import Pattern
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from mergecraft.redaction_structured import redact_structured_value
 
@@ -411,12 +409,16 @@ def redact_log_message(message: str) -> str:
 
 
 def install_loguru_redaction_filter() -> None:
-    """Attach a loguru patcher that redacts secret values from all log records."""
+    """Register the message redactor on the composed loguru patcher.
 
-    def _patcher(record: dict[str, object]) -> None:
-        record["message"] = redact_log_message(str(record["message"]))
+    Fills ``utils.log``'s redactor slot with :func:`redact_log_message` and
+    reinstalls the same composed patcher there, so every installed patcher both
+    carries bound run context and strips secret values from ``record["message"]``
+    — in either install order. ``utils.log`` never imports this module (CR-D3).
+    """
+    from mergecraft.utils.log import set_message_redactor
 
-    logger.configure(patcher=_patcher)  # type: ignore[arg-type]  # — loguru patcher stub is overly restrictive; _patcher(record) signature is compatible at runtime
+    set_message_redactor(redact_log_message)
 
 
 def assert_no_canary(text: str, canary: str) -> None:
