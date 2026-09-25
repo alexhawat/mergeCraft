@@ -56,6 +56,11 @@ PROBE_SEAMS: tuple[str, ...] = (
 # that keeps going is the unbounded loop this suite exists to catch.
 MAX_PROBE_CANDIDATES = 4096
 
+# Every probe ``subprocess.run`` must carry a finite timeout no larger than
+# this: an unbounded spawn is the silent hang (a wedged credential-changing
+# exec) this suite exists to catch.
+PROBE_TIMEOUT_MAX_S = 120.0
+
 # Hard stop for the fake itself, well above ``MAX_PROBE_CANDIDATES``, so a badly
 # unbounded implementation fails the assertion instead of hanging the suite.
 _SAFETY_MAX_ATTEMPTS = 100_000

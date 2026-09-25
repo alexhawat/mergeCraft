@@ -12,7 +12,10 @@ for a uid the kernel still knows is busy in the parent namespace. The runner
 therefore resolves the target identity and derives the pair by probing the
 kernel's own answer (the real credential-changing exec, stepped upward while it
 is refused) in the parent, before the fork, and hands the pair to the pre-exec.
-With no drop it stays exactly ``(max, max)`` and the probe is never reached.
+The accepted candidate is only a floor: a further ``max_processes`` is added so
+the dropped payload's own ``fork`` still lands (a zero-headroom limit makes
+``bash`` retry ``fork`` in a sleep loop until the run times out). With no drop it
+stays exactly ``(max, max)`` and the probe is never reached.
 """
 
 from __future__ import annotations
@@ -60,13 +63,15 @@ def _full_caps() -> sandbox_mod.SandboxCapabilities:
     )
 
 
-def _sandbox_context(tmp_path: Path) -> sandbox_mod.SandboxContext:
+def _sandbox_context(
+    tmp_path: Path, *, max_processes: int = _MAX_PROCESSES
+) -> sandbox_mod.SandboxContext:
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     return sandbox_mod.build_sandbox_context(
         repo_root=tmp_path,
         scratch_dir=scratch,
-        limits=sandbox_mod.SandboxLimits(timeout_s=30, memory_mb=256, max_processes=_MAX_PROCESSES),
+        limits=sandbox_mod.SandboxLimits(timeout_s=30, memory_mb=256, max_processes=max_processes),
         network_allowlist=[],
         read_only_source=True,
         caps=_full_caps(),
@@ -115,6 +120,7 @@ def _drive_sandboxed_spawn(
     *,
     limits: list[tuple[int, tuple[int, int]]],
     before_fork: Callable[[], None],
+    max_processes: int = _MAX_PROCESSES,
 ) -> Callable[[], None]:
     """Run a sandboxed plan and return the pre-exec it passes to ``subprocess.run``."""
     monkeypatch.setattr(resource, "setrlimit", lambda which, value: limits.append((which, value)))
@@ -128,7 +134,7 @@ def _drive_sandboxed_spawn(
 
     monkeypatch.setattr(subprocess, "run", _run)
     plan = AnalyzerPlan(manifest_id="probe", argv=("true",), cwd=tmp_path, mode="native")
-    run_plan(plan, sandbox_context=_sandbox_context(tmp_path))
+    run_plan(plan, sandbox_context=_sandbox_context(tmp_path, max_processes=max_processes))
     preexec = captured.get("preexec_fn")
     assert callable(preexec), "the sandboxed spawn must carry a pre-exec"
     return preexec
@@ -207,4 +213,38 @@ def test_sandboxed_preexec_probes_the_drop_cap_before_the_fork(
     preexec()
 
     assert attempt.attempts == [16, 32, 48], "the pre-exec must not probe again"
-    assert _nproc_limits(limits) == [(48, 48)]
+    assert _nproc_limits(limits) == [(64, 64)], (
+        "the accepted candidate 48 is a floor; the pre-exec adds max_processes of headroom"
+    )
+
+
+def test_sandboxed_preexec_adds_headroom_when_the_proc_hint_under_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CI drift shape still leaves the dropped payload room to fork.
+
+    A stale ``/proc`` hint of 16 while the kernel knows the target uid carries 24,
+    with ``max_processes`` 8: the probe accepts its first candidate (16 + 8 = 24)
+    because ``/bin/true`` never forks, so a bare 24 would leave the payload no
+    room and hang ``bash`` in its fork-retry loop. The pre-exec must install the
+    pair with the allowance added again — ``(32, 32)``.
+    """
+    _pin_resolvers(monkeypatch, target_uid=1001, target_gid=2002)
+    monkeypatch.setattr(sandbox_mod, "process_count_for_uid", lambda *_a, **_k: 16, raising=False)
+    attempt = ProbeAttempt(succeed_at=24)
+    install_probe(monkeypatch, sandbox_mod, attempt)
+    limits: list[tuple[int, tuple[int, int]]] = []
+
+    preexec = _drive_sandboxed_spawn(
+        monkeypatch,
+        tmp_path,
+        limits=limits,
+        before_fork=lambda: None,
+        max_processes=8,
+    )
+    preexec()
+
+    assert attempt.attempts == [24], "the first candidate is the stale hint plus one allowance"
+    nproc = _nproc_limits(limits)
+    assert nproc == [(32, 32)]
+    assert nproc[0][0] - 24 >= 8, "the dropped payload must keep max_processes of headroom"

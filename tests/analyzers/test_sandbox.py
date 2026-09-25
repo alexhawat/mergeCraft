@@ -12,6 +12,7 @@ import os
 import pwd
 import resource
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import pytest
 from tests.analyzers.support import import_module
 from tests.analyzers.support_sandbox_limits import (
     MAX_PROBE_CANDIDATES,
+    PROBE_TIMEOUT_MAX_S,
     ProbeAttempt,
     install_probe,
     refuse_probe,
@@ -433,10 +435,15 @@ def test_process_limit_for_drop_keeps_the_flat_cap_without_a_target(
     assert sandbox.process_limit_for_drop(16, target_uid=None, target_gid=None) == (16, 16)
 
 
-def test_process_limit_for_drop_keeps_count_plus_max_when_the_count_is_visible(
+def test_process_limit_for_drop_keeps_count_plus_headroom_when_the_count_is_visible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Outside a namespace a visible count still yields the tight ``count + max`` pair."""
+    """Outside a namespace a visible count yields the count plus one full allowance of headroom.
+
+    The accepted candidate is only a *floor*: the payload keeps a further
+    ``max_processes`` above it so its own ``fork`` still lands after the
+    credential-changing exec.
+    """
     sandbox = import_module("mergecraft.analyzers.sandbox")
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(40), raising=False)
     attempt = ProbeAttempt(succeed_at=56)
@@ -444,7 +451,9 @@ def test_process_limit_for_drop_keeps_count_plus_max_when_the_count_is_visible(
 
     soft, hard = sandbox.process_limit_for_drop(16, target_uid=1001, target_gid=1001)
 
-    assert (soft, hard) == (56, 56)
+    accepted = attempt.attempts[-1]
+    assert accepted == 56
+    assert (soft, hard) == (accepted + 16, accepted + 16) == (72, 72)
     assert attempt.attempts == [56], "the visible count is the starting hint of the probe"
 
 
@@ -459,14 +468,15 @@ def test_process_limit_for_drop_steps_up_until_the_probe_succeeds(
 
     soft, hard = sandbox.process_limit_for_drop(16, target_uid=1001, target_gid=1001)
 
-    assert soft == hard == attempt.attempts[-1]
+    accepted = attempt.attempts[-1]
+    assert soft == hard == accepted + 16
     assert attempt.attempts[0] == 16, "the first candidate is the hint plus one allowance"
     assert all(
         later - earlier == 16
         for earlier, later in zip(attempt.attempts, attempt.attempts[1:], strict=False)
     ), "the probe must step upward in max_processes increments"
-    assert soft >= 50
-    assert soft - 16 < 50, "the candidate just below the answer must have been refused"
+    assert accepted >= 50
+    assert accepted - 16 < 50, "the candidate just below the answer must have been refused"
 
 
 def test_process_limit_for_drop_bounds_the_payload_allowance(
@@ -481,11 +491,40 @@ def test_process_limit_for_drop_bounds_the_payload_allowance(
 
     soft, hard = sandbox.process_limit_for_drop(16, target_uid=1001, target_gid=1001)
 
-    assert soft == hard
+    accepted = attempt.attempts[-1]
+    assert soft == hard == accepted + 16
     assert soft - hint >= 16, "the payload's additional allowance must be at least max_processes"
     assert (soft, hard) != (resource.RLIM_INFINITY, resource.RLIM_INFINITY), (
         "the RLIMIT_NPROC cap must not be removed"
     )
+
+
+def test_process_limit_for_drop_keeps_headroom_when_the_hint_under_reports(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale ``/proc`` hint must not yield a zero-headroom pair — the silent CI hang.
+
+    Reproduces the CI shape: the hint reads 16 while the kernel knows the target
+    uid already carries 24, and ``max_processes`` is 8. The probe's first
+    candidate (16 + 8 = 24) is *accepted* — ``/bin/true`` does not fork, so the
+    credential change lands there — but a limit of 24 leaves the payload no room
+    to ``fork``: ``bash`` retries in a sleep loop and the run times out. The
+    returned pair must therefore add the allowance again, ``(32, 32)``, so the
+    dropped payload can still spawn its own children.
+    """
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    stale_hint = 16
+    true_count = 24
+    max_processes = 8
+    monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(stale_hint), raising=False)
+    attempt = ProbeAttempt(succeed_at=true_count)
+    install_probe(monkeypatch, sandbox, attempt)
+
+    soft, hard = sandbox.process_limit_for_drop(max_processes, target_uid=1001, target_gid=1001)
+
+    assert attempt.attempts[0] == stale_hint + max_processes == true_count
+    assert (soft, hard) == (true_count + max_processes, true_count + max_processes) == (32, 32)
+    assert soft - true_count >= max_processes, "the payload must be able to fork after the drop"
 
 
 def test_process_limit_for_drop_fails_closed_when_the_probe_never_succeeds(
@@ -524,7 +563,54 @@ def test_process_limit_for_drop_accommodates_a_resolved_sudo_target(
     gid = resolve_gid(sandbox)
 
     assert (uid, gid) == (1001, 2002)
-    assert sandbox.process_limit_for_drop(16, target_uid=uid, target_gid=gid) == (32, 32)
+    assert sandbox.process_limit_for_drop(16, target_uid=uid, target_gid=gid) == (48, 48)
+
+
+def test_drop_probe_bounds_each_subprocess_with_a_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wedged credential-changing exec must not hang the caller: every probe carries a timeout."""
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    _fake_drop_tools(monkeypatch, uid=0)
+    monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(0), raising=False)
+    runs: list[dict[str, object]] = []
+
+    def _fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        runs.append(dict(kwargs))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(sandbox.subprocess, "run", _fake_run)
+
+    sandbox.process_limit_for_drop(8, target_uid=1001, target_gid=1001)
+
+    assert runs, "the drop probe must run a subprocess"
+    for kwargs in runs:
+        timeout = kwargs.get("timeout")
+        assert isinstance(timeout, (int, float)), (
+            "every probe subprocess must pass an explicit timeout="
+        )
+        assert not isinstance(timeout, bool), "a bool is not a timeout"
+        assert 0 < float(timeout) <= PROBE_TIMEOUT_MAX_S
+
+
+def test_drop_probe_treats_a_timed_out_exec_as_no_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A probe that outlives its timeout resolves to no answer; the caller still returns a pair."""
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    _fake_drop_tools(monkeypatch, uid=0)
+    monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(0), raising=False)
+
+    def _timeout(*_args: object, **_kwargs: object) -> object:
+        raise subprocess.TimeoutExpired(cmd="setpriv", timeout=5)
+
+    monkeypatch.setattr(sandbox.subprocess, "run", _timeout)
+
+    soft, hard = sandbox.process_limit_for_drop(8, target_uid=1001, target_gid=1001)
+
+    assert soft == hard
+    assert soft > 0
+    assert (soft, hard) != (resource.RLIM_INFINITY, resource.RLIM_INFINITY)
 
 
 def test_resolve_drop_target_uid_returns_the_sudo_identity(

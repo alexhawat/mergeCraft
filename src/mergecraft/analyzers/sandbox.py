@@ -1059,6 +1059,17 @@ milliseconds at worst).
 """
 
 
+_NPROC_PROBE_TIMEOUT_S = 5.0
+"""Hard timeout for one :func:`_drop_exec_succeeds_at_limit` probe.
+
+The probe runs ``setpriv … /bin/true``, which should return in milliseconds; a
+probe still alive after five seconds means a pathological environment, and the
+caller must record "cannot run" instead of hanging the run. The payload's own
+15-second analyzer timeout is far above this, so the probe can never become the
+run's clock.
+"""
+
+
 def _apply_nproc_limit(limit: int) -> None:
     """Child-side ``RLIMIT_NPROC`` for :func:`_drop_exec_succeeds_at_limit`."""
     resource.setrlimit(resource.RLIMIT_NPROC, (limit, limit))
@@ -1081,8 +1092,9 @@ def _drop_exec_succeeds_at_limit(target_uid: int, target_gid: int, *, limit: int
 
     * ``True`` — the kernel accepted the credential change at ``limit``;
     * ``False`` — the kernel refused it (``EAGAIN``; ``setpriv`` exits non-zero);
-    * ``None`` — the probe cannot run (not root, no ``setpriv``, or the spawn
-      failed), so the caller must not read this as either answer.
+    * ``None`` — the probe cannot run (not root, no ``setpriv``, the spawn
+      failed, or it exceeded ``_NPROC_PROBE_TIMEOUT_S``), so the caller must not
+      read this as either answer.
 
     The capability flags the real drop carries are irrelevant to the
     ``RLIMIT_NPROC`` credential check, so the probe keeps the same ``setpriv``
@@ -1107,7 +1119,13 @@ def _drop_exec_succeeds_at_limit(target_uid: int, target_gid: int, *, limit: int
             stderr=subprocess.DEVNULL,
             check=False,
             preexec_fn=lambda: _apply_nproc_limit(limit),
+            timeout=_NPROC_PROBE_TIMEOUT_S,
         )
+    except subprocess.TimeoutExpired:
+        # A pathological probe must not hang the run; an unanswered probe is
+        # "cannot run" (the caller's drop path then fails closed), never a
+        # silent wait.
+        return None
     except (OSError, subprocess.SubprocessError):
         return None
     return completed.returncode == 0
@@ -1135,11 +1153,21 @@ def process_limit_for_drop(
        payload its full allowance;
     3. on refusal, step the candidate up by ``max_processes`` and probe again, at
        most ``_NPROC_PROBE_MAX_STEPS`` times;
-    4. return the first candidate the kernel accepts, as ``(limit, limit)``.
+    4. take the first candidate ``L`` the kernel accepts — the *smallest* limit
+       at which the credential change lands — and return ``L + max_processes``
+       as ``(limit, limit)``.
 
-    Because every candidate is at least ``max_processes`` above the visible
-    count, the returned limit keeps the payload's additional allowance at
-    ``max_processes`` or more, and the ``RLIMIT_NPROC`` cap is never removed.
+    Step 4's extra allowance is not redundant. The probe accepts the smallest
+    limit that carries the credential-changing ``execve``, and the hint is only a
+    snapshot of a uid the orchestrator keeps churning: when the hint has
+    under-reported, that accepted ``L`` can equal the target uid's real load
+    exactly (``headroom 0``). The credential change still lands at ``headroom 0``
+    — an ``execve`` is not a ``fork`` — but the payload's first ``fork`` is then
+    refused ``EAGAIN`` and a shell retries it in a sleep loop: a silent hang, not
+    a failure. Returning ``L + max_processes`` keeps the payload at least
+    ``max_processes`` processes above both the visible count and the accepted
+    candidate, so it can always fork, and the ``RLIMIT_NPROC`` cap is still
+    finite — never removed.
 
     Fails closed with ``main._ConfigurationError`` when no candidate within the
     bound is accepted — the drop must not be attempted with a cap that cannot
@@ -1164,7 +1192,15 @@ def process_limit_for_drop(
             limit = count + allowance
             return (limit, limit)
         if outcome:
-            return (candidate, candidate)
+            # Guarantee the payload real fork headroom: the accepted candidate is
+            # the *smallest* limit that lets the credential change land, and a
+            # stale hint may have made it equal the target uid's real load, where
+            # the credential change lands but the first ``fork`` is refused and a
+            # shell retries it in a sleep loop (a silent hang). One further
+            # allowance keeps the payload ``max_processes`` above the accepted
+            # candidate without removing the cap.
+            limit = candidate + allowance
+            return (limit, limit)
     raise _privilege_configuration_error(
         f"cannot size RLIMIT_NPROC for the privilege drop to {target_uid}:{target_gid}: "
         f"no candidate within {_NPROC_PROBE_MAX_STEPS} x {allowance} processes of the "
