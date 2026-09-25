@@ -40,6 +40,8 @@ on:
         required: false
       GEMINI_API_KEY:
         required: false
+      CODEX_AUTH_JSON:
+        required: false
 
 permissions:
   contents: read
