@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from mergecraft.ci.paths import extract_failure_paths, failure_line, primary_failure_path
+from mergecraft.ci.paths import (
+    extract_failure_paths,
+    failure_line,
+    normalize_repo_path,
+    primary_failure_path,
+)
 
 BlameAttribution = Literal["caused_by_pr", "probably_not_this_pr", "unknown"]
 
@@ -25,7 +30,7 @@ class BlameVerdict:
 
 
 def _paths_overlap(failure_paths: list[str], pr_diff_paths: list[str]) -> list[str]:
-    pr_set = set(pr_diff_paths)
+    pr_set = {normalize_repo_path(path) for path in pr_diff_paths}
     return [path for path in failure_paths if path in pr_set]
 
 
@@ -39,7 +44,7 @@ def blame_failure(
     log_excerpt = str(failure.get("log_excerpt") or failure.get("log_text") or "")
     stored_paths = failure.get("failure_paths")
     if isinstance(stored_paths, list) and stored_paths:
-        failure_paths = [str(path) for path in stored_paths]
+        failure_paths = [normalize_repo_path(str(path)) for path in stored_paths]
     else:
         failure_paths = extract_failure_paths(log_excerpt)
     if not failure_paths:
