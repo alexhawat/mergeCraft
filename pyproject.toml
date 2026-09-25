@@ -203,6 +203,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: opt-in tests that need network, credentials, or real binaries",
+    "hermetic_integration: keyless integration tests selected by make test-integration",
     "live: real-provider / live-credential integration (scheduled + release precondition)",
     "coverage: branch-walking tests that inflate coverage; excluded from the default make test read",
 ]

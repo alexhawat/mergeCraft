@@ -50,13 +50,15 @@ fake provider CLI shims under `docker/e2e/fake-provider-cli/`.
 ## Broad slice (scheduled nightly — same workflow)
 
 Triggered by `schedule` / `workflow_dispatch`. Live-provider cells are
-**secrets-gated** — the job no-ops with an explicit skip when provider
-secrets are absent (`skipped: no live credential`).
+**secrets-gated**: with no live model configured the slice emits a warning and
+records the result as **unavailable** in the run summary; a configured model
+with a missing credential, a rejected subscription credential, or a failing
+provider fails the job.
 
 | Cell | Coverage |
 |------|----------|
 | Security slice (above) | Always |
-| Agents × providers matrix (live) | `claude`/`codex`/`gemini`/`opencode` against real CLIs when `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` (etc.) are present |
+| Live provider coverage | `nous` and `github` in the nightly Integration workflow's live matrix; the ChatGPT/Codex subscription in this workflow's live slice. The `anthropic` / `openai` / `gemini` HTTP-API legs are not exercised — no such API key is configured |
 | Arch | `ubuntu-latest` today; arm64 expansion tracked with multi-arch publish |
 
 ## Out of scope / dogfood

@@ -63,8 +63,14 @@ Greened by: narrowing the workflow matrix and its env block.
 | Test | Layer | Pins | RED today |
 | --- | --- | --- | --- |
 | `test_unconfigured_live_slice_warns_as_unavailable` | functional | An empty model exits 0, emits a `::warning`, records "unavailable" in the step summary, and never says "skipped" | It prints "skipped" and exits 0 with no warning or summary line |
+| `test_codex_subscription_credential_is_selected_for_openai_models` | functional | An `openai/*` model with only `CODEX_AUTH_JSON` passes that credential in and not `OPENAI_API_KEY` | The step only knows `OPENAI_API_KEY` |
+| `test_openai_model_without_api_key_or_subscription_exits_non_zero` | error | Neither credential set is a configured-but-broken run: non-zero, no `docker run` | Already green; must stay |
+| `test_rejected_subscription_credential_reads_as_unavailable` (×3) | error | A `refresh token` / `401` / `invalid_grant` rejection prints "unavailable credential" | No error classification |
+| `test_product_failure_is_not_reported_as_unavailable_credential` | error | A genuine product failure never prints "unavailable credential" | Already green; must stay |
+| `test_live_slice_job_serializes_the_subscription_credential` | integration | The live-slice job declares `concurrency: { group: codex-subscription-auth, cancel-in-progress: false }` | No job concurrency |
 
-Greened by: replacing the skip branch with warning + summary + exit 0. The
+Greened by: replacing the skip branch with warning + summary + exit 0, wiring
+the Codex subscription credential, and giving the job its concurrency group. The
 existing configured-but-missing-credential parameter stays non-zero as a
 regression guard.
 
@@ -160,11 +166,89 @@ plus comment-based ruff pairing.
 Pre-existing tests in these files that continue to pass are regression guards,
 not part of the RED inventory.
 
+## CI2 test-file reconciliation (2026-09-25)
+
+The CI2 sub-wave splits non-test edits (executor: `pyproject.toml`, `Makefile`,
+workflows, docker) from test-file edits (this author). This section records the
+test-file side and the resulting green/red split.
+
+### Test-file edits
+
+| File | Change | Status after the edit |
+| --- | --- | --- |
+| `tests/integration/test_provider_failures.py` | `pytestmark = pytest.mark.hermetic_integration` | marked; runs keylessly |
+| `tests/integration/test_nous_404_failover_466.py` | `pytestmark = pytest.mark.hermetic_integration` | marked; runs keylessly |
+| `tests/conftest.py` | `pytest_configure` registers `hermetic_integration` | collection bridge under `--strict-markers`; the canonical declaration stays in `pyproject.toml` (still RED below) |
+| `tests/ci/test_integration_job_ran.py` | deleted the `test_integration_job_always_runs_smoke` existence smoke | `test_no_ci_meta_test_carries_integration_or_hermetic_markers` now green; selector/pyproject tests stay RED |
+| `tests/integration/test_live_providers.py` | `_fail_on_http_error(response, provider)` before every `response.json()`; `NOUS_DEFAULT_MODEL`; Nous posts the constant, `MERGECRAFT_LIVE_NOUS_MODEL` overrides | all five `test_live_provider_http_status.py` contracts green |
+| `tests/ci/test_live_image_smoke.py` | `_run_live_step` helper plus the Codex-subscription cases and the concurrency pin | new cases RED until CI2.4a lands |
+| `tests/analyzers/test_sandbox_execution.py` | lane-aware platform + unshare guard (`pytest.fail` inside the lane) | `test_every_guarded_test_consults_the_privileged_lane` green; lane invocation stays RED |
+| `tests/utils/test_privilege_chown.py` | lane-aware root guard (`pytest.fail` inside the lane) | same |
+| `tests/agents/test_ce_providers.py` | removed the spurious `MERGECRAFT_LIVE_E2E` skipif; renamed to `test_live_provider_smoke_runs_keylessly`; dropped the now-unused `os` import | green in `make test` |
+
+No CI1 registry references the renamed node id: `PROVIDER_LIVE_TESTS` and
+`LIVE_CONTRACT_TESTS` in `src/mergecraft/integrations/live_providers.py` name
+only the `tests/integration/test_live_providers.py` nodes.
+
+`NOUS_DEFAULT_MODEL` source: `docs/authentication.md` documents
+`nous/deepseek/deepseek-v4-flash`, resolved at `src/mergecraft/models.py` inside
+the `nous` catalog `ModelDef.resolve` value. It is a mapping value, not an
+importable module constant, so the test mirrors the literal and says so in the
+module docstring (overridable with `MERGECRAFT_LIVE_NOUS_MODEL`).
+
+The `tests/conftest.py` registration is a bridge: the plan's locked decision
+puts the canonical declaration in `pyproject.toml`, and
+`test_hermetic_marker_is_registered_in_pytest_ini` still fails until the executor
+lands it. Without the bridge the two marked files would raise
+`'hermetic_integration' not found in markers configuration option` under the
+repo's `--strict-markers` addopts before the executor runs.
+
+### Green / red split
+
+Command:
+
+```bash
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest \
+  tests/ci/test_integration_job_ran.py tests/ci/test_live_provider_http_status.py \
+  tests/ci/test_in_image_test_lists.py tests/ci/test_live_image_smoke.py \
+  tests/ci/test_live_provider_matrix.py tests/integration/ \
+  tests/agents/test_ce_providers.py -m "not live" -q
+```
+
+`13 failed, 84 passed, 9 deselected` — every failure is executor-owned:
+
+| Failing test | Needs |
+| --- | --- |
+| `test_hermetic_marker_is_registered_in_pytest_ini` | `pyproject.toml` marker registration |
+| `test_test_integration_selects_the_hermetic_marker` | `Makefile` selector change |
+| `test_unconfigured_live_slice_warns_as_unavailable` | `e2e.yml` CI-D6 branch |
+| `test_codex_subscription_credential_is_selected_for_openai_models` | `e2e.yml` CI2.4a |
+| `test_rejected_subscription_credential_reads_as_unavailable` (×3) | `e2e.yml` CI2.4a unavailable-credential mapping |
+| `test_live_slice_job_serializes_the_subscription_credential` | `e2e.yml` job `concurrency` |
+| `test_privilege_script_runs_the_chown_test_in_the_privileged_lane` | `run_in_image_privilege.sh` CI2.5 |
+| `test_in_image_scripts_pin_the_project_test_runner[privilege]` | `run_in_image_privilege.sh` pin bump |
+| `test_disposable_host_lane_runs_the_sandbox_test_in_the_privileged_lane` | `integration.yml` + `Makefile` CI2.6 |
+| `test_live_matrix_contains_only_runnable_legs` | `integration.yml` CI2.3 |
+| `test_live_matrix_env_wires_exactly_the_runnable_legs` | `integration.yml` CI2.3 |
+
+Newly green, all test-file-only changes: all five
+`tests/ci/test_live_provider_http_status.py` contracts, the two Nous model
+contracts, `test_no_ci_meta_test_carries_integration_or_hermetic_markers`, the
+two `test_hermetic_integration_files_are_marked_and_skip_free` parameters, both
+`test_every_guarded_test_consults_the_privileged_lane` parameters, and the
+renamed keyless catalog smoke.
+
+Invocation-level guard evidence (macOS, non-root): both guarded tests skip with
+`MERGECRAFT_PRIVILEGED_LANE` unset and fail with it set to `1`.
+
 ## Notes for the implementation waves
 
 - `tests/` is owned by the test author. If a test is wrong, the orchestrator
   re-dispatches the test author; implementation waves must not edit tests.
 - The `hermetic_integration` marker must be registered before the selector uses
-  it, or the strict-markers addopts fail.
+  it, or the strict-markers addopts fail. The canonical registration is
+  `[tool.pytest.ini_options].markers` in `pyproject.toml`;
+  `tests/conftest.py::pytest_configure` mirrors it only so the suite collects in
+  the window before that registration lands.
 - Do not weaken trust-tier, sandbox or fail-closed behaviour to satisfy any
   test; the tests assert the stronger behaviour, not the weaker one.

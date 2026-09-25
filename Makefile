@@ -164,14 +164,17 @@ test: ## Unit tests
 	$(PYTEST) tests -v --tb=short --strict-markers -m "not integration and not coverage" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
-# W12.1 / #21 — integration suite joins PR CI. Existing ``@pytest.mark.integration``
-# tests self-skip without live secrets/binaries; the scheduled workflow injects
-# secrets so the same marker becomes the live-provider release precondition.
-# The ``live`` marker is registered for future narrowing by test-creator.
-test-integration: ## Integration tests (PR CI; self-skip without live secrets)
+# W12.1 / #21 — integration suite joins PR CI. The keyless
+# ``@pytest.mark.hermetic_integration`` files always execute here, so the job
+# reports a real result on a runner with no secrets; the secret-gated
+# ``@pytest.mark.integration`` tests self-skip, and the scheduled workflow
+# injects secrets so the same marker becomes the live-provider release
+# precondition. ``and`` binds before ``or``: the selector stays
+# ``integration and not live`` plus the hermetic marker.
+test-integration: ## Integration tests (PR CI; hermetic always run, live-secret legs self-skip)
 	@log=$$(mktemp); \
 	set -o pipefail; \
-	$(PYTEST) tests -v --tb=short --strict-markers -m "integration and not live" \
+	$(PYTEST) tests -v --tb=short --strict-markers -m "integration and not live or hermetic_integration" \
 		--ignore=tests/tracing/test_otlp_collector_e2e.py $(PYTEST_XDIST) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242} \
 		2>&1 | tee $$log; \
@@ -437,6 +440,18 @@ test-filtered-egress: ## Real production firewall tests, disposable Linux only
 	@test -x /usr/bin/python3 || { echo "Integration probes require readable system Python"; exit 1; }
 	/usr/bin/python3 --version
 	unshare --mount --net --pid --fork --mount-proc bash -ec 'mount --make-rprivate /; sysctl -q -w net.ipv4.ip_forward=1; export MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME=1; exec "$(CURDIR)/.venv-dev/bin/python" -m pytest tests/analyzers/test_filtered_egress.py -v --tb=short --strict-markers -m integration -p no:cacheprovider'
+
+# The sandbox repo-write/network block needs a direct ``unshare`` capability a
+# hosted runner does not have. Its honest home is a root process on a
+# disposable Linux host, so this target only runs there. Inside that lane a
+# missing capability fails rather than skips — a skip here would claim a test
+# that never ran.
+.PHONY: test-sandbox-privileged
+test-sandbox-privileged: ## Sandbox write/network block, disposable root Linux lane only
+	@test "$(MERGECRAFT_DISPOSABLE_LINUX)" = 1 || { echo 'Requires explicit MERGECRAFT_DISPOSABLE_LINUX=1 on a disposable Linux runner'; exit 1; }
+	@test "$$(uname -s)" = Linux || { echo 'Sandbox namespace mounts require Linux'; exit 1; }
+	@test "$$(id -u)" = 0 || { echo 'The sandbox lane must run as root'; exit 1; }
+	MERGECRAFT_PRIVILEGED_LANE=1 "$(CURDIR)/.venv-dev/bin/python" -m pytest tests/analyzers/test_sandbox_execution.py::test_sandboxed_execution_blocks_repo_write_and_network -v --tb=short --strict-markers -m "not integration" -p no:cacheprovider
 
 .PHONY: test-wheel-corpus
 test-wheel-corpus: build ## Verify installed convergence corpus outside the checkout

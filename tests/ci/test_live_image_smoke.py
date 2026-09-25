@@ -102,6 +102,9 @@ def test_live_container_gets_only_its_selected_credential(
         "E2E_IMAGE": "test-image",
         "MERGECRAFT_E2E_LIVE_MODEL": model,
     }
+    # The Codex subscription credential wins over OPENAI_API_KEY for `openai/*`;
+    # clear any inherited value so the API-key fallback stays deterministic.
+    environment.pop("CODEX_AUTH_JSON", None)
     if model.endswith("-missing"):
         environment["OPENAI_API_KEY"] = ""
     result = subprocess.run(
@@ -144,3 +147,139 @@ def test_unconfigured_live_slice_warns_as_unavailable(
     assert "skipped" not in output.lower(), (
         f"'skipped' claims a test that never ran; say unavailable instead:\n{output}"
     )
+
+
+_LIVE_CREDENTIAL_KEYS = (
+    "OPENAI_API_KEY",
+    "CODEX_AUTH_JSON",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+)
+
+
+def _run_live_step(
+    tmp_path: Path,
+    script: str,
+    *,
+    model: str,
+    extra_env: dict[str, str],
+    docker_body: str = '#!/bin/bash\nprintf "%s\\n" "$@" > "$SMOKE_DOCKER_ARGS"\n',
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run the extracted live step with a fake ``docker`` on ``PATH``.
+
+    ``extra_env`` is the only source of live credentials: inherited provider
+    keys and the Codex subscription are cleared unless named there, so each
+    case exercises exactly the credential it declares.
+    """
+    docker = tmp_path / "docker"
+    arguments = tmp_path / "arguments"
+    docker.write_text(docker_body, encoding="utf-8")
+    docker.chmod(0o700)
+    environment = {
+        **os.environ,
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "SMOKE_DOCKER_ARGS": str(arguments),
+        "E2E_IMAGE": "test-image",
+        "MERGECRAFT_E2E_LIVE_MODEL": model,
+        **extra_env,
+    }
+    for key in _LIVE_CREDENTIAL_KEYS:
+        if key not in extra_env:
+            environment.pop(key, None)
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result, arguments
+
+
+def test_codex_subscription_credential_is_selected_for_openai_models(
+    tmp_path: Path, live_step_script: str
+) -> None:
+    """``openai/*`` with only ``CODEX_AUTH_JSON`` passes the subscription credential in."""
+    result, arguments = _run_live_step(
+        tmp_path,
+        live_step_script,
+        model="openai/gpt-5.3-codex",
+        extra_env={"CODEX_AUTH_JSON": "nonsecret-fixture"},
+    )
+    assert result.returncode == 0, result.stderr
+    passed = set(arguments.read_text(encoding="utf-8").splitlines())
+    assert "CODEX_AUTH_JSON" in passed, f"the container must receive the subscription: {passed}"
+    assert "OPENAI_API_KEY" not in passed, f"only one credential may pass: {passed}"
+    assert "nonsecret-fixture" not in passed, "the secret value must not ride on argv"
+
+
+def test_openai_model_without_api_key_or_subscription_exits_non_zero(
+    tmp_path: Path, live_step_script: str
+) -> None:
+    """Neither credential set is a configured-but-broken run: fail, do not skip."""
+    result, arguments = _run_live_step(
+        tmp_path,
+        live_step_script,
+        model="openai/gpt-5.3-codex",
+        extra_env={},
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert not arguments.exists()
+
+
+@pytest.mark.parametrize("marker", ["refresh token", "401", "invalid_grant"])
+def test_rejected_subscription_credential_reads_as_unavailable(
+    tmp_path: Path, live_step_script: str, marker: str
+) -> None:
+    """A rejected Codex session is named unavailable, not reported as a product failure."""
+    docker_body = f'#!/bin/bash\nprintf "codex auth error: {marker}\\n" >&2\nexit 1\n'
+    result, _ = _run_live_step(
+        tmp_path,
+        live_step_script,
+        model="openai/gpt-5.3-codex",
+        extra_env={"CODEX_AUTH_JSON": "nonsecret-fixture"},
+        docker_body=docker_body,
+    )
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    assert result.returncode != 0, output
+    assert "unavailable credential" in output, output
+
+
+def test_product_failure_is_not_reported_as_unavailable_credential(
+    tmp_path: Path, live_step_script: str
+) -> None:
+    """A genuine product failure must keep the unavailable-credential label off."""
+    docker_body = (
+        "#!/bin/bash\n"
+        'printf "review harness rejected the diff: no terminal result\\n" >&2\n'
+        "exit 1\n"
+    )
+    result, _ = _run_live_step(
+        tmp_path,
+        live_step_script,
+        model="openai/gpt-5.3-codex",
+        extra_env={"CODEX_AUTH_JSON": "nonsecret-fixture"},
+        docker_body=docker_body,
+    )
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    assert result.returncode != 0, output
+    assert "unavailable credential" not in output, output
+
+
+def test_live_slice_job_serializes_the_subscription_credential() -> None:
+    """Codex refresh tokens rotate, so the live-slice job must not run concurrently."""
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / ".github/workflows/e2e.yml").read_text()
+    )
+    live_job = next(
+        job
+        for job in workflow["jobs"].values()
+        if any(
+            step.get("name") == "Live installed-harness smoke (explicit model required)"
+            for step in job.get("steps", [])
+        )
+    )
+    concurrency = live_job.get("concurrency")
+    assert isinstance(concurrency, dict), concurrency
+    assert concurrency.get("group") == "codex-subscription-auth", concurrency
+    assert concurrency.get("cancel-in-progress") is False, concurrency

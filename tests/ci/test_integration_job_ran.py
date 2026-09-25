@@ -57,12 +57,6 @@ def _load_count_executed() -> Any:
     return count_executed
 
 
-@pytest.mark.integration
-def test_integration_job_always_runs_smoke() -> None:
-    """Always-executed integration smoke so the PR job never reports zero tests (D9)."""
-    assert (REPO_ROOT / "scripts" / "check_integration_ran.py").is_file()
-
-
 @pytest.mark.parametrize(
     ("summary_line", "expected"),
     [
