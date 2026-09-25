@@ -63,6 +63,14 @@ def register_gate_command(app: typer.Typer) -> None:
             "--tolerance",
             help="Declared tolerance band for the release regression gate.",
         ),
+        require_halves: bool = typer.Option(
+            False,
+            "--require-halves",
+            help=(
+                "Fail when the candidate drops a result-set half the baseline "
+                "carries (release mode); the PR check keeps the skip."
+            ),
+        ),
         json_output: bool = typer.Option(
             False,
             "--json",
@@ -96,6 +104,11 @@ def register_gate_command(app: typer.Typer) -> None:
         result set is compared against the published baseline with the declared
         ``--tolerance`` band via ``mergecraft.evals.gate.eval_gate`` — a metric
         that regresses beyond the band fails the release, noise inside it passes.
+
+        ``--require-halves`` (release mode, EV-D11) additionally fails when the
+        candidate drops a half the baseline carries (e.g. its detection join);
+        without it the absent half is skipped, which is what the PR check wants
+        because its candidate never carries detection.
         """
         if (baseline is None) != (candidate is None):
             cli_bail("--baseline and --candidate must be given together")
@@ -106,6 +119,7 @@ def register_gate_command(app: typer.Typer) -> None:
                 candidate=load_result_set(candidate),
                 baseline=load_result_set(baseline),
                 tolerance=tolerance,
+                require_halves=require_halves,
             )
             append_step_summary(format_pr_gate_summary(gate_report))
 

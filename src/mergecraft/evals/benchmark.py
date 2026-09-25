@@ -54,7 +54,7 @@ DEFAULT_BENCHMARK_PROVIDERS: Final[tuple[str, ...]] = ("claude", "openai")
 # Scoring-contract version pinned alongside the reviewing-model identity (N6)
 # — bump whenever `evals/scoring.py`'s matching rules change in a way that
 # would move a published number.
-SCORER_VERSION: Final[str] = "1.0.0"
+SCORER_VERSION: Final[str] = "1.1.0"
 
 _CORPUS_ID_PREFIX: Final[tuple[tuple[str, str], ...]] = (
     ("bench-adversarial", "adversarial_noop"),
@@ -328,6 +328,23 @@ class DetectionMetrics(BaseModel):
     # as eligible.
     calibration: CalibrationStatus | None = None
     execution_identity: DetectionRunIdentity | None = None
+
+    @property
+    def failed_case_rate(self) -> float:
+        """Share of attempted detection cases whose review failed (EV-D2).
+
+        ``cases_failed / (cases_run + cases_failed)`` — lower is better. The
+        aggregate excludes failed cases from scoring, so dropping hard cases
+        raises recall; this rate is the gate's counter-signal, and it is ``1.0``
+        on an all-failed run (the perfect-empty-fold case). ``0.0`` when nothing
+        was attempted, never ``NaN``. Computed, never serialised: no
+        ``model_dump()`` key, so the result-set wire shape is unchanged and old
+        artifacts (``cases_failed`` defaults to ``0``) still load.
+        """
+        attempts = self.cases_run + self.cases_failed
+        if attempts == 0:
+            return 0.0
+        return self.cases_failed / attempts
 
 
 class BenchmarkResultSet(BaseModel):
