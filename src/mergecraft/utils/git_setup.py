@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import base64
 import contextlib
+import errno
 import os
 import shutil
 import subprocess
@@ -97,22 +98,70 @@ def _register_atexit_cleanup() -> None:
     _atexit_registered = True
 
 
+def _describe_exc(exc: BaseException) -> str:
+    """Render an exception for a cleanup warning, naming the errno when known.
+
+    Never includes file contents, tokens or headers — only the exception's
+    own text, which the composed log patcher redacts (CR-D10).
+    """
+    if isinstance(exc, OSError) and exc.errno is not None:
+        name = errno.errorcode.get(exc.errno, f"errno {exc.errno}")
+        return f"{type(exc).__name__} ({name}): {exc}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _warn_rmtree_error(
+    _func: object,
+    path: str,
+    exc_info: tuple[type[BaseException], BaseException, object],
+) -> None:
+    """``shutil.rmtree(onerror=...)`` callback: warn per failed path, never raise.
+
+    A path that is already absent is *clean* — the goal (absence) is achieved —
+    so an ENOENT for a path that no longer exists is silent (CR-D8). Any other
+    failure warns once, naming the path.
+    """
+    exc = exc_info[1] if len(exc_info) > 1 else exc_info[0]
+    if _is_already_absent(exc, path):
+        return
+    logger.warning("» could not remove {}: {}", path, _describe_exc(exc))
+
+
+def _is_already_absent(exc: BaseException, path: str) -> bool:
+    """True when ``exc`` is an ENOENT for a ``path`` that is already gone."""
+    is_enoent = isinstance(exc, FileNotFoundError) or (
+        isinstance(exc, OSError) and exc.errno == errno.ENOENT
+    )
+    if not is_enoent:
+        return False
+    return not os.path.lexists(path)
+
+
 def _secure_overwrite_file(path: Path) -> None:
-    """Overwrite file bytes before unlink (W2.3)."""
+    """Overwrite file bytes before unlink (W2.3).
+
+    Best-effort: any ``OSError`` is logged once, naming the path and the errno
+    name, and never propagates (CR-D8).
+    """
     try:
         size = path.stat().st_size
-    except OSError:
+    except OSError as exc:
+        logger.warning("» could not stat {} for secure overwrite: {}", path, _describe_exc(exc))
         return
     try:
         with path.open("r+b") as handle:
             handle.write(b"\x00" * size)
             handle.flush()
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.warning("» could not overwrite {}: {}", path, _describe_exc(exc))
 
 
 def cleanup_temp_directory() -> None:
-    """Remove the run temp dir and scrub credential files (W2.3)."""
+    """Remove the run temp dir and scrub credential files (W2.3).
+
+    Best-effort (CR-D8): every failure is logged once, naming the step and the
+    path and never a secret, and no failure raises or skips later work.
+    """
     global _temp_dir
     target = _temp_dir or os.environ.get("MERGECRAFT_TEMP_DIR")
     if not target:
@@ -121,10 +170,16 @@ def cleanup_temp_directory() -> None:
     askpass = root / "credentials" / "git-askpass.sh"
     if askpass.is_file():
         _secure_overwrite_file(askpass)
-        with contextlib.suppress(OSError):
+        try:
             askpass.unlink()
-    shutil.rmtree(target, ignore_errors=True)
+        except OSError as exc:
+            logger.warning("» could not unlink askpass file {}: {}", askpass, _describe_exc(exc))
+    if os.path.lexists(target):
+        shutil.rmtree(target, onerror=_warn_rmtree_error)
     _temp_dir = None
+    residual = [str(path) for path in (askpass, root) if path.exists()]
+    if residual:
+        logger.warning("» cleanup left residual path(s): {}", ", ".join(residual))
 
 
 def create_temp_directory() -> str:
@@ -426,8 +481,12 @@ def setup_git(
     askpass_path = Path(askpass)
     if askpass_path.is_file():
         _secure_overwrite_file(askpass_path)
-        with contextlib.suppress(OSError):
+        try:
             askpass_path.unlink()
+        except OSError as exc:
+            logger.warning(
+                "» could not unlink askpass file {}: {}", askpass_path, _describe_exc(exc)
+            )
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
     from mergecraft.utils.git_hardening import read_remote_origin_url
 
@@ -491,17 +550,23 @@ def wipe_runner_leak_surface() -> None:
                 return
         if resolved not in _created_paths and str(path) not in _created_paths:
             return
+        if not os.path.lexists(str(path)):
+            # Already gone — the wipe's goal (absence) is achieved, not a
+            # failure, so nothing is logged (CR-D8).
+            _created_paths.discard(resolved)
+            _created_paths.discard(str(path))
+            return
         try:
             if path.is_dir():
-                shutil.rmtree(path, ignore_errors=True)
+                shutil.rmtree(path, onerror=_warn_rmtree_error)
             else:
                 _secure_overwrite_file(path)
                 path.unlink(missing_ok=True)
             wiped.append(str(path))
             _created_paths.discard(resolved)
             _created_paths.discard(str(path))
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("» could not wipe leak-surface path {}: {}", path, _describe_exc(exc))
 
     for registered in list(_created_paths):
         try_unlink(Path(registered))

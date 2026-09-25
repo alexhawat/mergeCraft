@@ -1227,7 +1227,6 @@ async def test_preamble_keeps_bound_context_after_redaction_install(
         pytest.param("scm", "scm", id="scm"),
     ],
 )
-@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
 async def test_finally_logs_a_failed_step_and_still_runs_later_steps(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, step: str, keyword: str
 ) -> None:

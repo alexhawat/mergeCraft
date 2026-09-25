@@ -366,7 +366,6 @@ def _capture_warnings() -> tuple[list[str], int]:
     return warnings, sink_id
 
 
-@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
 def test_secure_overwrite_warns_when_the_file_cannot_be_opened(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -404,7 +403,6 @@ def test_secure_overwrite_success_emits_no_warning(tmp_path: Path) -> None:
     assert warnings == []
 
 
-@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
 def test_cleanup_warns_when_the_askpass_unlink_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -434,7 +432,6 @@ def test_cleanup_warns_when_the_askpass_unlink_fails(
     assert "token-value" not in warnings[0]
 
 
-@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
 def test_cleanup_warns_when_rmtree_reports_a_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -471,7 +468,6 @@ def test_cleanup_warns_when_rmtree_reports_a_failure(
     assert all("token-value" not in message for message in warnings)
 
 
-@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
 def test_cleanup_warns_when_the_askpass_file_survives(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -525,7 +521,6 @@ def test_cleanup_success_emits_no_warning(tmp_path: Path, monkeypatch: pytest.Mo
     assert not root.exists()
 
 
-@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
 def test_wipe_warns_when_a_registered_path_cannot_be_removed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

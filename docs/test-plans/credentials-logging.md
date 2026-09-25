@@ -6,8 +6,8 @@ across unit, integration and functional layers, and records which tests are
 red until the implementation waves land.
 
 Owner: `test-creator` (sole writer of `tests/` and this file). Implementation
-waves CR2–CR4 turn the red contracts green; this file is reconciled with the
-xfail markers after each implementation wave.
+waves CR2–CR4 have landed; every contract below is pinned by a plain passing
+test.
 
 ## Contract → test map
 
@@ -67,25 +67,19 @@ raising) with assertions on emitted warnings and their contents.
 
 ## Red / green status
 
-The composed-patcher group (CR2) and the git-env / passthrough-name group (CR3)
-have landed: their tests are plain passing assertions and enforce for real. The
-remaining red contracts are marked with a non-strict `xfail(reason=...)` until
-their implementation lands.
+All contracts in this plan are implemented and every test is a plain passing
+assertion — no `xfail` markers remain for this plan.
 
 Green (enforced):
 
 - `tests/utils/test_log.py` — 3 composed-patcher tests.
 - `tests/cli/test_logging_entrypoints.py` — 5 root-callback / entrypoint tests.
-- `tests/test_main_phases.py` — the `main()` preamble bound-context test.
+- `tests/test_main_phases.py` — the `main()` preamble bound-context test and the 4 teardown-step tests.
 - `tests/utils/test_git_setup.py` — 29 git-config / trace-redirect tests.
 - `tests/security/test_hostile_git_config.py` — 2 ambient-trace / credential-helper tests.
 - `tests/utils/test_secrets.py` — 3 lookalike-credential-name tests.
-
-Still red (xfail):
-
-- `tests/test_main_phases.py` — 4 teardown-step tests (cleanup/revocation).
-- `tests/security/test_credentials.py` — 5 tests (cleanup failure warnings).
-- `tests/utils/test_token.py` — 3 tests (revocation warning level).
+- `tests/security/test_credentials.py` — 5 cleanup-warning tests.
+- `tests/utils/test_token.py` — 3 revocation-level tests.
 
 Guards that must stay green: `tests/analyzers/test_redaction_boundaries.py`,
 the success-path tests in `tests/security/test_credentials.py`, the documented

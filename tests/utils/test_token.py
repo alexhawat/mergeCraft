@@ -304,7 +304,6 @@ async def test_revoke_installation_token_never_raises(
 
 
 @pytest.mark.parametrize("status_code", [401, 403, 500])
-@pytest.mark.xfail(reason="green after the logged-cleanup-failure wave lands", strict=False)
 async def test_revoke_installation_token_logs_http_failures_at_warning(
     monkeypatch: pytest.MonkeyPatch,
     status_code: int,
