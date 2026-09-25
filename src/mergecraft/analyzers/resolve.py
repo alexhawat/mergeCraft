@@ -451,6 +451,36 @@ def expand_analyzer_argv(
     return tuple(expanded)
 
 
+def _confine_static_check_files(changed_files: list[str], *, root: Path) -> list[str]:
+    """Confine ``{files}`` entries and neutralise option-shaped ones (SX-D6).
+
+    An entry that resolves outside ``root`` is dropped. A relative entry that
+    begins with ``-`` would parse as an option, so it is rewritten to a ``./``
+    path, which every getopt reads as a filename. No ``--`` separator is
+    inserted: gates are often ``make`` targets or wrapper scripts that pass
+    ``--`` through as an argument, and some CLIs give it another meaning.
+    """
+    resolved_root = root.resolve()
+    confined: list[str] = []
+    for rel in changed_files:
+        path = Path(rel)
+        candidate = path if path.is_absolute() else resolved_root / rel
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(resolved_root)
+        except (ValueError, OSError):
+            continue
+        if not path.is_absolute() and rel.startswith("-"):
+            # Option-shaped relative entry: `./-rf` reads as a path to every
+            # getopt, with no `--` separator to be reinterpreted downstream.
+            confined.append(f"./{rel}")
+        else:
+            # Same shape ``expand_analyzer_argv`` emits: the confined absolute
+            # path, which also cannot parse as an option.
+            confined.append(str(resolved))
+    return confined
+
+
 def static_check_plan(
     *,
     name: str,
@@ -465,7 +495,7 @@ def static_check_plan(
     argv = shlex.split(command)
     if FILES_TOKEN in argv:
         index = argv.index(FILES_TOKEN)
-        argv = [*argv[:index], *files, *argv[index + 1 :]]
+        argv = [*argv[:index], *_confine_static_check_files(files, root=root), *argv[index + 1 :]]
     return AnalyzerPlan(
         manifest_id=name,
         mode="repo-native",

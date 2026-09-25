@@ -7,7 +7,7 @@ Exports:
     hash_tree: Fingerprint a checkout tree before agent execution.
     verify_tree_unchanged: Fail closed when the tree changed during review.
     assert_checkout_read_boundary: Reject paths outside the checkout read allowlist.
-    scan_local_sinks_for_secrets: Detect provider secrets in local log sinks.
+    scan_local_sinks_for_secrets: Return the paths of local sinks holding secrets.
 """
 
 from __future__ import annotations
@@ -113,19 +113,40 @@ def _is_sink_file(path: Path) -> bool:
     return path.name in _SINK_NAMES
 
 
-def scan_local_sinks_for_secrets(search_root: Path, *, secrets: Sequence[str]) -> str:
-    """Return concatenated sink contents that contain any ``secrets`` literal."""
-    resolved = search_root.resolve()
-    if not resolved.is_dir():
-        return ""
-    hits: list[str] = []
-    for path in sorted(resolved.rglob("*")):
-        if not path.is_file() or not _is_sink_file(path):
-            continue
+def scan_local_sinks_for_secrets(
+    search_root: Path | None,
+    *,
+    secrets: Sequence[str],
+    explicit_paths: Sequence[Path] = (),
+) -> list[Path]:
+    """Return the *paths* of local sink files that contain any ``secrets`` literal.
+
+    Returns matching paths only — **never** contents. Returning the contents
+    would leak the credential the helper exists to catch the moment any caller
+    logs or records the result (SX-D10). The caller is expected to name the
+    path in its failure reason and delete the file, not to print the payload.
+
+    ``search_root`` is walked recursively and filtered by the sink classifier
+    (:func:`_is_sink_file`). ``explicit_paths`` names artifact sources the
+    suffix/name classifier would miss — the evidence uploads are ``.json``
+    packets, and ``.json`` is deliberately not a sink suffix — so each named
+    file is scanned whether or not it looks like a sink.
+    """
+    hits: list[Path] = []
+    if search_root is not None and search_root.is_dir():
+        for path in sorted(search_root.rglob("*")):
+            if path.is_file() and _is_sink_file(path):
+                hits.append(path)
+    for raw in explicit_paths:
+        candidate = Path(raw)
+        if candidate.is_file():
+            hits.append(candidate)
+    matches: list[Path] = []
+    for path in dict.fromkeys(hits):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         if any(secret and secret in text for secret in secrets):
-            hits.append(text)
-    return "\n".join(hits)
+            matches.append(path)
+    return matches

@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
-from typing import TYPE_CHECKING, Any
+import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
 
+from mergecraft.analyzers import sandbox as sandbox_mod
+from mergecraft.mcp import shell as shell_mod
 from mergecraft.mcp.context import (
     PayloadEvent,
     RepoIdentity,
@@ -20,9 +26,6 @@ from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.utils.github import GitHubClient
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _ctx(
@@ -165,8 +168,15 @@ requires_make = pytest.mark.skipif(
 
 @requires_make
 @pytest.mark.asyncio
-async def test_discovered_makefile_gates_withheld_when_shell_disabled(tmp_path: Path) -> None:
-    """The gap: undeclared repos fall back to Makefile gates, which must be withheld too."""
+async def test_discovered_makefile_gates_are_not_run_bare_when_shell_disabled(
+    tmp_path: Path,
+) -> None:
+    """Undeclared repos fall back to Makefile gates; untrusted they never run bare.
+
+    Under the untrusted-sandbox decision the shell-disabled withhold is replaced
+    by a sandbox plan: a host with no isolation reports the gate as
+    declared-but-cannot-run rather than executing PR-authored Makefile code.
+    """
     _write_makefile(tmp_path)
     ctx = _ctx(tmp_path, shell="disabled", static_checks=[], enabled=True)
     ctx.trust_tier = "untrusted"
@@ -175,11 +185,6 @@ async def test_discovered_makefile_gates_withheld_when_shell_disabled(tmp_path: 
     checks = payload.get("checks") or []
     assert [check["status"] for check in checks] == ["declared-but-cannot-run"]
     assert checks[0]["name"] == "lint"
-    reason = str(payload["reason"])
-    assert "shell is disabled" in reason
-    # Truthful wording: nothing was *configured*, the gate came from the Makefile.
-    assert "Makefile" in reason
-    assert "staticChecks are configured" not in reason
 
 
 @requires_make
@@ -199,15 +204,26 @@ async def test_discovered_makefile_gates_run_when_shell_disabled_but_trusted(
 
 @requires_make
 @pytest.mark.asyncio
-async def test_discovered_makefile_gates_run_under_permissive_shell(tmp_path: Path) -> None:
-    """An untrusted event with shell available keeps running discovered gates."""
+async def test_discovered_makefile_gates_are_withheld_when_no_isolation_under_permissive_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shell permission is an execution opt-in, not a sandbox guarantee (SX-D7).
+
+    Gate discovery still works — the Makefile `lint` target is planned — but an
+    untrusted gate must never run bare on the real checkout when the untrusted
+    sandbox cannot run, whatever ``shell`` says. Under ``shell: restricted`` the
+    gate is withheld as declared-but-cannot-run, naming the missing isolation.
+    """
+    _force_missing_isolation(monkeypatch)
     _write_makefile(tmp_path)
     ctx = _ctx(tmp_path, shell="restricted", static_checks=[], enabled=True)
     ctx.trust_tier = "untrusted"
     payload = await _run(ctx)
-    assert payload["ran"] is True
-    assert payload["allPassed"] is True
-    assert payload["checks"][0]["status"] == "passed"
+    assert payload["ran"] is False
+    checks = payload.get("checks") or []
+    assert [check["status"] for check in checks] == ["declared-but-cannot-run"]
+    assert checks[0]["name"] == "lint"
+    assert "sandbox isolation" in str(payload.get("reason", "")).lower()
 
 
 @pytest.mark.asyncio
@@ -220,3 +236,426 @@ async def test_no_gate_at_all_keeps_early_return_when_shell_disabled(tmp_path: P
     assert "declares no mechanical gate" in payload["reason"]
     assert payload["checks"] == []
     assert ctx.tool_state.static_checks_ran is True
+
+
+# ---------------------------------------------------------------------------
+# Untrusted gates run inside the untrusted sandbox (default-deny env, scratch
+# home, isolated network), and sandbox-caused failures are classified rather
+# than reported as findings about the diff.
+# ---------------------------------------------------------------------------
+
+
+def _full_caps() -> sandbox_mod.SandboxCapabilities:
+    return sandbox_mod.SandboxCapabilities(
+        pid_namespace=True,
+        network_namespace=True,
+        read_only_bind=True,
+        tmpfs=True,
+        cgroup_memory=False,
+        rlimit_nproc=True,
+        pid_namespace_method="unshare",
+        user_namespace=True,
+    )
+
+
+def _force_untrusted_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sandbox_mod, "probe_capabilities", _full_caps)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    shell_mod._reset_shell_detection_globals()
+
+
+def _no_isolation_caps() -> sandbox_mod.SandboxCapabilities:
+    """A host with none of the isolation an untrusted gate requires."""
+    return sandbox_mod.SandboxCapabilities(
+        pid_namespace=False,
+        network_namespace=False,
+        read_only_bind=False,
+        tmpfs=False,
+        cgroup_memory=False,
+        rlimit_nproc=False,
+        pid_namespace_method="none",
+        user_namespace=False,
+        unavailable_reasons=["pid namespace unavailable (unshare failed)"],
+    )
+
+
+def _force_missing_isolation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deterministically plan no untrusted sandbox, whatever the host supports."""
+    monkeypatch.setattr(sandbox_mod, "probe_capabilities", _no_isolation_caps)
+    shell_mod._reset_shell_detection_globals()
+
+
+def _capture_child(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    returncode: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+) -> dict[str, Any]:
+    """Patch the child boundary and record what the gate would have received."""
+    captured: dict[str, Any] = {"argv": [], "env": None, "payload_env": None}
+
+    def _run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        captured["argv"] = list(argv)
+        captured["env"] = kwargs.get("env")
+        descriptors = kwargs.get("pass_fds") or ()
+        if descriptors:
+            raw = os.read(descriptors[0], 65536).decode("utf-8", errors="replace")
+            parsed: dict[str, str] = {}
+            for entry in raw.split("\0"):
+                if "=" in entry:
+                    key, value = entry.split("=", 1)
+                    parsed[key] = value
+            captured["payload_env"] = parsed
+        return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    return captured
+
+
+@pytest.mark.parametrize("shell", ["restricted", "disabled"])
+@pytest.mark.asyncio
+async def test_untrusted_gates_run_sandboxed_with_scratch_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str
+) -> None:
+    _force_untrusted_sandbox(monkeypatch)
+    monkeypatch.setenv("GITHUB_TOKEN", "static-checks-scm-canary")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "static-checks-provider-canary")
+    captured = _capture_child(monkeypatch)
+
+    ctx = _ctx(
+        tmp_path,
+        shell=shell,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    await _run(ctx)
+
+    argv = captured["argv"]
+    assert "unshare" in argv, argv
+    assert "--net" in argv, argv
+    payload_env = captured["payload_env"]
+    assert isinstance(payload_env, dict), "the sandboxed gate must receive a payload env"
+    assert "static-checks-scm-canary" not in payload_env
+    assert "static-checks-provider-canary" not in payload_env
+    for key in ("HOME", "XDG_CACHE_HOME", "TMPDIR"):
+        value = payload_env.get(key)
+        assert value, f"{key} must be pointed at scratch, got {value!r}"
+        assert str(tmp_path) in value, f"{key}={value!r} is outside the run tmpdir"
+
+
+@pytest.mark.parametrize("shell", ["restricted", "enabled"])
+@pytest.mark.asyncio
+async def test_untrusted_gates_never_run_bare_when_isolation_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str
+) -> None:
+    """No untrusted sandbox ⇒ every gate withheld, and no child process launched.
+
+    The removed fallback ran an untrusted gate bare on the real checkout
+    whenever ``shell`` allowed it. With isolation missing, every gate — declared
+    here — reports ``declared-but-cannot-run`` naming the missing isolation for
+    both ``restricted`` and ``enabled``, and the child boundary is never
+    crossed.
+    """
+    _force_missing_isolation(monkeypatch)
+    captured = _capture_child(monkeypatch)
+
+    ctx = _ctx(
+        tmp_path,
+        shell=shell,
+        static_checks=[
+            StaticCheckConfig(name="lint", command="gate"),
+            StaticCheckConfig(name="typecheck", command="gate"),
+        ],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    assert payload["ran"] is False, payload
+    assert [check["status"] for check in payload["checks"]] == [
+        "declared-but-cannot-run",
+        "declared-but-cannot-run",
+    ], payload
+    reason = str(payload.get("reason", ""))
+    assert "sandbox isolation" in reason.lower(), payload
+    assert "isolation unavailable" in reason.lower(), payload
+    assert captured["argv"] == [], payload
+    assert captured["env"] is None, payload
+
+
+@pytest.mark.parametrize(
+    ("stderr", "reason"),
+    [
+        ("Could not resolve host: registry.npmjs.org", "sandboxed: network is disabled"),
+        (
+            "Temporary failure in name resolution",
+            "sandboxed: network is disabled",
+        ),
+        ("Network is unreachable", "sandboxed: network is disabled"),
+        ("getaddrinfo EAI_AGAIN registry.npmjs.org", "sandboxed: network is disabled"),
+        ("EROFS: read-only file system", "sandboxed: path not writable"),
+        (
+            "EACCES: permission denied, open '/opt/mergecraft/.venv/pyvenv.cfg'",
+            "sandboxed: path not writable",
+        ),
+        (
+            "EACCES: permission denied, unlink '<redacted>'",
+            "sandboxed: path not writable",
+        ),
+        # ``run.py`` redacts the denied path before classification, so the
+        # realistic ``Permission denied`` shape arrives with ``<redacted>``.
+        (
+            "mkdir: cannot create directory '<redacted>': Permission denied",
+            "sandboxed: path not writable",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_sandbox_caused_gate_failure_is_declared_not_a_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stderr: str, reason: str
+) -> None:
+    _force_untrusted_sandbox(monkeypatch)
+    _capture_child(monkeypatch, returncode=1, stderr=stderr)
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    checks = payload["checks"]
+    assert checks, payload
+    assert checks[0]["status"] == "declared-but-cannot-run", payload
+    assert checks[0]["status"] != "failed"
+    assert reason in json.dumps(payload), payload
+
+
+# A real gate error printed alongside an incidental sandbox-shaped line (a
+# cleanup write that failed, a lookup the tool tried anyway). The gate produced
+# a verdict about the diff, so the whole failure must stay ``failed`` — the
+# sandbox line is noise, not a reason to suppress the verdict (P-8 inverse).
+_MIXED_SANDBOX_NOISE: tuple[str, ...] = (
+    "EACCES: permission denied, unlink '<redacted>'",
+    "EPERM: operation not permitted, open '<redacted>'",
+    "getaddrinfo EAI_AGAIN registry.npmjs.org",
+    "Network is unreachable",
+    "EROFS: read-only file system, open '<redacted>.log'",
+)
+
+_REAL_GATE_ERROR = "src/app.py:3:1: error: undefined name 'helper' (F821)"
+
+
+@pytest.mark.parametrize("noise", _MIXED_SANDBOX_NOISE)
+@pytest.mark.asyncio
+async def test_mixed_real_error_and_sandbox_noise_stays_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, noise: str
+) -> None:
+    """A real error plus incidental sandbox noise is never downgraded (SX-D7).
+
+    The classifier matches the first sandbox-shaped line; a caller that keys the
+    whole gate on that alone suppresses a genuine lint/test failure whenever an
+    unrelated ``getaddrinfo``/``EACCES`` line appears next to it. The gate's own
+    verdict and exit code must survive.
+    """
+    _force_untrusted_sandbox(monkeypatch)
+    _capture_child(
+        monkeypatch,
+        returncode=1,
+        stdout=_REAL_GATE_ERROR,
+        stderr=noise,
+    )
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    checks = payload["checks"]
+    assert checks, payload
+    assert checks[0]["status"] == "failed", payload
+    assert checks[0]["status"] != "declared-but-cannot-run"
+    assert checks[0]["exitCode"] == 1, payload
+    assert _REAL_GATE_ERROR in checks[0]["output"], payload
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "src/app.py:3:1: error: permission denied to call the network helper",
+        "npm ERR! permission denied by policy",
+        "test_auth.py:22: AssertionError: operation not permitted",
+        "ruff check failed: the `network` fixture is unused (F841)",
+    ],
+)
+@pytest.mark.asyncio
+async def test_ordinary_gate_output_that_mentions_a_denial_stays_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stderr: str
+) -> None:
+    """Output about the user's code is the gate's result, not a sandbox denial."""
+    _force_untrusted_sandbox(monkeypatch)
+    _capture_child(monkeypatch, returncode=1, stderr=stderr)
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    checks = payload["checks"]
+    assert checks[0]["status"] == "failed", payload
+    assert checks[0]["exitCode"] == 1, payload
+
+
+@pytest.mark.asyncio
+async def test_real_gate_failure_is_still_the_gates_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _force_untrusted_sandbox(monkeypatch)
+    _capture_child(
+        monkeypatch,
+        returncode=1,
+        stderr="src/app.py:3:1: error: the network helper is unused (F401)",
+    )
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    checks = payload["checks"]
+    assert checks[0]["status"] == "failed", payload
+    assert checks[0]["exitCode"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sandboxed_gate_write_never_reaches_the_real_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _force_untrusted_sandbox(monkeypatch)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sandboxed_upper = tmp_path / "sandboxed-upper"
+    sandboxed_upper.mkdir()
+
+    def _fake_subprocess_run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        # The write lands where the process actually is: a namespace-wrapped gate
+        # writes the disposable upper layer, a bare gate corrupts the checkout.
+        target = sandboxed_upper if "unshare" in argv else repo
+        (target / "build-output.txt").write_text("built\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, "ok", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+    ctx = _ctx(
+        repo,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    assert payload["checks"][0]["status"] == "passed", payload
+    assert not (repo / "build-output.txt").exists(), "the real checkout was written"
+    assert (sandboxed_upper / "build-output.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_trusted_tier_gate_still_runs_without_a_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _capture_child(monkeypatch, returncode=0, stdout="ok")
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "trusted"
+    payload = await _run(ctx)
+
+    assert "unshare" not in captured["argv"], captured["argv"]
+    assert payload["checks"][0]["status"] == "passed", payload
+
+
+_VIEW_PATHS = ("repo-upper", "repo-work", "repo-merged", "repo-copy")
+_WRITABLE_MODE_RE = re.compile(r"(?:-m|--mode)[ =]+0?[0-7]*[2367]\b")
+
+
+def _view_is_widened_for_the_dropped_uid(fragment: str) -> bool:
+    """Whether the copy-on-write fragment makes its view writable by the payload.
+
+    The orchestrator builds the view as root, so a plain ``mkdir`` leaves the
+    merged root (or the scratch copy) at the creator's ``0755``. A gate dropped
+    to the agent uid then fails ``mkdir .venv`` with ``EACCES`` and is reported
+    as a finding about the diff (P-8). Accept any explicit permission step on
+    the view: a ``chmod``/``chown``, a writable ``mkdir -m``, or a ``umask 0``.
+    """
+    if not any(name in fragment for name in _VIEW_PATHS):
+        return False
+    if re.search(r"\b(?:chmod|chown)\b", fragment):
+        return True
+    if _WRITABLE_MODE_RE.search(fragment):
+        return True
+    return bool(re.search(r"\bumask\s+0", fragment))
+
+
+@pytest.mark.asyncio
+async def test_untrusted_gates_request_the_copy_on_write_checkout_view(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SX-D7: an untrusted gate runs against a writable copy-on-write view.
+
+    The gate may write build output or ``.venv`` into the tree, so the checkout
+    is presented as a disposable copy-on-write view (overlay with a scratch
+    upper, or the scratch-copy fallback) instead of a read-only bind. The flag
+    must reach the real ``plan_sandbox`` and the resulting command must carry
+    the overlay/scratch-view fragment — and that view must be writable by the
+    dropped uid, or the write fails ``EACCES`` and the gate is misreported as a
+    finding (P-8).
+    """
+    _force_untrusted_sandbox(monkeypatch)
+
+    real_plan_sandbox = sandbox_mod.plan_sandbox
+    planned: list[dict[str, Any]] = []
+    plans: list[sandbox_mod.SandboxPlan] = []
+
+    def _spy_plan_sandbox(**kwargs: Any) -> Any:
+        planned.append(kwargs)
+        plan = real_plan_sandbox(**kwargs)
+        plans.append(plan)
+        return plan
+
+    monkeypatch.setattr(sandbox_mod, "plan_sandbox", _spy_plan_sandbox)
+    captured = _capture_child(monkeypatch)
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    await _run(ctx)
+
+    assert planned, "the untrusted static-check path must plan a sandbox"
+    assert planned[0].get("copy_on_write_repo") is True, planned[0]
+    assert plans[0].context is not None, plans[0]
+    assert plans[0].context.copy_on_write_repo is True, plans[0].context
+
+    command = " ".join(captured["argv"])
+    assert "mount -t overlay overlay" in command, command
+    assert "upperdir=" in command, command
+    assert "repo-copy" in command, command  # the recorded scratch-copy fallback
+    assert _view_is_widened_for_the_dropped_uid(command), (
+        "the copy-on-write view is left at the creator's mode, so a gate dropped "
+        f"to the agent uid cannot write the tree (P-8): {command}"
+    )

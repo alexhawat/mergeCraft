@@ -88,3 +88,43 @@ def test_repo_installed_tool_never_substituted(
     assert plan.version_note is not None
     assert "0.14.0" in plan.version_note
     assert "0.15.12" not in plan.argv[0]
+
+
+def test_static_check_plan_confines_and_neutralises_changed_files(tmp_path: Path) -> None:
+    """A file token must never hand a gate a path outside the checkout or an option.
+
+    ``../outside`` is dropped; an option-shaped entry is prefixed with ``./`` so
+    every getopt reads it as a path. No ``--`` separator is inserted.
+    """
+    resolve = import_module("mergecraft.analyzers.resolve")
+    plan = resolve.static_check_plan(
+        name="lint",
+        command="gate {files}",
+        root=tmp_path,
+        changed_files=["../outside.py", "-rf", "--config=x", "src/app.py"],
+    )
+    argv = list(plan.argv)
+    assert "../outside.py" not in argv, argv
+    assert "-rf" not in argv, argv
+    assert "--config=x" not in argv, argv
+    assert "./-rf" in argv, argv
+    assert "./--config=x" in argv, argv
+    assert "--" not in argv, argv
+    app_tokens = [arg for arg in argv if arg.endswith("app.py")]
+    assert app_tokens, argv
+    for token in app_tokens:
+        Path(token).resolve().relative_to(tmp_path.resolve())
+
+
+def test_static_check_plan_leaves_clean_entries_readable(tmp_path: Path) -> None:
+    """A normal repo-relative file survives the confinement step."""
+    resolve = import_module("mergecraft.analyzers.resolve")
+    plan = resolve.static_check_plan(
+        name="lint",
+        command="gate {files}",
+        root=tmp_path,
+        changed_files=["src/app.py"],
+    )
+    argv = list(plan.argv)
+    assert any(arg.endswith(("src/app.py", "/app.py")) for arg in argv), argv
+    assert "--" not in argv

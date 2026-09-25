@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.analyzers.redact import redact_analyzer_output
+from mergecraft.utils.secrets import filter_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -103,37 +104,65 @@ class AnalyzerOutcome:
         return self.status not in _NO_VERDICT
 
 
-def _run_tmpdir(plan: AnalyzerPlan) -> Path:
+def _run_tmpdir(plan: AnalyzerPlan, *, output_dir: Path | None = None) -> Path:
+    """Return the directory gate output is persisted to.
+
+    A sandboxed run passes ``output_dir`` — the sandbox/run tmpdir — so the
+    persisted output never lands in the real checkout. The unsandboxed path
+    keeps the historical ``<cwd>/.mergecraft/analyzer-runs`` location (SX-D13).
+    """
     from pathlib import Path
 
-    base = plan.cwd or Path.cwd()
-    tmpdir = base / ".mergecraft" / "analyzer-runs"
+    if output_dir is not None:
+        tmpdir = output_dir
+    else:
+        base = plan.cwd or Path.cwd()
+        tmpdir = base / ".mergecraft" / "analyzer-runs"
     tmpdir.mkdir(parents=True, exist_ok=True)
     return tmpdir
 
 
-def _persist_output(raw: str, *, plan: AnalyzerPlan) -> str | None:
+def _persist_output(raw: str, *, plan: AnalyzerPlan, output_dir: Path | None = None) -> str | None:
     if not raw:
         return None
     from mergecraft.analyzers.parse import persist_analyzer_output
 
     redacted = redact_analyzer_output(raw, tool_id=plan.manifest_id)
-    path = persist_analyzer_output(redacted, tmpdir=_run_tmpdir(plan), tool_id=plan.manifest_id)
+    path = persist_analyzer_output(
+        redacted, tmpdir=_run_tmpdir(plan, output_dir=output_dir), tool_id=plan.manifest_id
+    )
     return str(path)
 
 
-def _sandbox_preexec(context: SandboxContext) -> None:
+def _sandbox_preexec(context: SandboxContext, process_limit: tuple[int, int]) -> None:
     if sys.platform == "win32":
         return
     with contextlib.suppress(OSError):
-        resource.setrlimit(
-            resource.RLIMIT_NPROC,
-            (context.max_processes, context.max_processes),
-        )
+        resource.setrlimit(resource.RLIMIT_NPROC, process_limit)
     if context.memory_mb > 0:
         with contextlib.suppress(OSError):
             byte_limit = context.memory_mb * 1024 * 1024
             resource.setrlimit(resource.RLIMIT_AS, (byte_limit, byte_limit))
+
+
+@dataclass(frozen=True, slots=True)
+class _SandboxPreexec:
+    """Preexec callable that also carries the sandbox context.
+
+    ``_run_subprocess`` gets only the argv and the preexec, so the context rides
+    on the callable to point a dropped payload's ``HOME`` at the scratch dir.
+    ``process_limit`` is the ``RLIMIT_NPROC`` pair resolved in the parent before
+    forking — a dropping payload's cap is calibrated against the kernel's own
+    answer by :func:`~mergecraft.analyzers.sandbox.process_limit_for_drop` (SX-D2),
+    which must run here, in the parent, because it reads ``/proc`` and probes with
+    a subprocess; inside ``preexec_fn`` only async-signal-safe work is allowed.
+    """
+
+    context: SandboxContext
+    process_limit: tuple[int, int]
+
+    def __call__(self) -> None:
+        _sandbox_preexec(self.context, self.process_limit)
 
 
 def _truncate(text: str, *, output_path: str | None = None) -> str:
@@ -192,9 +221,27 @@ def _sandboxed_argv(
         from mergecraft.analyzers.egress import FilteredEgressSetupError
 
         raise FilteredEgressSetupError("untrusted analyzer requires a Linux namespace backend")
-    preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
-    from mergecraft.analyzers.sandbox import build_analyzer_sandbox_argv_for_run
+    from mergecraft.analyzers.sandbox import (
+        build_analyzer_sandbox_argv_for_run,
+        process_limit_for_drop,
+        resolve_drop_target_gid,
+        resolve_drop_target_uid,
+    )
 
+    # The drop target's ``RLIMIT_NPROC`` pair is resolved here, in the parent:
+    # only async-signal-safe work is allowed inside ``preexec_fn``, and a
+    # credential-changing ``execve`` is refused ``EAGAIN`` when the target uid
+    # already exceeds ``RLIMIT_NPROC`` (SX-D2). ``process_limit_for_drop`` probes
+    # the kernel for a limit that carries the drop, so it must run outside the
+    # fork.
+    preexec_fn = _SandboxPreexec(
+        sandbox_context,
+        process_limit=process_limit_for_drop(
+            sandbox_context.max_processes,
+            target_uid=resolve_drop_target_uid(),
+            target_gid=resolve_drop_target_gid(),
+        ),
+    )
     event_payload = event if event is not None else {}
     # Repository-provided PATH/loader/shell variables only reach the payload
     # after namespace setup and capability removal. They cannot choose helpers.
@@ -235,10 +282,21 @@ def _run_subprocess(
     """Run the analyzer subprocess; a caught timeout/OSError becomes a terminal outcome."""
     try:
         with contextlib.ExitStack() as resources:
-            environment = plan.env or None
+            # SX-D5: an empty/None plan.env must resolve to the default-deny
+            # filter, never to ``None`` (which inherits ``os.environ``) or to a
+            # raw copy of the orchestrator's environment.
+            environment = plan.env or filter_env()
             pass_fds: tuple[int, ...] = ()
             if sandboxed:
-                payload_env = plan.env or dict(os.environ)
+                payload_env = plan.env or filter_env()
+                if os.geteuid() == 0 and isinstance(preexec_fn, _SandboxPreexec):
+                    # SX2: a payload dropped to the agent user cannot write the
+                    # runner-owned HOME it inherited; point it at the writable
+                    # scratch tmpfs instead, or every cache write fails (P-8).
+                    payload_env = {
+                        **payload_env,
+                        "HOME": str(preexec_fn.context.scratch_dir),
+                    }
                 if any(
                     not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
                     or key.startswith("_MERGECRAFT_BOOTSTRAP_")
@@ -295,7 +353,11 @@ def _run_subprocess(
 
 
 def _outcome_from_completed(
-    completed: subprocess.CompletedProcess[str], *, plan: AnalyzerPlan, command: str
+    completed: subprocess.CompletedProcess[str],
+    *,
+    plan: AnalyzerPlan,
+    command: str,
+    output_dir: Path | None = None,
 ) -> AnalyzerOutcome:
     """Combine stdout/stderr, redact, persist to disk, and build the final outcome."""
     raw_stdout = (completed.stdout or "").strip()
@@ -312,7 +374,7 @@ def _outcome_from_completed(
     # Persist only what a parser can read. ``combined`` is the display string and
     # may be nothing but ``plan.version_note`` prose when the analyzer wrote to
     # neither stream; persisting that turned a clean run into "failed to parse".
-    output_path = _persist_output(raw_for_parser, plan=plan)
+    output_path = _persist_output(raw_for_parser, plan=plan, output_dir=output_dir)
     return AnalyzerOutcome(
         name=plan.manifest_id,
         command=command,
@@ -345,6 +407,14 @@ def run_plan(
     timeout_s = plan.timeout_s or CHECK_TIMEOUT_S
     if sandbox_context is not None:
         timeout_s = min(timeout_s, sandbox_context.timeout_s)
+    # F2-b: a sandboxed gate's output is persisted into the sandbox/run tmpdir,
+    # never the real checkout. A gate presented a disposable copy-on-write view
+    # must not leave `.mergecraft/analyzer-runs/*.out` in the tree the view was
+    # carved from, or the "real checkout is byte-identical" guarantee breaks.
+    # The non-sandboxed/catalog path keeps its historical location (SX-D13).
+    output_dir: Path | None = None
+    if sandbox_context is not None and sandbox_context.read_only_source:
+        output_dir = sandbox_context.scratch_dir / "analyzer-runs"
     command = _command_string(plan.argv)
     from mergecraft.analyzers.egress import (
         EgressSession,
@@ -396,11 +466,11 @@ def run_plan(
             timeout_s=timeout_s,
             preexec_fn=preexec_fn,
             command=command,
-            sandboxed=bool(sandbox_context is not None and sandbox_context.read_only_source),
+            sandboxed=output_dir is not None,
         )
         if isinstance(result, AnalyzerOutcome):
             return result
-        return _outcome_from_completed(result, plan=plan, command=command)
+        return _outcome_from_completed(result, plan=plan, command=command, output_dir=output_dir)
     except FilteredEgressSetupError as exc:
         return AnalyzerOutcome(
             name=plan.manifest_id,

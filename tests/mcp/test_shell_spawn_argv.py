@@ -1,16 +1,263 @@
-"""Lane A AP1.3 — sudo argv must not carry secret values (MCB-08 / D9)."""
+"""Lane A AP1.3 — sudo argv must not carry secret values (MCB-08 / D9).
+
+Also pins the privilege drop the namespace shell installs after its masks: a
+root orchestrator drops to the agent user, a sudo-elevated shell drops back to
+the orchestrator's own numeric UID/GID, and a host without either refuses
+before any process is spawned.
+"""
 
 from __future__ import annotations
 
+import os
+import pwd
+import shutil
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from mergecraft.mcp import shell as shell_mod
+from mergecraft.utils import privilege
 from mergecraft.utils.secrets import PROVIDER_KEY_ENV_VARS
 
 _CANARY = "CANARY_PROVIDER_SECRET_VALUE_AP1"
+
+
+class _FakePwEntry:
+    """Minimal ``pwd.struct_passwd`` stand-in for the drop target."""
+
+    def __init__(self, name: str = "mergecraft", uid: int = 10001, gid: int = 10001) -> None:
+        self.pw_name = name
+        self.pw_uid = uid
+        self.pw_gid = gid
+
+
+def _fake_drop_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``setpriv`` and the agent user resolvable regardless of host."""
+    # This models the agent-user drop: clear any ambient sudo envelope so the
+    # helper cannot drift onto the sudo-elevated numeric drop.
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    monkeypatch.delenv("SUDO_GID", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: _FakePwEntry(name))
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
+
+
+def _capture_popen_argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    captured: list[str] = []
+
+    def _popen(argv: list[str], **_kwargs: Any) -> MagicMock:
+        captured.extend(argv)
+        return MagicMock()
+
+    monkeypatch.setattr(shell_mod.subprocess, "Popen", _popen)
+    return captured
+
+
+def _spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    *,
+    cwd: str,
+    isolate_network: bool = False,
+) -> list[str]:
+    captured = _capture_popen_argv(monkeypatch)
+    shell_mod._spawn_shell(
+        command,
+        env={"PATH": "/usr/bin:/bin"},
+        cwd=cwd,
+        stdout=MagicMock(),
+        stderr=MagicMock(),
+        isolate_network=isolate_network,
+    )
+    return captured
+
+
+def test_root_unshare_shell_drops_identity_after_every_mount(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The payload is the last exec of the mask script, under ``setpriv``."""
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    _fake_drop_tools(monkeypatch)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: False)
+
+    argv = _spawn(monkeypatch, "echo ok", cwd=str(tmp_path))
+    assert argv[:4] == ["unshare", "--pid", "--fork", "--mount-proc"]
+    wrapped = argv[-1]
+    before_drop, marker, after_drop = wrapped.partition("exec setpriv")
+    assert marker, f"the root shell payload must exec setpriv; got {wrapped!r}"
+    # Every mask is installed before the identity is dropped in the same exec.
+    assert "mount --bind" in before_drop, wrapped
+    assert "mount -t tmpfs" in before_drop, wrapped
+    assert "docker.sock" in before_drop, wrapped
+    for flag in (
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--bounding-set=-all",
+        "--reuid=mergecraft",
+        "--regid=mergecraft",
+        "--init-groups",
+    ):
+        assert flag in after_drop, f"missing {flag} in {after_drop!r}"
+    assert after_drop.endswith(" -- bash --noprofile --norc -c 'echo ok'"), after_drop
+
+
+def test_sudo_unshare_shell_drops_to_the_orchestrator_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A non-root orchestrator that elevated through sudo drops back to itself."""
+    monkeypatch.setattr(os, "getuid", lambda: 4242)
+    monkeypatch.setattr(os, "geteuid", lambda: 4242)
+    monkeypatch.setattr(os, "getgid", lambda: 4343)
+    _fake_drop_tools(monkeypatch)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "sudo-unshare")
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: False)
+
+    argv = _spawn(monkeypatch, "echo ok", cwd=str(tmp_path))
+    assert argv[0] == "sudo"
+    wrapped = argv[-1]
+    assert "exec setpriv" in wrapped, wrapped
+    assert "--reuid=4242" in wrapped, wrapped
+    assert "--regid=4343" in wrapped, wrapped
+    assert "--clear-groups" in wrapped, wrapped
+    assert "--init-groups" not in wrapped, wrapped
+
+
+def test_missing_setpriv_refuses_before_spawning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without ``setpriv`` the shell must fail closed, not run as root."""
+    from mergecraft.main import _ConfigurationError
+
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    monkeypatch.delenv("SUDO_GID", raising=False)
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(shutil, "which", lambda name: None if name == "setpriv" else "/bin/true")
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: _FakePwEntry(name))
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: False)
+
+    spawned: list[object] = []
+
+    def _popen(*args: object, **kwargs: object) -> MagicMock:
+        spawned.append(args)
+        return MagicMock()
+
+    monkeypatch.setattr(shell_mod.subprocess, "Popen", _popen)
+    with pytest.raises(_ConfigurationError, match="setpriv"):
+        shell_mod._spawn_shell(
+            "echo ok",
+            env={},
+            cwd=str(tmp_path),
+            stdout=MagicMock(),
+            stderr=MagicMock(),
+        )
+    assert spawned == [], "the shell must not spawn without a resolvable privilege drop"
+
+
+def test_unresolvable_agent_user_refuses_before_spawning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A user missing from the passwd database is a configuration error."""
+    from mergecraft.main import _ConfigurationError
+
+    monkeypatch.delenv("SUDO_UID", raising=False)
+    monkeypatch.delenv("SUDO_GID", raising=False)
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: (_ for _ in ()).throw(KeyError(name)))
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: False)
+
+    spawned: list[object] = []
+
+    def _popen(*args: object, **kwargs: object) -> MagicMock:
+        spawned.append(args)
+        return MagicMock()
+
+    monkeypatch.setattr(shell_mod.subprocess, "Popen", _popen)
+    with pytest.raises(_ConfigurationError, match="mergecraft"):
+        shell_mod._spawn_shell(
+            "echo ok",
+            env={},
+            cwd=str(tmp_path),
+            stdout=MagicMock(),
+            stderr=MagicMock(),
+        )
+    assert spawned == [], "the shell must not spawn without a resolvable drop target"
+
+
+def test_sandbox_exec_argv_is_unchanged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Darwin's ``sandbox-exec`` branch keeps its byte-identical argv."""
+    from mergecraft.analyzers.sandbox import build_sandbox_exec_argv
+
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "sandbox-exec")
+    argv = _spawn(monkeypatch, "echo ok", cwd=str(tmp_path))
+    expected = build_sandbox_exec_argv(("bash", "-c", "echo ok"), workspace=Path(tmp_path))
+    assert argv == expected
+    assert "setpriv" not in " ".join(argv)
+
+
+def test_non_root_unshare_argv_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A non-root direct unshare host keeps today's flat wrapped command."""
+    monkeypatch.setattr(os, "getuid", lambda: 4242)
+    monkeypatch.setattr(os, "geteuid", lambda: 4242)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: False)
+
+    argv = _spawn(monkeypatch, "echo ok", cwd=str(tmp_path))
+    assert argv[:4] == ["unshare", "--pid", "--fork", "--mount-proc"]
+    assert argv[4:6] == ["bash", "-c"]
+    wrapped = argv[-1]
+    assert "setpriv" not in wrapped
+    assert wrapped.endswith("echo ok")
+
+
+def test_root_unshare_shell_under_sudo_drops_to_the_sudo_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Root via sudo outside the image drops to SUDO_UID/GID, not a missing agent user."""
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.delenv("IS_SANDBOX", raising=False)
+    monkeypatch.delenv("MERGECRAFT_ALLOW_ROOT", raising=False)
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1000")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    # The runner has no agent account: a fallback to the agent-user drop must
+    # fail loudly rather than silently resolve a user that is not there.
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: (_ for _ in ()).throw(KeyError(name)))
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: False)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    monkeypatch.setattr(shell_mod, "network_namespace_available", lambda: False)
+
+    argv = _spawn(monkeypatch, "echo ok", cwd=str(tmp_path))
+    wrapped = argv[-1]
+    assert "exec setpriv" in wrapped, wrapped
+    for flag in (
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--bounding-set=-all",
+        "--reuid=1000",
+        "--regid=1000",
+        "--clear-groups",
+    ):
+        assert flag in wrapped, f"missing {flag} in {wrapped!r}"
+    assert "--reuid=mergecraft" not in wrapped, wrapped
 
 
 @pytest.fixture(autouse=True)

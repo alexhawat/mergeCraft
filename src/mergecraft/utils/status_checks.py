@@ -241,6 +241,7 @@ async def report_status_checks(
     failure_reason: str | None = None,
     conclusion: CompletionConclusion | None = None,
     packet: MergeEvidencePacket | None = None,
+    approval_failure_reason: str | None = None,
 ) -> None:
     """Post opt-in status checks. Best-effort; never raises into the run outcome.
 
@@ -250,6 +251,14 @@ async def report_status_checks(
     Omitted, it falls back to the pre-W5 ``success``/``failure`` split driven
     by ``run_succeeded`` alone. The ``mergecraft-approval`` check uses
     ``packet.decision.verdict`` and is skipped when ``packet`` is None.
+
+    ``approval_failure_reason`` (SX-D10) forces the ``mergecraft-approval``
+    conclusion to ``failure`` regardless of the packet verdict — a post-run sink
+    scan hit outranks the published review, and the approval check is the gate
+    the merge policy reads. The reason is echoed in the check summary so it names
+    the sink path and the rotate instruction; it never carries credential
+    contents. The published review itself is left in place (GitHub cannot
+    un-publish it).
     """
     payload = ctx.payload
     status_enabled = payload.status_checks or bool(
@@ -322,6 +331,36 @@ async def report_status_checks(
         approval_decision_inputs,
         log_decision,
     )
+
+    # SX-D10: a post-run sink hit outranks the published verdict. The
+    # ``mergecraft-approval`` check is the gate the merge policy reads, so it
+    # must conclude ``failure`` even when the packet said approve — the
+    # completion check alone does not close the gate. The published review is
+    # left in place (GitHub cannot un-publish it); the summary names the sink
+    # path and the rotate instruction, never the credential contents.
+    if approval_failure_reason is not None:
+        sink_lines = [
+            approval_failure_reason,
+            "The review itself is unchanged; the approval gate is closed because "
+            "credential material reached a local sink.",
+        ]
+        _append_run_metadata(sink_lines, run_url=run_url, reviewed_sha=reviewed_sha)
+        try:
+            await _create_check_run(
+                ctx,
+                name=APPROVAL_CHECK,
+                head_sha=head_sha,
+                conclusion="failure",
+                title="mergeCraft would not approve",
+                summary="\n".join(sink_lines),
+            )
+        except Exception as err:
+            _log_check_post_failure(
+                check_name=APPROVAL_CHECK,
+                head_sha=head_sha,
+                err=err,
+            )
+        return
 
     # D7 / #460: the packet already ran ``decide_approval``. Reuse
     # ``packet.decision.verdict`` so this layer only posts check-runs.

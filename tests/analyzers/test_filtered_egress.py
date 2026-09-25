@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import pathlib
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from contextlib import suppress
@@ -625,6 +628,21 @@ def test_operator_opt_in_does_not_replace_required_capabilities(monkeypatch: Mon
     assert "unshare" in probe.reason
 
 
+def _world_writable_marker_dir() -> Path:
+    """A dir the dropped, unprivileged analyzer uid can write — outside the repo bind.
+
+    The sandbox correctly drops the payload to the invoking (sudo) uid, while
+    pytest's temp base (``/tmp/pytest-of-<user>/pytest-<n>``) is ``0700 root``;
+    a sibling of ``tmp_path`` is therefore unreachable and the dropped payload
+    cannot create the orphan marker. A ``0o777`` dir under the system temp dir
+    (itself ``1777``) is writable by that uid while still living outside the
+    read-only ``tmp_path`` repo bind. The caller removes it afterwards.
+    """
+    directory = pathlib.Path(tempfile.mkdtemp(prefix="mc-eg-orphan-"))
+    directory.chmod(0o777)
+    return directory
+
+
 @pytest.mark.integration
 def test_actual_analyzer_timeout_reaps_namespace_child(tmp_path: Path) -> None:
     """A timed-out unshare parent must not leave its analyzer running."""
@@ -636,48 +654,54 @@ def test_actual_analyzer_timeout_reaps_namespace_child(tmp_path: Path) -> None:
 
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    marker = tmp_path.parent / f"{tmp_path.name}-orphan"
-    context = build_sandbox_context(
-        repo_root=tmp_path,
-        scratch_dir=scratch,
-        limits=SandboxLimits(timeout_s=10, memory_mb=512, max_processes=16),
-        network_allowlist=[],
-        read_only_source=True,
-    )
-    control = AnalyzerPlan(
-        manifest_id="probe",
-        argv=(
-            _PROBE_PYTHON,
-            "-c",
-            "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('control')",
-            str(marker),
-        ),
-        cwd=tmp_path,
-        mode="native",
-        timeout_s=5,
-    )
-    completed = run_plan(
-        control, sandbox_context=context, event_name="pull_request_target", event={}
-    )
-    assert completed.status == "passed", completed.output
-    assert marker.read_text() == "control"
-    marker.unlink()
-    delayed = AnalyzerPlan(
-        manifest_id="probe",
-        argv=(
-            _PROBE_PYTHON,
-            "-c",
-            "import pathlib,sys,time; time.sleep(2); pathlib.Path(sys.argv[1]).write_text('orphan')",
-            str(marker),
-        ),
-        cwd=tmp_path,
-        mode="native",
-        timeout_s=1,
-    )
-    result = run_plan(delayed, sandbox_context=context, event_name="pull_request_target", event={})
-    assert result.status == "timed_out", result.output
-    time.sleep(3)
-    assert not marker.exists(), "analyzer survived its timed-out unshare parent"
+    marker_dir = _world_writable_marker_dir()
+    marker = marker_dir / "orphan-marker"
+    try:
+        context = build_sandbox_context(
+            repo_root=tmp_path,
+            scratch_dir=scratch,
+            limits=SandboxLimits(timeout_s=10, memory_mb=512, max_processes=16),
+            network_allowlist=[],
+            read_only_source=True,
+        )
+        control = AnalyzerPlan(
+            manifest_id="probe",
+            argv=(
+                _PROBE_PYTHON,
+                "-c",
+                "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('control')",
+                str(marker),
+            ),
+            cwd=tmp_path,
+            mode="native",
+            timeout_s=5,
+        )
+        completed = run_plan(
+            control, sandbox_context=context, event_name="pull_request_target", event={}
+        )
+        assert completed.status == "passed", completed.output
+        assert marker.read_text() == "control"
+        marker.unlink()
+        delayed = AnalyzerPlan(
+            manifest_id="probe",
+            argv=(
+                _PROBE_PYTHON,
+                "-c",
+                "import pathlib,sys,time; time.sleep(2); pathlib.Path(sys.argv[1]).write_text('orphan')",
+                str(marker),
+            ),
+            cwd=tmp_path,
+            mode="native",
+            timeout_s=1,
+        )
+        result = run_plan(
+            delayed, sandbox_context=context, event_name="pull_request_target", event={}
+        )
+        assert result.status == "timed_out", result.output
+        time.sleep(3)
+        assert not marker.exists(), "analyzer survived its timed-out unshare parent"
+    finally:
+        shutil.rmtree(marker_dir, ignore_errors=True)
 
 
 def test_pid_alive_true_for_current_process() -> None:

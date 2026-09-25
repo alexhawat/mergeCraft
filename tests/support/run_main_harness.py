@@ -21,11 +21,12 @@ import json
 import os
 import shutil
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import mergecraft.main as main_mod
 from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import RepoSettings, RunContextData
+from mergecraft.mcp.context import PayloadEvent
 from mergecraft.mcp.tool_state import DependencyInstallationState
 from mergecraft.prep import PrepResult
 
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     import pytest
 
     from mergecraft.main import MainResult
+    from mergecraft.scm.protocol import ScmProvider
 
 
 class FakeGitHubClient:
@@ -85,6 +87,29 @@ class FakeTokenRef:
         self.closed = True
 
 
+class RecordingScm:
+    """SCM stand-in that records check-run POST bodies and answers a PR head SHA.
+
+    Used only when :func:`run_main_for_test` is asked to *run* the real
+    ``report_status_checks`` (``capture_status_checks=True``) so a test can
+    observe the check-runs the orchestrator would actually post — the
+    ``mergecraft`` completion check and the ``mergecraft-approval`` gate —
+    rather than the kwargs the orchestrator handed the reporting layer.
+    """
+
+    def __init__(self) -> None:
+        self.check_runs: list[dict[str, Any]] = []
+
+    async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]:
+        return {"head": {"sha": "0" * 40}}
+
+    async def post(self, path: str, **kwargs: Any) -> Any:
+        body = kwargs.get("json")
+        if path.endswith("/check-runs") and isinstance(body, dict):
+            self.check_runs.append(dict(body))
+        return {}
+
+
 @dataclass(slots=True)
 class FakeAgent:
     """Scripted agent: records the run, returns (or raises) as configured."""
@@ -122,6 +147,7 @@ class MainRunRecord:
     github: FakeGitHubClient | None
     token_ref: FakeTokenRef | None
     report_status_calls: list[dict[str, Any]]
+    status_check_runs: list[dict[str, Any]]
     tracer_settings: list[RepoSettings]
 
     def index(self, event: str) -> int:
@@ -187,8 +213,10 @@ async def run_main_for_test(
     setup_script_stderr: bytes = b"",
     setup_script_delay_s: float = 0.0,
     packet_path: Path | None = None,
+    packet_payload: str | None = None,
     cleanup_tmpdir: bool = True,
     prompt: str = "review the diff",
+    capture_status_checks: bool = False,
     stop_mcp_error: bool = False,
 ) -> MainRunRecord:
     """Run ``mergecraft.main.main()`` against fully scripted collaborators.
@@ -200,6 +228,13 @@ async def run_main_for_test(
     skip (``skipped=True``, ``status="completed"``) — ``shell: disabled`` must
     not map that skip to ``RunOutcome.inconclusive``. ``cleanup_tmpdir=False`` leaves the run's
     temp dir alone so cleanup-contract tests can observe what ``main()`` did.
+    ``capture_status_checks=True`` runs the real ``report_status_checks`` against
+    a recording client and records the check-runs it would post in
+    ``record.status_check_runs`` (``name`` / ``conclusion`` / ``summary``),
+    instead of only the kwargs the orchestrator handed the reporting layer.
+    ``packet_payload`` (with ``packet_path``) makes the fake publisher write that
+    text to ``packet_path`` at publication time — the run's own generated
+    artifact, as opposed to a file planted during the agent phase.
     ``stop_mcp_error=True`` makes the fake MCP stop callable raise, so a test
     can exercise ``main()``'s best-effort teardown failure handling.
     """
@@ -211,6 +246,7 @@ async def run_main_for_test(
     events: list[str] = []
     setup_script_commands: list[str] = []
     report_status_calls: list[dict[str, Any]] = []
+    status_check_runs: list[dict[str, Any]] = []
     tracer_settings: list[RepoSettings] = []
     github_holder: list[FakeGitHubClient] = []
     token_holder: list[FakeTokenRef] = []
@@ -406,6 +442,12 @@ async def run_main_for_test(
 
     monkeypatch.setattr(main_mod, "persist_learnings", _fake_persist_learnings)
 
+    # The real reporting layer is captured before the patch so
+    # ``capture_status_checks`` can drive it against a recording SCM and
+    # observe the check-runs it posts (completion + approval), not just the
+    # kwargs the orchestrator handed it.
+    real_report_status = main_mod.report_status_checks
+
     async def _fake_report_status(ctx: Any, **kwargs: Any) -> None:
         # N2 — same rationale as ``_fake_persist_learnings``: capture
         # tool_context from the first publish-side call so the skip path
@@ -413,6 +455,21 @@ async def run_main_for_test(
         if ctx is not None:
             ctx_holder.append(ctx)
         report_status_calls.append(kwargs)
+        if capture_status_checks and ctx is not None:
+            recording_scm = RecordingScm()
+            original_scm = ctx.scm
+            original_status = ctx.payload.status_checks
+            original_event = ctx.payload.event
+            ctx.scm = cast("ScmProvider", recording_scm)
+            ctx.payload.status_checks = True
+            ctx.payload.event = PayloadEvent(trigger="pull_request", issue_number=1, is_pr=True)
+            try:
+                await real_report_status(ctx, **kwargs)
+            finally:
+                ctx.scm = original_scm
+                ctx.payload.status_checks = original_status
+                ctx.payload.event = original_event
+            status_check_runs.extend(recording_scm.check_runs)
 
     monkeypatch.setattr(main_mod, "report_status_checks", _fake_report_status)
 
@@ -425,6 +482,9 @@ async def run_main_for_test(
     def _fake_emit_packet(ctx: Any, **_kwargs: Any) -> Path | None:
         if ctx is not None:
             ctx_holder.append(ctx)
+        if packet_payload is not None and packet_path is not None:
+            packet_path.parent.mkdir(parents=True, exist_ok=True)
+            packet_path.write_text(packet_payload, encoding="utf-8")
         return packet_path
 
     monkeypatch.setattr(main_mod, "emit_run_packet", _fake_emit_packet)
@@ -468,6 +528,7 @@ async def run_main_for_test(
         github=github_holder[-1] if github_holder else None,
         token_ref=token_holder[-1] if token_holder else None,
         report_status_calls=report_status_calls,
+        status_check_runs=status_check_runs,
         tracer_settings=tracer_settings,
     )
     if cleanup_tmpdir and created_tmpdir:

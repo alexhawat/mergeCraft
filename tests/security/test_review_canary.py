@@ -33,6 +33,29 @@ def test_provider_key_canary_does_not_reach_a_local_sink(tmp_path: Path) -> None
     )
 
 
+def test_scan_returns_sink_paths_and_never_contents(tmp_path: Path) -> None:
+    """Returning the contents is itself the leak: a caller that logs the result
+    prints the credential the helper exists to catch. Only paths travel."""
+    from mergecraft.security.review_integrity import scan_local_sinks_for_secrets
+
+    sink = tmp_path / "sink.log"
+    sink.write_text(f"prefix {_PROVIDER_CANARY} suffix\n", encoding="utf-8")
+
+    result = scan_local_sinks_for_secrets(tmp_path, secrets=[_PROVIDER_CANARY])
+
+    matched = {Path(item) for item in result}
+    assert matched == {sink}, result
+    assert all(_PROVIDER_CANARY not in str(item) for item in matched), result
+    assert _PROVIDER_CANARY not in str(result), result
+
+
+def test_scan_returns_nothing_for_clean_sinks(tmp_path: Path) -> None:
+    from mergecraft.security.review_integrity import scan_local_sinks_for_secrets
+
+    (tmp_path / "sink.log").write_text("nothing to see\n", encoding="utf-8")
+    assert list(scan_local_sinks_for_secrets(tmp_path, secrets=[_PROVIDER_CANARY])) == []
+
+
 def test_config_yaml_is_unwritable_during_review(tmp_path: Path) -> None:
     from mergecraft.security.review_integrity import hash_tree, verify_tree_unchanged
 

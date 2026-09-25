@@ -20,6 +20,7 @@ import shlex
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -31,6 +32,10 @@ from mergecraft.analyzers.run import (
     CheckStatus,
     run_plans,
 )
+
+if TYPE_CHECKING:
+    from mergecraft.analyzers.manifest import TrustTier
+    from mergecraft.analyzers.sandbox import SandboxContext
 
 FILES_TOKEN = "{files}"
 
@@ -112,7 +117,13 @@ def plan_checks(
                 root=root,
                 changed_files=matching,
             )
-            planned.append(StaticCheck(name=plan.manifest_id, argv=plan.argv))
+            # ``static_check_plan`` emits confined absolute paths (the shape
+            # ``expand_analyzer_argv`` uses) so no entry can parse as an option.
+            # ``StaticCheck`` has historically carried the repo-relative form,
+            # which every display consumer and the pre-existing contract expect,
+            # so present the argv back relative to the root.
+            argv = tuple(_repo_relative(arg, root) for arg in plan.argv)
+            planned.append(StaticCheck(name=plan.manifest_id, argv=argv))
         return planned
 
     if shutil.which("make") is None:
@@ -124,13 +135,57 @@ def plan_checks(
     ]
 
 
-def run_checks(checks: list[StaticCheck], *, root: Path) -> list[StaticCheckOutcome]:
-    """Run each gate, capturing combined output. Never raises."""
+def _repo_relative(arg: str, root: Path) -> str:
+    """Return ``arg`` relative to ``root`` when it is an absolute path under it."""
+    path = Path(arg)
+    if not path.is_absolute():
+        return arg
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except (ValueError, OSError):
+        return arg
+
+
+def run_checks(
+    checks: list[StaticCheck],
+    *,
+    root: Path,
+    tier: TrustTier,
+    sandbox_context: SandboxContext | None = None,
+    env_overrides: dict[str, str] | None = None,
+) -> list[StaticCheckOutcome]:
+    """Run each gate, capturing combined output. Never raises.
+
+    Every gate gets an explicit, default-deny environment from
+    :func:`~mergecraft.analyzers.trust.build_analyzer_env` keyed on ``tier`` — the
+    static-check path is the only ``run_plan`` caller that used to reach the
+    inherit fallback (SX-D5). Trusted gates on the root backend drop to the agent
+    user (SX-D8) and carry ``agent_subprocess_env`` so their ``HOME`` is writable.
+    """
+    from mergecraft.analyzers.sandbox import build_privilege_drop_argv
+    from mergecraft.analyzers.trust import build_analyzer_env
+    from mergecraft.utils.privilege import agent_subprocess_env
+
+    env = build_analyzer_env(tier=tier)
+    if env_overrides:
+        env = {**env, **env_overrides}
+    drop_prefix: tuple[str, ...] = ()
+    if tier == "trusted" and sandbox_context is None:
+        drop = build_privilege_drop_argv()
+        if drop:
+            env = agent_subprocess_env(env)
+            drop_prefix = tuple(drop)
     plans = [
-        AnalyzerPlan(manifest_id=check.name, mode="repo-native", argv=check.argv, cwd=root)
+        AnalyzerPlan(
+            manifest_id=check.name,
+            mode="repo-native",
+            argv=(*drop_prefix, *check.argv),
+            cwd=root,
+            env=env,
+        )
         for check in checks
     ]
-    return run_plans(plans)
+    return run_plans(plans, sandbox_context=sandbox_context)
 
 
 def declared_cannot_run_outcomes(

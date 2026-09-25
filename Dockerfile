@@ -127,7 +127,7 @@ COPY integrations/opencode ./integrations/opencode
 # in pyproject and covered by ``uv.lock``, so ``--frozen`` still applies.
 RUN uv sync --frozen --no-dev --extra tracing \
     && useradd -m -u 10001 -s /bin/bash mergecraft \
-    && chown -R mergecraft:mergecraft /opt/mergecraft \
+    && python -m compileall -q /opt/mergecraft \
     && rm -f /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/uv_cache.json \
     && sed -i '/uv_cache\.json/d' \
         /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/RECORD \
@@ -157,5 +157,14 @@ RUN chmod +x /entrypoint.sh
 # non-root container user cannot write those file-commands (set_output → EACCES)
 # nor operate on the runner-owned checkout (git "dubious ownership"). Root is the
 # norm for Docker actions; the agent is still sandboxed via the shell/push inputs.
+#
+# The runtime tree under /opt/mergecraft stays root-owned. The root orchestrator
+# imports that tree lazily during the run, so the agent user must not be able to
+# rewrite it — a recursive chown to `mergecraft` would hand the agent's own
+# sandbox target the authority to replace the runtime it is dropped from. The
+# agent user owns only its own HOME (/home/mergecraft, created by `useradd -m`),
+# which is where its caches resolve. Bytecode under /opt/mergecraft is compiled
+# at build time (`python -m compileall -q /opt/mergecraft`) so a process dropped
+# to the agent user never tries to write `__pycache__` into the root-owned tree.
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["--help"]

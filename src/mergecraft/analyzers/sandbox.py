@@ -6,6 +6,7 @@ import functools
 import os
 import re
 import resource
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -131,6 +132,12 @@ class SandboxContext:
     network_allowlist: list[str]
     network_default: NetworkDefault
     unavailable_capabilities: tuple[str, ...] = ()
+    # SX-D7: present the checkout as a disposable copy-on-write view. Set for
+    # untrusted static checks, whose gates may write build output or `.venv`
+    # into the tree: the real checkout is a read-only lower layer and every
+    # write lands in scratch. Analyzer runs keep the read-only bind (False),
+    # so their argv is unchanged.
+    copy_on_write_repo: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,6 +454,7 @@ def build_sandbox_context(
     network_allowlist: list[str],
     read_only_source: bool,
     caps: SandboxCapabilities | None = None,
+    copy_on_write_repo: bool = False,
 ) -> SandboxContext:
     probed = caps if caps is not None else probe_capabilities()
     _ = probed
@@ -461,6 +469,7 @@ def build_sandbox_context(
         network_allowlist=list(network_allowlist),
         network_default="deny",
         unavailable_capabilities=tuple(probed.unavailable_reasons),
+        copy_on_write_repo=copy_on_write_repo,
     )
 
 
@@ -472,6 +481,7 @@ def plan_sandbox(
     tier: TrustTier | None = None,
     trust_tier: TrustTier | None = None,
     manifests: tuple[AnalyzerManifest, ...] = (),
+    copy_on_write_repo: bool = False,
 ) -> SandboxPlan:
     """Plan sandbox execution; skip untrusted analyzers when isolation is missing (D7)."""
     effective_tier = tier if tier is not None else trust_tier
@@ -527,6 +537,7 @@ def plan_sandbox(
         network_allowlist=network_allowlist,
         read_only_source=effective_tier == "untrusted",
         caps=caps,
+        copy_on_write_repo=copy_on_write_repo,
     )
     return SandboxPlan(can_run=True, context=context)
 
@@ -551,6 +562,8 @@ def _shell_single_quote(value: str) -> str:
 
 def analyzer_isolation_mount_fragment(context: SandboxContext) -> str:
     """Shell fragment: read-only repo bind and tmpfs scratch for untrusted analyzers."""
+    if context.copy_on_write_repo:
+        return _copy_on_write_repo_mount_fragment(context)
     repo = _shell_single_quote(str(context.repo_root.resolve()))
     scratch = _shell_single_quote(str(context.scratch_dir.resolve()))
     return (
@@ -558,6 +571,54 @@ def analyzer_isolation_mount_fragment(context: SandboxContext) -> str:
         f"mount --bind {repo} {repo} || exit 1; "
         f"mount -o remount,bind,ro {repo} || exit 1; "
         f"mount -t tmpfs tmpfs {scratch} || exit 1; "
+    )
+
+
+def _copy_on_write_repo_mount_fragment(context: SandboxContext) -> str:
+    """Shell fragment: present the checkout as a disposable copy-on-write view (SX-D7).
+
+    An untrusted static check may write build output or ``.venv`` into the tree,
+    so a read-only bind would fail gates that have nothing to do with the diff.
+    The real checkout becomes the read-only **lower** layer of an overlayfs mount
+    whose upper and work directories live on scratch; the merged view is bound
+    over the checkout path and ``cd`` re-resolves the cwd through it, so the
+    gate reads the real tree and writes only scratch. When the kernel cannot
+    mount an overlay (no unprivileged overlayfs), a scratch **copy** of the
+    checkout is bound in its place — the recorded fallback. Either way the real
+    checkout is never written.
+
+    The view is widened for the payload's identity before it is used. The
+    orchestrator creates ``upper``/``work``/``merged``/``copy`` as root at the
+    creator's mode, and the payload drops to the agent uid in the same ``exec``
+    (SX-D2); a dropped gate that cannot write a root-owned ``0755`` root fails
+    ``mkdir .venv`` with ``EACCES`` and is misreported as a finding (P-8). The
+    merged root is chowned to the drop target by ``chmod`` (the overlay copies
+    the change into ``upper``), so the write lands in scratch; the scratch-copy
+    fallback is widened recursively. Both live on the private scratch tmpfs, so
+    the widened mode never crosses the namespace boundary.
+    """
+    repo = _shell_single_quote(str(context.repo_root.resolve()))
+    scratch = _shell_single_quote(str(context.scratch_dir.resolve()))
+    upper = f"{scratch}/repo-upper"
+    work = f"{scratch}/repo-work"
+    merged = f"{scratch}/repo-merged"
+    copy = f"{scratch}/repo-copy"
+    return (
+        f"mkdir -p {scratch}; "
+        f"mount -t tmpfs tmpfs {scratch} || exit 1; "
+        f"if mkdir -p {upper} {work} {merged} 2>/dev/null "
+        f"&& chmod 0777 {upper} {work} 2>/dev/null "
+        f"&& mount -t overlay overlay "
+        f"-o lowerdir={repo},upperdir={upper},workdir={work} {merged} 2>/dev/null; then "
+        f"chmod 0777 {merged} || exit 1; "
+        f"mount --bind {merged} {repo} || exit 1; "
+        f"else "
+        f"mkdir -p {copy} || exit 1; "
+        f"cp -a {repo}/. {copy}/ || exit 1; "
+        f"chmod -R a+rwX {copy} || exit 1; "
+        f"mount --bind {copy} {repo} || exit 1; "
+        f"fi; "
+        f"cd {repo} || exit 1; "
     )
 
 
@@ -702,12 +763,460 @@ def analyzer_egress_skip_reason(
     return None
 
 
+_DROP_SENTINEL = "__mergecraft_privilege_drop__"
+
+# SX-D1/SX-D2: every drop prefix carries the capability clear, whatever identity
+# it lands on. Kept in one place beside the two builders so the spellings cannot
+# drift apart.
+_CAPABILITY_DROP_FLAGS = (
+    "--no-new-privs",
+    "--inh-caps=-all",
+    "--ambient-caps=-all",
+    "--bounding-set=-all",
+)
+
+# The analyzer sandbox runs the payload as the namespace init: ``unshare
+# --kill-child=KILL`` arms ``PR_SET_PDEATHSIG`` on it so a killed ``unshare``
+# parent tears the whole PID namespace down. Changing credentials between the
+# arm and the payload clears that signal — the kernel drops ``PDEATHSIG`` on the
+# uid/gid change — so a timed-out ``unshare`` reaped by ``subprocess`` left the
+# analyzer alive. ``setpriv --pdeathsig KILL`` re-arms it *after* the drop, in
+# the same ``exec``. It ships with ``--bounding-set`` (util-linux 2.33), which
+# the root drop already refuses to run without, so it needs no extra probe.
+_PDEATHSIG_FLAGS = ("--pdeathsig", "KILL")
+
+
+def _privilege_configuration_error(message: str) -> Exception:
+    """Return a ``main._ConfigurationError`` (imported lazily; no import cycle)."""
+    from mergecraft.main import _ConfigurationError
+
+    return _ConfigurationError(message)
+
+
+def _require_hardened_setpriv() -> None:
+    """Refuse when ``setpriv`` cannot carry the hardened drop (SX-D2 fail-closed).
+
+    The agent-user backend reaches these checks through
+    :func:`mergecraft.utils.privilege.wrap_agent_command`. The sudo-elevated
+    backend resolves its own numeric identity, so it must re-assert the same
+    precondition rather than emitting a truncated prefix on a ``setpriv`` that
+    cannot clear the bounding set (util-linux < 2.33).
+    """
+    from mergecraft.utils.privilege import _setpriv_supports_bounding_set
+
+    if shutil.which("setpriv") is None:
+        raise _privilege_configuration_error(
+            "setpriv is not on PATH; the sandbox privilege drop is unavailable and "
+            "the run cannot proceed as root"
+        )
+    if not _setpriv_supports_bounding_set():
+        raise _privilege_configuration_error(
+            "setpriv does not support --bounding-set in this image; the hardened "
+            "privilege drop (--inh-caps=-all, --bounding-set=-all, --no-new-privs) "
+            "cannot be applied and the run cannot proceed as root"
+        )
+
+
+def _sudo_elevated_target() -> tuple[int, int] | None:
+    """Return the unprivileged ``(uid, gid)`` a sudo-elevated process drops to.
+
+    ``sudo`` records the invoking account in ``SUDO_UID``/``SUDO_GID``. A sandbox
+    started root through ``sudo`` is *dropping* root, not starting the agent as
+    it, so it lands on that account rather than on the action image's agent user
+    (SX-D2). Both variables must be present and parse; a target of ``0`` is
+    refused rather than accepted as a root-preserving "drop". Returns ``None``
+    when no elevation is recorded, so the caller falls through to the agent-user
+    backend.
+    """
+    raw_uid = os.environ.get("SUDO_UID", "").strip()
+    raw_gid = os.environ.get("SUDO_GID", "").strip()
+    if not raw_uid and not raw_gid:
+        return None
+    try:
+        uid = int(raw_uid)
+        gid = int(raw_gid)
+    except ValueError as exc:
+        raise _privilege_configuration_error(
+            "sudo-elevated sandbox cannot drop identity: SUDO_UID/SUDO_GID "
+            f"({raw_uid!r}/{raw_gid!r}) are not numeric"
+        ) from exc
+    if uid == 0 or gid == 0:
+        raise _privilege_configuration_error(
+            "sudo-elevated sandbox cannot drop identity: SUDO_UID/SUDO_GID resolve "
+            f"to {uid}:{gid}; a privilege drop to a root account cannot land"
+        )
+    return uid, gid
+
+
+def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
+    """Return the ``setpriv`` prefix that drops identity *after* the masks (SX-D1/SX-D2/SX-D3).
+
+    The masks (read-only ``.git`` bind, tmpfs scratch, cleared bounding set) need
+    ``CAP_SYS_ADMIN`` to install, so the payload must be dropped in the *same*
+    ``exec``, as the final expression of the mask script. Callers ``exec`` the
+    payload behind this prefix; the kernel then enforces the masks against a
+    process that lacks the authority to lift them.
+
+    Two identities, one spelling:
+
+    * ``to_orchestrator=True`` — the ``sudo-unshare`` shell built by a non-root
+      orchestrator. The payload drops back to the orchestrator's own numeric
+      UID/GID with ``--clear-groups``. Raises when that UID/GID is 0.
+    * ``to_orchestrator=False`` — the analyzer sandbox. Returns ``[]`` when the
+      current process is not euid 0, i.e. no drop applies. At euid 0 it resolves
+      the drop in this order:
+
+      1. **sudo-elevated** (``SUDO_UID``/``SUDO_GID`` recorded) — the payload
+         drops to the orchestrator's own numeric UID/GID with ``--clear-groups``
+         (SX-D2). This is deliberately *not* routed through
+         :func:`mergecraft.utils.privilege.wrap_agent_command`: that helper
+         enforces the agent-CLI policy refusing to *start* as root outside the
+         action image, which is the opposite direction from a sandbox dropping
+         root and would refuse a legitimate sudo-elevated run.
+      2. otherwise — the agent user, through
+         :func:`mergecraft.utils.privilege.wrap_agent_command`, reusing its
+         fail-closed resolution (missing ``setpriv``, missing user, or a user
+         resolving to UID/GID 0 all raise ``main._ConfigurationError``).
+
+    Every returned prefix carries ``--no-new-privs --inh-caps=-all
+    --ambient-caps=-all --bounding-set=-all`` and re-arms the parent-death signal
+    with ``--pdeathsig KILL``. The credential change clears
+    ``PR_SET_PDEATHSIG``; without the re-arm a timed-out namespace init
+    (``unshare --kill-child=KILL``) survived its killed parent and kept running
+    the analyzer. The function raises rather than returning a prefix that would
+    leave the payload as root.
+    """
+    if to_orchestrator:
+        uid = os.getuid()
+        gid = os.getgid()
+        if uid == 0 or gid == 0:
+            raise _privilege_configuration_error(
+                f"sudo-elevated shell cannot drop identity: the orchestrator UID/GID "
+                f"is {uid}:{gid}; a privilege drop to a root account cannot land"
+            )
+        return [
+            "setpriv",
+            *_CAPABILITY_DROP_FLAGS,
+            f"--reuid={uid}",
+            f"--regid={gid}",
+            "--clear-groups",
+            *_PDEATHSIG_FLAGS,
+        ]
+    if os.geteuid() != 0:
+        return []
+    sudo_target = _sudo_elevated_target()
+    if sudo_target is not None:
+        _require_hardened_setpriv()
+        uid, gid = sudo_target
+        return [
+            "setpriv",
+            *_CAPABILITY_DROP_FLAGS,
+            f"--reuid={uid}",
+            f"--regid={gid}",
+            "--clear-groups",
+            *_PDEATHSIG_FLAGS,
+        ]
+    from mergecraft.utils.privilege import wrap_agent_command
+
+    # wrap_agent_command validates setpriv, the user record and the UID/GID and
+    # raises main._ConfigurationError when the drop cannot land.
+    resolved = wrap_agent_command([_DROP_SENTINEL])
+    if _DROP_SENTINEL not in resolved:
+        return []
+    argv = resolved[:-1]
+    if "--inh-caps=-all" not in argv:
+        # ``wrap_agent_command`` keys on the real uid and returns its command
+        # unwrapped when that is non-zero, while this function keys on the
+        # effective uid. The two disagree under a setuid-style euid/uid split,
+        # leaving an empty prefix here. Fail closed with the same configuration
+        # error the rest of the drop raises, rather than letting
+        # ``list.index`` raise a bare ``ValueError`` — a prefix without the
+        # capability clear must never be returned.
+        raise _privilege_configuration_error(
+            "privilege drop prefix is malformed: the setpriv capability flags "
+            "(--inh-caps=-all) are absent, so the payload would not be dropped "
+            "with the cleared bounding set the sandbox requires"
+        )
+    if "--ambient-caps=-all" not in argv:
+        # wrap_agent_command omits --ambient-caps; add it beside --inh-caps so
+        # the four capability flags travel together for every caller.
+        argv.insert(argv.index("--inh-caps=-all") + 1, "--ambient-caps=-all")
+    argv.extend(_PDEATHSIG_FLAGS)
+    return argv
+
+
+def _resolve_drop_target_identity() -> tuple[int, int] | None:
+    """Resolve the ``(uid, gid)`` the analyzer payload drops to, or ``None`` (SX-D2).
+
+    The sandbox sizes its ``RLIMIT_NPROC`` cap against the target uid's *real*
+    load before it forks (:func:`process_limit_for_drop`), so it must know the
+    exact numeric identity the in-``exec`` ``setpriv --reuid/--regid`` will land
+    on. Mirrors :func:`build_privilege_drop_argv` for the analyzer path — the
+    same three backends, in the same order — but without the fail-closed raise,
+    so the caller can size the cap before the drop's own error (a missing
+    ``setpriv`` or agent user) lands where it belongs:
+
+    1. a sudo-elevated shell (``SUDO_UID``/``SUDO_GID`` recorded and non-zero)
+       drops to that account;
+    2. otherwise the action image's agent user;
+    3. otherwise the orchestrator's own (real) uid/gid — the identity the
+       ``to_orchestrator`` drop branch lands on.
+
+    ``None`` when no drop applies: the platform has no drop, the process is not
+    euid 0 (the backend builds no prefix), or a backend cannot resolve an
+    identity. A malformed sudo envelope is a fail-closed configuration error in
+    the real drop, so it resolves to ``None`` here rather than a value the drop
+    would never use. Never raises.
+    """
+    if sys.platform == "win32" or os.geteuid() != 0:
+        return None
+    if os.environ.get("SUDO_UID", "").strip() or os.environ.get("SUDO_GID", "").strip():
+        try:
+            return _sudo_elevated_target()
+        except Exception:
+            return None
+    try:
+        from mergecraft.utils.privilege import _resolve_privilege_drop_user
+
+        entry = _resolve_privilege_drop_user()
+    except Exception:
+        # Missing agent user / root outside the image is a configuration error on
+        # the real drop; the resolver reports "no drop" and lets that raise land
+        # where it belongs.
+        return None
+    if entry is not None:
+        return (entry.pw_uid, entry.pw_gid)
+    uid, gid = os.getuid(), os.getgid()
+    if uid == 0 or gid == 0:
+        return None
+    return (uid, gid)
+
+
+def resolve_drop_target_uid() -> int | None:
+    """Return the uid the analyzer payload runs as when a privilege drop applies (SX-D2).
+
+    See :func:`_resolve_drop_target_identity`; ``None`` when no drop applies.
+    """
+    identity = _resolve_drop_target_identity()
+    return identity[0] if identity is not None else None
+
+
+def resolve_drop_target_gid() -> int | None:
+    """Return the gid the analyzer payload runs as when a privilege drop applies (SX-D2).
+
+    The sibling of :func:`resolve_drop_target_uid`. The ``setpriv`` drop sets
+    ``--regid`` as well as ``--reuid``, so the ``RLIMIT_NPROC`` probe in
+    :func:`process_limit_for_drop` needs both halves of the identity to mirror
+    the drop honestly. ``None`` when no drop applies.
+    """
+    identity = _resolve_drop_target_identity()
+    return identity[1] if identity is not None else None
+
+
+def process_count_for_uid(uid: int) -> int:
+    """Count processes whose *real* uid is ``uid``, from ``/proc/*/status``.
+
+    A credential-changing ``execve`` is refused ``EAGAIN`` when the target
+    real-uid already exceeds ``RLIMIT_NPROC``, so the sandbox must clear the
+    target uid's *current* load before its drop can land.
+
+    Best-effort and total: ``/proc`` is read directly, an unreadable entry is
+    skipped, and any failure to read ``/proc`` at all returns ``0``. Never
+    raises — a zero count is a blind starting hint the probe then calibrates,
+    never an abort.
+    """
+    count = 0
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return 0
+    for name in entries:
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/status", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if not line.startswith("Uid:"):
+                        continue
+                    fields = line.split()
+                    if len(fields) >= 2 and int(fields[1]) == uid:
+                        count += 1
+                    break
+        except (OSError, ValueError):
+            continue
+    return count
+
+
+_NPROC_PROBE_MAX_STEPS = 64
+"""Bound on :func:`process_limit_for_drop`'s upward search.
+
+The probe's first candidate is the ``/proc`` count plus one ``max_processes``
+allowance and each step adds another ``max_processes``; this is the maximum
+number of steps. At the default allowance of 16 that reaches a limit 1024
+processes above the visible count — well beyond any realistic orchestrator-uid
+load — and caps the probe at 64 short-lived ``setpriv`` processes (a few hundred
+milliseconds at worst).
+"""
+
+
+_NPROC_PROBE_TIMEOUT_S = 5.0
+"""Hard timeout for one :func:`_drop_exec_succeeds_at_limit` probe.
+
+The probe runs ``setpriv … /bin/true``, which should return in milliseconds; a
+probe still alive after five seconds means a pathological environment, and the
+caller must record "cannot run" instead of hanging the run. The payload's own
+15-second analyzer timeout is far above this, so the probe can never become the
+run's clock.
+"""
+
+
+def _apply_nproc_limit(limit: int) -> None:
+    """Child-side ``RLIMIT_NPROC`` for :func:`_drop_exec_succeeds_at_limit`."""
+    resource.setrlimit(resource.RLIMIT_NPROC, (limit, limit))
+
+
+def _drop_exec_succeeds_at_limit(target_uid: int, target_gid: int, *, limit: int) -> bool | None:
+    """Ask the kernel whether a credential change to ``(uid, gid)`` lands under ``limit``.
+
+    ``/proc`` only lists the *current* PID namespace, and the analyzer sandbox
+    runs the payload inside ``unshare --pid --mount-proc``: a target uid that
+    owns processes outside that namespace is invisible, so the ``/proc`` count
+    reads 0 while the kernel still refuses the credential-changing ``execve``
+    with ``EAGAIN`` (``setpriv: failed to execute /bin/bash: Resource temporarily
+    unavailable``). This probe is namespace-independent because it asks the
+    kernel the same question the payload will ask, with the same tool: it runs
+    the payload's ``setpriv --reuid/--regid --clear-groups`` under the candidate
+    ``RLIMIT_NPROC`` and observes whether ``/bin/true`` executes.
+
+    Return values:
+
+    * ``True`` — the kernel accepted the credential change at ``limit``;
+    * ``False`` — the kernel refused it (``EAGAIN``; ``setpriv`` exits non-zero);
+    * ``None`` — the probe cannot run (not root, no ``setpriv``, the spawn
+      failed, or it exceeded ``_NPROC_PROBE_TIMEOUT_S``), so the caller must not
+      read this as either answer.
+
+    The capability flags the real drop carries are irrelevant to the
+    ``RLIMIT_NPROC`` credential check, so the probe keeps the same ``setpriv``
+    credential change without them. Cost is one ``subprocess`` spawn; the caller
+    bounds how many it makes.
+    """
+    if sys.platform == "win32" or os.geteuid() != 0:
+        return None
+    if shutil.which("setpriv") is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "setpriv",
+                f"--reuid={target_uid}",
+                f"--regid={target_gid}",
+                "--clear-groups",
+                "--",
+                "/bin/true",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            preexec_fn=lambda: _apply_nproc_limit(limit),
+            timeout=_NPROC_PROBE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        # A pathological probe must not hang the run; an unanswered probe is
+        # "cannot run" (the caller's drop path then fails closed), never a
+        # silent wait.
+        return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.returncode == 0
+
+
+def process_limit_for_drop(
+    max_processes: int, *, target_uid: int | None, target_gid: int | None = None
+) -> tuple[int, int]:
+    """Return the ``(soft, hard)`` ``RLIMIT_NPROC`` pair for a sandboxed payload.
+
+    With no drop (``target_uid is None``) the historical flat cap is kept
+    exactly: ``(max_processes, max_processes)``, and no probe runs.
+
+    With a drop the pair must let the payload's credential-changing ``execve``
+    land (SX-D2) while still bounding the payload's **additional** processes to
+    ``max_processes``. The kernel refuses that ``execve`` with ``EAGAIN`` when
+    the target real-uid already exceeds the limit, so the cap is calibrated
+    against the kernel's own answer rather than a ``/proc`` count a PID namespace
+    can hide:
+
+    1. take the visible count (:func:`process_count_for_uid`, ``0`` when ``/proc``
+       is blind to the target's processes) as the starting hint;
+    2. probe a credential change to ``(target_uid, target_gid)`` at
+       ``hint + max_processes`` — the smallest limit that still leaves the
+       payload its full allowance;
+    3. on refusal, step the candidate up by ``max_processes`` and probe again, at
+       most ``_NPROC_PROBE_MAX_STEPS`` times;
+    4. take the first candidate ``L`` the kernel accepts — the *smallest* limit
+       at which the credential change lands — and return ``L + max_processes``
+       as ``(limit, limit)``.
+
+    Step 4's extra allowance is not redundant. The probe accepts the smallest
+    limit that carries the credential-changing ``execve``, and the hint is only a
+    snapshot of a uid the orchestrator keeps churning: when the hint has
+    under-reported, that accepted ``L`` can equal the target uid's real load
+    exactly (``headroom 0``). The credential change still lands at ``headroom 0``
+    — an ``execve`` is not a ``fork`` — but the payload's first ``fork`` is then
+    refused ``EAGAIN`` and a shell retries it in a sleep loop: a silent hang, not
+    a failure. Returning ``L + max_processes`` keeps the payload at least
+    ``max_processes`` processes above both the visible count and the accepted
+    candidate, so it can always fork, and the ``RLIMIT_NPROC`` cap is still
+    finite — never removed.
+
+    Fails closed with ``main._ConfigurationError`` when no candidate within the
+    bound is accepted — the drop must not be attempted with a cap that cannot
+    carry it. When the probe cannot run at all (no ``setpriv``) the drop path
+    already fails closed with a named configuration error, so this falls back to
+    the first candidate rather than masking that error. ``target_gid`` may be
+    omitted only when no drop applies.
+    """
+    if target_uid is None:
+        return (max_processes, max_processes)
+    allowance = max_processes if max_processes > 0 else 1
+    count = process_count_for_uid(target_uid)
+    if target_gid is None:
+        # Without a gid the probe cannot mirror the drop's credential change; the
+        # caller always resolves both, so this is a defensive best effort.
+        limit = count + allowance
+        return (limit, limit)
+    for step in range(1, _NPROC_PROBE_MAX_STEPS + 1):
+        candidate = count + step * allowance
+        outcome = _drop_exec_succeeds_at_limit(target_uid, target_gid, limit=candidate)
+        if outcome is None:
+            limit = count + allowance
+            return (limit, limit)
+        if outcome:
+            # Guarantee the payload real fork headroom: the accepted candidate is
+            # the *smallest* limit that lets the credential change land, and a
+            # stale hint may have made it equal the target uid's real load, where
+            # the credential change lands but the first ``fork`` is refused and a
+            # shell retries it in a sleep loop (a silent hang). One further
+            # allowance keeps the payload ``max_processes`` above the accepted
+            # candidate without removing the cap.
+            limit = candidate + allowance
+            return (limit, limit)
+    raise _privilege_configuration_error(
+        f"cannot size RLIMIT_NPROC for the privilege drop to {target_uid}:{target_gid}: "
+        f"no candidate within {_NPROC_PROBE_MAX_STEPS} x {allowance} processes of the "
+        f"{count} visible let a credential-changing exec land"
+    )
+
+
 def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
     # Killing only the waiting unshare parent otherwise leaves PID 1 and its
     # descendants alive after a subprocess timeout.
     argv: list[str] = ["unshare"]
-    if caps.user_namespace:
+    # SX-D4: on host UID 0 a user namespace with --map-root-user maps 0->0, which
+    # adds nothing and leaves no UID to drop to. The payload drops identity with
+    # setpriv instead (build_privilege_drop_argv), so the mapping is omitted.
+    if caps.user_namespace and os.geteuid() != 0:
         argv.extend(["--user", "--map-root-user"])
     argv.extend(["--pid", "--fork", "--mount-proc", "--kill-child=KILL"])
     if isolate_network and caps.network_namespace:
@@ -722,12 +1231,21 @@ def build_analyzer_sandbox_command(argv: tuple[str, ...], *, context: SandboxCon
     mounts = analyzer_isolation_mount_fragment(context)
     sockets = analyzer_socket_mask_fragment()
     inner = shlex.join(argv)
+    # On a root orchestrator the payload drops identity in the same exec, after
+    # the mounts and the capability clear, so the mask binds a process that
+    # cannot lift it (SX-D1/SX-D2/SX-D4). Off the root backend the existing
+    # capability-clearing prefix is kept unchanged.
+    drop = build_privilege_drop_argv()
+    privilege = (
+        shlex.join(drop)
+        if drop
+        else ("setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs")
+    )
     return (
         f"{_PROC_PREP_FRAGMENT}{sockets}{mounts}"
         "mount --bind /proc/sys /proc/sys || exit 1; "
         "mount -o remount,bind,ro /proc/sys || exit 1; "
-        "exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all "
-        f"--no-new-privs -- {inner}"
+        f"exec {privilege} -- {inner}"
     )
 
 
@@ -785,7 +1303,7 @@ def build_analyzer_sandbox_argv_for_run(
     egress_session: EgressSession | None = None,
 ) -> list[str]:
     """Trust-aware wrapper around ``build_analyzer_sandbox_argv`` (D5/D5a)."""
-    from mergecraft.analyzers.egress import wrap_argv_for_filtered_netns
+    from mergecraft.analyzers.egress import FilteredEgressSetupError, wrap_argv_for_filtered_netns
 
     _ = analyzer_id, self_review_level
     isolate = _resolve_isolate_network(context, event_name=event_name, event=event)
@@ -793,7 +1311,19 @@ def build_analyzer_sandbox_argv_for_run(
         isolate = False
     built = build_analyzer_sandbox_argv(argv, context=context, isolate_network=isolate)
     if egress_session is not None:
-        return egress_session.wrap_argv(built)
+        wrapped = egress_session.wrap_argv(built)
+        # F4 outcome (a): the userspace bridge re-execs under
+        # ``unshare --user --map-root-user``. On a root orchestrator that maps
+        # 0->0, so the agent UID is unmapped inside the bridge's user namespace
+        # and the ``setpriv --reuid`` drop (built above) cannot land — the
+        # analyzer would keep UID 0. Fail closed with a named reason instead.
+        if os.geteuid() == 0 and any("egress_bridge" in part for part in wrapped):
+            raise FilteredEgressSetupError(
+                "filtered egress bridge cannot carry the privilege drop: its "
+                "user namespace maps root->root, so the agent UID is unmapped "
+                "and the analyzer would run as UID 0"
+            )
+        return wrapped
     if netns_name:
         return wrap_argv_for_filtered_netns(built, netns_name)
     return built
@@ -815,14 +1345,19 @@ __all__ = [
     "build_analyzer_sandbox_argv",
     "build_analyzer_sandbox_argv_for_run",
     "build_analyzer_sandbox_command",
+    "build_privilege_drop_argv",
     "build_sandbox_context",
     "build_sandbox_exec_argv",
     "egress_trusted_for_host_networking",
     "evaluate_analyzer_egress_policy",
     "plan_sandbox",
     "probe_capabilities",
+    "process_count_for_uid",
+    "process_limit_for_drop",
     "require_sandbox_for_enabled_shell",
     "reset_detection_cache",
+    "resolve_drop_target_gid",
+    "resolve_drop_target_uid",
     "sandbox_exec_policy",
     "sandbox_execution_context",
     "sandbox_skip_findings",
