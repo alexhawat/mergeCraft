@@ -59,17 +59,11 @@ class GateTarget:
 _SELF = GateTarget("self", ".github/workflows/mergecraft.yml", "approval-gate")
 _HARDENED = GateTarget("hardened", "scripts/example_workflows/hardened.yml.tpl", "review")
 _DOGFOOD = GateTarget("dogfood", "docs/artifacts/dogfood-mergecraft.yml", "review")
-# SW2 hardened the self-workflow's gate; the hardened example and the dogfood
-# artifact are SW3's to update, so only their cases stay expected-red.
-_XFAIL_CONSUMER_GATE = pytest.mark.xfail(
-    reason="green after SW3.3 / SW3.7: hardened example and dogfood gate hardening",
-    strict=False,
-)
-_TARGET_PARAMS: list[Any] = [
-    pytest.param(_SELF, id="self"),
-    pytest.param(_HARDENED, id="hardened", marks=_XFAIL_CONSUMER_GATE),
-    pytest.param(_DOGFOOD, id="dogfood", marks=_XFAIL_CONSUMER_GATE),
-]
+# Every copy of the gate — the self-workflow, the hardened example and the
+# dogfood artifact — is driven through the same provenance matrix. SW3 hardened
+# the two consumer surfaces, so all three now run as real passes.
+_TARGET_PARAMS: tuple[GateTarget, ...] = (_SELF, _HARDENED, _DOGFOOD)
+_TARGET_IDS = ["self", "hardened", "dogfood"]
 # The hardened example and the dogfood artifact keep their documented
 # fail-open behaviour when no mergecraft-approval check exists at all.
 _FAIL_OPEN_WHEN_CHECK_ABSENT = {_HARDENED.name, _DOGFOOD.name}
@@ -252,13 +246,13 @@ def _assert_passes(target: GateTarget, tmp_path: Path, **kwargs: Any) -> None:
 # ── structural wiring ──────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_gate_reads_this_runs_own_output(target: GateTarget) -> None:
     key, _ = _output_env(_gate_step(target))
     assert key
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_gate_queries_the_check_by_name_with_an_explicit_page(target: GateTarget) -> None:
     run = str(_gate_step(target).get("run"))
     assert "check_name=mergecraft-approval" in run, (
@@ -293,7 +287,7 @@ def test_shared_routing_lib_uses_the_same_name_filtered_query() -> None:
 # ── behavioral matrix ──────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_newer_foreign_success_cannot_mask_a_genuine_success(
     target: GateTarget, tmp_path: Path
 ) -> None:
@@ -313,7 +307,7 @@ def test_newer_foreign_success_cannot_mask_a_genuine_success(
     )
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_output_failure_blocks_despite_a_newer_foreign_success(
     target: GateTarget, tmp_path: Path
 ) -> None:
@@ -332,14 +326,14 @@ def test_output_failure_blocks_despite_a_newer_foreign_success(
     )
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_github_actions_check_with_matching_attempt_corroborates_success(
     target: GateTarget, tmp_path: Path
 ) -> None:
     _assert_passes(target, tmp_path, verdict="success", checks=[_check()])
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_configured_app_check_corroborates_success(target: GateTarget, tmp_path: Path) -> None:
     _assert_passes(
         target,
@@ -350,7 +344,7 @@ def test_configured_app_check_corroborates_success(target: GateTarget, tmp_path:
     )
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_wrong_external_id_is_unattributable_and_blocks(target: GateTarget, tmp_path: Path) -> None:
     _assert_blocks(
         target,
@@ -360,7 +354,7 @@ def test_wrong_external_id_is_unattributable_and_blocks(target: GateTarget, tmp_
     )
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_empty_output_with_no_check(target: GateTarget, tmp_path: Path) -> None:
     """A missing packet and a missing check: self fails closed, examples notice."""
     returncode = _run_gate(target, tmp_path, verdict="", checks=[])
@@ -370,12 +364,12 @@ def test_empty_output_with_no_check(target: GateTarget, tmp_path: Path) -> None:
         assert returncode != 0, "self review must fail closed with no verdict and no check"
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_empty_output_with_a_corroborating_check_blocks(target: GateTarget, tmp_path: Path) -> None:
     _assert_blocks(target, tmp_path, verdict="", checks=[_check()])
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 @pytest.mark.parametrize("verdict", ["failure", "neutral"])
 def test_forged_github_actions_success_cannot_pass_a_non_success_run(
     target: GateTarget, tmp_path: Path, verdict: str
@@ -384,7 +378,7 @@ def test_forged_github_actions_success_cannot_pass_a_non_success_run(
     _assert_blocks(target, tmp_path, verdict=verdict, checks=[_check()])
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_matching_check_with_failure_conclusion_blocks(target: GateTarget, tmp_path: Path) -> None:
     _assert_blocks(
         target,
@@ -394,7 +388,7 @@ def test_matching_check_with_failure_conclusion_blocks(target: GateTarget, tmp_p
     )
 
 
-@pytest.mark.parametrize("target", _TARGET_PARAMS)
+@pytest.mark.parametrize("target", _TARGET_PARAMS, ids=_TARGET_IDS)
 def test_a_lone_foreign_check_cannot_pass(target: GateTarget, tmp_path: Path) -> None:
     _assert_blocks(
         target,

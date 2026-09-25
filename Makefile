@@ -260,8 +260,8 @@ examples: ## Render example workflow YAML from templates
 example-workflows-check: ## Fail when committed example workflows drift from templates
 	$(UV) run python scripts/render_example_workflows.py --check
 
-pins-check: ## Fail when packaged defaults.yaml drifts from checkout copy (#402, #414)
-	cmp -s scripts/example_workflows/defaults.yaml src/mergecraft/data/example_workflows/defaults.yaml || { echo "defaults.yaml copies drifted (edit scripts/example_workflows/defaults.yaml, sync packaged copy, then make pins-check)" >&2; exit 1; }
+pins-check: ## Fail when the defaults.yaml copies drift or the pinned SHA disagrees with its tag (#402, #414)
+	$(UV) run python scripts/check_example_defaults_sync.py
 
 agent-packages: ## Regenerate per-harness Agent Skills packages
 	$(UV) run python scripts/gen_agent_packages.py

@@ -17,6 +17,9 @@ _D2_SOURCE = REPO_ROOT / "docs" / "diagrams" / "pipeline.d2"
 _PIPELINE_LIGHT = REPO_ROOT / "assets" / "diagrams" / "pipeline-light.svg"
 _PIPELINE_DARK = REPO_ROOT / "assets" / "diagrams" / "pipeline-dark.svg"
 _PAGES = "https://alexhawat.github.io/mergeCraft/"
+# SW-D7: Example 1 pins the Action by full commit SHA and names the release tag.
+_SHA_PIN = re.compile(r"^[0-9a-f]{40}$")
+_TAG_LABEL = re.compile(r"#\s*v\d+\.\d+\.\d+(?:a\d+|b\d+|rc\d+)?", re.IGNORECASE)
 
 _DEMO_PATHS = (
     "docs/assets/demo.gif",
@@ -175,14 +178,27 @@ def test_landing_action_section_is_named_for_github_action() -> None:
     ), "README must rename How it works → How it works in GitHub Action (A4)"
 
 
-def test_landing_pins_a_release_tag() -> None:
+def test_landing_pins_a_full_sha_and_labels_the_release_tag() -> None:
+    """SW-D7: Example 1 pins the Action immutably and names the release tag.
+
+    A release tag is mutable, so the ``uses:`` ref must be the full 40-hex
+    commit the tag resolves to; the ``@<sha> # vX.Y.Z`` comment keeps the
+    shipped version readable next to the otherwise opaque SHA.
+    """
     text = _readme_text()
     section = _example_one_section(text)
     uses_match = action_uses_pattern.search(section)
     assert uses_match, "Example 1 must include uses: alexhawat/mergeCraft@…"
     ref = uses_match.group(1).rstrip("#").strip()
-    assert re.fullmatch(r"v\d+\.\d+\.\d+(?:a\d+|b\d+|rc\d+)?", ref, re.IGNORECASE), (
-        f"Example 1 must pin a release tag (vX.Y.Z), not {ref!r} (A6/D7)"
+    assert _SHA_PIN.fullmatch(ref), (
+        f"Example 1 must pin a full 40-hex commit SHA, not {ref!r} (SW-D7)"
+    )
+    line_start = section.rfind("\n", 0, uses_match.start()) + 1
+    line_end = section.find("\n", uses_match.end())
+    uses_line = section[line_start : line_end if line_end != -1 else None]
+    assert _TAG_LABEL.search(uses_line), (
+        f"Example 1 must label its SHA pin with the release tag it resolves to "
+        f"(`@<sha> # vX.Y.Z`), not {uses_line!r} (SW-D7)"
     )
 
 

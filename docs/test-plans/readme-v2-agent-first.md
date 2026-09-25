@@ -56,7 +56,7 @@ Source plan: `.ignorelocal/waves/08-readme-v2-agent-first-wave-plan.md`.
 | Contract | Tests | Layer |
 | --- | --- | --- |
 | GitHub Action section title (A4) | `tests/docs/test_landing_readme.py::test_landing_action_section_is_named_for_github_action` | functional |
-| Release tag pin (A6/D7) | `…::test_landing_pins_a_release_tag` | functional |
+| Immutable SHA pin labelled with the tag (A6/D7, superseded by SW-D7) | `…::test_landing_pins_a_full_sha_and_labels_the_release_tag` | functional |
 | No SHA pin caveat | `…::test_landing_has_no_sha_pin_caveat` | functional |
 | Forbid `readme_test.md` in README (D16) | `tests/docs/test_distribution_checklist.py::test_readme_drops_ideal_and_todo_asset_comments` | functional |
 | Published Action ref in init | `tests/cli/test_init_cmd.py::test_scaffolded_workflow_references_published_action` | integration |

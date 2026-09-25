@@ -182,3 +182,22 @@ post-wave reconciliation so the branch ends on real passes.
   cases, but now per parameter (`hardened`, `dogfood`) rather than on the whole
   function: those two consumer surfaces are SW3's to green. The self-workflow
   gate cases run as real passes.
+- 2026-09-25 — SW3 landed the consumer surfaces (shared SHA pins, read-only
+  contents and per-PR serialization in the scaffold and examples, and the
+  hardened-example / dogfood gate hardening), so every remaining SW3 `xfail`
+  marker came off. The provenance matrix no longer needs its per-parameter
+  split: `_TARGET_PARAMS` is a plain `self`/`hardened`/`dogfood` tuple and all
+  cases run as real passes. Also cleared: the five `test_scaffold_action_pins.py`
+  pins, the minimal-surface read-only pin, both scaffold functional pins, both
+  shared-SHA defaults params, and the offline tag→SHA drift gate.
+- 2026-09-25 — one assertion was genuinely superseded, not merely red-then-green.
+  SW-D7 pins the README Example 1 `uses:` line to a full commit SHA carrying a
+  `# vX.Y.Z` label, which is mutually unsatisfiable with the older
+  `test_landing_pins_a_release_tag` release-tag expectation. It now asserts a
+  full 40-hex lowercase SHA **and** the human-readable tag label, renamed
+  `test_landing_pins_a_full_sha_and_labels_the_release_tag`;
+  `test_landing_has_no_sha_pin_caveat` is unchanged. The stale row in
+  `readme-v2-agent-first.md` was updated to match. Remaining `xfailed` in
+  `tests/{ci,cli,pins,docs}` are SW4-owned:
+  `test_self_review_rung_model_pin.py` (1) and `test_get_installation_token.py`
+  (1).

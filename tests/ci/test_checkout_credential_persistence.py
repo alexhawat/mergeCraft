@@ -217,10 +217,6 @@ _MINIMAL_SURFACES = (
 )
 
 
-@pytest.mark.xfail(
-    reason="green after SW3.2: minimal example requests read-only contents",
-    strict=False,
-)
 @pytest.mark.parametrize("relative", _MINIMAL_SURFACES)
 def test_minimal_surfaces_request_read_only_contents(relative: str) -> None:
     """A review needs no content write, and must not leave its token in .git/config."""

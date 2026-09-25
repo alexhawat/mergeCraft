@@ -14,7 +14,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import pytest
 import yaml
 from scripts.render_example_workflows import render_all
 
@@ -92,7 +91,6 @@ def _ordered_uses(doc: dict[str, Any]) -> list[str]:
     return found
 
 
-@pytest.mark.xfail(reason="green after SW3.2/SW3.3: every action pinned by SHA", strict=False)
 def test_every_action_reference_is_a_full_commit_sha() -> None:
     offenders: list[str] = []
     for label, doc in _surfaces():
@@ -108,7 +106,6 @@ def test_every_action_reference_is_a_full_commit_sha() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after SW3.1/SW3.2: one checkout_sha source", strict=False)
 def test_every_actions_checkout_uses_the_shared_checkout_sha() -> None:
     defaults = load_example_defaults()
     assert defaults.get("checkout_sha") == LOCKED_CHECKOUT_SHA
@@ -123,14 +120,12 @@ def test_every_actions_checkout_uses_the_shared_checkout_sha() -> None:
     assert not offenders, f"actions/checkout pins disagree with checkout_sha: {offenders}"
 
 
-@pytest.mark.xfail(reason="green after SW3.1: defaults carry the mergeCraft SHA", strict=False)
 def test_action_sha_minimal_matches_the_published_commit() -> None:
     defaults = load_example_defaults()
     assert defaults.get("action_sha_minimal") == LOCKED_ACTION_SHA
     assert defaults.get("action_pin_minimal") == action_pin_minimal()
 
 
-@pytest.mark.xfail(reason="green after SW3.2/SW3.5: scaffold serializes per PR", strict=False)
 def test_scaffold_serializes_runs_per_pull_request() -> None:
     scaffold = yaml.safe_load(_workflow_template())
     concurrency = scaffold.get("concurrency")
@@ -140,7 +135,6 @@ def test_scaffold_serializes_runs_per_pull_request() -> None:
     assert concurrency.get("cancel-in-progress") is True
 
 
-@pytest.mark.xfail(reason="green after SW3.2: minimal example serializes per PR", strict=False)
 def test_minimal_template_serializes_runs_per_pull_request() -> None:
     template = yaml.safe_load(
         (REPO_ROOT / "scripts/example_workflows/minimal.yml.tpl").read_text(encoding="utf-8")

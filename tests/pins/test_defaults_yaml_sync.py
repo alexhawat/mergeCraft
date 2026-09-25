@@ -67,7 +67,6 @@ def test_make_pins_check_in_ci_static() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after SW3.1: shared SHA keys land in defaults", strict=False)
 @pytest.mark.parametrize(
     "path",
     [_CHECKOUT_DEFAULTS, _PACKAGED_DEFAULTS],

@@ -11,7 +11,6 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 import yaml
 from tests.ci.workflow_support import REPO_ROOT, read_text
 from typer.testing import CliRunner
@@ -247,10 +246,6 @@ def _scaffold_doc(tmp_path: Path, monkeypatch: MonkeyPatch) -> dict[str, object]
     return doc
 
 
-@pytest.mark.xfail(
-    reason="green after SW3.5: scaffold requests read-only contents",
-    strict=False,
-)
 def test_scaffolded_workflow_requests_read_only_contents(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -283,10 +278,6 @@ def test_scaffolded_workflow_requests_read_only_contents(
                 )
 
 
-@pytest.mark.xfail(
-    reason="green after SW3.5: scaffold serializes runs per pull request",
-    strict=False,
-)
 def test_scaffolded_workflow_serializes_runs_per_pull_request(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

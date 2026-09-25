@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from mergecraft.pins import action_pin_minimal, load_example_defaults
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "git_ls_remote_tags.txt"
@@ -33,7 +31,6 @@ def _recorded_tag_commits() -> dict[str, str]:
     return commits
 
 
-@pytest.mark.xfail(reason="green after SW3.1: action_sha_minimal key added", strict=False)
 def test_action_sha_matches_the_tag_it_ships_with() -> None:
     commits = _recorded_tag_commits()
     tag = action_pin_minimal()
