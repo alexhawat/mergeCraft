@@ -7,6 +7,12 @@
 # precondition — see CONTRIBUTING.md §Cut a release), plus a non-blocking
 # unit-suite run with a per-run random seed (#776 / F9): a pinned seed fixes
 # the permutation of a collection, not the collection itself.
+#
+# The nightly live-provider matrix exercises `nous` and `github` only. The
+# `anthropic`, `openai` and `gemini` legs are removed and named as not
+# exercised: this repository holds no Anthropic, OpenAI or Gemini API key, and
+# a subscription cannot call those HTTP endpoints. Real-harness live coverage
+# runs in the E2E workflow's live slice on the ChatGPT/Codex subscription.
 name: Integration
 
 on:
@@ -98,6 +104,13 @@ jobs:
         # The hosted runner is disposable. The inner namespace additionally
         # keeps forwarding and firewall changes off the runner's own network.
         run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-filtered-egress
+      - name: Sandbox write/network block on the disposable host lane
+        # A default ``docker run`` lacks the namespace capability the sandbox
+        # test needs, and a hosted runner cannot create the namespace
+        # unprivileged. This root process on a disposable host is the lane the
+        # test is written for; with the privileged-lane flag set it fails
+        # rather than skips.
+        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-sandbox-privileged
 
   security-scope:
     name: npm audit + workflow lint
@@ -147,7 +160,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        provider: [anthropic, openai, gemini, nous, github]
+        # Only legs this repository can run: `nous` (NOUS_API_KEY) and
+        # `github` (GITHUB_TOKEN). The removed HTTP-API legs are named in the
+        # workflow header.
+        provider: [nous, github]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -161,9 +177,6 @@ jobs:
         env:
           MERGECRAFT_LIVE: "1"
           MERGECRAFT_LIVE_PROVIDER: ${{ matrix.provider }}
-          ANTHROPIC_API_KEY: ${{ matrix.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY || '' }}
-          OPENAI_API_KEY: ${{ matrix.provider == 'openai' && secrets.OPENAI_API_KEY || '' }}
-          GEMINI_API_KEY: ${{ matrix.provider == 'gemini' && secrets.GEMINI_API_KEY || '' }}
           NOUS_API_KEY: ${{ matrix.provider == 'nous' && secrets.NOUS_API_KEY || '' }}
           GITHUB_TOKEN: ${{ matrix.provider == 'github' && secrets.GITHUB_TOKEN || '' }}
         run: make test-integration-live

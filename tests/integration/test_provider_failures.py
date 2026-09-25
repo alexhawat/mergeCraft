@@ -13,6 +13,10 @@ from mergecraft.utils.agent_resolve import _is_retryable_failure, run_with_model
 if TYPE_CHECKING:
     from pathlib import Path
 
+# Keyless and hermetic: `make test-integration` selects this marker so the PR
+# job executes a real test instead of the deleted file-existence smoke.
+pytestmark = pytest.mark.hermetic_integration
+
 
 @pytest.mark.asyncio
 async def test_retryable_cli_shaped_failure_advances_chain(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1702,6 +1702,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Harbor's agent wrapper invokes `mergecraft review` instead of the deprecated
   `diff-review` alias.
 
+- The sandbox write/network test and the symlink-target chown test run in the
+  privileged lanes built for them, and fail rather than skip inside those lanes
+- The keyless provider-catalog smoke no longer hides behind a live gate and runs
+  in the unit suite
+- Both in-image test scripts pin the same `pytest` and `pytest-asyncio` as the
+  project they test
+
+### Changed
+
+- The PR integration job runs keyless hermetic integration tests instead of
+  passing on a check that a helper script exists, so a green run means tests
+  executed
+- Nightly live-provider coverage lists only the providers this repository holds
+  credentials for; the removed legs are named as not exercised instead of
+  failing on secrets the repository is not configured to hold
+- An E2E live slice with no model configured reports `unavailable` in a warning
+  and the step summary instead of a green `skipped`; a configured-but-broken
+  slice still fails
+- Live-provider tests report the HTTP status before parsing a response body, and
+  never echo the credential or the request URL; the Nous leg posts the
+  documented default model
+- CodeQL results upload to code scanning on the events whose token can write
+  `security-events`, and an analysis failure fails the job; fork and Dependabot
+  pull requests analyse without uploading
+- `make workflow-lint` no longer reports success on a host where it could not
+  lint: it fails and says lint is unavailable
+- `make docker-build` tags the image with a lowercase repository name, so the
+  target can succeed
+- Every runtime dependency is an exact pin, every third-party import in the
+  package is declared, and the declarations nothing imports are gone
+
+
+### Added
+
+- Published Python distributions are installed outside the checkout and carry
+  build provenance before upload
+- `pre-commit` blocks newly added large files and private keys, and scans staged
+  changes for secrets with `gitleaks`
+- `make test-durations` refreshes the committed `.test_durations` that
+  least-duration sharding balances by
+
+
 ## [0.1.0] — 2026-08-14
 
 Initial public release: mergeCraft is a standalone, BYOK GitHub Action for

@@ -94,7 +94,10 @@ def test_check_live_integration_contract_passes() -> None:
 
 def test_default_credential_slugs_and_github_required_set() -> None:
     """Default sweep plus github matrix leg. Deleting github must fail."""
-    assert DEFAULT_CREDENTIAL_SLUGS == ("anthropic", "openai", "gemini", "nous")
+    assert "nous" in DEFAULT_CREDENTIAL_SLUGS, (
+        "the runnable Nous leg must stay in the default credential sweep"
+    )
+    assert set(DEFAULT_CREDENTIAL_SLUGS) <= {"anthropic", "openai", "gemini", "nous"}
     for slug in DEFAULT_CREDENTIAL_SLUGS:
         assert slug in PROVIDER_SECRET_ENV
     assert PROVIDER_SECRET_ENV["github"] == "GITHUB_TOKEN"
@@ -183,3 +186,34 @@ def test_no_skips_when_no_secret_test_exists() -> None:
                 rel = path.relative_to(REPO_ROOT)
                 offenders.append(f"{rel}::{name}")
     assert not offenders, f"permissive skip-when-no-secret tests: {offenders}"
+
+
+def test_live_matrix_contains_only_runnable_legs() -> None:
+    """Every matrix leg must be a provider the repository holds a credential for."""
+    live = job(load_workflow("integration.yml"), "integration-live")
+    matrix = (live.get("strategy") or {}).get("matrix") or {}
+    providers = set(matrix.get("provider") or [])
+    assert providers == {"nous", "github"}, (
+        f"the nightly live matrix must list only the runnable legs; found {sorted(providers)}"
+    )
+    for provider in providers:
+        assert provider in PROVIDER_SECRET_ENV, (
+            f"matrix leg {provider!r} has no PROVIDER_SECRET_ENV entry"
+        )
+
+
+def test_live_matrix_env_wires_exactly_the_runnable_legs() -> None:
+    """Only the surviving legs may be wired; a removed leg must not linger."""
+    live = job(load_workflow("integration.yml"), "integration-live")
+    matrix = (live.get("strategy") or {}).get("matrix") or {}
+    text = read_text(".github/workflows/integration.yml")
+    for provider in matrix.get("provider") or []:
+        secret = PROVIDER_SECRET_ENV[str(provider)]
+        assert f"secrets.{secret}" in text, (
+            f"matrix leg {provider!r} must receive {secret} from the job secrets"
+        )
+    for removed in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        assert f"secrets.{removed}" not in text, (
+            f"{removed} is still wired although its matrix leg is gone; remove the leg "
+            "and name it in the header instead"
+        )
