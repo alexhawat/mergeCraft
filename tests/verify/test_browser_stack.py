@@ -81,8 +81,44 @@ def test_launch_browser_driver_returns_live_driver_when_cdp_reachable(
         _close_quietly(driver)
 
 
-def test_resolve_driver_uses_stub_only_with_allow_stub() -> None:
-    driver = verify_behavior_cmd._resolve_driver(allow_stub=True, viewport=None)
+def _bound_driver(result: object) -> object:
+    """Return the driver from ``_resolve_driver``'s result.
+
+    The fallback contract may hand the driver kind back alongside the driver
+    (``(driver, kind)``); accept either shape so this file pins the *driver*,
+    which is the load-bearing half. The report provenance is pinned separately.
+    """
+    if isinstance(result, tuple):
+        return result[0]
+    return result
+
+
+def test_resolve_driver_prefers_the_live_driver_when_the_stack_is_available(
+    fake_cdp_endpoint: str,
+) -> None:
+    """``--allow-stub`` is a fallback, not a bypass: with the stack reachable it
+    binds the live CDP driver even when the flag is set. The old code returned
+    the stub here without ever probing — that is the defect."""
+    assert browser_stack_available() is True
+    result = verify_behavior_cmd._resolve_driver(allow_stub=True, viewport=None)
+    driver = _bound_driver(result)
+    try:
+        assert driver.__class__.__name__ != "_StubBrowserDriver"
+        assert type(driver) is CdpBrowserDriver
+    finally:
+        _close_quietly(driver)
+
+
+def test_resolve_driver_uses_the_stub_only_when_the_stack_is_unavailable() -> None:
+    """The documented fallback: an unavailable stack plus ``--allow-stub`` yields
+    the stub. Both the launcher's probe symbol and the availability symbol are
+    patched so no ambient CDP endpoint can be reached."""
+    with (
+        patch("mergecraft.browser.launch.browser_stack_available", return_value=False),
+        patch("mergecraft.browser.availability.browser_stack_available", return_value=False),
+    ):
+        result = verify_behavior_cmd._resolve_driver(allow_stub=True, viewport=None)
+    driver = _bound_driver(result)
     assert driver.__class__.__name__ == "_StubBrowserDriver"
 
 
@@ -91,9 +127,11 @@ def test_resolve_driver_binds_live_driver_when_cdp_reachable(fake_cdp_endpoint: 
     assert browser_stack_available() is True
     driver_mod = import_verify("driver")
     protocol = require_symbol(driver_mod, "BrowserDriver")
-    driver = verify_behavior_cmd._resolve_driver(
-        allow_stub=False,
-        viewport=Viewport(width=800, height=600),
+    driver = _bound_driver(
+        verify_behavior_cmd._resolve_driver(
+            allow_stub=False,
+            viewport=Viewport(width=800, height=600),
+        )
     )
     try:
         assert isinstance(driver, protocol)
@@ -106,6 +144,7 @@ def test_resolve_driver_binds_live_driver_when_cdp_reachable(fake_cdp_endpoint: 
 def test_resolve_driver_raises_when_cdp_unreachable() -> None:
     with (
         patch("mergecraft.browser.launch.browser_stack_available", return_value=False),
+        patch("mergecraft.browser.availability.browser_stack_available", return_value=False),
         pytest.raises(BrowserStackUnavailableError, match="unreachable"),
     ):
         verify_behavior_cmd._resolve_driver(allow_stub=False, viewport=None)
@@ -113,7 +152,10 @@ def test_resolve_driver_raises_when_cdp_unreachable() -> None:
 
 def test_unreachable_cdp_cli_exits_configuration_not_pass() -> None:
     """Without ``--allow-stub`` the CLI refuses; it never reports a green verify."""
-    with patch("mergecraft.browser.launch.browser_stack_available", return_value=False):
+    with (
+        patch("mergecraft.browser.launch.browser_stack_available", return_value=False),
+        patch("mergecraft.browser.availability.browser_stack_available", return_value=False),
+    ):
         result = _RUNNER.invoke(
             app,
             ["verify-behavior", "--mode", "verify", "--url", "http://127.0.0.1:8765/"],

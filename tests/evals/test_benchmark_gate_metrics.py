@@ -43,6 +43,7 @@ from pydantic import ValidationError
 from mergecraft.agents.verifier import VERIFIER_RUBRIC_VERSION, judge_pin
 from mergecraft.evals.benchmark import (
     RESULT_SET_SCHEMA_VERSION,
+    SCORER_VERSION,
     BenchmarkMetrics,
     VersionPins,
     run_structural_replay,
@@ -676,3 +677,27 @@ def test_version_pins_fully_pinned_true_when_every_provider_is_confirmed() -> No
 
     assert pins.fully_pinned is True
     assert pins.unpinned_providers == ()
+
+
+# ── scorer version bump for maximum-cardinality matching (EV1 → EV2) ──
+
+
+def test_scorer_version_is_bumped_for_the_new_matching_rule() -> None:
+    """``evals/scoring.py``'s matching rule becomes maximum-cardinality, which
+    moves published recall, so the constant's own contract mandates a bump
+    (EV-D4 locked ``1.1.0``). The publisher refuses mixing old- and new-scorer
+    results, so leaving it at ``1.0.0`` would silently mix them."""
+    assert SCORER_VERSION == "1.1.0"
+    assert SCORER_VERSION != "1.0.0"
+
+
+def test_structural_result_set_pins_the_current_scorer_version(tmp_path: Path) -> None:
+    """The pin a result set carries is the current ``SCORER_VERSION``, not a
+    stale literal — a reader can tell which matching rule produced the number."""
+    bank = tmp_path / "bank"
+    _add_all(bank, [_clean_approved(0)])
+
+    result = run_structural_replay(bank)
+
+    assert result.pins.scorer_version == SCORER_VERSION
+    assert result.pins.scorer_version != "1.0.0"

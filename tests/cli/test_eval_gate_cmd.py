@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from tests.evals.support_eval_calibration import structural_baseline_path
 from typer.testing import CliRunner
 
 from mergecraft.cli.eval_cmd import app
 from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
+from mergecraft.evals.gate import load_result_set
+
+if TYPE_CHECKING:
+    import pytest
 
 runner = CliRunner()
 
@@ -154,6 +160,109 @@ def test_score_fails_below_the_required_recall(tmp_path: Path) -> None:
 
     assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert "below the required" in result.output
+
+
+# ── release regression gate: coverage metrics + require-halves (EV1 → EV2) ──
+
+
+def _baseline_with_detection(tmp_path: Path) -> Path:
+    """The committed structural baseline with a detection half attached."""
+    from mergecraft.evals.live_run import DetectionMetrics
+    from mergecraft.evals.scoring import AggregateScoreReport
+
+    baseline = load_result_set(structural_baseline_path())
+    detection = DetectionMetrics(
+        provider="claude",
+        model="claude-sonnet-5",
+        cases_run=2,
+        cases_failed=0,
+        failed_case_ids=[],
+        aggregate=AggregateScoreReport(
+            total_cases=1,
+            total_issues=2,
+            total_reported=2,
+            found=1,
+            false_negatives=1,
+            unadjudicated=0,
+            false_positives=1,
+            false_positives_per_case=0.0,
+            clean_case_fp_rate=0.0,
+        ),
+        case_results=[],
+        raw_findings_dir="",
+    )
+    path = tmp_path / "baseline-with-detection.json"
+    path.write_text(
+        baseline.model_copy(update={"detection": detection}).model_dump_json(),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_gate_regression_names_inconclusive_rate_in_the_step_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A candidate with one added structural inconclusive exits non-zero and the
+    step summary names ``inconclusive_rate`` with baseline / candidate / delta."""
+    baseline = load_result_set(structural_baseline_path())
+    bumped = baseline.metrics.inconclusive_rate + 0.25
+    candidate = baseline.model_copy(
+        update={"metrics": baseline.metrics.model_copy(update={"inconclusive_rate": bumped})}
+    )
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(candidate.model_dump_json(), encoding="utf-8")
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+
+    result = runner.invoke(
+        app,
+        [
+            "gate",
+            "--baseline",
+            str(structural_baseline_path()),
+            "--candidate",
+            str(candidate_path),
+            "--bank",
+            str(tmp_path / "absent-bank"),
+        ],
+    )
+
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
+    text = summary.read_text(encoding="utf-8")
+    assert "inconclusive_rate" in text
+    assert f"{baseline.metrics.inconclusive_rate:.2%}" in text
+    assert f"{bumped:.2%}" in text
+
+
+def test_require_halves_flag_fails_a_candidate_missing_the_detection_half(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Release mode passes ``--require-halves``: a candidate missing the
+    detection half the baseline carries fails, naming the missing half. Without
+    the flag the PR check keeps today's skip."""
+    baseline_path = _baseline_with_detection(tmp_path)
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(
+        load_result_set(structural_baseline_path()).model_dump_json(), encoding="utf-8"
+    )
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    common = [
+        "gate",
+        "--baseline",
+        str(baseline_path),
+        "--candidate",
+        str(candidate_path),
+        "--bank",
+        str(tmp_path / "absent-bank"),
+    ]
+
+    skipped = runner.invoke(app, common)
+    assert skipped.exit_code == 0, skipped.output
+
+    required = runner.invoke(app, [*common, "--require-halves"])
+    assert required.exit_code == CLI_CONFIGURATION_EXIT_CODE
+    assert "detection" in summary.read_text(encoding="utf-8")
 
 
 def test_a_promoted_case_is_not_reported_as_unpromoted(tmp_path: Path) -> None:

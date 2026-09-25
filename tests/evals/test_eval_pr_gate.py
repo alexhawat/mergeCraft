@@ -55,6 +55,22 @@ def test_clean_committed_baseline_passes_eval_gate() -> None:
     assert report.regressed_metrics == ()
 
 
+def test_committed_baseline_self_compare_carries_the_inconclusive_rate_row() -> None:
+    """The new structural coverage metric is present in the delta ledger even
+    when the two sides are identical, so the release log shows the number it
+    now gates. The committed baseline carries no detection half, so the
+    detection coverage metric is skipped rather than fabricated — the PR check
+    keeps today's skip."""
+    baseline = load_result_set(structural_baseline_path())
+
+    report = eval_gate(candidate=baseline, baseline=baseline)
+
+    assert report.passed is True
+    metrics = {item.metric for item in report.deltas}
+    assert "inconclusive_rate" in metrics
+    assert all(not metric.startswith("detection.") for metric in metrics)
+
+
 def test_deliberately_regressed_baseline_fails_and_names_the_metric() -> None:
     """DoD — a material unsafe-approval rise fails and names that metric."""
     baseline = load_result_set(structural_baseline_path())
