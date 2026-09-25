@@ -67,29 +67,31 @@ raising) with assertions on emitted warnings and their contents.
 
 ## Red / green status
 
-The composed-patcher group (CR2) has landed: its tests are plain passing
-assertions and enforce for real. The remaining red contracts are marked with a
-non-strict `xfail(reason=...)` until their implementation lands.
+The composed-patcher group (CR2) and the git-env / passthrough-name group (CR3)
+have landed: their tests are plain passing assertions and enforce for real. The
+remaining red contracts are marked with a non-strict `xfail(reason=...)` until
+their implementation lands.
 
 Green (enforced):
 
 - `tests/utils/test_log.py` — 3 composed-patcher tests.
 - `tests/cli/test_logging_entrypoints.py` — 5 root-callback / entrypoint tests.
 - `tests/test_main_phases.py` — the `main()` preamble bound-context test.
+- `tests/utils/test_git_setup.py` — 29 git-config / trace-redirect tests.
+- `tests/security/test_hostile_git_config.py` — 2 ambient-trace / credential-helper tests.
+- `tests/utils/test_secrets.py` — 3 lookalike-credential-name tests.
 
 Still red (xfail):
 
 - `tests/test_main_phases.py` — 4 teardown-step tests (cleanup/revocation).
-- `tests/utils/test_git_setup.py` — 29 tests (config families, trace/redirect names).
-- `tests/security/test_hostile_git_config.py` — 2 tests (trace capture, credential helper).
-- `tests/utils/test_secrets.py` — 3 tests (lookalike credential names).
 - `tests/security/test_credentials.py` — 5 tests (cleanup failure warnings).
 - `tests/utils/test_token.py` — 3 tests (revocation warning level).
 
 Guards that must stay green: `tests/analyzers/test_redaction_boundaries.py`,
 the success-path tests in `tests/security/test_credentials.py`, the documented
 passthrough / allowlist / reinjection tests in `tests/utils/test_secrets.py`,
-and `tests/test_main_phases.py::test_teardown_success_logs_no_cleanup_warning`.
+the success-silence tests in `tests/utils/test_git_setup.py`, and
+`tests/test_main_phases.py::test_teardown_success_logs_no_cleanup_warning`.
 
 ## Test hermeticity
 

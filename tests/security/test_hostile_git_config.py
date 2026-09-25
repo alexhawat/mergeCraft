@@ -221,7 +221,6 @@ def _http_stub() -> Iterator[str]:
         server.server_close()
 
 
-@pytest.mark.xfail(reason="green after the git-env hardening wave lands", strict=False)
 def test_ambient_git_trace_cannot_capture_the_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -248,7 +247,6 @@ def test_ambient_git_trace_cannot_capture_the_token(
     assert encoded not in combined
 
 
-@pytest.mark.xfail(reason="green after the git-env hardening wave lands", strict=False)
 def test_ambient_credential_helper_is_unreachable_from_returned_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

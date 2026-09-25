@@ -517,7 +517,6 @@ def _inject_ambient_git_config(monkeypatch: MonkeyPatch) -> None:
         monkeypatch.setenv(f"GIT_CONFIG_VALUE_{index}", "store")
 
 
-@pytest.mark.xfail(reason="green after the git-env hardening wave lands", strict=False)
 def test_git_env_for_token_no_token_skips_config_pairs(monkeypatch: MonkeyPatch) -> None:
     """The returned env carries no ambient config, tracing or redirect names.
 
@@ -541,7 +540,6 @@ def test_git_env_for_token_no_token_skips_config_pairs(monkeypatch: MonkeyPatch)
         pytest.param("", 2, id="default-fallback"),
     ],
 )
-@pytest.mark.xfail(reason="green after the git-env hardening wave lands", strict=False)
 def test_git_env_for_token_with_token_keeps_only_its_own_pairs(
     monkeypatch: MonkeyPatch,
     remote_url: str,
@@ -580,7 +578,6 @@ def test_git_env_for_token_with_token_keeps_only_its_own_pairs(
     ],
 )
 @pytest.mark.parametrize("token", ["", "ghs_secret"])
-@pytest.mark.xfail(reason="green after the git-env hardening wave lands", strict=False)
 def test_git_env_for_token_drops_trace_and_redirect_names(
     monkeypatch: MonkeyPatch, name: str, token: str
 ) -> None:

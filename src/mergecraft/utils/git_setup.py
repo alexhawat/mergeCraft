@@ -226,9 +226,60 @@ def git_auth_header_value(token: str) -> str:
     return f"Authorization: Basic {credential}"
 
 
+# Env families a mergeCraft git subprocess must never inherit from its parent:
+# they inject git config, can write the ``http.extraHeader`` Authorization value
+# to a trace file or stderr, or redirect the credential helper / transport.
+# Matched by exact name or by prefix, so the numbered ``GIT_CONFIG_KEY_<n>`` /
+# ``GIT_CONFIG_VALUE_<n>`` family covers any ``n``. Source: git's documentation
+# for ``git-config``, ``gitcredentials`` and ``git``. File-based config
+# (``GIT_CONFIG_GLOBAL``, ``~/.gitconfig``, the system config) is the operator's
+# own and is deliberately left in place.
+GIT_ENV_UNTRUSTED_NAMES: tuple[str, ...] = (
+    # config injection
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_",
+    "GIT_CONFIG_VALUE_",
+    # tracing that can write the ``http.extraHeader`` Authorization value
+    "GIT_TRACE",
+    "GIT_TRACE_CURL",
+    "GIT_TRACE_CURL_NO_DATA",
+    "GIT_TRACE_PACKET",
+    "GIT_TRACE_SETUP",
+    "GIT_CURL_VERBOSE",
+    "GIT_TRACE_REDACT",
+    # credential / transport redirection
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_PROXY_COMMAND",
+    "GIT_EXEC_PATH",
+)
+
+
+def _is_untrusted_git_env_name(name: str) -> bool:
+    """Return whether ``name`` is one of :data:`GIT_ENV_UNTRUSTED_NAMES`."""
+    return any(name == entry or name.startswith(entry) for entry in GIT_ENV_UNTRUSTED_NAMES)
+
+
+def _strip_untrusted_git_env(env: dict[str, str]) -> None:
+    """Drop :data:`GIT_ENV_UNTRUSTED_NAMES` from ``env`` in place."""
+    for name in [key for key in env if _is_untrusted_git_env_name(key)]:
+        del env[name]
+
+
 def git_env_for_token(token: str, *, remote_url: str = "") -> dict[str, str]:
-    """Build git subprocess env with header-based auth — never URL-embedded (D5)."""
+    """Build git subprocess env with header-based auth — never URL-embedded (D5).
+
+    Ambient env-injected git config (``GIT_CONFIG_*``), trace output and
+    credential/transport redirection are dropped from the copied environment on
+    both the token and no-token paths, so a git child admits only the names this
+    run sets. File-based config (``GIT_CONFIG_GLOBAL``, ``~/.gitconfig``, the
+    system config) is the operator's own and is left in place.
+    """
     env = os.environ.copy()
+    _strip_untrusted_git_env(env)
     env["GIT_TERMINAL_PROMPT"] = "0"
     if not token:
         return env

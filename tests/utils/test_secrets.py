@@ -205,7 +205,6 @@ _DOCUMENTED_PASSTHROUGH = (
 
 
 @pytest.mark.parametrize("name", _PREFIX_LOOKALIKE_CREDENTIALS)
-@pytest.mark.xfail(reason="green after the env-name allowlist wave lands", strict=False)
 def test_prefix_lookalike_credentials_are_not_passed_through(
     monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
