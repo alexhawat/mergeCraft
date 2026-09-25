@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.config.settings import default_settings
+from mergecraft.utils import log as log_mod
 
 if TYPE_CHECKING:
     import pytest
@@ -31,6 +32,18 @@ def _registry() -> Any:
 
 def _questions() -> Any:
     return import_jev("questions")
+
+
+def _clear_log_redactor() -> None:
+    """Clear the process-global log redactor and recompose the patcher.
+
+    ``configure_logging`` is idempotent per slot; clearing the redactor first
+    keeps a captured record raw. Restore by calling this again in teardown.
+    """
+    setter = getattr(log_mod, "set_message_redactor", None)
+    if setter is not None:
+        setter(None)
+    log_mod.configure_logging(force=True)
 
 
 def test_route_choice_requires_confidence_not_choice_alone() -> None:
@@ -117,20 +130,30 @@ def test_filter_state_fences_untrusted_strings() -> None:
 
 
 async def test_client_logs_model_and_usage_on_every_call() -> None:
-    module = import_jev("client")
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
-    client = module.AsyncJevClient(api_key=TEST_API_KEY, transport=transport)
-    with loguru_lines() as logs:
-        await client.call(
-            state={"hunk": "x", "path": "p", "unit_id": "u", "noise": "drop"},
-            pack_id="unit/v1",
-            unit_id="u",
-        )
-    joined = "\n".join(logs)
-    assert PINNED_MODEL in joined
-    assert "input_tokens=" in joined
-    assert "output_tokens=" in joined
-    assert "jev call complete" in joined
+    """The client logs the model and the input/output usage on every call.
+
+    Log redaction is process-global and can be left installed by another test;
+    clear it here so the captured record is the raw one the client emits, then
+    restore the process state on the way out.
+    """
+    _clear_log_redactor()
+    try:
+        module = import_jev("client")
+        transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
+        client = module.AsyncJevClient(api_key=TEST_API_KEY, transport=transport)
+        with loguru_lines() as logs:
+            await client.call(
+                state={"hunk": "x", "path": "p", "unit_id": "u", "noise": "drop"},
+                pack_id="unit/v1",
+                unit_id="u",
+            )
+        joined = "\n".join(logs)
+        assert PINNED_MODEL in joined
+        assert "input_tokens=" in joined
+        assert "output_tokens=" in joined
+        assert "jev call complete" in joined
+    finally:
+        _clear_log_redactor()
 
 
 async def test_evidence_attestation_requires_relation_confidence_floor(

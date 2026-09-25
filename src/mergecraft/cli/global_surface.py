@@ -192,6 +192,9 @@ def apply_global_cli_options(
     )
     level = resolve_effective_log_level(quiet=quiet, verbose=verbose, log_level=log_level)
     configure_logging(force=True, level=level)
+    from mergecraft.analyzers.redact import install_loguru_redaction_filter
+
+    install_loguru_redaction_filter()
 
 
 def get_cli_globals(ctx: typer.Context) -> CliGlobals:

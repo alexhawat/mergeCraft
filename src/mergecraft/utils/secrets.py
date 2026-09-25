@@ -18,9 +18,12 @@ SENSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"_CREDENTIAL$", re.IGNORECASE),
 )
 
-# Prefixes whose vars are safe to pass through (runner metadata, workflow context).
-# GITHUB_TOKEN/GH_TOKEN match GITHUB_ but are still filtered via is_sensitive_env_name.
-SAFE_ENV_PREFIXES: tuple[str, ...] = ("GITHUB_", "RUNNER_", "JAVA_HOME_", "GOROOT_")
+# Prefixes whose vars are safe to pass through. Only versioned toolchain homes
+# remain prefixes: ``GITHUB_``/``RUNNER_`` are now an explicit documented name
+# list in ``SAFE_ENV_NAMES`` (below), so credential-shaped names such as
+# ``GITHUB_PAT`` no longer ride the passthrough. Sensitive names are still
+# filtered via :func:`is_sensitive_env_name`.
+SAFE_ENV_PREFIXES: tuple[str, ...] = ("JAVA_HOME_", "GOROOT_")
 
 SAFE_ENV_NAMES: frozenset[str] = frozenset(
     {
@@ -58,6 +61,54 @@ SAFE_ENV_NAMES: frozenset[str] = frozenset(
         "EDGEWEBDRIVER",
         "GECKOWEBDRIVER",
         "GHCUP_INSTALL_BASE_PREFIX",
+        # GitHub Actions documented default variables (explicit names, not a
+        # prefix: ``GITHUB_PAT``/``GITHUB_APP_PEM`` must not ride the passthrough).
+        #
+        # The Actions *command-file* channels -- ``GITHUB_ENV``, ``GITHUB_PATH``,
+        # ``GITHUB_OUTPUT`` and ``GITHUB_STEP_SUMMARY`` -- are deliberately NOT
+        # listed here: they are writable control channels for later workflow
+        # steps and this action's own outputs/summary, not child metadata. A
+        # child that inherited one could append ``KEY=VALUE`` lines to alter a
+        # later step's environment or ``PATH``. Omitting them from this allowlist
+        # keeps them out of every ``filter_env`` consumer (``build_agent_env``,
+        # ``resolve_env("restricted")``, analyzers, agent drivers). The
+        # documented read-only metadata (``GITHUB_WORKSPACE``,
+        # ``GITHUB_REPOSITORY``, ``GITHUB_EVENT_NAME``, ``GITHUB_EVENT_PATH``,
+        # ``RUNNER_TEMP``, …) stays.
+        "GITHUB_ACTION",
+        "GITHUB_ACTION_PATH",
+        "GITHUB_ACTION_REPOSITORY",
+        "GITHUB_ACTIONS",
+        "GITHUB_ACTOR",
+        "GITHUB_ACTOR_ID",
+        "GITHUB_API_URL",
+        "GITHUB_ARTIFACTS",
+        "GITHUB_ARTIFACTS_LIST",
+        "GITHUB_BASE_REF",
+        "GITHUB_EVENT_NAME",
+        "GITHUB_EVENT_PATH",
+        "GITHUB_GRAPHQL_URL",
+        "GITHUB_HEAD_REF",
+        "GITHUB_JOB",
+        "GITHUB_REF",
+        "GITHUB_REF_NAME",
+        "GITHUB_REF_PROTECTED",
+        "GITHUB_REF_TYPE",
+        "GITHUB_REPOSITORY",
+        "GITHUB_REPOSITORY_ID",
+        "GITHUB_REPOSITORY_OWNER",
+        "GITHUB_REPOSITORY_OWNER_ID",
+        "GITHUB_RETENTION_DAYS",
+        "GITHUB_RUN_ATTEMPT",
+        "GITHUB_RUN_ID",
+        "GITHUB_RUN_NUMBER",
+        "GITHUB_SERVER_URL",
+        "GITHUB_SHA",
+        "GITHUB_TRIGGERING_ACTOR",
+        "GITHUB_WORKFLOW",
+        "GITHUB_WORKFLOW_REF",
+        "GITHUB_WORKFLOW_SHA",
+        "GITHUB_WORKSPACE",
         "GRADLE_HOME",
         "JAVA_HOME",
         "HOMEBREW_CLEANUP_PERIODIC_FULL_DAYS",
@@ -68,6 +119,14 @@ SAFE_ENV_NAMES: frozenset[str] = frozenset(
         "PIPX_BIN_DIR",
         "PIPX_HOME",
         "PSModulePath",
+        # GitHub Actions documented ``RUNNER_*`` default variables (explicit names).
+        "RUNNER_ARCH",
+        "RUNNER_DEBUG",
+        "RUNNER_ENVIRONMENT",
+        "RUNNER_NAME",
+        "RUNNER_OS",
+        "RUNNER_TEMP",
+        "RUNNER_TOOL_CACHE",
         "SELENIUM_JAR_PATH",
         "SGX_AESM_ADDR",
         "SWIFT_PATH",
