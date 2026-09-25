@@ -18,6 +18,7 @@ import pytest
 
 from mergecraft.agents.shared import AgentResult
 from mergecraft.main import RunOutcome
+from mergecraft.utils.status_checks import APPROVAL_CHECK, COMPLETION_CHECK
 from tests.support.run_main_harness import run_main_for_test
 
 _SCM_CANARY = "ghs_fake_git_token"
@@ -84,6 +85,7 @@ async def test_canary_sink_fails_the_run_names_the_path_and_is_deleted(
         cleanup_tmpdir=False,
         agent=agent,  # type: ignore[arg-type] — duck-typed agent, same protocol as FakeAgent
         env={"ANTHROPIC_API_KEY": _PROVIDER_CANARY},
+        capture_status_checks=True,
     )
 
     assert rec.raised is None, rec.raised
@@ -99,8 +101,17 @@ async def test_canary_sink_fails_the_run_names_the_path_and_is_deleted(
     assert _SCM_CANARY not in error, error
     assert _PROVIDER_CANARY not in error, error
 
-    conclusions = [call.get("conclusion") for call in rec.report_status_calls]
-    assert "failure" in conclusions, conclusions
+    # The sink hit must fail the run *and* force the merge gate closed. The
+    # completion check alone is not enough: ``mergecraft-approval`` is the
+    # check the merge gate reads, and it is derived from the packet verdict
+    # unless the sink hit overrides it (SX-D10). Assert the check the operator
+    # actually gates on, not merely that some check concluded ``failure``.
+    completion_runs = [run for run in rec.status_check_runs if run.get("name") == COMPLETION_CHECK]
+    assert completion_runs, rec.status_check_runs
+    assert completion_runs[-1].get("conclusion") == "failure", completion_runs
+    approval_runs = [run for run in rec.status_check_runs if run.get("name") == APPROVAL_CHECK]
+    assert approval_runs, rec.status_check_runs
+    assert all(run.get("conclusion") == "failure" for run in approval_runs), approval_runs
 
     if not run_tmpdir_sink:
         assert not (runner_temp / location).exists(), "the sink must be removed before upload"

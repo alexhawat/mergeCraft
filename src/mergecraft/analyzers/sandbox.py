@@ -585,6 +585,16 @@ def _copy_on_write_repo_mount_fragment(context: SandboxContext) -> str:
     mount an overlay (no unprivileged overlayfs), a scratch **copy** of the
     checkout is bound in its place — the recorded fallback. Either way the real
     checkout is never written.
+
+    The view is widened for the payload's identity before it is used. The
+    orchestrator creates ``upper``/``work``/``merged``/``copy`` as root at the
+    creator's mode, and the payload drops to the agent uid in the same ``exec``
+    (SX-D2); a dropped gate that cannot write a root-owned ``0755`` root fails
+    ``mkdir .venv`` with ``EACCES`` and is misreported as a finding (P-8). The
+    merged root is chowned to the drop target by ``chmod`` (the overlay copies
+    the change into ``upper``), so the write lands in scratch; the scratch-copy
+    fallback is widened recursively. Both live on the private scratch tmpfs, so
+    the widened mode never crosses the namespace boundary.
     """
     repo = _shell_single_quote(str(context.repo_root.resolve()))
     scratch = _shell_single_quote(str(context.scratch_dir.resolve()))
@@ -596,12 +606,15 @@ def _copy_on_write_repo_mount_fragment(context: SandboxContext) -> str:
         f"mkdir -p {scratch}; "
         f"mount -t tmpfs tmpfs {scratch} || exit 1; "
         f"if mkdir -p {upper} {work} {merged} 2>/dev/null "
+        f"&& chmod 0777 {upper} {work} 2>/dev/null "
         f"&& mount -t overlay overlay "
         f"-o lowerdir={repo},upperdir={upper},workdir={work} {merged} 2>/dev/null; then "
+        f"chmod 0777 {merged} || exit 1; "
         f"mount --bind {merged} {repo} || exit 1; "
         f"else "
         f"mkdir -p {copy} || exit 1; "
         f"cp -a {repo}/. {copy}/ || exit 1; "
+        f"chmod -R a+rwX {copy} || exit 1; "
         f"mount --bind {copy} {repo} || exit 1; "
         f"fi; "
         f"cd {repo} || exit 1; "
@@ -812,6 +825,19 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
     if _DROP_SENTINEL not in resolved:
         return []
     argv = resolved[:-1]
+    if "--inh-caps=-all" not in argv:
+        # ``wrap_agent_command`` keys on the real uid and returns its command
+        # unwrapped when that is non-zero, while this function keys on the
+        # effective uid. The two disagree under a setuid-style euid/uid split,
+        # leaving an empty prefix here. Fail closed with the same configuration
+        # error the rest of the drop raises, rather than letting
+        # ``list.index`` raise a bare ``ValueError`` — a prefix without the
+        # capability clear must never be returned.
+        raise _privilege_configuration_error(
+            "privilege drop prefix is malformed: the setpriv capability flags "
+            "(--inh-caps=-all) are absent, so the payload would not be dropped "
+            "with the cleared bounding set the sandbox requires"
+        )
     if "--ambient-caps=-all" not in argv:
         # wrap_agent_command omits --ambient-caps; add it beside --inh-caps so
         # the four capability flags travel together for every caller.

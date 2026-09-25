@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -415,3 +416,77 @@ async def test_trusted_tier_gate_still_runs_without_a_namespace(
 
     assert "unshare" not in captured["argv"], captured["argv"]
     assert payload["checks"][0]["status"] == "passed", payload
+
+
+_VIEW_PATHS = ("repo-upper", "repo-work", "repo-merged", "repo-copy")
+_WRITABLE_MODE_RE = re.compile(r"(?:-m|--mode)[ =]+0?[0-7]*[2367]\b")
+
+
+def _view_is_widened_for_the_dropped_uid(fragment: str) -> bool:
+    """Whether the copy-on-write fragment makes its view writable by the payload.
+
+    The orchestrator builds the view as root, so a plain ``mkdir`` leaves the
+    merged root (or the scratch copy) at the creator's ``0755``. A gate dropped
+    to the agent uid then fails ``mkdir .venv`` with ``EACCES`` and is reported
+    as a finding about the diff (P-8). Accept any explicit permission step on
+    the view: a ``chmod``/``chown``, a writable ``mkdir -m``, or a ``umask 0``.
+    """
+    if not any(name in fragment for name in _VIEW_PATHS):
+        return False
+    if re.search(r"\b(?:chmod|chown)\b", fragment):
+        return True
+    if _WRITABLE_MODE_RE.search(fragment):
+        return True
+    return bool(re.search(r"\bumask\s+0", fragment))
+
+
+@pytest.mark.asyncio
+async def test_untrusted_gates_request_the_copy_on_write_checkout_view(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SX-D7: an untrusted gate runs against a writable copy-on-write view.
+
+    The gate may write build output or ``.venv`` into the tree, so the checkout
+    is presented as a disposable copy-on-write view (overlay with a scratch
+    upper, or the scratch-copy fallback) instead of a read-only bind. The flag
+    must reach the real ``plan_sandbox`` and the resulting command must carry
+    the overlay/scratch-view fragment — and that view must be writable by the
+    dropped uid, or the write fails ``EACCES`` and the gate is misreported as a
+    finding (P-8).
+    """
+    _force_untrusted_sandbox(monkeypatch)
+
+    real_plan_sandbox = sandbox_mod.plan_sandbox
+    planned: list[dict[str, Any]] = []
+    plans: list[sandbox_mod.SandboxPlan] = []
+
+    def _spy_plan_sandbox(**kwargs: Any) -> Any:
+        planned.append(kwargs)
+        plan = real_plan_sandbox(**kwargs)
+        plans.append(plan)
+        return plan
+
+    monkeypatch.setattr(sandbox_mod, "plan_sandbox", _spy_plan_sandbox)
+    captured = _capture_child(monkeypatch)
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    await _run(ctx)
+
+    assert planned, "the untrusted static-check path must plan a sandbox"
+    assert planned[0].get("copy_on_write_repo") is True, planned[0]
+    assert plans[0].context is not None, plans[0]
+    assert plans[0].context.copy_on_write_repo is True, plans[0].context
+
+    command = " ".join(captured["argv"])
+    assert "mount -t overlay overlay" in command, command
+    assert "upperdir=" in command, command
+    assert "repo-copy" in command, command  # the recorded scratch-copy fallback
+    assert _view_is_widened_for_the_dropped_uid(command), (
+        "the copy-on-write view is left at the creator's mode, so a gate dropped "
+        f"to the agent uid cannot write the tree (P-8): {command}"
+    )

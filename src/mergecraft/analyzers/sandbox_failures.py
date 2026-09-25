@@ -45,11 +45,38 @@ _CONNECTION_REFUSED_RE = re.compile(r"connection refused", re.IGNORECASE)
 
 # Write-denied shapes. ``EROFS`` / "read-only file system" name the read-only
 # bind; ``EACCES`` is the permission the sandboxed identity lacks outside its
-# scratch view.
+# scratch view. These are errno-level tokens a tool prints for a kernel denial,
+# so they match on their own. The human-readable spelling coreutils print for
+# the same denial is ``Permission denied`` (and, for the same class of syscall,
+# ``Operation not permitted``) — but by the time a gate's output reaches this
+# classifier the redaction boundary has already replaced the denied path with
+# ``<redacted>``, so the path can no longer be the signal. Match on the *write
+# operation* named on the same line instead: the shape a real denied
+# ``mkdir``/``cp``/``open``/``touch`` takes, and a shape ordinary *code* output
+# (a lint error about a policy, a message about the user's own code) does not.
 _WRITE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bEROFS\b"),
     re.compile(r"read-only file system", re.IGNORECASE),
     re.compile(r"\bEACCES\b"),
+)
+
+# A denial phrase names the refusal; a write-operation shape names what was
+# refused. Both must be present on the line, so output that merely *mentions* a
+# denial about the user's code (a policy error, an auth failure) is not mistaken
+# for a sandbox-denied write. ``operation not permitted`` is EPERM's English
+# spelling, so it belongs with the denial phrases — never the write-operation
+# set, where it would classify on its own. The bare ``open`` token is only a
+# write shape with the libc/syscall punctuation (``open:`` / ``open '`` /
+# ``open(``) a real denied open prints; a sentence *about* opening something
+# (``permission denied to open a user file``) is not.
+_DENIAL_PHRASE_RE = re.compile(
+    r"permission denied|operation not permitted|\bEPERM\b", re.IGNORECASE
+)
+_WRITE_OPERATION_RE = re.compile(
+    r"\b(?:mkdir|cp|touch|cannot create)\b"
+    r"|open\s*[:(]"
+    r"|open\s*'",
+    re.IGNORECASE,
 )
 
 _IPV4_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
@@ -87,6 +114,8 @@ def _reason_for_line(line: str) -> str | None:
     for pattern in _WRITE_PATTERNS:
         if pattern.search(line):
             return PATH_NOT_WRITABLE_REASON
+    if _DENIAL_PHRASE_RE.search(line) and _WRITE_OPERATION_RE.search(line):
+        return PATH_NOT_WRITABLE_REASON
     return None
 
 

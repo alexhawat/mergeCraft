@@ -104,22 +104,33 @@ class AnalyzerOutcome:
         return self.status not in _NO_VERDICT
 
 
-def _run_tmpdir(plan: AnalyzerPlan) -> Path:
+def _run_tmpdir(plan: AnalyzerPlan, *, output_dir: Path | None = None) -> Path:
+    """Return the directory gate output is persisted to.
+
+    A sandboxed run passes ``output_dir`` — the sandbox/run tmpdir — so the
+    persisted output never lands in the real checkout. The unsandboxed path
+    keeps the historical ``<cwd>/.mergecraft/analyzer-runs`` location (SX-D13).
+    """
     from pathlib import Path
 
-    base = plan.cwd or Path.cwd()
-    tmpdir = base / ".mergecraft" / "analyzer-runs"
+    if output_dir is not None:
+        tmpdir = output_dir
+    else:
+        base = plan.cwd or Path.cwd()
+        tmpdir = base / ".mergecraft" / "analyzer-runs"
     tmpdir.mkdir(parents=True, exist_ok=True)
     return tmpdir
 
 
-def _persist_output(raw: str, *, plan: AnalyzerPlan) -> str | None:
+def _persist_output(raw: str, *, plan: AnalyzerPlan, output_dir: Path | None = None) -> str | None:
     if not raw:
         return None
     from mergecraft.analyzers.parse import persist_analyzer_output
 
     redacted = redact_analyzer_output(raw, tool_id=plan.manifest_id)
-    path = persist_analyzer_output(redacted, tmpdir=_run_tmpdir(plan), tool_id=plan.manifest_id)
+    path = persist_analyzer_output(
+        redacted, tmpdir=_run_tmpdir(plan, output_dir=output_dir), tool_id=plan.manifest_id
+    )
     return str(path)
 
 
@@ -321,7 +332,11 @@ def _run_subprocess(
 
 
 def _outcome_from_completed(
-    completed: subprocess.CompletedProcess[str], *, plan: AnalyzerPlan, command: str
+    completed: subprocess.CompletedProcess[str],
+    *,
+    plan: AnalyzerPlan,
+    command: str,
+    output_dir: Path | None = None,
 ) -> AnalyzerOutcome:
     """Combine stdout/stderr, redact, persist to disk, and build the final outcome."""
     raw_stdout = (completed.stdout or "").strip()
@@ -338,7 +353,7 @@ def _outcome_from_completed(
     # Persist only what a parser can read. ``combined`` is the display string and
     # may be nothing but ``plan.version_note`` prose when the analyzer wrote to
     # neither stream; persisting that turned a clean run into "failed to parse".
-    output_path = _persist_output(raw_for_parser, plan=plan)
+    output_path = _persist_output(raw_for_parser, plan=plan, output_dir=output_dir)
     return AnalyzerOutcome(
         name=plan.manifest_id,
         command=command,
@@ -371,6 +386,14 @@ def run_plan(
     timeout_s = plan.timeout_s or CHECK_TIMEOUT_S
     if sandbox_context is not None:
         timeout_s = min(timeout_s, sandbox_context.timeout_s)
+    # F2-b: a sandboxed gate's output is persisted into the sandbox/run tmpdir,
+    # never the real checkout. A gate presented a disposable copy-on-write view
+    # must not leave `.mergecraft/analyzer-runs/*.out` in the tree the view was
+    # carved from, or the "real checkout is byte-identical" guarantee breaks.
+    # The non-sandboxed/catalog path keeps its historical location (SX-D13).
+    output_dir: Path | None = None
+    if sandbox_context is not None and sandbox_context.read_only_source:
+        output_dir = sandbox_context.scratch_dir / "analyzer-runs"
     command = _command_string(plan.argv)
     from mergecraft.analyzers.egress import (
         EgressSession,
@@ -422,11 +445,11 @@ def run_plan(
             timeout_s=timeout_s,
             preexec_fn=preexec_fn,
             command=command,
-            sandboxed=bool(sandbox_context is not None and sandbox_context.read_only_source),
+            sandboxed=output_dir is not None,
         )
         if isinstance(result, AnalyzerOutcome):
             return result
-        return _outcome_from_completed(result, plan=plan, command=command)
+        return _outcome_from_completed(result, plan=plan, command=command, output_dir=output_dir)
     except FilteredEgressSetupError as exc:
         return AnalyzerOutcome(
             name=plan.manifest_id,

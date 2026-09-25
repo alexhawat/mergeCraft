@@ -586,6 +586,7 @@ async def _publish(
     actual_outcome: str | None = None,
     verdict_diagnostic: Any | None = None,
     emit: bool = True,
+    sink_scan_error: str | None = None,
 ) -> str | None:
     """Prepare packet + persist learnings + status checks, then optionally emit.
 
@@ -593,6 +594,12 @@ async def _publish(
     normal post-agent path in ``_finalize``, and the exception cleanup path
     (``emit=False`` — failure still reports status but skips SARIF/packet
     emit). Tracer span wraps the emit path only.
+
+    ``sink_scan_error`` (SX-D10) is the post-run sink-hit reason. It does not
+    change the completion check — the caller has already mapped the failed
+    outcome — but it forces the ``mergecraft-approval`` conclusion to
+    ``failure`` regardless of the packet verdict, so a credential that reached a
+    local sink cannot leave the merge gate open.
     """
     tool_context = ctx.tool_context
     if tool_context is None:
@@ -643,6 +650,7 @@ async def _publish(
                     failure_reason="formal review record publication failed",
                     conclusion="neutral",
                     packet=prepared,
+                    approval_failure_reason=sink_scan_error,
                 )
                 raise
         await report_status_checks(
@@ -651,6 +659,7 @@ async def _publish(
             failure_reason=failure_reason,
             conclusion=RUN_OUTCOME_CONCLUSION[outcome],
             packet=prepared,
+            approval_failure_reason=sink_scan_error,
         )
         if prepared is not None:
             from mergecraft.utils.status_checks import _run_url
@@ -2022,6 +2031,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         verdict_prediction=verdict_prediction,
         actual_outcome=str(outcome) if verdict_prediction is not None else None,
         verdict_diagnostic=verdict_diagnostic_code,
+        sink_scan_error=sink_scan_error,
     )
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted
