@@ -82,6 +82,28 @@ _WRITE_OPERATION_RE = re.compile(
 _IPV4_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
 _LOOPBACK_HOST_RE = re.compile(r"\blocalhost\b", re.IGNORECASE)
 
+# "Other error content" — a line that reports an outcome about the *code* the
+# gate judged (a lint/compiler/test diagnostic), not a sandbox denial. When one
+# of these accompanies a sandbox-shaped line, the failure is *mixed*: a real
+# gate error printed next to an incidental sandbox line (a cleanup write that
+# was denied, a lookup the tool attempted anyway). The incident line must not
+# suppress the gate's real result (the inverse of the P-8 rule SX-D7 protects).
+# Deliberately generic tool-output words (``error:`` without a location,
+# ``failed``, an exit-code summary) are *not* included: a genuine sandbox
+# failure prints those as the consequence of the denial.
+_OTHER_ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # source-location diagnostics: ``path:line`` or ``path:line:col``
+    re.compile(r"^[^\s:][^\s:]*:\d+(?::\d+)?:"),
+    # compiler/interpreter error headline with an optional bracketed code
+    re.compile(r"^\s*error(?:\[[A-Za-z0-9]+\])?\s*:", re.IGNORECASE),
+    # ruff/pycodestyle code headline (e.g. ``E501 line too long``)
+    re.compile(r"^\s*[A-Z]\d{3,4}\b"),
+    # test-framework failure markers
+    re.compile(r"^\s*(?:FAILED|FAIL|not ok)\b"),
+    re.compile(r"\bAssertionError\b"),
+    re.compile(r"Traceback \(most recent call last\)"),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class SandboxFailure:
@@ -135,9 +157,43 @@ def classify_sandbox_failure_detail(text: str) -> SandboxFailure | None:
     return None
 
 
+def _has_other_error_content(text: str) -> bool:
+    """Whether ``text`` reports an outcome about the code the gate judged.
+
+    Lines that are themselves sandbox-shaped are skipped: the sandbox denial is
+    the incident signal, not independent evidence of a real failure.
+    """
+    for raw_line in text.splitlines():
+        if _reason_for_line(raw_line) is not None:
+            continue
+        if any(pattern.search(raw_line) for pattern in _OTHER_ERROR_PATTERNS):
+            return True
+    return False
+
+
+def classify_unambiguous_sandbox_failure_detail(text: str) -> SandboxFailure | None:
+    """Return the sandbox failure only when the output is *unambiguously* sandbox-caused.
+
+    A gate failure is downgraded to ``declared-but-cannot-run`` only when a
+    sandbox signature is present and *no* line reports a real diagnostic about
+    the code (a source-location lint/compiler error, a test-framework failure).
+    If the output mixes a sandbox-shaped line with such an error — a real lint
+    failure plus an incidental ``getaddrinfo``/``EACCES`` from cleanup — the
+    gate's own result wins and this returns ``None`` (P-8 inverse). A single
+    unclassified line does not hide a later sandbox signature: this scans the
+    whole output before deciding.
+    """
+    detail = classify_sandbox_failure_detail(text)
+    if detail is None:
+        return None
+    if _has_other_error_content(text):
+        return None
+    return detail
+
+
 def classify_sandbox_failure(text: str) -> str | None:
     """Return the sandbox reason for ``text``, or ``None`` when it is the gate's own result."""
-    detail = classify_sandbox_failure_detail(text)
+    detail = classify_unambiguous_sandbox_failure_detail(text)
     return detail.reason if detail is not None else None
 
 
@@ -147,4 +203,5 @@ __all__ = [
     "SandboxFailure",
     "classify_sandbox_failure",
     "classify_sandbox_failure_detail",
+    "classify_unambiguous_sandbox_failure_detail",
 ]

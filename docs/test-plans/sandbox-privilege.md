@@ -40,9 +40,13 @@ Bare `uv run` uses the runtime virtualenv; the dev extras (pytest) live in
 | A denied write is still classified after pre-classification redaction turns its path into `<redacted>` | Unit / error handling | `tests/analyzers/test_sandbox_failure_signatures.py` · `test_redacted_write_denied_line_classifies_as_path_not_writable` |
 | Ordinary tool output that merely mentions "network", or a code-level "permission denied" that names no denied write, stays unclassified | Unit | `tests/analyzers/test_sandbox_failure_signatures.py` · `test_ordinary_tool_output_is_left_unclassified` |
 | A code-level denial sentence (a bare denial phrase, or a generic `open` token) is not a sandbox write, while real kernel/errno write denials still classify | Unit | `tests/analyzers/test_sandbox_failure_signatures.py` · `test_ordinary_tool_output_is_left_unclassified`, `test_write_denied_positive_matrix_still_classifies` |
+| A purely sandbox-caused multi-line stream still classifies, keeping the matched line as evidence | Unit | `tests/analyzers/test_sandbox_failure_signatures.py` · `test_multi_line_all_sandbox_output_classifies_and_keeps_the_matched_line` |
+| A real diagnostic mixed with incidental sandbox noise is not an *unambiguous* sandbox failure, though the line-oriented detail classifier still finds the noise line | Unit / error handling | `tests/analyzers/test_sandbox_failure_signatures.py` · `test_mixed_output_is_not_an_unambiguous_sandbox_failure`, `test_unambiguous_pure_sandbox_failure_still_classifies` |
 | Untrusted gates run inside the sandbox with a scrubbed env and scratch `HOME`/cache/tmp | Integration | `tests/mcp/test_static_checks.py` · `test_untrusted_gates_run_sandboxed_with_scratch_env` |
 | A sandbox-caused failure becomes `declared-but-cannot-run`, not a finding | Integration / error handling | `tests/mcp/test_static_checks.py` · `test_sandbox_caused_gate_failure_is_declared_not_a_finding` |
+| A real gate failure printed next to incidental sandbox noise (a cleanup `EACCES`/`EPERM`, an unrelated `getaddrinfo`/`Network is unreachable`/`EROFS` line) stays `failed` with its exit code and error text | Integration / error handling | `tests/mcp/test_static_checks.py` · `test_mixed_real_error_and_sandbox_noise_stays_failed` |
 | A real gate failure is still reported as that gate's result | Integration | `tests/mcp/test_static_checks.py` · `test_real_gate_failure_is_still_the_gates_result` |
+| Ordinary gate output that merely mentions a denial (a code-level `permission denied`, a policy message, an assertion) stays `failed` | Integration | `tests/mcp/test_static_checks.py` · `test_ordinary_gate_output_that_mentions_a_denial_stays_failed` |
 | A sandboxed gate's writes never reach the real checkout | Integration | `tests/mcp/test_static_checks.py` · `test_sandboxed_gate_write_never_reaches_the_real_checkout` |
 | The untrusted gate path requests the copy-on-write view and its command carries the overlay/scratch-copy fragment, widened for the dropped uid | Integration | `tests/mcp/test_static_checks.py` · `test_untrusted_gates_request_the_copy_on_write_checkout_view` |
 | A gate writing build output at the repo root succeeds and the real checkout is byte-identical afterwards | Root-gated | `tests/security/test_untrusted_gate_write_view.py` · `test_gate_writes_the_view_and_leaves_the_real_checkout_untouched` |
@@ -52,6 +56,7 @@ Bare `uv run` uses the runtime virtualenv; the dev extras (pytest) live in
 | The trusted tier runs gates as before, without a namespace | Guard | `tests/mcp/test_static_checks.py` · `test_trusted_tier_gate_still_runs_without_a_namespace` |
 | The sink scan returns sink paths and never contents | Unit | `tests/security/test_review_canary.py` · `test_scan_returns_sink_paths_and_never_contents`, `test_scan_returns_nothing_for_clean_sinks` |
 | A canary sink fails the run, names the path, forces the approval conclusion to `failure`, and is deleted | Functional / E2E | `tests/security/test_sink_scan_post_run.py` · `test_canary_sink_fails_the_run_names_the_path_and_is_deleted` |
+| A credential the run writes into its own emitted packet during publication fails the run, forces the approval conclusion to `failure`, and is deleted before upload | Functional / E2E | `tests/security/test_sink_scan_post_run.py` · `test_canary_in_the_generated_packet_fails_before_upload` |
 | Clean sinks change nothing | Functional / E2E | `tests/security/test_sink_scan_post_run.py` · `test_clean_sinks_change_nothing` |
 | Neither image recursively hands the runtime tree to the agent user; the agent user and precompiled bytecode remain | Static / guard | `tests/security/test_dockerfile_runtime_ownership.py` |
 | The shell payload runs as a non-root UID with no effective capabilities | Root-gated | `tests/security/test_shell_uid_drop.py` · `test_shell_payload_runs_unprivileged_with_no_effective_capabilities` |
@@ -98,6 +103,31 @@ now green against the landed fixes):
   the first case is host-runnable as
   `tests/analyzers/test_sandbox_failure_signatures.py` ·
   `test_redacted_write_denied_line_classifies_as_path_not_writable`.
+
+**Follow-up regression cases — authored red, green against the re-scan and
+mixed-classification fixes** (from the PR #880 self-review; the implementation is
+the parallel `src/mergecraft/main.py` + `src/mergecraft/mcp/static_checks.py` +
+`src/mergecraft/analyzers/sandbox_failures.py` change):
+
+- the run-generated packet is re-scanned after publication and deleted before
+  upload, failing the run and the approval conclusion
+  (`tests/security/test_sink_scan_post_run.py` ·
+  `test_canary_in_the_generated_packet_fails_before_upload`);
+- a mixed real-error-plus-sandbox-noise gate output stays `failed` and is not an
+  unambiguous sandbox failure at the classifier
+  (`tests/mcp/test_static_checks.py` ·
+  `test_mixed_real_error_and_sandbox_noise_stays_failed`;
+  `tests/analyzers/test_sandbox_failure_signatures.py` ·
+  `test_mixed_output_is_not_an_unambiguous_sandbox_failure`);
+- ordinary gate output that merely mentions a denial stays `failed`
+  (`tests/mcp/test_static_checks.py` ·
+  `test_ordinary_gate_output_that_mentions_a_denial_stays_failed`).
+
+The pure-denial and ordinary-unclassified halves they guard stay green
+throughout (`test_sandbox_caused_gate_failure_is_declared_not_a_finding`,
+`test_ordinary_tool_output_is_left_unclassified`,
+`test_unambiguous_pure_sandbox_failure_still_classifies`,
+`test_multi_line_all_sandbox_output_classifies_and_keeps_the_matched_line`).
 
 **Green throughout** (guards that must not regress):
 
@@ -152,7 +182,10 @@ They assert process identity and mount state — never an escape payload.
   analyzer UID-drop cases (those keep the read-only bind).
 - The post-run sink cases drive the real orchestrator through the scripted
   run harness, planting the canary during the agent phase so it is present when
-  the finalize stage scans. The harness can run the real status-check reporting
+  the finalize stage scans. The harness can also make the fake publisher write a
+  payload to the emitted packet path, so a credential that only reaches an
+  artifact generated *during publication* can be exercised (`packet_payload`).
+  The harness can run the real status-check reporting
   against a recording client (`capture_status_checks=True`) so the assertion is
   on the check-runs the run would post — the `mergecraft-approval` conclusion
   included — not on the orchestrator's arguments to the reporting layer.

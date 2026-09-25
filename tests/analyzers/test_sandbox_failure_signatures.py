@@ -4,6 +4,12 @@ A gate that fails because the sandbox denied it network or a write produced no
 verdict about the diff; reporting it as a finding invents a code defect. The
 table maps the signature stderr to a named reason and leaves ordinary tool
 output alone — even output that happens to mention "network".
+
+A failure is only *unambiguously* sandbox-caused when no line reports a real
+diagnostic about the diff. A real lint/test error printed next to an incidental
+sandbox-shaped line (a cleanup ``EACCES``, a ``getaddrinfo`` the tool attempted
+anyway) stays the gate's result, so the unambiguous classifier returns ``None``
+even though the line-oriented detail classifier matched a line.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ WRITE_SAMPLES: tuple[str, ...] = (
     "EROFS: read-only file system, open '/opt/mergecraft/build.log'",
     "Read-only file system",
     "EACCES: permission denied, open '/opt/mergecraft/.venv/pyvenv.cfg'",
+    "EACCES: permission denied, unlink '<redacted>'",
 )
 
 ORDINARY_SAMPLES: tuple[str, ...] = (
@@ -61,6 +68,22 @@ ORDINARY_SAMPLES: tuple[str, ...] = (
     "src/policy.py:10:1: error: permission denied to open a user file",
     # An assertion message mentioning ``open``, again code, not a denied syscall.
     "AssertionError: permission denied to open the vault",
+)
+
+# Mixed output: a real diagnostic about the diff printed next to an incidental
+# sandbox-shaped line (a cleanup write the sandbox refused, a lookup the tool
+# attempted anyway). The gate judged the diff, so the whole failure is not an
+# *unambiguous* sandbox failure; keying on the first sandbox-shaped line alone
+# suppresses a real lint/test error (the inverse of the P-8 rule).
+MIXED_SAMPLES: tuple[str, ...] = (
+    "src/app.py:3:1: error: undefined name 'helper' (F821)\n"
+    "EACCES: permission denied, unlink '<redacted>'",
+    "EACCES: permission denied, unlink '<redacted>'\n"
+    "src/app.py:3:1: error: undefined name 'helper' (F821)",
+    "E501 line too long\nCould not resolve host: registry.npmjs.org",
+    "FAILED tests/test_app.py::test_x\nNetwork is unreachable",
+    "AssertionError: operation not permitted\nEACCES: permission denied, open '<redacted>'",
+    "Traceback (most recent call last)\ngetaddrinfo EAI_AGAIN registry.npmjs.org",
 )
 
 # A denied write leaves the kernel's ``Permission denied`` spelling and an
@@ -97,6 +120,27 @@ def _classifier() -> Callable[[str], str | None]:
     )
 
 
+def _detail_classifier() -> Callable[[str], Any]:
+    module = import_module("mergecraft.analyzers.sandbox_failures")
+    candidate: Any = getattr(module, "classify_sandbox_failure_detail", None)
+    if callable(candidate):
+        return candidate
+    raise AssertionError(
+        "mergecraft.analyzers.sandbox_failures must expose classify_sandbox_failure_detail"
+    )
+
+
+def _unambiguous_classifier() -> Callable[[str], Any]:
+    module = import_module("mergecraft.analyzers.sandbox_failures")
+    candidate: Any = getattr(module, "classify_unambiguous_sandbox_failure_detail", None)
+    if callable(candidate):
+        return candidate
+    raise AssertionError(
+        "mergecraft.analyzers.sandbox_failures must expose "
+        "classify_unambiguous_sandbox_failure_detail"
+    )
+
+
 @pytest.mark.parametrize("sample", NETWORK_SAMPLES)
 def test_network_signatures_classify_as_network_disabled(sample: str) -> None:
     assert _classifier()(sample) == NETWORK_REASON
@@ -123,6 +167,36 @@ def test_ordinary_tool_output_is_left_unclassified(sample: str) -> None:
     assert _classifier()(sample) is None
 
 
+@pytest.mark.parametrize("sample", MIXED_SAMPLES)
+def test_mixed_output_is_not_an_unambiguous_sandbox_failure(sample: str) -> None:
+    """A real diagnostic next to incidental sandbox noise keeps the gate's result.
+
+    The line-oriented detail classifier still finds the sandbox line — it must,
+    so the gate can name the evidence — but the *unambiguous* classifier the gate
+    runner calls returns ``None``: a genuine lint/test error accompanied by an
+    unrelated ``getaddrinfo``/``EACCES`` line must not be downgraded to
+    ``declared-but-cannot-run`` (the inverse of the P-8 rule).
+    """
+    assert _detail_classifier()(sample) is not None
+    assert _unambiguous_classifier()(sample) is None
+    assert _classifier()(sample) is None
+
+
+@pytest.mark.parametrize(
+    ("sample", "reason"),
+    [
+        *((sample, NETWORK_REASON) for sample in NETWORK_SAMPLES),
+        *((sample, WRITE_REASON) for sample in WRITE_SAMPLES),
+    ],
+)
+def test_unambiguous_pure_sandbox_failure_still_classifies(sample: str, reason: str) -> None:
+    """The genuine cases still become ``declared-but-cannot-run`` with their reason."""
+    detail = _unambiguous_classifier()(sample)
+
+    assert detail is not None, sample
+    assert detail.reason == reason
+
+
 def test_redacted_write_denied_line_classifies_as_path_not_writable() -> None:
     """A pre-redacted denied write still names *"sandboxed: path not writable"*.
 
@@ -145,3 +219,26 @@ def test_errno_write_signatures_survive_redaction(sample: str) -> None:
     """The errno spellings still classify on the line the classifier actually sees."""
     redacted = redact_analyzer_output(sample, tool_id="gate")
     assert _classifier()(redacted) == WRITE_REASON, redacted
+
+
+def test_multi_line_all_sandbox_output_classifies_and_keeps_the_matched_line() -> None:
+    """A purely sandbox-caused multi-line stream still classifies (SX-D7).
+
+    A real gate failure prints several lines; when every one is a sandbox shape
+    (a package manager's DNS failures, say) the gate is still
+    ``declared-but-cannot-run``, and the matched line is retained as evidence.
+    The counterpart — a real error printed next to *incidental* sandbox noise —
+    is pinned at the gate boundary in ``tests/mcp/test_static_checks.py``:
+    a classifier match must not be read as a verdict that the whole failure was
+    sandbox-caused.
+    """
+    lines = (
+        "Could not resolve host: registry.npmjs.org",
+        "Network is unreachable",
+        "getaddrinfo EAI_AGAIN registry.npmjs.org",
+    )
+    detail = _detail_classifier()("\n".join(lines))
+
+    assert detail is not None
+    assert detail.reason == NETWORK_REASON
+    assert detail.line == lines[0]

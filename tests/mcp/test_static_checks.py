@@ -321,7 +321,23 @@ async def test_untrusted_gates_run_sandboxed_with_scratch_env(
             "Temporary failure in name resolution",
             "sandboxed: network is disabled",
         ),
+        ("Network is unreachable", "sandboxed: network is disabled"),
+        ("getaddrinfo EAI_AGAIN registry.npmjs.org", "sandboxed: network is disabled"),
         ("EROFS: read-only file system", "sandboxed: path not writable"),
+        (
+            "EACCES: permission denied, open '/opt/mergecraft/.venv/pyvenv.cfg'",
+            "sandboxed: path not writable",
+        ),
+        (
+            "EACCES: permission denied, unlink '<redacted>'",
+            "sandboxed: path not writable",
+        ),
+        # ``run.py`` redacts the denied path before classification, so the
+        # realistic ``Permission denied`` shape arrives with ``<redacted>``.
+        (
+            "mkdir: cannot create directory '<redacted>': Permission denied",
+            "sandboxed: path not writable",
+        ),
     ],
 )
 @pytest.mark.asyncio
@@ -344,6 +360,87 @@ async def test_sandbox_caused_gate_failure_is_declared_not_a_finding(
     assert checks[0]["status"] == "declared-but-cannot-run", payload
     assert checks[0]["status"] != "failed"
     assert reason in json.dumps(payload), payload
+
+
+# A real gate error printed alongside an incidental sandbox-shaped line (a
+# cleanup write that failed, a lookup the tool tried anyway). The gate produced
+# a verdict about the diff, so the whole failure must stay ``failed`` — the
+# sandbox line is noise, not a reason to suppress the verdict (P-8 inverse).
+_MIXED_SANDBOX_NOISE: tuple[str, ...] = (
+    "EACCES: permission denied, unlink '<redacted>'",
+    "EPERM: operation not permitted, open '<redacted>'",
+    "getaddrinfo EAI_AGAIN registry.npmjs.org",
+    "Network is unreachable",
+    "EROFS: read-only file system, open '<redacted>.log'",
+)
+
+_REAL_GATE_ERROR = "src/app.py:3:1: error: undefined name 'helper' (F821)"
+
+
+@pytest.mark.parametrize("noise", _MIXED_SANDBOX_NOISE)
+@pytest.mark.asyncio
+async def test_mixed_real_error_and_sandbox_noise_stays_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, noise: str
+) -> None:
+    """A real error plus incidental sandbox noise is never downgraded (SX-D7).
+
+    The classifier matches the first sandbox-shaped line; a caller that keys the
+    whole gate on that alone suppresses a genuine lint/test failure whenever an
+    unrelated ``getaddrinfo``/``EACCES`` line appears next to it. The gate's own
+    verdict and exit code must survive.
+    """
+    _force_untrusted_sandbox(monkeypatch)
+    _capture_child(
+        monkeypatch,
+        returncode=1,
+        stdout=_REAL_GATE_ERROR,
+        stderr=noise,
+    )
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    checks = payload["checks"]
+    assert checks, payload
+    assert checks[0]["status"] == "failed", payload
+    assert checks[0]["status"] != "declared-but-cannot-run"
+    assert checks[0]["exitCode"] == 1, payload
+    assert _REAL_GATE_ERROR in checks[0]["output"], payload
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "src/app.py:3:1: error: permission denied to call the network helper",
+        "npm ERR! permission denied by policy",
+        "test_auth.py:22: AssertionError: operation not permitted",
+        "ruff check failed: the `network` fixture is unused (F841)",
+    ],
+)
+@pytest.mark.asyncio
+async def test_ordinary_gate_output_that_mentions_a_denial_stays_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stderr: str
+) -> None:
+    """Output about the user's code is the gate's result, not a sandbox denial."""
+    _force_untrusted_sandbox(monkeypatch)
+    _capture_child(monkeypatch, returncode=1, stderr=stderr)
+
+    ctx = _ctx(
+        tmp_path,
+        static_checks=[StaticCheckConfig(name="lint", command="gate")],
+        enabled=True,
+    )
+    ctx.trust_tier = "untrusted"
+    payload = await _run(ctx)
+
+    checks = payload["checks"]
+    assert checks[0]["status"] == "failed", payload
+    assert checks[0]["exitCode"] == 1, payload
 
 
 @pytest.mark.asyncio

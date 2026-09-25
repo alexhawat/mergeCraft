@@ -213,6 +213,7 @@ async def run_main_for_test(
     setup_script_stderr: bytes = b"",
     setup_script_delay_s: float = 0.0,
     packet_path: Path | None = None,
+    packet_payload: str | None = None,
     cleanup_tmpdir: bool = True,
     prompt: str = "review the diff",
     capture_status_checks: bool = False,
@@ -230,6 +231,9 @@ async def run_main_for_test(
     a recording client and records the check-runs it would post in
     ``record.status_check_runs`` (``name`` / ``conclusion`` / ``summary``),
     instead of only the kwargs the orchestrator handed the reporting layer.
+    ``packet_payload`` (with ``packet_path``) makes the fake publisher write that
+    text to ``packet_path`` at publication time — the run's own generated
+    artifact, as opposed to a file planted during the agent phase.
     """
     repo_root = tmp_path / "workspace"
     repo_root.mkdir()
@@ -469,6 +473,9 @@ async def run_main_for_test(
     def _fake_emit_packet(ctx: Any, **_kwargs: Any) -> Path | None:
         if ctx is not None:
             ctx_holder.append(ctx)
+        if packet_payload is not None and packet_path is not None:
+            packet_path.parent.mkdir(parents=True, exist_ok=True)
+            packet_path.write_text(packet_payload, encoding="utf-8")
         return packet_path
 
     monkeypatch.setattr(main_mod, "emit_run_packet", _fake_emit_packet)

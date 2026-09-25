@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.analyzers.sandbox_failures import classify_sandbox_failure_detail
+from mergecraft.analyzers.sandbox_failures import classify_unambiguous_sandbox_failure_detail
 from mergecraft.ci.evidence import (
     declared_gate_findings,
     record_ci_findings,
@@ -178,14 +178,15 @@ def _sandbox_scratch_env(scratch_dir: Path) -> dict[str, str]:
 def _classify_sandbox_failures(outcomes: list[StaticCheckOutcome]) -> list[StaticCheckOutcome]:
     """Turn sandbox-caused failures into ``declared-but-cannot-run`` (SX-D7 / P-8).
 
-    A non-zero exit whose output matches the sandbox signature table produced no
+    A non-zero exit whose output is *unambiguously* sandbox-caused produced no
     verdict about the diff, so it is not a finding. The matched line is kept
-    beside the reason; any other non-zero exit stays the gate's real result.
+    beside the reason; a real diagnostic printed next to incidental sandbox
+    noise keeps the gate's real result (P-8 inverse).
     """
     classified: list[StaticCheckOutcome] = []
     for outcome in outcomes:
         if outcome.status == "failed":
-            detail = classify_sandbox_failure_detail(outcome.output)
+            detail = classify_unambiguous_sandbox_failure_detail(outcome.output)
             if detail is not None:
                 logger.info(
                     "static check {} failed inside the sandbox: {}",

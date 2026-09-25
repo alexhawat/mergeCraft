@@ -6,6 +6,11 @@ contents), force the approval conclusion to ``failure``, and delete the matching
 files before the workflow's artifact-upload step can ship them. Every artifact
 source the evidence and trace uploads are assembled from is in scope, not only
 the run's temp directory.
+
+The scan runs before ``_publish``, so the artifact the run generates *during*
+publication — the emitted packet / run packet — is a second timing hazard: the
+generated sink must be re-checked after it is written and deleted before upload,
+or a credential that only ever reached the packet ships anyway.
 """
 
 from __future__ import annotations
@@ -31,6 +36,8 @@ _ARTIFACT_SOURCES = (
     "mergecraft/run-packet.json",
     "shadow-compare.jsonl",
 )
+
+_GENERATED_PACKET = "mergecraft/run-packet.json"
 
 
 class _SinkWritingAgent:
@@ -115,6 +122,59 @@ async def test_canary_sink_fails_the_run_names_the_path_and_is_deleted(
 
     if not run_tmpdir_sink:
         assert not (runner_temp / location).exists(), "the sink must be removed before upload"
+
+
+@pytest.mark.asyncio
+async def test_canary_in_the_generated_packet_fails_before_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A credential the run writes into its own packet is caught after publication.
+
+    The post-run sink scan runs before ``_publish``, so a credential that first
+    reaches an artifact the run generates *during publication* — the emitted
+    ``packet-*.json`` / run packet, which the scanner itself treats as an upload
+    source — would otherwise ship untouched (SX-D10). The packet below is
+    written at publication time, not during the agent phase, so only a
+    post-publish re-scan can see it: the run must fail, name the path, force the
+    ``mergecraft-approval`` conclusion to ``failure`` and delete the file before
+    the workflow's artifact upload, without printing its contents.
+    """
+    runner_temp = tmp_path / "runner-temp"
+    packet_path = runner_temp / _GENERATED_PACKET
+    payload = f"scm={_SCM_CANARY}\nprovider={_PROVIDER_CANARY}\n"
+    agent = _SinkWritingAgent(run_tmpdir_sink=False)
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        cleanup_tmpdir=False,
+        agent=agent,  # type: ignore[arg-type] — duck-typed agent, same protocol as FakeAgent
+        env={"ANTHROPIC_API_KEY": _PROVIDER_CANARY},
+        capture_status_checks=True,
+        packet_path=packet_path,
+        packet_payload=payload,
+    )
+
+    assert rec.raised is None, rec.raised
+    assert rec.result is not None
+    assert rec.result.success is False
+    assert rec.result.outcome is RunOutcome.failed
+    error = rec.result.error or ""
+    assert str(packet_path) in error, error
+    assert _SCM_CANARY not in error, error
+    assert _PROVIDER_CANARY not in error, error
+
+    completion_runs = [run for run in rec.status_check_runs if run.get("name") == COMPLETION_CHECK]
+    assert completion_runs, rec.status_check_runs
+    assert completion_runs[-1].get("conclusion") == "failure", completion_runs
+    approval_runs = [run for run in rec.status_check_runs if run.get("name") == APPROVAL_CHECK]
+    assert approval_runs, rec.status_check_runs
+    assert approval_runs[-1].get("conclusion") == "failure", approval_runs
+
+    assert not packet_path.exists(), (
+        "the run-generated packet holding credential material must be removed "
+        "before the workflow's artifact upload"
+    )
 
 
 @pytest.mark.asyncio

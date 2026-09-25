@@ -118,7 +118,7 @@ from mergecraft.utils.workspace import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.config.settings import RepoSettings, RunContextData
@@ -587,25 +587,40 @@ async def _publish(
     verdict_diagnostic: Any | None = None,
     emit: bool = True,
     sink_scan_error: str | None = None,
+    sink_scan: Callable[[Path | None], str | None] | None = None,
 ) -> str | None:
-    """Prepare packet + persist learnings + status checks, then optionally emit.
+    """Prepare packet + emit + persist learnings + status checks.
 
-    Shared by the setup-script "inconclusive" short-circuit (G4.2), the
-    normal post-agent path in ``_finalize``, and the exception cleanup path
-    (``emit=False`` — failure still reports status but skips SARIF/packet
-    emit). Tracer span wraps the emit path only.
+    Shared by the normal post-agent path in ``_finalize`` and the exception
+    cleanup path (``emit=False`` — failure still reports status but skips
+    SARIF/packet emit). Tracer span wraps the emit path only.
 
-    ``sink_scan_error`` (SX-D10) is the post-run sink-hit reason. It does not
-    change the completion check — the caller has already mapped the failed
+    ``sink_scan_error`` (SX-D10) is the pre-publication sink-hit reason. It does
+    not change the completion check — the caller has already mapped the failed
     outcome — but it forces the ``mergecraft-approval`` conclusion to
     ``failure`` regardless of the packet verdict, so a credential that reached a
     local sink cannot leave the merge gate open.
+
+    ``sink_scan`` (SX-D10) is the post-emission scan callback. In the emit path
+    the packet is written **before** the status/approval report, then
+    ``sink_scan(written)`` re-scans it (the artifact the workflow uploads). A
+    non-``None`` result forces the completion and approval checks to ``failure``
+    for this report, so a credential that only ever reached the generated
+    packet still closes the merge gate before artifact upload.
     """
     tool_context = ctx.tool_context
     if tool_context is None:
         return None
-    run_ok = run_succeeded_for_outcome(outcome)
-    prepared = resolve_prepared_run_packet(tool_context, run_succeeded=run_ok)
+    prepared = resolve_prepared_run_packet(
+        tool_context, run_succeeded=run_succeeded_for_outcome(outcome)
+    )
+
+    # Effective values the status report uses. The pre-emission scan may already
+    # have failed the run; the post-emission scan (emit path) can update these
+    # before the report is posted.
+    effective_outcome = outcome
+    effective_failure_reason = failure_reason
+    effective_sink_error = sink_scan_error
 
     async def _learnings_and_status() -> None:
         await persist_learnings(tool_context)
@@ -627,7 +642,7 @@ async def _publish(
             and review_run
             and tool_context.tool_state.terminal_submission is None
         ):
-            rejection_reason = failure_reason or "no_accepted_model_verdict"
+            rejection_reason = effective_failure_reason or "no_accepted_model_verdict"
         if (
             pull_number is not None
             and prepared is not None
@@ -640,7 +655,7 @@ async def _publish(
                     rejection_reason=rejection_reason,
                     tmpdir=tool_context.tmpdir,
                     ctx=tool_context,
-                    run_outcome=outcome,
+                    run_outcome=effective_outcome,
                     verdict_diagnostic=verdict_diagnostic,
                 )
             except Exception:
@@ -650,16 +665,17 @@ async def _publish(
                     failure_reason="formal review record publication failed",
                     conclusion="neutral",
                     packet=prepared,
-                    approval_failure_reason=sink_scan_error,
+                    approval_failure_reason=effective_sink_error,
                 )
                 raise
+        run_ok = run_succeeded_for_outcome(effective_outcome)
         await report_status_checks(
             tool_context,
             run_succeeded=run_ok,
-            failure_reason=failure_reason,
-            conclusion=RUN_OUTCOME_CONCLUSION[outcome],
+            failure_reason=effective_failure_reason,
+            conclusion=RUN_OUTCOME_CONCLUSION[effective_outcome],
             packet=prepared,
-            approval_failure_reason=sink_scan_error,
+            approval_failure_reason=effective_sink_error,
         )
         if prepared is not None:
             from mergecraft.utils.status_checks import _run_url
@@ -675,7 +691,7 @@ async def _publish(
                 outcome_label=outcome_label,
                 rejection_reason=rejection_reason,
                 run_url=_run_url(tool_context),
-                run_outcome=outcome,
+                run_outcome=effective_outcome,
                 verdict_diagnostic=verdict_diagnostic,
                 analyzer_summary=analyzer_run.pre_merge_summary
                 if analyzer_run is not None
@@ -704,10 +720,11 @@ async def _publish(
         raise ValueError(msg)
     tracer = get_tracer_from_settings(ctx.settings)
     with tracer.start_span("mergecraft.publish", attrs_source=attrs_source) as _span:
-        await _learnings_and_status()
-        # #39 — opt-in, off by default, and never a gate: with `sarif_upload`
-        # unset this returns before making any request.
-        await report_sarif_upload(tool_context)
+        # SX-D10 — emit *before* the status/approval report so the post-emission
+        # scan can see the packet this run generates; the packet is an upload
+        # source, and a credential that only ever reached it would otherwise
+        # ship untouched. A hit is folded into the report below (completion and
+        # approval both ``failure``) and the sink is already deleted.
         written = await asyncio.to_thread(
             emit_run_packet,
             tool_context,
@@ -715,6 +732,16 @@ async def _publish(
             verdict_prediction=verdict_prediction,
             actual_outcome=actual_outcome,
         )
+        if sink_scan is not None:
+            post_error = sink_scan(Path(written) if written else None)
+            if post_error is not None:
+                effective_sink_error = post_error
+                effective_outcome = RunOutcome.failed
+                effective_failure_reason = post_error
+        await _learnings_and_status()
+        # #39 — opt-in, off by default, and never a gate: with `sarif_upload`
+        # unset this returns before making any request.
+        await report_sarif_upload(tool_context)
         return str(written) if written else None
 
 
@@ -1869,6 +1896,11 @@ def _runner_temp_artifact_sources() -> list[Path]:
     base = Path(runner_temp)
     sources = [base / rel for rel in _SINK_SCAN_ARTIFACT_SOURCES]
     sources.extend(sorted(base.glob("packet-*.json")))
+    # The emitted packet is ``<change-slug>-merge-evidence-packet.json`` in the
+    # run-packet dir; the literal/glob spellings above predate it, so match the
+    # real basename too — a packet that exists before the scan must not be
+    # missed (a publication-time packet is caught by the post-emission scan).
+    sources.extend(sorted((base / "mergecraft").glob("*-merge-evidence-packet.json")))
     sources.extend(sorted((base / "mergecraft").glob("*run-packet.json")))
     sources.extend(sorted((base / "mergecraft").glob("*.jsonl")))
     return list(dict.fromkeys(sources))
@@ -1906,6 +1938,45 @@ def _run_sink_scan_secret_values(ctx: RunContext) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _scan_sinks_after_run(ctx: RunContext, *, extra_paths: Sequence[Path] = ()) -> str | None:
+    """Scan the run tmpdir and the artifact sources, delete hits, return the reason.
+
+    SX-D10: a credential that reached a local sink has already left the agent's
+    process, so the honest response is to stop the run, name the sink path —
+    **never** its contents — and delete the sink before the workflow's
+    artifact-upload step reads it. ``extra_paths`` carries artifacts the run
+    generates *after* the pre-publication scan (the emitted packet/run packet),
+    so the same guarantee covers everything the run emits, not only what
+    existed beforehand.
+
+    Returns the failure reason (naming the paths and the rotate instruction) or
+    ``None`` when nothing matched. The matched contents are never returned or
+    logged.
+    """
+    secrets = _run_sink_scan_secret_values(ctx)
+    if not secrets:
+        return None
+    hits = scan_local_sinks_for_secrets(
+        Path(ctx.tmpdir) if ctx.tmpdir else None,
+        secrets=secrets,
+        explicit_paths=[*_runner_temp_artifact_sources(), *extra_paths],
+    )
+    if not hits:
+        return None
+    for path in hits:
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning("» could not remove exposed local sink {}: {}", path, exc)
+        else:
+            logger.warning("» removed local sink holding credential material: {}", path)
+    return (
+        "credential material found in local sink(s) after the run: "
+        + ", ".join(str(path) for path in hits)
+        + " — rotate the exposed credential(s)"
+    )
+
+
 async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
@@ -1934,27 +2005,11 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     # credential already left the agent's process, so the response is to stop
     # the run, name the sink path — never its contents — force the approval
     # conclusion to ``failure`` and delete the sink before artifact upload.
-    sink_scan_error: str | None = None
-    sink_scan_secrets = _run_sink_scan_secret_values(ctx)
-    if sink_scan_secrets:
-        sink_hits = scan_local_sinks_for_secrets(
-            Path(ctx.tmpdir) if ctx.tmpdir else None,
-            secrets=sink_scan_secrets,
-            explicit_paths=_runner_temp_artifact_sources(),
-        )
-        if sink_hits:
-            sink_scan_error = (
-                "credential material found in local sink(s) after the run: "
-                + ", ".join(str(path) for path in sink_hits)
-                + " — rotate the exposed credential(s)"
-            )
-            for path in sink_hits:
-                try:
-                    path.unlink()
-                except OSError as exc:
-                    logger.warning("» could not remove exposed local sink {}: {}", path, exc)
-                else:
-                    logger.warning("» removed local sink holding credential material: {}", path)
+    #
+    # This scan sees only what exists *before* publication; ``_publish`` emits
+    # the packet afterwards, so it is re-scanned post-emission (below) before
+    # the approval/status report and the workflow's upload.
+    sink_scan_error: str | None = _scan_sinks_after_run(ctx)
 
     # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
     # ``inconclusive`` when review-relevant dependency prep failed OR a
@@ -2023,6 +2078,21 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         (m for m in tool_context.modes if m.name == tool_context.tool_state.selected_mode),
         None,
     )
+
+    # SX-D10 — the pre-publication scan above cannot see the packet ``_publish``
+    # emits, and the workflow uploads that artifact. ``_publish`` re-scans it
+    # after emission and before the status/approval report; the callback records
+    # a post-emission hit here so this run's own result agrees with the checks
+    # ``_publish`` posted.
+    post_emission_sink: list[str] = []
+
+    def _scan_emitted_sink(written: Path | None) -> str | None:
+        extra = [written] if written is not None else []
+        post_error = _scan_sinks_after_run(ctx, extra_paths=extra)
+        if post_error is not None:
+            post_emission_sink.append(post_error)
+        return post_error
+
     packet_path = await _publish(
         ctx,
         outcome=outcome,
@@ -2032,7 +2102,13 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         actual_outcome=str(outcome) if verdict_prediction is not None else None,
         verdict_diagnostic=verdict_diagnostic_code,
         sink_scan_error=sink_scan_error,
+        sink_scan=_scan_emitted_sink,
     )
+    if post_emission_sink:
+        # The emitted packet held credential material and has been deleted; the
+        # completion and approval checks were already forced to ``failure``.
+        outcome = RunOutcome.failed
+        failure_reason = post_emission_sink[0]
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted
     # only when the agent actually submitted a terminal verdict: a run that
