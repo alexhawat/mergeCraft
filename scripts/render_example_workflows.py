@@ -42,6 +42,8 @@ def _substitute(template_text: str, *, variant: str, defaults: dict[str, str]) -
     replacements = {
         "__ACTION_REPO__": defaults["action_repo"],
         "__ACTION_PIN__": defaults[pin_key],
+        "__ACTION_SHA__": defaults["action_sha_minimal"],
+        "__CHECKOUT_SHA__": defaults["checkout_sha"],
         "__CI_JOB_PREFIX__": json.dumps(defaults["ci_job_prefix"]),
         "__BASE_BRANCHES__": defaults["base_branches"],
     }

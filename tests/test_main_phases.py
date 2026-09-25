@@ -39,8 +39,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from loguru import logger
 
 import mergecraft.main as main_mod
+import mergecraft.utils.log as log_mod
 import mergecraft.utils.token as token_mod
 from mergecraft.agents.shared import AgentResult
 from mergecraft.analyzers.trust import derive_trust_tier
@@ -56,7 +58,12 @@ from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.utils.payload import JsonPayload, resolve_prompt_input
 from mergecraft.utils.token import resolve_tokens
-from tests.support.run_main_harness import FakeAgent, run_main_for_test
+from tests.support.run_main_harness import (
+    FakeAgent,
+    FakeGitHubClient,
+    FakeTokenRef,
+    run_main_for_test,
+)
 
 
 def _rmtree_if_exists(path: str) -> None:
@@ -1139,3 +1146,161 @@ async def test_resolve_credentials_binds_a_dispatch_named_in_the_event_inputs(
 
     assert scm.get_pull_calls == [7]
     assert ctx.trust_tier == "trusted"
+
+
+# ── Log patcher composition and best-effort teardown logging ─────────────────
+
+_CANARY = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz1234567890"
+
+
+def _restore_logging_globals() -> None:
+    """Restore the process-wide patcher and the redactor slot after a test."""
+    setter = getattr(log_mod, "set_message_redactor", None)
+    if setter is not None:
+        setter(None)
+    log_mod.configure_logging(force=True)
+    log_mod.clear_run_context()
+
+
+def _capture_cleanup_warnings() -> tuple[list[str], int]:
+    """Attach a WARNING-level sink and return its messages plus its handler id."""
+    warnings: list[str] = []
+
+    def _sink(message: Any) -> None:
+        warnings.append(str(message.record["message"]))
+
+    sink_id = logger.add(_sink, level="WARNING")
+    return warnings, sink_id
+
+
+class _CanaryAgent(FakeAgent):
+    """Agent that emits a planted canary so the global patcher is observable."""
+
+    async def run(self, ctx: Any) -> AgentResult:
+        logger.warning("agent fetching with {}", _CANARY)
+        return await super().run(ctx)
+
+
+async def test_preamble_keeps_bound_context_after_redaction_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A record logged mid-run carries bound correlation fields and no canary.
+
+    ``main()`` installs the message redactor at its start and binds run context
+    later in the setup phase; the composed patcher must keep both.
+    """
+    records: list[Any] = []
+    sink_id = logger.add(lambda message: records.append(message), level="WARNING")
+    try:
+        rec = await run_main_for_test(
+            monkeypatch=monkeypatch,
+            tmp_path=tmp_path,
+            agent=_CanaryAgent(),
+            env={"GITHUB_RUN_ID": "4242"},
+            event_payload={"pull_request": {"number": 77}},
+        )
+    finally:
+        logger.remove(sink_id)
+        _restore_logging_globals()
+
+    assert rec.result is not None, rec.raised
+    assert rec.result.success, rec.raised
+    canary_records = [
+        message for message in records if "agent fetching" in str(message.record.get("message", ""))
+    ]
+    assert canary_records, "the canary agent record never reached the sink"
+    record = canary_records[0].record
+    extra = record["extra"]
+    assert extra.get("run_id") == "4242"
+    assert extra.get("repo") == "acme/demo"
+    assert extra.get("pr") == 77
+    assert extra.get("phase") == "setup"
+    assert _CANARY not in str(record["message"])
+
+
+@pytest.mark.parametrize(
+    ("step", "keyword"),
+    [
+        pytest.param("stop_mcp", "mcp", id="stop-mcp"),
+        pytest.param("cleanup_temp_directory", "cleanup", id="cleanup"),
+        pytest.param("token_ref", "token", id="token-ref"),
+        pytest.param("scm", "scm", id="scm"),
+    ],
+)
+async def test_finally_logs_a_failed_step_and_still_runs_later_steps(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, step: str, keyword: str
+) -> None:
+    """Each teardown step failing in turn logs one warning and stops nothing."""
+    scenario_tmp = tmp_path / step
+    scenario_tmp.mkdir()
+    calls: list[str] = []
+
+    real_token_aclose = FakeTokenRef.aclose
+    real_scm_aclose = FakeGitHubClient.aclose
+
+    async def token_aclose(self: FakeTokenRef) -> None:
+        calls.append("token_ref")
+        if step == "token_ref":
+            raise RuntimeError("token revoke failed")
+        await real_token_aclose(self)
+
+    async def scm_aclose(self: FakeGitHubClient) -> None:
+        calls.append("scm")
+        if step == "scm":
+            raise RuntimeError("scm close failed")
+        await real_scm_aclose(self)
+
+    monkeypatch.setattr(FakeTokenRef, "aclose", token_aclose)
+    monkeypatch.setattr(FakeGitHubClient, "aclose", scm_aclose)
+
+    real_cleanup = main_mod.cleanup_temp_directory
+
+    def cleanup() -> None:
+        calls.append("cleanup_temp_directory")
+        if step == "cleanup_temp_directory":
+            raise RuntimeError("temp cleanup failed")
+        real_cleanup()
+
+    monkeypatch.setattr(main_mod, "cleanup_temp_directory", cleanup)
+
+    warnings, sink_id = _capture_cleanup_warnings()
+    rec_tmpdir: str | None = None
+    try:
+        rec = await run_main_for_test(
+            monkeypatch=monkeypatch,
+            tmp_path=scenario_tmp,
+            cleanup_tmpdir=False,
+            stop_mcp_error=step == "stop_mcp",
+        )
+        rec_tmpdir = rec.tmpdir
+    finally:
+        logger.remove(sink_id)
+        if rec_tmpdir:
+            _rmtree_if_exists(rec_tmpdir)
+
+    # Later teardown steps still run after the failure. ``_setup_run`` closes
+    # one earlier scm handle, so only the tail is the finally sequence.
+    assert calls[-3:] == ["cleanup_temp_directory", "token_ref", "scm"], calls
+    # Exactly one warning for the failed step, naming it and the exception.
+    cleanup_warnings = [message for message in warnings if "cleanup step" in message]
+    assert len(cleanup_warnings) == 1, warnings
+    assert "RuntimeError" in cleanup_warnings[0]
+    assert keyword in cleanup_warnings[0].lower()
+    # The run result is unchanged by a teardown failure.
+    assert rec.result is not None, rec.raised
+    assert rec.result.success, rec.raised
+
+
+async def test_teardown_success_logs_no_cleanup_warning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Guard — a successful run logs no best-effort teardown warning."""
+    warnings, sink_id = _capture_cleanup_warnings()
+    try:
+        rec = await run_main_for_test(monkeypatch=monkeypatch, tmp_path=tmp_path)
+    finally:
+        logger.remove(sink_id)
+
+    assert rec.result is not None, rec.raised
+    assert rec.result.success, rec.raised
+    assert [message for message in warnings if "cleanup step" in message] == []

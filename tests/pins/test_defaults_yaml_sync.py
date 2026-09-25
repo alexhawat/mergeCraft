@@ -9,6 +9,10 @@ lands in W2 (D7).
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+import pytest
+import yaml
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
 from tests.docs.support import ci_steps, makefile_prerequisite_tokens
@@ -18,6 +22,9 @@ _PACKAGED_DEFAULTS = (
     REPO_ROOT / "src" / "mergecraft" / "data" / "example_workflows" / "defaults.yaml"
 )
 _PINS_CHECK_TARGET = "pins-check"
+_SHA = re.compile(r"^[0-9a-f]{40}$")
+_LOCKED_CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+_LOCKED_ACTION_SHA = "521c0aedbf525a80a5bf6eddf0119ada85a8d381"
 
 
 def test_checkout_and_packaged_defaults_yaml_are_byte_identical() -> None:
@@ -58,3 +65,18 @@ def test_make_pins_check_in_ci_static() -> None:
     assert _PINS_CHECK_TARGET in ci_static, (
         f"Makefile ci-static must include {_PINS_CHECK_TARGET} (#414 drift gate)"
     )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [_CHECKOUT_DEFAULTS, _PACKAGED_DEFAULTS],
+    ids=["checkout", "packaged"],
+)
+def test_defaults_carry_the_shared_action_and_checkout_shas(path: Path) -> None:
+    """One immutable commit each for the Action ref and every checkout."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(raw, dict)
+    assert raw.get("action_sha_minimal") == _LOCKED_ACTION_SHA
+    assert raw.get("checkout_sha") == _LOCKED_CHECKOUT_SHA
+    assert _SHA.fullmatch(str(raw.get("action_sha_minimal")))
+    assert _SHA.fullmatch(str(raw.get("checkout_sha")))

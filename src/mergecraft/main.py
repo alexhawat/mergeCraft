@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import time
 from dataclasses import dataclass, field, replace
@@ -118,7 +117,7 @@ from mergecraft.utils.workspace import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
     from mergecraft.analyzers.manifest import TrustTier
     from mergecraft.config.settings import RepoSettings, RunContextData
@@ -1083,8 +1082,10 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
         sarif_upload=sarif_upload_enabled,
     )
     ctx.token_ref = token_ref
-    # Prefer MCP token for API calls
-    await ctx.scm.aclose()
+    # Prefer MCP token for API calls. Closing the superseded job-token client is
+    # best-effort: a failure must not sink the run (CR-D8), so it is logged once
+    # and the MCP-token client is installed regardless.
+    await _close_superseded_scm(ctx.scm)
     ctx.scm = create_github_scm(token_ref.mcp_token, client=GitHubClient(token_ref.mcp_token))
 
     return ctx
@@ -1190,6 +1191,8 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     degradations = collect_roster_credential_degradations(
         settings=settings,
         cwd=Path.cwd(),
+        model_head=ctx.model_head,
+        model_pin=ctx.model_pin,
     )
     if degradations:
         tool_state.credential_degradations = degradations
@@ -2317,19 +2320,53 @@ async def main() -> MainResult:
             return await _action_failure_result(ctx, error)
         finally:
             if ctx.stop_mcp is not None:
-                with contextlib.suppress(Exception):
-                    ctx.stop_mcp()
-            with contextlib.suppress(Exception):
-                cleanup_temp_directory()
+                _run_cleanup_step("stop_mcp", ctx.stop_mcp)
+            _run_cleanup_step("cleanup_temp_directory", cleanup_temp_directory)
             if ctx.token_ref is not None:
-                with contextlib.suppress(Exception):
-                    await ctx.token_ref.aclose()
+                await _run_cleanup_step_async("token_ref.aclose", ctx.token_ref.aclose)
             if ctx.scm is not None:
-                with contextlib.suppress(Exception):
-                    await ctx.scm.aclose()
+                await _run_cleanup_step_async("scm.aclose", ctx.scm.aclose)
             from mergecraft.config.settings_snapshot import reset_gateway_settings_cache
 
             reset_gateway_settings_cache()
+
+
+def _log_cleanup_failure(step: str, exc: Exception) -> None:
+    """One warning per failed best-effort cleanup step, never a secret (CR-D8)."""
+    logger.warning("cleanup step {} failed: {}: {}", step, type(exc).__name__, exc)
+
+
+def _run_cleanup_step(step: str, action: Callable[[], object]) -> None:
+    """Run a synchronous cleanup step, logging one warning on failure."""
+    try:
+        action()
+    except Exception as exc:
+        _log_cleanup_failure(step, exc)
+
+
+async def _run_cleanup_step_async(step: str, action: Callable[[], Awaitable[object]]) -> None:
+    """Run an async cleanup step, logging one warning on failure."""
+    try:
+        await action()
+    except Exception as exc:
+        _log_cleanup_failure(step, exc)
+
+
+async def _close_superseded_scm(scm: ScmProvider) -> None:
+    """Best-effort close of the job-token SCM before the MCP-token SCM replaces it.
+
+    A failure here is logged once, naming the superseded handle and never a
+    secret, and never changes the run outcome (CR-D8). The replacement client
+    is still closed by the best-effort ``finally`` teardown.
+    """
+    try:
+        await scm.aclose()
+    except Exception as exc:
+        logger.warning(
+            "» could not close superseded scm handle: {}: {}",
+            type(exc).__name__,
+            exc,
+        )
 
 
 async def _action_failure_result(ctx: RunContext, error: Exception) -> MainResult:

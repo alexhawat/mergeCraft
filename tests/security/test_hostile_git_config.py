@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import base64
+import contextlib
+import http.server
 import subprocess
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from mergecraft.mcp.git import _run_git
+from mergecraft.utils.git_setup import git_env_for_token
 from mergecraft.xrepo.review import _rev_parse_commit
 from tests.security.hostile_git_fixtures import HostileGitRepo, build_hostile_git_repo
 
@@ -185,3 +191,155 @@ def test_xrepo_checkout_is_equally_protected(hostile_git_repo: HostileGitRepo) -
 @pytest.fixture
 def hostile_git_repo(tmp_path: Path) -> HostileGitRepo:
     return build_hostile_git_repo(tmp_path)
+
+
+@contextlib.contextmanager
+def _http_stub() -> Iterator[str]:
+    """A local HTTP server that answers every git request with 404.
+
+    The stub exists so ``git ls-remote`` performs a real HTTP exchange without
+    reaching the network; nothing needs to succeed for the leak assertions.
+    """
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            return None
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_ambient_git_trace_cannot_capture_the_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ambient ``GIT_TRACE_CURL`` file is never written by the git child."""
+    trace_file = tmp_path / "curl-trace.txt"
+    monkeypatch.setenv("GIT_TRACE_CURL", str(trace_file))
+    token = "ghs_trace_leak_secret"
+    encoded = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+
+    with _http_stub() as base_url:
+        remote = f"{base_url}/acme/demo.git"
+        env = git_env_for_token(token, remote_url=remote)
+        completed = subprocess.run(
+            ["git", "ls-remote", remote],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    combined = completed.stdout + completed.stderr
+    assert not trace_file.exists(), "ambient git tracing captured the request"
+    assert token not in combined
+    assert encoded not in combined
+
+
+def test_ambient_credential_helper_is_unreachable_from_returned_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A child run with the returned env reads no ambient credential helper."""
+    # Isolate the operator's own file-based config so only the injection under
+    # test can contribute a helper: an empty HOME has no ``~/.gitconfig`` and
+    # ``GIT_CONFIG_NOSYSTEM`` disables the system file.
+    empty_home = tmp_path / "home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'credential.helper'='store'")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.helper")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "store")
+
+    env = git_env_for_token("ghs_real_token", remote_url="https://github.com/acme/demo.git")
+    completed = subprocess.run(
+        ["git", "config", "--get-all", "credential.helper"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.stdout.strip() == "", (
+        "git child resolved a credential helper from ambient config"
+    )
+
+
+_CONFIG_SOURCE_NAMES = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM")
+_HOSTILE_HELPER_MARKER = "mc-hostile-credential-helper"
+_HOSTILE_REWRITE_TARGET = "http://127.0.0.1:9/"
+
+
+@pytest.mark.parametrize("source_name", _CONFIG_SOURCE_NAMES)
+def test_ambient_config_source_override_cannot_install_a_credential_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_name: str
+) -> None:
+    """An inherited config-source selector cannot point git at a hostile file.
+
+    ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` select a whole config file, so
+    an inherited value can install a credential helper or a URL rewrite before
+    the brokered header pairs apply. Both must be dropped from the returned env.
+    """
+    empty_home = tmp_path / "home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    if source_name == "GIT_CONFIG_GLOBAL":
+        # The injected global file replaces ``~/.gitconfig``; disable the system
+        # file so only the injected file can contribute.
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    hostile_config = tmp_path / "hostile.gitconfig"
+
+    with _http_stub() as base_url:
+        stub_remote = f"{base_url}/acme/demo.git"
+        hostile_config.write_text(
+            "[credential]\n"
+            f"\thelper = {_HOSTILE_HELPER_MARKER}\n"
+            f'[url "{_HOSTILE_REWRITE_TARGET}"]\n'
+            f"\tinsteadOf = {base_url}/\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(source_name, str(hostile_config))
+
+        remote = "https://github.com/acme/demo.git"
+        with_token = git_env_for_token("ghs_secret_token", remote_url=remote)
+        without_token = git_env_for_token("", remote_url=remote)
+
+        helper_output = subprocess.run(
+            ["git", "config", "--get-all", "credential.helper"],
+            cwd=tmp_path,
+            env=with_token,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        stub_env = git_env_for_token("ghs_secret_token", remote_url=stub_remote)
+        ls_remote = subprocess.run(
+            ["git", "ls-remote", stub_remote],
+            env=stub_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    assert _HOSTILE_HELPER_MARKER not in helper_output.stdout, (
+        "a child run resolved a credential helper from the inherited config source"
+    )
+    combined = ls_remote.stdout + ls_remote.stderr
+    assert _HOSTILE_HELPER_MARKER not in combined
+    assert _HOSTILE_REWRITE_TARGET not in combined, "an inherited url rewrite was applied"
+    for env in (with_token, without_token):
+        for name in ("GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
+            assert name not in env, f"{name} survived git_env_for_token"

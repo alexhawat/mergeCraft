@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import pytest
+
 from mergecraft.utils import git_setup as git_setup_mod
 from mergecraft.utils.git_setup import (
     _auth_header_prefixes,
@@ -506,9 +508,83 @@ def test_auth_header_prefixes_malformed_or_empty_fallback() -> None:
     assert _auth_header_prefixes("not-a-url") == fallback
 
 
-def test_git_env_for_token_no_token_skips_config_pairs() -> None:
+def _inject_ambient_git_config(monkeypatch: MonkeyPatch) -> None:
+    """Plant the ambient ``GIT_CONFIG_*`` shape that leaks into git children."""
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'credential.helper'='store'")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "3")
+    for index in range(3):
+        monkeypatch.setenv(f"GIT_CONFIG_KEY_{index}", "credential.helper")
+        monkeypatch.setenv(f"GIT_CONFIG_VALUE_{index}", "store")
+
+
+def test_git_env_for_token_no_token_skips_config_pairs(monkeypatch: MonkeyPatch) -> None:
+    """The returned env carries no ambient config, tracing or redirect names.
+
+    Ambient ``GIT_CONFIG_*`` and the trace/askpass/ssh/proxy families are
+    dropped before the token check, so the no-token path returns none of them
+    and still disables the interactive prompt.
+    """
+    _inject_ambient_git_config(monkeypatch)
     env = git_env_for_token("", remote_url="https://github.com/acme/demo.git")
     assert env.get("GIT_CONFIG_COUNT") is None
+    assert "GIT_CONFIG_PARAMETERS" not in env
+    for name in list(env):
+        assert not name.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")), name
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+
+@pytest.mark.parametrize(
+    ("remote_url", "expected_count"),
+    [
+        pytest.param("https://github.com/acme/demo.git", 1, id="github-remote"),
+        pytest.param("", 2, id="default-fallback"),
+    ],
+)
+def test_git_env_for_token_with_token_keeps_only_its_own_pairs(
+    monkeypatch: MonkeyPatch,
+    remote_url: str,
+    expected_count: int,
+) -> None:
+    """With a token the env carries only the header pairs git auth needs."""
+    _inject_ambient_git_config(monkeypatch)
+    env = git_env_for_token("ghs_secret", remote_url=remote_url)
+    assert "GIT_CONFIG_PARAMETERS" not in env
+    assert env["GIT_CONFIG_COUNT"] == str(expected_count)
+    for index in range(expected_count):
+        assert env[f"GIT_CONFIG_KEY_{index}"].startswith("http.")
+        assert env[f"GIT_CONFIG_VALUE_{index}"].startswith("Authorization: Basic ")
+    for index in range(expected_count, 3):
+        assert f"GIT_CONFIG_KEY_{index}" not in env
+        assert f"GIT_CONFIG_VALUE_{index}" not in env
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "GIT_TRACE",
+        "GIT_TRACE_CURL",
+        "GIT_TRACE_CURL_NO_DATA",
+        "GIT_TRACE_PACKET",
+        "GIT_TRACE_SETUP",
+        "GIT_CURL_VERBOSE",
+        "GIT_TRACE_REDACT",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_PROXY_COMMAND",
+        "GIT_EXEC_PATH",
+    ],
+)
+@pytest.mark.parametrize("token", ["", "ghs_secret"])
+def test_git_env_for_token_drops_trace_and_redirect_names(
+    monkeypatch: MonkeyPatch, name: str, token: str
+) -> None:
+    """Ambient trace/askpass/ssh/proxy/exec-path names never reach the child."""
+    monkeypatch.setenv(name, "ambient-value")
+    env = git_env_for_token(token, remote_url="https://github.com/acme/demo.git")
+    assert name not in env
     assert env["GIT_TERMINAL_PROMPT"] == "0"
 
 

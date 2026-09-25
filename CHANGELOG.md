@@ -1663,8 +1663,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Port allocator replaced: `_select_port` now uses `bind((MCP_HOST, 0))` to let the OS pick an ephemeral port instead of scanning a fixed 50-wide band from 3764; `MERGECRAFT_MCP_PORT` override is preserved; `mergecraft doctor` reports "ephemeral port" instead of a fixed number (#283)
 - `AgentRegistry.resolve_tool_names` and `_default_tool_classes` now align with `build_reviewer_tools`: reviewer binding uses `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES` and `PRIMARY_MUTATING_ALLOWLIST`, so `create_pull_request_review` is correctly included in the registry-derived surface (D9, #282)
 - `offline_review` now routes agents to `MCP_REVIEWER_ENDPOINT` (`/mcp/reviewer`) rather than the orchestrator `/mcp`; terminal-protocol and orchestrator-only tools are no longer reachable from offline CLI reviews (#282)
+- The self-review fallback decision scripts run from a copy staged in the runner home before the first Action step mounts the workspace, re-verified against a recorded content hash, so a pull request that edits those scripts can no longer run its own version with the review job's token
+- Approval enforcement now takes the verdict from the review run's own evidence-packet output and requires a `mergecraft-approval` check issued by `github-actions` (or the configured App), on the reviewed head, carrying this run's `<run id>:<attempt>` id and agreeing with that verdict; an unattributable, absent, or disagreeing check fails closed, so a foreign check can neither pass a gate nor mask a genuine verdict
+- The `mergecraft init` scaffold requests `contents: read`, disables checkout credential persistence, and pins every action to a full commit sha; the shipped examples and the README example pin the same way
+- The changelog-preview workflow passes no repository secrets to the third-party reusable workflow it calls
 
 ### Removed
+
+- The unused `get-installation-token/main.py` script; the `get-installation-token` composite Action is unchanged
 
 ### Fixed
 
@@ -1715,6 +1721,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unreadable base manifest, or a manifest whose entries share a name — is listed
   in the review payload.
 
+- A fallback review rung reports only the model it actually ran: it no longer
+  names the primary provider's reviewer slot as a skipped credential when the
+  fallback carries its own provider's credentials.
+
+- Harbor's agent wrapper invokes `mergecraft review` instead of the deprecated
+  `diff-review` alias.
+
+- The sandbox write/network test and the symlink-target chown test run in the
+  privileged lanes built for them, and fail rather than skip inside those lanes
+- The keyless provider-catalog smoke no longer hides behind a live gate and runs
+  in the unit suite
+- Both in-image test scripts pin the same `pytest` and `pytest-asyncio` as the
+  project they test
+
+### Security
+
+- A single log patcher now both redacts secrets and carries the bound run
+  context, so every entrypoint — the Action, `mergecraft review` /
+  `diff-review` (including Harbor), and `mcp serve` — logs records that are
+  redacted **and** attributable to their run, repository, pull request and
+  phase. Previously the two patchers replaced each other, leaving the Action
+  redacted but uncorrelated and every other entrypoint correlated but not
+  redacted.
+
+- Git subprocesses no longer inherit environment-injected git configuration or
+  credential redirection: ambient `GIT_CONFIG_*` pairs, the config-source
+  selectors (`GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`), git trace
+  variables (`GIT_TRACE*`, `GIT_CURL_VERBOSE`), and askpass / ssh / proxy /
+  exec-path overrides are dropped before the subprocess environment is built, so
+  an ambient `credential.helper`, trace target, or substituted config file
+  cannot capture the brokered credential. The operator's own default
+  `~/.gitconfig` and system configuration are still honoured.
+
+- GitHub Actions and runner metadata reach child processes by explicit
+  documented name rather than by prefix, so lookalike credential variables such
+  as `GITHUB_PAT` or `RUNNER_BLOB` no longer pass into agents, the restricted
+  shell, or analyzers. The Actions command-file channels (`GITHUB_ENV`,
+  `GITHUB_PATH`, `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`) are excluded from the
+  child environment: they are writable control channels for later steps and for
+  this action's outputs, not child metadata. `envAllowlist` remains the explicit
+  escape hatch.
+
+- Cleanup and token-revocation failures are logged as warnings naming the step
+  and path — including a residual askpass file — instead of being suppressed.
+  Cleanup stays best-effort: no failure changes the run outcome.
+
 ### Changed
 
 - The PR integration job runs keyless hermetic integration tests instead of
@@ -1739,6 +1791,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every runtime dependency is an exact pin, every third-party import in the
   package is declared, and the declarations nothing imports are gone
 
+
 ### Added
 
 - Published Python distributions are installed outside the checkout and carry
@@ -1748,14 +1801,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `make test-durations` refreshes the committed `.test_durations` that
   least-duration sharding balances by
 
-### Fixed
-
-- The sandbox write/network test and the symlink-target chown test run in the
-  privileged lanes built for them, and fail rather than skip inside those lanes
-- The keyless provider-catalog smoke no longer hides behind a live gate and runs
-  in the unit suite
-- Both in-image test scripts pin the same `pytest` and `pytest-asyncio` as the
-  project they test
 
 ## [0.1.0] — 2026-08-14
 

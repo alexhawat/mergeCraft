@@ -217,6 +217,7 @@ async def run_main_for_test(
     cleanup_tmpdir: bool = True,
     prompt: str = "review the diff",
     capture_status_checks: bool = False,
+    stop_mcp_error: bool = False,
 ) -> MainRunRecord:
     """Run ``mergecraft.main.main()`` against fully scripted collaborators.
 
@@ -234,6 +235,8 @@ async def run_main_for_test(
     ``packet_payload`` (with ``packet_path``) makes the fake publisher write that
     text to ``packet_path`` at publication time — the run's own generated
     artifact, as opposed to a file planted during the agent phase.
+    ``stop_mcp_error=True`` makes the fake MCP stop callable raise, so a test
+    can exercise ``main()``'s best-effort teardown failure handling.
     """
     repo_root = tmp_path / "workspace"
     repo_root.mkdir()
@@ -367,7 +370,13 @@ async def run_main_for_test(
     def _fake_start_mcp(tool_context: Any, **_kwargs: Any) -> tuple[str, Any]:
         events.append("start_mcp_http_server")
         ctx_holder.append(tool_context)
-        return "http://127.0.0.1:0/mcp", lambda: None
+
+        def _stop() -> None:
+            if stop_mcp_error:
+                msg = "stop_mcp failed"
+                raise RuntimeError(msg)
+
+        return "http://127.0.0.1:0/mcp", _stop
 
     monkeypatch.setattr(main_mod, "start_mcp_http_server", _fake_start_mcp)
 

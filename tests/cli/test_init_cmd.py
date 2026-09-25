@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from mergecraft.models import PROVIDERS
-from mergecraft.pins import action_pin_minimal
+from mergecraft.pins import action_pin_minimal, load_example_defaults
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -65,7 +65,12 @@ def _readme_example_one_ref() -> str | None:
 
 
 def _defaults_pin() -> str:
-    return action_pin_minimal()
+    """The `uses:` ref the scaffold must carry: the immutable SHA when present.
+
+    Before the shared SHA key lands the scaffold emits the release tag, so fall
+    back to it and keep this helper green on both sides of that change.
+    """
+    return load_example_defaults().get("action_sha_minimal") or action_pin_minimal()
 
 
 def test_scaffolded_workflow_references_published_action(
@@ -225,3 +230,61 @@ def test_the_scaffolded_pin_is_what_resolve_action_pin_sha_reads(
 
     monkeypatch.setenv("MERGECRAFT_ACTION_SHA", exported.group(1))
     assert resolve_action_pin_sha() == exported.group(1)
+
+
+# ── the scaffold consumers copy: least privilege and per-PR serialization ──
+
+
+def _scaffold_doc(tmp_path: Path, monkeypatch: MonkeyPatch) -> dict[str, object]:
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init", "--force"])
+    assert result.exit_code == 0, result.output
+    workflow = (tmp_path / ".github" / "workflows" / "mergecraft.yml").read_text(encoding="utf-8")
+    doc = yaml.safe_load(workflow)
+    assert isinstance(doc, dict)
+    return doc
+
+
+def test_scaffolded_workflow_requests_read_only_contents(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The scaffold reviews PRs; it must not hold a content-write token."""
+    doc = _scaffold_doc(tmp_path, monkeypatch)
+    permissions = doc.get("permissions")
+    assert isinstance(permissions, dict), "scaffold has no top-level permissions block"
+    assert permissions.get("contents") == "read", "the scaffold must default to contents: read"
+    workflow_text = (tmp_path / ".github" / "workflows" / "mergecraft.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "contents: write" in workflow_text, (
+        "the read-only default needs a comment naming the contents: write that "
+        "dispatch-driven pushes require, or operators will not know how to opt up"
+    )
+    jobs = doc.get("jobs") or {}
+    assert isinstance(jobs, dict)
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        for step in job.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if isinstance(uses, str) and uses.startswith("actions/checkout@"):
+                with_block = step.get("with") or {}
+                assert isinstance(with_block, dict)
+                assert with_block.get("persist-credentials") is False, (
+                    "the scaffold's checkout must not persist its token into .git/config"
+                )
+
+
+def test_scaffolded_workflow_serializes_runs_per_pull_request(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    doc = _scaffold_doc(tmp_path, monkeypatch)
+    concurrency = doc.get("concurrency")
+    assert isinstance(concurrency, dict), "scaffold must declare a concurrency group"
+    assert "pull_request.number" in str(concurrency.get("group", "")), (
+        "the group must be keyed on the PR number so two runs cannot race the same PR"
+    )
+    assert concurrency.get("cancel-in-progress") is True
