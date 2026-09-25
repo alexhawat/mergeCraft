@@ -117,6 +117,13 @@ ref is the new `action_sha_minimal` key — the commit the release tag resolves 
   `action_sha_minimal` with the commit the tag resolves to, parsed from the
   recorded `git ls-remote` capture in `tests/pins/fixtures/`. The live
   comparison runs in the pins Makefile target.
+- CLI fail-closed gate — `tests/pins/test_pins_check_missing_tag.py` drives
+  `scripts/check_example_defaults_sync.py` (the body of `make pins-check`) with
+  a `git` shim first on `PATH`, so the exit code of the gate itself is pinned.
+  A tag that does not exist (`ls-remote` prints nothing, exits 0) must fail
+  exit 1 naming the tag; an unreachable remote (exit non-zero) keeps the
+  offline grace and exits 0 with the skip notice; a tag resolving to another
+  commit fails; a tag resolving to `action_sha_minimal` passes.
 
 ### 6. No secrets to a third-party reusable workflow
 
@@ -216,3 +223,24 @@ post-wave reconciliation so the branch ends on real passes.
   no-`diff-review` assertions are unchanged, and that marker came off too. The
   only remaining `xfailed` marks are the two pre-existing driver-conditioned ones
   in `tests/agents/test_harness_deny_list_pin.py`, which plan 51 owns.
+
+## Reconciliation log — post-review fix round (SW-D7 missing-tag guard)
+
+- 2026-09-25 — **RED anchor added.** `tests/pins/test_pins_check_missing_tag.py`
+  runs the `make pins-check` CLI (`scripts/check_example_defaults_sync.py`) with
+  a `git` shim on `PATH`, exercising four `ls-remote` answers. Contract: a tag
+  the remote never had (`ls-remote` prints nothing **and exits 0**) must fail
+  exit 1 and name the tag in a drift message; an unreachable remote must keep
+  the offline grace and exit 0 printing its skip notice; a tag resolving to a
+  different commit must fail exit 1; a tag resolving to `action_sha_minimal`
+  must pass exit 0. The tag (`action_pin_minimal()`) and pinned commit
+  (`load_example_defaults()["action_sha_minimal"]`) are read from the shipped
+  defaults, so the test tracks the release values.
+  **Current tree: case 1 is RED** — `_resolve_tag_commit()` returns `None` for
+  both "absent" and "unreachable", so `main()` folds an absent tag into the
+  skip path and exits 0. Cases 2–4 pass. This is a plain failing test, not a
+  non-strict `xfail`: the fix lands in `scripts/check_example_defaults_sync.py`
+  and the test turns green by itself. The pre-existing offline recorded-capture
+  test (`test_action_sha_matches_tag.py`) is unchanged. (`UV_PROJECT_ENVIRONMENT`
+  = `.venv-dev`; `make lint` + `make typecheck` clean; `tests/pins` 42 passed /
+  1 intended failure.)

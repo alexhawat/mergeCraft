@@ -11,11 +11,13 @@ commit the tag resolves to.
 
 The tag comparison runs a live ``git ls-remote``; when the remote cannot be
 reached it prints a notice and skips that half, so a local ``make pins-check``
-in an offline checkout does not fail on the network. The offline half — the
-recorded capture — is exercised by the pins test suite.
+in an offline checkout does not fail on the network. A remote that *answers*
+but has no such tag is a failure, not a skip: the pin names a release that does
+not exist, so there is no commit to agree with. The offline half — the recorded
+capture — is exercised by the pins test suite.
 
 Module: scripts.check_example_defaults_sync
-Depends: argparse, subprocess, sys, pathlib, yaml
+Depends: argparse, subprocess, sys, pathlib, typing, yaml
 
 Exports:
     main — CLI entry; byte-identity and tag/commit agreement for the defaults.
@@ -27,7 +29,7 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 import yaml
 
@@ -59,8 +61,30 @@ def _check_byte_identity() -> list[str]:
     return []
 
 
-def _resolve_tag_commit(tag: str, remote: str) -> str | None:
-    """Return the commit *tag* points at, or ``None`` when the remote is unreachable."""
+class _TagResolution(NamedTuple):
+    """Outcome of resolving a release tag against a remote.
+
+    ``state`` keeps the three cases distinct so an *absent* tag (the remote
+    answered but has no such ref) can fail instead of being conflated with an
+    *unreachable* remote (which keeps the offline grace):
+
+    - ``"resolved"`` — ``commit`` is the SHA the tag points at.
+    - ``"absent"`` — the remote is reachable but has no such tag.
+    - ``"unreachable"`` — the remote could not be queried; skip the comparison.
+    """
+
+    state: Literal["resolved", "absent", "unreachable"]
+    commit: str | None = None
+
+
+def _resolve_tag_commit(tag: str, remote: str) -> _TagResolution:
+    """Resolve *tag* on *remote*, distinguishing absent from unreachable.
+
+    A non-zero ``git`` exit, ``OSError`` or timeout means the remote could not
+    be queried (``unreachable``). A zero exit with no ``refs/tags/<tag>`` (or
+    only a peeled ref yielding no commit) means the remote answered and the tag
+    does not exist (``absent``).
+    """
     try:
         result = subprocess.run(
             ["git", "ls-remote", "--tags", remote, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"],
@@ -71,9 +95,9 @@ def _resolve_tag_commit(tag: str, remote: str) -> str | None:
             timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return None
+        return _TagResolution("unreachable")
     if result.returncode != 0:
-        return None
+        return _TagResolution("unreachable")
     peeled = ""
     plain = ""
     for line in result.stdout.splitlines():
@@ -88,7 +112,11 @@ def _resolve_tag_commit(tag: str, remote: str) -> str | None:
     # An annotated tag lists both the tag object and the peeled commit; the
     # peeled commit is what a workflow ``uses:`` resolves to.
     resolved = peeled or plain
-    return resolved or None
+    if not resolved:
+        # The remote answered but never heard of this tag: a deleted, mistyped
+        # or never-pushed release pin, not an offline checkout.
+        return _TagResolution("absent")
+    return _TagResolution("resolved", resolved)
 
 
 def main() -> int:
@@ -108,17 +136,23 @@ def main() -> int:
     if not tag or not pinned:
         failures.append("defaults.yaml must declare both action_pin_minimal and action_sha_minimal")
     else:
-        resolved = _resolve_tag_commit(tag, args.remote)
-        if resolved is None:
+        lookup = _resolve_tag_commit(tag, args.remote)
+        if lookup.state == "unreachable":
             print(
                 f"notice: could not resolve {tag} from remote {args.remote!r} "
                 "— skipping the tag/commit comparison",
                 file=sys.stderr,
             )
-        elif resolved != pinned:
+        elif lookup.state == "absent":
+            failures.append(
+                f"action_sha_minimal ({pinned}) cannot match the tag {tag!r}: "
+                f"the remote {args.remote!r} has no such tag; "
+                "push the release tag or refresh action_pin_minimal"
+            )
+        elif lookup.commit != pinned:
             failures.append(
                 f"action_sha_minimal ({pinned}) does not equal the commit "
-                f"{tag} resolves to ({resolved}); refresh the SHA key"
+                f"{tag} resolves to ({lookup.commit}); refresh the SHA key"
             )
 
     if failures:
