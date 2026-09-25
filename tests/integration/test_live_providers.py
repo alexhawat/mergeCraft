@@ -3,6 +3,18 @@
 Credentials missing: these tests **fail** (D9), they do not skip. They are
 excluded from ``make test`` via ``integration`` + ``live`` markers. Do not
 record live responses into fixtures (convention 7).
+
+Every provider test asserts the HTTP status *before* it parses the body, and
+the failure names the provider and the numeric status, echoing at most 300
+characters of the body. It never prints the request URL or a header: Gemini's
+credential rides in the query string, so a URL would leak it.
+
+The Nous leg posts the product's documented default model
+(``nous/deepseek/deepseek-v4-flash``, ``docs/authentication.md``) from
+``NOUS_DEFAULT_MODEL`` below. That model id exists only as a value inside the
+catalog mapping in ``mergecraft/models.py``, not as an importable module
+constant, so it is mirrored here; ``MERGECRAFT_LIVE_NOUS_MODEL`` overrides it
+for a one-off live probe.
 """
 
 from __future__ import annotations
@@ -29,12 +41,29 @@ _MAX_OUTPUT_TOKENS = 16
 _TOKEN_BOUND = 64
 _TIMEOUT = 45.0
 
+# The product's documented Nous default; env-overridable for a one-off probe.
+NOUS_DEFAULT_MODEL = "nous/deepseek/deepseek-v4-flash"
+
 
 def _require(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
         pytest.fail(f"{name} is required for live provider tests (D9 — fail, do not skip)")
     return value
+
+
+def _fail_on_http_error(response: httpx.Response, provider: str) -> None:
+    """Fail on a non-2xx response before any body-shape assertion (CI-D4).
+
+    The message names the provider and the numeric status, and echoes at most
+    300 characters of the body. It never includes the request URL or headers:
+    Gemini's key rides in the query string, so a URL would leak it. We do not
+    call ``response.raise_for_status()`` because its ``str()`` embeds the URL.
+    """
+    if response.status_code < 400:
+        return
+    body = response.text or ""
+    pytest.fail(f"{provider} live request failed with HTTP {response.status_code}: {body[:300]}")
 
 
 def _accumulate(agent_name: str, payload: dict[str, Any], output: str) -> StreamSpanAccumulator:
@@ -77,6 +106,7 @@ def test_anthropic_minimal_completion() -> None:
         },
         timeout=_TIMEOUT,
     )
+    _fail_on_http_error(response, "anthropic")
     payload = response.json()
     assert "content" in payload, f"Anthropic body is not a structured message: {payload!r}"
     blocks = payload["content"]
@@ -100,6 +130,7 @@ def test_openai_codex_minimal_completion() -> None:
         },
         timeout=_TIMEOUT,
     )
+    _fail_on_http_error(response, "openai")
     payload = response.json()
     choices = payload.get("choices")
     assert isinstance(choices, list)
@@ -123,6 +154,7 @@ def test_gemini_minimal_completion() -> None:
         },
         timeout=_TIMEOUT,
     )
+    _fail_on_http_error(response, "gemini")
     payload = response.json()
     candidates = payload.get("candidates")
     assert isinstance(candidates, list)
@@ -149,16 +181,18 @@ def test_gemini_minimal_completion() -> None:
 def test_nous_minimal_completion() -> None:
     key = _require("NOUS_API_KEY")
     base = os.environ.get("NOUS_BASE_URL", "https://inference-api.nousresearch.com/v1").rstrip("/")
+    model = os.environ.get("MERGECRAFT_LIVE_NOUS_MODEL") or NOUS_DEFAULT_MODEL
     response = httpx.post(
         f"{base}/chat/completions",
         headers={"authorization": f"Bearer {key}"},
         json={
-            "model": os.environ.get("NOUS_MODEL", "Hermes-4-70B"),
+            "model": model,
             "max_tokens": _MAX_OUTPUT_TOKENS,
             "messages": [{"role": "user", "content": "Reply with the single word ping."}],
         },
         timeout=_TIMEOUT,
     )
+    _fail_on_http_error(response, "nous")
     payload = response.json()
     choices = payload.get("choices")
     assert isinstance(choices, list)

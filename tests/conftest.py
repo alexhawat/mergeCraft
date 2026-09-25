@@ -22,6 +22,20 @@ pytest_plugins = [
 ]
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the ``hermetic_integration`` marker for collection.
+
+    The canonical declaration lives in ``[tool.pytest.ini_options].markers`` in
+    ``pyproject.toml`` (pinned by ``tests/ci/test_integration_job_ran.py``).
+    This hook keeps the suite collectible under ``--strict-markers`` in the
+    window before that declaration lands; it changes no marker selection.
+    """
+    config.addinivalue_line(
+        "markers",
+        "hermetic_integration: keyless integration tests selected by make test-integration",
+    )
+
+
 @pytest.fixture(autouse=True)
 def _reset_process_tracer_cache() -> Iterator[None]:
     """Reset the process-wide Tracer cache (#292) so tests do not leak tracers."""

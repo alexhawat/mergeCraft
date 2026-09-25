@@ -107,14 +107,37 @@ MERGECRAFT_TEST_SPLITS=2 make ci-resume
 A partial shard never writes `coverage.json` or invokes a floor. Missing,
 overlapping, modified, stale, or incompatible manifests fail before combination.
 
-To run the live slice (requires provider secrets such as `ANTHROPIC_API_KEY`):
+### Live slice
+
+The scheduled Integration workflow's live-provider matrix runs the two legs
+this repository can authenticate: `nous` (`NOUS_API_KEY`) and `github`
+(`GITHUB_TOKEN`). The `anthropic`, `openai` and `gemini` HTTP-API legs are
+**not exercised** — no Anthropic, OpenAI or Gemini API key is configured, and a
+subscription cannot call those HTTP endpoints. Real-harness live coverage runs
+as the nightly E2E live slice on the ChatGPT/Codex subscription
+(`vars.MERGECRAFT_E2E_LIVE_MODEL=openai/gpt-5.3-codex`, secret
+`CODEX_AUTH_JSON`), which the self-review workflow already consumes.
+
+That subscription credential rotates: Codex refreshes the ChatGPT session during
+use and retires the old refresh token, so the E2E live slice serializes on a
+`codex-subscription-auth` concurrency group. If the credential is expired or
+rejected, the job reports **unavailable credential** rather than a product
+failure. To recover, re-mint it locally and store it:
+
+```bash
+mergecraft auth codex
+gh secret set CODEX_AUTH_JSON
+```
+
+To run the live slice locally (requires the matching provider secret):
 
 ```bash
 MERGECRAFT_LIVE=1 make test-integration-live
 ```
 
-`MERGECRAFT_LIVE=1` is the opt-in gate: without it, the live modules skip collection.
-With the flag set but secrets absent the suite still fails loudly (fail-closed).
+`MERGECRAFT_LIVE=1` is the opt-in gate: without it, the live modules skip
+collection. With the flag set but secrets absent the suite still fails loudly
+(fail-closed).
 
 ## Operator: branch protection
 
@@ -183,7 +206,8 @@ Add repository secrets for Craft publish: `TWINE_USERNAME`, `TWINE_PASSWORD`.
    ```
 2. **CI/CD** on the release branch (build-once → promote digest):
    - runs `make ci`
-   - builds `dist/*` and uploads `artifact-python-dist`
+   - builds `dist/*`, install-checks the wheel with `make test-wheel-corpus`, and
+     attaches build provenance before uploading `artifact-python-dist`
    - builds each GHCR image **once**, pushes immutable `:${GITHUB_SHA}` /
      `:analyzers-${GITHUB_SHA}` tags, and captures the digests
    - generates an SBOM (syft) + Trivy scan per image (CRITICAL/HIGH gate on

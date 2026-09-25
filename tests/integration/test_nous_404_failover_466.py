@@ -14,6 +14,10 @@ from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import RepoSettings
 from mergecraft.utils.agent_resolve import run_with_model_chain
 
+# Keyless and hermetic: `make test-integration` selects this marker so the PR
+# job executes a real test instead of the deleted file-existence smoke.
+pytestmark = pytest.mark.hermetic_integration
+
 _NOUS_BILLING_404 = json.dumps(
     {
         "name": "APIError",

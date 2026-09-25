@@ -48,10 +48,10 @@ make setup
 make install                 # wraps: uv sync --extra dev
 
 # Fast static/build tier
-make ci-static               # lockcheck lint typecheck pyright catalog-check build
+make ci-static               # lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check mcp-server-json-check
 
 # Full local check (what CI runs)
-make ci                      # ci-static + security + test
+make ci                      # ci-static + security + coverage-gate
 
 # Add a new runtime dependency (one-off, no target needed)
 uv add "httpx==0.28.1"       # then: make lockcheck
@@ -197,7 +197,7 @@ def bad_ids(raw: Optional[str]) -> List[str]: ...
 ## Async
 
 - **async for I/O** — network and long-running work is `async def`; `httpx.AsyncClient` for HTTP (never `requests`)
-- `anyio` / `asyncio` primitives; `aiofiles` for file I/O on async paths
+- `anyio` / `asyncio` primitives for concurrency; file I/O stays in sync helpers — no async-file library is adopted
 - Never call `asyncio.run()` from inside async code — `await` or `create_task()`
 - Always set a timeout on outbound HTTP and on subprocess execution
 
@@ -610,7 +610,7 @@ dependencies = [
     "loguru==0.7.3",
     "httpx==0.28.1",
     "pydantic==2.13.3",
-    "pydantic-settings==2.14.2",
+    "pydantic-settings==2.15.0",
 ]
 
 [project.optional-dependencies]
@@ -648,8 +648,8 @@ dev = ["pytest==9.0.3", "ruff==0.15.22", "mypy==1.20.2"]
 | `security` | `bandit -ll` + `pip-audit` (3 retries) |
 | `precommit` | `pre-commit run --all-files` |
 | `build` | `uv build` |
-| `ci-static` | `lockcheck lint typecheck pyright catalog-check build` |
-| `ci` | `ci-static security test` |
+| `ci-static` | `lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check mcp-server-json-check` |
+| `ci` | `ci-static security coverage-gate` |
 | `coverage-gate` | Native combined global floor plus separate critical line and branch floors |
 | `ci-steps` / `ci-resume` / `ci-reset` | Ordered step list + resumable runner (`scripts/ci_resume.sh`) |
 | `docker-build` | Build the Action image |
@@ -847,7 +847,7 @@ Workflows live in `.github/workflows/`: `ci.yml` (the gate), `ci-cd.yml`, `docke
 - run: make ci
 ```
 
-Test sharding uses `MERGECRAFT_TEST_SPLITS` / `MERGECRAFT_TEST_GROUP` (pytest-split, least-duration algorithm).
+Test sharding uses `MERGECRAFT_TEST_SPLITS` / `MERGECRAFT_TEST_GROUP` (pytest-split, least-duration algorithm, balanced by the committed `.test_durations`; `make test-durations` refreshes it).
 
 ### Enforcement summary
 

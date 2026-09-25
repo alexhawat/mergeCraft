@@ -27,9 +27,9 @@ esac
 
 if [[ ! -x "${ACTIONLINT_BIN}" ]]; then
   if [[ "${os}" != "linux" ]]; then
-    echo "workflow-lint: actionlint bootstrap is linux-only in CI; skipping binary install on ${os}" >&2
-    echo "Install actionlint/zizmor locally or run this target on ubuntu-latest." >&2
-    exit 0
+    echo "workflow-lint: actionlint is unavailable on ${os} without a cached binary;" >&2
+    echo "install actionlint/zizmor locally or run this target on ubuntu-latest." >&2
+    exit 1
   fi
   tmp="$(mktemp -d)"
   trap 'rm -rf "${tmp}"' EXIT
@@ -42,7 +42,9 @@ fi
 
 if [[ ! -x "${ZIZMOR_BIN}" ]]; then
   if [[ "${os}" != "linux" ]]; then
-    exit 0
+    echo "workflow-lint: zizmor is unavailable on ${os} without a cached binary;" >&2
+    echo "install it locally or run this target on ubuntu-latest." >&2
+    exit 1
   fi
   tmp="${tmp:-$(mktemp -d)}"
   curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o "${tmp}/zizmor.tar.gz" \

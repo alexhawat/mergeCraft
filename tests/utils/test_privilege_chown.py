@@ -49,10 +49,23 @@ def test_prepare_workspace_does_not_chown_dot_git(
     assert after_uid == before_uid, ".git must not be chowned to the agent user"
 
 
-@pytest.mark.skipif(os.getuid() != 0, reason="requires root to chown workspace paths")
+def _in_privileged_lane() -> bool:
+    """Inside the lane built for this test, a missing root fails, not skips."""
+    return os.environ.get("MERGECRAFT_PRIVILEGED_LANE") == "1"
+
+
+@pytest.mark.skipif(
+    os.getuid() != 0 and not _in_privileged_lane(),
+    reason="requires root to chown workspace paths",
+)
 def test_prepare_workspace_does_not_chown_symlink_target_outside_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    if os.getuid() != 0:
+        pytest.fail(
+            "MERGECRAFT_PRIVILEGED_LANE=1 but this process is not root; the symlink-target "
+            "chown test must run in the in-image root pass"
+        )
     outside = tmp_path / "outside"
     outside.mkdir()
     secret = outside / "secret.txt"
