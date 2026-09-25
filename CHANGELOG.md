@@ -1637,8 +1637,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Port allocator replaced: `_select_port` now uses `bind((MCP_HOST, 0))` to let the OS pick an ephemeral port instead of scanning a fixed 50-wide band from 3764; `MERGECRAFT_MCP_PORT` override is preserved; `mergecraft doctor` reports "ephemeral port" instead of a fixed number (#283)
 - `AgentRegistry.resolve_tool_names` and `_default_tool_classes` now align with `build_reviewer_tools`: reviewer binding uses `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES` and `PRIMARY_MUTATING_ALLOWLIST`, so `create_pull_request_review` is correctly included in the registry-derived surface (D9, #282)
 - `offline_review` now routes agents to `MCP_REVIEWER_ENDPOINT` (`/mcp/reviewer`) rather than the orchestrator `/mcp`; terminal-protocol and orchestrator-only tools are no longer reachable from offline CLI reviews (#282)
+- The self-review fallback decision scripts run from a copy staged in the runner home before the first Action step mounts the workspace, re-verified against a recorded content hash, so a pull request that edits those scripts can no longer run its own version with the review job's token
+- Approval enforcement now takes the verdict from the review run's own evidence-packet output and requires a `mergecraft-approval` check issued by `github-actions` (or the configured App), on the reviewed head, carrying this run's `<run id>:<attempt>` id and agreeing with that verdict; an unattributable, absent, or disagreeing check fails closed, so a foreign check can neither pass a gate nor mask a genuine verdict
+- The `mergecraft init` scaffold requests `contents: read`, disables checkout credential persistence, and pins every action to a full commit sha; the shipped examples and the README example pin the same way
+- The changelog-preview workflow passes no repository secrets to the third-party reusable workflow it calls
 
 ### Removed
+
+- The unused `get-installation-token/main.py` script; the `get-installation-token` composite Action is unchanged
 
 ### Fixed
 
@@ -1688,6 +1694,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   omission — ungranted, missing sibling, pin mismatch, unreachable pin, an
   unreadable base manifest, or a manifest whose entries share a name — is listed
   in the review payload.
+
+- A fallback review rung reports only the model it actually ran: it no longer
+  names the primary provider's reviewer slot as a skipped credential when the
+  fallback carries its own provider's credentials.
+
+- Harbor's agent wrapper invokes `mergecraft review` instead of the deprecated
+  `diff-review` alias.
 
 ## [0.1.0] — 2026-08-14
 
