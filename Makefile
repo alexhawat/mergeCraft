@@ -24,7 +24,7 @@ SHELL := /bin/bash
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence eval-trajectory shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
-	test-integration test-integration-live test-otlp-collector coverage-measure coverage-combine-gate coverage-gate npm-audit workflow-lint \
+	test-integration test-integration-live test-otlp-collector test-durations coverage-measure coverage-combine-gate coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare \
 	tracked-markdown-check
 
@@ -162,6 +162,14 @@ agents-check: ## Agent registry model/prompt/tool validation gate (AP1)
 PYTEST_SPLIT := $(if $(MERGECRAFT_TEST_SPLITS),--splits $(MERGECRAFT_TEST_SPLITS) --group $(MERGECRAFT_TEST_GROUP) --splitting-algorithm least_duration,)
 test: ## Unit tests
 	$(PYTEST) tests -v --tb=short --strict-markers -m "not integration and not coverage" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
+		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
+
+# Least-duration sharding is only honest when the timings exist. This refreshes
+# the committed `.test_durations` from one full unit-suite run, so the selector
+# above balances by real durations instead of advertising an algorithm it lacks.
+test-durations: ## Regenerate the committed .test_durations used by least-duration sharding
+	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration and not coverage" $(PYTEST_XDIST) \
+		--store-durations --durations-path=.test_durations \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
 # W12.1 / #21 — integration suite joins PR CI. The keyless
@@ -417,7 +425,7 @@ bench-detect: ## Join structural replay + live finding-location detection (#140,
 	$(UV) run mergecraft eval bench $(BENCH_DETECT_ARGS)
 
 docker-build: ## Build action Docker image
-	docker build -t mergeCraft:local -f Dockerfile .
+	docker build -t mergecraft:local -f Dockerfile .
 
 clean: ## Remove caches and build artifacts
 	rm -rf .venv dist build .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml .cache

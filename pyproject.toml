@@ -17,10 +17,17 @@ keywords = ["github-actions", "ai-coding-agent", "code-review"]
 dependencies = [
     "loguru==0.7.3",
     "httpx==0.28.1",
+    # security/egress.py subclasses the private httpcore._backends.base.NetworkBackend,
+    # so httpcore is declared directly rather than left to httpx's transitive tree.
+    "httpcore==1.0.9",
     "rich==15.0.0",
     "typer==0.25.1",
+    # cli/interactive.py and cli/typer_group.py import click directly; typer only
+    # brings it transitively, so pin it explicitly at the locked resolution.
+    "click==8.4.2",
     "pyyaml==6.0.3",
     "pydantic==2.13.5",
+    # Adopted by the settings migration; not yet imported.
     "pydantic-settings==2.15.0",
     "fastapi==0.141.1",
     "uvicorn[standard]==0.52.4",
@@ -28,12 +35,11 @@ dependencies = [
     "jsonschema==4.26.0",
     "semver==3.1.0",
     "python-dotenv==1.2.3",
+    # Transitive runtime requirement of httpx and starlette; the exact pin is policy.
     "anyio==4.15.1",
     "defusedxml==0.7.1",
     "tenacity==9.1.4",
-    "markdownify==1.2.3",
-    "pyjwt[crypto]>=2.13.0",
-    "aiofiles==25.1.0",
+    "pyjwt[crypto]==2.13.0",
     "tree-sitter==0.26.0",
     "tree-sitter-python==0.25.0",
     "typing-extensions==4.16.0",
@@ -77,7 +83,6 @@ dev = [
     "pytest-cov==7.1.0",
     "pytest-randomly==5.0.0",
     "pytest-split==0.11.0",
-    "types-aiofiles==25.1.0.20251011",
     # Pinned to the version in analyzers/catalog/ast-grep.yaml so dev/test
     # runs exercise the same declaration-node kinds as the managed binary
     # impact.py resolves at review time.
