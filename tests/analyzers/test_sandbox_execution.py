@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,34 @@ def _sandbox_context(tmp_path: Path) -> SandboxContext:
     )
 
 
+def _assert_setpriv_prefix(joined: str) -> None:
+    """The payload ``exec``s ``setpriv`` after the masks, dropping root identity at euid 0.
+
+    Off the root backend the historical capability-clearing spelling is kept
+    byte-for-byte. On a root orchestrator SX2/SX-D1/SX-D2 make the same ``exec``
+    carry the identity drop (``--reuid``/``--regid``) beside the capability
+    flags, so a guard that pinned only the caps-only spelling would enshrine the
+    very hole SX2 closed.
+    """
+    if os.geteuid() == 0:
+        assert "exec setpriv" in joined, joined
+        prefix = joined.split("exec setpriv", 1)[1].split(" -- ", 1)[0]
+        for flag in (
+            "--no-new-privs",
+            "--inh-caps=-all",
+            "--ambient-caps=-all",
+            "--bounding-set=-all",
+        ):
+            assert flag in prefix, (flag, joined)
+        assert "--reuid=" in prefix, joined
+        assert "--regid=" in prefix, joined
+        return
+    assert (
+        "exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all "
+        "--no-new-privs -- /bin/bash --noprofile --norc"
+    ) in joined, joined
+
+
 def test_sandboxed_argv_wires_net_ro_bind_and_tmpfs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -70,10 +99,7 @@ def test_sandboxed_argv_wires_net_ro_bind_and_tmpfs(
     assert "tmpfs" in joined
     assert str(tmp_path) in joined
     assert "bash" in argv
-    assert (
-        "exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs -- /bin/bash --noprofile --norc"
-        in joined
-    )
+    _assert_setpriv_prefix(joined)
     assert "echo probe" in joined
 
 

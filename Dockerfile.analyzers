@@ -143,7 +143,7 @@ COPY integrations/opencode ./integrations/opencode
 
 RUN uv sync --frozen --no-dev \
     && useradd -m -u 10001 -s /bin/bash mergecraft \
-    && chown -R mergecraft:mergecraft /opt/mergecraft \
+    && python -m compileall -q /opt/mergecraft \
     && rm -f /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/uv_cache.json \
     && sed -i '/uv_cache\.json/d' \
         /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/RECORD \

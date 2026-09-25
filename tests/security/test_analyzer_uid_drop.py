@@ -32,10 +32,37 @@ def _preconditions_met() -> bool:
 pytestmark = pytest.mark.skipif(not _preconditions_met(), reason=_ROOT_PRECONDITION_REASON)
 
 
+def _make_traversable_for_dropped_uid(path: Path) -> None:
+    """Add ``o+x`` to ``path`` and its ancestors so the dropped uid can traverse in.
+
+    pytest's ``tmp_path`` lives under a root-owned ``0700`` base
+    (``/tmp/pytest-of-<user>/pytest-<n>``), while the production analyzer
+    workspace is traversable by the agent (``utils/privilege.prepare_workspace_for_agent``
+    chowns it before the run). The sandbox correctly drops the payload to the
+    agent uid; the fixture must then present a traversable parent chain or the
+    payload cannot reach the ``1777`` tmpfs mounted at the scratch leaf. Grant
+    traversal only — the leaf tmpfs stays world-writable and the real checkout
+    stays unreadable. Stop at ``tempfile.gettempdir()`` and any ancestor that is
+    already traversable by others.
+    """
+    stop = Path(tempfile.gettempdir()).resolve()
+    current = path.resolve()
+    while True:
+        mode = current.stat().st_mode
+        if mode & 0o001:
+            break
+        os.chmod(current, mode | 0o001)
+        parent = current.parent
+        if current == stop or parent == current:
+            break
+        current = parent
+
+
 def _untrusted_context(tmp_path: Path) -> Any:
     from mergecraft.analyzers import sandbox as sandbox_mod
 
     scratch = tmp_path / "analyzer-scratch"
+    _make_traversable_for_dropped_uid(tmp_path)
     plan = sandbox_mod.plan_sandbox(
         repo_root=tmp_path,
         scratch_dir=scratch,
