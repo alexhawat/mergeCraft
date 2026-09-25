@@ -775,6 +775,16 @@ _CAPABILITY_DROP_FLAGS = (
     "--bounding-set=-all",
 )
 
+# The analyzer sandbox runs the payload as the namespace init: ``unshare
+# --kill-child=KILL`` arms ``PR_SET_PDEATHSIG`` on it so a killed ``unshare``
+# parent tears the whole PID namespace down. Changing credentials between the
+# arm and the payload clears that signal — the kernel drops ``PDEATHSIG`` on the
+# uid/gid change — so a timed-out ``unshare`` reaped by ``subprocess`` left the
+# analyzer alive. ``setpriv --pdeathsig KILL`` re-arms it *after* the drop, in
+# the same ``exec``. It ships with ``--bounding-set`` (util-linux 2.33), which
+# the root drop already refuses to run without, so it needs no extra probe.
+_PDEATHSIG_FLAGS = ("--pdeathsig", "KILL")
+
 
 def _privilege_configuration_error(message: str) -> Exception:
     """Return a ``main._ConfigurationError`` (imported lazily; no import cycle)."""
@@ -869,8 +879,12 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
          resolving to UID/GID 0 all raise ``main._ConfigurationError``).
 
     Every returned prefix carries ``--no-new-privs --inh-caps=-all
-    --ambient-caps=-all --bounding-set=-all``. The function raises rather than
-    returning a prefix that would leave the payload as root.
+    --ambient-caps=-all --bounding-set=-all`` and re-arms the parent-death signal
+    with ``--pdeathsig KILL``. The credential change clears
+    ``PR_SET_PDEATHSIG``; without the re-arm a timed-out namespace init
+    (``unshare --kill-child=KILL``) survived its killed parent and kept running
+    the analyzer. The function raises rather than returning a prefix that would
+    leave the payload as root.
     """
     if to_orchestrator:
         uid = os.getuid()
@@ -886,6 +900,7 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
             f"--reuid={uid}",
             f"--regid={gid}",
             "--clear-groups",
+            *_PDEATHSIG_FLAGS,
         ]
     if os.geteuid() != 0:
         return []
@@ -899,6 +914,7 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
             f"--reuid={uid}",
             f"--regid={gid}",
             "--clear-groups",
+            *_PDEATHSIG_FLAGS,
         ]
     from mergecraft.utils.privilege import wrap_agent_command
 
@@ -925,6 +941,7 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
         # wrap_agent_command omits --ambient-caps; add it beside --inh-caps so
         # the four capability flags travel together for every caller.
         argv.insert(argv.index("--inh-caps=-all") + 1, "--ambient-caps=-all")
+    argv.extend(_PDEATHSIG_FLAGS)
     return argv
 
 
