@@ -7,7 +7,8 @@
 # inside the built image (the real containment boundary).
 #
 # Nightly / workflow_dispatch: same security slice, plus a secrets-gated live
-# provider matrix (skipped with an explicit note when secrets are absent).
+# slice. With no live model configured it emits a warning and records the
+# result as unavailable in the step summary; a configured-but-broken run fails.
 name: E2E
 
 on:
@@ -38,6 +39,8 @@ on:
       OPENAI_API_KEY:
         required: false
       GEMINI_API_KEY:
+        required: false
+      CODEX_AUTH_JSON:
         required: false
 
 permissions:
@@ -127,6 +130,12 @@ jobs:
     if: ${{ !inputs.required-security && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # Codex rotates the ChatGPT session's refresh token during use, so two
+    # concurrent runs sharing one credential can retire each other's session.
+    # Serialize this job against other consumers of the same subscription.
+    concurrency:
+      group: codex-subscription-auth
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -173,17 +182,28 @@ jobs:
       - name: Live installed-harness smoke (explicit model required)
         env:
           MERGECRAFT_E2E_LIVE_MODEL: ${{ vars.MERGECRAFT_E2E_LIVE_MODEL }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set -euo pipefail
           if [[ -z "${MERGECRAFT_E2E_LIVE_MODEL:-}" ]]; then
-            echo "skipped: set MERGECRAFT_E2E_LIVE_MODEL to enable the bounded real-harness smoke"
+            message="live slice unavailable: set MERGECRAFT_E2E_LIVE_MODEL to enable the bounded real-harness smoke"
+            echo "::warning title=Live slice unavailable::${message}"
+            echo "${message}" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           case "${MERGECRAFT_E2E_LIVE_MODEL}" in
-            openai/*) credential_name=OPENAI_API_KEY ;;
+            openai/*)
+              # The ChatGPT/Codex subscription credential outranks the API key:
+              # both reach the same Codex harness inside the image.
+              if [[ -n "${CODEX_AUTH_JSON:-}" ]]; then
+                credential_name=CODEX_AUTH_JSON
+              else
+                credential_name=OPENAI_API_KEY
+              fi
+              ;;
             anthropic/*) credential_name=ANTHROPIC_API_KEY ;;
             google/*|gemini/*) credential_name=GEMINI_API_KEY ;;
             *) echo "unsupported live-smoke provider" >&2; exit 2 ;;
@@ -194,9 +214,25 @@ jobs:
           fi
           # The helper requires a real accepted terminal review. Missing credentials,
           # provider failure or timeout fails the step; --help is not acceptance.
+          # Only the credential's *name* is passed in; its value never rides argv.
+          run_log="$(mktemp)"
+          set +e
           docker run --rm --user 10001:10001 \
             --entrypoint /opt/mergecraft/.venv/bin/python \
             -e HOME=/home/mergecraft -e XDG_CACHE_HOME=/home/mergecraft/.cache \
             -e MERGECRAFT_E2E_LIVE_MODEL -e "${credential_name}" \
             -v "$PWD/scripts/live_image_smoke.py:/smoke.py:ro" \
-            "${E2E_IMAGE}" /smoke.py
+            "${E2E_IMAGE}" /smoke.py 2>&1 | tee "$run_log"
+          status="${PIPESTATUS[0]}"
+          set -e
+          if [[ "${status}" -ne 0 ]]; then
+            # An expired or rejected subscription credential is not a product
+            # failure: name it unable to run, so a red night is not misread as a
+            # review defect. Recovery: re-mint with `mergecraft auth codex`.
+            if grep -Eqi 'refresh token|invalid_grant|401' "$run_log"; then
+              echo "::error title=Live slice unavailable::unavailable credential — the Codex subscription credential was rejected or expired; re-mint it with 'mergecraft auth codex'"
+            else
+              echo "::error title=Live slice failed::the live harness smoke did not produce an accepted terminal review" >&2
+            fi
+            exit "${status}"
+          fi

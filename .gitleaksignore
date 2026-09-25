@@ -1,0 +1,24 @@
+# gitleaks fingerprints for reviewed false positives.
+#
+# Every entry is a per-finding fingerprint (file:rule:line), never a
+# whole-file allowlist, and every entry names a tracked path that can ship.
+# Each one is a deliberately fake credential in a test fixture (or a doc
+# example) that the scanner cannot distinguish from a live secret. Review the
+# referenced line before adding another.
+#
+plans/VERIFICATION.md:generic-api-key:126
+tests/agents/test_provider_config.py:generic-api-key:54
+tests/cli/test_auth_logfire_cmd.py:generic-api-key:573
+tests/cli/test_provider_migrate_cmd.py:generic-api-key:52
+tests/cli/test_tracing_logfire_cmd.py:generic-api-key:366
+tests/scm/test_ingress_idempotency.py:generic-api-key:12
+tests/security/test_clone_hardening.py:generic-api-key:195
+tests/security/test_credential_theft.py:generic-api-key:28
+tests/tracing/exporters/test_integration.py:github-pat:70
+tests/tracing/test_content_policy.py:github-pat:115
+tests/tracing/test_content_policy.py:github-pat:129
+tests/tracing/test_finding_spans.py:github-pat:109
+tests/tracing/test_llm_payloads.py:github-pat:44
+tests/tracing/test_redact_cli_argv.py:gitlab-pat:13
+tests/tracing/test_sentinel_unified.py:generic-api-key:12
+tests/tracing/test_thinking.py:github-pat:50

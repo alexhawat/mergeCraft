@@ -34,6 +34,11 @@ def _full_caps() -> sandbox_mod.SandboxCapabilities:
     )
 
 
+def _privileged_lane() -> bool:
+    """Inside the lane built for this test, a missing capability fails, not skips."""
+    return os.environ.get("MERGECRAFT_PRIVILEGED_LANE") == "1"
+
+
 def _sandbox_context(tmp_path: Path) -> SandboxContext:
     scratch = tmp_path / "scratch"
     scratch.mkdir()
@@ -124,13 +129,21 @@ def test_untrusted_sudo_backend_refuses_private_fd_loss(
         _sandboxed_argv(plan, _sandbox_context(tmp_path))
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="namespace mounts require Linux")
+@pytest.mark.skipif(
+    sys.platform != "linux" and not _privileged_lane(),
+    reason="namespace mounts require Linux",
+)
 def test_sandboxed_execution_blocks_repo_write_and_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    if sys.platform != "linux":
+        pytest.fail("MERGECRAFT_PRIVILEGED_LANE=1 requires Linux namespace mounts")
     caps = sandbox_mod.probe_capabilities()
     if not caps.pid_namespace or caps.pid_namespace_method != "unshare":
-        pytest.skip("direct unshare unavailable; sudo cannot carry the private payload environment")
+        message = "direct unshare unavailable; sudo cannot carry the private payload environment"
+        if _privileged_lane():
+            pytest.fail(f"MERGECRAFT_PRIVILEGED_LANE=1 but the sandbox lane cannot run: {message}")
+        pytest.skip(message)
 
     scratch = tmp_path / "scratch"
     scratch.mkdir()
