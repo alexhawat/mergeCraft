@@ -945,6 +945,233 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
     return argv
 
 
+def _resolve_drop_target_identity() -> tuple[int, int] | None:
+    """Resolve the ``(uid, gid)`` the analyzer payload drops to, or ``None`` (SX-D2).
+
+    The sandbox sizes its ``RLIMIT_NPROC`` cap against the target uid's *real*
+    load before it forks (:func:`process_limit_for_drop`), so it must know the
+    exact numeric identity the in-``exec`` ``setpriv --reuid/--regid`` will land
+    on. Mirrors :func:`build_privilege_drop_argv` for the analyzer path — the
+    same three backends, in the same order — but without the fail-closed raise,
+    so the caller can size the cap before the drop's own error (a missing
+    ``setpriv`` or agent user) lands where it belongs:
+
+    1. a sudo-elevated shell (``SUDO_UID``/``SUDO_GID`` recorded and non-zero)
+       drops to that account;
+    2. otherwise the action image's agent user;
+    3. otherwise the orchestrator's own (real) uid/gid — the identity the
+       ``to_orchestrator`` drop branch lands on.
+
+    ``None`` when no drop applies: the platform has no drop, the process is not
+    euid 0 (the backend builds no prefix), or a backend cannot resolve an
+    identity. A malformed sudo envelope is a fail-closed configuration error in
+    the real drop, so it resolves to ``None`` here rather than a value the drop
+    would never use. Never raises.
+    """
+    if sys.platform == "win32" or os.geteuid() != 0:
+        return None
+    if os.environ.get("SUDO_UID", "").strip() or os.environ.get("SUDO_GID", "").strip():
+        try:
+            return _sudo_elevated_target()
+        except Exception:
+            return None
+    try:
+        from mergecraft.utils.privilege import _resolve_privilege_drop_user
+
+        entry = _resolve_privilege_drop_user()
+    except Exception:
+        # Missing agent user / root outside the image is a configuration error on
+        # the real drop; the resolver reports "no drop" and lets that raise land
+        # where it belongs.
+        return None
+    if entry is not None:
+        return (entry.pw_uid, entry.pw_gid)
+    uid, gid = os.getuid(), os.getgid()
+    if uid == 0 or gid == 0:
+        return None
+    return (uid, gid)
+
+
+def resolve_drop_target_uid() -> int | None:
+    """Return the uid the analyzer payload runs as when a privilege drop applies (SX-D2).
+
+    See :func:`_resolve_drop_target_identity`; ``None`` when no drop applies.
+    """
+    identity = _resolve_drop_target_identity()
+    return identity[0] if identity is not None else None
+
+
+def resolve_drop_target_gid() -> int | None:
+    """Return the gid the analyzer payload runs as when a privilege drop applies (SX-D2).
+
+    The sibling of :func:`resolve_drop_target_uid`. The ``setpriv`` drop sets
+    ``--regid`` as well as ``--reuid``, so the ``RLIMIT_NPROC`` probe in
+    :func:`process_limit_for_drop` needs both halves of the identity to mirror
+    the drop honestly. ``None`` when no drop applies.
+    """
+    identity = _resolve_drop_target_identity()
+    return identity[1] if identity is not None else None
+
+
+def process_count_for_uid(uid: int) -> int:
+    """Count processes whose *real* uid is ``uid``, from ``/proc/*/status``.
+
+    A credential-changing ``execve`` is refused ``EAGAIN`` when the target
+    real-uid already exceeds ``RLIMIT_NPROC``, so the sandbox must clear the
+    target uid's *current* load before its drop can land.
+
+    Best-effort and total: ``/proc`` is read directly, an unreadable entry is
+    skipped, and any failure to read ``/proc`` at all returns ``0``. Never
+    raises — a zero count is a blind starting hint the probe then calibrates,
+    never an abort.
+    """
+    count = 0
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return 0
+    for name in entries:
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/status", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if not line.startswith("Uid:"):
+                        continue
+                    fields = line.split()
+                    if len(fields) >= 2 and int(fields[1]) == uid:
+                        count += 1
+                    break
+        except (OSError, ValueError):
+            continue
+    return count
+
+
+_NPROC_PROBE_MAX_STEPS = 64
+"""Bound on :func:`process_limit_for_drop`'s upward search.
+
+The probe's first candidate is the ``/proc`` count plus one ``max_processes``
+allowance and each step adds another ``max_processes``; this is the maximum
+number of steps. At the default allowance of 16 that reaches a limit 1024
+processes above the visible count — well beyond any realistic orchestrator-uid
+load — and caps the probe at 64 short-lived ``setpriv`` processes (a few hundred
+milliseconds at worst).
+"""
+
+
+def _apply_nproc_limit(limit: int) -> None:
+    """Child-side ``RLIMIT_NPROC`` for :func:`_drop_exec_succeeds_at_limit`."""
+    resource.setrlimit(resource.RLIMIT_NPROC, (limit, limit))
+
+
+def _drop_exec_succeeds_at_limit(target_uid: int, target_gid: int, *, limit: int) -> bool | None:
+    """Ask the kernel whether a credential change to ``(uid, gid)`` lands under ``limit``.
+
+    ``/proc`` only lists the *current* PID namespace, and the analyzer sandbox
+    runs the payload inside ``unshare --pid --mount-proc``: a target uid that
+    owns processes outside that namespace is invisible, so the ``/proc`` count
+    reads 0 while the kernel still refuses the credential-changing ``execve``
+    with ``EAGAIN`` (``setpriv: failed to execute /bin/bash: Resource temporarily
+    unavailable``). This probe is namespace-independent because it asks the
+    kernel the same question the payload will ask, with the same tool: it runs
+    the payload's ``setpriv --reuid/--regid --clear-groups`` under the candidate
+    ``RLIMIT_NPROC`` and observes whether ``/bin/true`` executes.
+
+    Return values:
+
+    * ``True`` — the kernel accepted the credential change at ``limit``;
+    * ``False`` — the kernel refused it (``EAGAIN``; ``setpriv`` exits non-zero);
+    * ``None`` — the probe cannot run (not root, no ``setpriv``, or the spawn
+      failed), so the caller must not read this as either answer.
+
+    The capability flags the real drop carries are irrelevant to the
+    ``RLIMIT_NPROC`` credential check, so the probe keeps the same ``setpriv``
+    credential change without them. Cost is one ``subprocess`` spawn; the caller
+    bounds how many it makes.
+    """
+    if sys.platform == "win32" or os.geteuid() != 0:
+        return None
+    if shutil.which("setpriv") is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "setpriv",
+                f"--reuid={target_uid}",
+                f"--regid={target_gid}",
+                "--clear-groups",
+                "--",
+                "/bin/true",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            preexec_fn=lambda: _apply_nproc_limit(limit),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.returncode == 0
+
+
+def process_limit_for_drop(
+    max_processes: int, *, target_uid: int | None, target_gid: int | None = None
+) -> tuple[int, int]:
+    """Return the ``(soft, hard)`` ``RLIMIT_NPROC`` pair for a sandboxed payload.
+
+    With no drop (``target_uid is None``) the historical flat cap is kept
+    exactly: ``(max_processes, max_processes)``, and no probe runs.
+
+    With a drop the pair must let the payload's credential-changing ``execve``
+    land (SX-D2) while still bounding the payload's **additional** processes to
+    ``max_processes``. The kernel refuses that ``execve`` with ``EAGAIN`` when
+    the target real-uid already exceeds the limit, so the cap is calibrated
+    against the kernel's own answer rather than a ``/proc`` count a PID namespace
+    can hide:
+
+    1. take the visible count (:func:`process_count_for_uid`, ``0`` when ``/proc``
+       is blind to the target's processes) as the starting hint;
+    2. probe a credential change to ``(target_uid, target_gid)`` at
+       ``hint + max_processes`` — the smallest limit that still leaves the
+       payload its full allowance;
+    3. on refusal, step the candidate up by ``max_processes`` and probe again, at
+       most ``_NPROC_PROBE_MAX_STEPS`` times;
+    4. return the first candidate the kernel accepts, as ``(limit, limit)``.
+
+    Because every candidate is at least ``max_processes`` above the visible
+    count, the returned limit keeps the payload's additional allowance at
+    ``max_processes`` or more, and the ``RLIMIT_NPROC`` cap is never removed.
+
+    Fails closed with ``main._ConfigurationError`` when no candidate within the
+    bound is accepted — the drop must not be attempted with a cap that cannot
+    carry it. When the probe cannot run at all (no ``setpriv``) the drop path
+    already fails closed with a named configuration error, so this falls back to
+    the first candidate rather than masking that error. ``target_gid`` may be
+    omitted only when no drop applies.
+    """
+    if target_uid is None:
+        return (max_processes, max_processes)
+    allowance = max_processes if max_processes > 0 else 1
+    count = process_count_for_uid(target_uid)
+    if target_gid is None:
+        # Without a gid the probe cannot mirror the drop's credential change; the
+        # caller always resolves both, so this is a defensive best effort.
+        limit = count + allowance
+        return (limit, limit)
+    for step in range(1, _NPROC_PROBE_MAX_STEPS + 1):
+        candidate = count + step * allowance
+        outcome = _drop_exec_succeeds_at_limit(target_uid, target_gid, limit=candidate)
+        if outcome is None:
+            limit = count + allowance
+            return (limit, limit)
+        if outcome:
+            return (candidate, candidate)
+    raise _privilege_configuration_error(
+        f"cannot size RLIMIT_NPROC for the privilege drop to {target_uid}:{target_gid}: "
+        f"no candidate within {_NPROC_PROBE_MAX_STEPS} x {allowance} processes of the "
+        f"{count} visible let a credential-changing exec land"
+    )
+
+
 def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
     # Killing only the waiting unshare parent otherwise leaves PID 1 and its
@@ -1089,8 +1316,12 @@ __all__ = [
     "evaluate_analyzer_egress_policy",
     "plan_sandbox",
     "probe_capabilities",
+    "process_count_for_uid",
+    "process_limit_for_drop",
     "require_sandbox_for_enabled_shell",
     "reset_detection_cache",
+    "resolve_drop_target_gid",
+    "resolve_drop_target_uid",
     "sandbox_exec_policy",
     "sandbox_execution_context",
     "sandbox_skip_findings",

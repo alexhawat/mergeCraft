@@ -134,14 +134,11 @@ def _persist_output(raw: str, *, plan: AnalyzerPlan, output_dir: Path | None = N
     return str(path)
 
 
-def _sandbox_preexec(context: SandboxContext) -> None:
+def _sandbox_preexec(context: SandboxContext, process_limit: tuple[int, int]) -> None:
     if sys.platform == "win32":
         return
     with contextlib.suppress(OSError):
-        resource.setrlimit(
-            resource.RLIMIT_NPROC,
-            (context.max_processes, context.max_processes),
-        )
+        resource.setrlimit(resource.RLIMIT_NPROC, process_limit)
     if context.memory_mb > 0:
         with contextlib.suppress(OSError):
             byte_limit = context.memory_mb * 1024 * 1024
@@ -154,12 +151,18 @@ class _SandboxPreexec:
 
     ``_run_subprocess`` gets only the argv and the preexec, so the context rides
     on the callable to point a dropped payload's ``HOME`` at the scratch dir.
+    ``process_limit`` is the ``RLIMIT_NPROC`` pair resolved in the parent before
+    forking — a dropping payload's cap is calibrated against the kernel's own
+    answer by :func:`~mergecraft.analyzers.sandbox.process_limit_for_drop` (SX-D2),
+    which must run here, in the parent, because it reads ``/proc`` and probes with
+    a subprocess; inside ``preexec_fn`` only async-signal-safe work is allowed.
     """
 
     context: SandboxContext
+    process_limit: tuple[int, int]
 
     def __call__(self) -> None:
-        _sandbox_preexec(self.context)
+        _sandbox_preexec(self.context, self.process_limit)
 
 
 def _truncate(text: str, *, output_path: str | None = None) -> str:
@@ -218,9 +221,27 @@ def _sandboxed_argv(
         from mergecraft.analyzers.egress import FilteredEgressSetupError
 
         raise FilteredEgressSetupError("untrusted analyzer requires a Linux namespace backend")
-    preexec_fn = _SandboxPreexec(sandbox_context)
-    from mergecraft.analyzers.sandbox import build_analyzer_sandbox_argv_for_run
+    from mergecraft.analyzers.sandbox import (
+        build_analyzer_sandbox_argv_for_run,
+        process_limit_for_drop,
+        resolve_drop_target_gid,
+        resolve_drop_target_uid,
+    )
 
+    # The drop target's ``RLIMIT_NPROC`` pair is resolved here, in the parent:
+    # only async-signal-safe work is allowed inside ``preexec_fn``, and a
+    # credential-changing ``execve`` is refused ``EAGAIN`` when the target uid
+    # already exceeds ``RLIMIT_NPROC`` (SX-D2). ``process_limit_for_drop`` probes
+    # the kernel for a limit that carries the drop, so it must run outside the
+    # fork.
+    preexec_fn = _SandboxPreexec(
+        sandbox_context,
+        process_limit=process_limit_for_drop(
+            sandbox_context.max_processes,
+            target_uid=resolve_drop_target_uid(),
+            target_gid=resolve_drop_target_gid(),
+        ),
+    )
     event_payload = event if event is not None else {}
     # Repository-provided PATH/loader/shell variables only reach the payload
     # after namespace setup and capability removal. They cannot choose helpers.
