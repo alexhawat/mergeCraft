@@ -1,0 +1,131 @@
+"""The post-run sink scan fails the run and removes the sink before upload (S10).
+
+A credential that reached a local log sink has already left the agent's process;
+the honest post-run response is to stop the run, name the sink path (never its
+contents), force the approval conclusion to ``failure``, and delete the matching
+files before the workflow's artifact-upload step can ship them. Every artifact
+source the evidence and trace uploads are assembled from is in scope, not only
+the run's temp directory.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from mergecraft.agents.shared import AgentResult
+from mergecraft.main import RunOutcome
+from tests.support.run_main_harness import run_main_for_test
+
+_SCM_CANARY = "ghs_fake_git_token"
+_PROVIDER_CANARY = "sk-ant-review-sink-canary"
+
+_ARTIFACT_SOURCES = (
+    "packet-nous.json",
+    "packet-codex.json",
+    "packet-claude.json",
+    "mergecraft/run-packet.json",
+    "shadow-compare.jsonl",
+)
+
+
+class _SinkWritingAgent:
+    """Agent stand-in that plants one canary sink during the run."""
+
+    def __init__(self, *, run_tmpdir_sink: bool) -> None:
+        self.name = "claude"
+        self.calls: list[str] = []
+        self._run_tmpdir_sink = run_tmpdir_sink
+        self.seen_tmpdir: str | None = None
+
+    async def install(self, token: str | None = None) -> str:
+        return self.name
+
+    async def run(self, ctx: Any) -> AgentResult:
+        self.calls.append(self.name)
+        payload = f"scm={_SCM_CANARY}\nprovider={_PROVIDER_CANARY}\n"
+        tmpdir = ctx.tmpdir
+        self.seen_tmpdir = tmpdir
+        if self._run_tmpdir_sink:
+            (Path(tmpdir) / "leak.log").write_text(payload, encoding="utf-8")
+        return AgentResult(success=True, output="fake-agent-output")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "location",
+    ["run-tmpdir", *_ARTIFACT_SOURCES],
+    ids=["run-tmpdir", *[source.replace("/", "-") for source in _ARTIFACT_SOURCES]],
+)
+async def test_canary_sink_fails_the_run_names_the_path_and_is_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str
+) -> None:
+    runner_temp = tmp_path / "runner-temp"
+    run_tmpdir_sink = location == "run-tmpdir"
+    agent = _SinkWritingAgent(run_tmpdir_sink=run_tmpdir_sink)
+
+    if not run_tmpdir_sink:
+        real_run = agent.run
+
+        async def _run_with_artifact(ctx: object) -> AgentResult:
+            sink = Path(os.environ["RUNNER_TEMP"]) / location
+            sink.parent.mkdir(parents=True, exist_ok=True)
+            sink.write_text(f"scm={_SCM_CANARY}\nprovider={_PROVIDER_CANARY}\n", encoding="utf-8")
+            return await real_run(ctx)
+
+        agent.run = _run_with_artifact  # type: ignore[method-assign] — per-case sink placement
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        cleanup_tmpdir=False,
+        agent=agent,  # type: ignore[arg-type] — duck-typed agent, same protocol as FakeAgent
+        env={"ANTHROPIC_API_KEY": _PROVIDER_CANARY},
+    )
+
+    assert rec.raised is None, rec.raised
+    assert rec.result is not None
+    assert rec.result.success is False
+    assert rec.result.outcome is RunOutcome.failed
+    error = rec.result.error or ""
+    if run_tmpdir_sink:
+        expected_path = str(Path(agent.seen_tmpdir or "") / "leak.log")
+    else:
+        expected_path = str(runner_temp / location)
+    assert expected_path in error, error
+    assert _SCM_CANARY not in error, error
+    assert _PROVIDER_CANARY not in error, error
+
+    conclusions = [call.get("conclusion") for call in rec.report_status_calls]
+    assert "failure" in conclusions, conclusions
+
+    if not run_tmpdir_sink:
+        assert not (runner_temp / location).exists(), "the sink must be removed before upload"
+
+
+@pytest.mark.asyncio
+async def test_clean_sinks_change_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner_temp = tmp_path / "runner-temp"
+    agent = _SinkWritingAgent(run_tmpdir_sink=False)
+
+    async def _run_with_clean_sink(ctx: object) -> AgentResult:
+        sink = Path(os.environ["RUNNER_TEMP"]) / "packet-nous.json"
+        sink.write_text('{"verdict": "pass"}\n', encoding="utf-8")
+        return AgentResult(success=True, output="fake-agent-output")
+
+    agent.run = _run_with_clean_sink  # type: ignore[method-assign] — benign sink placement
+
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        cleanup_tmpdir=False,
+        agent=agent,  # type: ignore[arg-type] — duck-typed agent, same protocol as FakeAgent
+    )
+
+    assert rec.raised is None, rec.raised
+    assert rec.result is not None
+    assert rec.result.success is True
+    assert (runner_temp / "packet-nous.json").exists()

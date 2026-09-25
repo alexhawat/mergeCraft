@@ -1,10 +1,102 @@
-"""Sandbox capability probe and isolation (D7)."""
+"""Sandbox capability probe and isolation (D7).
+
+Also pins the identity the analyzer sandbox installs: on a root orchestrator it
+omits the ``--user --map-root-user`` mapping and drops the payload to the agent
+user; off the root backend the argv is unchanged.
+"""
 
 from __future__ import annotations
 
+import os
+import pwd
+import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests.analyzers.support import import_module
+
+if TYPE_CHECKING:
+    import pytest
+
+
+class _FakePwEntry:
+    """Minimal ``pwd.struct_passwd`` stand-in for the drop target."""
+
+    def __init__(self, name: str = "mergecraft", uid: int = 10001, gid: int = 10001) -> None:
+        self.pw_name = name
+        self.pw_uid = uid
+        self.pw_gid = gid
+
+
+def _full_caps_with_user_namespace() -> object:
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    return sandbox.SandboxCapabilities(
+        pid_namespace=True,
+        network_namespace=True,
+        read_only_bind=True,
+        tmpfs=True,
+        cgroup_memory=False,
+        rlimit_nproc=True,
+        pid_namespace_method="unshare",
+        user_namespace=True,
+    )
+
+
+def _fake_drop_tools(monkeypatch: pytest.MonkeyPatch, *, uid: int) -> None:
+    monkeypatch.setattr(os, "getuid", lambda: uid)
+    monkeypatch.setattr(os, "geteuid", lambda: uid)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: _FakePwEntry(name))
+    from mergecraft.utils import privilege
+
+    monkeypatch.setattr(privilege, "_in_action_image", lambda: True)
+    monkeypatch.setattr(privilege, "_setpriv_supports_bounding_set", lambda: True)
+
+
+def _analyzer_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    shell_mod = import_module("mergecraft.mcp.shell")
+    monkeypatch.setattr(sandbox, "probe_capabilities", _full_caps_with_user_namespace)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
+    context = sandbox.build_sandbox_context(
+        repo_root=tmp_path,
+        scratch_dir=tmp_path / "scratch",
+        limits=sandbox.SandboxLimits(timeout_s=30, memory_mb=256, max_processes=8),
+        network_allowlist=[],
+        read_only_source=True,
+        caps=_full_caps_with_user_namespace(),
+    )
+    return sandbox.build_analyzer_sandbox_argv(
+        ("echo", "probe"), context=context, isolate_network=False
+    )
+
+
+def test_root_analyzer_argv_omits_map_root_user_and_drops_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UID 0 maps 0→0, so the sandbox must not use it and must drop instead."""
+    _fake_drop_tools(monkeypatch, uid=0)
+    argv = _analyzer_argv(tmp_path, monkeypatch)
+    joined = " ".join(argv)
+    assert "--user" not in argv, argv
+    assert "--map-root-user" not in argv, argv
+    assert "--reuid=mergecraft" in joined, argv
+    assert "--regid=mergecraft" in joined, argv
+    assert "--no-new-privs" in joined, argv
+    assert "--inh-caps=-all" in joined, argv
+
+
+def test_non_root_analyzer_argv_keeps_map_root_user_and_no_reuid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Off the root backend the analyzer argv is unchanged."""
+    _fake_drop_tools(monkeypatch, uid=4242)
+    argv = _analyzer_argv(tmp_path, monkeypatch)
+    joined = " ".join(argv)
+    assert "--user" in argv, argv
+    assert "--map-root-user" in argv, argv
+    assert "--reuid" not in joined, argv
+    assert "--regid" not in joined, argv
 
 
 def test_capability_probe_records_unavailable_primitives_by_name() -> None:

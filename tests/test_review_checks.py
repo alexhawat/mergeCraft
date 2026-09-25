@@ -104,6 +104,7 @@ def test_run_checks_reports_pass_and_failure(tmp_path: Path) -> None:
             StaticCheck(name="bad", argv=(sys.executable, "-c", "raise SystemExit(3)")),
         ],
         root=tmp_path,
+        tier="trusted",
     )
     assert [o.name for o in outcomes] == ["ok", "bad"]
     assert outcomes[0].status == "passed"
@@ -117,7 +118,9 @@ def test_run_checks_reports_pass_and_failure(tmp_path: Path) -> None:
 def test_missing_executable_is_unavailable_not_failed(tmp_path: Path) -> None:
     """An uninstalled linter says nothing about the diff, so it must not read as a failure."""
     outcomes = run_checks(
-        [StaticCheck(name="missing", argv=("mergecraft-no-such-binary",))], root=tmp_path
+        [StaticCheck(name="missing", argv=("mergecraft-no-such-binary",))],
+        root=tmp_path,
+        tier="trusted",
     )
     assert outcomes[0].status == "unavailable"
     assert outcomes[0].ran is False
@@ -135,6 +138,39 @@ def test_run_checks_truncates_long_output(tmp_path: Path) -> None:
             )
         ],
         root=tmp_path,
+        tier="trusted",
     )
     assert "truncated" in outcomes[0].output
     assert len(outcomes[0].output) < MAX_OUTPUT_CHARS * 2
+
+
+@pytest.mark.parametrize("tier", ["untrusted", "trusted"])
+def test_run_checks_scrubs_credentials_from_the_gate_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str
+) -> None:
+    """A gate that prints its environment must not see the orchestrator's secrets."""
+    scm_canary = "review-checks-scm-canary"
+    provider_canary = "review-checks-provider-canary"
+    monkeypatch.setenv("GITHUB_TOKEN", scm_canary)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", provider_canary)
+
+    outcomes = run_checks(
+        [
+            StaticCheck(
+                name="env",
+                argv=(
+                    sys.executable,
+                    "-c",
+                    (
+                        "import os; "
+                        "print('SCM=' + str(os.environ.get('GITHUB_TOKEN'))); "
+                        "print('PROVIDER=' + str(os.environ.get('ANTHROPIC_API_KEY')))"
+                    ),
+                ),
+            )
+        ],
+        root=tmp_path,
+        tier=tier,
+    )
+    assert scm_canary not in outcomes[0].output, outcomes[0].output
+    assert provider_canary not in outcomes[0].output, outcomes[0].output
