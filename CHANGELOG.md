@@ -208,6 +208,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CI failures with no evidence of cause are now reported as **unattributed** —
+  blocking, with `introduced_by_pr: unknown` — instead of being cleared as
+  not-this-PR. A passing or unrecognised base-branch status no longer clears a
+  failure: only a same-fingerprint base run that concluded `failure` does, and
+  one base-branch status can no longer clear more than one cluster
+  (per-fingerprint base runs can). "Pre-existing" now requires the base run to
+  have failed, and its summary names the ref and what that run concluded.
+  Failure paths come only from failure lines — `FAILED`/`ERROR` with a node,
+  line-start `path:line:`, and `path(line,col)` — with root-level files,
+  `(line,col)` and `./` forms accepted and normalised on both sides of the diff
+  comparison, so passed tests, collection lines and command echoes no longer
+  produce a blame path. The pre-merge CI row and the run payload report an
+  unattributed count.
+
 - Every agent CLI driver and the OpenCode server boot no longer hang when a
   child fills its stderr pipe. Each driver drains stderr concurrently with the
   stdout stream it already reads, keeping the two pipes separate so the
