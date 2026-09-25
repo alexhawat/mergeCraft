@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: MIT
 #
 # CodeQL semantic code scanning for Python.
-# Requires code scanning to be enabled in repo settings for upload to succeed.
+# Results publish to code scanning on the events whose token can write
+# security-events: pushes to the protected branches, the weekly schedule, and
+# pull requests opened from this repository. Fork and Dependabot pull requests
+# still analyse, but skip the upload because their token is read-only.
+# An analysis failure fails this job on every event. This workflow is not a
+# required status check.
 name: CodeQL
 
 on:
@@ -24,9 +29,6 @@ jobs:
     name: Analyze (python)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Private repos without code scanning enabled fail on SARIF upload;
-    # keep the job green until scanning is turned on in Settings → Security.
-    continue-on-error: true
     permissions:
       security-events: write
       contents: read
@@ -42,5 +44,6 @@ jobs:
         uses: github/codeql-action/analyze@f58f0d11ebf5dedd870fab2f999275f7602cfa46 # codeql-bundle-v2.26.0
         with:
           category: "/language:python"
-          # Avoid hard-fail when Advanced Security / code scanning is not enabled.
-          upload: never
+          # Publish only where the token can write security-events; fork and
+          # Dependabot pull requests keep the upload disabled.
+          upload: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'always' || 'never' }}

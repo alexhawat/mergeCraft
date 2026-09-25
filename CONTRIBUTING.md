@@ -206,7 +206,8 @@ Add repository secrets for Craft publish: `TWINE_USERNAME`, `TWINE_PASSWORD`.
    ```
 2. **CI/CD** on the release branch (build-once → promote digest):
    - runs `make ci`
-   - builds `dist/*` and uploads `artifact-python-dist`
+   - builds `dist/*`, install-checks the wheel with `make test-wheel-corpus`, and
+     attaches build provenance before uploading `artifact-python-dist`
    - builds each GHCR image **once**, pushes immutable `:${GITHUB_SHA}` /
      `:analyzers-${GITHUB_SHA}` tags, and captures the digests
    - generates an SBOM (syft) + Trivy scan per image (CRITICAL/HIGH gate on
