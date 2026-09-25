@@ -286,9 +286,10 @@ def git_auth_header_value(token: str) -> str:
 # to a trace file or stderr, or redirect the credential helper / transport.
 # Matched by exact name or by prefix, so the numbered ``GIT_CONFIG_KEY_<n>`` /
 # ``GIT_CONFIG_VALUE_<n>`` family covers any ``n``. Source: git's documentation
-# for ``git-config``, ``gitcredentials`` and ``git``. File-based config
-# (``GIT_CONFIG_GLOBAL``, ``~/.gitconfig``, the system config) is the operator's
-# own and is deliberately left in place.
+# for ``git-config``, ``gitcredentials`` and ``git``. The operator's *default*
+# file-based config (``~/.gitconfig``, the system config) remains in place; only
+# env-selected config *sources* are dropped (see
+# :data:`GIT_ENV_UNTRUSTED_EXACT_NAMES`).
 GIT_ENV_UNTRUSTED_NAMES: tuple[str, ...] = (
     # config injection
     "GIT_CONFIG_PARAMETERS",
@@ -312,9 +313,22 @@ GIT_ENV_UNTRUSTED_NAMES: tuple[str, ...] = (
     "GIT_EXEC_PATH",
 )
 
+# Config-source selectors: each points git at an arbitrary config file that
+# is read before this run's numbered header pairs, so an inherited value can
+# install a credential helper, URL rewrite, or HTTP header. Matched exactly so
+# the boolean config *disables* (``GIT_CONFIG_NOSYSTEM`` / ``GIT_CONFIG_NOGLOBAL``)
+# still pass through. Source: git's documentation for ``git`` / ``git-config``.
+GIT_ENV_UNTRUSTED_EXACT_NAMES: tuple[str, ...] = (
+    "GIT_CONFIG",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+)
+
 
 def _is_untrusted_git_env_name(name: str) -> bool:
-    """Return whether ``name`` is one of :data:`GIT_ENV_UNTRUSTED_NAMES`."""
+    """Return whether ``name`` is one of the untrusted git env families."""
+    if name in GIT_ENV_UNTRUSTED_EXACT_NAMES:
+        return True
     return any(name == entry or name.startswith(entry) for entry in GIT_ENV_UNTRUSTED_NAMES)
 
 
@@ -330,8 +344,9 @@ def git_env_for_token(token: str, *, remote_url: str = "") -> dict[str, str]:
     Ambient env-injected git config (``GIT_CONFIG_*``), trace output and
     credential/transport redirection are dropped from the copied environment on
     both the token and no-token paths, so a git child admits only the names this
-    run sets. File-based config (``GIT_CONFIG_GLOBAL``, ``~/.gitconfig``, the
-    system config) is the operator's own and is left in place.
+    run sets. Env-selected config sources such as ``GIT_CONFIG`` /
+    ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` are dropped too; the operator's
+    default ``~/.gitconfig`` and system config remain in place.
     """
     env = os.environ.copy()
     _strip_untrusted_git_env(env)

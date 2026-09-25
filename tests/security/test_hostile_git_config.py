@@ -251,9 +251,12 @@ def test_ambient_credential_helper_is_unreachable_from_returned_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A child run with the returned env reads no ambient credential helper."""
-    # Ignore the operator's file-based config so only the injection under test
-    # can contribute a helper.
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    # Isolate the operator's own file-based config so only the injection under
+    # test can contribute a helper: an empty HOME has no ``~/.gitconfig`` and
+    # ``GIT_CONFIG_NOSYSTEM`` disables the system file.
+    empty_home = tmp_path / "home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'credential.helper'='store'")
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
@@ -273,3 +276,70 @@ def test_ambient_credential_helper_is_unreachable_from_returned_env(
     assert completed.stdout.strip() == "", (
         "git child resolved a credential helper from ambient config"
     )
+
+
+_CONFIG_SOURCE_NAMES = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM")
+_HOSTILE_HELPER_MARKER = "mc-hostile-credential-helper"
+_HOSTILE_REWRITE_TARGET = "http://127.0.0.1:9/"
+
+
+@pytest.mark.parametrize("source_name", _CONFIG_SOURCE_NAMES)
+def test_ambient_config_source_override_cannot_install_a_credential_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_name: str
+) -> None:
+    """An inherited config-source selector cannot point git at a hostile file.
+
+    ``GIT_CONFIG_GLOBAL`` / ``GIT_CONFIG_SYSTEM`` select a whole config file, so
+    an inherited value can install a credential helper or a URL rewrite before
+    the brokered header pairs apply. Both must be dropped from the returned env.
+    """
+    empty_home = tmp_path / "home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    if source_name == "GIT_CONFIG_GLOBAL":
+        # The injected global file replaces ``~/.gitconfig``; disable the system
+        # file so only the injected file can contribute.
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    hostile_config = tmp_path / "hostile.gitconfig"
+
+    with _http_stub() as base_url:
+        stub_remote = f"{base_url}/acme/demo.git"
+        hostile_config.write_text(
+            "[credential]\n"
+            f"\thelper = {_HOSTILE_HELPER_MARKER}\n"
+            f'[url "{_HOSTILE_REWRITE_TARGET}"]\n'
+            f"\tinsteadOf = {base_url}/\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(source_name, str(hostile_config))
+
+        remote = "https://github.com/acme/demo.git"
+        with_token = git_env_for_token("ghs_secret_token", remote_url=remote)
+        without_token = git_env_for_token("", remote_url=remote)
+
+        helper_output = subprocess.run(
+            ["git", "config", "--get-all", "credential.helper"],
+            cwd=tmp_path,
+            env=with_token,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        stub_env = git_env_for_token("ghs_secret_token", remote_url=stub_remote)
+        ls_remote = subprocess.run(
+            ["git", "ls-remote", stub_remote],
+            env=stub_env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    assert _HOSTILE_HELPER_MARKER not in helper_output.stdout, (
+        "a child run resolved a credential helper from the inherited config source"
+    )
+    combined = ls_remote.stdout + ls_remote.stderr
+    assert _HOSTILE_HELPER_MARKER not in combined
+    assert _HOSTILE_REWRITE_TARGET not in combined, "an inherited url rewrite was applied"
+    for env in (with_token, without_token):
+        for name in ("GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"):
+            assert name not in env, f"{name} survived git_env_for_token"

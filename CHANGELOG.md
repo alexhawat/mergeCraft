@@ -1700,12 +1700,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redacted.
 
 - Git subprocesses no longer inherit environment-injected git configuration or
-  credential redirection: ambient `GIT_CONFIG_*` pairs, git trace variables
-  (`GIT_TRACE*`, `GIT_CURL_VERBOSE`), and askpass / ssh / proxy / exec-path
-  overrides are dropped before the subprocess environment is built, so an
-  ambient `credential.helper` or trace target cannot capture the brokered
-  credential. File-based configuration (`GIT_CONFIG_GLOBAL`, `~/.gitconfig`,
-  system) is left to the operator.
+  credential redirection: ambient `GIT_CONFIG_*` pairs, the config-source
+  selectors (`GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`), git trace
+  variables (`GIT_TRACE*`, `GIT_CURL_VERBOSE`), and askpass / ssh / proxy /
+  exec-path overrides are dropped before the subprocess environment is built, so
+  an ambient `credential.helper`, trace target, or substituted config file
+  cannot capture the brokered credential. The operator's own default
+  `~/.gitconfig` and system configuration are still honoured.
 
 - GitHub Actions and runner metadata reach child processes by explicit
   documented name rather than by prefix, so lookalike credential variables such
