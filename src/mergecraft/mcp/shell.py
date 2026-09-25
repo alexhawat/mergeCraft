@@ -302,6 +302,18 @@ def _allow_unsandboxed_shell() -> bool:
     return os.environ.get("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL") == "1"
 
 
+def _dropped_payload(command: str, drop_argv: list[str]) -> str:
+    """Shell fragment: the payload as the quoted argument of the drop's final ``exec``.
+
+    The masks run first; ``setpriv`` is the last ``exec`` of the same script, so
+    the kernel enforces the masks against a process that no longer holds
+    ``CAP_SYS_ADMIN`` and cannot lift them (SX-D1).
+    """
+    import shlex
+
+    return f"exec {shlex.join(drop_argv)} -- bash --noprofile --norc -c {shlex.quote(command)}"
+
+
 def _spawn_shell(
     command: str,
     *,
@@ -339,7 +351,7 @@ def _spawn_shell(
             "/var/run/crio/crio.sock",
         )
     )
-    wrapped = f"{proc_cleanup} {socket_cleanup} {fs_mounts} {command}"
+    wrapped = f"{proc_cleanup} {socket_cleanup} {fs_mounts}"
     unshare_argv = _unshare_argv(isolate_network=isolate_network)
 
     if method == "sandbox-exec":
@@ -353,6 +365,16 @@ def _spawn_shell(
             stderr=stderr,
             start_new_session=True,
         )
+    if method in {"unshare", "sudo-unshare"}:
+        from mergecraft.analyzers.sandbox import build_privilege_drop_argv
+
+        # SX-D1: the masks need CAP_SYS_ADMIN; the payload must not. The drop is
+        # the final exec of the mask script, so both hold at the only point they
+        # can. A root orchestrator drops to the agent user; a sudo-elevated
+        # orchestrator drops back to its own numeric UID/GID (SX-D2).
+        drop = build_privilege_drop_argv(to_orchestrator=method == "sudo-unshare")
+        payload = command if not drop else _dropped_payload(command, drop)
+        wrapped = f"{wrapped} {payload}"
     if method == "unshare":
         return subprocess.Popen(
             [*unshare_argv, "bash", "-c", wrapped],

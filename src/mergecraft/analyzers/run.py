@@ -136,6 +136,20 @@ def _sandbox_preexec(context: SandboxContext) -> None:
             resource.setrlimit(resource.RLIMIT_AS, (byte_limit, byte_limit))
 
 
+@dataclass(frozen=True, slots=True)
+class _SandboxPreexec:
+    """Preexec callable that also carries the sandbox context.
+
+    ``_run_subprocess`` gets only the argv and the preexec, so the context rides
+    on the callable to point a dropped payload's ``HOME`` at the scratch dir.
+    """
+
+    context: SandboxContext
+
+    def __call__(self) -> None:
+        _sandbox_preexec(self.context)
+
+
 def _truncate(text: str, *, output_path: str | None = None) -> str:
     if len(text) <= MAX_OUTPUT_CHARS:
         return text
@@ -192,7 +206,7 @@ def _sandboxed_argv(
         from mergecraft.analyzers.egress import FilteredEgressSetupError
 
         raise FilteredEgressSetupError("untrusted analyzer requires a Linux namespace backend")
-    preexec_fn = lambda: _sandbox_preexec(sandbox_context)  # noqa: E731
+    preexec_fn = _SandboxPreexec(sandbox_context)
     from mergecraft.analyzers.sandbox import build_analyzer_sandbox_argv_for_run
 
     event_payload = event if event is not None else {}
@@ -239,6 +253,14 @@ def _run_subprocess(
             pass_fds: tuple[int, ...] = ()
             if sandboxed:
                 payload_env = plan.env or dict(os.environ)
+                if os.geteuid() == 0 and isinstance(preexec_fn, _SandboxPreexec):
+                    # SX2: a payload dropped to the agent user cannot write the
+                    # runner-owned HOME it inherited; point it at the writable
+                    # scratch tmpfs instead, or every cache write fails (P-8).
+                    payload_env = {
+                        **payload_env,
+                        "HOME": str(preexec_fn.context.scratch_dir),
+                    }
                 if any(
                     not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
                     or key.startswith("_MERGECRAFT_BOOTSTRAP_")

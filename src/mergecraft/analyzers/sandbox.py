@@ -702,12 +702,85 @@ def analyzer_egress_skip_reason(
     return None
 
 
+_DROP_SENTINEL = "__mergecraft_privilege_drop__"
+
+
+def _privilege_configuration_error(message: str) -> Exception:
+    """Return a ``main._ConfigurationError`` (imported lazily; no import cycle)."""
+    from mergecraft.main import _ConfigurationError
+
+    return _ConfigurationError(message)
+
+
+def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
+    """Return the ``setpriv`` prefix that drops identity *after* the masks (SX-D1/SX-D2/SX-D3).
+
+    The masks (read-only ``.git`` bind, tmpfs scratch, cleared bounding set) need
+    ``CAP_SYS_ADMIN`` to install, so the payload must be dropped in the *same*
+    ``exec``, as the final expression of the mask script. Callers ``exec`` the
+    payload behind this prefix; the kernel then enforces the masks against a
+    process that lacks the authority to lift them.
+
+    Two identities, one spelling:
+
+    * ``to_orchestrator=False`` — the root orchestrator. The payload drops to the
+      agent user through :func:`mergecraft.utils.privilege.wrap_agent_command`,
+      reusing its fail-closed resolution (missing ``setpriv``, missing user, or a
+      user resolving to UID/GID 0 all raise ``main._ConfigurationError``). Returns
+      ``[]`` when the current process is not euid 0, i.e. no drop applies.
+    * ``to_orchestrator=True`` — the sudo-elevated shell. A non-root orchestrator
+      elevated the namespace through ``sudo``, so the payload drops back to the
+      orchestrator's own numeric UID/GID with ``--clear-groups``. Raises when that
+      UID/GID is 0.
+
+    Every returned prefix carries ``--no-new-privs --inh-caps=-all
+    --ambient-caps=-all --bounding-set=-all``. The function raises rather than
+    returning a prefix that would leave the payload as root.
+    """
+    if to_orchestrator:
+        uid = os.getuid()
+        gid = os.getgid()
+        if uid == 0 or gid == 0:
+            raise _privilege_configuration_error(
+                f"sudo-elevated shell cannot drop identity: the orchestrator UID/GID "
+                f"is {uid}:{gid}; a privilege drop to a root account cannot land"
+            )
+        return [
+            "setpriv",
+            "--no-new-privs",
+            "--inh-caps=-all",
+            "--ambient-caps=-all",
+            "--bounding-set=-all",
+            f"--reuid={uid}",
+            f"--regid={gid}",
+            "--clear-groups",
+        ]
+    if os.geteuid() != 0:
+        return []
+    from mergecraft.utils.privilege import wrap_agent_command
+
+    # wrap_agent_command validates setpriv, the user record and the UID/GID and
+    # raises main._ConfigurationError when the drop cannot land.
+    resolved = wrap_agent_command([_DROP_SENTINEL])
+    if _DROP_SENTINEL not in resolved:
+        return []
+    argv = resolved[:-1]
+    if "--ambient-caps=-all" not in argv:
+        # wrap_agent_command omits --ambient-caps; add it beside --inh-caps so
+        # the four capability flags travel together for every caller.
+        argv.insert(argv.index("--inh-caps=-all") + 1, "--ambient-caps=-all")
+    return argv
+
+
 def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
     # Killing only the waiting unshare parent otherwise leaves PID 1 and its
     # descendants alive after a subprocess timeout.
     argv: list[str] = ["unshare"]
-    if caps.user_namespace:
+    # SX-D4: on host UID 0 a user namespace with --map-root-user maps 0->0, which
+    # adds nothing and leaves no UID to drop to. The payload drops identity with
+    # setpriv instead (build_privilege_drop_argv), so the mapping is omitted.
+    if caps.user_namespace and os.geteuid() != 0:
         argv.extend(["--user", "--map-root-user"])
     argv.extend(["--pid", "--fork", "--mount-proc", "--kill-child=KILL"])
     if isolate_network and caps.network_namespace:
@@ -722,12 +795,21 @@ def build_analyzer_sandbox_command(argv: tuple[str, ...], *, context: SandboxCon
     mounts = analyzer_isolation_mount_fragment(context)
     sockets = analyzer_socket_mask_fragment()
     inner = shlex.join(argv)
+    # On a root orchestrator the payload drops identity in the same exec, after
+    # the mounts and the capability clear, so the mask binds a process that
+    # cannot lift it (SX-D1/SX-D2/SX-D4). Off the root backend the existing
+    # capability-clearing prefix is kept unchanged.
+    drop = build_privilege_drop_argv()
+    privilege = (
+        shlex.join(drop)
+        if drop
+        else ("setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs")
+    )
     return (
         f"{_PROC_PREP_FRAGMENT}{sockets}{mounts}"
         "mount --bind /proc/sys /proc/sys || exit 1; "
         "mount -o remount,bind,ro /proc/sys || exit 1; "
-        "exec setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all "
-        f"--no-new-privs -- {inner}"
+        f"exec {privilege} -- {inner}"
     )
 
 
@@ -785,7 +867,7 @@ def build_analyzer_sandbox_argv_for_run(
     egress_session: EgressSession | None = None,
 ) -> list[str]:
     """Trust-aware wrapper around ``build_analyzer_sandbox_argv`` (D5/D5a)."""
-    from mergecraft.analyzers.egress import wrap_argv_for_filtered_netns
+    from mergecraft.analyzers.egress import FilteredEgressSetupError, wrap_argv_for_filtered_netns
 
     _ = analyzer_id, self_review_level
     isolate = _resolve_isolate_network(context, event_name=event_name, event=event)
@@ -793,7 +875,19 @@ def build_analyzer_sandbox_argv_for_run(
         isolate = False
     built = build_analyzer_sandbox_argv(argv, context=context, isolate_network=isolate)
     if egress_session is not None:
-        return egress_session.wrap_argv(built)
+        wrapped = egress_session.wrap_argv(built)
+        # F4 outcome (a): the userspace bridge re-execs under
+        # ``unshare --user --map-root-user``. On a root orchestrator that maps
+        # 0->0, so the agent UID is unmapped inside the bridge's user namespace
+        # and the ``setpriv --reuid`` drop (built above) cannot land — the
+        # analyzer would keep UID 0. Fail closed with a named reason instead.
+        if os.geteuid() == 0 and any("egress_bridge" in part for part in wrapped):
+            raise FilteredEgressSetupError(
+                "filtered egress bridge cannot carry the privilege drop: its "
+                "user namespace maps root->root, so the agent UID is unmapped "
+                "and the analyzer would run as UID 0"
+            )
+        return wrapped
     if netns_name:
         return wrap_argv_for_filtered_netns(built, netns_name)
     return built
@@ -815,6 +909,7 @@ __all__ = [
     "build_analyzer_sandbox_argv",
     "build_analyzer_sandbox_argv_for_run",
     "build_analyzer_sandbox_command",
+    "build_privilege_drop_argv",
     "build_sandbox_context",
     "build_sandbox_exec_argv",
     "egress_trusted_for_host_networking",
