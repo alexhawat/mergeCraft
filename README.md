@@ -424,19 +424,30 @@ on:
         type: string
 
 permissions:
-  contents: write
+  # A review needs only read access. Dispatch-driven pushes (`push: restricted`)
+  # require contents: write — opt up explicitly if you enable them.
+  contents: read
   pull-requests: write
   issues: write
   checks: write
   actions: read
   id-token: write
 
+concurrency:
+  # Serialize runs per pull request so two reviews cannot race the same PR.
+  group: mergecraft-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   mergecraft:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: alexhawat/mergeCraft@v0.1.0a1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Do not persist the checkout token into .git/config: mergeCraft adds
+          # its own Authorization header, and git sends both on one request.
+          persist-credentials: false
+      - uses: alexhawat/mergeCraft@521c0aedbf525a80a5bf6eddf0119ada85a8d381 # v0.1.0a1
         with:
           # Event-aware: a pull_request run reviews the PR, a manual dispatch
           # uses the prompt the operator typed. Hardcoding the text here would
@@ -448,9 +459,9 @@ jobs:
           model: anthropic/claude-sonnet
           status_checks: enabled
         env:
-          # Keep equal to the `uses:` ref above — the container cannot read it,
-          # so this is the only way the run records which pin it is running.
-          MERGECRAFT_ACTION_SHA: v0.1.0a1
+          # Keep equal to the `uses:` commit above — the container cannot read
+          # it, so this is the only way the run records which pin it is running.
+          MERGECRAFT_ACTION_SHA: 521c0aedbf525a80a5bf6eddf0119ada85a8d381
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 

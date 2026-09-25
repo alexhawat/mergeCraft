@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path
 from typing import Any
 
-from tests.ci.workflow_support import job, load_workflow
+from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
 
 _WORKFLOW = "mergecraft.yml"
 _REVIEW_JOB = "review"
@@ -17,6 +18,19 @@ _SCRIPT_BY_STEP_ID = {
     "fallback": "scripts/decide_codex_fallback.sh",
     "claude_fallback": "scripts/decide_claude_fallback.sh",
 }
+# The scripts the trusted-copy step must stage, preserving layout so a copy
+# resolves its shared library from ``$(dirname "$0")/..`` exactly as the
+# workspace copy does.
+TRUSTED_SCRIPTS = (
+    "scripts/decide_codex_fallback.sh",
+    "scripts/decide_claude_fallback.sh",
+    "scripts/lib/provider_verdict_guard.sh",
+)
+# A stable head SHA and run identity the mock check-run payload and the decide
+# steps agree on. The real gate binds a check to ``<run_id>:<run_attempt>``.
+HEAD_SHA = "abc123def4567890abcdef1234567890abcd1234"
+RUN_ID = "123"
+RUN_ATTEMPT = "2"
 
 
 def step_by_id(step_id: str) -> dict[str, Any]:
@@ -64,8 +78,16 @@ def write_gh_mock(
     *,
     check_run_id: str = "999888777",
     conclusion: str = "neutral",
+    app_id: int = 15368,
+    app_slug: str = "github-actions",
+    external_id: str = f"{RUN_ID}:{RUN_ATTEMPT}",
 ) -> Path:
-    """Install a fake ``gh`` that answers mergecraft-approval check-run queries."""
+    """Install a fake ``gh`` that answers mergecraft-approval check-run queries.
+
+    The payload carries the fields the run-bound filter reads — issuer ``app``,
+    ``head_sha`` and ``external_id`` — so the same mock exercises both the old
+    name-only lookup and the attributable lookup without changing callers.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True)
     gh_path = bin_dir / "gh"
@@ -78,7 +100,11 @@ def write_gh_mock(
                         "id": int(check_run_id),
                         "name": "mergecraft-approval",
                         "conclusion": conclusion,
+                        "status": "completed",
+                        "head_sha": HEAD_SHA,
+                        "external_id": external_id,
                         "completed_at": "2026-09-01T00:00:00Z",
+                        "app": {"id": app_id, "slug": app_slug},
                     }
                 ]
             }
@@ -87,21 +113,53 @@ def write_gh_mock(
     )
     gh_path.write_text(
         textwrap.dedent(
-            f"""\
+            """\
             #!/usr/bin/env bash
             set -euo pipefail
-            if [[ "$*" == *check-runs* ]]; then
-              cat {json.dumps(str(payload_path))}
-              exit 0
+            if [[ "$*" != *check-runs* ]]; then
+              echo "unexpected gh invocation: $*" >&2
+              exit 1
             fi
-            echo "unexpected gh invocation: $*" >&2
-            exit 1
+            jq_expr=""
+            args=("$@")
+            i=0
+            while [ "$i" -lt "${#args[@]}" ]; do
+              arg="${args[$i]}"
+              if [ "$arg" = "--jq" ]; then
+                i=$((i + 1))
+                jq_expr="${args[$i]}"
+              fi
+              i=$((i + 1))
+            done
+            if [ -n "$jq_expr" ]; then
+              jq -r "$jq_expr" "__PAYLOAD__"
+            else
+              cat "__PAYLOAD__"
+            fi
             """
-        ),
+        ).replace("__PAYLOAD__", str(payload_path)),
         encoding="utf-8",
     )
     gh_path.chmod(0o755)
     return bin_dir
+
+
+def stage_trusted_copy(tmp_path: Path, *, run_id: str = RUN_ID) -> Path:
+    """Stage the three decide scripts under a runner-home trusted root.
+
+    Mirrors the layout the self-workflow's trusted-copy step produces before
+    any mergeCraft step runs: ``<root>/scripts/...`` with the shared library in
+    ``<root>/scripts/lib/``, so the copy resolves its own library relative to
+    the copied script rather than the checkout.
+    """
+    root = tmp_path / f"mergecraft-trusted-{run_id}"
+    for relative in TRUSTED_SCRIPTS:
+        source = REPO_ROOT / relative
+        assert source.is_file(), f"missing trusted script at {relative}"
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    return root
 
 
 def run_decide_script(
@@ -110,30 +168,36 @@ def run_decide_script(
     *,
     env: dict[str, str],
     gh_mock_dir: Path | None = None,
+    cwd: Path | None = None,
 ) -> tuple[dict[str, str], subprocess.CompletedProcess[str]]:
-    """Execute a decide-step bash script and return parsed ``GITHUB_OUTPUT``."""
+    """Execute a decide-step bash script and return parsed ``GITHUB_OUTPUT``.
+
+    ``cwd`` defaults to the repository root; pass a trusted-copy root to prove
+    the script carries no dependency on the checkout it was copied out of.
+    """
     output = tmp_path / "github_output"
     output.write_text("", encoding="utf-8")
     script_env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(tmp_path),
         "GITHUB_OUTPUT": str(output),
+        "GITHUB_RUN_ID": RUN_ID,
+        "GITHUB_RUN_ATTEMPT": RUN_ATTEMPT,
         "EVENT_NAME": "pull_request_target",
         "REPO": "acme/demo",
-        "HEAD_SHA": "abc123def4567890abcdef1234567890abcd1234",
+        "HEAD_SHA": HEAD_SHA,
         "BASELINE_ID": "111222333",
     }
     if gh_mock_dir is not None:
         script_env["PATH"] = f"{gh_mock_dir}:{script_env['PATH']}"
     script_env.update(env)
-    repo_root = Path(__file__).resolve().parents[2]
     completed = subprocess.run(
         [str(script)],
         check=False,
         capture_output=True,
         text=True,
         env=script_env,
-        cwd=str(repo_root),
+        cwd=str(cwd if cwd is not None else REPO_ROOT),
     )
     assert completed.returncode == 0, (
         f"decide script failed ({completed.returncode}): "

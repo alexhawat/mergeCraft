@@ -17,12 +17,20 @@ on:
         type: string
 
 permissions:
-  contents: write
+  # A review needs only read access. Dispatch-driven pushes (`push: restricted`)
+  # require contents: write — opt up explicitly if you enable them.
+  contents: read
   pull-requests: write
   issues: write
   checks: write
   actions: read
   id-token: write
+
+concurrency:
+  # Serialize runs per pull request so two reviews cannot race the same PR
+  # (the sticky summary comment is upserted, not re-fetched).
+  group: mergecraft-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   mergecraft:
@@ -31,7 +39,11 @@ jobs:
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@__CHECKOUT_SHA__ # v7.0.1
+        with:
+          # Do not persist the checkout token into .git/config: mergeCraft adds
+          # its own Authorization header, and git sends both on one request.
+          persist-credentials: false
 
       # Optional: mint a short-lived installation token for elevated API access
       # - name: Get installation token
@@ -42,7 +54,7 @@ jobs:
       #     GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
 
       - name: Run mergeCraft
-        uses: __ACTION_REPO__@__ACTION_PIN__
+        uses: __ACTION_REPO__@__ACTION_SHA__ # __ACTION_PIN__
         with:
           prompt: >
             ${{ github.event_name == 'pull_request'
@@ -63,7 +75,7 @@ jobs:
           # `uses:` line above, so it learns the pin only from here — omit it and
           # the run records an empty Action pin and cannot report a pin/image
           # mismatch. Keep it equal to the `uses:` ref.
-          MERGECRAFT_ACTION_SHA: __ACTION_PIN__
+          MERGECRAFT_ACTION_SHA: __ACTION_SHA__
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}

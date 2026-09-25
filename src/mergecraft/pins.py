@@ -21,6 +21,8 @@ _PACKAGED_DEFAULTS_PATH: Final[str] = "example_workflows/defaults.yaml"
 _FALLBACK_DEFAULTS: Final[dict[str, str]] = {
     "action_repo": "alexhawat/mergeCraft",
     "action_pin_minimal": "v0.1.0a1",
+    "action_sha_minimal": "521c0aedbf525a80a5bf6eddf0119ada85a8d381",
+    "checkout_sha": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "action_pin_hardened": "REPLACE_WITH_FULL_COMMIT_SHA",
     "ci_job_prefix": "Verify (",
     "base_branches": "[main]",
@@ -56,6 +58,8 @@ def load_example_defaults() -> dict[str, str]:
     env_map = {
         "action_repo": "MERGECRAFT_EXAMPLE_ACTION_REPO",
         "action_pin_minimal": "MERGECRAFT_EXAMPLE_ACTION_PIN_MINIMAL",
+        "action_sha_minimal": "MERGECRAFT_EXAMPLE_ACTION_SHA_MINIMAL",
+        "checkout_sha": "MERGECRAFT_EXAMPLE_CHECKOUT_SHA",
         "action_pin_hardened": "MERGECRAFT_EXAMPLE_ACTION_PIN_HARDENED",
         "ci_job_prefix": "MERGECRAFT_EXAMPLE_CI_JOB_PREFIX",
         "base_branches": "MERGECRAFT_EXAMPLE_BASE_BRANCHES",
@@ -69,3 +73,13 @@ def load_example_defaults() -> dict[str, str]:
 def action_pin_minimal() -> str:
     """Return the canonical minimal Action pin (for example ``v0.1.0a1``)."""
     return load_example_defaults()["action_pin_minimal"].strip()
+
+
+def action_sha_minimal() -> str:
+    """Return the immutable commit the minimal Action pin resolves to."""
+    return load_example_defaults()["action_sha_minimal"].strip()
+
+
+def checkout_sha() -> str:
+    """Return the one ``actions/checkout`` commit every workflow should pin."""
+    return load_example_defaults()["checkout_sha"].strip()

@@ -13,7 +13,7 @@ from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.provider_cmd import seed_builtin_providers
 from mergecraft.config.io import load_config_dict, patch_config_dict
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
-from mergecraft.pins import action_pin_minimal
+from mergecraft.pins import action_pin_minimal, action_sha_minimal, checkout_sha
 from mergecraft.review.completed import COMPLETED_REVIEWS_GITIGNORE_LINE
 from mergecraft.utils.git_hardening import git_argv
 
@@ -58,6 +58,8 @@ trust:
 def _workflow_template() -> str:
     """Build the init scaffold workflow without import-time pin resolution."""
     pin = action_pin_minimal()
+    sha = action_sha_minimal()
+    checkout = checkout_sha()
     return f"""\
 name: mergeCraft
 
@@ -72,11 +74,18 @@ on:
         type: string
 
 permissions:
-  contents: write
+  # A review needs only read access. Dispatch-driven pushes (`push: restricted`)
+  # require contents: write — opt up explicitly if you enable them.
+  contents: read
   pull-requests: write
   issues: write
   checks: write
   actions: read
+
+concurrency:
+  # Serialize runs per pull request so two reviews cannot race the same PR.
+  group: mergecraft-${{{{ github.workflow }}}}-${{{{ github.event.pull_request.number || github.ref }}}}
+  cancel-in-progress: true
 
 jobs:
   mergecraft:
@@ -85,9 +94,13 @@ jobs:
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@{checkout} # v7.0.1
+        with:
+          # Do not persist the checkout token into .git/config: mergeCraft adds
+          # its own Authorization header, and git sends both on one request.
+          persist-credentials: false
       - name: Run mergeCraft
-        uses: alexhawat/mergeCraft@{pin}
+        uses: alexhawat/mergeCraft@{sha} # {pin}
         with:
           prompt: >
             ${{{{ github.event_name == 'pull_request'
@@ -100,8 +113,8 @@ jobs:
           # only learn it from here — `uses:` is not visible inside the image —
           # and resolve_action_pin_sha() reads exactly this name. Without it a
           # consumer install records an empty pin and cannot report a pin/image
-          # mismatch (#641). Keep it equal to the `uses:` SHA above.
-          MERGECRAFT_ACTION_SHA: {pin}
+          # mismatch (#641). Keep it equal to the `uses:` commit above.
+          MERGECRAFT_ACTION_SHA: {sha}
           CLAUDE_CODE_OAUTH_TOKEN: ${{{{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}}}
           # ANTHROPIC_API_KEY: ${{{{ secrets.ANTHROPIC_API_KEY }}}}
           # CODEX_AUTH_JSON: ${{{{ secrets.CODEX_AUTH_JSON }}}}

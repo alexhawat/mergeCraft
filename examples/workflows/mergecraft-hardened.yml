@@ -242,7 +242,7 @@ jobs:
       # all supported majors 2026-07-20) it hard-fails on fork PRs unless you
       # pass `allow-unsafe-pr-checkout`. If you find yourself reaching for that
       # flag under pull_request_target, switch to `pull_request` instead.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # MUST stay false. actions/checkout persists its token as an
@@ -387,38 +387,50 @@ jobs:
         run: |
           echo "::notice title=mergeCraft incomplete::Review step did not finish successfully (see its log). Approval enforcement skipped."
 
-      # Gate on the approval check-run rather than on the review step's exit code,
-      # so agent infrastructure failures do not read as "changes requested".
+      # Gate on this run's own review verdict rather than on the review step's
+      # exit code, so agent infrastructure failures do not read as "changes
+      # requested". The verdict is the last review rung's evidence packet, read
+      # through `steps.mergecraft.outputs.evidence_packet` — output only this
+      # run can write. A `mergecraft-approval` check-run only corroborates it:
+      # the check must sit on this head, be issued by an actor this repository
+      # trusts (`github-actions`, or the configured App when EXPECTED_APP_ID is
+      # set), carry this run's `<run id>:<attempt>` external id, and agree with
+      # the packet verdict.
       #
-      # W8.4 (D13): the approval conclusion is computed structurally from the
-      # typed `Finding` list + run state + trust tier — narrative ("approved",
-      # "not approved") never enters the decision. The hardened enforce step
-      # treats anything other than `success` as blocking:
+      # The conclusion is computed structurally from the typed `Finding` list +
+      # run state + trust tier — narrative ("approved", "not approved") never
+      # enters the decision. `failure` = a Critical/Major finding; `neutral` =
+      # the run crashed, timed out, produced no findings, or ran on an untrusted
+      # tier; `success` = reviewed with no blockers.
       #
-      # - `failure` ⇒ review surfaced a blocker (Critical/Major finding) — block.
-      # - `neutral` ⇒ the run crashed / timed out / produced no findings, or
-      #   the trust tier is `untrusted` (fork PR / pull_request_target) — block.
-      #   `neutral` is the wire-shape that means "no permissive gate"; an
-      #   injected PR that suppresses its findings still surfaces `neutral`
-      #   because the structural decision reads the typed finding list.
-      # - `success` ⇒ review completed, no blockers, at least one finding — pass.
-      # - absent (no `mergecraft-approval` check posted at all, e.g. the
-      #   review step never ran) ⇒ still fail open. The required check
-      #   pattern relies on a posted check; if no check exists, the GitHub
-      #   branch-protection rule itself blocks the merge, not this step.
+      # Fail closed on an empty verdict, an unattributable check, or a
+      # disagreement. Fail open only when there is neither a verdict nor a
+      # mergecraft-approval check at all: the required-check pattern relies on a
+      # posted check, so the branch-protection rule itself blocks that merge.
       - name: Fail when mergeCraft would not approve
         if: github.event_name == 'pull_request_target' && env.HAS_AUTH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVIDENCE_PACKET: ${{ steps.mergecraft.outputs.evidence_packet }}
+          # Set your mergeCraft App id here when the action authenticates as a
+          # GitHub App, so the gate accepts that App's approval check. Left
+          # empty, the gate trusts the github-actions issuer (job-token mode).
+          EXPECTED_APP_ID: ''
         run: |
           set -euo pipefail
-          conclusion=""; queried=""
+          verdict=""
+          if [ -n "${EVIDENCE_PACKET:-}" ]; then
+            verdict="$(printf '%s' "${EVIDENCE_PACKET}" | jq -r '.decision.verdict // empty' 2>/dev/null || true)"
+          fi
+
+          # Name-filtered and paged so a large CI matrix cannot push the check
+          # off the first page.
+          expected_external="${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}"
+          checks=""; queried=""
           for attempt in $(seq 1 5); do
-            if conclusion="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
-                --jq '[.check_runs[]? | select(.name == "mergecraft-approval")]
-                      | sort_by(.completed_at // .started_at) | last | .conclusion // ""')"; then
+            if checks="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?check_name=mergecraft-approval&filter=all&per_page=100")"; then
               queried="yes"; break
             fi
             echo "check-runs query failed (attempt ${attempt}/5); retrying in 5s…" >&2
@@ -428,19 +440,44 @@ jobs:
             echo "::warning title=mergeCraft approval unknown::Could not query check-runs for ${HEAD_SHA} after retries. Failing open."
             exit 0
           fi
-          case "${conclusion}" in
-            success)
-              echo "mergeCraft approval: structural gate passed (no blockers in the typed Finding list)."
-              ;;
-            failure)
-              echo "::error title=mergeCraft requested changes::mergecraft-approval failed — the typed Finding list contains a Critical or Major finding."
-              exit 1
-              ;;
-            neutral)
-              echo "::error title=mergeCraft review incomplete::mergecraft-approval is 'neutral' — the run crashed, timed out, produced no findings, or ran on an untrusted tier. This is treated as blocking by W8 (D13)."
-              exit 1
-              ;;
-            *)
-              echo "::notice title=mergeCraft approval not posted::No mergecraft-approval check on ${HEAD_SHA}. Not blocking (fail-open for missing check — branch protection handles the missing required check)."
-              ;;
-          esac
+
+          # Corroborate: same head, this run's external id, and an issuer this
+          # repository trusts — github-actions, or the configured App when an id
+          # is set. A check that cannot be attributed is ignored, never trusted.
+          check="$(printf '%s' "${checks}" | jq -r \
+            --arg head "${HEAD_SHA}" \
+            --arg ext "${expected_external}" \
+            --arg app "${EXPECTED_APP_ID:-}" '
+              [ .check_runs[]?
+                | select(.name == "mergecraft-approval")
+                | select(.head_sha == $head)
+                | select(.external_id == $ext)
+                | select((.app.slug // "") == "github-actions"
+                         or ($app != "" and ((.app.id // 0) | tostring) == $app))
+              ]
+              | sort_by(.completed_at // .started_at)
+              | last
+              | "\(.conclusion // "")"
+            ' 2>/dev/null || true)"
+
+          if [ -z "${verdict}" ] && [ -z "${check}" ]; then
+            echo "::notice title=mergeCraft approval not posted::No mergecraft-approval check on ${HEAD_SHA} and no review verdict was produced. Not blocking (fail-open for missing check — branch protection handles the missing required check)."
+            exit 0
+          fi
+          if [ -z "${verdict}" ]; then
+            echo "::error title=mergeCraft review incomplete::The review step produced no verdict, so the mergecraft-approval check on ${HEAD_SHA} cannot be corroborated. Failing closed."
+            exit 1
+          fi
+          if [ -z "${check}" ]; then
+            echo "::error title=mergeCraft review incomplete::No mergecraft-approval check attributable to this run on ${HEAD_SHA} (external id ${expected_external}). Failing closed."
+            exit 1
+          fi
+          if [ "${check}" != "${verdict}" ]; then
+            echo "::error title=mergeCraft requested changes::mergecraft-approval (${check}) disagrees with the review verdict (${verdict}). Failing closed."
+            exit 1
+          fi
+          if [ "${verdict}" != "success" ]; then
+            echo "::error title=mergeCraft requested changes::mergecraft review verdict is ${verdict} — address the review feedback on this PR."
+            exit 1
+          fi
+          echo "mergeCraft approval: structural gate passed (no blockers in the typed Finding list)."
