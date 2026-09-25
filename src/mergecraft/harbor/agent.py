@@ -1,4 +1,4 @@
-"""Harbor ``BaseInstalledAgent`` wrapper around ``mergecraft diff-review --json``."""
+"""Harbor ``BaseInstalledAgent`` wrapper around ``mergecraft review --json``."""
 
 from __future__ import annotations
 
@@ -146,7 +146,7 @@ class MergecraftReviewAgent(BaseInstalledAgent):
 
         cmd_parts = [
             _path_env() + ";",
-            "mergecraft diff-review",
+            "mergecraft review",
             "--cwd .",
             f"--json {findings_path.as_posix()}",
         ]

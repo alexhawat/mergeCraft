@@ -12,8 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 from mergecraft.config.settings import RepoSettings
 from mergecraft.utils.agent_resolve import collect_roster_credential_degradations
 
@@ -50,7 +48,6 @@ def _clear_credentials(monkeypatch: MonkeyPatch) -> None:
             monkeypatch.delenv(f"{key}_{index}", raising=False)
 
 
-@pytest.mark.xfail(reason="green after SW4.2: pinned rung reports only its head", strict=False)
 def test_pinned_rung_reports_no_slot_for_an_uncredentialed_tail(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
@@ -68,7 +65,6 @@ def test_pinned_rung_reports_no_slot_for_an_uncredentialed_tail(
     )
 
 
-@pytest.mark.xfail(reason="green after SW4.2: record follows the run chain", strict=False)
 def test_unpinned_rung_reports_the_uncredentialed_tail_at_its_slot(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

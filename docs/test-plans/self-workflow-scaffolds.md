@@ -201,3 +201,18 @@ post-wave reconciliation so the branch ends on real passes.
   `tests/{ci,cli,pins,docs}` are SW4-owned:
   `test_self_review_rung_model_pin.py` (1) and `test_get_installation_token.py`
   (1).
+- 2026-09-25 — SW4 landed the roster/L6 change (`model_pin: enabled` on the
+  three rungs plus the collector's executed-chain contract) and the D20 legacy
+  deletions, so the four green tests' non-strict `xfail` markers came off:
+  `tests/agents/test_roster_degradation_run_chain.py` (both),
+  `tests/ci/test_self_review_rung_model_pin.py::test_every_rung_pins_the_model_it_runs`
+  and `tests/ci/test_get_installation_token.py::test_the_unused_legacy_script_is_deleted`.
+  One genuine test defect surfaced in
+  `tests/harbor/test_harbor_agent_review_command.py`: `_run_body()` walked only
+  `ast.FunctionDef`, but `mergecraft.harbor.agent.run` is `async def`
+  (`ast.AsyncFunctionDef`, which is **not** a `FunctionDef` subclass), so the
+  helper raised before the command assertion ran. It now walks
+  `(ast.FunctionDef, ast.AsyncFunctionDef)`; the `mergecraft review` /
+  no-`diff-review` assertions are unchanged, and that marker came off too. The
+  only remaining `xfailed` marks are the two pre-existing driver-conditioned ones
+  in `tests/agents/test_harness_deny_list_pin.py`, which plan 51 owns.

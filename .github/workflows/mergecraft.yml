@@ -673,6 +673,11 @@ jobs:
           # same diff and calls tools correctly. Both models are served by the
           # same Nous Portal key, so no secret changes are needed.
           model: nous/tencent/hy3
+          # Run exactly the model named above. This rung carries only the Nous
+          # credential, so a chain-preserving walk could advance into a provider
+          # it cannot authenticate and report a reviewer slot it was never meant
+          # to run.
+          model_pin: enabled
           push: disabled
           shell: disabled
           status_checks: enabled
@@ -838,6 +843,10 @@ jobs:
           # per-attempt budget (D8) so both attempts can finish before the ceiling.
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
           model: openai/gpt-terra
+          # Run exactly the model named above; this rung carries only OpenAI
+          # credentials, so a configured tail it cannot authenticate is never a
+          # slot it was meant to run.
+          model_pin: enabled
           push: disabled
           shell: disabled
           status_checks: enabled
@@ -977,6 +986,10 @@ jobs:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
           model: anthropic/claude-sonnet
+          # Run exactly the model named above; this rung carries only Anthropic
+          # credentials, so a configured tail it cannot authenticate is never a
+          # slot it was meant to run.
+          model_pin: enabled
           push: disabled
           shell: disabled
           status_checks: enabled

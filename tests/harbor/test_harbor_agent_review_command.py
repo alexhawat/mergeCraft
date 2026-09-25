@@ -10,20 +10,17 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 _SOURCE = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "harbor" / "agent.py"
 
 
-def _run_body() -> ast.FunctionDef:
+def _run_body() -> ast.FunctionDef | ast.AsyncFunctionDef:
     tree = ast.parse(_SOURCE.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "run":
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
             return node
     raise AssertionError("mergecraft.harbor.agent has no run() method")
 
 
-@pytest.mark.xfail(reason="green after SW4.3: Harbor runs mergecraft review", strict=False)
 def test_harbor_agent_uses_the_supported_review_command() -> None:
     text = _SOURCE.read_text(encoding="utf-8")
     assert "diff-review" not in text, (

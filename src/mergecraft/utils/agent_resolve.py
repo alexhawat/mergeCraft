@@ -331,8 +331,17 @@ def collect_roster_credential_degradations(
     settings: RepoSettings,
     cwd: Path,
     wired_providers: frozenset[str] | None = None,
+    model_head: str | None = None,
+    model_pin: bool = False,
 ) -> tuple[str, ...]:
-    """Return loud degradation lines for reviewer slots missing credentials (D10)."""
+    """Return loud degradation lines for reviewer slots missing credentials (D10).
+
+    The record follows the chain the run actually executes. ``model_head`` is
+    the model the operator named for this run and ``model_pin`` is their "use
+    exactly this model" opt-in. When pinned, a default reviewer binding runs
+    only its head, so a configured tail it has no credential for is not
+    reported as a skipped slot.
+    """
     from mergecraft.agents.registry import AgentRole, load_registry
     from mergecraft.config.agent_roster import load_roster
     from mergecraft.config.io import config_path_for_root, load_config_dict
@@ -342,7 +351,7 @@ def collect_roster_credential_degradations(
         parse_auth_manifest,
     )
 
-    registry = load_registry(settings=settings, repo_root=cwd)
+    registry = load_registry(settings=settings, repo_root=cwd, model_head=model_head)
     raw = load_config_dict(config_path_for_root(cwd))
     load_roster(raw)
     wired = wired_providers
@@ -356,9 +365,15 @@ def collect_roster_credential_degradations(
         else:
             wired = frozenset()
 
+    pinned_head = model_head if model_pin and model_head else None
     degradations: list[str] = []
     for agent_key, binding in registry._ordered_role_entries(AgentRole.reviewer):
-        for index, slug in enumerate(binding.model_chain):
+        chain: tuple[str, ...] = binding.model_chain
+        if pinned_head is not None and agent_key not in registry._configured_keys:
+            # A pinned run executes exactly the named head, so the default
+            # binding's configured tail is not a slot this run can reach.
+            chain = (pinned_head,)
+        for index, slug in enumerate(chain):
             try:
                 provider = get_model_provider(slug)
             except ValueError:

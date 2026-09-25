@@ -1153,6 +1153,8 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     degradations = collect_roster_credential_degradations(
         settings=settings,
         cwd=Path.cwd(),
+        model_head=ctx.model_head,
+        model_pin=ctx.model_pin,
     )
     if degradations:
         tool_state.credential_degradations = degradations

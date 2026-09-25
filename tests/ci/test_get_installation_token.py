@@ -8,7 +8,6 @@ consumers reference as ``./get-installation-token``.
 
 from __future__ import annotations
 
-import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT
@@ -17,7 +16,6 @@ _MANIFEST = REPO_ROOT / "get-installation-token" / "action.yml"
 _LEGACY_SCRIPT = REPO_ROOT / "get-installation-token" / "main.py"
 
 
-@pytest.mark.xfail(reason="green after SW4.4: unused legacy script deleted", strict=False)
 def test_the_unused_legacy_script_is_deleted() -> None:
     assert not _LEGACY_SCRIPT.exists(), (
         "get-installation-token/main.py is never invoked and emits the deprecated "

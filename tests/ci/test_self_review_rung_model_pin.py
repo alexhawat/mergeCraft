@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from tests.ci.workflow_support import job, load_workflow
 
 _WORKFLOW = "mergecraft.yml"
@@ -40,7 +38,6 @@ def _rungs() -> list[dict[str, Any]]:
     return rungs
 
 
-@pytest.mark.xfail(reason="green after SW4.1: every rung sets model_pin", strict=False)
 def test_every_rung_pins_the_model_it_runs() -> None:
     for rung in _rungs():
         with_block = rung.get("with") or {}
