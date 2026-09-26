@@ -35,6 +35,23 @@ def annotate_not_caused_by_pr(finding: Finding) -> Finding:
     )
 
 
+def annotate_unattributed(finding: Finding) -> Finding:
+    """Keep a CI failure the evidence cannot place, at a blocking severity (BL-D2).
+
+    ``unknown`` provenance is not exoneration: the row stays ``Major`` so it
+    blocks the packet verdict, and ``introduced_by_pr: "unknown"`` keeps it out
+    of the verifier (no proven hunk to verify) without ever clearing it.
+    """
+    if finding.source != "ci":
+        return finding
+    return finding.model_copy(
+        update={
+            "severity": "Major",
+            "introduced_by_pr": "unknown",
+        }
+    )
+
+
 def requires_verification(finding: Finding) -> bool:
     """Return whether a CI finding should pass through the verifier before review."""
     return finding.source == "ci" and finding.introduced_by_pr == "true" and should_verify(finding)
@@ -57,6 +74,7 @@ def filter_ci_for_review(
 __all__ = [
     "annotate_caused_by_pr",
     "annotate_not_caused_by_pr",
+    "annotate_unattributed",
     "filter_ci_for_review",
     "requires_verification",
 ]

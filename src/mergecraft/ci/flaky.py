@@ -17,7 +17,12 @@ class FlakyVerdict:
 
 
 def _attempt_outcomes(attempts: list[dict[str, Any]]) -> list[str]:
-    return [str(item.get("conclusion", "")).lower() for item in attempts]
+    return [str(item.get("conclusion", "")).strip().lower() for item in attempts]
+
+
+def _base_outcome(run: dict[str, Any]) -> str:
+    """Normalise a base-run conclusion the same way retry attempts are (BL-D3/BL-D6)."""
+    return str(run.get("conclusion", "")).strip().lower() or "unknown"
 
 
 def classify_failure(
@@ -26,7 +31,12 @@ def classify_failure(
     attempts: list[dict[str, Any]],
     base_branch_runs: list[dict[str, Any]],
 ) -> FlakyVerdict:
-    """Classify retry/base-branch behaviour for one failure fingerprint."""
+    """Classify retry/base-branch behaviour for one failure fingerprint.
+
+    ``pre_existing`` requires a matching base run whose conclusion is ``failure``
+    (BL-D6). A matching base run that *passed* when this PR's attempts failed is
+    evidence the failure is new here: ``stable`` with ``blame_on_author=True``.
+    """
     evidence: list[str] = []
     outcomes = _attempt_outcomes(attempts)
     has_failure = any(outcome == "failure" for outcome in outcomes)
@@ -48,45 +58,47 @@ def classify_failure(
     ]
     for run in matching_base:
         ref = str(run.get("ref", "base branch"))
-        conclusion = str(run.get("conclusion", "unknown"))
-        evidence.append(f"{ref} saw fingerprint {fingerprint} as {conclusion}")
+        evidence.append(f"{ref} saw fingerprint {fingerprint} as {_base_outcome(run)}")
 
-    if matching_base and has_failure:
-        ref = str(matching_base[0].get("ref", "base branch"))
+    failing_base = [run for run in matching_base if _base_outcome(run) == "failure"]
+    if failing_base:
+        ref = str(failing_base[0].get("ref", "base branch"))
         return FlakyVerdict(
             classification="pre_existing",
             summary=(
-                f"Same failure fingerprint already fails on {ref}; "
+                f"Base branch {ref} failed with this fingerprint; "
                 "treat as pre-existing rather than introduced by this PR."
             ),
             evidence=evidence,
             blame_on_author=False,
         )
 
-    if matching_base and has_success and has_failure:
-        ref = str(matching_base[0].get("ref", "pre-0.0.1"))
-        evidence.append(f"{ref} also shows mixed outcomes for this fingerprint")
-        return FlakyVerdict(
-            classification="flaky",
-            summary=f"This test is flaky on {ref} too — do not blame the PR author.",
-            evidence=evidence,
-            blame_on_author=False,
-        )
+    if has_failure:
+        passing_base = [run for run in matching_base if _base_outcome(run) == "success"]
+        if passing_base:
+            refs = ", ".join(str(run.get("ref", "base branch")) for run in passing_base)
+            return FlakyVerdict(
+                classification="stable",
+                summary=(
+                    f"Base branch {refs} passed with this fingerprint; "
+                    "the failure is not explained by the base branch."
+                ),
+                evidence=evidence,
+                blame_on_author=True,
+            )
 
     if matching_base:
-        ref = str(matching_base[0].get("ref", "base branch"))
-        conclusion = str(matching_base[0].get("conclusion", "unknown"))
-        if conclusion == "failure":
-            return FlakyVerdict(
-                classification="pre_existing",
-                summary=f"Base branch {ref} already reports this fingerprint as failing.",
-                evidence=evidence,
-                blame_on_author=False,
-            )
+        described = ", ".join(
+            f"{run.get('ref', 'base branch')!s} concluded {_base_outcome(run)}"
+            for run in matching_base
+        )
+        summary = f"Base-branch evidence does not explain this failure ({described})."
+    else:
+        summary = "No retry flip or base-branch match for this fingerprint."
 
     return FlakyVerdict(
         classification="stable",
-        summary="No retry flip or base-branch match for this fingerprint.",
+        summary=summary,
         evidence=evidence,
         blame_on_author=has_failure,
     )

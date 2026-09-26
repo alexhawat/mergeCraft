@@ -241,6 +241,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{#id}` headings become real anchors), and the operator-facing `MERGECRAFT_*`
   knobs are documented in `docs/cli.md`.
 
+- CI failures with no evidence of cause are now reported as **unattributed** —
+  blocking, with `introduced_by_pr: unknown` — instead of being cleared as
+  not-this-PR. A passing or unrecognised base-branch status no longer clears a
+  failure: only a same-fingerprint base run that concluded `failure` does, and
+  one base-branch status can no longer clear more than one cluster
+  (per-fingerprint base runs can). "Pre-existing" now requires the base run to
+  have failed, and its summary names the ref and what that run concluded.
+  Failure paths come only from failure lines — `FAILED`/`ERROR` with a node,
+  line-start `path:line:`, and `path(line,col)` — with root-level files,
+  `(line,col)` and `./` forms accepted and normalised on both sides of the diff
+  comparison, so passed tests, collection lines and command echoes no longer
+  produce a blame path. The pre-merge CI row and the run payload report an
+  unattributed count.
+
 - A negated acceptance criterion — "No error is shown", "Error is not shown" —
   no longer passes against a page that shows the error: it is left unverified
   with a named reason, and a negated reproduction claim is partial rather than a

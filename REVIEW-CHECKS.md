@@ -244,7 +244,7 @@ To discover a `check_suite_id` for a commit, call `list_check_runs` with the PR 
 
 - Root-cause clustering by failure fingerprint (twelve shards from one broken import → one finding)
 - Flaky vs stable vs pre-existing classification from retry flips and base-branch evidence
-- PR attribution (`caused_by_pr` vs `probably_not_this_pr`) from diff overlap — never asserted without evidence
+- PR attribution (`caused_by_pr` vs `probably_not_this_pr` vs `unknown`) from diff overlap and same-fingerprint base-branch evidence — never asserted without evidence
 - Truncation when more failures exist than the configured cap (default 3)
 
 **What is explicitly not claimed**
@@ -252,11 +252,12 @@ To discover a `check_suite_id` for a commit, call `list_check_runs` with the PR 
 - mergeCraft does not re-run CI, retry jobs, or push fix commits
 - Non-GitHub providers (CircleCI, GitLab, Azure) are honestly stubbed — no silent empty results
 - A failure outside the diff is **reported, not blamed** on the author
+- When the evidence does not decide — no diff overlap and no same-fingerprint base-branch failure — the failure is **unattributed** and stays blocking; only a base-branch failure or a retry flip clears it
 - Flaky failures are named flaky rather than treated as the author's defect
 
-The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission.
+The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, unattributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission. Only an inline comment is posted for a `caused_by_pr` failure: an unattributed one has no proven hunk to anchor to.
 
-**Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](docs/REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`, while a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`. Since every gate that consumes findings is monotone in blockers, that annotation is what makes "reported, not blamed" mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request.
+**Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](docs/REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`; a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`; and an **unattributed** one — no diff overlap and no same-fingerprint base-branch failure — is `Major` / `introduced_by_pr: unknown`. Since every gate that consumes findings is monotone in blockers, the annotation is what makes the verdict mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request, and an unattributed failure cannot be cleared without evidence.
 
 **SARIF your CI already produced.** Naming artifacts under `ciEvidence.sarifArtifacts` lets the reviewer ingest their SARIF as CI findings through the same parser the analyzer catalog uses. Default is empty, in which case no artifact API call is made. Ingested results are reported at a non-blocking severity with `introduced_by_pr: unknown` — SARIF from another pipeline describes the tree, not this diff.
 
@@ -272,7 +273,7 @@ Assertions about the pull request itself rather than its code. These always appe
 - **Scope** — does the diff do things neither the description nor a linked issue asked for? Out-of-scope paths get named.
 - **Mechanical gates** — the result from `run_static_checks` (repo gates).
 - **Analyzers** — the result from `run_analyzers` (catalog tools): how many ran, how many skipped (with reasons), lockfile digest.
-- **CI** — pipeline intelligence on failing check suites: failure count, cluster count, flaky count, PR-attributed count, and whether truncation occurred. Flaky or probably-not-this-PR failures are reported here, not blamed on the author.
+- **CI** — pipeline intelligence on failing check suites: failure count, cluster count, flaky count, PR-attributed count, unattributed count, and whether truncation occurred. Flaky and probably-not-this-PR failures are reported here, not blamed on the author; a failure the evidence cannot place is reported as unattributed and stays blocking until a base-branch failure or a retry flip clears it.
 
 A flagged row here is fixed by editing the PR's title, body, or issue links — not its code — so these never also become inline comments. The one exception is a failing mechanical gate, which is a real code finding and is raised inline too.
 
