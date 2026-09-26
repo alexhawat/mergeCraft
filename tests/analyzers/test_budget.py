@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from mergecraft.config.settings import AnalyzersSettings
 from mergecraft.review_taxonomy import BODY_ONLY_EFFORT, BODY_ONLY_SEVERITY
 from tests.analyzers.support import INLINE_BUDGET, import_module
 
@@ -27,6 +28,56 @@ def _finding(
 def test_inline_budget_matches_w0_measurement() -> None:
     budget = import_module("mergecraft.analyzers.budget")
     assert budget.default_inline_budget() == INLINE_BUDGET
+
+
+def test_resolve_inline_budget_honours_an_explicit_zero() -> None:
+    """``inlineBudget: 0`` is a configured value, not "unset" (D14 / #899).
+
+    A falsey ``0 or default`` resolution silently restores 8, so the prompt, the
+    pre-pass key and the tool request describe different placement contracts.
+    The resolver is ``None``-aware: only a genuinely unset budget falls back.
+    """
+    budget = import_module("mergecraft.analyzers.budget")
+
+    assert budget.resolve_inline_budget(AnalyzersSettings(inlineBudget=0)) == 0
+    assert budget.resolve_inline_budget(AnalyzersSettings()) == budget.default_inline_budget()
+    # ``inline_budget`` is typed ``int`` (default 8), so ``None`` is only
+    # reachable outside validation — the documented fallback still covers it.
+    unset = AnalyzersSettings.model_construct(inline_budget=None)
+    assert budget.resolve_inline_budget(unset) == budget.default_inline_budget()
+
+    # The bug this pins: the falsey form replaces the explicit 0 with the default.
+    zero = AnalyzersSettings(inlineBudget=0).inline_budget
+    assert (zero or budget.default_inline_budget()) == budget.default_inline_budget()
+    assert budget.resolve_inline_budget(AnalyzersSettings(inlineBudget=0)) != (
+        zero or budget.default_inline_budget()
+    )
+
+
+def test_zero_budget_places_every_finding_in_overflow() -> None:
+    """``inlineBudget: 0`` is a supported zero-slot cap — nothing renders inline.
+
+    Every candidate overflows to its lane: analyzer findings to the mechanical
+    section, agent findings to deferred, and the batch-resolved short-id map
+    covers only the overflow rows. (``test_mechanical_section_includes_short_ids``
+    pins the overflow short id; this pins the zero-slot placement itself.)
+    """
+    budget = import_module("mergecraft.analyzers.budget")
+    analyzer_findings = [_finding("Major", path=f"src/a{i}.py", line=i) for i in range(1, 4)]
+    agent_findings = [
+        {"severity": "Major", "path": f"src/g{i}.py", "line": i, "body": f"agent {i}"}
+        for i in range(1, 4)
+    ]
+    placement = budget.place_findings(
+        analyzer_findings, inline_budget=0, agent_findings=agent_findings
+    )
+    assert placement.inline == []
+    assert {f.fingerprint for f in placement.mechanical} == {
+        f.fingerprint for f in analyzer_findings
+    }
+    assert len(placement.deferred) == len(agent_findings)
+    overflow = {f.fingerprint for f in (*placement.mechanical, *placement.deferred)}
+    assert set(placement.short_ids) <= overflow
 
 
 def test_overflow_lands_in_mechanical_section() -> None:

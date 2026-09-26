@@ -237,6 +237,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actually received, so two runs configured with different inline budgets record
   different versions.
 
+- A configured inline budget of `0` is honoured everywhere: the offline analyzer
+  pre-pass, the pipeline fallback and the rendered prompt now agree, instead of
+  the pre-pass silently using the default.
+
 - The review doctrine states the Python 3.11 install floor, and the `push`
   input, the compatibility matrix and the review checks describe review-only
   behaviour — no value grants commit or push.

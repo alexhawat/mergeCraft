@@ -39,6 +39,10 @@ exists.
 | No prompt mentions a diff-coverage nudge | C8 / PD-D6 | Unit | `…::test_no_prompt_mentions_a_diff_coverage_nudge` | ✅ pass |
 | No prompt mentions a Fix button | D8 / PD-D11 | Unit | `…::test_no_prompt_mentions_a_fix_button` | ✅ pass |
 | A run's recorded prompt version names the prompt it actually rendered | #899 | Unit | `tests/prompts/test_prompt_budget_text.py::test_distinct_configured_budgets_produce_distinct_versions`, `…::test_version_hashes_the_rendered_prompt_body`, `…::test_default_render_version_matches_prompt_version_for_baseline` | ✅ pass |
+| `inlineBudget: 0` resolves to `0`, not the default | #899 | Unit | `tests/analyzers/test_budget.py::test_resolve_inline_budget_honours_an_explicit_zero` | ✅ pass |
+| Pre-pass and tool analyzer-run keys match at `inlineBudget: 0` | #899 | Unit | `tests/review/test_analyzer_prepass_reuse.py::test_prepass_and_tool_keys_agree_at_zero_inline_budget` | ✅ pass |
+| `inlineBudget: 0` puts every finding in overflow | #899 | Unit | `tests/analyzers/test_budget.py::test_zero_budget_places_every_finding_in_overflow` | ✅ pass |
+| The rendered `Review` prompt shows `0` at `inlineBudget: 0` | #899 | Unit | `tests/prompts/test_prompt_budget_text.py::test_zero_inline_budget_renders_the_zero_slot` | ✅ pass |
 | Doctrine names the real verifier-budget keys | N20 / C8 / PD-D5 | Functional (doc) | `tests/docs/test_review_doctrine_contracts.py::test_verification_section_names_the_real_budget_keys` | ✅ pass |
 | Doctrine forbids the inline-budget claim; naming the key is allowed only if its sentence decouples it | N20 / PD-D5 | Functional (doc) | `…::test_verification_section_does_not_claim_the_inline_budget_caps_it` | ✅ pass |
 | Doctrine Python floor agrees with `pyproject.toml` `requires-python` | C13 / PD3.2 | Functional (doc) | `…::test_python_floor_agrees_with_pyproject` | ✅ pass |
@@ -147,6 +151,39 @@ tests in `tests/prompts/test_prompt_budget_text.py`:
 Falsified by temporarily reverting the argument to `base_prompt`: the first two
 fail (a marker-bearing mode's versions collapse to one), the baseline test stays
 green. Restored byte-identical; this test owns no `src/` change.
+
+### Zero-budget pins (#899)
+
+`analyzers.inlineBudget: 0` is a supported zero-slot cap: every finding goes to an
+overflow lane and none renders inline. It was resolved falsily to the default `8`
+by the offline analyzer pre-pass (`0 or default`), so at `0` the pre-pass recorded
+`state.key` with budget `8` while `mcp/analyzers.py` built the tool's
+`request_key` with `0`; `prior_key.matches(request_key)` was then False and the
+pre-pass was silently thrown away. The shared `resolve_inline_budget(settings)`
+now honours an explicit `0`, so the prompt, the pre-pass and the tool describe one
+placement contract. Pinned by four tests:
+
+- `test_resolve_inline_budget_honours_an_explicit_zero`
+  (`tests/analyzers/test_budget.py`) — `inlineBudget=0` → `0`, default/unset →
+  `default_inline_budget()`, and the falsey `0 or default` result differs from the
+  resolver's.
+- `test_prepass_and_tool_keys_agree_at_zero_inline_budget`
+  (`tests/review/test_analyzer_prepass_reuse.py`) — builds one `analyzer_run_key`
+  input set both ways (`resolve_inline_budget(settings)` for the pre-pass vs
+  `settings.inline_budget` for the tool), asserts `prepass_key.matches(request_key)`
+  at `0`, and asserts the falsey `0 or default` key would **not** match.
+- `test_zero_budget_places_every_finding_in_overflow`
+  (`tests/analyzers/test_budget.py`) — `place_findings(..., inline_budget=0)`
+  leaves `placement.inline` empty; every analyzer finding is mechanical, every
+  agent finding is deferred, and the short-id map covers only overflow rows.
+- `test_zero_inline_budget_renders_the_zero_slot`
+  (`tests/prompts/test_prompt_budget_text.py`) — the rendered `Review` prompt shows
+  `budget cap — 0`; the `None` render (key name, no number) stays pinned by
+  `test_none_renders_the_key_name_and_no_marker_or_number`.
+
+Falsified by temporarily reverting `resolve_inline_budget` to
+`settings.inline_budget or default_inline_budget()`: the resolver test and the
+key-match test fail (`assert 8 == 0`); restored byte-identical.
 
 ## C15 / C20 — renderer-aware link check (PD-D9)
 

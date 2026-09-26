@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.analyzers.finding import Finding, try_resolve_finding_short_ids
 
 if TYPE_CHECKING:
+    from mergecraft.config.settings import AnalyzersSettings
     from mergecraft.mcp.tool_state import AnalyzerRunState
 from mergecraft.review_taxonomy import (
     BODY_ONLY_EFFORT,
@@ -39,6 +40,22 @@ class FindingPlacement:
 def default_inline_budget() -> int:
     """Return the W0.2-measured inline cap (D14)."""
     return _DEFAULT_INLINE_BUDGET
+
+
+def resolve_inline_budget(settings: AnalyzersSettings) -> int:
+    """Return the repo's resolved inline budget, honouring an explicit ``0``.
+
+    ``analyzers.inlineBudget`` is an ``int`` (default 8), so ``0`` is a configured
+    value, not "unset": at ``0`` every finding goes to an overflow lane
+    (mechanical or deferred) and none renders inline. Resolution is
+    ``None``-aware — it falls back to :func:`default_inline_budget` only when the
+    setting is ``None`` — so a falsey-but-explicit ``0`` is never replaced by the
+    default. Both the offline analyzer pre-pass and the pipeline share this one
+    resolver so their recorded keys agree at ``0``.
+    """
+    if settings.inline_budget is None:
+        return default_inline_budget()
+    return settings.inline_budget
 
 
 def _is_body_only_finding(item: Finding | dict[str, Any]) -> bool:
@@ -368,5 +385,6 @@ __all__ = [
     "place_findings",
     "render_deferred_section",
     "render_deferred_section_from_rows",
+    "resolve_inline_budget",
     "sync_deferred_section",
 ]

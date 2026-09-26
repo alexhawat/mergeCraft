@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
-from mergecraft.analyzers.budget import default_inline_budget
+from mergecraft.analyzers.budget import resolve_inline_budget
 from mergecraft.analyzers.pipeline import run_analyzer_pipeline
 from mergecraft.config import load_repo_settings
 from mergecraft.mcp.checkout import changed_paths_in_diff
@@ -76,8 +76,9 @@ async def run_offline_analyze(
         logger.warning("offline analyze: pipeline failed — {}", exc)
         return AnalyzerRunState(ran=False, reason=str(exc))
     # ``inline_budget`` is left unset above, so record the budget the pipeline
-    # itself resolves — the tool passes ``settings.inline_budget`` explicitly and
-    # the two only agree when that value is truthy.
+    # itself resolves via ``resolve_inline_budget`` — the same resolver the tool
+    # uses when it passes ``settings.inline_budget`` explicitly, so the two keys
+    # agree even at ``inlineBudget: 0``.
     settings = load_repo_settings(root=cwd, load_learnings_files=False).analyzers
     state.key = analyzer_run_key(
         repo_root=cwd,
@@ -85,7 +86,7 @@ async def run_offline_analyze(
         tier=tier,
         shell=str(shell),
         mode="auto",
-        inline_budget=settings.inline_budget or default_inline_budget(),
+        inline_budget=resolve_inline_budget(settings),
         offline=True,
         base_ref=materialization.base_ref,
         diff_text=diff_text,

@@ -111,6 +111,24 @@ def test_none_renders_the_key_name_and_no_marker_or_number() -> None:
     assert "(8)" not in prompt, "inline_budget=None must not bake today's default"
 
 
+def test_zero_inline_budget_renders_the_zero_slot() -> None:
+    """``inlineBudget: 0`` renders ``0`` — the prompt agrees with the resolver.
+
+    A configured ``0`` means every finding overflows, so the reviewer's prompt
+    must show the same ``0`` the resolver and the tool use, not the default 8.
+    The ``None`` case (config-key name, no number) stays pinned by
+    ``test_none_renders_the_key_name_and_no_marker_or_number`` above.
+    """
+    prompt = _review_prompt(inline_budget=0)
+    assert "budget cap — 0" in prompt, (
+        "inline_budget=0 must render the zero slot, not fall back to the default"
+    )
+    assert "analyzers.inlineBudget" not in prompt, (
+        "inline_budget=0 must render the number, not the unset key name"
+    )
+    assert "${" not in prompt, "the INLINE_BUDGET marker must always expand"
+
+
 def test_default_render_has_no_leftover_marker() -> None:
     """Mirror ``tests/test_modes.py``: no rendered prompt leaves a ``${...}`` marker."""
     for mode in compute_modes("claude"):

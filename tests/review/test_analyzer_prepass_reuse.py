@@ -13,13 +13,20 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.analyzers.budget import default_inline_budget, resolve_inline_budget
+from mergecraft.config.settings import AnalyzersSettings
 from mergecraft.mcp.context import (
     PayloadEvent,
     RepoIdentity,
     ResolvedPayload,
     ToolContext,
 )
-from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow, init_tool_state
+from mergecraft.mcp.tool_state import (
+    AnalyzerRunState,
+    AnalyzerStatusRow,
+    analyzer_run_key,
+    init_tool_state,
+)
 from mergecraft.modes import compute_modes
 from mergecraft.review.offline_stages import run_offline_analyze
 from mergecraft.utils.github import GitHubClient
@@ -151,3 +158,38 @@ async def test_failed_prepass_is_not_reused(
     await _call_tool(ctx, changed_files=["demo.py"], diff_path=str(materialization.path))
 
     assert len(pipeline_calls) == 1
+
+
+def test_prepass_and_tool_keys_agree_at_zero_inline_budget(tmp_path: Path) -> None:
+    """An explicit ``inlineBudget: 0`` must key the pre-pass and the tool alike.
+
+    ``run_offline_analyze`` records the budget the pipeline resolves (via
+    ``resolve_inline_budget``) while ``run_analyzers`` requests with the raw
+    ``settings.inline_budget``. A falsey ``0 or default`` resolution recorded 8
+    against the tool's 0, so ``prior_key.matches(request_key)`` was False and the
+    pre-pass was silently discarded — every analyzer ran twice over the same diff.
+    """
+    settings = AnalyzersSettings(inlineBudget=0)
+    key_inputs: dict[str, Any] = {
+        "repo_root": tmp_path,
+        "changed_files": ["demo.py"],
+        "tier": "trusted",
+        "shell": "restricted",
+        "mode": "auto",
+        "offline": True,
+        "base_ref": "origin/main",
+        "diff_text": PATCH,
+    }
+
+    prepass_key = analyzer_run_key(**key_inputs, inline_budget=resolve_inline_budget(settings))
+    request_key = analyzer_run_key(**key_inputs, inline_budget=settings.inline_budget)
+    assert prepass_key.inline_budget == request_key.inline_budget == 0
+    assert prepass_key.matches(request_key)
+
+    # The bug this pins: a falsey resolution replaced the explicit 0 with the
+    # default, so the recorded key no longer matched the tool's request.
+    falsey_key = analyzer_run_key(
+        **key_inputs, inline_budget=settings.inline_budget or default_inline_budget()
+    )
+    assert falsey_key.inline_budget == default_inline_budget()
+    assert not falsey_key.matches(request_key)
