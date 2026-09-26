@@ -116,7 +116,8 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   `evaluate_analyzer_egress_policy()`, `filtered_egress_available()`,
   and `build_analyzer_sandbox_argv_for_run()`.
   Analyzer capabilities are dropped after mount setup, preventing
-  namespace switching or enabling IPv6 again. The isolated runtime must
+  namespace switching or enabling IPv6 again; on a root orchestrator the
+  analyzers drop capabilities **and** UID. The isolated runtime must
   use direct `unshare`; sudo-based backends are refused because sudo
   cannot safely carry the private payload-environment descriptor.
   Namespace helpers receive a minimal trusted environment. Payload
@@ -234,7 +235,7 @@ Inline review comments from analyzers and the reviewing agent share a single cap
 
 `Critical` and `Major` findings are hypotheses until the read-only `mergecraft-verifier` subagent reads the cited code. That gate applies to analyzer, CI, and agent-authored findings.
 
-Verification depth is **independent** of inline placement (`analyzers.inlineBudget`, default 8). The verifier dispatch cap is `review.verificationBudget` (default **24**). Set it to **`0`** to verify every eligible finding with no cap. Three filters run in order: severity (skip `Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under `## Withdrawn review findings`), then the verification budget — so pre-budget skips never consume slots. Over-budget fingerprints surface in `skippedOverBudget` for the open-PR ledger (W3).
+Verification depth is **independent** of inline placement (`analyzers.inlineBudget`, default 8). The verifier dispatch cap is `review.verificationBudget` (default **24**), **scaled per round by `review.roundBudgets`**. Set it to **`0`** to verify every eligible finding with no cap. Three filters run in order: severity (skip `Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under `## Withdrawn review findings`), then the verification budget — so pre-budget skips never consume slots. Over-budget fingerprints surface in `skippedOverBudget` for the open-PR ledger (W3).
 
 ## Execution preference
 

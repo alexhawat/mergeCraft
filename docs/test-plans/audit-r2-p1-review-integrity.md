@@ -1,6 +1,6 @@
 # Test plan — audit-r2 lane A: P1 review integrity (RA1)
 
-Plan: [`.ignorelocal/waves/20-audit-r2-a-p1-review-integrity-wave-plan.md`](../../.ignorelocal/waves/20-audit-r2-a-p1-review-integrity-wave-plan.md)
+Plan: `.ignorelocal/waves/20-audit-r2-a-p1-review-integrity-wave-plan.md`
 Owner: `test-creator`. Wave RA1 authors the entire RED suite for RA2–RA6; each
 impl wave flips its own slice green (D13b). All RA1 `xfail(strict=False)`
 markers were removed in the RA7 strictness sweep — see **RA1.7** below.

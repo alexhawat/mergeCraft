@@ -1229,7 +1229,11 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     payload = ctx.payload
 
     modes = [
-        *compute_modes(ctx.agent_id, settings.signed_commits),
+        *compute_modes(
+            ctx.agent_id,
+            settings.signed_commits,
+            inline_budget=settings.analyzers.inline_budget,
+        ),
         *_custom_modes(settings.modes),
     ]
     tool_state.modes = modes
@@ -1667,7 +1671,11 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
             attempt_ctx = replace(run_ctx, resolved_model=attempt_model)
         else:
             attempt_modes = [
-                *compute_modes(attempt_agent_id, settings.signed_commits),
+                *compute_modes(
+                    attempt_agent_id,
+                    settings.signed_commits,
+                    inline_budget=settings.analyzers.inline_budget,
+                ),
                 *_custom_modes(settings.modes),
             ]
             attempt_instructions = resolve_instructions(

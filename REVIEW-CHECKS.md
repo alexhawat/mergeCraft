@@ -340,9 +340,9 @@ file, and the withdrawn-findings section. Three things bound the cost:
 - **Memory** — a finding whose fingerprint already appears under `## Withdrawn review findings` is
   skipped outright, not re-verified.
 - **Budget** — dispatches are capped at the repo's `review.verificationBudget` (default 24; `0` =
-  no cap), spent on `Critical` before `Major`. Verification depth is independent of inline
-  placement (`analyzers.inlineBudget`, default 8). Over-budget fingerprints are recorded in
-  `skippedOverBudget` rather than silently dropped.
+  no cap), **scaled per round by `review.roundBudgets`** and spent on `Critical` before `Major`.
+  Verification depth is independent of inline placement (`analyzers.inlineBudget`, default 8).
+  Over-budget fingerprints are recorded in `skippedOverBudget` rather than silently dropped.
 
 Each verdict goes back through `record_finding_verdict`: **confirm** publishes as drafted,
 **downgrade** re-grades, and **drop** writes the verifier's reason under
@@ -376,7 +376,12 @@ What mergecraft deliberately does **not** report — this is most of what keeps 
 
 ## 7. Memory across runs
 
-- **Withdrawn findings** — when an author refutes a review finding and `AddressReviews` accepts the pushback, it records the *reason* in `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`. A `drop` verdict from the verifier writes to the same section, so a finding the reviewer refuted *before publishing* is also refuted permanently. Later reviews read that section first and treat it as binding, so a false positive is argued once instead of on every PR.
+- **Withdrawn findings** — a **`drop` verdict** from the verifier writes the verifier's *reason* in
+  `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`, keyed by the
+  finding's own fingerprint. That is the path production runs: a finding refuted *before
+  publishing* is refuted permanently, and the same claim is skipped before verification on every
+  later run. Later reviews read that section first and treat it as binding, so a false positive is
+  argued once instead of on every PR.
 - **Finding fingerprints** — each inline comment is stamped server-side with a content hash of its path and body (`<!-- mergecraft-finding:v1:… -->`). Whitespace and case are normalized, so a re-raised finding is recognizable across runs even when reworded.
 - **Open-PR finding ledger** — the sticky progress comment carries `<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->` markers for every finding this pull request's reviews considered, including deferred overflow, verifier drops (`withdrawn`), and over-budget verifications (`unpublished`). Persistence is GitHub-only; inspect with `mergecraft findings ledger --pr N`. The ledger never files GitHub issues — post-merge carryover owns issue filing.
 - **Repo learnings** — test commands, conventions, gotchas, and architecture notes persist in the same file and are loaded into every run.
@@ -492,10 +497,12 @@ record, not in packet `findings[]`.
 
 ## 9. Address-reviews checks
 
-When mergecraft is on the receiving end of review comments (`AddressReviews` mode), each thread is checked for:
-
-- Whether the request still stands against current code — a stale request gets a reply, not a change.
-- Whether the proposed fix would be bloat in context; if so it's reverted rather than committed.
-- Whether the diff contains only intended changes, with no debug artifacts left behind.
-- Whether reply and resolve happened together — both or neither, and never before the fix is live on the remote.
-- Whether a refuted finding was recorded as a withdrawn finding (group 7).
+`AddressReviews` is **not registered in production** — mergeCraft's production modes are
+review-only and only review a diff; none of them addresses review comments or pushes commits.
+The checks below describe that mode's design and are documented for contributors, not a
+behaviour a shipped run performs: whether a request still stands against current code (a stale
+request gets a reply, not a change); whether a proposed fix would be bloat in context (reverted
+rather than committed); whether the diff contains only intended changes, with no debug artifacts
+left behind; whether reply and resolve happened together — both or neither, and never before the
+fix is live on the remote; and whether a refuted finding was recorded as a withdrawn finding
+(group 7).

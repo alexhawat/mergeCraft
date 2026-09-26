@@ -10,7 +10,8 @@ API_ONLY_SCOPE_GUIDANCE = (
 )
 
 CHECKOUT_STEP_NOTE = (
-    '**api-only scope:** when `checkout_pr` returns `scope: "api-only"`, ' + API_ONLY_SCOPE_GUIDANCE
+    '**api-only scope:** when `${t("checkout_pr")}` returns `scope: "api-only"`, '
+    + API_ONLY_SCOPE_GUIDANCE
 )
 
 

@@ -108,8 +108,9 @@ anchors, and `MERGECRAFT_ENV` overrides both:
 The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
 the next invocation actually loads. Outside a git checkout the writers fail
 with the directory they consulted named in the error; the startup load falls
-back to `./.env` and stays silent when it is missing, so global invocations and
-CI sandboxes are unaffected.
+back to `./.env` and stays silent when it is missing, so global invocations are
+unaffected. Inside GitHub Actions the startup load reads no `.env` from the
+workspace unless `MERGECRAFT_ENV` names one.
 
 ### Credential detection (`credential_status_for_slug`)
 

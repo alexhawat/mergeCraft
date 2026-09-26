@@ -177,6 +177,47 @@ CLI JSON output only, and does **not** by itself mean the review snapshot or the
 agent wire format changed. The converse also holds — a change to either of those
 contracts does not move the CLI stamp.
 
+## Environment variables
+
+`mergecraft` honours these operator-facing environment variables. Each row names
+what the variable bounds, the default it falls back to when unset, and where it
+applies. Variables not listed here are internal, generated, or reserved and are
+not part of the operator contract.
+
+| Variable | What it bounds | Default | Where it applies |
+| --- | --- | --- | --- |
+| `MERGECRAFT_AGENT` | Explicit agent harness (`claude`, `codex`, `opencode`, `gemini`, `cursor`); an unknown value falls through to auto-selection | unset — auto-select from credentials and model | local CLI and Action runs |
+| `MERGECRAFT_AGENT_TIMEOUT` | Seconds before an agent subprocess is killed | `3600` | every harness invocation and the credential broker |
+| `MERGECRAFT_CACHE_DIR` | Run-cache root directory | `~/.cache/mergecraft/run-cache` (honours `XDG_CACHE_HOME`) | CLI runs that use the cache |
+| `MERGECRAFT_CACHE_MAX_BYTES` | Byte ceiling for the run cache, in bytes | `536870912` (512 MiB) | cache prune and eviction |
+| `MERGECRAFT_CDP_URL` | Chrome DevTools Protocol base URL for the browser driver | `http://127.0.0.1:9222` | `verify-behavior` browser driver |
+| `MERGECRAFT_CONFIG` | Explicit path to the repo config file | unset — discovered at `<repo>/.mergecraft/config.yaml` | config resolution and the `config`/`tracing` commands |
+| `MERGECRAFT_CONTEXT_RETRIEVAL_TIMEOUT_S` | Seconds allowed for one context-retrieval call | `30` | review context retrieval |
+| `MERGECRAFT_COST_BUDGET_USD` | Per-run spend ceiling, in US dollars | `50.0` | budget enforcement (exhaustion maps to inconclusive) |
+| `MERGECRAFT_EGRESS_DNS_RESOLVERS` | Comma-separated IPv4 resolvers allowed inside the analyzer network namespace | host `/etc/resolv.conf` nameservers (fallback `1.1.1.1`) | isolated analyzers |
+| `MERGECRAFT_ENV` | Explicit path to the `.env` file loaded at CLI startup | unset — git-root `.env`, skipped inside GitHub Actions | CLI startup and credential writers |
+| `MERGECRAFT_EVIDENCE_DIR` | Parent directory for the emitted evidence packet | unset — `$RUNNER_TEMP/mergecraft`, else the run temp dir | review evidence-packet emission |
+| `MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S` | Upper bound, in seconds, applied to every registered external operation | `600` | external I/O within a run |
+| `MERGECRAFT_KEEP_TMP` | Truthy keeps the run's temporary directories | unset — temp dirs are cleaned up | local and offline review |
+| `MERGECRAFT_LATENCY_BUDGET_MS` | Latency budget, in milliseconds, for the selected `--profile` bundle | unset — the profile's own value | profile budget bundles |
+| `MERGECRAFT_LOG_FORMAT` | Log sink format: `json` or `text` | `text` | CLI and Action logging |
+| `MERGECRAFT_LOG_LEVEL` | Loguru level name (`TRACE` through `CRITICAL`) | unset — `INFO`, or `DEBUG` under `ACTIONS_STEP_DEBUG` / `--verbose` | CLI logging |
+| `MERGECRAFT_MAX_DIFF_LINES` | Diff line ceiling before scope reduction is recorded | `50000` | review diff loading |
+| `MERGECRAFT_MODEL` | Model slug override; wins over the config `models:` list | unset — the first configured model | model resolution |
+| `MERGECRAFT_NONINTERACTIVE` | Truthy disables interactive prompts | unset — prompts when stdin is a TTY | CLI interactive commands |
+| `MERGECRAFT_OTEL_ENDPOINT` | OTLP/HTTP endpoint for the `otel` tracing sink; setting it implies OTLP when no destination is chosen | unset | tracing sink resolution |
+| `MERGECRAFT_RUN_TIMEOUT_S` | Whole-run wall-clock ceiling, in seconds | `3600` | run bounds |
+| `MERGECRAFT_TEMP_DIR` | Run temp directory override | unset — the run's own temp dir, else `/tmp` | checkout, MCP shell, git, and agent seams |
+| `MERGECRAFT_TEMP_PARENT` | Preferred parent directory for created temp dirs (avoids world-writable `/tmp`) | unset — `$RUNNER_TEMP`, else `~/.cache/mergecraft/tmp` | temp-dir creation |
+| `MERGECRAFT_TOKEN_BUDGET` | Per-run token ceiling | `2000000` | budget enforcement (scaled by `review.roundBudgets`) |
+| `MERGECRAFT_TOOL_CALL_BUDGET` | Per-run tool-call ceiling | `500` | budget enforcement (scaled by `review.roundBudgets`) |
+| `MERGECRAFT_TRACE_DIR` | Directory for local JSONL traces | `.mergecraft/traces` | tracing and the `replay`/`run inspect` commands |
+| `MERGECRAFT_TRACING` | Boolean toggle for tracing | unset — disabled unless config enables it | tracing resolution |
+| `MERGECRAFT_TRACING_CONTENT` | Payload capture level: `off`, `metadata`, `redacted`, or `full` | `redacted` | agent and tool span capture |
+| `MERGECRAFT_TRACING_PROJECT` | Logfire project label written alongside the Logfire write token | unset | Logfire tracing |
+| `MERGECRAFT_TRACING_REGION` | Logfire OTLP region: `us` or `eu` | `us` | Logfire tracing |
+| `MERGECRAFT_TRACING_TO` | Tracing destination: `local_files`, `otel`, or `logfire` | unset — JSONL file sink when tracing is on | tracing sink resolution |
+
 ## See also
 
 - [Action reference](action-reference.md)

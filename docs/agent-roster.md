@@ -173,6 +173,6 @@ in config.
 After `mergecraft init`, authenticate one provider — the first successful
 `mergecraft provider auth <label>` seeds `agents.reviewer` p0 from that
 provider's preferred model. No third command is required before
-`mergecraft review` works. See [`docs/authentication.md`](authentication.md#quick-start-init--auth--review).
+`mergecraft review` works. See [`docs/authentication.md`](authentication.md#quick-start--init--auth--review).
 
 **See also:** [`docs/authentication.md`](authentication.md) · [`docs/workflows.md`](workflows.md) · [`docs/cli.md`](cli.md)

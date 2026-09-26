@@ -169,7 +169,7 @@ full record behind that summary.
   each sweep reads those back first, so a finding reintroduced by a later PR
   still files as the regression it is. `.github/workflows/findings-carryover.yml`
   runs it on every merged PR, dry unless the `CARRYOVER_AUTO_APPLY` repository
-  variable is set. See [`docs/findings-carryover.md`](docs/findings-carryover.md).
+  variable is set. See [`docs/findings-carryover.md`](../findings-carryover.md).
 - `feat(tracing): enrich tool.call attrs to carry invoke + complete + verb sub-event info` —
   every `tool.call` span carries the request/response byte counts, `exit_code`,
   error class/message, and input-key list. Known-verb tools (`browser`,

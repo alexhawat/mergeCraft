@@ -221,6 +221,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Review prompts name only tools that exist and only finding fields the schemas
+  accept: every registered tool name is interpolated, so it renders as the
+  harness's real tool reference; the `collateral` list is gone (collateral still
+  renders in the inline body as the **Also update:** list); and the
+  classifier-router paragraph naming `classify_change`, `route_lenses` and
+  `selected_lens_ids` is removed.
+
+- Prompts no longer bake in a budget: the inline cap renders from
+  `analyzers.inlineBudget`, the verifier cap is described as
+  `review.verificationBudget` scaled per round by `review.roundBudgets`, and the
+  stale diff-coverage-nudge note and the Fix-button rationale are gone.
+
+- The recorded prompt version now reflects the rendered prompt the reviewer
+  actually received, so two runs configured with different inline budgets record
+  different versions.
+
+- A configured inline budget of `0` is honoured everywhere: the offline analyzer
+  pre-pass, the pipeline fallback and the rendered prompt now agree, instead of
+  the pre-pass silently using the default.
+
+- The review doctrine states the Python 3.11 install floor, and the `push`
+  input, the compatibility matrix and the review checks describe review-only
+  behaviour — no value grants commit or push.
+
+- Documentation links and glossary anchors resolve on GitHub (the glossary's
+  `{#id}` headings become real anchors), and the operator-facing `MERGECRAFT_*`
+  knobs are documented in `docs/cli.md`.
+
 - CI failures with no evidence of cause are now reported as **unattributed** —
   blocking, with `introduced_by_pr: unknown` — instead of being cleared as
   not-this-PR. A passing or unrecognised base-branch status no longer clears a

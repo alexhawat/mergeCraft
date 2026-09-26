@@ -14,9 +14,9 @@ from mergecraft.analyzers.baseline_suppression import (
     suppress_baseline_findings,
 )
 from mergecraft.analyzers.budget import (
-    default_inline_budget,
     finding_to_deferred_row,
     place_findings,
+    resolve_inline_budget,
     sync_deferred_section,
 )
 from mergecraft.analyzers.cluster import cluster_findings
@@ -429,11 +429,7 @@ def run_analyzer_pipeline(
 
         # Analyzer path: dedupe only — rubric/causality stay on agent findings.
         clustered = dedupe_findings(cluster_findings(scoped))
-        budget = (
-            inline_budget
-            if inline_budget is not None
-            else (settings.inline_budget or default_inline_budget())
-        )
+        budget = inline_budget if inline_budget is not None else resolve_inline_budget(settings)
         placement = place_findings(clustered, inline_budget=budget)
 
         serialized = [_serialize_finding(f) for f in clustered]

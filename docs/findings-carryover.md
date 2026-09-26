@@ -90,6 +90,14 @@ threads only. Fingerprints already recorded in the open-PR ledger are skipped by
 carryover while the pull request is open, so deferred findings are disclosed on
 the PR without spawning duplicate issues.
 
+**Serialization precondition.** The final upsert does not re-fetch the live
+comment: the run's own snapshot is authoritative for a comment it owns, which
+keeps a trust question off the hot path. That is safe only while runs on one pull
+request are serialized, and the self-workflow and the `init` scaffold carry a
+concurrency group for exactly this. A consumer workflow **without** a concurrency
+group can interleave two runs on one pull request, and the later upsert wins, so
+the sticky ledger may reflect the earlier run until the next upsert corrects it.
+
 The key is scoped to the pull request on purpose. If the same finding is
 reintroduced by a *later* pull request, that is a regression and deserves its
 own issue; keying on the fingerprint alone would let a long-closed issue

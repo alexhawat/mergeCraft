@@ -162,16 +162,26 @@ async def test_offline_real_resolver_cross_harness_and_credential_status(
     async def install(_token: str | None = None) -> str:
         return "stub"
 
+    # ``run_offline_agent_review`` renders each candidate's modes with the same
+    # settings object it loaded, interpolating ``settings.analyzers.inline_budget``
+    # into the prompt (PD-D4). Mirror that call exactly rather than hardcoding the
+    # default so this pins the harness-specific tool-reference rendering.
+    inline_budget = dispatch["settings"].analyzers.inline_budget
+
     async def claude_run(ctx: Any) -> AgentResult:
         seen.append("claude")
-        assert ctx.tool_state.modes == compute_modes("claude", signed_commits=False)
+        assert ctx.tool_state.modes == compute_modes(
+            "claude", signed_commits=False, inline_budget=inline_budget
+        )
         return AgentResult(
             success=False, error="temporary provider failure", metadata={"retryable": True}
         )
 
     async def codex_run(ctx: Any) -> AgentResult:
         seen.append("codex")
-        assert ctx.tool_state.modes == compute_modes("codex", signed_commits=False)
+        assert ctx.tool_state.modes == compute_modes(
+            "codex", signed_commits=False, inline_budget=inline_budget
+        )
         return AgentResult(success=True, terminal_submission_received=True)
 
     monkeypatch.setattr(

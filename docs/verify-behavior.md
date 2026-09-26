@@ -289,6 +289,7 @@ are absorbed into the same contract.
 | `blocked.missing` | 61, 62, 63 |
 | `timestamp` | 62 |
 | `credential_names` | credentials-by-name rule |
+| `driver` | `cdp` / `stub` / unset — which driver produced the report; `--allow-stub` tries the browser first and falls back to the stub only when the stack is unavailable |
 
 ## Markdown view
 
