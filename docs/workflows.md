@@ -193,7 +193,7 @@ issues-showcase-readiness follow-up. -->
   crashes, timeouts, and untrusted tiers. The agent's narrative approval is
   advisory only. This check cannot independently authorize privileged approval.
   A maintainer explicitly dispatches
-  [`mergecraft-approve.yml`](../../.github/workflows/mergecraft-approve.yml)
+  [`mergecraft-approve.yml`](../.github/workflows/mergecraft-approve.yml)
   with the accepted run/head and a distinct approval App — see
   [trust policy](trust-policy.md).
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no

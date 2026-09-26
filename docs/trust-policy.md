@@ -19,8 +19,8 @@ Before plan 13, both questions were conflated in a single `trust_tier` from
 return **still applies to authority** unless the operator explicitly opts into
 `full`. Execution trust is derived beside it — never by editing that return.
 
-Read more: [`src/mergecraft/config/trust_policy.py`](../../src/mergecraft/config/trust_policy.py),
-[`src/mergecraft/analyzers/trust.py`](../../src/mergecraft/analyzers/trust.py).
+Read more: [`src/mergecraft/config/trust_policy.py`](../src/mergecraft/config/trust_policy.py),
+[`src/mergecraft/analyzers/trust.py`](../src/mergecraft/analyzers/trust.py).
 
 ## Three levels (`trust.selfReview`)
 
@@ -179,7 +179,7 @@ The reviewing workflow (`mergecraft.yml`) stays on `pull_request_target` only.
 Do not re-add a `pull_request` trigger to earn "trusted" tier — PR #200 reverted
 that same day because it hands credentials to PR-controlled workflow definitions.
 
-Read more: [`.github/workflows/mergecraft-approve.yml`](../../.github/workflows/mergecraft-approve.yml),
+Read more: [`.github/workflows/mergecraft-approve.yml`](../.github/workflows/mergecraft-approve.yml),
 [Security model — structural approval](workflows.md#security-model).
 
 ## Base-snapshot rule
@@ -212,7 +212,7 @@ mergecraft trust set-self-review full --i-understand-this-grants-approval-author
 ## Dogfood posture (mergeCraft repository)
 
 The mergeCraft repository's committed
-[`.mergecraft/config.yaml`](../../.mergecraft/config.yaml) dogfoods same-repo
+[`.mergecraft/config.yaml`](../.mergecraft/config.yaml) dogfoods same-repo
 self-review at:
 
 | Knob | Level | Effect on this repo |

@@ -9,8 +9,15 @@ anchors; ``{#id}`` is **not** an anchor. Scope: ``docs/**/*.md``,
 are excluded. Relative links resolve against the containing file's directory;
 a directory target is valid.
 
-The named red cases are PD4.1-PD4.4's fix list; the named green cases must stay
-green. These assertions fail until PD4; do not xfail: RED is the point.
+Links and anchors are extracted from renderer-faithful text: fenced code blocks
+(``` / `~~~`) and inline code spans are blanked first, because GitHub renders
+neither as a link or an anchor. Heading text keeps its inline-code *content*
+(``## The `push` input`` → ``the-push-input``) but a ``#`` line inside a fence is
+not a heading.
+
+The named fix cases are PD4.1-PD4.4's post-fix target list; the named green
+cases must stay green. These assertions fail until PD4; do not xfail: RED is the
+point.
 """
 
 from __future__ import annotations
@@ -33,8 +40,11 @@ _EXPLICIT_ANCHOR_RE = re.compile(
 )
 _ATX_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$", re.MULTILINE)
 _LINK_TITLE_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+_INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1", re.DOTALL)
 
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:")
+_IGNORED_DIR = ".ignorelocal"
 
 _ROOT_FILES = ("README.md", "REVIEW-CHECKS.md", "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md")
 _EXCLUDED = frozenset({"docs/action-reference.md"})
@@ -47,6 +57,33 @@ class LinkBreak(NamedTuple):
     line: int
     target: str
     reason: str
+
+
+def _blank_text(text: str) -> str:
+    """Replace every non-newline character with a space (offsets stay stable)."""
+    return "".join("\n" if ch == "\n" else " " for ch in text)
+
+
+def _strip_fenced(text: str) -> str:
+    """Blank ``` / `~~~` fenced code blocks; GitHub renders no heading or link inside."""
+    lines = text.split("\n")
+    fence: str | None = None
+    for index, line in enumerate(lines):
+        match = _FENCE_RE.match(line)
+        if fence is None:
+            if match:
+                fence = match.group(1)[0]
+                lines[index] = _blank_text(line)
+        else:
+            lines[index] = _blank_text(line)
+            if match and match.group(1)[0] == fence:
+                fence = None
+    return "\n".join(lines)
+
+
+def _strip_code(text: str) -> str:
+    """Blank fenced blocks and inline code spans — GitHub renders neither as a link/anchor."""
+    return _INLINE_CODE_RE.sub(lambda match: _blank_text(match.group(0)), _strip_fenced(text))
 
 
 def _scope_files() -> list[Path]:
@@ -73,8 +110,8 @@ def _slugify(text: str) -> str:
 
 
 def _anchors_from_text(text: str) -> set[str]:
-    anchors = set(_EXPLICIT_ANCHOR_RE.findall(text))
-    anchors.update(_slugify(match.group(2)) for match in _ATX_RE.finditer(text))
+    anchors = set(_EXPLICIT_ANCHOR_RE.findall(_strip_code(text)))
+    anchors.update(_slugify(match.group(2)) for match in _ATX_RE.finditer(_strip_fenced(text)))
     return anchors
 
 
@@ -84,7 +121,8 @@ def _anchors_for(path: Path) -> frozenset[str]:
 
 
 def _iter_links(text: str) -> list[tuple[int, str]]:
-    return [(match.start(), match.group(1).strip()) for match in _LINK_RE.finditer(text)]
+    stripped = _strip_code(text)
+    return [(match.start(), match.group(1).strip()) for match in _LINK_RE.finditer(stripped)]
 
 
 def _reason_for(source: Path, target: str) -> str | None:
@@ -108,6 +146,17 @@ def link_resolves(source_rel: str, target: str) -> bool:
     return _reason_for(_ROOT / source_rel, target) is None
 
 
+def _link_enters_ignored_dir(source: Path, target: str) -> bool:
+    """Return whether *target* resolves into the gitignored ``.ignorelocal/`` tree."""
+    if not target or target.startswith(_EXTERNAL_PREFIXES) or target.startswith("#"):
+        return False
+    head = target.partition("#")[0]
+    if not head:
+        return False
+    resolved = (source.parent / head).resolve()
+    return resolved.is_relative_to((_ROOT / _IGNORED_DIR).resolve())
+
+
 def collect_breaks() -> list[LinkBreak]:
     """Return every unresolved in-scope link (empty when the docs are clean)."""
     breaks: list[LinkBreak] = []
@@ -128,30 +177,31 @@ def collect_breaks() -> list[LinkBreak]:
     return breaks
 
 
-# Name red cases from Part 1 + PD0 recon (PD4.1-PD4.4 fix them).
-_RED_LINKS: tuple[tuple[str, str], ...] = (
-    ("docs/trust-policy.md", "../../src/mergecraft/config/trust_policy.py"),
-    ("docs/trust-policy.md", "../../src/mergecraft/analyzers/trust.py"),
-    ("docs/trust-policy.md", "../../.github/workflows/mergecraft-approve.yml"),
-    ("docs/trust-policy.md", "../../.mergecraft/config.yaml"),
-    ("docs/workflows.md", "../../.github/workflows/mergecraft-approve.yml"),
-    ("docs/dev/changelog-archive.md", "docs/findings-carryover.md"),
+# PD4.1-PD4.4's post-fix contract: the target each doc will hold *after* the fix,
+# and therefore must resolve. Several already resolve in the current tree; the two
+# glossary anchors stay RED until PD4.3 converts the `{#id}` headings. The general
+# guard below is what tracks the not-yet-fixed doc strings.
+_PD4_FIX_LINKS: tuple[tuple[str, str], ...] = (
+    ("docs/trust-policy.md", "../src/mergecraft/config/trust_policy.py"),
+    ("docs/trust-policy.md", "../src/mergecraft/analyzers/trust.py"),
+    ("docs/trust-policy.md", "../.github/workflows/mergecraft-approve.yml"),
+    ("docs/trust-policy.md", "../.mergecraft/config.yaml"),
+    ("docs/workflows.md", "../.github/workflows/mergecraft-approve.yml"),
+    ("docs/dev/changelog-archive.md", "../findings-carryover.md"),
     ("README.md", "docs/glossary.md#trust-tier"),
     ("docs/trust-policy.md", "glossary.md#trust-tier"),
     (
         "docs/_mcp_reviewer_tools.md",
-        "config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257--d7",
+        "config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257",
     ),
     (
         "docs/mcp-tools.md",
-        "config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257--d7",
+        "config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257",
     ),
-    ("docs/agent-roster.md", "authentication.md#quick-start-init--auth--review"),
-    (
-        "docs/test-plans/audit-r2-p1-review-integrity.md",
-        "../../.ignorelocal/waves/20-audit-r2-a-p1-review-integrity-wave-plan.md",
-    ),
-    ("docs/test-plans/open-issues-sweep-2026-08-22b-gd.md", "skills/mergecraft/SKILL.md"),
+    # True GitHub slug of `## Quick start — init → auth → review`: github-slugger
+    # 2.0.0 strips both the em dash and the arrow, leaving a double hyphen (the same
+    # rule as the green `example-1--auto-review-every-pr`).
+    ("docs/agent-roster.md", "authentication.md#quick-start--init--auth--review"),
 )
 
 # Named green cases (Part 1 "valid, no action").
@@ -188,11 +238,27 @@ def test_no_broken_markdown_links_in_scope() -> None:
     assert not breaks, f"{len(breaks)} link(s) do not resolve on GitHub:\n{rendered}"
 
 
+def test_no_in_scope_link_enters_the_gitignored_wave_directory() -> None:
+    """No in-scope doc may link into `.ignorelocal/` — gitignored, so CI never resolves it."""
+    offenders: list[str] = []
+    for path in _scope_files():
+        text = path.read_text(encoding="utf-8")
+        for offset, target in _iter_links(text):
+            if not _link_enters_ignored_dir(path, target):
+                continue
+            line = text[:offset].count("\n") + 1
+            offenders.append(f"  {path.relative_to(_ROOT).as_posix()}:{line} -> {target}")
+    assert not offenders, (
+        f"{len(offenders)} in-scope markdown link(s) target the gitignored "
+        f"{_IGNORED_DIR}/ tree (de-link them; CI cannot resolve them):\n" + "\n".join(offenders)
+    )
+
+
 @pytest.mark.parametrize(("source", "target"), _GREEN_LINKS)
 def test_named_green_links_resolve(source: str, target: str) -> None:
     assert link_resolves(source, target), f"{source} -> {target} must resolve"
 
 
-@pytest.mark.parametrize(("source", "target"), _RED_LINKS)
-def test_named_red_links_resolve(source: str, target: str) -> None:
+@pytest.mark.parametrize(("source", "target"), _PD4_FIX_LINKS)
+def test_pd4_fix_targets_resolve(source: str, target: str) -> None:
     assert link_resolves(source, target), f"{source} -> {target} must resolve after PD4 (see PD-D9)"

@@ -45,9 +45,10 @@ exists.
 | Generated `docs/action-reference.md` `push` row states review-only refusal | C7 / PD-D7 | Functional (doc) | `…::test_action_reference_push_row_states_review_only_refusal` | ❌ RED |
 | `REVIEW-CHECKS.md` §9 does not present address-reviews as production | C7 / PD-D7 | Functional (doc) | `…::test_review_checks_section_9_does_not_present_address_reviews_as_production` | ❌ RED |
 | GitHub slug rules (no space collapsing; `{#id}` is not an anchor) | C15 / PD-D9 | Unit | `tests/docs/test_markdown_links.py::test_slug_rules_match_github`, `…::test_explicit_anchors_are_honoured_and_brace_ids_are_not` | ✅ pass |
-| Every in-scope markdown link resolves | C15 / C20 / PD-D9 | Functional (repo) | `…::test_no_broken_markdown_links_in_scope` (30 breaks) | ❌ RED |
+| Every in-scope markdown link resolves (code-aware) | C15 / C20 / PD-D9 | Functional (repo) | `…::test_no_broken_markdown_links_in_scope` (26 breaks) | ❌ RED |
+| No in-scope link enters the gitignored `.ignorelocal/` tree | C15 / PD-D9 | Functional (repo) | `…::test_no_in_scope_link_enters_the_gitignored_wave_directory` | ✅ pass |
 | Named green anchors stay green | C15 | Functional (repo) | `…::test_named_green_links_resolve[…]` ×6 | ✅ pass |
-| Named red links/chrome resolve | C15 / C20 | Functional (repo) | `…::test_named_red_links_resolve[…]` ×13 | ❌ RED |
+| PD4 post-fix targets resolve | C15 / C20 | Functional (repo) | `…::test_pd4_fix_targets_resolve[…]` ×11 (9 green; 2 glossary anchors RED until PD4.3) | ❌ RED |
 | Operator/document split partitions every `src/` name | C14 / PD-D8 | Unit | `tests/docs/test_operator_env_vars.py::test_document_and_never_document_partition_src_names` | ✅ pass |
 | `docs/cli.md` gains an `## Environment variables` section | C14 / PD-D8 | Functional (doc) | `…::test_cli_docs_gain_an_environment_variables_section` | ❌ RED |
 | Every document-list knob appears in that section | C14 / PD-D8 | Functional (doc) | `…::test_environment_section_documents_every_operator_knob` | ❌ RED |
@@ -134,24 +135,74 @@ heading slugs to `trust-tier-trust-tier`). Scope is `docs/**/*.md`, `README.md`,
 targets resolve against the containing file's directory; a directory target is
 valid.
 
-- **Comprehensive red:** `test_no_broken_markdown_links_in_scope` reports **30**
-  breaks — matching the PD0 renderer-aware scan exactly (19 glossary `{#id}`
-  misses, 5 `../../` links, the archive link, 5 remainder). The PD-D9 narrowing
-  fork did **not** trigger (30 ≪ ~40).
-- **Named red cases (13):** the five `../../` links
+**Renderer-faithful extraction (PD4 escalation, 2026-09-26).** The scan blanks
+fenced code blocks (``` / `~~~`) and inline code spans before extracting links and
+explicit anchors, because GitHub renders neither as a link or an anchor. Heading
+slugs keep their inline-code *content* (``## The `push` input`` → `the-push-input`)
+but a `#` line inside a fence is not a heading. This removed the four false
+positives below; `test_slug_rules_match_github` and
+`test_explicit_anchors_are_honoured_and_brace_ids_are_not` stay green.
+
+- **Comprehensive red:** `test_no_broken_markdown_links_in_scope` reports **26**
+  breaks (corrected, code-aware): **17** glossary `{#id}` misses
+  (`docs/trust-policy.md:276`; `README.md` ×16), **5** `../../` links,
+  **1** archive link, and **3** remainder. The PD-D9 narrowing fork did **not**
+  trigger (26 ≪ ~40).
+- **PD4 post-fix fix list (11):** the five `../../` targets now `../…`
   (`docs/trust-policy.md` ×4: `trust_policy.py`, `trust.py`, the approve
   workflow, `.mergecraft/config.yaml`; `docs/workflows.md` ×1);
-  `docs/dev/changelog-archive.md` → `docs/findings-carryover.md`; a
-  representative glossary anchor miss from `README.md` and from
-  `docs/trust-policy.md`; the two `config-failure-policy.md` anchor misses; the
-  `authentication.md` anchor miss; the gitignored wave-plan link from
-  `docs/test-plans/audit-r2-p1-review-integrity.md`; and the `skills/mergecraft/
-  SKILL.md` link from `docs/test-plans/open-issues-sweep-2026-08-22b-gd.md`.
-  PD4.1–PD4.4 fix them.
+  `docs/dev/changelog-archive.md` → `../findings-carryover.md`; two glossary
+  `#trust-tier` anchors (`README.md`, `docs/trust-policy.md`); the two
+  `config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257`
+  anchors; and `docs/agent-roster.md` →
+  `authentication.md#quick-start--init--auth--review`. Nine resolve now; the two
+  glossary anchors stay RED until PD4.3. PD4.1–PD4.4 green them.
+- **The two originally-named red cases dropped as false positives:**
+  `docs/test-plans/open-issues-sweep-2026-08-22b-gd.md`'s
+  `[Agent skill](skills/mergecraft/SKILL.md)` is quoted **in inline code**, so
+  GitHub renders no link; and `docs/test-plans/audit-r2-p1-review-integrity.md`'s
+  `.ignorelocal/…` link is de-linked (plain code span) — it never resolved in CI.
+  They are replaced by the `.ignorelocal/` guard test, which is the real
+  invariant.
 - **Named green cases (6):** `#how-it-works`, `#for-agents`, `#security-model`,
   `SECURITY.md#agent-credential-broker-codex-553`,
   `docs/trust-policy.md#agent-credential-broker-553`,
   `README.md#example-1--auto-review-every-pr`.
+
+### PD4 escalation — the self-contradictory red list (2026-09-26)
+
+**Defect.** Six of the thirteen original `_RED_LINKS` entries asserted that a
+*pre-fix broken* target resolves, which no doc edit can satisfy: the four
+`../../src/…` / `../../.github/…` / `../../.mergecraft/…` strings (PD4 rewrites
+the **doc** to `../…`, so the post-fix string is `../…`, never `../../…`), the
+`docs/dev/changelog-archive.md` → `docs/findings-carryover.md` string (PD4 writes
+`../findings-carryover.md`), and two anchor strings whose slugs cannot exist
+(`…-257--d7`; `#quick-start-init--auth--review`). Three further entries were
+false positives from matching links inside inline code, and one targeted a
+gitignored path.
+
+**Fixes.** (1) Renderer-faithful extraction (above). (2) `_RED_LINKS` replaced by
+`_PD4_FIX_LINKS` / `test_pd4_fix_targets_resolve` — the **post-fix** target list,
+so each case proves the fix resolves. (3) The `.ignorelocal/` de-link in
+`docs/test-plans/audit-r2-p1-review-integrity.md` plus the new
+`test_no_in_scope_link_enters_the_gitignored_wave_directory` guard.
+
+**Deviation from the escalation's fix list (recorded).** The escalation gave the
+`docs/agent-roster.md` post-fix anchor as `authentication.md#quick-start-init-auth-review`.
+That slug does not exist: the heading `## Quick start — init → auth → review`
+strips **both** the em dash and the arrow, leaving the double hyphen. Verified
+against `github-slugger@2.0.0`:
+
+```text
+"Quick start — init → auth → review"              => "quick-start--init--auth--review"
+"MCP git tool — reviewer-surface enforcement (#257)" => "mcp-git-tool--reviewer-surface-enforcement-257"
+"Example 1 — auto-review every PR"                => "example-1--auto-review-every-pr"
+```
+
+The test therefore pins the true slug `authentication.md#quick-start--init--auth--review`
+(same no-collapse rule as the green `example-1--auto-review-every-pr` case).
+Encoding the escalation's string would have recreated the exact defect.
+
 
 ## C14 / PD-D8 — the two lists
 
@@ -244,6 +295,7 @@ rationale.
 | --- | --- | --- |
 | 2026-09-26 | `tests/review/test_offline_model_chain.py::test_offline_real_resolver_cross_harness_and_credential_status` | `review/offline_agent.py` now renders `inline_budget=settings.analyzers.inline_budget` (PD2.4 / PD-D4); the expected modes are built with that same budget instead of relying on the omitted default. |
 | 2026-09-26 | `tests/docs/test_review_doctrine_contracts.py::test_verification_section_does_not_claim_the_inline_budget_caps_it` | The PD1 guard banned the literal token `analyzers.inlineBudget`, which PD-D5/P-8 require the doctrine to **name**. The guard now forbids the *claim* and requires any sentence naming the key to decouple it (see "PD3 test refinement" below). |
+| 2026-09-26 | `tests/docs/test_markdown_links.py` (`_PD4_FIX_LINKS` / code-aware scan / `.ignorelocal` guard) | PD4 escalation: 6 of 13 `_RED_LINKS` asserted pre-fix broken strings resolve (unsatisfiable); 3 were inline-code false positives; 1 targeted a gitignored path. Red list is now the post-fix target list, the scan is renderer-faithful, and the escalation's `quick-start-init-auth-review` slug is corrected to `quick-start--init--auth--review` (github-slugger 2.0.0). See "PD4 escalation" above. |
 
 ## PD3 test refinement — inline-budget guard (2026-09-26)
 

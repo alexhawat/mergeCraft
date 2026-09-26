@@ -11,7 +11,7 @@ Install surface: [`docs/mcp.md`](mcp.md) (runtime harness vs public stdio).
 
 The `git` MCP tool (`ToolClass.REPOSITORY_READ`) enforces fail-closed restrictions
 regardless of `payload.shell`. Full guard tables:
-[`config-failure-policy.md` — MCP git tool](config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257--d7).
+[`config-failure-policy.md` — MCP git tool](config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257).
 
 **Added read-only subcommands (W3):**
 
