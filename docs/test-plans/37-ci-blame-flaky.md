@@ -165,6 +165,12 @@ only when the base does **not** conclude `failure`. Encoded in
 | Flaky retry surfaces in section + pre-merge row — **guard (green)** | `test_flaky_retry_surfaces_in_section_and_pre_merge_row` | `tests/ci/test_ci_intelligence.py` |
 | PR-attributed failure produces an inline comment — **guard (green)** | `test_pr_attributed_failure_produces_inline_comment` | `tests/ci/test_ci_intelligence.py` |
 | One cluster + scalar `failure` is exonerated (MCP tool) — **guard (green)** | `test_analyze_ci_failures_tool_returns_review_payload` | `tests/mcp/test_ci_intelligence.py` |
+| Base success + non-overlap renders one consistent, unattributed conclusion — **review-round pin** | `test_base_success_and_non_overlap_render_one_unattributed_conclusion` | `tests/ci/test_ci_intelligence.py` |
+
+> **Review-round pin:** a matching base run that *passed* plus a failure outside the PR
+> diff must render **one** conclusion — `unknown`, unattributed — with neither the flaky
+> nor the blame summary claiming authorship; the fixed product clause removes
+> "attributed to this PR" from the base-success flaky summary.
 
 ### Functional / E2E — review seam + packet (BL4; U1 / U2)
 

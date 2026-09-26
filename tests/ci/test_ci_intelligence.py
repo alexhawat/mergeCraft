@@ -83,6 +83,50 @@ def test_single_cluster_scalar_base_status_still_applies() -> None:
     assert payload["clusters"][0]["blameVerdict"] == "probably_not_this_pr"
 
 
+def test_base_success_and_non_overlap_render_one_unattributed_conclusion() -> None:
+    """A passing base plus a non-overlapping failure must not be attributed to the PR.
+
+    Review-round pin: the flaky classifier's base-success branch claimed the failure
+    "is attributed to this PR" while ``blame_failure`` correctly returned ``unknown``,
+    so the rendered CI section asserted two contradictory conclusions. It must present
+    exactly one: unattributed, with neither summary claiming authorship.
+    """
+    fixture = load_fixture("blame_unrelated_to_pr.json")
+    normalize = import_module("mergecraft.ci.normalize")
+    fingerprint = str(normalize.normalize_failure(fixture["job"])["failure_fingerprint"])
+
+    payload = intelligence_from_failures(
+        [fixture["job"]],
+        pr_diff_paths=fixture["pr_diff_paths"],
+        base_branch_runs=[{"ref": "main", "conclusion": "success", "fingerprint": fingerprint}],
+        retry_attempts={fingerprint: [{"attempt": 1, "conclusion": "failure"}]},
+    )
+
+    cluster = payload["clusters"][0]
+    section = payload["section"]
+
+    # Blame decides: no overlap and no base failure is unattributed, not exonerated.
+    assert cluster["blameVerdict"] == "unknown"
+    assert "**Blame verdict:** unknown" in section
+
+    # The flaky summary must not claim authorship the blame verdict did not prove.
+    assert "attributed to this PR" not in section
+    assert "attributed to this PR" not in cluster["flakySummary"]
+    assert "attributed to this PR" not in cluster["blameSummary"]
+    assert "caused by this PR" not in section
+    assert "caused by this PR" not in cluster["flakySummary"]
+
+    # The flaky verdict names the passing base and asserts nothing further.
+    assert cluster["flakyVerdict"] == "stable"
+    assert "main" in cluster["flakySummary"]
+    assert "passed" in cluster["flakySummary"].lower()
+
+    # An unknown cluster is counted as PR-unattributed and gets no inline comment.
+    assert payload["stats"]["prAttributedCount"] == 0
+    assert payload["stats"]["unattributedCount"] == 1
+    assert payload["comments"] == []
+
+
 def test_flaky_retry_surfaces_in_section_and_pre_merge_row() -> None:
     flaky = load_fixture("flaky_retry_pass.json")
     multi = load_fixture("multi_job_single_root_cause.json")
