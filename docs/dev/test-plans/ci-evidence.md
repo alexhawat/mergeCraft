@@ -42,16 +42,20 @@ uses a check run named *exactly* like the gate and asserts the similarity buys n
 |---|---|---|---|
 | Bare check run (no retry history, no base comparison) | `Minor` | `unknown` | No |
 | SARIF artifact from the consumer's CI | capped at `Minor` | `unknown` | No |
-| Clustered failure, `annotate_not_caused_by_pr` (flaky / pre-existing) | `Minor` | `false` | No |
+| Clustered failure, `annotate_not_caused_by_pr` (flaky / pre-existing / base-failure exoneration) | `Minor` | `false` | No |
+| Clustered failure, `annotate_unattributed` (no overlap and no same-fingerprint base failure) | `Major` | `unknown` | Yes |
 | Clustered failure, `annotate_caused_by_pr` (diff overlap) | `Major` | `true` | Yes |
 
 "Can block" is not a description — it is the property under test. Every consumer of
 findings (`agents.gates.decide_approval`, the merge evidence packet's verdict) is
 monotone in `BLOCKING_SEVERITIES = {Critical, Major}`, so keeping flaky failures at
-`Minor` is *the* mechanism behind "reported, not blamed". Covered by
-`test_flaky_ci_finding_never_blocks_the_approval_gate` and
+`Minor` is *the* mechanism behind "reported, not blamed". The unattributed row is the
+mirror: a CI failure with no evidence either way is recorded `"unknown"` (never
+`"false"`) at `Major`, so it keeps the blocker instead of being silently cleared.
+Covered by `test_flaky_ci_finding_never_blocks_the_approval_gate` and
 `test_flaky_ci_finding_does_not_flip_the_packet_verdict`, with
-`test_pr_attributed_ci_finding_does_block_the_packet_verdict` as the mirror image so
+`test_pr_attributed_ci_finding_does_block_the_packet_verdict` and
+`test_unattributed_ci_cluster_blocks_the_packet_verdict` as the mirror images so
 neither assertion can pass vacuously.
 
 ## Runtime seams (the #96 lesson)
