@@ -72,13 +72,18 @@ jobs:
           uv run mergecraft eval replay-bank \
             --results-dir "$RUNNER_TEMP/eval-gate" \
             --json > "$RUNNER_TEMP/candidate.json"
+      # A baseline that carries a detection half needs a detection leg in this
+      # job: the candidate above is a structural replay and never carries one.
+      # --require-halves therefore makes every release fail until this job also
+      # produces the detection half the baseline carries.
       - name: Release regression gate
         run: |
           set -euo pipefail
           uv run mergecraft eval gate \
             --baseline evals/results/latest.json \
             --candidate "$RUNNER_TEMP/candidate.json" \
-            --tolerance 0.02
+            --tolerance 0.02 \
+            --require-halves
         # NOTE: the committed baseline is currently perfect
         # (unsafe_approval_rate 0.0 / clean_block_rate 0.0 over ~46 cases), so
         # a single case flipping can exceed the 0.02 band. When the eval bank

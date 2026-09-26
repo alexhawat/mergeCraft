@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from tests.verify.support import (
+    ALLOWED_ADDITIVE_REPORT_FIELDS,
     PINNED_ARTIFACT_FIELDS,
     PINNED_INPUT_FIELDS,
     PINNED_REPORT_FIELDS,
@@ -80,7 +81,13 @@ def test_report_requires_schema_version() -> None:
 
 
 def test_report_schema_version_is_pinned() -> None:
-    """Field-set drift without a version bump fails this pin."""
+    """Field-set drift without a version bump fails this pin.
+
+    The report model additionally tolerates the documented additive optional
+    ``driver`` field: EV-D7 adds it under the same ``1.0.0`` version because it
+    is optional and defaulted, so every existing report still validates. Any
+    *other* new field, or a removed one, still fails this pin.
+    """
     models = import_verify("models")
     version = require_symbol(models, "VERIFICATION_SCHEMA_VERSION")
     report_cls = require_symbol(models, "VerificationReport")
@@ -88,7 +95,9 @@ def test_report_schema_version_is_pinned() -> None:
     artifacts_cls = require_symbol(models, "ReportArtifacts")
     assert version == PINNED_SCHEMA_VERSION
     assert version.count(".") == 2
-    assert set(report_cls.model_fields) == PINNED_REPORT_FIELDS
+    report_fields = set(report_cls.model_fields)
+    assert report_fields >= PINNED_REPORT_FIELDS
+    assert report_fields - PINNED_REPORT_FIELDS <= ALLOWED_ADDITIVE_REPORT_FIELDS
     assert set(input_cls.model_fields) == PINNED_INPUT_FIELDS
     assert set(artifacts_cls.model_fields) == PINNED_ARTIFACT_FIELDS
 

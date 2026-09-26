@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Behaviour-verification reports record which driver produced them — `cdp`,
+  `stub`, or unset when not recorded — so a report says whether its page came
+  from a real browser or the non-browser fallback.
+
 - OpenCode plugin at `integrations/opencode/plugins/mergecraft/`: registers the
   public MCP server, overrides `/mergecraft/review` with the configured engine,
   redacts credentials from prompts, keeps the reviewer subagent read-only and
@@ -35,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subagents, V2 MCP wiring, JEV scope, and Logfire tracing.
 
 ### Changed
+
+- The release regression gate now fails when a run adds failed or inconclusive
+  cases, instead of scoring only what survived: a detection half whose every
+  case failed no longer reads as a perfect `1.0`, and a release candidate
+  missing a half the baseline carries fails instead of skipping it.
+
+- Finding matching against a baseline maximises the number of matched issues, so
+  recall no longer changes when baseline issues are reordered; the scorer
+  version is now `1.1.0`.
 
 - `docs/mcp.md` OpenCode install now shows the OpenCode V2 shape — servers nested
   under `mcp.servers` with `disabled`, not the V1 top-level `mcp` map with
@@ -207,6 +220,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under `tests/` still fires.
 
 ### Fixed
+
+- A negated acceptance criterion — "No error is shown", "Error is not shown" —
+  no longer passes against a page that shows the error: it is left unverified
+  with a named reason, and a negated reproduction claim is partial rather than a
+  false reproduction.
+
+- `--allow-stub` permits the stub only when the browser stack is unavailable and
+  logs why, instead of bypassing a reachable browser.
 
 - Every agent CLI driver and the OpenCode server boot no longer hang when a
   child fills its stderr pipe. Each driver drains stderr concurrently with the

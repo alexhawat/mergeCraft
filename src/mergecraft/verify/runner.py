@@ -38,6 +38,7 @@ from mergecraft.verify.models import (
     BlockedDetails,
     CriterionResult,
     CriterionStatus,
+    DriverKind,
     InteractionAction,
     ReportArtifacts,
     ReportStatus,
@@ -58,6 +59,9 @@ _NAVIGATE_READY_S = 15.0
 _REAP_WAIT_S = 3.0
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _TYPE_ACTION_TARGET = "<focused element>"
+#: Negation cues matched on the raw lowercased criterion *before* tokenising, so
+#: ``no`` (dropped by the length filter) and ``not`` (a stopword) still count.
+_NEGATION_CUE_RE = re.compile(r"\b(?:no|not|never|none|nothing|without|cannot)\b|n't")
 
 
 class ActionStepFailure(Exception):
@@ -143,6 +147,7 @@ def _build_report(
     application_logs: list[str] | None = None,
     suggested_next_fix: str = "",
     blocked: BlockedDetails | None = None,
+    driver: DriverKind | None = None,
     credential_names: list[str] | None = None,
 ) -> VerificationReport:
     return VerificationReport(
@@ -164,6 +169,7 @@ def _build_report(
         blocked=blocked,
         timestamp=_now(),
         credential_names=list(credential_names or []),
+        driver=driver,
     )
 
 
@@ -275,6 +281,17 @@ def _page_matches_expected(expected: str, page: str) -> bool:
     return all(token in lowered for token in tokens)
 
 
+def _has_negation_cue(text: str) -> bool:
+    """Return whether ``text`` carries a negation cue.
+
+    Matched on the raw lowercased text before tokenising, so ``no`` (dropped by
+    the length filter) and ``not`` (a stopword) still count. Token absence is not
+    evidence of truth: the local heuristic must not pass a negated criterion it
+    cannot judge.
+    """
+    return _NEGATION_CUE_RE.search(text.lower()) is not None
+
+
 def _is_transient_nav_error(exc: BaseException) -> bool:
     if isinstance(exc, TimeoutError | OSError):
         return True
@@ -338,12 +355,29 @@ async def _apply_actions(
     return recorded
 
 
-def _criterion_status(text: str, page: str, evidence: list[str]) -> CriterionResult:
+def _criterion_status(
+    text: str, page: str, evidence: list[str]
+) -> tuple[CriterionResult, str | None]:
+    """Score one criterion locally, and name a negated one it cannot judge.
+
+    Returns:
+        tuple[CriterionResult, str | None]: The per-criterion result and, when a
+        negation cue makes the criterion un-judgeable, the named reason to
+        record on ``skipped_or_unverified``.
+    """
     lowered = page.lower()
     criterion = text.lower()
     status: CriterionStatus
+    reason: str | None = None
     if not page.strip():
         status = "unverified"
+    elif _has_negation_cue(text):
+        # Fail closed (P-6, EV-D5): the heuristic must not pass a negation it
+        # cannot judge, and it names why (P-8). Consulted before the
+        # "still visible" / "mismatch" special cases so a criterion carrying a
+        # negation cue cannot escape the rule by wording.
+        status = "unverified"
+        reason = _negation_unverified_reason("criterion", text)
     elif "still visible" in criterion:
         status = "fail" if "still visible" in lowered else "pass"
     elif "mismatch" in criterion:
@@ -352,12 +386,13 @@ def _criterion_status(text: str, page: str, evidence: list[str]) -> CriterionRes
         status = "pass"
     else:
         status = "fail"
-    return CriterionResult(
+    result = CriterionResult(
         id=text[:48] or "criterion",
         text=text,
         status=status,
         evidence=list(evidence),
     )
+    return result, reason
 
 
 async def _score_criteria(
@@ -370,14 +405,20 @@ async def _score_criteria(
 
     Returns:
         tuple[list[CriterionResult], list[str]]: Per-criterion results and the
-        named skip reasons for criteria Jev could not judge. Callers own the
+        named skip reasons for criteria that were not judged — Jev
+        ``unverified`` verdicts, or a local negation cue. Callers own the
         pass/fail/partial aggregation.
     """
-    if jev_client is None:
-        return [_criterion_status(text, page, evidence) for text in spec.acceptance_criteria], []
-    judgments = await judge_criteria(spec.acceptance_criteria, page_text=page, client=jev_client)
     results: list[CriterionResult] = []
     unverified: list[str] = []
+    if jev_client is None:
+        for text in spec.acceptance_criteria:
+            result, reason = _criterion_status(text, page, evidence)
+            results.append(result)
+            if reason is not None:
+                unverified.append(reason)
+        return results, unverified
+    judgments = await judge_criteria(spec.acceptance_criteria, page_text=page, client=jev_client)
     for judgment in judgments:
         if judgment.verdict == "unverified":
             unverified.append(_unverified_reason("criterion", judgment.criterion, judgment.reason))
@@ -395,6 +436,15 @@ async def _score_criteria(
 def _unverified_reason(kind: str, subject: str, reason: str) -> str:
     """Name a judgment that did not happen so it never reads as 'found nothing'."""
     return f"{kind} unverified: {subject} ({reason or 'unavailable'})"
+
+
+def _negation_unverified_reason(kind: str, subject: str) -> str:
+    """Name a negated criterion the local heuristic must not judge as a pass."""
+    return _unverified_reason(
+        kind,
+        subject,
+        "negation cue: local heuristic cannot verify a negated criterion",
+    )
 
 
 def write_skipped_report(spec: VerificationInput, *, reason: str) -> VerificationReport:
@@ -424,6 +474,7 @@ async def run_verify_behavior(
     spec: VerificationInput,
     *,
     driver: BrowserDriver | None = None,
+    driver_kind: DriverKind | None = None,
     jev_client: AsyncJevClient | None = None,
     event: dict[str, Any] | None = None,
     event_name: str | None = None,
@@ -437,6 +488,10 @@ async def run_verify_behavior(
         spec (VerificationInput): Union input from issues 61, 62, and 63.
         driver (BrowserDriver | None, optional): Injected protocol. Tests pass
             a fake; the CLI binds browser-use or ``--allow-stub``.
+        driver_kind (DriverKind | None, optional): Which driver produced the run
+            (``"cdp"`` or ``"stub"``), stamped on the report. ``None`` when not
+            recorded — a library caller that injected a driver, or a run that
+            produced no report.
         jev_client (AsyncJevClient | None, optional): Pinned Jev client. When
             supplied, criteria and the repro claim are scored by the seam; when
             omitted, the local text heuristic is used.
@@ -464,7 +519,9 @@ async def run_verify_behavior(
     )
     if skipped:
         logger.info("verify-behavior skipped reasons={}", skipped)
-        report = _build_report(spec, status="skipped", skipped_or_unverified=skipped)
+        report = _build_report(
+            spec, status="skipped", skipped_or_unverified=skipped, driver=driver_kind
+        )
         untrusted_skip = any(item.startswith("untrusted:") for item in skipped)
         if spec.artifacts_dir and not untrusted_skip:
             _write_artifacts(Path(spec.artifacts_dir), report, "")
@@ -477,6 +534,7 @@ async def run_verify_behavior(
             status="blocked",
             blocked=BlockedDetails(missing=missing_creds),
             skipped_or_unverified=[],
+            driver=driver_kind,
         )
         if spec.artifacts_dir:
             _write_artifacts(Path(spec.artifacts_dir), report, "")
@@ -498,6 +556,7 @@ async def run_verify_behavior(
                 status="blocked",
                 blocked=BlockedDetails(missing=["browser driver"]),
                 credential_names=credential_names,
+                driver=driver_kind,
             )
             if spec.artifacts_dir:
                 _write_artifacts(Path(spec.artifacts_dir), report, "")
@@ -520,6 +579,7 @@ async def run_verify_behavior(
                 ],
                 blocked=BlockedDetails(missing=[named]),
                 credential_names=credential_names,
+                driver=driver_kind,
             )
             if spec.artifacts_dir:
                 _write_artifacts(Path(spec.artifacts_dir), report, "")
@@ -545,6 +605,7 @@ async def run_verify_behavior(
                 steps=steps,
                 blocked=BlockedDetails(missing=[label]),
                 credential_names=credential_names,
+                driver=driver_kind,
             )
             if spec.artifacts_dir:
                 _write_artifacts(Path(spec.artifacts_dir), report, "")
@@ -586,10 +647,17 @@ async def run_verify_behavior(
                 spec.acceptance_criteria[0] if spec.acceptance_criteria else "expected behaviour"
             )
             observed = page or "no page text"
+            status: ReportStatus
             if jev_client is None:
-                status: ReportStatus = (
-                    "reproduced" if _page_matches_expected(expected, page) else "not_reproduced"
-                )
+                if _has_negation_cue(expected):
+                    # Fail closed (P-6): a negated expectation is never a
+                    # reproduction on the opposite page.
+                    status = "partial"
+                    skipped_criteria.append(_negation_unverified_reason("repro", expected))
+                else:
+                    status = (
+                        "reproduced" if _page_matches_expected(expected, page) else "not_reproduced"
+                    )
             else:
                 repro = await judge_repro_claim(expected, page_text=page, client=jev_client)
                 if repro.verdict == "unverified":
@@ -608,6 +676,7 @@ async def run_verify_behavior(
                 artifacts=artifacts,
                 console_errors=console_errors,
                 credential_names=credential_names,
+                driver=driver_kind,
             )
         else:
             if not criteria:
@@ -632,6 +701,7 @@ async def run_verify_behavior(
                 artifacts=artifacts,
                 console_errors=console_errors,
                 credential_names=credential_names,
+                driver=driver_kind,
             )
         if spec.artifacts_dir:
             _write_artifacts(Path(spec.artifacts_dir), report, log_text)

@@ -64,6 +64,11 @@ PINNED_REPORT_FIELDS: Final[frozenset[str]] = frozenset(
         "credential_names",
     }
 )
+#: Additive optional report fields that may appear under the same schema
+#: version without failing the field-set pin. ``driver`` records which
+#: verification driver produced a report; it is optional and defaulted, so an
+#: older report still validates (EV-D7 keeps ``schema_version`` at 1.0.0).
+ALLOWED_ADDITIVE_REPORT_FIELDS: Final[frozenset[str]] = frozenset({"driver"})
 PINNED_ARTIFACT_FIELDS: Final[frozenset[str]] = frozenset(
     {"screenshots", "video", "trace", "logs", "network_summary"}
 )
