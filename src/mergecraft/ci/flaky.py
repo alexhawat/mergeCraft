@@ -81,8 +81,7 @@ def classify_failure(
                 classification="stable",
                 summary=(
                     f"Base branch {refs} passed with this fingerprint; "
-                    "the failure is not explained by the base branch "
-                    "and is attributed to this PR."
+                    "the failure is not explained by the base branch."
                 ),
                 evidence=evidence,
                 blame_on_author=True,
