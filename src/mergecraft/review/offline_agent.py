@@ -127,7 +127,11 @@ async def run_offline_agent_review(
         # the shared fallback loop can inspect it. Runtime resolution happens
         # only after each candidate passes the credential check.
         agent = resolve_agent(resolve_harness(settings, chain[0]))
-        modes = compute_modes(agent.name, signed_commits=False)
+        modes = compute_modes(
+            agent.name,
+            signed_commits=False,
+            inline_budget=settings.analyzers.inline_budget,
+        )
         bounds = run_bounds or resolve_run_bounds(settings=settings)
         budget_tracker = BudgetTracker(bounds)
 
@@ -249,7 +253,11 @@ async def run_offline_agent_review(
                     metadata={"retryable": True},
                 )
             attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
-            attempt_modes = compute_modes(attempt_agent.name, signed_commits=False)
+            attempt_modes = compute_modes(
+                attempt_agent.name,
+                signed_commits=False,
+                inline_budget=settings.analyzers.inline_budget,
+            )
             tool_context.agent_id = attempt_agent.name
             tool_context.modes = attempt_modes
             tool_context.resolved_model = attempt_model

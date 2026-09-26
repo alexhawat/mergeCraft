@@ -178,6 +178,7 @@ def prompt_version_for(name: str) -> str:
             commit_step=commit_step,
             finalize_step=finalize_step,
             signed_commits=False,
+            inline_budget=None,
         )
         return compute_prompt_version(rendered)
     msg = f"unknown built-in mode: {name!r}"
@@ -190,6 +191,19 @@ def _render_lens_menu_block() -> str:
     return render_lens_menu_block()
 
 
+def _render_inline_budget(inline_budget: int | None) -> str:
+    """Render the ``${INLINE_BUDGET}`` marker for a repo's inline budget.
+
+    ``None`` names the config key with no baked-in number — so a prompt never
+    presents today's default as if it were a limit — while an integer renders
+    the value this run actually resolved. The marker always expands, so no
+    rendered prompt keeps a ``${...}`` sequence.
+    """
+    if inline_budget is None:
+        return "the repo's inline budget (`analyzers.inlineBudget`)"
+    return str(inline_budget)
+
+
 def _expand_template(
     template: str,
     *,
@@ -197,6 +211,7 @@ def _expand_template(
     commit_step: str,
     finalize_step: str,
     signed_commits: bool,
+    inline_budget: int | None = None,
 ) -> str:
     text = template
     text = text.replace("${REVIEWER_AGENT_NAME}", REVIEWER_AGENT_NAME)
@@ -208,6 +223,7 @@ def _expand_template(
     text = text.replace("${VERIFIER_AGENT_NAME}", VERIFIER_AGENT_NAME)
     text = text.replace("${RECALL_AGENT_NAME}", RECALL_AGENT_NAME)
     text = text.replace("${LENS_MENU_BLOCK}", _render_lens_menu_block())
+    text = text.replace("${INLINE_BUDGET}", _render_inline_budget(inline_budget))
 
     def signed_simple(m: re.Match[str]) -> str:
         return m.group(1) if signed_commits else m.group(2)
@@ -223,8 +239,19 @@ def _expand_template(
     return _T_CALL_RE.sub(lambda m: t(m.group(1)), text)
 
 
-def compute_modes(agent_id: AgentId, signed_commits: bool = False) -> list[Mode]:
-    """Return built-in modes with tool refs formatted for ``agent_id``."""
+def compute_modes(
+    agent_id: AgentId,
+    signed_commits: bool = False,
+    *,
+    inline_budget: int | None = None,
+) -> list[Mode]:
+    """Return built-in modes with tool refs formatted for ``agent_id``.
+
+    ``inline_budget`` is the repo's ``analyzers.inlineBudget`` resolved by the
+    caller. When omitted the prompt names the config key instead of baking in a
+    number; the ``${INLINE_BUDGET}`` marker always expands, so no rendered
+    prompt keeps a ``${...}`` sequence.
+    """
 
     def t(tool_name: str) -> str:
         return format_mcp_tool_ref(agent_id, tool_name)
@@ -244,19 +271,35 @@ def compute_modes(agent_id: AgentId, signed_commits: bool = False) -> list[Mode]
 
     result: list[Mode] = []
     for name, description, template in _MODE_DEFS:
-        prompt = _expand_template(
+        # The version hashes the ``inline_budget=None`` render so it names the
+        # prompt, never a repo's config value — even when a caller resolved a
+        # concrete budget (PD-D4).
+        base_prompt = _expand_template(
             template,
             t=t,
             commit_step=commit_step,
             finalize_step=finalize_step,
             signed_commits=signed_commits,
+            inline_budget=None,
+        )
+        prompt = (
+            base_prompt
+            if inline_budget is None
+            else _expand_template(
+                template,
+                t=t,
+                commit_step=commit_step,
+                finalize_step=finalize_step,
+                signed_commits=signed_commits,
+                inline_budget=inline_budget,
+            )
         )
         result.append(
             Mode(
                 name=name,
                 description=description,
                 prompt=prompt,
-                version=compute_prompt_version(prompt),
+                version=compute_prompt_version(base_prompt),
             )
         )
     return result

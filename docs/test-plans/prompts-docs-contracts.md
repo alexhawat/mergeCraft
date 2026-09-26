@@ -25,19 +25,19 @@ exists.
 | Contract | Decision | Layer | Test node(s) | Status |
 | --- | --- | --- | --- | --- |
 | Every `${t("x")}` in a production template names a registered tool | PD-D3 | Unit | `tests/prompts/test_prompt_tool_names.py::test_source_tool_refs_are_registered[Review\|IncrementalReview\|Plan]` | ✅ pass |
-| No registered tool name appears bare-backticked in a rendered production prompt | C16 / PD-D3 | Unit | `…::test_no_registered_tool_name_is_bare_backticked[Review\|IncrementalReview]` | ❌ RED |
-| `PR_SUMMARY_FORMAT` carries no bare registered tool name | C16 / PD-D3 | Unit | `…::test_pr_summary_format_has_no_bare_registered_tool_names` | ❌ RED |
-| `classify_change` / `route_lenses` / `selected_lens_ids` / `load_lens_catalog` absent from every rendered production prompt | C2 / PD-D1 | Unit | `…::test_forbidden_names_absent_from_rendered_prompt[Review]` (others green) | ❌ RED |
-| No prompt asks for a `collateral` field or list | C3 / PD-D2 | Unit | `tests/prompts/test_prompt_finding_schema.py::test_no_prompt_asks_for_a_collateral_field_or_list` | ❌ RED |
+| No registered tool name appears bare-backticked in a rendered production prompt | C16 / PD-D3 | Unit | `…::test_no_registered_tool_name_is_bare_backticked[Review\|IncrementalReview]` | ✅ pass |
+| `PR_SUMMARY_FORMAT` carries no bare registered tool name | C16 / PD-D3 | Unit | `…::test_pr_summary_format_has_no_bare_registered_tool_names` | ✅ pass |
+| `classify_change` / `route_lenses` / `selected_lens_ids` / `load_lens_catalog` absent from every rendered production prompt | C2 / PD-D1 | Unit | `…::test_forbidden_names_absent_from_rendered_prompt[Review]` (others green) | ✅ pass |
+| No prompt asks for a `collateral` field or list | C3 / PD-D2 | Unit | `tests/prompts/test_prompt_finding_schema.py::test_no_prompt_asks_for_a_collateral_field_or_list` | ✅ pass |
 | The body-only **Also update:** instruction remains | C3 / PD-D2 | Unit | `…::test_also_update_body_instruction_remains` | ✅ pass |
 | `AgentFinding` still rejects a `collateral` key (read-only pin on plan 39) | PD-D2 | Unit | `…::test_agent_finding_still_forbids_a_collateral_key` | ✅ pass |
-| No digit follows "budget cap" in any production prompt | N14 / PD-D4 | Unit | `tests/prompts/test_prompt_budget_text.py::test_no_digit_follows_the_budget_cap_phrase` | ❌ RED |
-| `inline_budget=5` renders `5`; the value is the only render delta | N14 / PD-D4 | Unit | `…::test_inline_budget_value_is_interpolated` | ❌ RED |
-| `inline_budget=None` renders `analyzers.inlineBudget`, no number, no `${` | PD-D4 | Unit | `…::test_none_renders_the_key_name_and_no_marker_or_number` | ❌ RED |
+| No digit follows "budget cap" in any production prompt | N14 / PD-D4 | Unit | `tests/prompts/test_prompt_budget_text.py::test_no_digit_follows_the_budget_cap_phrase` | ✅ pass |
+| `inline_budget=5` renders `5`; the value is the only render delta | N14 / PD-D4 | Unit | `…::test_inline_budget_value_is_interpolated` | ✅ pass |
+| `inline_budget=None` renders `analyzers.inlineBudget`, no number, no `${` | PD-D4 | Unit | `…::test_none_renders_the_key_name_and_no_marker_or_number` | ✅ pass |
 | No rendered prompt leaves a `${...}` marker (mirrors `tests/test_modes.py`) | PD-D4 | Unit | `…::test_default_render_has_no_leftover_marker` | ✅ pass |
-| The verifier-cap sentence names `review.verificationBudget` and `review.roundBudgets` | C8 / PD-D5 | Unit | `…::test_verifier_cap_names_the_config_keys` | ❌ RED |
-| No prompt mentions a diff-coverage nudge | C8 / PD-D6 | Unit | `…::test_no_prompt_mentions_a_diff_coverage_nudge` | ❌ RED |
-| No prompt mentions a Fix button | D8 / PD-D11 | Unit | `…::test_no_prompt_mentions_a_fix_button` | ❌ RED |
+| The verifier-cap sentence names `review.verificationBudget` and `review.roundBudgets` | C8 / PD-D5 | Unit | `…::test_verifier_cap_names_the_config_keys` | ✅ pass |
+| No prompt mentions a diff-coverage nudge | C8 / PD-D6 | Unit | `…::test_no_prompt_mentions_a_diff_coverage_nudge` | ✅ pass |
+| No prompt mentions a Fix button | D8 / PD-D11 | Unit | `…::test_no_prompt_mentions_a_fix_button` | ✅ pass |
 | Doctrine names the real verifier-budget keys | N20 / C8 / PD-D5 | Functional (doc) | `tests/docs/test_review_doctrine_contracts.py::test_verification_section_names_the_real_budget_keys` | ❌ RED |
 | Doctrine does not say the inline budget caps verification | N20 / PD-D5 | Functional (doc) | `…::test_verification_section_does_not_claim_the_inline_budget_caps_it` | ❌ RED |
 | Doctrine Python floor agrees with `pyproject.toml` `requires-python` | C13 / PD3.2 | Functional (doc) | `…::test_python_floor_agrees_with_pyproject` | ❌ RED |
@@ -52,6 +52,74 @@ exists.
 | `docs/cli.md` gains an `## Environment variables` section | C14 / PD-D8 | Functional (doc) | `…::test_cli_docs_gain_an_environment_variables_section` | ❌ RED |
 | Every document-list knob appears in that section | C14 / PD-D8 | Functional (doc) | `…::test_environment_section_documents_every_operator_knob` | ❌ RED |
 | No never-document name appears in that section | C14 / PD-D8 | Functional (doc) | `…::test_environment_section_lists_no_internal_or_control_name` | ❌ RED |
+
+## PD2 reconciliation (2026-09-26)
+
+PD2.1–PD2.6a turned the prompt-half contracts green; PD2.7 refreshed the three
+snapshot fixtures and cleared the one out-of-scope failure PD2 surfaced. The
+PD2 rows in the matrix above are now ✅ pass (C2, C3, C16, N14, C8 prompt half,
+D8 prompt text); the PD3/PD4 doc rows stay RED by design.
+
+- **Scoped run:** `MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/prompts
+  tests/modes tests/test_modes.py tests/tracing/test_mode_prompt_attrs.py
+  tests/review -q` → **336 passed**; `uv run ruff check tests/` and
+  `uv run ruff format --check tests/` clean.
+
+### Snapshot refresh (PD-D12)
+
+Regenerated from the live source of truth, not hand-edited bytes:
+
+- `tests/prompts/fixtures/review_template_vp4_1.txt` ← `Review.TEMPLATE`
+- `tests/prompts/fixtures/incremental_review_template_vp4_1.txt` ←
+  `IncrementalReview.TEMPLATE`
+- `tests/_fixtures/pre_split_prompts.json` ← `compute_modes("opencode")` renders,
+  encoded the existing way (`json.dumps(..., indent=2, ensure_ascii=False) + "\n"`).
+
+**Hunk attribution.** Every hunk in the two raw-template fixture diffs maps to a
+PD2.1–PD2.6a edit:
+
+| Fixture | Hunk group | PD2 item |
+| --- | --- | --- |
+| Review | `when \`checkout_pr\` returns` → `${t("checkout_pr")}` (shared splice) | PD2.3 / C16 |
+| Review | `analyzer_findings` → `${t("analyzer_findings")}`; `budget cap (8)` → `budget cap — ${INLINE_BUDGET}` | PD2.3 / C16, PD2.4 / N14 |
+| Review | flaky sentence → `failure` / `unattributed` wording; `${t("list_check_runs")}` | PD2.6a, PD2.3 / C16 |
+| Review | `Consult … (mergecraft lens list / load_lens_catalog)` → `The registry-backed **lens catalog** is the menu rendered below` | PD2.1 / C2 |
+| Review | classifier-routing paragraph deleted | PD2.1 / C2 |
+| Review | finding's `collateral` list → `as an **Also update:** bullet list` | PD2.2 / C3 |
+| Review | verifier cap → `review.verificationBudget` … `review.roundBudgets` | PD2.5 / C8 |
+| Review | `report_progress` / `create_issue_comment` → `${t(...)}` | PD2.3 / C16 |
+| Review | Fix-button rationale → `verdict` lever | PD2.6 / D8 |
+| IncrementalReview | `checkout_pr` / `analyzer_findings` / `list_check_runs` interpolation + flaky wording | PD2.3 / C16, PD2.6a |
+| IncrementalReview | finding's `collateral` list → `Also update:` | PD2.2 / C3 |
+| IncrementalReview | `create_issue_comment` → `${t(...)}` | PD2.3 / C16 |
+| IncrementalReview | Fix-button rationale → `verdict` lever | PD2.6 / D8 |
+| IncrementalReview | diff-coverage-nudge line deleted | PD2.5 / C8 |
+
+**`pre_split_prompts.json` — one reported coalescence.** The file stores
+*rendered* prompts, so its `Review.prompt` and `IncrementalReview.prompt` lines
+carry all of the rendered PD2 changes above **and** the terminal-window rewrite
+from PR #619 (`96cb4042`: the `approved` / `comments` → `verdict` / `summary` /
+`findings` submit step and callout tiers). The JSON was last refreshed at
+`813352a9` (2026-08-29); `96cb4042` refreshed the two raw fixtures but **not**
+the JSON, and the `_outside_terminal` carve-out in
+`test_mode_prompt_text_is_byte_identical_after_split` hid that staleness. A live
+refresh therefore pulls the pre-existing #619 delta in alongside the PD2 edits.
+It is a latency correction, **not** drift introduced by PD2, and it lies wholly
+inside that test's terminal-window carve-out. Only the `Review` and
+`IncrementalReview` `prompt` fields differ; both `description` fields and the
+entire `Plan` entry are byte-identical.
+
+### Offline-chain assertion correction
+
+`tests/review/test_offline_model_chain.py::test_offline_real_resolver_cross_harness_and_credential_status`
+compared against `compute_modes("claude"|"codex", signed_commits=False)` while
+`review/offline_agent.py` now renders
+`inline_budget=settings.analyzers.inline_budget` (PD2.4 / PD-D4), so the
+expected render no longer matched. The assertions now build both expectations
+from `dispatch["settings"].analyzers.inline_budget` — the same settings object
+the production path loads — and still assert full mode-list equality per
+harness, not a name-only comparison. Rationale also recorded in the pushback
+table below.
 
 ## C15 / C20 — renderer-aware link check (PD-D9)
 
@@ -174,4 +242,4 @@ rationale.
 
 | Date | Test | Rationale |
 | --- | --- | --- |
-| — | — | (none yet) |
+| 2026-09-26 | `tests/review/test_offline_model_chain.py::test_offline_real_resolver_cross_harness_and_credential_status` | `review/offline_agent.py` now renders `inline_budget=settings.analyzers.inline_budget` (PD2.4 / PD-D4); the expected modes are built with that same budget instead of relying on the omitted default. |
