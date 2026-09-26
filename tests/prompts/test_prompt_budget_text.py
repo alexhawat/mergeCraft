@@ -10,6 +10,9 @@ Locked decisions:
   by ``review.roundBudgets``; the prompt names the keys, never a number.
 * **PD-D6** — the diff-coverage-nudge note is deleted.
 * **PD-D11** — the Fix-button rationale is removed.
+* **#899** — ``Mode.version`` hashes the prompt actually rendered, so a run's
+  recorded version names the text the reviewer received; the default render
+  still matches ``prompt_version_for``.
 
 These assertions fail until PD2; do not xfail: RED is the point.
 """
@@ -19,7 +22,16 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from mergecraft.modes import PR_SUMMARY_FORMAT, Mode, compute_modes
+from mergecraft.modes import (
+    PR_SUMMARY_FORMAT,
+    IncrementalReview,
+    Mode,
+    Plan,
+    Review,
+    compute_modes,
+    compute_prompt_version,
+    prompt_version_for,
+)
 
 _BUDGET_CAP_DIGIT_RE = re.compile(r"budget cap\D{0,12}\d")
 _FIX_BUTTON_RE = re.compile(r"Fix[-\s]?button", re.IGNORECASE)
@@ -131,3 +143,93 @@ def test_no_prompt_mentions_a_fix_button() -> None:
     assert not offenders, (
         f"these surfaces still justify behaviour by a Fix button: {offenders} (PD-D11)"
     )
+
+
+# ── #899 — a run's recorded version must name the prompt that actually ran ───
+
+_MODE_MODULES = (Review, IncrementalReview, Plan)
+_INLINE_BUDGET_MARKER = "${INLINE_BUDGET}"
+
+
+def _budget_marker_modes() -> set[str]:
+    """Names of the built-in modes whose raw template embeds ``${INLINE_BUDGET}``.
+
+    Derived from the templates rather than asserted as a literal, so a later
+    change that adds the marker to another mode is covered automatically.
+    """
+    return {module.NAME for module in _MODE_MODULES if _INLINE_BUDGET_MARKER in module.TEMPLATE}
+
+
+def _versions_by_mode(*, inline_budget: int | None) -> dict[str, str]:
+    return {mode.name: mode.version for mode in _render(inline_budget)}
+
+
+def test_distinct_configured_budgets_produce_distinct_versions() -> None:
+    """A verdict must be attributable to the prompt that actually ran (#899).
+
+    ``Mode.version`` hashed the ``inline_budget=None`` baseline, so two runs
+    configured with different inline budgets recorded the *same* version even
+    though the reviewer received different prompt text. A mode whose template
+    embeds ``${INLINE_BUDGET}`` renders a budget-dependent body and so must
+    version differently per budget; a marker-free mode's body (and version) is
+    legitimately budget-independent. The expected set is derived from the
+    templates so the pin stays honest if another mode gains the marker.
+    """
+    default = _versions_by_mode(inline_budget=None)
+    five = _versions_by_mode(inline_budget=5)
+    seven = _versions_by_mode(inline_budget=7)
+
+    marker_modes = _budget_marker_modes()
+    assert marker_modes, (
+        f"no built-in mode embeds {_INLINE_BUDGET_MARKER}; the budget marker vanished"
+    )
+
+    for module in _MODE_MODULES:
+        name = module.NAME
+        versions = {default[name], five[name], seven[name]}
+        if name in marker_modes:
+            assert len(versions) == 3, (
+                f"{name} embeds {_INLINE_BUDGET_MARKER} but its version does not move "
+                f"with the configured budget: default={default[name]!r}, "
+                f"5={five[name]!r}, 7={seven[name]!r} (#899)"
+            )
+        else:
+            assert len(versions) == 1, (
+                f"{name} does not embed {_INLINE_BUDGET_MARKER}, so its version must "
+                f"not move with the budget: {versions!r}"
+            )
+
+
+def test_version_hashes_the_rendered_prompt_body() -> None:
+    """Version is a function of the body, per ``compute_prompt_version``'s contract.
+
+    Identical rendered bodies give identical versions and any body change gives a
+    different one — so ``Mode.version`` must equal the hash of the prompt it
+    ships, not a separately tracked field. Together with the budget-distinctness
+    test above, that is what makes the recorded version name the prompt the
+    reviewer received.
+    """
+    for inline_budget in (None, 5, 7):
+        for mode in _render(inline_budget):
+            assert mode.prompt is not None, f"{mode.name} rendered no prompt"
+            assert mode.version == compute_prompt_version(mode.prompt), (
+                f"{mode.name} at inline_budget={inline_budget!r}: version is not the "
+                "content hash of its rendered prompt body"
+            )
+    assert compute_prompt_version("same body") == compute_prompt_version("same body")
+    assert compute_prompt_version("same body") != compute_prompt_version("same body ")
+
+
+def test_default_render_version_matches_prompt_version_for_baseline() -> None:
+    """The default (no-budget) render is still the ``prompt_version_for`` baseline.
+
+    ``compute_modes`` without a budget expands the same ``inline_budget=None``
+    render that ``prompt_version_for`` hashes with a sentinel agent, so the two
+    must agree for every built-in mode — the #899 fix must not move the default
+    version a caller records.
+    """
+    for mode in _render_modes("opencode"):
+        assert mode.version == prompt_version_for(mode.name), (
+            f"{mode.name}: default compute_modes version diverged from "
+            "prompt_version_for() — the baseline contract moved"
+        )

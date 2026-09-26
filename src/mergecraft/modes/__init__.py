@@ -153,11 +153,14 @@ def compute_prompt_version(body: str) -> str:
 
 
 def prompt_version_for(name: str) -> str:
-    """Return the prompt version for the built-in mode named ``name``.
+    """Return the baseline prompt version for the built-in mode named ``name``.
 
-    The version is computed from the *rendered* prompt — the body after
-    every ``${...}`` marker is expanded — so it is stable across the
-    ``signed_commits`` toggle but moves when the prompt text moves.
+    The baseline is the **default** render — every ``${...}`` marker expanded
+    with ``inline_budget=None`` (the config-key name, not a number) — for a
+    sentinel agent, so it is stable across the ``signed_commits`` toggle and the
+    caller's runtime agent. :func:`compute_modes` hashes the prompt it actually
+    renders, so a run that resolved a concrete ``inline_budget`` records that
+    render's version instead; this baseline is what a default caller records.
     Raises :class:`KeyError` if the name does not match a built-in.
     """
     for mode_name, _, template in _MODE_DEFS:
@@ -271,9 +274,11 @@ def compute_modes(
 
     result: list[Mode] = []
     for name, description, template in _MODE_DEFS:
-        # The version hashes the ``inline_budget=None`` render so it names the
-        # prompt, never a repo's config value — even when a caller resolved a
-        # concrete budget (PD-D4).
+        # ``compute_prompt_version`` hashes the *rendered* body, so the version
+        # names the prompt the reviewer actually received: a caller that resolved
+        # a concrete ``inline_budget`` records the version of the text that ran.
+        # The default (``inline_budget=None``) render is the baseline that
+        # ``prompt_version_for`` returns for a sentinel agent.
         base_prompt = _expand_template(
             template,
             t=t,
@@ -299,7 +304,7 @@ def compute_modes(
                 name=name,
                 description=description,
                 prompt=prompt,
-                version=compute_prompt_version(base_prompt),
+                version=compute_prompt_version(prompt),
             )
         )
     return result

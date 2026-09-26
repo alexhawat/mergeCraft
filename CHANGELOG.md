@@ -233,6 +233,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `review.verificationBudget` scaled per round by `review.roundBudgets`, and the
   stale diff-coverage-nudge note and the Fix-button rationale are gone.
 
+- The recorded prompt version now reflects the rendered prompt the reviewer
+  actually received, so two runs configured with different inline budgets record
+  different versions.
+
 - The review doctrine states the Python 3.11 install floor, and the `push`
   input, the compatibility matrix and the review checks describe review-only
   behaviour — no value grants commit or push.

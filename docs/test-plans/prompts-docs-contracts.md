@@ -38,6 +38,7 @@ exists.
 | The verifier-cap sentence names `review.verificationBudget` and `review.roundBudgets` | C8 / PD-D5 | Unit | `…::test_verifier_cap_names_the_config_keys` | ✅ pass |
 | No prompt mentions a diff-coverage nudge | C8 / PD-D6 | Unit | `…::test_no_prompt_mentions_a_diff_coverage_nudge` | ✅ pass |
 | No prompt mentions a Fix button | D8 / PD-D11 | Unit | `…::test_no_prompt_mentions_a_fix_button` | ✅ pass |
+| A run's recorded prompt version names the prompt it actually rendered | #899 | Unit | `tests/prompts/test_prompt_budget_text.py::test_distinct_configured_budgets_produce_distinct_versions`, `…::test_version_hashes_the_rendered_prompt_body`, `…::test_default_render_version_matches_prompt_version_for_baseline` | ✅ pass |
 | Doctrine names the real verifier-budget keys | N20 / C8 / PD-D5 | Functional (doc) | `tests/docs/test_review_doctrine_contracts.py::test_verification_section_names_the_real_budget_keys` | ✅ pass |
 | Doctrine forbids the inline-budget claim; naming the key is allowed only if its sentence decouples it | N20 / PD-D5 | Functional (doc) | `…::test_verification_section_does_not_claim_the_inline_budget_caps_it` | ✅ pass |
 | Doctrine Python floor agrees with `pyproject.toml` `requires-python` | C13 / PD3.2 | Functional (doc) | `…::test_python_floor_agrees_with_pyproject` | ✅ pass |
@@ -121,6 +122,31 @@ from `dispatch["settings"].analyzers.inline_budget` — the same settings object
 the production path loads — and still assert full mode-list equality per
 harness, not a name-only comparison. Rationale also recorded in the pushback
 table below.
+
+### Version attribution pin (#899)
+
+`Mode.version` originally hashed the `inline_budget=None` baseline rather than
+the rendered body, so two runs configured with different inline budgets recorded
+the *same* version while the reviewer received different prompt text — breaking a
+verdict's attribution to the prompt that produced it in the evidence packet and
+tracing. The fix (`version=compute_prompt_version(prompt)`) is pinned by three
+tests in `tests/prompts/test_prompt_budget_text.py`:
+
+- `test_distinct_configured_budgets_produce_distinct_versions` — derives the
+  marker-bearing modes by scanning each mode `TEMPLATE` for `${INLINE_BUDGET}`
+  (`Review` bears it; `IncrementalReview` and `Plan` do not), asserts a
+  marker-bearing mode's version is distinct across the default / `5` / `7`, and
+  that a marker-free mode's version is unchanged.
+- `test_version_hashes_the_rendered_prompt_body` — per `compute_prompt_version`'s
+  docstring, pins `mode.version == compute_prompt_version(mode.prompt)` so the
+  version is a function of the body, not a separately tracked field.
+- `test_default_render_version_matches_prompt_version_for_baseline` — the
+  no-budget render still equals `prompt_version_for(name)` for every built-in, so
+  the fix does not move the default version a caller records.
+
+Falsified by temporarily reverting the argument to `base_prompt`: the first two
+fail (a marker-bearing mode's versions collapse to one), the baseline test stays
+green. Restored byte-identical; this test owns no `src/` change.
 
 ## C15 / C20 — renderer-aware link check (PD-D9)
 
