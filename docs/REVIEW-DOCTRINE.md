@@ -50,8 +50,11 @@ linter is substituted. The repo's own gate is the only gate.
 
 When the repo has a tool, mergeCraft runs **the repo's copy** at **the repo's config and
 version**. A reviewer carrying its own interpreter manufactures findings: `except A, B:`
-is a `SyntaxError` under Python 3.13 and legal under 3.14 (PEP 758), which this project
-requires. The module docstring, tool description, and mode prompt all encode this rule.
+is a `SyntaxError` under Python 3.13 and legal under 3.14 (PEP 758) — a version-dependent
+construct, not this project's floor. mergeCraft installs on Python 3.11
+(`requires-python = ">=3.11"`) and CI also runs 3.14; see
+[docs/dev/python-version-floor.md](dev/python-version-floor.md). The module docstring, tool
+description, and mode prompt all encode this rule.
 
 ## Finding fingerprints
 
@@ -83,11 +86,13 @@ model's own findings — was the one source that never got checked. `verify_agen
 `record_finding_verdict` close that, on the same terms as the analyzer path: severity gate,
 withdrawn-memory skip, and a dispatch cap.
 
-**The cap is the inline budget, not a new knob.** Verification exists to protect what gets
-published, so it can never cost more than publication does: dispatches are capped at
-`analyzers.inlineBudget` and spent on `Critical` before `Major`. **Cost:** on a diff with more
-than `inlineBudget` blocking findings, the overflow publishes unverified — the alternative
-(unbounded judge dispatches on the worst diffs) is worse.
+**The cap is `review.verificationBudget`, not the inline budget.** Verification protects what
+gets published, so it is its own control, **independent of inline placement**: the
+`analyzers.inlineBudget` key governs only which findings render inline (default 8). Dispatches
+are capped at `review.verificationBudget` — default **24**, `0` = no cap — **scaled per round
+by `review.roundBudgets`**, and spent on `Critical` before `Major`. **Cost:** on a diff with
+more than the round budget of blocking findings, the overflow publishes unverified — the
+alternative (unbounded judge dispatches on the worst diffs) is worse.
 
 **A `drop` is durable.** It writes the verifier's reason under `WITHDRAWN_FINDINGS_HEADING` with
 the finding's own fingerprint, so the same claim is skipped before verification on every later

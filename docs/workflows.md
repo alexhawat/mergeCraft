@@ -12,13 +12,20 @@ flowchart TD
     Q -->|pull_request from fork| T3[untrusted]
     Q -->|pull_request_target| T3
     Q -->|issue_comment / review_comment| Q2{author_association}
-    Q2 -->|OWNER / MEMBER / COLLABORATOR| T1
     Q2 -->|CONTRIBUTOR / FIRST_TIME / NONE / missing| X[refused — no run]
+    Q2 -->|OWNER / MEMBER / COLLABORATOR| Q3{PR head it would check out}
+    Q3 -->|same-repo head| T1
+    Q3 -->|fork head| X
+    Q3 -->|no head| NT[not trusted — fail closed]
 ```
 
 The authorization decision reads `comment.author_association` from the event
 payload — **never** the comment body — so writing `author_association: OWNER`
-into a comment changes nothing. Details:
+into a comment changes nothing. Who commented is only half of it: a
+comment-triggered run is classified from **the code it would check out**, not
+just who commented. The run binds the pull request it will review and reads the
+head from the SCM API; a comment-triggered run with no PR head is not trusted,
+and one on a fork PR is refused. Details:
 [Comment-trigger authorization](#comment-trigger-authorization).
 
 </details>
@@ -31,6 +38,13 @@ Only `OWNER`, `MEMBER`, and `COLLABORATOR` may start a run from an
 comment body. Under `pull_request_target`, comment triggers also require
 `allow_pr_target_comments: true` on the Action input (default off). See
 [`allow_pr_target_comments`](action-reference.md) in the action reference.
+
+The run also binds the pull request it will check out **before** any trust or
+credential decision, and reads the head from the SCM API rather than the comment.
+A comment with no resolvable PR head is not trusted, and a comment-triggered run
+on a fork PR is refused rather than downgraded. `checkout_pr` then refuses any PR
+number other than the bound one, and refuses a fork head on a run trusted for
+execution or authority.
 
 
 
@@ -184,24 +198,32 @@ issues-showcase-readiness follow-up. -->
   [trust policy](trust-policy.md).
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
-- **Agent subprocess env is an explicit allowlist** — agent CLIs never
-  inherit the full process environment. Stripped by default: ``GIT_ASKPASS``,
+- **Agent subprocess env is an explicit name list, not a prefix allowlist** —
+  agent CLIs never inherit the full process environment. GitHub Actions and
+  runner metadata reach child processes by explicit documented name, so a
+  lookalike credential variable cannot pass the default-deny filter. Stripped by
+  default: ``GIT_ASKPASS``,
   ``GITHUB_TOKEN``/``GH_TOKEN``, ``ACTIONS_ID_TOKEN_*``, and every non-active
   provider API key. Git authentication for agent operations is brokered
   per-invocation via MCP git's ``http.extraHeader`` injection, not ambient
   askpass. Retained askpass files (entrypoint bookkeeping only) live at
   ``0o600`` inside a ``0o700`` credentials directory the agent cannot read.
   Run temp dirs and registered leak-surface paths are removed on success and
-  failure; ``wipe_runner_leak_surface`` only unlinks mergeCraft-owned paths.
+  failure; a cleanup that fails is logged as a warning naming the residual path
+  and never the secret, and ``wipe_runner_leak_surface`` only unlinks
+  mergeCraft-owned paths.
 - **`push` / `shell` value semantics are defined in the action-inputs
   table** — see [Action inputs (`with:`) in action-reference.md](action-reference.md#action-inputs-with)
-  for the `disabled` / `restricted` / `enabled` vocabulary both inputs share.
+  for the `disabled` / `restricted` / `enabled` vocabulary both inputs share. `push` is
+  **review-only** in production: mergeCraft refuses commit and push whatever its value, and no
+  value grants write access.
 - **Containment hardening** — ``safe.directory`` is scoped to
   ``$GITHUB_WORKSPACE`` and registered cross-repo checkout roots (no wildcard).
   Git hooks run only when ``shell: enabled``; ``restricted`` and ``disabled``
   neutralize hooks via ``core.hooksPath``. ``cwd`` and MCP shell
   ``working_directory`` must resolve inside allowed workspace roots. Agent CLI
-  subprocesses drop to the unprivileged ``mergecraft`` user via ``setpriv``
+  subprocesses **and the MCP shell** drop to the unprivileged ``mergecraft`` user
+  via ``setpriv`` — and on a root orchestrator the analyzers drop to it too —
   while the action entrypoint stays root for GitHub file commands.
 - **Network isolation depends on the sandbox backend** — on CI hosts that
   support it, untrusted MCP shell spawns with ``unshare --pid --net`` so the
@@ -344,6 +366,19 @@ and checks, so COMMENT-only configuration and check provenance are not an
 independent approval boundary. A forged reviewer check cannot trigger this
 workflow: automatic `workflow_run` approval is removed and reviewer tokens have
 no Actions write permission.
+
+**Gate provenance.** The approval gate trusts **this run's own evidence-packet
+verdict** — the review job exposes the final `decision.verdict` (`success` /
+`failure` / `neutral`) as a job output, read through `needs.review.outputs.*`, or
+reads `steps.mergecraft.outputs.evidence_packet` directly when the gate is a step
+in the same job. Another workflow run cannot write those outputs, including one
+added on the PR's own branch. A `mergecraft-approval` check only **corroborates**
+that verdict: it must be issued on the reviewed head SHA by `github-actions` (or
+by the configured App ID when `EXPECTED_APP_ID` is set) with
+`external_id == "<run_id>:<run_attempt>"`, and its conclusion must equal the
+output verdict. A missing or empty verdict, a conclusion that disagrees, or a
+check that cannot be attributed to this run all fail closed with a named reason;
+the only thing that passes is output `success` plus a corroborating check.
 
 The helper executes only trusted default-branch code, fetches the selected
 mergecraft run from GitHub, and verifies its workflow path, App-authenticated

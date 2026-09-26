@@ -38,9 +38,9 @@ exists.
 | The verifier-cap sentence names `review.verificationBudget` and `review.roundBudgets` | C8 / PD-D5 | Unit | `…::test_verifier_cap_names_the_config_keys` | ✅ pass |
 | No prompt mentions a diff-coverage nudge | C8 / PD-D6 | Unit | `…::test_no_prompt_mentions_a_diff_coverage_nudge` | ✅ pass |
 | No prompt mentions a Fix button | D8 / PD-D11 | Unit | `…::test_no_prompt_mentions_a_fix_button` | ✅ pass |
-| Doctrine names the real verifier-budget keys | N20 / C8 / PD-D5 | Functional (doc) | `tests/docs/test_review_doctrine_contracts.py::test_verification_section_names_the_real_budget_keys` | ❌ RED |
-| Doctrine does not say the inline budget caps verification | N20 / PD-D5 | Functional (doc) | `…::test_verification_section_does_not_claim_the_inline_budget_caps_it` | ❌ RED |
-| Doctrine Python floor agrees with `pyproject.toml` `requires-python` | C13 / PD3.2 | Functional (doc) | `…::test_python_floor_agrees_with_pyproject` | ❌ RED |
+| Doctrine names the real verifier-budget keys | N20 / C8 / PD-D5 | Functional (doc) | `tests/docs/test_review_doctrine_contracts.py::test_verification_section_names_the_real_budget_keys` | ✅ pass |
+| Doctrine forbids the inline-budget claim; naming the key is allowed only if its sentence decouples it | N20 / PD-D5 | Functional (doc) | `…::test_verification_section_does_not_claim_the_inline_budget_caps_it` | ✅ pass |
+| Doctrine Python floor agrees with `pyproject.toml` `requires-python` | C13 / PD3.2 | Functional (doc) | `…::test_python_floor_agrees_with_pyproject` | ✅ pass |
 | `action.yml` `push` description states review-only refusal | C7 / PD-D7 | Functional (doc) | `tests/docs/test_review_only_docs.py::test_action_yml_push_description_states_review_only_refusal` | ❌ RED |
 | Generated `docs/action-reference.md` `push` row states review-only refusal | C7 / PD-D7 | Functional (doc) | `…::test_action_reference_push_row_states_review_only_refusal` | ❌ RED |
 | `REVIEW-CHECKS.md` §9 does not present address-reviews as production | C7 / PD-D7 | Functional (doc) | `…::test_review_checks_section_9_does_not_present_address_reviews_as_production` | ❌ RED |
@@ -243,3 +243,42 @@ rationale.
 | Date | Test | Rationale |
 | --- | --- | --- |
 | 2026-09-26 | `tests/review/test_offline_model_chain.py::test_offline_real_resolver_cross_harness_and_credential_status` | `review/offline_agent.py` now renders `inline_budget=settings.analyzers.inline_budget` (PD2.4 / PD-D4); the expected modes are built with that same budget instead of relying on the omitted default. |
+| 2026-09-26 | `tests/docs/test_review_doctrine_contracts.py::test_verification_section_does_not_claim_the_inline_budget_caps_it` | The PD1 guard banned the literal token `analyzers.inlineBudget`, which PD-D5/P-8 require the doctrine to **name**. The guard now forbids the *claim* and requires any sentence naming the key to decouple it (see "PD3 test refinement" below). |
+
+## PD3 test refinement — inline-budget guard (2026-09-26)
+
+**What changed, and why.** The PD1 assertion `assert "analyzers.inlinebudget" not in
+lowered` was over-broad. Locked decision **PD-D5** and plan item **PD3.1** require the
+doctrine § *Verification covers every source* to state both that the verifier cap is
+`review.verificationBudget` **and** that it is *independent of* `analyzers.inlineBudget` —
+which means the section must be **able to name the inline-budget key** to say it governs
+only inline placement. Banning the literal made the contract unsatisfiable as written; the
+executor satisfied it by splitting the key across two code spans (`` `analyzers` ``
+/ `` `inlineBudget` ``) merely to avoid the token — test-gaming, and worse prose (the plan's
+**P-8**: name the real key, one shape one rule).
+
+**The refined invariant.** The section may name the key; it must not present it as *the*
+verification cap. The test now:
+
+1. still asserts the legacy claim is absent — `"the cap is the inline budget"`;
+2. still relies on the sibling test
+   `test_verification_section_names_the_real_budget_keys` (names `review.verificationBudget`
+   and `roundBudgets`);
+3. for **every sentence** that names the key — matched case-insensitively in any markdown
+   shape (`analyzers.inlineBudget`, `analyzers inlineBudget`, or the split
+   `` `analyzers` `inlineBudget` ``) — requires that sentence to also contain one of
+   `independent`, `placement`, or `governs only`.
+
+The Python-floor test (`test_python_floor_agrees_with_pyproject`) is untouched, and no
+`xfail` was added.
+
+**Behaviour check (guard fires, not a hole).** A throwaway harness fed the helper five
+sentences: the real split-token sentence and a restored-natural-key decoupled sentence did
+**not** fire; `"The cap is the inline budget, i.e. `analyzers.inlineBudget`."`,
+`"The `analyzers.inlineBudget` value is 8."`, and `"analyzers inlineBudget defaults to 8."`
+all fired. The doctrine still carries the split-token workaround (the executor restores the
+natural key afterwards), so the refined test passes against it.
+
+- **Verification:** `MERGECRAFT_PYTEST_JOBS=0 uv run pytest
+  tests/docs/test_review_doctrine_contracts.py -q` → **3 passed**;
+  `uv run ruff check tests/docs/test_review_doctrine_contracts.py` → **All checks passed!**

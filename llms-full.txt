@@ -1013,9 +1013,9 @@ file, and the withdrawn-findings section. Three things bound the cost:
 - **Memory** — a finding whose fingerprint already appears under `## Withdrawn review findings` is
   skipped outright, not re-verified.
 - **Budget** — dispatches are capped at the repo's `review.verificationBudget` (default 24; `0` =
-  no cap), spent on `Critical` before `Major`. Verification depth is independent of inline
-  placement (`analyzers.inlineBudget`, default 8). Over-budget fingerprints are recorded in
-  `skippedOverBudget` rather than silently dropped.
+  no cap), **scaled per round by `review.roundBudgets`** and spent on `Critical` before `Major`.
+  Verification depth is independent of inline placement (`analyzers.inlineBudget`, default 8).
+  Over-budget fingerprints are recorded in `skippedOverBudget` rather than silently dropped.
 
 Each verdict goes back through `record_finding_verdict`: **confirm** publishes as drafted,
 **downgrade** re-grades, and **drop** writes the verifier's reason under
@@ -1049,7 +1049,12 @@ What mergecraft deliberately does **not** report — this is most of what keeps 
 
 ## 7. Memory across runs
 
-- **Withdrawn findings** — when an author refutes a review finding and `AddressReviews` accepts the pushback, it records the *reason* in `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`. A `drop` verdict from the verifier writes to the same section, so a finding the reviewer refuted *before publishing* is also refuted permanently. Later reviews read that section first and treat it as binding, so a false positive is argued once instead of on every PR.
+- **Withdrawn findings** — a **`drop` verdict** from the verifier writes the verifier's *reason* in
+  `.mergecraft/learnings.md` under `## Withdrawn review findings (known non-issues)`, keyed by the
+  finding's own fingerprint. That is the path production runs: a finding refuted *before
+  publishing* is refuted permanently, and the same claim is skipped before verification on every
+  later run. Later reviews read that section first and treat it as binding, so a false positive is
+  argued once instead of on every PR.
 - **Finding fingerprints** — each inline comment is stamped server-side with a content hash of its path and body (`<!-- mergecraft-finding:v1:… -->`). Whitespace and case are normalized, so a re-raised finding is recognizable across runs even when reworded.
 - **Open-PR finding ledger** — the sticky progress comment carries `<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->` markers for every finding this pull request's reviews considered, including deferred overflow, verifier drops (`withdrawn`), and over-budget verifications (`unpublished`). Persistence is GitHub-only; inspect with `mergecraft findings ledger --pr N`. The ledger never files GitHub issues — post-merge carryover owns issue filing.
 - **Repo learnings** — test commands, conventions, gotchas, and architecture notes persist in the same file and are loaded into every run.
@@ -1165,13 +1170,15 @@ record, not in packet `findings[]`.
 
 ## 9. Address-reviews checks
 
-When mergecraft is on the receiving end of review comments (`AddressReviews` mode), each thread is checked for:
-
-- Whether the request still stands against current code — a stale request gets a reply, not a change.
-- Whether the proposed fix would be bloat in context; if so it's reverted rather than committed.
-- Whether the diff contains only intended changes, with no debug artifacts left behind.
-- Whether reply and resolve happened together — both or neither, and never before the fix is live on the remote.
-- Whether a refuted finding was recorded as a withdrawn finding (group 7).
+`AddressReviews` is **not registered in production** — mergeCraft's production modes are
+review-only and only review a diff; none of them addresses review comments or pushes commits.
+The checks below describe that mode's design and are documented for contributors, not a
+behaviour a shipped run performs: whether a request still stands against current code (a stale
+request gets a reply, not a change); whether a proposed fix would be bloat in context (reverted
+rather than committed); whether the diff contains only intended changes, with no debug artifacts
+left behind; whether reply and resolve happened together — both or neither, and never before the
+fix is live on the remote; and whether a refuted finding was recorded as a withdrawn finding
+(group 7).
 
 ===== FILE: docs/ANALYZERS.md =====
 
@@ -1293,7 +1300,8 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   `evaluate_analyzer_egress_policy()`, `filtered_egress_available()`,
   and `build_analyzer_sandbox_argv_for_run()`.
   Analyzer capabilities are dropped after mount setup, preventing
-  namespace switching or enabling IPv6 again. The isolated runtime must
+  namespace switching or enabling IPv6 again; on a root orchestrator the
+  analyzers drop capabilities **and** UID. The isolated runtime must
   use direct `unshare`; sudo-based backends are refused because sudo
   cannot safely carry the private payload-environment descriptor.
   Namespace helpers receive a minimal trusted environment. Payload
@@ -1411,7 +1419,7 @@ Inline review comments from analyzers and the reviewing agent share a single cap
 
 `Critical` and `Major` findings are hypotheses until the read-only `mergecraft-verifier` subagent reads the cited code. That gate applies to analyzer, CI, and agent-authored findings.
 
-Verification depth is **independent** of inline placement (`analyzers.inlineBudget`, default 8). The verifier dispatch cap is `review.verificationBudget` (default **24**). Set it to **`0`** to verify every eligible finding with no cap. Three filters run in order: severity (skip `Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under `## Withdrawn review findings`), then the verification budget — so pre-budget skips never consume slots. Over-budget fingerprints surface in `skippedOverBudget` for the open-PR ledger (W3).
+Verification depth is **independent** of inline placement (`analyzers.inlineBudget`, default 8). The verifier dispatch cap is `review.verificationBudget` (default **24**), **scaled per round by `review.roundBudgets`**. Set it to **`0`** to verify every eligible finding with no cap. Three filters run in order: severity (skip `Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under `## Withdrawn review findings`), then the verification budget — so pre-budget skips never consume slots. Over-budget fingerprints surface in `skippedOverBudget` for the open-PR ledger (W3).
 
 ## Execution preference
 
@@ -1536,8 +1544,11 @@ linter is substituted. The repo's own gate is the only gate.
 
 When the repo has a tool, mergeCraft runs **the repo's copy** at **the repo's config and
 version**. A reviewer carrying its own interpreter manufactures findings: `except A, B:`
-is a `SyntaxError` under Python 3.13 and legal under 3.14 (PEP 758), which this project
-requires. The module docstring, tool description, and mode prompt all encode this rule.
+is a `SyntaxError` under Python 3.13 and legal under 3.14 (PEP 758) — a version-dependent
+construct, not this project's floor. mergeCraft installs on Python 3.11
+(`requires-python = ">=3.11"`) and CI also runs 3.14; see
+[docs/dev/python-version-floor.md](dev/python-version-floor.md). The module docstring, tool
+description, and mode prompt all encode this rule.
 
 ## Finding fingerprints
 
@@ -1569,11 +1580,13 @@ model's own findings — was the one source that never got checked. `verify_agen
 `record_finding_verdict` close that, on the same terms as the analyzer path: severity gate,
 withdrawn-memory skip, and a dispatch cap.
 
-**The cap is the inline budget, not a new knob.** Verification exists to protect what gets
-published, so it can never cost more than publication does: dispatches are capped at
-`analyzers.inlineBudget` and spent on `Critical` before `Major`. **Cost:** on a diff with more
-than `inlineBudget` blocking findings, the overflow publishes unverified — the alternative
-(unbounded judge dispatches on the worst diffs) is worse.
+**The cap is `review.verificationBudget`, not the inline budget.** Verification protects what
+gets published, so it is its own control, **independent of inline placement**: the
+`analyzers.inlineBudget` key governs only which findings render inline (default 8). Dispatches
+are capped at `review.verificationBudget` — default **24**, `0` = no cap — **scaled per round
+by `review.roundBudgets`**, and spent on `Critical` before `Major`. **Cost:** on a diff with
+more than the round budget of blocking findings, the overflow publishes unverified — the
+alternative (unbounded judge dispatches on the worst diffs) is worse.
 
 **A `drop` is durable.** It writes the verifier's reason under `WITHDRAWN_FINDINGS_HEADING` with
 the finding's own fingerprint, so the same claim is skipped before verification on every later
@@ -2862,8 +2875,9 @@ anchors, and `MERGECRAFT_ENV` overrides both:
 The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
 the next invocation actually loads. Outside a git checkout the writers fail
 with the directory they consulted named in the error; the startup load falls
-back to `./.env` and stays silent when it is missing, so global invocations and
-CI sandboxes are unaffected.
+back to `./.env` and stays silent when it is missing, so global invocations are
+unaffected. Inside GitHub Actions the startup load reads no `.env` from the
+workspace unless `MERGECRAFT_ENV` names one.
 
 ### Credential detection (`credential_status_for_slug`)
 

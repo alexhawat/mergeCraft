@@ -13,7 +13,7 @@ scheduled nightly job covers the **broad slice** plus live providers
 | **Agents** | `claude`, `codex`, `gemini`, `opencode`, `cursor` (API harness) | Local CLIs are lockfile-pinned in the Action image (`docker/agent-clis/`); Cursor is Cloud-only |
 | **Providers** | `anthropic`, `openai`, `google`, `nous`, `tokenhub`, custom OpenAI-compatible | BYOK — credentials via Action secrets / env allowlist (W2) |
 | **Shell** | `disabled`, `restricted`, `enabled` | MCP `shell` tool only under `restricted`; hooks off unless `enabled` |
-| **Push** | `disabled`, `restricted`, `enabled` | Default runtime resolve is `restricted`; default branch protected under `restricted` |
+| **Push** | `disabled`, `restricted`, `enabled` | Production modes are **review-only**: mergeCraft refuses commit and push whatever the value, so no value grants write access. Default runtime resolve is `restricted`; default branch protected under `restricted` |
 | **Arch** | `linux/amd64`, `linux/arm64` | Images built multi-arch where the release pipeline publishes them; PR E2E runs on `ubuntu-latest` (amd64) |
 
 ## Harness × model

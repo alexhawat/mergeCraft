@@ -40,7 +40,7 @@ inputs:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"
     required: false
   push:
-    description: "Git push permission: disabled, restricted, or enabled. Default: restricted"
+    description: "Git push permission: disabled, restricted, or enabled. Production modes are review-only: mergeCraft refuses commit and push whatever the value, so no value grants write access. Default: restricted"
     required: false
   shell:
     description: "Shell permission: disabled, restricted, or enabled."
