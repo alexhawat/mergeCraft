@@ -527,6 +527,56 @@ def _findings_overlap(first: ReportedFinding, second: ReportedFinding, *, slack:
     )
 
 
+def _maximum_matching(
+    issues: list[BaselineIssue],
+    findings: list[ReportedFinding],
+    *,
+    slack: int,
+) -> dict[int, int]:
+    """Maximum-cardinality issue→finding matching via Kuhn augmenting paths (EV-D4).
+
+    Deterministic: issues are attempted in baseline order and each issue's
+    candidates are tried in ``(distance, finding index)`` order, so where there
+    is no contention every issue still claims its closest finding. Never yields
+    fewer matches than the greedy nearest-first walk it replaces.
+
+    Returns:
+        ``{issue_index: finding_index}`` for every matched issue; an issue
+        absent from the mapping is unmatched.
+    """
+    candidates_by_issue: list[list[int]] = []
+    for issue in issues:
+        ordered = sorted(
+            (
+                (index, finding)
+                for index, finding in enumerate(findings)
+                if _overlaps(issue, finding, slack=slack)
+            ),
+            key=lambda pair: (_distance(issue, pair[1]), pair[0]),
+        )
+        candidates_by_issue.append([index for index, _ in ordered])
+
+    finding_to_issue: dict[int, int] = {}
+    issue_to_finding: dict[int, int] = {}
+
+    def _augment(issue_index: int, visited: set[int]) -> bool:
+        for finding_index in candidates_by_issue[issue_index]:
+            if finding_index in visited:
+                continue
+            visited.add(finding_index)
+            incumbent = finding_to_issue.get(finding_index)
+            if incumbent is None or _augment(incumbent, visited):
+                finding_to_issue[finding_index] = issue_index
+                issue_to_finding[issue_index] = finding_index
+                return True
+        return False
+
+    for issue_index in range(len(issues)):
+        _augment(issue_index, set())
+
+    return issue_to_finding
+
+
 def _empty_breakdowns() -> tuple[dict[str, Breakdown], dict[str, Breakdown]]:
     """Pre-seed one zero-count bucket per known category and severity.
 
@@ -588,10 +638,15 @@ def score_findings(
 ) -> ScoreReport:
     """Match reported findings against baseline issues by file and line overlap.
 
-    Matching is one-to-one and greedy by proximity: each baseline issue claims
-    the closest not-yet-claimed finding that overlaps it. One finding therefore
-    cannot satisfy two baseline issues, so a single sprawling comment covering a
-    whole file scores one match rather than all of them.
+    Matching is one-to-one and **maximum-cardinality** (EV-D4): it finds as many
+    issue↔finding pairs as any assignment can, via augmenting paths. Issues are
+    considered in baseline order and each issue's candidates are tried in
+    ``(distance, finding index)`` order, so when there is no contention every
+    issue still claims its closest finding. One finding therefore cannot satisfy
+    two baseline issues, so a single sprawling comment covering a whole file
+    scores one match rather than all of them — but an earlier issue can no
+    longer take the only finding a later issue had, so recall does not depend on
+    the order the corpus lists issues in.
 
     ``closed_world`` marks this case as fully labelled — every issue a human
     would flag is already in ``issues`` — so an unmatched finding is a
@@ -605,25 +660,20 @@ def score_findings(
     an agent-seeded corpus, but ``calibration.eligible`` stays ``False`` so a
     caller cannot present them as calibrated.
     """
-    claimed: set[int] = set()
+    issue_to_finding = _maximum_matching(issues, findings, slack=slack)
     matches: list[Match] = []
     missed: list[str] = []
 
-    for issue in issues:
-        candidates = [
-            (index, finding)
-            for index, finding in enumerate(findings)
-            if index not in claimed and _overlaps(issue, finding, slack=slack)
-        ]
-        if not candidates:
+    for index, issue in enumerate(issues):
+        finding_index = issue_to_finding.get(index)
+        if finding_index is None:
             missed.append(issue.id)
             continue
-        index, finding = min(candidates, key=lambda pair: _distance(issue, pair[1]))
-        claimed.add(index)
+        finding = findings[finding_index]
         matches.append(
             Match(
                 issue_id=issue.id,
-                finding_index=index,
+                finding_index=finding_index,
                 severity_agrees=bool(issue.severity)
                 and normalize_severity(issue.severity) == normalize_severity(finding.severity),
                 category_agrees=bool(issue.category)
@@ -631,6 +681,7 @@ def score_findings(
             )
         )
 
+    claimed = set(issue_to_finding.values())
     matched_ids = {match.issue_id for match in matches}
     by_category, by_severity = _empty_breakdowns()
     for issue in issues:

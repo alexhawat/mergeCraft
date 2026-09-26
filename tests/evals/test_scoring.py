@@ -100,6 +100,52 @@ def test_severity_vocabularies_are_reconciled() -> None:
     assert report.severity_agreement == 1.0
 
 
+# ── maximum-cardinality matching (EV1 → EV2): recall cannot depend on order ──
+#
+# Counter-example with the default slack of 3 (``DEFAULT_LINE_SLACK``): issue A
+# at line 10 and issue B at line 14; finding f0 at 12 overlaps both (distance 2
+# to each) and finding f1 at 7 overlaps A only (distance 3). Greedy
+# nearest-first lets A take f0, leaving B no candidate — recall 1/2, and 2/2
+# when the issues are listed the other way round. Maximum matching recovers
+# A to f1 and B to f0 for 2/2 in both orders.
+
+
+def _contended_issues() -> list[BaselineIssue]:
+    return [_issue("A", start=10, end=10), _issue("B", start=14, end=14)]
+
+
+def _contended_findings() -> list[ReportedFinding]:
+    return [_finding(start=12, end=12), _finding(start=7, end=7)]
+
+
+def test_maximum_matching_recovers_the_later_issues_only_candidate() -> None:
+    report = score_findings(_contended_issues(), _contended_findings())
+
+    assert report.found == 2
+    assert report.missed_issue_ids == []
+
+
+def test_matching_is_order_independent_for_the_counter_example() -> None:
+    """The same two issues in the opposite baseline order must score the same —
+    recall cannot depend on the order the corpus happens to list them in."""
+    forward = score_findings(_contended_issues(), _contended_findings())
+    reverse = score_findings(list(reversed(_contended_issues())), _contended_findings())
+
+    assert forward.found == 2
+    assert reverse.found == 2
+
+
+def test_matching_is_deterministic_across_repeated_calls() -> None:
+    """EV-D4: candidates are tried in ``(distance, finding index)`` order, so the
+    same inputs always yield the same issue→finding assignment."""
+    first = score_findings(_contended_issues(), _contended_findings())
+    second = score_findings(_contended_issues(), _contended_findings())
+
+    assert [(match.issue_id, match.finding_index) for match in first.matches] == [
+        (match.issue_id, match.finding_index) for match in second.matches
+    ]
+
+
 def test_severity_disagreement_is_reported_not_fatal() -> None:
     report = score_findings([_issue(severity="high")], [_finding(severity="Trivial")])
 

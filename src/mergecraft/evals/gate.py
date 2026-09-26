@@ -15,18 +15,31 @@ The release log must say *which* number moved, not just "failed", so
 Gated metrics:
 
 - Structural replay (always compared): ``decision_replay_pass_rate``
-  (higher is better), ``unsafe_approval_rate`` and ``clean_block_rate``
-  (lower is better).
+  (higher is better), ``unsafe_approval_rate``, ``clean_block_rate`` and
+  ``inconclusive_rate`` (lower is better). ``inconclusive_rate`` is gated
+  because a crashed or non-replayable case leaves the unsafe-approval
+  denominator, so the rate the gate watches could only improve; the
+  inconclusive rate records the evidence that went missing (U5).
 - Live detection join (compared only when **both** result sets carry it —
   an absent half is skipped, never fabricated): ``detection.recall``,
   ``detection.corpus_confirmed_precision`` and ``detection.f1`` (all higher
-  is better).
+  is better), plus ``detection.failed_case_rate`` (lower is better). The
+  detection aggregate excludes every case whose review failed, so the fold
+  reports recall/precision/F1 of ``1.0`` when *nothing* survived; the gate
+  must count the failed cases the fold drops, or an all-failed run reads as
+  perfect (U5).
 - Convergence corpus (compared only when **both** result sets carry a
   ``convergence`` block — W10): ``convergence.mean_first_pass_recall`` (higher
   is better). When that block is present the gate also enforces the **paired
   DG1 precision floor** via :func:`mergecraft.findings.precision_corpus.evaluate_dg1_precision_corpus`
   — recall must stay at or above :data:`~mergecraft.findings.precision_corpus.PRE_DG1_BASELINE`
   and corpus-confirmed precision must not fall below the same baseline.
+
+With ``require_halves=True`` (release mode, EV-D11) a baseline half the
+candidate drops is itself a regression: the missing half is named, because a
+release candidate that silently omits its detection half would otherwise pass.
+The default keeps the PR check's behaviour — its candidate never carries
+detection, so an absent half stays skipped.
 
 Pure core: no I/O except in :func:`load_result_set`, which the caller hands
 an explicit path; no ``os.environ`` reads; nothing at import time (§W11.6).
@@ -62,6 +75,7 @@ _STRUCTURAL_GATE_METRICS: Final[tuple[tuple[str, Direction], ...]] = (
     ("decision_replay_pass_rate", "higher_is_better"),
     ("unsafe_approval_rate", "lower_is_better"),
     ("clean_block_rate", "lower_is_better"),
+    ("inconclusive_rate", "lower_is_better"),
 )
 
 #: Detection-join gate metrics — compared only when both sides ran detection.
@@ -70,6 +84,14 @@ _DETECTION_GATE_METRICS: Final[tuple[tuple[str, Direction], ...]] = (
     ("corpus_confirmed_precision", "higher_is_better"),
     ("f1", "higher_is_better"),
 )
+
+#: Detection coverage metric — compared when both sides carry detection (U5).
+#: A computed property on ``DetectionMetrics``, not a serialised field (EV-D2).
+_DETECTION_FAILED_CASE_METRIC: Final[str] = "detection.failed_case_rate"
+
+#: Metric naming a baseline half the candidate dropped under
+#: ``require_halves`` (EV-D11). ``0.0`` means the half is present.
+_MISSING_HALF_METRIC: Final[str] = "detection.missing_half"
 
 #: Convergence corpus gate metrics — compared when both result sets carry
 #: a ``convergence`` block (W10).
@@ -182,12 +204,18 @@ def eval_gate(
     candidate: BenchmarkResultSet,
     baseline: BenchmarkResultSet,
     tolerance: float = DEFAULT_GATE_TOLERANCE,
+    require_halves: bool = False,
 ) -> GateReport:
     """Compare two result sets' scalar gate metrics, direction-aware.
 
     Pure: the caller owns how the result sets were produced. A metric is
     regressed when it moves in its bad direction by strictly more than
     ``tolerance``; movement within the band is noise and passes.
+
+    ``require_halves`` (EV-D11) turns a *missing* half into a regression: when
+    the baseline carries a detection half and the candidate does not, the gate
+    fails and names the absent half. Without it (the PR check's default) the
+    absent half is skipped as before.
 
     Raises:
         ValueError: ``tolerance`` is negative.
@@ -219,6 +247,28 @@ def eval_gate(
                     tolerance,
                 )
             )
+        deltas.append(
+            _compare(
+                _DETECTION_FAILED_CASE_METRIC,
+                "lower_is_better",
+                baseline.detection.failed_case_rate,
+                candidate.detection.failed_case_rate,
+                tolerance,
+            )
+        )
+    elif require_halves and baseline.detection is not None and candidate.detection is None:
+        # Presence check, not a tolerance-banded comparison: a dropped half is
+        # an absolute regression, named so the release log says which half went
+        # missing (EV-D11).
+        deltas.append(
+            _compare(
+                _MISSING_HALF_METRIC,
+                "lower_is_better",
+                0.0,
+                1.0,
+                tolerance=0.0,
+            )
+        )
 
     if baseline.convergence is not None and candidate.convergence is not None:
         for metric, direction in _CONVERGENCE_GATE_METRICS:

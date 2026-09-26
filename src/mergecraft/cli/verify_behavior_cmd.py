@@ -30,6 +30,7 @@ from mergecraft.config.settings import load_repo_settings
 from mergecraft.utils.payload import read_github_event
 from mergecraft.verify.models import (
     AuthSpec,
+    DriverKind,
     VerificationInput,
     Viewport,
     is_successful,
@@ -202,19 +203,46 @@ def _close_driver(driver: object) -> None:
         closer()
 
 
+def _launch_live_driver(viewport: Viewport | None) -> BrowserDriver:
+    """Bind the live CDP driver, applying the viewport when one is set.
+
+    ``launch_browser_driver`` probes the endpoint with a bounded timeout and
+    raises ``BrowserStackUnavailableError`` when it is unreachable, so an
+    unreachable ``MERGECRAFT_CDP_URL`` falls back promptly rather than stalling.
+    """
+    if viewport is not None:
+        return launch_browser_driver(width=viewport.width, height=viewport.height)
+    return launch_browser_driver()
+
+
 def _resolve_driver(
     *,
     allow_stub: bool,
     viewport: Viewport | None = None,
-) -> BrowserDriver:
-    """Return a live browser-use driver, a stub, or raise when unavailable."""
-    if allow_stub:
-        logger.debug("verify-behavior using stub driver; --allow-stub")
-        return _StubBrowserDriver()
-    logger.debug("verify-behavior binding browser-use stack")
-    if viewport is not None:
-        return launch_browser_driver(width=viewport.width, height=viewport.height)
-    return launch_browser_driver()
+) -> tuple[BrowserDriver, DriverKind]:
+    """Return ``(driver, kind)``: the live CDP driver, or the stub fallback.
+
+    ``--allow-stub`` is a fallback, not a bypass: the live driver is tried
+    first. The stub is returned only when the browser stack is unavailable and
+    ``allow_stub`` is set, logged at warning with the reason; otherwise the
+    ``BrowserStackUnavailableError`` propagates (fail closed).
+    """
+    try:
+        return _launch_live_driver(viewport), "cdp"
+    except BrowserStackUnavailableError as exc:
+        if not allow_stub:
+            raise
+        logger.warning("verify-behavior falling back to stub driver: {}", exc)
+        return _StubBrowserDriver(), "stub"
+
+
+def _driver_and_kind(
+    resolved: tuple[BrowserDriver, DriverKind | None] | BrowserDriver,
+) -> tuple[BrowserDriver, DriverKind | None]:
+    """Split ``_resolve_driver``'s ``(driver, kind)``; tolerate a bare driver."""
+    if isinstance(resolved, tuple):
+        return resolved
+    return resolved, None
 
 
 def _resolve_jev_client(settings: RepoSettings) -> AsyncJevClient:
@@ -325,10 +353,13 @@ def run(
         offline=offline,
     )
     driver: BrowserDriver | None = None
+    driver_kind: DriverKind | None = None
     cdp_unavailable: str | None = None
     if not skip:
         try:
-            driver = _resolve_driver(allow_stub=allow_stub, viewport=spec.viewport)
+            driver, driver_kind = _driver_and_kind(
+                _resolve_driver(allow_stub=allow_stub, viewport=spec.viewport)
+            )
         except BrowserStackUnavailableError as exc:
             cdp_unavailable = str(exc)
 
@@ -345,6 +376,7 @@ def run(
             run_verify_behavior(
                 spec,
                 driver=driver,
+                driver_kind=driver_kind,
                 jev_client=jev_client,
                 offline=offline,
                 event=event,

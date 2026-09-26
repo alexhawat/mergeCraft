@@ -617,3 +617,83 @@ def test_detection_case_forbids_unknown_fields() -> None:
             baseline_path=Path("b"),
             unknown="nope",  # type: ignore[call-arg]
         )
+
+
+# ── coverage metric: failed_case_rate is computed, not serialised (EV1 → EV2) ──
+
+
+def _detection_metrics(*, cases_run: int, cases_failed: int) -> DetectionMetrics:
+    """A minimal ``DetectionMetrics`` with an explicit attempted/failed split."""
+    return DetectionMetrics(
+        provider="claude",
+        model="claude-sonnet-5",
+        cases_run=cases_run,
+        cases_failed=cases_failed,
+        failed_case_ids=[f"failed-{index:03d}" for index in range(cases_failed)],
+        aggregate=AggregateScoreReport(
+            total_cases=cases_run,
+            total_issues=0,
+            total_reported=0,
+            found=0,
+            false_negatives=0,
+            unadjudicated=0,
+            false_positives=0,
+            false_positives_per_case=0.0,
+            clean_case_fp_rate=0.0,
+        ),
+        case_results=[],
+        raw_findings_dir="",
+    )
+
+
+def test_failed_case_rate_is_zero_with_no_failures() -> None:
+    """``failed_case_rate = cases_failed / (cases_run + cases_failed)`` — no
+    failures is ``0.0``, the best value (lower is better)."""
+    metrics = _detection_metrics(cases_run=3, cases_failed=0)
+
+    assert metrics.failed_case_rate == 0.0
+
+
+def test_failed_case_rate_is_one_when_every_case_failed() -> None:
+    """An all-failed run is ``1.0`` — the perfect-empty-fold case the gate must
+    catch instead of reading the aggregate's vacuous recall/precision/F1 of 1.0."""
+    metrics = _detection_metrics(cases_run=0, cases_failed=4)
+
+    assert metrics.failed_case_rate == 1.0
+
+
+@pytest.mark.parametrize(
+    ("cases_run", "cases_failed", "expected"),
+    [
+        (1, 1, 0.5),
+        (3, 1, 0.25),
+        (0, 0, 0.0),
+    ],
+)
+def test_failed_case_rate_is_the_share_of_attempts_that_failed(
+    cases_run: int, cases_failed: int, expected: float
+) -> None:
+    metrics = _detection_metrics(cases_run=cases_run, cases_failed=cases_failed)
+
+    assert metrics.failed_case_rate == pytest.approx(expected)
+
+
+def test_failed_case_rate_is_computed_not_a_serialised_field() -> None:
+    """EV-D2: the rate is a computed property, so it never enters the wire shape
+    and old artifacts (which default ``cases_failed`` to ``0``) still load."""
+    metrics = _detection_metrics(cases_run=2, cases_failed=1)
+
+    assert "failed_case_rate" not in metrics.model_dump()
+    assert "failed_case_rate" not in metrics.model_dump(mode="json")
+
+    # ``cases_failed`` defaults to 0, so a pre-EV2 artifact without the key loads.
+    legacy = DetectionMetrics(
+        provider="claude",
+        model="claude-sonnet-5",
+        cases_run=2,
+        aggregate=metrics.aggregate,
+        case_results=[],
+        raw_findings_dir="",
+    )
+    assert legacy.cases_failed == 0
+    assert legacy.failed_case_rate == 0.0

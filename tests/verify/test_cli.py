@@ -22,9 +22,20 @@ _RUNNER = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def _browser_stack_unavailable() -> Iterator[None]:
-    """These cases pin the fail-closed path, not a live browser-use launch."""
-    with patch("mergecraft.browser.launch.browser_stack_available", return_value=False):
+def _browser_stack_unavailable(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """These cases pin the fail-closed path, not a live browser-use launch.
+
+    Under fallback semantics ``--allow-stub`` probes the browser first, so the
+    module fixture points ``MERGECRAFT_CDP_URL`` at a closed port and patches
+    both availability probes off: no case here can bind an operator's ambient
+    Chrome. The ``--allow-stub`` cases still patch availability explicitly, per
+    the wave's no-ambient-endpoint rule.
+    """
+    monkeypatch.setenv("MERGECRAFT_CDP_URL", "http://127.0.0.1:1")
+    with (
+        patch("mergecraft.browser.launch.browser_stack_available", return_value=False),
+        patch("mergecraft.browser.availability.browser_stack_available", return_value=False),
+    ):
         yield
 
 
@@ -68,59 +79,77 @@ def test_cli_verify_mode_errors_when_browser_stack_unavailable(tmp_path: Path) -
     assert "pass" not in result.stdout.lower()
 
 
-def test_cli_allow_stub_writes_a_report(tmp_path: Path) -> None:
+def test_cli_allow_stub_writes_a_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MERGECRAFT_CDP_URL", "http://127.0.0.1:1")
     artifacts = tmp_path / "arts"
     criteria = tmp_path / "criteria.md"
     criteria.write_text("- stub page is visible\n", encoding="utf-8")
-    result = _RUNNER.invoke(
-        app,
-        [
-            "verify-behavior",
-            "--mode",
-            "verify",
-            "--url",
-            "http://127.0.0.1:8765/",
-            "--criteria-file",
-            str(criteria),
-            "--artifacts-dir",
-            str(artifacts),
-            "--allow-stub",
-        ],
-    )
+    with (
+        patch("mergecraft.browser.launch.browser_stack_available", return_value=False),
+        patch("mergecraft.browser.availability.browser_stack_available", return_value=False),
+    ):
+        result = _RUNNER.invoke(
+            app,
+            [
+                "verify-behavior",
+                "--mode",
+                "verify",
+                "--url",
+                "http://127.0.0.1:8765/",
+                "--criteria-file",
+                str(criteria),
+                "--artifacts-dir",
+                str(artifacts),
+                "--allow-stub",
+            ],
+        )
     # The stub driver reports the criterion unmet, so verify exits 1 — a
     # report is still written. Pinned exactly (T-D5); the old {0, 1} accepted
     # both the pass and fail verdicts and so asserted nothing.
     assert result.exit_code == 1
-    assert list(artifacts.rglob("*.json"))
+    report_path = artifacts / "report.json"
+    assert report_path.is_file()
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["driver"] == "stub"
 
 
-def test_cli_reproduce_mode_accepts_issue_file(tmp_path: Path) -> None:
+def test_cli_reproduce_mode_accepts_issue_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MERGECRAFT_CDP_URL", "http://127.0.0.1:1")
     issue = tmp_path / "issue.md"
     issue.write_text("## Repro\n1. Open upload\n2. Click Clear\n", encoding="utf-8")
     artifacts = tmp_path / "arts"
-    result = _RUNNER.invoke(
-        app,
-        [
-            "verify-behavior",
-            "--mode",
-            "reproduce",
-            "--url",
-            "http://127.0.0.1:8765/",
-            "--issue-file",
-            str(issue),
-            "--artifacts-dir",
-            str(artifacts),
-            "--base",
-            "origin/main",
-            "--viewport",
-            "1280x720",
-            "--allow-stub",
-        ],
-    )
+    with (
+        patch("mergecraft.browser.launch.browser_stack_available", return_value=False),
+        patch("mergecraft.browser.availability.browser_stack_available", return_value=False),
+    ):
+        result = _RUNNER.invoke(
+            app,
+            [
+                "verify-behavior",
+                "--mode",
+                "reproduce",
+                "--url",
+                "http://127.0.0.1:8765/",
+                "--issue-file",
+                str(issue),
+                "--artifacts-dir",
+                str(artifacts),
+                "--base",
+                "origin/main",
+                "--viewport",
+                "1280x720",
+                "--allow-stub",
+            ],
+        )
     # The stub driver cannot reproduce the issue, so reproduce exits 1 — a
     # report is still written. Pinned exactly (T-D5).
     assert result.exit_code == 1
-    assert list(artifacts.rglob("*.json"))
+    report_path = artifacts / "report.json"
+    assert report_path.is_file()
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["driver"] == "stub"
 
 
 def test_cli_accepts_yaml_input(tmp_path: Path) -> None:

@@ -47,6 +47,7 @@ CRITERION_STATUSES: Final[frozenset[str]] = frozenset({"pass", "fail", "unverifi
 VerificationMode = Literal["verify", "reproduce"]
 AuthStrategy = Literal["env", "manual", "mock"]
 CriterionStatus = Literal["pass", "fail", "unverified"]
+DriverKind = Literal["cdp", "stub"]
 ReportStatus = Literal[
     "pass",
     "fail",
@@ -191,6 +192,7 @@ class VerificationReport(BaseModel):
     blocked: BlockedDetails | None = None
     timestamp: str
     credential_names: list[str]
+    driver: DriverKind | None = None
 
     @model_validator(mode="after")
     def _status_and_blocked_contract(self) -> Self:
