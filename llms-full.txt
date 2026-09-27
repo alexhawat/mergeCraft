@@ -764,8 +764,9 @@ packet wins over every other signal — including the recorded
 ## Terminal verdict vs structural verdict (VP2)
 
 A review run is not complete until the agent records a **terminal
-submission** through `submit_review_verdict`. Provider success, review
-prose, and `create_pull_request_review` publication are separate acts:
+submission** through `submit_review_verdict`. Provider success and review
+prose are not a verdict, and recording a verdict is not publishing it: the
+agent records, and the run publishes.
 
 - **Agent verdict** — the model's `approve` / `request_changes` choice,
   summary, and structured findings submitted through the typed MCP tool.
@@ -790,6 +791,18 @@ has never been an input to `decide_approval` and cannot approve a pull
 request. A run whose provider returned successfully but never called
 `submit_review_verdict` now reports `inconclusive` (`neutral` check
 conclusion) instead of `passed`.
+
+**The run publishes the recorded verdict.** After the final attempt's
+submission is accepted, the run posts it to GitHub as one review whose inline
+comments are the submission's findings. It posts once per head: if the agent
+already published the same verdict, nothing is posted again. If an earlier
+attempt already published a *different* verdict on the same head, nothing is
+posted either (GitHub cannot take a review back, and a second one would
+duplicate every inline thread), and the run reports `inconclusive`, naming the
+verdict GitHub shows and the one it recorded. A published review that shows
+fewer findings inline than were recorded lists the missing ones in the publish
+response. A recorded verdict that never reached GitHub reports `inconclusive`
+with its own reason. Each fresh run still posts its own review.
 
 **Fallback interaction.** Semantic fallback advances when
 `terminal_submission_received` is false — whether because no submission
@@ -1859,12 +1872,26 @@ mergeCraft separates three layers that older review flows conflated:
    is a pure function of typed findings and run state. It never reads agent
    prose, `result.output`, or `ApprovalRecord.would_approve`.
 3. **Publication** — `publish_pull_request_review` is the internal publisher
-   (not an MCP tool). `create_pull_request_review` maps legacy params through
+   (not an MCP tool), and the run calls it: once the final attempt's
+   submission is accepted, the orchestrator publishes it before classifying
+   the outcome (never under the `shadow` protocol). With no agent-supplied
+   comments pending, the inline comments are the submission's findings.
+   `create_pull_request_review` maps legacy params through
    `validate_submission`, derives the body from the terminal submission, and
-   routes through the same publisher. Publication is idempotent per
-   `(pull_number, commit_id)`; a second publish short-circuits. The published
-   body must match the terminal submission — probe or health-check strings are
-   hard failures when a submission is bound.
+   routes through the same publisher. The published body must match the
+   terminal submission — probe or health-check strings are hard failures when
+   a submission is bound.
+
+   The receipt binds what was published: the head, the verdict, and the
+   finding markers in the body and inline comments. Publication is idempotent
+   per head and verdict. Against the recorded submission, the same verdict
+   short-circuits with no second review (and any recorded finding GitHub does
+   not show inline is listed as `publicationIncomplete`); a different verdict
+   also posts nothing, because GitHub cannot un-publish and a second review
+   would duplicate its inline threads, and the run reads `inconclusive`,
+   naming both verdicts. A recorded verdict with no receipt reads
+   `inconclusive` with its own reason. Each fresh run publishes its own
+   review; there is no memory across runs.
 
 **Per-run token band (`runBounds`).** `tokenBudget` is the soft target.
 `tokenBudgetTolerance` (default `0.10`) defines the hard ceiling as
