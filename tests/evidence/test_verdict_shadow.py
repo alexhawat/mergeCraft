@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from mergecraft.agents.shared import AgentResult
 from mergecraft.run_outcome import RunOutcome
 
@@ -414,3 +416,60 @@ def test_verdict_protocol_publish_records_only_in_shadow_mode() -> None:
         terminal_verdict="enforce",
     )
     assert enforce_publish.prediction is None
+
+
+# ── publication inputs reach the predictor ───────────────────────────────────
+#
+# The predictor mirrors the enforce path of ``_classify_outcome``, so the two
+# new classifier inputs (``terminal_publication_receipt`` and
+# ``terminal_publication_mismatch``) are threaded through
+# ``_verdict_protocol_publish`` as well. Without that, a recorded verdict that
+# never reached GitHub would carry an ``approved`` diagnostic on the span while
+# the run itself reads inconclusive.
+
+
+@pytest.mark.xfail(
+    reason="green after VP2.6: _verdict_protocol_publish threads the publication inputs",
+    strict=False,
+)
+@pytest.mark.parametrize(
+    "publication",
+    [
+        {"terminal_publication_receipt": False},
+        {
+            "terminal_publication_receipt": True,
+            "terminal_publication_mismatch": ("request_changes", "approve"),
+        },
+    ],
+    ids=["no_receipt", "mismatch"],
+)
+def test_verdict_protocol_publish_carries_the_publication_inputs(
+    publication: dict[str, Any],
+) -> None:
+    from mergecraft.main_outcome import _verdict_protocol_publish
+    from mergecraft.mcp.verdict import VerdictDiagnostic
+
+    publish = _verdict_protocol_publish(
+        result=_present_verdict_result(),
+        mode="Review",
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        final_summary_written=False,
+        terminal_verdict="shadow",
+        **publication,
+    )
+
+    assert publish.prediction is not None
+    assert _as_outcome(_prediction_outcome(publish.prediction)) is RunOutcome.inconclusive
+    assert publish.diagnostic is not VerdictDiagnostic.approved
+
+
+def test_predictor_default_publication_inputs_keep_a_received_verdict_approved() -> None:
+    """Green guard: callers that pass no publication inputs see today's prediction."""
+    from mergecraft.evidence.shadow import predict_verdict_protocol
+    from mergecraft.mcp.verdict import VerdictDiagnostic
+
+    prediction = predict_verdict_protocol(_present_verdict_result(), mode="Review")
+    assert _as_outcome(_prediction_outcome(prediction)) is RunOutcome.passed
+    assert _prediction_diagnostic(prediction) == VerdictDiagnostic.approved.value

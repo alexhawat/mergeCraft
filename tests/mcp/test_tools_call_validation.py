@@ -428,6 +428,7 @@ def _ctx_with_budget(tmp_path: Path, *, tool_call_budget: int = 10) -> ToolConte
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
     ctx.budget_tracker = BudgetTracker(bounds)
     return ctx

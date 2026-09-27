@@ -107,6 +107,7 @@ def _ctx(tmp_path: Path, *, selected_mode: str | None = None) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         signed_commits=True,
+        trust_tier="trusted",
     )
 
 

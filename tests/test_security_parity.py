@@ -48,6 +48,7 @@ def tool_ctx(tmp_path: Path) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         signed_commits=True,
+        trust_tier="trusted",
     )
 
 
@@ -71,6 +72,7 @@ def test_shell_tool_only_when_restricted(tmp_path: Path) -> None:
         "tool_state": init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         "mcp_server_url": "",
         "tmpdir": str(tmp_path),
+        "trust_tier": "trusted",
     }
     restricted = ToolContext(
         **base,  # type: ignore[arg-type]

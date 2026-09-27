@@ -88,6 +88,7 @@ def _tool_ctx(tmp_path: Path) -> ToolContext:
         signed_commits=True,
         xrepo=None,
         static_checks_enabled=True,
+        trust_tier="trusted",
     )
 
 

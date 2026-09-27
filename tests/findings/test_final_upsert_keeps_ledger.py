@@ -148,6 +148,7 @@ def _ctx(tmp_path: Path, scm: _FakeScm) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 

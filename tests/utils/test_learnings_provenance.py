@@ -696,6 +696,7 @@ async def _persist_learnings_with_fork_provenance(
         tool_state=tool_state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
     await persist_learnings(ctx)
     return tmp_path / "runner-workspace" / ".mergecraft" / "learnings.md"
@@ -752,6 +753,7 @@ async def _persist_learnings_with_member_provenance(
         tool_state=tool_state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
     await persist_learnings(ctx)
     return tmp_path / "runner-workspace" / ".mergecraft" / "learnings.md"
@@ -797,3 +799,58 @@ def _extract_active_section(text: str) -> str:
     # Fall back to the whole file minus the first h1 (the legacy
     # flat layout has no h2 sections).
     return text
+
+
+# ── unknown trust is untrusted ────────────────────────────────────────────────
+#
+# ``build_provenance_record`` feeds the quarantine that
+# ``route_learnings_for_persist`` applies. A run that never recorded its trust
+# tier, or recorded an unrecognized one, must not stamp its learnings as
+# ``trusted``.
+
+
+@pytest.mark.xfail(
+    reason="green after VP4.1: learning provenance falls back to untrusted",
+    strict=False,
+)
+@pytest.mark.parametrize("tier", [None, "weird", ""])
+def test_unknown_trust_tier_stamps_learning_provenance_untrusted(
+    tmp_path: Path, tier: str | None
+) -> None:
+    _require_learnings()
+    from mergecraft.mcp.tool_state import init_tool_state
+    from mergecraft.utils.learnings import build_provenance_record
+
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.run_id = "run-1"
+    state.trust_tier = tier
+
+    assert build_provenance_record(state).trust_tier == "untrusted"
+
+
+@pytest.mark.parametrize("tier", ["trusted", "untrusted"])
+def test_known_trust_tier_is_stamped_on_learning_provenance(tmp_path: Path, tier: str) -> None:
+    """Green guard: a recognized tier is recorded as-is."""
+    _require_learnings()
+    from mergecraft.mcp.tool_state import init_tool_state
+    from mergecraft.utils.learnings import build_provenance_record
+
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.run_id = "run-1"
+    state.trust_tier = tier
+
+    assert build_provenance_record(state).trust_tier == tier
+
+
+@pytest.mark.xfail(
+    reason="green after VP4.1: learning provenance falls back to untrusted",
+    strict=False,
+)
+def test_provenance_docstring_no_longer_promises_a_trusted_fallback() -> None:
+    """The documented fallback matches the code: unknown is untrusted."""
+    _require_learnings()
+    from mergecraft.utils.learnings import build_provenance_record
+
+    doc = " ".join((build_provenance_record.__doc__ or "").split()).lower()
+    assert "falls back to ``trusted``" not in doc
+    assert "untrusted" in doc

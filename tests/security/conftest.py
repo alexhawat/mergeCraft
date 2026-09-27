@@ -99,6 +99,7 @@ def make_tool_ctx(tmp_path: Path, planted_repo: PlantedRepo):
             signed_commits=signed_commits,
             xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
             static_checks_enabled=True,
+            trust_tier="trusted",
         )
 
     return _make

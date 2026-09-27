@@ -83,6 +83,7 @@ def ctx(repo_root: Path, scratch: Path, monkeypatch: pytest.MonkeyPatch) -> Tool
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(repo_root)),
         mcp_server_url="",
         tmpdir=str(scratch),
+        trust_tier="trusted",
     )
 
 

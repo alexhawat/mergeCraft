@@ -357,3 +357,288 @@ def test_legacy_inline_comments_map_to_fingerprinted_findings() -> None:
     path = "src/util.py"
     findings = _comments_to_findings([{"path": path, "line": 4, "body": body}])
     assert findings[0]["fingerprint"] == finding_fingerprint(path=path, body=body)
+
+
+# ── the run publishes the recorded verdict ────────────────────────────────────
+#
+# A compliant Review run records exactly one ``submit_review_verdict`` and
+# publishes nothing itself. Phase 4 of the orchestrator owns publication: once
+# ``finalize_agent_result`` accepts the final attempt's submission, the run
+# calls ``publish_pull_request_review`` once, unless a matching receipt already
+# exists. The publisher derives its inline comments from the submission's
+# findings when no agent-supplied comments are pending.
+
+_GREEN_AFTER_ORCHESTRATOR_PUBLISH = pytest.mark.xfail(
+    reason="green after VP2.5: Phase 4 publishes the accepted terminal submission",
+    strict=False,
+)
+_GREEN_AFTER_FINDINGS_FALLBACK = pytest.mark.xfail(
+    reason="green after VP2.3: the publisher builds inline comments from submission.findings",
+    strict=False,
+)
+_GREEN_AFTER_PUBLISH_WITH_FINDINGS = pytest.mark.xfail(
+    reason="green after VP2.5 + VP2.3: Phase 4 publishes the submission's findings inline",
+    strict=False,
+)
+_GREEN_AFTER_CONTRACT_TEXT = pytest.mark.xfail(
+    reason="green after VP2.7: submit_review_verdict says the run publishes the verdict",
+    strict=False,
+)
+
+
+def _two_findings() -> list[dict[str, Any]]:
+    from tests.support.publication import finding
+
+    return [
+        finding("Unchecked index into the list.", line=12),
+        finding("Missing timeout.", line=20),
+    ]
+
+
+@_GREEN_AFTER_ORCHESTRATOR_PUBLISH
+@pytest.mark.asyncio
+async def test_orchestrator_publishes_a_recorded_verdict_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Happy path: one ``submit_review_verdict`` and no agent publish -> one GitHub review."""
+    from mergecraft.run_outcome import RunOutcome
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import (
+        HEAD_SHA,
+        RecordingReviewGitHub,
+        publication_ctx,
+        submit_verdict,
+    )
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", _two_findings())
+    assert github.review_payloads == []
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert len(github.review_payloads) == 1, (
+        f"the run must publish the recorded verdict exactly once, got {github.review_payloads!r}"
+    )
+    posted = github.review_payloads[0]
+    assert posted["event"] == "REQUEST_CHANGES"
+    assert posted["commit_id"] == HEAD_SHA
+    receipt = ctx.tool_state.review
+    assert receipt is not None
+    assert receipt.reviewed_sha == HEAD_SHA
+    assert ctx.tool_state.terminal_publication_failed is False
+    assert record.outcome is RunOutcome.passed
+    assert record.failure_reason is None
+
+
+@_GREEN_AFTER_PUBLISH_WITH_FINDINGS
+@pytest.mark.asyncio
+async def test_orchestrator_publication_carries_the_submission_findings_inline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The published review's inline comments are exactly the submission's findings."""
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import (
+        RecordingReviewGitHub,
+        inline_fingerprints,
+        publication_ctx,
+        submission_fingerprints,
+        submit_verdict,
+    )
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", _two_findings())
+    expected = submission_fingerprints(ctx)
+    assert len(expected) == 2
+
+    await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert len(github.review_payloads) == 1
+    posted = github.review_payloads[0]
+    comments = list(posted.get("comments") or [])
+    assert inline_fingerprints(posted) == expected
+    assert sorted((str(c["path"]), int(c["line"])) for c in comments) == [
+        ("src/app.py", 12),
+        ("src/app.py", 20),
+    ]
+
+
+@_GREEN_AFTER_FINDINGS_FALLBACK
+@pytest.mark.asyncio
+async def test_publisher_fallback_builds_inline_comments_from_submission_findings(
+    tmp_path: Path,
+) -> None:
+    """Unit: with nothing pending, the internal publisher posts the findings inline.
+
+    The pre-change fallback posted ``"comments": []``, dropping every finding
+    from GitHub's inline view.
+    """
+    from mergecraft.mcp.review import publish_pull_request_review
+    from tests.support.publication import (
+        RecordingReviewGitHub,
+        inline_fingerprints,
+        publication_ctx,
+        submission_fingerprints,
+        submit_verdict,
+    )
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", _two_findings())
+    assert ctx.tool_state.pending_review_publication is None
+
+    result = await publish_pull_request_review(ctx)
+
+    assert result["success"] is True
+    assert len(github.review_payloads) == 1
+    assert inline_fingerprints(github.review_payloads[0]) == submission_fingerprints(ctx)
+
+
+@pytest.mark.asyncio
+async def test_publisher_fallback_for_an_approve_posts_no_inline_comments(
+    tmp_path: Path,
+) -> None:
+    """Edge (green guard): an approve with no findings has nothing to post inline."""
+    from mergecraft.mcp.review import publish_pull_request_review
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "approve")
+
+    result = await publish_pull_request_review(ctx)
+
+    assert result["success"] is True
+    assert len(github.review_payloads) == 1
+    assert not github.review_payloads[0].get("comments")
+    # ``pr_approve_enabled`` is off on this context, so the approve lands as a COMMENT.
+    assert github.review_payloads[0]["event"] == "COMMENT"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_does_not_publish_in_shadow_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Edge (green guard): the shadow verdict protocol never publishes from Phase 4."""
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", _two_findings())
+
+    await run_finalize(ctx, monkeypatch=monkeypatch, terminal_verdict="shadow")
+
+    assert github.review_payloads == []
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_does_not_republish_over_a_matching_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Edge (green guard): the agent already published this verdict -> no second POST."""
+    from mergecraft.run_outcome import RunOutcome
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", _two_findings())
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    published = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": submission.summary, "request_changes": True}
+    )
+    assert published.is_error is False
+    assert len(github.review_payloads) == 1
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert len(github.review_payloads) == 1
+    assert record.outcome is RunOutcome.passed
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_does_not_publish_a_submission_finalize_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Error (green guard): only the *accepted* final attempt's verdict is published.
+
+    A submission recorded by attempt 0 does not satisfy attempt 1, so
+    ``finalize_agent_result`` does not accept it and nothing may reach GitHub.
+    """
+    from mergecraft.main_outcome import _MISSING_TERMINAL_VERDICT_REASON
+    from mergecraft.run_outcome import RunOutcome
+    from mergecraft.utils.agent_resolve import stamp_attempt_id
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", _two_findings())
+    stamp_attempt_id(ctx.tool_state, attempt_id=1, fallback_index=1)
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert github.review_payloads == []
+    assert record.outcome is RunOutcome.inconclusive
+    assert record.failure_reason == _MISSING_TERMINAL_VERDICT_REASON
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_does_not_publish_an_incremental_progress_only_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Edge (green guard): an IncrementalReview that only wrote its summary posts no review."""
+    from mergecraft.run_outcome import RunOutcome
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted", mode="IncrementalReview")
+    ctx.tool_state.final_summary_written = True
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert github.review_payloads == []
+    assert record.outcome is RunOutcome.passed
+
+
+@_GREEN_AFTER_ORCHESTRATOR_PUBLISH
+@pytest.mark.asyncio
+async def test_orchestrator_publication_failure_is_inconclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Error: GitHub refuses the orchestrator's POST -> the run is inconclusive, not passed.
+
+    The exception must not escape Phase 4; it sets ``terminal_publication_failed``
+    through the existing path, and the classifier names the lost publication.
+    """
+    from mergecraft.main_outcome import _UNPUBLISHED_TERMINAL_VERDICT_REASON
+    from mergecraft.run_outcome import RunOutcome
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
+
+    github = RecordingReviewGitHub(create_failures=1)
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", _two_findings())
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert len(github.review_payloads) == 1, "the orchestrator must have attempted the POST"
+    assert ctx.tool_state.review is None
+    assert ctx.tool_state.terminal_publication_failed is True
+    assert record.outcome is RunOutcome.inconclusive
+    assert record.failure_reason == _UNPUBLISHED_TERMINAL_VERDICT_REASON
+
+
+@_GREEN_AFTER_CONTRACT_TEXT
+def test_submit_review_verdict_description_says_the_run_publishes(tmp_path: Path) -> None:
+    """The tool no longer tells the agent to publish separately."""
+    from mergecraft.mcp.verdict import submit_review_verdict_tool
+
+    description = submit_review_verdict_tool(_ctx(tmp_path)).description
+    assert "create_pull_request_review" not in description
+    assert "does not publish" not in description.lower()
+    assert "publish" in description.lower()

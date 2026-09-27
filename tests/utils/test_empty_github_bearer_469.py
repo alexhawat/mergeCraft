@@ -48,6 +48,7 @@ def _tool_context(tmp_path: Path, github: GitHubClient) -> ToolContext:
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 

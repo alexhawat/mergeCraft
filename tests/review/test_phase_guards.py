@@ -134,6 +134,7 @@ def _ctx(tmp_path: Path, *, repo_dir: Path | None = None) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(artifacts),
+        trust_tier="trusted",
     )
 
 

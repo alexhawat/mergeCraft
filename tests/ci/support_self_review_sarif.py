@@ -112,6 +112,7 @@ def tool_context(tmp_path: Any, github: GitHubClient) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         ci_sarif_artifacts=["ruff-sarif", "mypy-sarif", "bandit-sarif"],
+        trust_tier="trusted",
     )
 
 
@@ -131,4 +132,5 @@ def tool_context_with_scm(tmp_path: Any, scm: Any) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         ci_sarif_artifacts=["ruff-sarif", "mypy-sarif", "bandit-sarif"],
+        trust_tier="trusted",
     )

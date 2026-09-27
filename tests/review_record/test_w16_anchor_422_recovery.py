@@ -71,6 +71,7 @@ def _ctx(tmp_path: Path, github: _RecordingGitHub) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         pr_approve_enabled=True,
+        trust_tier="trusted",
     )
     bind_review_publication_scope(tool_ctx)
     diff_path = tmp_path / "diff.patch"

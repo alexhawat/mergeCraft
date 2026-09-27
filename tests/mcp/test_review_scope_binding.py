@@ -48,6 +48,7 @@ def _review_ctx(tmp_path: Path, *, pr_number: int = 7) -> ToolContext:
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
     bind_github_client(ctx, _RecordingGitHub())
     state = ctx.tool_state

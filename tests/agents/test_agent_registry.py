@@ -88,6 +88,7 @@ def _tool_ctx(
         signed_commits=True,
         xrepo=XrepoConfig(mode="explicit", read=["other"], write=["other"]),
         static_checks_enabled=True,
+        trust_tier="trusted",
     )
 
 

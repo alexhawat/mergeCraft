@@ -210,6 +210,7 @@ async def test_report_status_checks_surfaces_neutral_for_crashed_run(
         tool_state=tool_state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
     # Even though the agent's stored boolean says "approved", the run

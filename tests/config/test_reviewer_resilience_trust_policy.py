@@ -157,6 +157,7 @@ async def test_analyzers_level_blocks_create_pull_request_review_approve(
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
     result = await create_pull_request_review_tool(ctx).execute(
         {"event": "APPROVE", "body": "LGTM", "comments": []}

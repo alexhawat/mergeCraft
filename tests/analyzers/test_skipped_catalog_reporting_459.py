@@ -189,6 +189,7 @@ async def test_run_analyzers_log_is_unavailable_not_findings_zero_clean(
             tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
             mcp_server_url="",
             tmpdir=str(tmp_path),
+            trust_tier="trusted",
         )
         await run_analyzers_tool(ctx).execute({"changed_files": ["src/app.py"]})
     finally:

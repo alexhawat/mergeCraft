@@ -86,6 +86,7 @@ def _registered_tool_names() -> set[str]:
             analyzers_settings_enabled=True,
             analyzers_mode="full",
             xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
+            trust_tier="trusted",
         )
         return {
             spec.name for spec in build_orchestrator_tools(ctx, output_schema={"type": "object"})

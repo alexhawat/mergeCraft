@@ -53,6 +53,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         tool_state=tool_state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 

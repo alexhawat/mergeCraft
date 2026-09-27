@@ -36,6 +36,7 @@ def _tool_context(tmp_path: Path, *, snapshot: object) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         repo_settings_snapshot=snapshot,
+        trust_tier="trusted",
     )
 
 

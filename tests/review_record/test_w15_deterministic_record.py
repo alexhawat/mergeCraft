@@ -128,6 +128,7 @@ def _context(tmp_path: Path, scm: _Scm) -> Any:
         modes=compute_modes("claude"),
         tool_state=state,
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 

@@ -351,6 +351,7 @@ def test_prompt_version_appears_in_evidence_packet() -> None:
         tool_state=ToolState(repos={}, primary_repo_key="acme/demo"),
         mcp_server_url="",
         tmpdir="",
+        trust_tier="trusted",
     )
 
     # Selected mode present → exactly one row with matching version.
