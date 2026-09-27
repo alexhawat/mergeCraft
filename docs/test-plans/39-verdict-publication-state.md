@@ -9,9 +9,10 @@ implementation: every test that needed new behaviour carried a non-strict
 regression guard was green from the start. Each implementation step was
 followed by removing exactly the markers it satisfied.
 
-**Status:** every contract below has landed except the five rows under
-*The run record belongs to the final attempt*, added after the verification
-gate and still red. No assertion was weakened or dropped to reach green.
+**Status: complete.** Every contract below has landed and every row is green,
+including the five rows under *The run record belongs to the final attempt*
+that were added after the verification gate. No red marker from this work
+remains in the tree, and no assertion was weakened or dropped to reach green.
 Two notes from the lifting passes:
 
 * Line overlap for thread retirement is matched against the new (RIGHT-side)
@@ -26,8 +27,7 @@ Verification commands:
 
 ```bash
 MERGECRAFT_PYTEST_JOBS=0 uv run pytest <paths> --collect-only -q   # collection diagnostic
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest <paths> -q                  # red = xfailed, guards pass
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest <paths> --runxfail -q       # see the real reds
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest <paths> -q                  # every contract passes
 make lint && make typecheck
 ```
 
@@ -111,11 +111,11 @@ implementation has one target.
 
 | Contract | Layer | Test | Status |
 | --- | --- | --- | --- |
-| A fallback attempt drops the previous attempt's prepared evidence packet | unit | `tests/review/test_attempt_attribution.py::test_prepare_chain_attempt_drops_the_prepared_run_packet` | red |
-| On a fallback verdict mismatch, the record does not call the earlier verdict the reviewer's terminal verdict, and names both verdicts | functional | `tests/review/test_attempt_attribution.py::test_a_fallback_mismatch_record_names_both_verdicts_not_the_stale_one` | red |
-| A same-verdict publication missing recorded findings inline lists their fingerprints in the record (wording free) | functional | `tests/review/test_attempt_attribution.py::test_a_same_verdict_publication_gap_is_listed_in_the_record` | red |
-| The `orchestrator.publish_review` step carries the receipt's `payload_hash`, in state and in the built trajectory; its `publication_incomplete` is empty when nothing is missing | functional | `tests/evidence/test_trajectory_completion.py::test_the_publish_step_carries_the_receipt_hash` | red |
-| The `orchestrator.publish_review` step is recorded (ok) even when the agent published the same verdict, and its `publication_incomplete` lists the sorted missing fingerprints | functional | `tests/evidence/test_trajectory_completion.py::test_the_publish_step_lists_findings_missing_from_the_inline_view` | red |
+| A fallback attempt drops the previous attempt's prepared evidence packet | unit | `tests/review/test_attempt_attribution.py::test_prepare_chain_attempt_drops_the_prepared_run_packet` | green |
+| On a fallback verdict mismatch, the record does not call the earlier verdict the reviewer's terminal verdict, and names both verdicts | functional | `tests/review/test_attempt_attribution.py::test_a_fallback_mismatch_record_names_both_verdicts_not_the_stale_one` | green |
+| A same-verdict publication missing recorded findings inline lists their fingerprints in the record (wording free) | functional | `tests/review/test_attempt_attribution.py::test_a_same_verdict_publication_gap_is_listed_in_the_record` | green |
+| The `orchestrator.publish_review` step carries the receipt's `payload_hash`, in state and in the built trajectory; its `publication_incomplete` is empty when nothing is missing | functional | `tests/evidence/test_trajectory_completion.py::test_the_publish_step_carries_the_receipt_hash` | green |
+| The `orchestrator.publish_review` step is recorded (ok) even when the agent published the same verdict, and its `publication_incomplete` lists the sorted missing fingerprints | functional | `tests/evidence/test_trajectory_completion.py::test_the_publish_step_lists_findings_missing_from_the_inline_view` | green |
 
 ### Thread retirement by line and author
 

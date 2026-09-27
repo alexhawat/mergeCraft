@@ -442,11 +442,6 @@ async def test_an_agent_published_review_with_the_same_verdict_is_not_a_mismatch
 # terminal verdict". When the same verdict is published without some of the
 # recorded findings inline, the record lists their fingerprints.
 
-_GREEN_AFTER_RECORD_FIX = pytest.mark.xfail(
-    reason="green after VP5.2-fix: the record is scoped to the final attempt's publication",
-    strict=False,
-)
-
 
 def _record_block(body: str) -> str:
     """The deterministic record, without the review prose or hidden HTML markers."""
@@ -472,7 +467,6 @@ async def _publish_attempt_one(ctx: ToolContext, *, findings: list[dict[str, Any
     assert published.is_error is False, published.content[0]["text"]
 
 
-@_GREEN_AFTER_RECORD_FIX
 def test_prepare_chain_attempt_drops_the_prepared_run_packet(tmp_path: Path) -> None:
     """Unit: a fallback attempt starts without the previous attempt's evidence packet."""
     from mergecraft.utils.agent_resolve import _prepare_chain_attempt
@@ -483,7 +477,6 @@ def test_prepare_chain_attempt_drops_the_prepared_run_packet(tmp_path: Path) -> 
     assert ctx.tool_state.prepared_run_packet is None
 
 
-@_GREEN_AFTER_RECORD_FIX
 @pytest.mark.asyncio
 async def test_a_fallback_mismatch_record_names_both_verdicts_not_the_stale_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -523,7 +516,6 @@ async def test_a_fallback_mismatch_record_names_both_verdicts_not_the_stale_one(
     assert re.search(r"\bapprove\b", block), block
 
 
-@_GREEN_AFTER_RECORD_FIX
 @pytest.mark.asyncio
 async def test_a_same_verdict_publication_gap_is_listed_in_the_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

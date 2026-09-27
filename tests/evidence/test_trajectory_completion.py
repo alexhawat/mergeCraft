@@ -130,11 +130,6 @@ async def test_a_run_that_never_submitted_records_no_publish_step(
 # nothing is missing). Both survive ``build_trajectory_record``, which is what
 # the evidence packet serializes.
 
-_GREEN_AFTER_RECORD_FIX = pytest.mark.xfail(
-    reason="green after VP5.2-fix: the publish step carries payload_hash and the gap",
-    strict=False,
-)
-
 
 def _publish_row(ctx: ToolContext) -> Any:
     rows = [call for call in ctx.tool_state.tool_calls if call.tool == _ORCHESTRATOR_PUBLISH]
@@ -149,7 +144,6 @@ def _packet_publish_row(ctx: ToolContext) -> Any:
     return rows[0]
 
 
-@_GREEN_AFTER_RECORD_FIX
 @pytest.mark.asyncio
 async def test_the_publish_step_carries_the_receipt_hash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -168,7 +162,6 @@ async def test_the_publish_step_carries_the_receipt_hash(
     assert _publish_row(ctx).publication_incomplete == []
 
 
-@_GREEN_AFTER_RECORD_FIX
 @pytest.mark.asyncio
 async def test_the_publish_step_lists_findings_missing_from_the_inline_view(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
