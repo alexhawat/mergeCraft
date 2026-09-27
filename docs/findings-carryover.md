@@ -151,12 +151,28 @@ existed. Manual runs are dry by default; tick **apply** to file.
 ## Known gap
 
 The sweep's signal is *unresolved*, which assumes the reviewer resolves the
-threads it has satisfied. It does not currently do that reliably — mergeCraft's
-incremental mode is instructed to reply and call `resolve_review_thread` for
-findings the new commits addressed, and on PR #161 all thirteen threads were
-left open, including eight the final review explicitly declared addressed.
+threads it has satisfied. It only does so under a deliberately narrow rule.
+When an incremental re-review publishes, the run closes one of its own open
+threads only when all of these hold:
 
-Until that retirement step is fixed, a sweep carries over findings that were
+- **The code under it changed.** The thread's anchored line falls inside a
+  hunk of the diff since the last reviewed commit, or GitHub marks the thread
+  outdated. Another edit elsewhere in the same file is not enough, and a thread
+  with no known line is left open.
+- **Every comment in it is mergeCraft's.** Each comment carries the mergeCraft
+  marker *and* was posted by an expected publisher: the configured reviewer
+  App's bot login, or the login of the personal access token the run publishes
+  with. The shared `github-actions[bot]` login never counts, because any
+  workflow in the repository can post as it. A human reply keeps the thread
+  open. A run with no expected publisher (job-token only) closes nothing and
+  logs one line saying why.
+- **The finding is no longer raised anywhere in the submission.** A finding
+  that was raised again stays open whether it was posted inline, demoted into
+  the review body, or deferred past the inline budget.
+
+A thread that fails any of these stays open, so a fix that landed away from the
+anchored line, or any run without an expected publisher, leaves threads open
+for findings that are in fact fixed. A sweep then carries over findings that were
 already fixed. That is why `CARRYOVER_AUTO_APPLY` defaults to off and the
 automatic path is a dry run: review what the sweep would file on your own
 repository before letting merges write.

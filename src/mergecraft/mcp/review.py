@@ -381,40 +381,95 @@ def _maybe_suggest_eval_add(ctx: ToolContext) -> None:
     )
 
 
+def _incremental_changed_lines(primary: Any) -> dict[str, list[range]] | None:
+    """New-file line ranges the incremental diff touched, per path.
+
+    Read from the RIGHT side of each hunk of the patch since the last reviewed
+    commit (inclusive bounds become half-open ranges). A thread GitHub marks
+    outdated qualifies on that flag alone, so the LEFT side adds nothing but
+    old-file coordinates that could match an unrelated current line.
+
+    Returns ``None`` when the diff cannot be read: without it no line is known
+    to have changed, and retirement must not guess.
+    """
+    diff_path = getattr(primary, "incremental_diff_path", None)
+    if not diff_path:
+        return None
+    from pathlib import Path
+
+    try:
+        diff_text = Path(str(diff_path)).read_text(encoding="utf-8")
+    except OSError as err:
+        logger.info("finding resolution: incremental diff unreadable, resolving nothing: {}", err)
+        return None
+    index = build_inline_anchor_index(diff_text)
+    return {
+        path: [range(start, end + 1) for start, end in sides.get("RIGHT", [])]
+        for path, sides in index.hunk_ranges.items()
+    }
+
+
+def _still_raised_fingerprints(
+    ctx: ToolContext, *, posted: dict[str, Any], inline: list[dict[str, Any]]
+) -> frozenset[str]:
+    """Fingerprints this run still raises anywhere: submission, posted body, inline.
+
+    The final inline list alone misses findings demoted to the review body (a
+    422 or an anchor outside the diff) and findings deferred past the inline
+    budget; their threads must stay open because the finding is still open.
+    """
+    raised: set[str] = set(_submission_fingerprints(ctx.tool_state.terminal_submission))
+    raised |= finding_fingerprints_in(str(posted.get("body") or ""))
+    for item in [*inline, *(posted.get("comments") or [])]:
+        raised |= finding_fingerprints_in(str(item.get("body") or ""))
+    return frozenset(raised)
+
+
 async def _resolve_fixed_finding_threads(
-    ctx: ToolContext, *, pull_number: int, posted_bodies: list[str]
+    ctx: ToolContext, *, pull_number: int, still_raised: frozenset[str]
 ) -> int:
     """Close threads for findings the new commits fixed (C4).
 
     Runs only on a re-review that knows which paths moved since the last reviewed
-    commit. A thread is closed when mergeCraft raised it, nobody else replied, its
-    file was touched by the new commits, and the review just posted did not raise
-    it again — i.e. the code the finding pointed at changed and the finding is
-    gone. Everything here is advisory: a failure logs and the review still stands.
+    commit. A thread is closed when every comment in it is mergeCraft's (marker
+    and an expected-publisher author), its anchored line falls in a hunk of the
+    incremental diff or GitHub marks it outdated, and none of its findings is
+    still raised anywhere in this run's submission. The expected-publisher set
+    comes from the run's authorship rule only; the login the review was just
+    posted as is never added to it. Everything here is advisory: a failure logs
+    and the review still stands.
     """
     if ctx.tool_state.selected_mode != INCREMENTAL_REVIEW_MODE:
         return 0
     primary = primary_repo_state(ctx.tool_state)
-    changed_paths = set(primary.incremental_changed_paths or ())
-    if not changed_paths:
+    if not primary.incremental_changed_paths:
         return 0
-    current: set[str] = set()
-    for body in posted_bodies:
-        current |= finding_fingerprints_in(body)
+    changed_lines = _incremental_changed_lines(primary)
+    if changed_lines is None:
+        return 0
+    from mergecraft.review.authorship import expected_publisher_logins
+
+    publishers = expected_publisher_logins(ctx)
     try:
-        threads = await fetch_review_threads(ctx, pull_number)
+        threads = await fetch_review_threads(ctx, pull_number) if publishers else []
     except Exception as err:  # advisory cleanup; never fails a posted review
         logger.info("finding resolution: listing review threads soft-failed: {}", err)
         return 0
     targets = resolvable_thread_ids(
-        threads, current_fingerprints=frozenset(current), changed_paths=changed_paths
+        threads,
+        current_fingerprints=still_raised,
+        changed_lines=changed_lines,
+        publishers=publishers,
     )
     resolved = 0
     for thread_id in targets:
         try:
-            await resolve_review_thread(ctx, thread_id)
+            is_resolved = await resolve_review_thread(ctx, thread_id)
         except Exception as err:  # one bad thread must not stop the rest
             logger.info("finding resolution: resolving thread {} soft-failed: {}", thread_id, err)
+            continue
+        if not is_resolved:
+            logger.info("finding resolution: GitHub did not confirm thread {} resolved", thread_id)
             continue
         resolved += 1
     if resolved:
@@ -1418,7 +1473,11 @@ async def _publish_github_review(
     resolved = await _resolve_fixed_finding_threads(
         ctx,
         pull_number=pull_number,
-        posted_bodies=[str(item.get("body") or "") for item in inline],
+        still_raised=_still_raised_fingerprints(
+            ctx,
+            posted=accepted_payloads[-1] if accepted_payloads else payload,
+            inline=inline,
+        ),
     )
     if resolved:
         response["resolvedThreads"] = resolved
