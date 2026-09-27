@@ -64,6 +64,8 @@ class RecordingReviewGitHub(GitHubClient):
     ) -> None:
         super().__init__(token="test-token")
         self.review_payloads: list[dict[str, Any]] = []
+        self.review_bodies: dict[int, str] = {}
+        self.review_updates: list[tuple[int, str]] = []
         self.resolved: list[str] = []
         self.graphql_calls: list[str] = []
         self._threads = list(threads or [])
@@ -81,6 +83,7 @@ class RecordingReviewGitHub(GitHubClient):
             response = httpx.Response(500, request=request, json={"message": "Server Error"})
             raise httpx.HTTPStatusError("500", request=request, response=response)
         review_id = len(self.review_payloads)
+        self.review_bodies[review_id] = str(payload.get("body") or "")
         return {
             "id": review_id,
             "node_id": f"n{review_id}",
@@ -89,6 +92,21 @@ class RecordingReviewGitHub(GitHubClient):
             "user": {"login": self._reviewer_login},
             "commit_id": payload.get("commit_id"),
         }
+
+    async def update_review(
+        self, owner: str, repo: str, pull_number: int, review_id: int, body: str, **_kwargs: Any
+    ) -> dict[str, Any]:
+        """Record the deterministic record's final upsert onto a posted review."""
+        del owner, repo, pull_number
+        self.review_updates.append((int(review_id), body))
+        self.review_bodies[int(review_id)] = body
+        return {"id": review_id, "body": body}
+
+    async def get_review(
+        self, owner: str, repo: str, pull_number: int, review_id: int, **_kwargs: Any
+    ) -> dict[str, Any]:
+        del owner, repo, pull_number
+        return {"id": review_id, "body": self.review_bodies.get(int(review_id), "")}
 
     async def list_issue_comments(
         self, owner: str, repo: str, issue_number: int, **kwargs: Any

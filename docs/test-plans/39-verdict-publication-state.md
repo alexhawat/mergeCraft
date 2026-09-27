@@ -9,9 +9,10 @@ implementation: every test that needed new behaviour carried a non-strict
 regression guard was green from the start. Each implementation step was
 followed by removing exactly the markers it satisfied.
 
-**Status: complete.** Every contract below has landed and every row is green.
-No red marker from this work remains in the tree, and no assertion was
-weakened or dropped to reach green. Two notes from the lifting passes:
+**Status:** every contract below has landed except the five rows under
+*The run record belongs to the final attempt*, added after the verification
+gate and still red. No assertion was weakened or dropped to reach green.
+Two notes from the lifting passes:
 
 * Line overlap for thread retirement is matched against the new (RIGHT-side)
   hunk ranges; a thread whose anchor moved off the new side qualifies through
@@ -25,7 +26,8 @@ Verification commands:
 
 ```bash
 MERGECRAFT_PYTEST_JOBS=0 uv run pytest <paths> --collect-only -q   # collection diagnostic
-MERGECRAFT_PYTEST_JOBS=0 uv run pytest <paths> -q                  # every contract passes
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest <paths> -q                  # red = xfailed, guards pass
+MERGECRAFT_PYTEST_JOBS=0 uv run pytest <paths> --runxfail -q       # see the real reds
 make lint && make typecheck
 ```
 
@@ -104,6 +106,16 @@ implementation has one target.
 | A compliant run published by the orchestrator has an ok `orchestrator.publish_review` step and completion claims | functional | `tests/evidence/test_trajectory_completion.py::test_a_compliant_run_published_by_the_orchestrator_has_a_complete_step` | green |
 | A run with no receipt records the publish step as not ok and claims no completion for it | functional | `tests/evidence/test_trajectory_completion.py::test_a_run_with_no_receipt_has_no_successful_publish_step` | green |
 | Unchanged intents; unknown tools are never `complete`; no submission, no publish step | unit / functional | `tests/evidence/test_trajectory_completion.py::test_create_pull_request_review_is_still_a_completion_intent`, `::test_an_unknown_tool_is_never_counted_as_completion`, `::test_a_run_that_never_submitted_records_no_publish_step` | green (guard) |
+
+### The run record belongs to the final attempt
+
+| Contract | Layer | Test | Status |
+| --- | --- | --- | --- |
+| A fallback attempt drops the previous attempt's prepared evidence packet | unit | `tests/review/test_attempt_attribution.py::test_prepare_chain_attempt_drops_the_prepared_run_packet` | red |
+| On a fallback verdict mismatch, the record does not call the earlier verdict the reviewer's terminal verdict, and names both verdicts | functional | `tests/review/test_attempt_attribution.py::test_a_fallback_mismatch_record_names_both_verdicts_not_the_stale_one` | red |
+| A same-verdict publication missing recorded findings inline lists their fingerprints in the record (wording free) | functional | `tests/review/test_attempt_attribution.py::test_a_same_verdict_publication_gap_is_listed_in_the_record` | red |
+| The `orchestrator.publish_review` step carries the receipt's `payload_hash`, in state and in the built trajectory; its `publication_incomplete` is empty when nothing is missing | functional | `tests/evidence/test_trajectory_completion.py::test_the_publish_step_carries_the_receipt_hash` | red |
+| The `orchestrator.publish_review` step is recorded (ok) even when the agent published the same verdict, and its `publication_incomplete` lists the sorted missing fingerprints | functional | `tests/evidence/test_trajectory_completion.py::test_the_publish_step_lists_findings_missing_from_the_inline_view` | red |
 
 ### Thread retirement by line and author
 

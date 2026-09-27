@@ -430,3 +430,138 @@ async def test_an_agent_published_review_with_the_same_verdict_is_not_a_mismatch
     assert len(github.review_payloads) == 1
     assert ctx.tool_state.terminal_publication_mismatch is False
     assert record.outcome is RunOutcome.passed
+
+
+# ── the run record belongs to the final attempt ───────────────────────────────
+#
+# A fallback attempt must not inherit the previous attempt's evidence packet:
+# ``_prepare_chain_attempt`` drops ``tool_state.prepared_run_packet`` with the
+# submission. And when GitHub shows a different verdict than the one the run
+# recorded, the deterministic record carries the mismatch reason naming both
+# verdicts instead of calling the earlier attempt's verdict "the reviewer's
+# terminal verdict". When the same verdict is published without some of the
+# recorded findings inline, the record lists their fingerprints.
+
+_GREEN_AFTER_RECORD_FIX = pytest.mark.xfail(
+    reason="green after VP5.2-fix: the record is scoped to the final attempt's publication",
+    strict=False,
+)
+
+
+def _record_block(body: str) -> str:
+    """The deterministic record, without the review prose or hidden HTML markers."""
+    import re
+
+    from mergecraft.findings.ledger import REVIEW_BODY_MARKER
+
+    record = body.split(REVIEW_BODY_MARKER, 1)[0]
+    return re.sub(r"<!--.*?-->", "", record, flags=re.DOTALL)
+
+
+async def _publish_attempt_one(ctx: ToolContext, *, findings: list[dict[str, Any]]) -> None:
+    """Attempt 1 records ``request_changes`` and the agent publishes it itself."""
+    from mergecraft.mcp.review import create_pull_request_review_tool
+    from tests.support.publication import submit_verdict
+
+    await submit_verdict(ctx, "request_changes", findings)
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    published = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": submission.summary, "request_changes": True}
+    )
+    assert published.is_error is False, published.content[0]["text"]
+
+
+@_GREEN_AFTER_RECORD_FIX
+def test_prepare_chain_attempt_drops_the_prepared_run_packet(tmp_path: Path) -> None:
+    """Unit: a fallback attempt starts without the previous attempt's evidence packet."""
+    from mergecraft.utils.agent_resolve import _prepare_chain_attempt
+
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.prepared_run_packet = object()
+    _prepare_chain_attempt(ctx.tool_state, 1)
+    assert ctx.tool_state.prepared_run_packet is None
+
+
+@_GREEN_AFTER_RECORD_FIX
+@pytest.mark.asyncio
+async def test_a_fallback_mismatch_record_names_both_verdicts_not_the_stale_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Attempt 1 published ``request_changes``; attempt 2 recorded ``approve``.
+
+    Driven through the real Phase 4 and the real record upsert. The record may
+    not present attempt 1's verdict as the reviewer's terminal verdict; it
+    carries the mismatch reason, which names both verdicts.
+    """
+    import re
+
+    from mergecraft.run_outcome import RunOutcome
+    from mergecraft.utils.agent_resolve import _prepare_chain_attempt
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import (
+        RecordingReviewGitHub,
+        finding,
+        publication_ctx,
+        submit_verdict,
+    )
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await _publish_attempt_one(ctx, findings=[finding("Unchecked index.", line=12)])
+    _prepare_chain_attempt(ctx.tool_state, 1)
+    await submit_verdict(ctx, "approve", summary="Second attempt approves.")
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch, real_publish=True)
+
+    assert len(github.review_payloads) == 1, "no second review may be posted"
+    assert record.outcome is RunOutcome.inconclusive
+    assert github.review_updates, "the record must be upserted onto the posted review"
+    block = _record_block(github.review_bodies[github.review_updates[-1][0]])
+    assert "terminal verdict was `request_changes`" not in block
+    assert re.search(r"\brequest_changes\b", block), block
+    assert re.search(r"\bapprove\b", block), block
+
+
+@_GREEN_AFTER_RECORD_FIX
+@pytest.mark.asyncio
+async def test_a_same_verdict_publication_gap_is_listed_in_the_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same verdict, but GitHub's inline view lacks recorded findings: the record lists them.
+
+    The wording is the implementer's; the record must name every missing
+    fingerprint in its visible text.
+    """
+    from mergecraft.run_outcome import RunOutcome
+    from mergecraft.utils.agent_resolve import _prepare_chain_attempt
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import (
+        RecordingReviewGitHub,
+        finding,
+        inline_fingerprints,
+        publication_ctx,
+        submission_fingerprints,
+        submit_verdict,
+    )
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await _publish_attempt_one(ctx, findings=[finding("Unchecked index.", line=12)])
+    _prepare_chain_attempt(ctx.tool_state, 1)
+    await submit_verdict(
+        ctx,
+        "request_changes",
+        [finding("Unchecked index.", line=12), finding("Another one.", line=30)],
+    )
+    missing = sorted(submission_fingerprints(ctx) - inline_fingerprints(github.review_payloads[0]))
+    assert missing, "fixture error: some recorded findings must be missing inline"
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch, real_publish=True)
+
+    assert len(github.review_payloads) == 1
+    assert record.outcome is RunOutcome.passed
+    assert github.review_updates, "the record must be upserted onto the posted review"
+    block = _record_block(github.review_bodies[github.review_updates[-1][0]])
+    absent = [fingerprint for fingerprint in missing if fingerprint not in block]
+    assert absent == [], f"the record does not list missing inline findings {absent}"
