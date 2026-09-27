@@ -437,9 +437,14 @@ class ToolCallRecord(BaseModel):
     """Classifier for ``ok=False`` rows; derived from ``error`` when unset."""
     command: str | None = None
     paths: list[str] = Field(default_factory=list)
-    payload_hash: str | None = None
+    # Both publish-step fields are omitted from serialization while unset, so a
+    # record without them dumps byte-identically to one written before they
+    # existed and committed ``trajectory_sha256`` pins stay valid.
+    payload_hash: str | None = Field(default=None, exclude_if=lambda value: value is None)
     """Receipt binding of the review this step published or found (publish step only)."""
-    publication_incomplete: list[str] = Field(default_factory=list)
+    publication_incomplete: list[str] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     """Sorted fingerprints of recorded findings the published review lacks inline."""
 
     @model_validator(mode="after")
