@@ -1020,8 +1020,8 @@ def submit_review_verdict_tool(ctx: ToolContext):
         description=(
             "Record the terminal review verdict for this run: approve or request_changes, "
             "a summary, and structured findings. Identical re-submissions are idempotent; "
-            "conflicting payloads are rejected. Does not publish to GitHub — call "
-            "create_pull_request_review separately when publication is required."
+            "conflicting payloads are rejected. This records the verdict; the run publishes "
+            "it to GitHub as one review, with the findings as inline comments, after you stop."
         ),
         input_schema={
             "type": "object",

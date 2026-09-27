@@ -250,6 +250,8 @@ def predict_verdict_protocol(
     prep_reason: str | None = None,
     final_summary_written: bool = False,
     terminal_publication_failed: bool = False,
+    terminal_publication_receipt: bool | None = None,
+    terminal_publication_mismatch: tuple[str, str] | None = None,
 ) -> VerdictProtocolPrediction:
     """Read the terminal-verdict protocol prediction without recording it (VP3).
 
@@ -259,7 +261,11 @@ def predict_verdict_protocol(
     with ``verdict_protocol="enforce"``, and a recorded-but-unpublished
     terminal submission (#619 Task 3b) predicts the same ``inconclusive``
     outcome the enforce path now returns, so the ``mergecraft.publish``
-    span's diagnostic never disagrees with the actual outcome.
+    span's diagnostic never disagrees with the actual outcome. The same holds
+    for a received submission with no publication receipt, or whose receipt
+    shows a different published verdict: both predict ``inconclusive`` with
+    ``terminal_submission_unpublished`` (the recorded verdict is not what
+    GitHub shows). Both inputs default to "not applicable".
     """
     from mergecraft.mcp.verdict import VerdictDiagnostic
 
@@ -297,6 +303,13 @@ def predict_verdict_protocol(
         return VerdictProtocolPrediction(
             outcome=RunOutcome.inconclusive,
             diagnostic=VerdictDiagnostic.provider_success_without_submission.value,
+        )
+    if mode in _REVIEW_MODE_NAMES and (
+        terminal_publication_mismatch is not None or terminal_publication_receipt is False
+    ):
+        return VerdictProtocolPrediction(
+            outcome=RunOutcome.inconclusive,
+            diagnostic=VerdictDiagnostic.terminal_submission_unpublished.value,
         )
     return VerdictProtocolPrediction(
         outcome=RunOutcome.passed,

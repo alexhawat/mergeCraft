@@ -151,6 +151,11 @@ _TOOL_INTENTS: Final[dict[str, Intent]] = {
     "upload_file": "modify",
     # complete — the run produced its declared output
     "create_pull_request_review": "complete",
+    # A Review run's declared output is its recorded verdict; the run itself
+    # publishes it, recorded as the synthetic ``orchestrator.publish_review``
+    # step (``ok`` only when a receipt exists).
+    "submit_review_verdict": "complete",
+    "orchestrator.publish_review": "complete",
     "create_pull_request": "complete",
     "update_pull_request_body": "complete",
     "close_pull_request": "complete",

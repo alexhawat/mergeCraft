@@ -364,12 +364,26 @@ mergeCraft separates three layers that older review flows conflated:
    is a pure function of typed findings and run state. It never reads agent
    prose, `result.output`, or `ApprovalRecord.would_approve`.
 3. **Publication** — `publish_pull_request_review` is the internal publisher
-   (not an MCP tool). `create_pull_request_review` maps legacy params through
+   (not an MCP tool), and the run calls it: once the final attempt's
+   submission is accepted, the orchestrator publishes it before classifying
+   the outcome (never under the `shadow` protocol). With no agent-supplied
+   comments pending, the inline comments are the submission's findings.
+   `create_pull_request_review` maps legacy params through
    `validate_submission`, derives the body from the terminal submission, and
-   routes through the same publisher. Publication is idempotent per
-   `(pull_number, commit_id)`; a second publish short-circuits. The published
-   body must match the terminal submission — probe or health-check strings are
-   hard failures when a submission is bound.
+   routes through the same publisher. The published body must match the
+   terminal submission — probe or health-check strings are hard failures when
+   a submission is bound.
+
+   The receipt binds what was published: the head, the verdict, and the
+   finding markers in the body and inline comments. Publication is idempotent
+   per head and verdict. Against the recorded submission, the same verdict
+   short-circuits with no second review (and any recorded finding GitHub does
+   not show inline is listed as `publicationIncomplete`); a different verdict
+   also posts nothing, because GitHub cannot un-publish and a second review
+   would duplicate its inline threads, and the run reads `inconclusive`,
+   naming both verdicts. A recorded verdict with no receipt reads
+   `inconclusive` with its own reason. Each fresh run publishes its own
+   review; there is no memory across runs.
 
 **Per-run token band (`runBounds`).** `tokenBudget` is the soft target.
 `tokenBudgetTolerance` (default `0.10`) defines the hard ceiling as

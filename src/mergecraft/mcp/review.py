@@ -516,26 +516,152 @@ def _terminal_publication_body(submission: Any, params: dict[str, Any]) -> str:
     return expected
 
 
+def _finding_identity(item: Any) -> str:
+    """Return one terminal-submission finding's fingerprint (model or dict row)."""
+    identity = getattr(item, "identity", None)
+    if callable(identity):
+        return str(identity()).strip()
+    if isinstance(item, dict):
+        explicit = str(item.get("fingerprint") or "").strip()
+        if explicit:
+            return explicit
+        path = str(item.get("path") or "")
+        body = str(item.get("body") or "")
+        if path and body:
+            return finding_fingerprint(path=path, body=body)
+    return ""
+
+
+def _submission_fingerprints(submission: Any) -> frozenset[str]:
+    """Fingerprints of the recorded terminal submission's findings."""
+    if submission is None:
+        return frozenset()
+    found = (_finding_identity(item) for item in (getattr(submission, "findings", None) or []))
+    return frozenset(fingerprint for fingerprint in found if fingerprint)
+
+
+def _inline_marker_fingerprints(comments: list[dict[str, Any]]) -> frozenset[str]:
+    """``mergecraft-finding:v1`` markers GitHub shows in the inline comments."""
+    found: set[str] = set()
+    for comment in comments:
+        found |= finding_fingerprints_in(str(comment.get("body") or ""))
+    return frozenset(found)
+
+
+def _receipt_payload_hash(verdict: str, fingerprints: frozenset[str] | set[str]) -> str:
+    """Hash binding a receipt to ``(verdict, fingerprints)``.
+
+    ``fingerprints`` are the finding markers in the published body and inline
+    comments. Hashing markers rather than payload bytes keeps a review the agent
+    posted itself (its own comment wording) comparable with the recorded verdict.
+    """
+    import hashlib
+
+    material = verdict + "\n" + "\n".join(sorted(fingerprints))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _bound_receipt(
+    result: dict[str, Any],
+    *,
+    posted: dict[str, Any],
+    verdict: str | None,
+) -> ReviewRecord:
+    """Build the receipt for one accepted review from the payload GitHub accepted."""
+    inline = _inline_marker_fingerprints(list(posted.get("comments") or []))
+    published = inline | finding_fingerprints_in(str(posted.get("body") or ""))
+    return ReviewRecord(
+        id=int(result["id"]),
+        node_id=str(result.get("node_id") or ""),
+        reviewed_sha=posted.get("commit_id"),
+        verdict=verdict,
+        payload_hash=_receipt_payload_hash(verdict, published) if verdict else None,
+        inline_fingerprints=tuple(sorted(inline)),
+    )
+
+
+def _record_publication_gap(ctx: ToolContext, review: ReviewRecord) -> list[str]:
+    """Record submission findings GitHub does not show inline on ``review``.
+
+    Only a receipt bound by the publisher (``verdict`` set) knows its inline
+    set; an unbound receipt leaves the recorded gap untouched rather than
+    claiming every finding is missing.
+    """
+    if review.verdict is None:
+        return list(ctx.tool_state.publication_incomplete)
+    submission = ctx.tool_state.terminal_submission
+    missing = sorted(_submission_fingerprints(submission) - set(review.inline_fingerprints))
+    ctx.tool_state.publication_incomplete = missing
+    if missing:
+        logger.warning(
+            "review {} shows {} recorded finding(s) outside its inline comments: {}",
+            review.id,
+            len(missing),
+            ", ".join(missing),
+        )
+    return missing
+
+
 def _existing_publication_response(
     ctx: ToolContext,
     *,
     pull_number: int,
     commit_id: str | None,
 ) -> dict[str, Any] | None:
-    """Short-circuit when this run already published for ``(pull_number, commit_id)`` (D5)."""
+    """Short-circuit when this run already published for ``(pull_number, commit_id)`` (D5).
+
+    The receipt binds the verdict it published. Against the recorded terminal
+    submission:
+
+    * same verdict -> the receipt stands: no second POST, the failure flag
+      clears, and any submission finding GitHub does not show inline is listed
+      as ``publicationIncomplete``;
+    * different verdict -> no second POST either (GitHub cannot un-publish, and
+      a second review would duplicate every inline thread), but the stale
+      receipt is never reported as a successful skip: the response is
+      ``success: false`` naming both verdicts, and
+      ``terminal_publication_mismatch`` is set.
+
+    A receipt with no reviewed sha (the deterministic record's diagnostic
+    review) never matches.
+    """
     review = ctx.tool_state.review
     if review is None or not commit_id or review.reviewed_sha != commit_id:
         return None
+    submission = ctx.tool_state.terminal_submission
+    recorded = str(submission.verdict) if submission is not None else None
+    if review.verdict is not None and recorded is not None and review.verdict != recorded:
+        ctx.tool_state.terminal_publication_mismatch = True
+        reason = (
+            f"review {review.id} on sha {commit_id} already shows verdict {review.verdict}; "
+            f"the recorded verdict {recorded} was not published (no second review is posted)"
+        )
+        logger.warning("publication mismatch on PR #{}: {}", pull_number, reason)
+        return {
+            "success": False,
+            "skipped": True,
+            "published": False,
+            "reason": reason,
+            "reviewId": review.id,
+            "publishedVerdict": review.verdict,
+            "recordedVerdict": recorded,
+            "publicationMismatch": True,
+        }
     # Callers establish the current PR scope and head before reaching this
-    # idempotent match. The recorded receipt therefore resolves any stale
-    # failure state without creating a duplicate review.
+    # idempotent match. A receipt for the recorded verdict therefore resolves
+    # any stale failure or mismatch state without creating a duplicate review.
     ctx.tool_state.terminal_publication_failed = False
-    return {
+    ctx.tool_state.terminal_publication_mismatch = False
+    missing = _record_publication_gap(ctx, review)
+    response: dict[str, Any] = {
         "success": True,
         "skipped": True,
         "reason": (f"review {review.id} already submitted for sha {commit_id} this session"),
         "reviewId": review.id,
     }
+    if missing:
+        response["publicationIncomplete"] = missing
+    return response
 
 
 def _maybe_revalidate_before_publish(ctx: ToolContext) -> None:
@@ -817,8 +943,14 @@ async def _create_github_review_with_anchor_recovery(
     pull_number: int,
     payload: dict[str, Any],
     packet: Any | None = None,
+    posted: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], bool]:
-    """Post a review, recovering APPROVE and inline-anchor 422 rejections (D8, #530)."""
+    """Post a review, recovering APPROVE and inline-anchor 422 rejections (D8, #530).
+
+    When ``posted`` is given, the payload GitHub accepted (after any demotion or
+    truncation) is appended to it, so the caller can bind its receipt to what
+    was actually published rather than to what it first asked for.
+    """
     scm = ctx.scm
     current = dict(payload)
     approve_fallback = False
@@ -834,6 +966,8 @@ async def _create_github_review_with_anchor_recovery(
                 pull_number,
                 **current,
             )
+            if posted is not None:
+                posted.append(dict(current))
             return result, approve_fallback
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 422:
@@ -1211,6 +1345,7 @@ async def _publish_github_review(
     else:
         payload.pop("comments", None)
 
+    accepted_payloads: list[dict[str, Any]] = []
     try:
         recovered = (
             await _recover_review_after_lost_receipt(
@@ -1227,6 +1362,7 @@ async def _publish_github_review(
                 pull_number=pull_number,
                 payload=payload,
                 packet=packet,
+                posted=accepted_payloads,
             )
     except Exception:
         # #619 Task 3a — the terminal submission is already recorded on
@@ -1239,15 +1375,23 @@ async def _publish_github_review(
         ctx.tool_state.terminal_publication_failed = True
         raise
     review_id = int(result["id"])
-    ctx.tool_state.review = ReviewRecord(
-        id=review_id,
-        node_id=str(result.get("node_id") or ""),
-        reviewed_sha=payload.get("commit_id"),
+    published_verdict = (
+        str(submission.verdict)
+        if submission is not None
+        else _requested_publication_verdict(params)
     )
+    receipt = _bound_receipt(
+        result,
+        posted=accepted_payloads[-1] if accepted_payloads else payload,
+        verdict=published_verdict,
+    )
+    ctx.tool_state.review = receipt
     # Clear only after the response has yielded a parseable id and the local
     # receipt has been stored. Failed or malformed retry responses remain
     # unresolved and continue to fail closed in final outcome classification.
     ctx.tool_state.terminal_publication_failed = False
+    ctx.tool_state.terminal_publication_mismatch = False
+    publication_gap = _record_publication_gap(ctx, receipt)
     _maybe_suggest_eval_add(ctx)
     ctx.tool_state.approval = ApprovalRecord(
         would_approve=approved,
@@ -1269,6 +1413,8 @@ async def _publish_github_review(
         response["commentFallbackDueTo422"] = True
     if ctx.tool_state.review_body_truncated:
         response["bodyTruncated"] = True
+    if publication_gap:
+        response["publicationIncomplete"] = publication_gap
     resolved = await _resolve_fixed_finding_threads(
         ctx,
         pull_number=pull_number,
@@ -1277,6 +1423,33 @@ async def _publish_github_review(
     if resolved:
         response["resolvedThreads"] = resolved
     return response
+
+
+def _comments_from_submission_findings(submission: Any) -> list[dict[str, Any]]:
+    """Inline comments for the recorded findings when no agent comments are pending.
+
+    Each finding already carries its path, line, body and fingerprint, so the
+    published review shows the submission's findings inline (the publisher's
+    anchor pass still re-anchors or demotes any line outside the diff).
+    """
+    comments: list[dict[str, Any]] = []
+    for item in getattr(submission, "findings", None) or []:
+        row = item.model_dump() if hasattr(item, "model_dump") else item
+        if not isinstance(row, dict):
+            continue
+        path = str(row.get("path") or "").strip()
+        body = str(row.get("body") or "")
+        if not path or not body.strip():
+            continue
+        comment: dict[str, Any] = {"path": path, "body": body}
+        fingerprint = _finding_identity(item)
+        if fingerprint:
+            comment["fingerprint"] = fingerprint
+        line = row.get("line")
+        if line is not None:
+            comment["line"] = int(line)
+        comments.append(comment)
+    return comments
 
 
 async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
@@ -1299,13 +1472,17 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
         ctx.tool_state.review_publication_entrypoint = "publish_pull_request_review"
         return existing
 
+    submission = ctx.tool_state.terminal_submission
     pending = ctx.tool_state.pending_review_publication
+    if pending is not None and str(pending.get("body") or "") != str(submission.summary):
+        # Agent params staged for an earlier attempt's submission (a fallback
+        # recorded a new one since); they no longer describe what is published.
+        pending = None
     if pending is None:
-        submission = ctx.tool_state.terminal_submission
         pending = {
             "pull_number": pull_number,
             "body": submission.summary,
-            "comments": [],
+            "comments": _comments_from_submission_findings(submission),
             "approved": submission.verdict == "approve",
             "request_changes": submission.verdict == "request_changes",
         }
@@ -1315,6 +1492,9 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
 
     ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
     stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
+    from mergecraft.mcp.verification import emit_published_findings
+
+    emit_published_findings(ctx)
     result = await _publish_github_review(
         ctx,
         pending,
@@ -1379,6 +1559,9 @@ def create_pull_request_review_tool(ctx: ToolContext):
         )
         if existing is not None:
             ctx.tool_state.review_publication_entrypoint = "create_pull_request_review"
+            if existing.get("publicationMismatch"):
+                # The agent must see that its verdict did not reach GitHub.
+                raise ValueError(str(existing["reason"]))
             return existing
 
         ensure_review_scope_for_terminal(ctx.tool_state, "create_pull_request_review")
