@@ -242,16 +242,15 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
 
 
 async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> AgentResult:
-    """Terminal hard-fail if stopHook / unsubmittedReview still open."""
+    """Copy the terminal-submission fields onto ``result``; ``success`` is preserved.
+
+    Sets ``terminal_submission_received`` and ``terminal_submission_id`` from
+    the recorded submission and merges its diagnostics into
+    ``result.diagnostics``. It never changes ``success``: a missing or rejected
+    submission is classified later by the run-outcome step, not here.
+    """
     received, submission_id, terminal_diagnostics = _terminal_submission_fields(ctx)
     diagnostics = {**result.diagnostics, **terminal_diagnostics}
-    if not result.success:
-        return replace(
-            result,
-            terminal_submission_received=received,
-            terminal_submission_id=submission_id,
-            diagnostics=diagnostics,
-        )
     return replace(
         result,
         terminal_submission_received=received,

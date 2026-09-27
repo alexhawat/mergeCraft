@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -328,17 +328,16 @@ def verify_agent_findings_tool(ctx: ToolContext):
             )
             for row in (params.get("findings") or [])
         ]
-        trust = (
-            ctx.tool_state.trust_tier
-            if ctx.tool_state.trust_tier in {"trusted", "untrusted"}
-            else "trusted"
+        # Unknown or missing trust is untrusted: only an explicit "trusted" earns it.
+        trust: Literal["trusted", "untrusted"] = (
+            "trusted" if ctx.tool_state.trust_tier == "trusted" else "untrusted"
         )
         normalized_findings = normalize_agent_findings_via_pipeline(
             findings,
             rule_id="agent:draft",
             dedupe=True,
             repo_root=repo_root,
-            trust_tier=trust,  # type: ignore[arg-type]  # — trust is str; callee expects TrustTier literal narrowing
+            trust_tier=trust,
         )
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:

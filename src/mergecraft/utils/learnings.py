@@ -208,8 +208,12 @@ def parse_provenance_comment(line: str) -> LearningProvenance | None:
     pr: int | None = int(pr_raw) if pr_raw not in {"", "-", "None"} else None
     assoc_raw = parts["author_association"]
     assoc = assoc_raw if assoc_raw not in {"", "-", "None"} else None
-    trust = parts["trust_tier"]
-    if trust not in {"trusted", "untrusted"}:
+    trust: Literal["trusted", "untrusted"]
+    if parts["trust_tier"] == "trusted":
+        trust = "trusted"
+    elif parts["trust_tier"] == "untrusted":
+        trust = "untrusted"
+    else:
         return None
     try:
         ts = datetime.strptime(parts["timestamp"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
@@ -221,7 +225,7 @@ def parse_provenance_comment(line: str) -> LearningProvenance | None:
         source_field=parts["source_field"],
         author_login=parts["author_login"],
         author_association=assoc,
-        trust_tier=trust,  # type: ignore[arg-type]  # — trust is str; callee expects TrustTier literal narrowing
+        trust_tier=trust,
         timestamp=ts,
     )
 
@@ -342,19 +346,19 @@ def build_provenance_record(tool_state: ToolState) -> LearningProvenance:
     environment variable when ``tool_state.run_id`` is unset, so a
     post-run path that never wires ``run_id`` still has a stable value.
     The author_login falls back to ``"unknown"`` when no author is
-    recorded. ``trust_tier`` falls back to ``trusted`` only when no
-    explicit value is set; ``author_association`` is propagated as-is
-    (None when not recorded).
+    recorded. ``trust_tier`` is ``trusted`` only when ``tool_state``
+    says so explicitly; a missing or unrecognised value records
+    ``untrusted``, so the quarantine treats unknown provenance as
+    untrusted. ``author_association`` is propagated as-is (None when not
+    recorded).
     """
     import os
 
     run_id = tool_state.run_id or os.environ.get("GITHUB_RUN_ID") or "0"
     author_login = tool_state.author or tool_state.author_association or "unknown"
-    trust_tier: Literal["trusted", "untrusted"]
-    if tool_state.trust_tier in {"trusted", "untrusted"}:
-        trust_tier = tool_state.trust_tier  # type: ignore[assignment]  # — tool_state.trust_tier verified against {"trusted","untrusted"} above
-    else:
-        trust_tier = "trusted"
+    trust_tier: Literal["trusted", "untrusted"] = (
+        "trusted" if tool_state.trust_tier == "trusted" else "untrusted"
+    )
     return LearningProvenance(
         run_id=str(run_id),
         pr_number=tool_state.pr_number,

@@ -420,6 +420,8 @@ async def publish_deterministic_record(
             modes=compute_modes("claude"),
             tool_state=tool_state,
             tmpdir=tmpdir or ".",
+            # No run event to derive trust from, so the record claims no trust.
+            trust_tier="untrusted",
         )
 
     tool_state = resolved_ctx.tool_state

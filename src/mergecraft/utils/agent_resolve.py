@@ -737,14 +737,22 @@ def _chain_deadline() -> float | None:
     attempt-count cap alone is not a bound: ten 1500s timeouts is a four-hour
     run. This ceiling reuses the existing per-run ``run_timeout_s`` budget
     rather than introducing a second notion of "too long" (#444).
+
+    A malformed run-bounds override (``resolve_run_bounds`` raises
+    ``ValueError`` when an env value does not parse) keeps the chain bounded:
+    it falls back to the default run timeout and logs a warning.
     """
-    from mergecraft.utils.run_bounds import resolve_run_bounds
+    from mergecraft.utils.run_bounds import _DEFAULT_RUN_TIMEOUT_S, resolve_run_bounds
 
     try:
         run_timeout_s = resolve_run_bounds().run_timeout_s
-    except Exception as exc:  # pragma: no cover - defensive: never block a run
-        logger.debug("chain deadline unavailable, continuing unbounded: {}", exc)
-        return None
+    except ValueError as exc:
+        logger.warning(
+            "chain deadline: run bounds unresolvable ({}); using the default run timeout {}s",
+            exc,
+            _DEFAULT_RUN_TIMEOUT_S,
+        )
+        run_timeout_s = _DEFAULT_RUN_TIMEOUT_S
     if run_timeout_s <= 0:
         return None
     return time.monotonic() + run_timeout_s
