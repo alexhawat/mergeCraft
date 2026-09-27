@@ -974,12 +974,18 @@ def promote_model_evidence(
 
 
 def _prepare_chain_attempt(tool_state: ToolState | None, fallback_index: int) -> None:
-    """Stamp the active chain index and drop any prior attempt's terminal submit."""
+    """Stamp the active chain index and drop the prior attempt's submission and packet.
+
+    The prepared evidence packet is built from the attempt that submitted; a
+    fallback attempt rebuilds it, so the run record describes the final attempt
+    rather than the one before it.
+    """
     if tool_state is None:
         return
     stamp_attempt_id(tool_state, attempt_id=fallback_index, fallback_index=fallback_index)
     tool_state.terminal_submission = None
     tool_state.terminal_submission_conflict = False
+    tool_state.prepared_run_packet = None
 
 
 async def run_with_model_chain(

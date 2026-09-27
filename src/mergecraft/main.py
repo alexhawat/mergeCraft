@@ -362,6 +362,37 @@ def _short_circuit_setup_failure(
     return ("continue", None)
 
 
+def _publication_record_lines(tool_state: ToolState) -> list[str]:
+    """Record lines naming what GitHub shows when it differs from the recorded verdict.
+
+    A publication mismatch names both verdicts: the one GitHub shows (published
+    earlier in this run) and the final recorded one, which was not published.
+    A same-verdict publication lists the recorded findings its inline comments
+    lack, by fingerprint. Empty when the published review matches the record.
+    """
+    lines: list[str] = []
+    review = tool_state.review
+    submission = tool_state.terminal_submission
+    if tool_state.terminal_publication_mismatch:
+        published = review.verdict if review is not None and review.verdict else "unknown"
+        recorded = str(submission.verdict) if submission is not None else "unknown"
+        lines += [
+            "",
+            f"**Publication mismatch:** GitHub shows the `{published}` review this run "
+            f"published earlier on this head; the final recorded verdict `{recorded}` was "
+            "not published, and no second review was posted.",
+        ]
+    elif tool_state.publication_incomplete:
+        missing = sorted(tool_state.publication_incomplete)
+        lines += [
+            "",
+            f"**Publication incomplete:** the published review does not show {len(missing)} "
+            "recorded finding(s) as inline comments: "
+            + ", ".join(f"`{fingerprint}`" for fingerprint in missing),
+        ]
+    return lines
+
+
 async def publish_deterministic_record(
     *,
     pull_number: int,
@@ -453,6 +484,9 @@ async def publish_deterministic_record(
         comment_fallback_applied=tool_state.review_comment_fallback_applied,
         review_body_truncated=tool_state.review_body_truncated,
     )
+    publication_lines = _publication_record_lines(tool_state)
+    if publication_lines:
+        block = "\n".join([block.rstrip(), *publication_lines]) + "\n"
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
     review = tool_state.review
     existing_body = ""
@@ -2011,7 +2045,9 @@ async def _publish_recorded_verdict(
     mismatch flag. A failure never escapes Phase 4; the classifier reads the
     missing receipt (or ``terminal_publication_failed``) instead. The step is
     recorded in the trajectory as ``orchestrator.publish_review``, ``ok`` only
-    when a receipt for the recorded verdict exists.
+    when a receipt for the recorded verdict exists, including when the agent
+    already published it. The row carries the receipt's ``payload_hash`` and
+    the recorded findings GitHub's inline view lacks.
     """
     tool_state = tool_context.tool_state
     if (
@@ -2036,18 +2072,20 @@ async def _publish_recorded_verdict(
             error=f"{type(exc).__name__}: {exc}",
         )
         return
-    if response.get("skipped") is True and response.get("success") is True:
-        # The agent already published this verdict; its own call is the
-        # completion step, and nothing was posted here. A skipped *mismatch*
-        # (``success: false``) falls through and is recorded as not ok.
-        return
-    published = response.get("success") is True and tool_state.review is not None
+    # A same-verdict skip (the agent already published this verdict) is
+    # recorded too: the receipt is present, and this row is where its hash and
+    # any inline gap are read. A skipped *mismatch* (``success: false``) is
+    # recorded as not ok.
+    receipt = tool_state.review
+    published = response.get("success") is True and receipt is not None
     record_tool_call(
         tool_state,
         tool=_ORCHESTRATOR_PUBLISH_STEP,
         arguments=None,
         ok=published,
         error=None if published else str(response.get("reason") or "no receipt"),
+        payload_hash=receipt.payload_hash if receipt is not None else None,
+        publication_incomplete=list(tool_state.publication_incomplete) if published else None,
     )
 
 

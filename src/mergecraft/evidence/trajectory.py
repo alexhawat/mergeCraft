@@ -437,6 +437,10 @@ class ToolCallRecord(BaseModel):
     """Classifier for ``ok=False`` rows; derived from ``error`` when unset."""
     command: str | None = None
     paths: list[str] = Field(default_factory=list)
+    payload_hash: str | None = None
+    """Receipt binding of the review this step published or found (publish step only)."""
+    publication_incomplete: list[str] = Field(default_factory=list)
+    """Sorted fingerprints of recorded findings the published review lacks inline."""
 
     @model_validator(mode="after")
     def _derive_failure_class(self) -> Self:
@@ -1018,6 +1022,8 @@ def record_tool_call(
     ok: bool,
     outcome_ok: bool | None = None,
     error: str | None = None,
+    payload_hash: str | None = None,
+    publication_incomplete: list[str] | None = None,
 ) -> ToolCallRecord:
     """Append one mediated tool call to the run's trajectory (D8).
 
@@ -1030,6 +1036,10 @@ def record_tool_call(
     :func:`mergecraft.analyzers.redact.redact_secrets` and truncated before
     they are stored, because the record is serialized into the evidence packet
     and surfaced as an Action output.
+
+    ``payload_hash`` and ``publication_incomplete`` are set only on the
+    orchestrator's publish step: the receipt's binding and the recorded
+    findings GitHub's inline view lacks.
     """
     command_raw = str((arguments or {}).get("command") or "") or None
     error_text = _truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None
@@ -1055,6 +1065,8 @@ def record_tool_call(
                 ok=ok,
                 outcome_ok=outcome_ok,
             ),
+            payload_hash=payload_hash,
+            publication_incomplete=sorted(publication_incomplete or []),
         )
     )
     state.tool_calls.append(row)
