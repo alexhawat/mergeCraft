@@ -155,19 +155,6 @@ async def test_stale_structural_result_is_not_reused(tmp_path: Path) -> None:
 # both verdicts. GitHub cannot un-publish, and a second review would duplicate
 # every inline thread.
 
-_GREEN_AFTER_RECEIPT_BINDING = pytest.mark.xfail(
-    reason="green after VP2.1: ReviewRecord carries verdict and payload_hash",
-    strict=False,
-)
-_GREEN_AFTER_RECEIPT_MATCH = pytest.mark.xfail(
-    reason="green after VP2.2: the receipt short-circuits only on a (sha, payload_hash) match",
-    strict=False,
-)
-_GREEN_AFTER_MISMATCH_OUTCOME = pytest.mark.xfail(
-    reason="green after VP2.2 + VP2.6: a verdict mismatch is inconclusive naming both verdicts",
-    strict=False,
-)
-
 
 def _payload_hash(verdict: str, fingerprints: set[str]) -> str:
     import hashlib
@@ -192,7 +179,6 @@ def _attempt(ctx: ToolContext, index: int) -> None:
     _prepare_chain_attempt(ctx.tool_state, index)
 
 
-@_GREEN_AFTER_RECEIPT_BINDING
 def test_review_record_new_fields_default_to_none() -> None:
     """Edge: a receipt built from only (id, node_id, sha) states no verdict and no hash."""
     from mergecraft.mcp.tool_state import ReviewRecord
@@ -202,7 +188,6 @@ def test_review_record_new_fields_default_to_none() -> None:
     assert getattr(record, "payload_hash", "absent") is None
 
 
-@_GREEN_AFTER_RECEIPT_BINDING
 @pytest.mark.asyncio
 async def test_receipt_binds_verdict_and_finding_fingerprints(tmp_path: Path) -> None:
     """Happy path: the stored receipt names the verdict and hashes the published markers."""
@@ -230,7 +215,6 @@ async def test_receipt_binds_verdict_and_finding_fingerprints(tmp_path: Path) ->
     assert receipt.payload_hash == _payload_hash("request_changes", published)
 
 
-@_GREEN_AFTER_RECEIPT_MATCH
 @pytest.mark.parametrize(
     "entrypoint", ["publish_pull_request_review", "create_pull_request_review", "_publish"]
 )
@@ -274,8 +258,13 @@ async def test_a_different_verdict_on_the_same_head_is_never_skipped_as_success(
         result = await create_pull_request_review_tool(ctx).execute(
             {"pull_number": 7, "body": submission.summary, "approved": True}
         )
-        text = result.content[0]["text"]
-        skipped_as_success = result.is_error is False and '"skipped": true' in text
+        if result.is_error:
+            skipped_as_success = False
+        else:
+            import json
+
+            body = json.loads(result.content[0]["text"])
+            skipped_as_success = body.get("success") is True and body.get("skipped") is True
     else:
         response = await _publish_github_review(ctx, {"pull_number": 7})
         skipped_as_success = response.get("success") is True and response.get("skipped") is True
@@ -285,7 +274,6 @@ async def test_a_different_verdict_on_the_same_head_is_never_skipped_as_success(
     assert ctx.tool_state.terminal_publication_mismatch is True
 
 
-@_GREEN_AFTER_MISMATCH_OUTCOME
 @pytest.mark.asyncio
 async def test_a_different_verdict_reads_inconclusive_naming_both_verdicts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -318,7 +306,6 @@ async def test_a_different_verdict_reads_inconclusive_naming_both_verdicts(
     assert "approve" in reason
 
 
-@_GREEN_AFTER_RECEIPT_MATCH
 @pytest.mark.asyncio
 async def test_same_verdict_with_a_different_inline_set_short_circuits_and_lists_the_gap(
     tmp_path: Path,
@@ -358,7 +345,6 @@ async def test_same_verdict_with_a_different_inline_set_short_circuits_and_lists
     assert list(ctx.tool_state.publication_incomplete) == missing
 
 
-@_GREEN_AFTER_RECEIPT_MATCH
 @pytest.mark.asyncio
 async def test_matching_receipt_records_no_publication_gap(tmp_path: Path) -> None:
     """Edge: identical verdict and findings -> short-circuit with an empty gap."""
@@ -384,7 +370,6 @@ async def test_matching_receipt_records_no_publication_gap(tmp_path: Path) -> No
     assert list(ctx.tool_state.publication_incomplete) == []
 
 
-@_GREEN_AFTER_RECEIPT_MATCH
 @pytest.mark.parametrize("order", ["publish_then_submit", "submit_then_publish"])
 @pytest.mark.asyncio
 async def test_an_agent_published_review_with_the_same_verdict_is_not_a_mismatch(

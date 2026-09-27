@@ -289,10 +289,6 @@ def test_finalize_docstring_does_not_claim_a_hard_fail() -> None:
     assert "success" in doc
 
 
-@pytest.mark.xfail(
-    reason="green after VP2.7: the post-run nudge no longer asks the agent to publish",
-    strict=False,
-)
 @pytest.mark.parametrize("mode", ["Review", "IncrementalReview"])
 def test_post_run_nudge_no_longer_asks_for_create_pull_request_review(mode: str) -> None:
     """The run publishes the recorded verdict; the nudge asks only for the verdict."""

@@ -368,23 +368,6 @@ def test_legacy_inline_comments_map_to_fingerprinted_findings() -> None:
 # exists. The publisher derives its inline comments from the submission's
 # findings when no agent-supplied comments are pending.
 
-_GREEN_AFTER_ORCHESTRATOR_PUBLISH = pytest.mark.xfail(
-    reason="green after VP2.5: Phase 4 publishes the accepted terminal submission",
-    strict=False,
-)
-_GREEN_AFTER_FINDINGS_FALLBACK = pytest.mark.xfail(
-    reason="green after VP2.3: the publisher builds inline comments from submission.findings",
-    strict=False,
-)
-_GREEN_AFTER_PUBLISH_WITH_FINDINGS = pytest.mark.xfail(
-    reason="green after VP2.5 + VP2.3: Phase 4 publishes the submission's findings inline",
-    strict=False,
-)
-_GREEN_AFTER_CONTRACT_TEXT = pytest.mark.xfail(
-    reason="green after VP2.7: submit_review_verdict says the run publishes the verdict",
-    strict=False,
-)
-
 
 def _two_findings() -> list[dict[str, Any]]:
     from tests.support.publication import finding
@@ -395,7 +378,6 @@ def _two_findings() -> list[dict[str, Any]]:
     ]
 
 
-@_GREEN_AFTER_ORCHESTRATOR_PUBLISH
 @pytest.mark.asyncio
 async def test_orchestrator_publishes_a_recorded_verdict_exactly_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -431,7 +413,6 @@ async def test_orchestrator_publishes_a_recorded_verdict_exactly_once(
     assert record.failure_reason is None
 
 
-@_GREEN_AFTER_PUBLISH_WITH_FINDINGS
 @pytest.mark.asyncio
 async def test_orchestrator_publication_carries_the_submission_findings_inline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -464,7 +445,6 @@ async def test_orchestrator_publication_carries_the_submission_findings_inline(
     ]
 
 
-@_GREEN_AFTER_FINDINGS_FALLBACK
 @pytest.mark.asyncio
 async def test_publisher_fallback_builds_inline_comments_from_submission_findings(
     tmp_path: Path,
@@ -605,7 +585,6 @@ async def test_orchestrator_does_not_publish_an_incremental_progress_only_run(
     assert record.outcome is RunOutcome.passed
 
 
-@_GREEN_AFTER_ORCHESTRATOR_PUBLISH
 @pytest.mark.asyncio
 async def test_orchestrator_publication_failure_is_inconclusive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -633,7 +612,6 @@ async def test_orchestrator_publication_failure_is_inconclusive(
     assert record.failure_reason == _UNPUBLISHED_TERMINAL_VERDICT_REASON
 
 
-@_GREEN_AFTER_CONTRACT_TEXT
 def test_submit_review_verdict_description_says_the_run_publishes(tmp_path: Path) -> None:
     """The tool no longer tells the agent to publish separately."""
     from mergecraft.mcp.verdict import submit_review_verdict_tool

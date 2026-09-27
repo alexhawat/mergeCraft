@@ -9,6 +9,13 @@ implementation: every test that needs new behaviour carries a non-strict
 regression guard is green from the start. When an implementation step lands,
 its markers are removed so the suite ends with real passes.
 
+**Status:** the publication and receipt contracts have landed and their
+markers are lifted; the thread-retirement, listing and fail-closed-default
+contracts are still red. When the markers were lifted, one check was
+tightened, not loosened: the `create_pull_request_review` variant of the
+different-verdict test now parses the tool's JSON response instead of matching
+a `"skipped": true` substring, so any success-plus-skip answer fails it.
+
 Verification commands:
 
 ```bash
@@ -43,55 +50,55 @@ implementation has one target.
 
 | Contract | Layer | Test | Red until |
 | --- | --- | --- | --- |
-| A recorded verdict with no agent publish is published exactly once by Phase 4 | functional | `tests/review/test_publication_split.py::test_orchestrator_publishes_a_recorded_verdict_exactly_once` | orchestrator publish |
-| The published inline comments are exactly the submission's findings | functional | `tests/review/test_publication_split.py::test_orchestrator_publication_carries_the_submission_findings_inline` | orchestrator publish + findings fallback |
-| With nothing pending, the internal publisher builds inline comments from the findings | unit | `tests/review/test_publication_split.py::test_publisher_fallback_builds_inline_comments_from_submission_findings` | findings fallback |
+| A recorded verdict with no agent publish is published exactly once by Phase 4 | functional | `tests/review/test_publication_split.py::test_orchestrator_publishes_a_recorded_verdict_exactly_once` | green (publication work landed) |
+| The published inline comments are exactly the submission's findings | functional | `tests/review/test_publication_split.py::test_orchestrator_publication_carries_the_submission_findings_inline` | green (publication work landed) |
+| With nothing pending, the internal publisher builds inline comments from the findings | unit | `tests/review/test_publication_split.py::test_publisher_fallback_builds_inline_comments_from_submission_findings` | green (publication work landed) |
 | An approve with no findings posts no inline comments | unit | `tests/review/test_publication_split.py::test_publisher_fallback_for_an_approve_posts_no_inline_comments` | green guard |
 | Shadow mode never publishes from Phase 4 | functional | `tests/review/test_publication_split.py::test_orchestrator_does_not_publish_in_shadow_mode` | green guard |
 | A matching agent-published receipt gets no second POST | functional | `tests/review/test_publication_split.py::test_orchestrator_does_not_republish_over_a_matching_receipt` | green guard |
 | A submission finalize rejected (stale attempt) is never published | functional | `tests/review/test_publication_split.py::test_orchestrator_does_not_publish_a_submission_finalize_rejected` | green guard |
 | A progress-only IncrementalReview posts no review | functional | `tests/review/test_publication_split.py::test_orchestrator_does_not_publish_an_incremental_progress_only_run` | green guard |
-| A refused Phase-4 POST is inconclusive with the publication-failure reason, and does not escape | functional | `tests/review/test_publication_split.py::test_orchestrator_publication_failure_is_inconclusive` | orchestrator publish |
-| `submit_review_verdict` says the run publishes; it no longer points at `create_pull_request_review` | unit | `tests/review/test_publication_split.py::test_submit_review_verdict_description_says_the_run_publishes` | contract text |
-| A received submission with no receipt is inconclusive with its own reason (both review modes) | unit | `tests/review/test_terminal_publication_outcome_619.py::test_recorded_verdict_without_a_receipt_is_inconclusive_with_its_own_reason` | classifier backstop |
-| A receipt passes; shadow and non-review modes ignore a missing receipt | unit | `tests/review/test_terminal_publication_outcome_619.py::test_recorded_verdict_with_a_receipt_passes`, `::test_missing_receipt_is_ignored_in_shadow_mode`, `::test_missing_receipt_is_ignored_outside_review_modes` | classifier backstop |
-| Reason ordering: a failed POST and a missing submission keep their own reasons | unit | `tests/review/test_terminal_publication_outcome_619.py::test_publication_failure_keeps_its_own_reason_over_a_missing_receipt`, `::test_no_submission_keeps_the_missing_verdict_reason` | classifier backstop |
+| A refused Phase-4 POST is inconclusive with the publication-failure reason, and does not escape | functional | `tests/review/test_publication_split.py::test_orchestrator_publication_failure_is_inconclusive` | green (publication work landed) |
+| `submit_review_verdict` says the run publishes; it no longer points at `create_pull_request_review` | unit | `tests/review/test_publication_split.py::test_submit_review_verdict_description_says_the_run_publishes` | green (publication work landed) |
+| A received submission with no receipt is inconclusive with its own reason (both review modes) | unit | `tests/review/test_terminal_publication_outcome_619.py::test_recorded_verdict_without_a_receipt_is_inconclusive_with_its_own_reason` | green (publication work landed) |
+| A receipt passes; shadow and non-review modes ignore a missing receipt | unit | `tests/review/test_terminal_publication_outcome_619.py::test_recorded_verdict_with_a_receipt_passes`, `::test_missing_receipt_is_ignored_in_shadow_mode`, `::test_missing_receipt_is_ignored_outside_review_modes` | green (publication work landed) |
+| Reason ordering: a failed POST and a missing submission keep their own reasons | unit | `tests/review/test_terminal_publication_outcome_619.py::test_publication_failure_keeps_its_own_reason_over_a_missing_receipt`, `::test_no_submission_keeps_the_missing_verdict_reason` | green (publication work landed) |
 | Offline classification is unchanged | unit | `tests/review/test_terminal_publication_outcome_619.py::test_offline_classification_is_unchanged` | green guard |
-| The shadow predictor agrees with the new outcomes | unit | `tests/review/test_terminal_publication_outcome_619.py::test_shadow_prediction_agrees_with_the_new_publication_outcomes`, `tests/evidence/test_verdict_shadow.py::test_verdict_protocol_publish_carries_the_publication_inputs` | classifier backstop |
+| The shadow predictor agrees with the new outcomes | unit | `tests/review/test_terminal_publication_outcome_619.py::test_shadow_prediction_agrees_with_the_new_publication_outcomes`, `tests/evidence/test_verdict_shadow.py::test_verdict_protocol_publish_carries_the_publication_inputs` | green (publication work landed) |
 | Predictor defaults keep today's prediction | unit | `tests/evidence/test_verdict_shadow.py::test_predictor_default_publication_inputs_keep_a_received_verdict_approved` | green guard |
-| The publisher failing before any POST still reads inconclusive, naming publication | functional | `tests/test_run_outcome.py::test_recorded_verdict_the_run_could_not_publish_is_not_passed` | orchestrator publish + classifier backstop |
+| The publisher failing before any POST still reads inconclusive, naming publication | functional | `tests/test_run_outcome.py::test_recorded_verdict_the_run_could_not_publish_is_not_passed` | green (publication work landed) |
 
 ### The receipt is bound to the verdict it published
 
 | Contract | Layer | Test | Red until |
 | --- | --- | --- | --- |
-| A receipt built from three fields states no verdict and no hash | unit | `tests/review/test_attempt_attribution.py::test_review_record_new_fields_default_to_none` | receipt binding |
-| The stored receipt names the verdict and hashes the published markers | integration | `tests/review/test_attempt_attribution.py::test_receipt_binds_verdict_and_finding_fingerprints` | receipt binding |
-| A different verdict on the same head: no second POST, no skip-as-success, mismatch flag set — for each of the three entrypoints | integration | `tests/review/test_attempt_attribution.py::test_a_different_verdict_on_the_same_head_is_never_skipped_as_success` (parametrized) | receipt match |
-| The mismatch reads inconclusive naming both verdicts, end to end through Phase 4 | functional | `tests/review/test_attempt_attribution.py::test_a_different_verdict_reads_inconclusive_naming_both_verdicts`; `tests/review/test_terminal_publication_outcome_619.py::test_verdict_mismatch_is_inconclusive_and_names_both_verdicts` | receipt match + classifier backstop |
-| Same verdict, larger finding set: short-circuit, failure flag cleared, gap listed | integration | `tests/review/test_attempt_attribution.py::test_same_verdict_with_a_different_inline_set_short_circuits_and_lists_the_gap` | receipt match |
-| Identical replay: short-circuit with an empty gap | integration | `tests/review/test_attempt_attribution.py::test_matching_receipt_records_no_publication_gap` | receipt match |
-| An agent-published review with the same verdict (either order) is not a mismatch | functional | `tests/review/test_attempt_attribution.py::test_an_agent_published_review_with_the_same_verdict_is_not_a_mismatch` (parametrized) | receipt match |
+| A receipt built from three fields states no verdict and no hash | unit | `tests/review/test_attempt_attribution.py::test_review_record_new_fields_default_to_none` | green (publication work landed) |
+| The stored receipt names the verdict and hashes the published markers | integration | `tests/review/test_attempt_attribution.py::test_receipt_binds_verdict_and_finding_fingerprints` | green (publication work landed) |
+| A different verdict on the same head: no second POST, no skip-as-success, mismatch flag set — for each of the three entrypoints | integration | `tests/review/test_attempt_attribution.py::test_a_different_verdict_on_the_same_head_is_never_skipped_as_success` (parametrized) | green (publication work landed) |
+| The mismatch reads inconclusive naming both verdicts, end to end through Phase 4 | functional | `tests/review/test_attempt_attribution.py::test_a_different_verdict_reads_inconclusive_naming_both_verdicts`; `tests/review/test_terminal_publication_outcome_619.py::test_verdict_mismatch_is_inconclusive_and_names_both_verdicts` | green (publication work landed) |
+| Same verdict, larger finding set: short-circuit, failure flag cleared, gap listed | integration | `tests/review/test_attempt_attribution.py::test_same_verdict_with_a_different_inline_set_short_circuits_and_lists_the_gap` | green (publication work landed) |
+| Identical replay: short-circuit with an empty gap | integration | `tests/review/test_attempt_attribution.py::test_matching_receipt_records_no_publication_gap` | green (publication work landed) |
+| An agent-published review with the same verdict (either order) is not a mismatch | functional | `tests/review/test_attempt_attribution.py::test_an_agent_published_review_with_the_same_verdict_is_not_a_mismatch` (parametrized) | green (publication work landed) |
 | A fallback attempt keeps the earlier receipt | unit | `tests/utils/test_cov_agent_resolve_paths.py::test_prepare_chain_attempt_keeps_the_publication_receipt` | green guard |
-| A fallback attempt's different verdict sets the mismatch flag | integration | `tests/utils/test_cov_agent_resolve_paths.py::test_a_fallback_attempt_with_a_different_verdict_sets_the_mismatch_flag` | receipt match |
+| A fallback attempt's different verdict sets the mismatch flag | integration | `tests/utils/test_cov_agent_resolve_paths.py::test_a_fallback_attempt_with_a_different_verdict_sets_the_mismatch_flag` | green (publication work landed) |
 | A matching replay clears a stale failure flag (existing semantics) | integration | `tests/mcp/test_review.py::test_matching_publication_replay_clears_stale_failure_after_scope_check` | green guard |
 
 ### A skipped roster slot is not an outcome
 
 | Contract | Layer | Test | Red until |
 | --- | --- | --- | --- |
-| A credential gap with a published `request_changes` keeps its event and classifies by its verdict | functional | `tests/test_run_outcome.py::test_credential_gap_with_a_published_request_changes_classifies_by_its_verdict` | orchestrator publish |
+| A credential gap with a published `request_changes` keeps its event and classifies by its verdict | functional | `tests/test_run_outcome.py::test_credential_gap_with_a_published_request_changes_classifies_by_its_verdict` | green (publication work landed) |
 | The same, when the agent published | functional | `tests/test_run_outcome.py::test_credential_gap_with_an_agent_published_verdict_is_not_demoted` | green guard |
-| The classifier reads the receipt, never the roster | unit | `tests/test_run_outcome.py::test_credential_gap_is_not_a_classifier_input` | classifier backstop |
+| The classifier reads the receipt, never the roster | unit | `tests/test_run_outcome.py::test_credential_gap_is_not_a_classifier_input` | green (publication work landed) |
 | The record still names the degradation | unit | `tests/review_record/test_credential_gap_verdict_775.py` | green guard |
 
 ### The trajectory keeps a completion step
 
 | Contract | Layer | Test | Red until |
 | --- | --- | --- | --- |
-| `submit_review_verdict` is a completion intent | unit | `tests/evidence/test_trajectory_completion.py::test_submit_review_verdict_is_a_completion_intent` | intent map |
-| A compliant run published by the orchestrator has an ok `orchestrator.publish_review` step and completion claims | functional | `tests/evidence/test_trajectory_completion.py::test_a_compliant_run_published_by_the_orchestrator_has_a_complete_step` | intent map + orchestrator publish |
-| A run with no receipt records the publish step as not ok and claims no completion for it | functional | `tests/evidence/test_trajectory_completion.py::test_a_run_with_no_receipt_has_no_successful_publish_step` | intent map + orchestrator publish |
+| `submit_review_verdict` is a completion intent | unit | `tests/evidence/test_trajectory_completion.py::test_submit_review_verdict_is_a_completion_intent` | green (publication work landed) |
+| A compliant run published by the orchestrator has an ok `orchestrator.publish_review` step and completion claims | functional | `tests/evidence/test_trajectory_completion.py::test_a_compliant_run_published_by_the_orchestrator_has_a_complete_step` | green (publication work landed) |
+| A run with no receipt records the publish step as not ok and claims no completion for it | functional | `tests/evidence/test_trajectory_completion.py::test_a_run_with_no_receipt_has_no_successful_publish_step` | green (publication work landed) |
 | Unchanged intents; unknown tools are never `complete`; no submission, no publish step | unit / functional | `tests/evidence/test_trajectory_completion.py::test_create_pull_request_review_is_still_a_completion_intent`, `::test_an_unknown_tool_is_never_counted_as_completion`, `::test_a_run_that_never_submitted_records_no_publish_step` | green guards |
 
 ### Thread retirement by line and author
@@ -158,7 +165,7 @@ implementation has one target.
 | `success`, `error`, output and diagnostics are preserved on both paths | unit | `tests/review/test_post_run_terminal_gate.py::test_finalize_preserves_success_and_error_on_both_paths` | green pin |
 | A missing submission is classified by the resolver, not failed by finalize | unit | `tests/review/test_post_run_terminal_gate.py::test_finalize_without_a_submission_does_not_fail_the_result` | green pin |
 | The docstring no longer claims a hard-fail | unit | `tests/review/test_post_run_terminal_gate.py::test_finalize_docstring_does_not_claim_a_hard_fail` | docstring |
-| The post-run nudge asks for the verdict only, not for `create_pull_request_review` | unit | `tests/review/test_post_run_terminal_gate.py::test_post_run_nudge_no_longer_asks_for_create_pull_request_review` | contract text |
+| The post-run nudge asks for the verdict only, not for `create_pull_request_review` | unit | `tests/review/test_post_run_terminal_gate.py::test_post_run_nudge_no_longer_asks_for_create_pull_request_review` | green (publication work landed) |
 
 ## Fixture sweep: trust is never implicit
 

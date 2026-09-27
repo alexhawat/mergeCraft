@@ -572,10 +572,6 @@ def test_prepare_chain_attempt_keeps_the_publication_receipt() -> None:
     assert state.terminal_publication_failed is True
 
 
-@pytest.mark.xfail(
-    reason="green after VP2.2: a later attempt's different verdict sets the mismatch flag",
-    strict=False,
-)
 async def test_a_fallback_attempt_with_a_different_verdict_sets_the_mismatch_flag(
     tmp_path: Path,
 ) -> None:

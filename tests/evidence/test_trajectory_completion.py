@@ -35,15 +35,6 @@ if TYPE_CHECKING:
 
 _ORCHESTRATOR_PUBLISH = "orchestrator.publish_review"
 
-_GREEN_AFTER_INTENT_MAP = pytest.mark.xfail(
-    reason="green after VP2.4: submit_review_verdict maps to the complete intent",
-    strict=False,
-)
-_GREEN_AFTER_SYNTHETIC_PUBLISH = pytest.mark.xfail(
-    reason="green after VP2.4 + VP2.5: the orchestrator publish is a trajectory step",
-    strict=False,
-)
-
 
 async def _submit_like_the_agent(ctx: ToolContext) -> None:
     """Record the verdict and the mediated tool call the MCP server would log for it."""
@@ -58,7 +49,6 @@ async def _submit_like_the_agent(ctx: ToolContext) -> None:
     record_tool_call(ctx.tool_state, tool="submit_review_verdict", arguments=payload, ok=True)
 
 
-@_GREEN_AFTER_INTENT_MAP
 def test_submit_review_verdict_is_a_completion_intent() -> None:
     assert classify_tool_intent("submit_review_verdict", {"verdict": "approve"}) == "complete"
 
@@ -73,7 +63,6 @@ def test_an_unknown_tool_is_never_counted_as_completion() -> None:
     assert classify_tool_intent("orchestrator.something_else", {}) == "other"
 
 
-@_GREEN_AFTER_SYNTHETIC_PUBLISH
 @pytest.mark.asyncio
 async def test_a_compliant_run_published_by_the_orchestrator_has_a_complete_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -96,7 +85,6 @@ async def test_a_compliant_run_published_by_the_orchestrator_has_a_complete_step
     assert "create_pull_request_review" not in [call.tool for call in record.tool_calls]
 
 
-@_GREEN_AFTER_SYNTHETIC_PUBLISH
 @pytest.mark.asyncio
 async def test_a_run_with_no_receipt_has_no_successful_publish_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

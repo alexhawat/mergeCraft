@@ -428,10 +428,6 @@ def test_verdict_protocol_publish_records_only_in_shadow_mode() -> None:
 # the run itself reads inconclusive.
 
 
-@pytest.mark.xfail(
-    reason="green after VP2.6: _verdict_protocol_publish threads the publication inputs",
-    strict=False,
-)
 @pytest.mark.parametrize(
     "publication",
     [

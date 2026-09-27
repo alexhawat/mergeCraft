@@ -358,10 +358,6 @@ def _gap_findings() -> list[dict[str, Any]]:
     return [finding("Verified Major: the retry loop never backs off.", line=12)]
 
 
-@pytest.mark.xfail(
-    reason="green after VP2.5: Phase 4 publishes; no credential-gap demotion",
-    strict=False,
-)
 async def test_credential_gap_with_a_published_request_changes_classifies_by_its_verdict(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -407,10 +403,6 @@ async def test_credential_gap_with_an_agent_published_verdict_is_not_demoted(
     assert record.failure_reason is None
 
 
-@pytest.mark.xfail(
-    reason="green after VP2.6: _classify_outcome gains the publication receipt input",
-    strict=False,
-)
 def test_credential_gap_is_not_a_classifier_input() -> None:
     """The classifier reads the receipt, never the roster: a published verdict passes."""
     from mergecraft.main_outcome import _classify_outcome
@@ -428,10 +420,6 @@ def test_credential_gap_is_not_a_classifier_input() -> None:
     assert reason is None
 
 
-@pytest.mark.xfail(
-    reason="green after VP2.5 + VP2.6: an unpublished recorded verdict is inconclusive",
-    strict=False,
-)
 async def test_recorded_verdict_the_run_could_not_publish_is_not_passed(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
