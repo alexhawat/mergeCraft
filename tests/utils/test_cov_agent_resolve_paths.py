@@ -615,10 +615,6 @@ def _warnings_during(action: Any) -> tuple[Any, list[str]]:
     return value, captured
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.4: the chain deadline falls back to the default run timeout",
-    strict=False,
-)
 def test_malformed_run_timeout_keeps_a_finite_chain_deadline(monkeypatch: MonkeyPatch) -> None:
     """Error: ``MERGECRAFT_RUN_TIMEOUT_S=not-a-number`` must not remove the chain deadline."""
     import time
@@ -635,10 +631,6 @@ def test_malformed_run_timeout_keeps_a_finite_chain_deadline(monkeypatch: Monkey
     assert warnings, "the fallback must warn, not log at debug"
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.4: the chain deadline falls back to the default run timeout",
-    strict=False,
-)
 def test_failing_run_bounds_resolution_warns_and_uses_the_default(
     monkeypatch: MonkeyPatch,
 ) -> None:

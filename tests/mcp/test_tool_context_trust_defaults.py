@@ -32,15 +32,6 @@ from mergecraft.utils.github import GitHubClient
 if TYPE_CHECKING:
     from pathlib import Path
 
-_GREEN_AFTER_RESTRICTIVE_DEFAULT = pytest.mark.xfail(
-    reason="green after VP4.2: ToolContext defaults trust_tier to untrusted",
-    strict=False,
-)
-_GREEN_AFTER_FALLBACK_TIER = pytest.mark.xfail(
-    reason="green after VP4.3: the deterministic-record fallback context is untrusted",
-    strict=False,
-)
-
 
 def _bare(tmp_path: Path, **kwargs: Any) -> ToolContext:
     """A ``ToolContext`` with no trust argument unless the caller passes one."""
@@ -56,14 +47,12 @@ def _bare(tmp_path: Path, **kwargs: Any) -> ToolContext:
     )
 
 
-@_GREEN_AFTER_RESTRICTIVE_DEFAULT
 def test_a_bare_context_is_untrusted_on_both_axes(tmp_path: Path) -> None:
     ctx = _bare(tmp_path)
     assert ctx.trust_tier == "untrusted"
     assert ctx.authority_trust == "untrusted"
 
 
-@_GREEN_AFTER_RESTRICTIVE_DEFAULT
 def test_dataclass_metadata_states_the_same_default(tmp_path: Path) -> None:
     """The field metadata and ``__init__`` agree: one default, restrictive."""
     del tmp_path
@@ -121,7 +110,6 @@ class _Stop(Exception):
     """Raised by the render stub once it has captured the record's inputs."""
 
 
-@_GREEN_AFTER_FALLBACK_TIER
 async def test_deterministic_record_fallback_context_is_untrusted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

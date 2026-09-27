@@ -23,10 +23,6 @@ if TYPE_CHECKING:
 
     from mergecraft.scm.protocol import ScmProvider
 
-_GREEN_AFTER_CLOSING_ISSUES_FLAG = pytest.mark.xfail(
-    reason="green after VP4.5: a failed closing-issues lookup is logged and flagged",
-    strict=False,
-)
 
 _PULL = {
     "number": 7,
@@ -82,7 +78,6 @@ async def _get(tmp_path: Path, graphql: Any) -> tuple[dict[str, Any], list[str]]
     return cast("dict[str, Any]", json.loads(result.content[0]["text"])), captured
 
 
-@_GREEN_AFTER_CLOSING_ISSUES_FLAG
 @pytest.mark.parametrize(
     "failure",
     [

@@ -750,10 +750,6 @@ def _explicit_ctx(tmp_path: Path) -> ToolContext:
     )
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.1: an unknown tool-state trust tier normalizes as untrusted",
-    strict=False,
-)
 @pytest.mark.parametrize("tier", [None, "weird", ""])
 @pytest.mark.asyncio
 async def test_unknown_trust_tier_normalizes_as_untrusted(

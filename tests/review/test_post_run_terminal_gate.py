@@ -277,10 +277,6 @@ async def test_finalize_without_a_submission_does_not_fail_the_result(tmp_path: 
     assert reason == _MISSING_VERDICT_REASON
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.6: the docstring describes what finalize_agent_result does",
-    strict=False,
-)
 def test_finalize_docstring_does_not_claim_a_hard_fail() -> None:
     from mergecraft.agents.post_run import finalize_agent_result
 

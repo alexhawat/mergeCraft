@@ -809,10 +809,6 @@ def _extract_active_section(text: str) -> str:
 # ``trusted``.
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.1: learning provenance falls back to untrusted",
-    strict=False,
-)
 @pytest.mark.parametrize("tier", [None, "weird", ""])
 def test_unknown_trust_tier_stamps_learning_provenance_untrusted(
     tmp_path: Path, tier: str | None
@@ -842,10 +838,6 @@ def test_known_trust_tier_is_stamped_on_learning_provenance(tmp_path: Path, tier
     assert build_provenance_record(state).trust_tier == tier
 
 
-@pytest.mark.xfail(
-    reason="green after VP4.1: learning provenance falls back to untrusted",
-    strict=False,
-)
 def test_provenance_docstring_no_longer_promises_a_trusted_fallback() -> None:
     """The documented fallback matches the code: unknown is untrusted."""
     _require_learnings()
