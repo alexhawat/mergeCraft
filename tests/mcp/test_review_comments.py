@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
-import pytest
 from tests.support.paged_scm import PagedListScm
 from tests.support.tool_context import make_tool_context
 
@@ -23,11 +22,6 @@ if TYPE_CHECKING:
 
     from mergecraft.scm.protocol import ScmProvider
 
-_GREEN_AFTER_PAGINATION = pytest.mark.xfail(
-    reason="green after VP3.5: list_pull_request_reviews paginates and reports incomplete",
-    strict=False,
-)
-
 
 async def _list(tmp_path: Path, scm: PagedListScm) -> dict[str, Any]:
     ctx = make_tool_context(tmp_path, trust_tier="trusted", scm=cast("ScmProvider", scm))
@@ -36,7 +30,6 @@ async def _list(tmp_path: Path, scm: PagedListScm) -> dict[str, Any]:
     return cast("dict[str, Any]", json.loads(result.content[0]["text"]))
 
 
-@_GREEN_AFTER_PAGINATION
 async def test_more_than_100_reviews_include_the_newest(tmp_path: Path) -> None:
     scm = PagedListScm(total=150)
     payload = await _list(tmp_path, scm)
@@ -49,7 +42,6 @@ async def test_more_than_100_reviews_include_the_newest(tmp_path: Path) -> None:
     assert not payload.get("incomplete")
 
 
-@_GREEN_AFTER_PAGINATION
 async def test_the_page_cap_stops_the_listing_and_says_incomplete(tmp_path: Path) -> None:
     scm = PagedListScm(endless=True)
     payload = await _list(tmp_path, scm)

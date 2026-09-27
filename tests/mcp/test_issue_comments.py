@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
-import pytest
 from tests.support.paged_scm import PagedListScm
 from tests.support.tool_context import make_tool_context
 
@@ -24,11 +23,6 @@ if TYPE_CHECKING:
 
     from mergecraft.scm.protocol import ScmProvider
 
-_GREEN_AFTER_PAGINATION = pytest.mark.xfail(
-    reason="green after VP3.4: get_issue_comments paginates and reports incomplete",
-    strict=False,
-)
-
 
 async def _list(tmp_path: Path, scm: PagedListScm) -> dict[str, Any]:
     ctx = make_tool_context(tmp_path, trust_tier="trusted", scm=cast("ScmProvider", scm))
@@ -37,7 +31,6 @@ async def _list(tmp_path: Path, scm: PagedListScm) -> dict[str, Any]:
     return cast("dict[str, Any]", json.loads(result.content[0]["text"]))
 
 
-@_GREEN_AFTER_PAGINATION
 async def test_250_comments_over_three_pages_come_back_complete(tmp_path: Path) -> None:
     scm = PagedListScm(total=250)
     payload = await _list(tmp_path, scm)
@@ -49,7 +42,6 @@ async def test_250_comments_over_three_pages_come_back_complete(tmp_path: Path) 
     assert not payload.get("incomplete")
 
 
-@_GREEN_AFTER_PAGINATION
 async def test_exactly_one_full_page_asks_once_more_and_stops_on_the_empty_page(
     tmp_path: Path,
 ) -> None:
@@ -62,7 +54,6 @@ async def test_exactly_one_full_page_asks_once_more_and_stops_on_the_empty_page(
     assert not payload.get("incomplete")
 
 
-@_GREEN_AFTER_PAGINATION
 async def test_the_page_cap_stops_the_listing_and_says_incomplete(tmp_path: Path) -> None:
     """Error: a listing that never ends is capped, and the response says it was cut."""
     scm = PagedListScm(endless=True)

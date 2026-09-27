@@ -9,9 +9,12 @@ implementation: every test that needs new behaviour carries a non-strict
 regression guard is green from the start. When an implementation step lands,
 its markers are removed so the suite ends with real passes.
 
-**Status:** the publication and receipt contracts have landed and their
-markers are lifted; the thread-retirement, listing and fail-closed-default
-contracts are still red. When the markers were lifted, one check was
+**Status:** the publication and receipt contracts, and the thread-retirement,
+resolve-payload and listing contracts, have landed and their markers are
+lifted; only the fail-closed-default contracts are still red. Line overlap is
+matched against the new (RIGHT-side) hunk ranges; a thread whose anchor moved
+off the new side qualifies through GitHub's outdated flag, which is what the
+outdated-thread tests pin. When the markers were lifted, one check was
 tightened, not loosened: the `create_pull_request_review` variant of the
 different-verdict test now parses the tool's JSON response instead of matching
 a `"skipped": true` substring, so any success-plus-skip answer fails it.
@@ -105,33 +108,33 @@ implementation has one target.
 
 | Contract | Layer | Test | Red until |
 | --- | --- | --- | --- |
-| The five original cases hold on the line-and-author signature | unit | `tests/test_review_resolution.py` (first five `test_*` after the extractor test) | retirement rule |
-| A line outside every hunk stays open though the file changed; hunk bounds are inclusive; an outdated thread qualifies without overlap; an unknown line resolves nothing | unit | `tests/test_review_resolution.py::test_a_thread_whose_line_is_outside_every_hunk_stays_open_even_when_its_file_changed`, `::test_hunk_boundaries_are_inclusive`, `::test_the_line_just_outside_a_hunk_does_not_qualify`, `::test_an_outdated_thread_qualifies_without_line_overlap`, `::test_an_unknown_line_resolves_nothing`, `::test_no_changed_lines_resolves_only_outdated_threads` | retirement rule |
-| A marked thread by an unexpected login, by the shared Actions bot, or with no author stays open | unit | `tests/test_review_resolution.py::test_a_marked_thread_by_a_login_outside_the_publisher_set_stays_open`, `::test_a_marked_thread_by_the_shared_actions_bot_stays_open`, `::test_a_comment_with_no_author_resolves_nothing` | retirement rule |
-| An empty publisher set resolves nothing and logs once why | unit | `tests/test_review_resolution.py::test_an_empty_publisher_set_resolves_nothing_and_says_so_once` | retirement rule |
-| An outdated thread by an expected publisher whose finding is gone resolves | unit / integration | `tests/test_review_resolution.py::test_an_expected_publisher_outdated_thread_whose_finding_is_gone_resolves`; `tests/mcp/test_review.py::test_rereview_resolves_threads_whose_findings_are_gone` | unit: retirement rule; integration: green guard |
-| Re-review keeps a thread whose line no hunk touched; resolves one whose line was touched | integration | `tests/mcp/test_review.py::test_rereview_keeps_a_thread_whose_line_no_hunk_touched`; `::test_rereview_resolves_a_thread_whose_line_a_hunk_touched` (guard) | retirement feed |
-| A finding demoted to the body, or still in the terminal submission but not inline, keeps its thread open | integration | `tests/mcp/test_review.py::test_rereview_keeps_the_thread_of_a_finding_demoted_to_the_body`, `::test_rereview_keeps_the_thread_of_a_finding_still_in_the_terminal_submission` | retirement feed |
-| An unexpected author, or `github-actions[bot]` even when it posted the review, keeps the thread open; no publisher → nothing resolves and the log says why | integration | `tests/mcp/test_review.py::test_rereview_keeps_a_marked_thread_by_an_unexpected_author`, `::test_rereview_never_trusts_the_shared_actions_bot`, `::test_rereview_with_no_expected_publisher_resolves_nothing_and_says_why` | retirement feed |
+| The five original cases hold on the line-and-author signature | unit | `tests/test_review_resolution.py` (first five `test_*` after the extractor test) | green (retirement and listing work landed) |
+| A line outside every hunk stays open though the file changed; hunk bounds are inclusive; an outdated thread qualifies without overlap; an unknown line resolves nothing | unit | `tests/test_review_resolution.py::test_a_thread_whose_line_is_outside_every_hunk_stays_open_even_when_its_file_changed`, `::test_hunk_boundaries_are_inclusive`, `::test_the_line_just_outside_a_hunk_does_not_qualify`, `::test_an_outdated_thread_qualifies_without_line_overlap`, `::test_an_unknown_line_resolves_nothing`, `::test_no_changed_lines_resolves_only_outdated_threads` | green (retirement and listing work landed) |
+| A marked thread by an unexpected login, by the shared Actions bot, or with no author stays open | unit | `tests/test_review_resolution.py::test_a_marked_thread_by_a_login_outside_the_publisher_set_stays_open`, `::test_a_marked_thread_by_the_shared_actions_bot_stays_open`, `::test_a_comment_with_no_author_resolves_nothing` | green (retirement and listing work landed) |
+| An empty publisher set resolves nothing and logs once why | unit | `tests/test_review_resolution.py::test_an_empty_publisher_set_resolves_nothing_and_says_so_once` | green (retirement and listing work landed) |
+| An outdated thread by an expected publisher whose finding is gone resolves | unit / integration | `tests/test_review_resolution.py::test_an_expected_publisher_outdated_thread_whose_finding_is_gone_resolves`; `tests/mcp/test_review.py::test_rereview_resolves_threads_whose_findings_are_gone` | green (retirement and listing work landed) |
+| Re-review keeps a thread whose line no hunk touched; resolves one whose line was touched | integration | `tests/mcp/test_review.py::test_rereview_keeps_a_thread_whose_line_no_hunk_touched`; `::test_rereview_resolves_a_thread_whose_line_a_hunk_touched` (guard) | green (retirement and listing work landed) |
+| A finding demoted to the body, or still in the terminal submission but not inline, keeps its thread open | integration | `tests/mcp/test_review.py::test_rereview_keeps_the_thread_of_a_finding_demoted_to_the_body`, `::test_rereview_keeps_the_thread_of_a_finding_still_in_the_terminal_submission` | green (retirement and listing work landed) |
+| An unexpected author, or `github-actions[bot]` even when it posted the review, keeps the thread open; no publisher → nothing resolves and the log says why | integration | `tests/mcp/test_review.py::test_rereview_keeps_a_marked_thread_by_an_unexpected_author`, `::test_rereview_never_trusts_the_shared_actions_bot`, `::test_rereview_with_no_expected_publisher_resolves_nothing_and_says_why` | green (retirement and listing work landed) |
 | Re-raised findings and full reviews never resolve | integration | `tests/mcp/test_review.py::test_rereview_keeps_threads_for_findings_it_raised_again`, `::test_full_review_never_resolves_threads` | green guards |
 
 ### A missing resolve payload is not a resolution
 
 | Contract | Layer | Test | Red until |
 | --- | --- | --- | --- |
-| Empty, null or stateless payloads return not resolved | unit | `tests/mcp/test_review.py::test_resolve_review_thread_treats_a_missing_payload_as_not_resolved` | fail-closed resolve |
-| The tool does not mark the run updated on such a payload | unit | `tests/mcp/test_review.py::test_resolve_tool_does_not_mark_the_run_updated_on_a_missing_payload` | fail-closed resolve |
+| Empty, null or stateless payloads return not resolved | unit | `tests/mcp/test_review.py::test_resolve_review_thread_treats_a_missing_payload_as_not_resolved` | green (retirement and listing work landed) |
+| The tool does not mark the run updated on such a payload | unit | `tests/mcp/test_review.py::test_resolve_tool_does_not_mark_the_run_updated_on_a_missing_payload` | green (retirement and listing work landed) |
 | Well-formed payloads are reported as-is; a real resolution marks the run updated | unit | `tests/mcp/test_review.py::test_resolve_review_thread_reports_what_github_said`, `::test_resolve_tool_marks_the_run_updated_when_github_resolved` | green guards |
-| The MCP helper agrees with the SCM adapter, which already fails closed | unit | `tests/scm/test_protocol.py::test_mcp_resolve_helper_agrees_with_the_adapter`; `::test_adapter_resolve_review_thread_fails_closed_on_a_missing_payload` (guard) | fail-closed resolve |
+| The MCP helper agrees with the SCM adapter, which already fails closed | unit | `tests/scm/test_protocol.py::test_mcp_resolve_helper_agrees_with_the_adapter`; `::test_adapter_resolve_review_thread_fails_closed_on_a_missing_payload` (guard) | green (retirement and listing work landed) |
 
 ### Listings that do not truncate
 
 | Contract | Layer | Test | Red until |
 | --- | --- | --- | --- |
-| 250 comments over three pages come back complete | unit | `tests/mcp/test_issue_comments.py::test_250_comments_over_three_pages_come_back_complete` | comment pagination |
-| A full last page asks once more and stops on the empty page | unit | `tests/mcp/test_issue_comments.py::test_exactly_one_full_page_asks_once_more_and_stops_on_the_empty_page` | comment pagination |
-| The page cap stops the listing and says `incomplete` | unit | `tests/mcp/test_issue_comments.py::test_the_page_cap_stops_the_listing_and_says_incomplete`; `tests/mcp/test_review_comments.py::test_the_page_cap_stops_the_listing_and_says_incomplete` | comment / review pagination |
-| More than 100 reviews include the newest | unit | `tests/mcp/test_review_comments.py::test_more_than_100_reviews_include_the_newest` | review pagination |
+| 250 comments over three pages come back complete | unit | `tests/mcp/test_issue_comments.py::test_250_comments_over_three_pages_come_back_complete` | green (retirement and listing work landed) |
+| A full last page asks once more and stops on the empty page | unit | `tests/mcp/test_issue_comments.py::test_exactly_one_full_page_asks_once_more_and_stops_on_the_empty_page` | green (retirement and listing work landed) |
+| The page cap stops the listing and says `incomplete` | unit | `tests/mcp/test_issue_comments.py::test_the_page_cap_stops_the_listing_and_says_incomplete`; `tests/mcp/test_review_comments.py::test_the_page_cap_stops_the_listing_and_says_incomplete` | green (retirement and listing work landed) |
+| More than 100 reviews include the newest | unit | `tests/mcp/test_review_comments.py::test_more_than_100_reviews_include_the_newest` | green (retirement and listing work landed) |
 | A short first page is one request with the same rows; no comments is an empty complete listing | unit | `tests/mcp/test_issue_comments.py::test_a_short_first_page_is_one_request`, `::test_no_comments_is_an_empty_complete_listing`; `tests/mcp/test_review_comments.py::test_a_short_first_page_is_one_request_with_the_same_row_shape` | green guards |
 | The recorded endpoint pins for both tools are unchanged | integration | `tests/scm/test_protocol.py::test_github_tool_endpoint_behaviour_is_unchanged` | green guard |
 

@@ -463,10 +463,6 @@ async def test_adapter_resolve_review_thread_fails_closed_on_a_missing_payload(
         pytest.param({"resolveReviewThread": {"thread": {}}}, id="thread_without_state"),
     ],
 )
-@pytest.mark.xfail(
-    reason="green after VP3.3: the MCP resolve helper agrees with the SCM adapter",
-    strict=False,
-)
 async def test_mcp_resolve_helper_agrees_with_the_adapter(
     tmp_path: Path, payload: dict[str, Any]
 ) -> None:

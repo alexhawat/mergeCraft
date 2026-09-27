@@ -741,10 +741,6 @@ async def test_self_review_config_publishes_comments_before_isolated_approval(
 # raised anywhere in the terminal submission — inline, demoted to the body, or
 # deferred. The create-review response's login is never added to the set.
 
-_GREEN_AFTER_RETIREMENT_FEED = pytest.mark.xfail(
-    reason="green after VP3.2: retirement is fed changed lines, publishers and the submission",
-    strict=False,
-)
 _APP_BOT = "mergecraft-app[bot]"
 _OLD = stamp_finding_fingerprint(path="src/app.py", body="Old finding.")
 
@@ -783,7 +779,6 @@ async def _post_rereview(ctx: ToolContext, comments: list[dict[str, Any]]) -> An
 _NEW_COMMENT = {"path": "src/app.py", "line": 12, "body": "A different finding."}
 
 
-@_GREEN_AFTER_RETIREMENT_FEED
 @pytest.mark.asyncio
 async def test_rereview_keeps_a_thread_whose_line_no_hunk_touched(tmp_path: Path) -> None:
     """The file changed (lines 40-44), the finding's line (3) did not: the thread stays open."""
@@ -808,7 +803,6 @@ async def test_rereview_resolves_a_thread_whose_line_a_hunk_touched(tmp_path: Pa
     assert github.resolved == ["T-line42"]
 
 
-@_GREEN_AFTER_RETIREMENT_FEED
 @pytest.mark.asyncio
 async def test_rereview_keeps_the_thread_of_a_finding_demoted_to_the_body(tmp_path: Path) -> None:
     """The finding was re-raised, but its anchor is not in the diff, so it went to the body.
@@ -830,7 +824,6 @@ async def test_rereview_keeps_the_thread_of_a_finding_demoted_to_the_body(tmp_pa
     assert github.resolved == []
 
 
-@_GREEN_AFTER_RETIREMENT_FEED
 @pytest.mark.asyncio
 async def test_rereview_keeps_the_thread_of_a_finding_still_in_the_terminal_submission(
     tmp_path: Path,
@@ -855,7 +848,6 @@ async def test_rereview_keeps_the_thread_of_a_finding_still_in_the_terminal_subm
     assert github.resolved == []
 
 
-@_GREEN_AFTER_RETIREMENT_FEED
 @pytest.mark.asyncio
 async def test_rereview_keeps_a_marked_thread_by_an_unexpected_author(tmp_path: Path) -> None:
     """The marker is typeable by anyone; the author is not in the publisher set."""
@@ -868,7 +860,6 @@ async def test_rereview_keeps_a_marked_thread_by_an_unexpected_author(tmp_path: 
     assert github.resolved == []
 
 
-@_GREEN_AFTER_RETIREMENT_FEED
 @pytest.mark.parametrize(
     "publishers", [frozenset(), frozenset({_APP_BOT})], ids=["job_token", "app_configured"]
 )
@@ -893,7 +884,6 @@ async def test_rereview_never_trusts_the_shared_actions_bot(
     assert "github-actions[bot]" not in (ctx.publisher_logins or frozenset())
 
 
-@_GREEN_AFTER_RETIREMENT_FEED
 @pytest.mark.asyncio
 async def test_rereview_with_no_expected_publisher_resolves_nothing_and_says_why(
     tmp_path: Path,
@@ -920,11 +910,6 @@ async def test_rereview_with_no_expected_publisher_resolves_nothing_and_says_why
 
 # ── resolve_review_thread fails closed on a missing payload ──────────────────
 
-_GREEN_AFTER_RESOLVE_FAILS_CLOSED = pytest.mark.xfail(
-    reason="green after VP3.3: a missing or malformed resolve payload is not resolved",
-    strict=False,
-)
-
 
 class _ResolvePayloadGitHub(RecordingReviewGitHub):
     """Answers the resolve mutation with a scripted GraphQL payload."""
@@ -947,7 +932,6 @@ _MALFORMED_RESOLVE_PAYLOADS = [
 ]
 
 
-@_GREEN_AFTER_RESOLVE_FAILS_CLOSED
 @pytest.mark.parametrize("payload", _MALFORMED_RESOLVE_PAYLOADS)
 @pytest.mark.asyncio
 async def test_resolve_review_thread_treats_a_missing_payload_as_not_resolved(
@@ -970,7 +954,6 @@ async def test_resolve_review_thread_reports_what_github_said(tmp_path: Path, st
     assert await resolve_review_thread(ctx, "T1") is state
 
 
-@_GREEN_AFTER_RESOLVE_FAILS_CLOSED
 @pytest.mark.parametrize("payload", _MALFORMED_RESOLVE_PAYLOADS)
 @pytest.mark.asyncio
 async def test_resolve_tool_does_not_mark_the_run_updated_on_a_missing_payload(

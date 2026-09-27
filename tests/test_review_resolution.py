@@ -36,11 +36,6 @@ _PUBLISHERS = frozenset({_PUBLISHER})
 # The hunk the new commits touched: lines 10-15 of ``src/app.py``.
 _TOUCHED: dict[str, list[range]] = {"src/app.py": [range(10, 16)]}
 
-_GREEN_AFTER_LINE_AND_AUTHOR = pytest.mark.xfail(
-    reason="green after VP3.1: resolvable_thread_ids takes changed_lines and publishers",
-    strict=False,
-)
-
 
 def _thread(
     *,
@@ -86,23 +81,19 @@ def test_fingerprints_are_extracted_from_a_stamped_body() -> None:
 # ── the five original cases, on the line-and-author signature ────────────────
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_thread_is_resolvable_when_its_finding_is_gone_from_touched_code() -> None:
     assert _resolve([_thread()], current=frozenset({_STILL_FP})) == ["T1"]
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_re_raised_finding_is_never_resolved() -> None:
     assert _resolve([_thread()], current=frozenset({_FIXED_FP})) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_untouched_file_is_never_resolved() -> None:
     """An incremental scope that never looked at the file proves nothing about it."""
     assert _resolve([_thread()], lines={"src/other.py": [range(1, 100)]}) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_thread_with_a_human_reply_is_left_alone() -> None:
     thread = _thread(
         extra_comments=[
@@ -112,7 +103,6 @@ def test_thread_with_a_human_reply_is_left_alone() -> None:
     assert _resolve([thread]) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_already_resolved_and_unstamped_threads_are_skipped() -> None:
     threads = [
         _thread(thread_id="T-resolved", resolved=True),
@@ -124,36 +114,30 @@ def test_already_resolved_and_unstamped_threads_are_skipped() -> None:
 # ── line overlap ──────────────────────────────────────────────────────────────
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_a_thread_whose_line_is_outside_every_hunk_stays_open_even_when_its_file_changed() -> None:
     """The file moved, but not the line the finding pointed at."""
     assert _resolve([_thread(line=3)]) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 @pytest.mark.parametrize("line", [10, 15])
 def test_hunk_boundaries_are_inclusive(line: int) -> None:
     assert _resolve([_thread(line=line)]) == ["T1"]
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 @pytest.mark.parametrize("line", [9, 16])
 def test_the_line_just_outside_a_hunk_does_not_qualify(line: int) -> None:
     assert _resolve([_thread(line=line)]) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_an_outdated_thread_qualifies_without_line_overlap() -> None:
     """GitHub marks the thread outdated: the anchored code is gone."""
     assert _resolve([_thread(line=3, outdated=True)]) == ["T1"]
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_an_unknown_line_resolves_nothing() -> None:
     assert _resolve([_thread(line=None)]) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_no_changed_lines_resolves_only_outdated_threads() -> None:
     threads = [_thread(thread_id="T-current"), _thread(thread_id="T-outdated", outdated=True)]
     assert _resolve(threads, lines={}) == ["T-outdated"]
@@ -162,24 +146,20 @@ def test_no_changed_lines_resolves_only_outdated_threads() -> None:
 # ── author identity ───────────────────────────────────────────────────────────
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_a_marked_thread_by_a_login_outside_the_publisher_set_stays_open() -> None:
     """Anyone can type the marker; the author is what proves mergeCraft posted it."""
     assert _resolve([_thread(author="mallory")]) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_a_marked_thread_by_the_shared_actions_bot_stays_open() -> None:
     """``github-actions[bot]`` is a shared identity any same-repo workflow can post as."""
     assert _resolve([_thread(author="github-actions[bot]")]) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_a_comment_with_no_author_resolves_nothing() -> None:
     assert _resolve([_thread(author=None)]) == []
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_an_empty_publisher_set_resolves_nothing_and_says_so_once() -> None:
     from loguru import logger
 
@@ -198,7 +178,6 @@ def test_an_empty_publisher_set_resolves_nothing_and_says_so_once() -> None:
     assert len(about_identity) == 1, captured
 
 
-@_GREEN_AFTER_LINE_AND_AUTHOR
 def test_an_expected_publisher_outdated_thread_whose_finding_is_gone_resolves() -> None:
     """Happy path, the fail-safe rules do not over-reject."""
     threads = [_thread(line=3, outdated=True)]
