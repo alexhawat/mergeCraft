@@ -638,11 +638,12 @@ def _bound_receipt(
 def _record_publication_gap(ctx: ToolContext, review: ReviewRecord) -> list[str]:
     """Record submission findings GitHub does not show inline on ``review``.
 
-    Only a receipt bound by the publisher (``verdict`` set) knows its inline
-    set; an unbound receipt leaves the recorded gap untouched rather than
-    claiming every finding is missing.
+    Only a receipt bound to a verdict whose inline set is known knows what
+    GitHub shows inline; an unbound receipt, or a recovered one whose inline
+    comments could not be listed (``inline_fingerprints is None``), leaves the
+    recorded gap untouched rather than claiming every finding is missing.
     """
-    if review.verdict is None:
+    if review.verdict is None or review.inline_fingerprints is None:
         return list(ctx.tool_state.publication_incomplete)
     submission = ctx.tool_state.terminal_submission
     missing = sorted(_submission_fingerprints(submission) - set(review.inline_fingerprints))
@@ -655,6 +656,69 @@ def _record_publication_gap(ctx: ToolContext, review: ReviewRecord) -> list[str]
             ", ".join(missing),
         )
     return missing
+
+
+def _receipt_conflict_response(
+    ctx: ToolContext,
+    review: ReviewRecord,
+    *,
+    pull_number: int,
+    commit_id: str,
+) -> dict[str, Any] | None:
+    """Return the no-second-POST response when ``review`` is not the recorded verdict.
+
+    ``None`` when there is no recorded terminal submission, or the receipt is
+    bound to the recorded verdict. Otherwise GitHub already holds a review from
+    this run on ``commit_id`` and no second review is posted:
+
+    * the receipt proves a different verdict -> ``terminal_publication_mismatch``
+      is set and the response names both verdicts (VP-D5);
+    * the receipt proves no verdict (a recovered review whose GitHub state is
+      neither ``APPROVED`` nor ``CHANGES_REQUESTED``) -> the response says the
+      recorded verdict is not proven published (``publicationUnproven``). The
+      failure flag clears (a review did reach GitHub), and the run classifies
+      ``inconclusive`` because a verdict-less receipt is never a receipt for the
+      recorded verdict (``main_outcome._publication_outcome_inputs``).
+    """
+    submission = ctx.tool_state.terminal_submission
+    if submission is None:
+        return None
+    recorded = str(submission.verdict)
+    if review.verdict is None:
+        ctx.tool_state.terminal_publication_failed = False
+        reason = (
+            f"review {review.id} on sha {commit_id} shows neither an approval nor a change "
+            f"request, so it proves no verdict; the recorded verdict {recorded} is not "
+            "proven published (no second review is posted)"
+        )
+        logger.warning("unproven publication on PR #{}: {}", pull_number, reason)
+        return {
+            "success": False,
+            "skipped": True,
+            "published": False,
+            "reason": reason,
+            "reviewId": review.id,
+            "recordedVerdict": recorded,
+            "publicationUnproven": True,
+        }
+    if review.verdict != recorded:
+        ctx.tool_state.terminal_publication_mismatch = True
+        reason = (
+            f"review {review.id} on sha {commit_id} already shows verdict {review.verdict}; "
+            f"the recorded verdict {recorded} was not published (no second review is posted)"
+        )
+        logger.warning("publication mismatch on PR #{}: {}", pull_number, reason)
+        return {
+            "success": False,
+            "skipped": True,
+            "published": False,
+            "reason": reason,
+            "reviewId": review.id,
+            "publishedVerdict": review.verdict,
+            "recordedVerdict": recorded,
+            "publicationMismatch": True,
+        }
+    return None
 
 
 def _existing_publication_response(
@@ -678,30 +742,16 @@ def _existing_publication_response(
       ``terminal_publication_mismatch`` is set.
 
     A receipt with no reviewed sha (the deterministic record's diagnostic
-    review) never matches.
+    review) never matches. A receipt on this sha that proves no verdict (a
+    recovered COMMENT review) posts nothing either, but never counts as the
+    recorded verdict's publication: see :func:`_receipt_conflict_response`.
     """
     review = ctx.tool_state.review
     if review is None or not commit_id or review.reviewed_sha != commit_id:
         return None
-    submission = ctx.tool_state.terminal_submission
-    recorded = str(submission.verdict) if submission is not None else None
-    if review.verdict is not None and recorded is not None and review.verdict != recorded:
-        ctx.tool_state.terminal_publication_mismatch = True
-        reason = (
-            f"review {review.id} on sha {commit_id} already shows verdict {review.verdict}; "
-            f"the recorded verdict {recorded} was not published (no second review is posted)"
-        )
-        logger.warning("publication mismatch on PR #{}: {}", pull_number, reason)
-        return {
-            "success": False,
-            "skipped": True,
-            "published": False,
-            "reason": reason,
-            "reviewId": review.id,
-            "publishedVerdict": review.verdict,
-            "recordedVerdict": recorded,
-            "publicationMismatch": True,
-        }
+    conflict = _receipt_conflict_response(ctx, review, pull_number=pull_number, commit_id=commit_id)
+    if conflict is not None:
+        return conflict
     # Callers establish the current PR scope and head before reaching this
     # idempotent match. A receipt for the recorded verdict therefore resolves
     # any stale failure or mismatch state without creating a duplicate review.
@@ -1163,6 +1213,96 @@ async def _recover_review_after_lost_receipt(
     return None
 
 
+_REVIEW_STATE_VERDICTS: dict[str, str] = {
+    "APPROVED": "approve",
+    "CHANGES_REQUESTED": "request_changes",
+}
+
+
+def _recovered_review_verdict(review: dict[str, Any]) -> str | None:
+    """The verdict a recovered review's GitHub state proves, or ``None``.
+
+    Only ``APPROVED`` and ``CHANGES_REQUESTED`` prove a verdict. ``COMMENTED``
+    (including an approve that fell back to COMMENT) or a missing state proves
+    none: the recovered review cannot show which verdict it carried.
+    """
+    return _REVIEW_STATE_VERDICTS.get(str(review.get("state") or "").strip().upper())
+
+
+async def _recovered_review_inline_comments(
+    ctx: ToolContext, *, pull_number: int, review_id: int
+) -> list[dict[str, Any]] | None:
+    """List the recovered review's inline comments, or ``None`` when unreadable.
+
+    ``None`` (never ``[]``) on any failure, a non-list page, or a listing cut by
+    the page cap: an unknown inline set must not read as "GitHub shows no
+    finding inline".
+    """
+    from mergecraft.mcp.list_pages import collect_list_pages
+
+    endpoint = (
+        f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/reviews/{review_id}/comments"
+    )
+
+    async def _page(params: dict[str, Any]) -> list[Any]:
+        raw = await ctx.scm.get(endpoint, params=params)
+        if not isinstance(raw, list):
+            msg = f"unexpected {type(raw).__name__} page"
+            raise TypeError(msg)
+        return raw
+
+    try:
+        listing = await collect_list_pages(_page, label=f"review {review_id} inline comments")
+    except Exception as exc:
+        logger.warning(
+            "could not list inline comments of recovered review {} on PR #{}: {}",
+            review_id,
+            pull_number,
+            exc,
+        )
+        return None
+    if listing.incomplete:
+        return None
+    return listing.rows
+
+
+async def _recovered_receipt(
+    ctx: ToolContext,
+    review: dict[str, Any],
+    *,
+    pull_number: int,
+    commit_id: str | None,
+) -> ReviewRecord:
+    """Bind a recovered review's receipt from what GitHub shows, never the unsent payload.
+
+    ``verdict`` comes from the review's state (:func:`_recovered_review_verdict`).
+    Fingerprints come from the review's body markers plus its listed inline
+    comments. When the inline comments cannot be listed, ``inline_fingerprints``
+    is ``None`` and ``payload_hash`` stays unset: the fingerprint set is unknown.
+    ``reviewed_sha`` is the review's own ``commit_id``, falling back to the head
+    the recovery searched for, so a later publish still finds this receipt and
+    posts no duplicate.
+    """
+    review_id = int(review["id"])
+    verdict = _recovered_review_verdict(review)
+    comments = await _recovered_review_inline_comments(
+        ctx, pull_number=pull_number, review_id=review_id
+    )
+    inline = _inline_marker_fingerprints(comments) if comments is not None else None
+    payload_hash: str | None = None
+    if verdict is not None and inline is not None:
+        published = inline | finding_fingerprints_in(str(review.get("body") or ""))
+        payload_hash = _receipt_payload_hash(verdict, published)
+    return ReviewRecord(
+        id=review_id,
+        node_id=str(review.get("node_id") or ""),
+        reviewed_sha=str(review.get("commit_id") or "") or commit_id,
+        verdict=verdict,
+        payload_hash=payload_hash,
+        inline_fingerprints=tuple(sorted(inline)) if inline is not None else None,
+    )
+
+
 def _finding_rows_for_provenance(ctx: ToolContext) -> list[dict[str, Any]]:
     """Collect finding rows for provenance display, including terminal submission."""
     rows = [row for row in ctx.tool_state.iter_finding_rows() if isinstance(row, dict)]
@@ -1430,17 +1570,34 @@ async def _publish_github_review(
         ctx.tool_state.terminal_publication_failed = True
         raise
     review_id = int(result["id"])
-    published_verdict = (
-        str(submission.verdict)
-        if submission is not None
-        else _requested_publication_verdict(params)
-    )
-    receipt = _bound_receipt(
-        result,
-        posted=accepted_payloads[-1] if accepted_payloads else payload,
-        verdict=published_verdict,
-    )
-    ctx.tool_state.review = receipt
+    if recovered is not None:
+        # The create response was lost, so what this run sent is not proof of
+        # what GitHub accepted: bind the receipt from the recovered review.
+        receipt = await _recovered_receipt(
+            ctx, recovered, pull_number=pull_number, commit_id=payload.get("commit_id")
+        )
+        ctx.tool_state.review = receipt
+        ctx.tool_state.terminal_publication_failed = False
+        conflict = _receipt_conflict_response(
+            ctx,
+            receipt,
+            pull_number=pull_number,
+            commit_id=str(receipt.reviewed_sha or ""),
+        )
+        if conflict is not None:
+            return conflict
+    else:
+        published_verdict = (
+            str(submission.verdict)
+            if submission is not None
+            else _requested_publication_verdict(params)
+        )
+        receipt = _bound_receipt(
+            result,
+            posted=accepted_payloads[-1] if accepted_payloads else payload,
+            verdict=published_verdict,
+        )
+        ctx.tool_state.review = receipt
     # Clear only after the response has yielded a parseable id and the local
     # receipt has been stored. Failed or malformed retry responses remain
     # unresolved and continue to fail closed in final outcome classification.

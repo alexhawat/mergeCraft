@@ -117,8 +117,12 @@ class ReviewRecord:
     ``payload_hash`` is ``sha256(verdict + "\n" + "\n".join(sorted(fingerprints)))``
     over the ``mergecraft-finding:v1`` markers in the published body and inline
     comments, and ``inline_fingerprints`` holds the markers GitHub shows inline.
-    A receipt that was not produced by the publisher (the deterministic record's
-    diagnostic review, or a recovered one) leaves all three unset.
+    The deterministic record's diagnostic review leaves all three unset. A review
+    recovered after its create response was lost is bound from what GitHub shows:
+    ``verdict`` from its state (``APPROVED`` / ``CHANGES_REQUESTED``; any other
+    state proves no verdict and leaves it unset), and ``inline_fingerprints`` from
+    its listed inline comments, or ``None`` when that list could not be read (the
+    inline set is unknown, so no publication gap is claimed from it).
     """
 
     id: int
@@ -126,7 +130,7 @@ class ReviewRecord:
     reviewed_sha: str | None
     verdict: str | None = None
     payload_hash: str | None = None
-    inline_fingerprints: tuple[str, ...] = ()
+    inline_fingerprints: tuple[str, ...] | None = ()
 
 
 @dataclass(slots=True)

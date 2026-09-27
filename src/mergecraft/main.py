@@ -34,6 +34,7 @@ from mergecraft.main_outcome import (
     _classify_outcome,
     _is_review_mode,
     _publication_outcome_inputs,
+    _publication_unproven,
     _publish_span_attrs,
     _verdict_protocol_publish,
 )
@@ -367,8 +368,11 @@ def _publication_record_lines(tool_state: ToolState) -> list[str]:
 
     A publication mismatch names both verdicts: the one GitHub shows (published
     earlier in this run) and the final recorded one, which was not published.
-    A same-verdict publication lists the recorded findings its inline comments
-    lack, by fingerprint. Empty when the published review matches the record.
+    A review on this head that proves no verdict (recovered after a lost create
+    response, state neither approval nor change request) says the recorded
+    verdict is not proven published. A same-verdict publication lists the
+    recorded findings its inline comments lack, by fingerprint. Empty when the
+    published review matches the record.
     """
     lines: list[str] = []
     review = tool_state.review
@@ -381,6 +385,19 @@ def _publication_record_lines(tool_state: ToolState) -> list[str]:
             f"**Publication mismatch:** GitHub shows the `{published}` review this run "
             f"published earlier on this head; the final recorded verdict `{recorded}` was "
             "not published, and no second review was posted.",
+        ]
+    elif (
+        submission is not None
+        and review is not None
+        and review.verdict is None
+        and review.reviewed_sha is not None
+    ):
+        lines += [
+            "",
+            f"**Publication unproven:** GitHub shows a review this run published on this "
+            f"head, but it is neither an approval nor a change request; the final recorded "
+            f"verdict `{submission.verdict}` is not proven published, and no second review "
+            "was posted.",
         ]
     elif tool_state.publication_incomplete:
         missing = sorted(tool_state.publication_incomplete)
@@ -2177,6 +2194,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             terminal_publication_failed=tool_state.terminal_publication_failed,
             terminal_publication_receipt=publication_receipt,
             terminal_publication_mismatch=publication_mismatch,
+            terminal_publication_unproven=_publication_unproven(tool_state),
         )
     if sink_scan_error is not None:
         # A sink hit outranks the published verdict: the run failed, whatever

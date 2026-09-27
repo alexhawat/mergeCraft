@@ -57,6 +57,15 @@ _NO_RECEIPT_TERMINAL_VERDICT_REASON = (
     "terminal review verdict was recorded but the run holds no receipt that it was "
     "published to GitHub"
 )
+# Distinct again: GitHub does hold a review this run published on this head
+# (recovered after its create response was lost), but its state is neither
+# APPROVED nor CHANGES_REQUESTED, so it proves no verdict. It is not a receipt
+# for the recorded verdict, and the reason says why rather than "no receipt".
+_UNPROVEN_RECEIPT_TERMINAL_VERDICT_REASON = (
+    "terminal review verdict was recorded, but the review this run published on this "
+    "head shows neither an approval nor a change request, so it does not prove the "
+    "recorded verdict reached GitHub"
+)
 
 
 def _publication_mismatch_reason(published: str, recorded: str) -> str:
@@ -92,9 +101,10 @@ def _publication_outcome_inputs(
 
     Both are "not applicable" (``None``) unless this is a review-mode run under
     the enforce protocol whose final attempt's submission was accepted: only
-    then does the run owe GitHub a review. The receipt counts only when the
-    publisher bound it to a verdict or a reviewed head; the deterministic
-    record's own diagnostic review (no sha, no verdict) is never a receipt.
+    then does the run owe GitHub a review. The receipt counts only when it is
+    bound to a verdict: the deterministic record's own diagnostic review (no
+    sha, no verdict) is never a receipt, and neither is a review on this head
+    that proves no verdict (see :func:`_publication_unproven`).
     """
     if (
         not _is_review_mode(tool_state.selected_mode)
@@ -103,7 +113,7 @@ def _publication_outcome_inputs(
     ):
         return None, None
     review = tool_state.review
-    receipt = review is not None and (review.verdict is not None or review.reviewed_sha is not None)
+    receipt = review is not None and review.verdict is not None
     mismatch: tuple[str, str] | None = None
     if tool_state.terminal_publication_mismatch:
         submission = tool_state.terminal_submission
@@ -111,6 +121,18 @@ def _publication_outcome_inputs(
         recorded = submission.verdict if submission is not None else None
         mismatch = (published or "an unknown verdict", recorded or "an unknown verdict")
     return receipt, mismatch
+
+
+def _publication_unproven(tool_state: ToolState) -> bool:
+    """True when the run's receipt is a review on a head that proves no verdict.
+
+    That is a review GitHub holds for this run (it has a ``reviewed_sha``) but
+    whose receipt carries no verdict, e.g. one recovered after a lost create
+    response whose state is ``COMMENTED``. The classifier uses it only to name
+    the specific reason when ``terminal_publication_receipt`` is ``False``.
+    """
+    review = tool_state.review
+    return review is not None and review.verdict is None and review.reviewed_sha is not None
 
 
 def _publish_span_attrs(outcome: RunOutcome, mode: Mode | None) -> dict[str, Any]:
@@ -137,6 +159,7 @@ def _classify_outcome(
     terminal_publication_failed: bool = False,
     terminal_publication_receipt: bool | None = None,
     terminal_publication_mismatch: tuple[str, str] | None = None,
+    terminal_publication_unproven: bool = False,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
 
@@ -155,7 +178,9 @@ def _classify_outcome(
     different published verdict (``terminal_publication_mismatch`` =
     ``(published, recorded)``) -> ``RunOutcome.inconclusive`` naming both; a
     received submission with no receipt (``terminal_publication_receipt`` is
-    ``False``) -> ``RunOutcome.inconclusive``. Both publication inputs default
+    ``False``) -> ``RunOutcome.inconclusive``, with a distinct reason when
+    ``terminal_publication_unproven`` says the run's review on this head proves
+    no verdict. The publication inputs default
     to "not applicable" (``None``), so a caller that never publishes (the
     offline classifier) is unchanged, and neither applies under the shadow
     protocol. A roster slot skipped for missing credentials is not an input:
@@ -201,8 +226,13 @@ def _classify_outcome(
             logger.warning("» {}", reason)
             return RunOutcome.inconclusive, reason
         if terminal_publication_receipt is False:
-            logger.warning("» {}", _NO_RECEIPT_TERMINAL_VERDICT_REASON)
-            return RunOutcome.inconclusive, _NO_RECEIPT_TERMINAL_VERDICT_REASON
+            reason = (
+                _UNPROVEN_RECEIPT_TERMINAL_VERDICT_REASON
+                if terminal_publication_unproven
+                else _NO_RECEIPT_TERMINAL_VERDICT_REASON
+            )
+            logger.warning("» {}", reason)
+            return RunOutcome.inconclusive, reason
     # ``setup_policy`` is the closed ``SetupFailurePolicy`` vocabulary; any
     # value other than ``fail`` / ``inconclusive`` (i.e. ``warn``, or the
     # Pydantic default the action-input resolver accepted) means "proceed
@@ -258,6 +288,7 @@ __all__ = [
     "_classify_outcome",
     "_is_review_mode",
     "_publication_outcome_inputs",
+    "_publication_unproven",
     "_publish_span_attrs",
     "_verdict_protocol_publish",
 ]
