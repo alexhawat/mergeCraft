@@ -40,7 +40,7 @@ dependencies = [
     "typesafe-sdk==0.6.0",
     # CDP transport for the host-Chrome verify driver (`mergecraft.browser.cdp`).
     # Pinned to the version already locked transitively via uvicorn[standard].
-    "websockets==15.0.1",
+    "websockets==17.1",
 ]
 
 [project.scripts]
