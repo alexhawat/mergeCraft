@@ -94,6 +94,7 @@ def _ctx(
         static_checks=static_checks or [],
         static_checks_enabled=True,
         ci_gate_checks=ci_gate_checks or {},
+        trust_tier="trusted",
     )
     ctx.trust_tier = "untrusted"
     return ctx

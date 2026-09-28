@@ -106,6 +106,7 @@ def _make_ctx(
         mcp_server_url="",
         tmpdir=str(tmp_path),
         resolved_model="claude-sonnet-4-5",
+        trust_tier="trusted",
     )
 
 

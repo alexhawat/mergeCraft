@@ -92,6 +92,7 @@ def test_shell_disabled_keeps_the_analyzer_surface(tmp_path: Path) -> None:
         static_checks_enabled=False,
         analyzers_mode="auto",
         analyzers_settings_enabled=True,
+        trust_tier="trusted",
     )
     assert trust.analyzers_enabled(ctx) is True
 

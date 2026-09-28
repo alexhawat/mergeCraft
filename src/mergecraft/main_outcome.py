@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from mergecraft.action.inputs import SetupFailurePolicy
     from mergecraft.agents.shared import AgentResult
     from mergecraft.evidence.shadow import VerdictProtocolPrediction
+    from mergecraft.mcp.tool_state import ToolState
     from mergecraft.mcp.verdict import VerdictDiagnostic
     from mergecraft.modes import Mode
 
@@ -49,6 +50,30 @@ _MISSING_TERMINAL_VERDICT_REASON = "no terminal review verdict was submitted for
 _UNPUBLISHED_TERMINAL_VERDICT_REASON = (
     "terminal review verdict was recorded but never published to GitHub"
 )
+# Distinct from both reasons above: a verdict was recorded and no POST failed,
+# yet the run holds no receipt for it. Nothing reached GitHub (the publisher
+# was never reached, or raised before posting). Fail closed, and say which.
+_NO_RECEIPT_TERMINAL_VERDICT_REASON = (
+    "terminal review verdict was recorded but the run holds no receipt that it was "
+    "published to GitHub"
+)
+# Distinct again: GitHub does hold a review this run published on this head
+# (recovered after its create response was lost), but its state is neither
+# APPROVED nor CHANGES_REQUESTED, so it proves no verdict. It is not a receipt
+# for the recorded verdict, and the reason says why rather than "no receipt".
+_UNPROVEN_RECEIPT_TERMINAL_VERDICT_REASON = (
+    "terminal review verdict was recorded, but the review this run published on this "
+    "head shows neither an approval nor a change request, so it does not prove the "
+    "recorded verdict reached GitHub"
+)
+
+
+def _publication_mismatch_reason(published: str, recorded: str) -> str:
+    """Name both verdicts when GitHub shows a different one than the run recorded."""
+    return (
+        f"GitHub shows the {published} review this run published earlier on this head, "
+        f"but the final recorded verdict is {recorded}; it was not published"
+    )
 
 
 def _is_review_mode(mode: str | Mode | None) -> bool:
@@ -64,6 +89,50 @@ def _is_incremental_review(mode: str | Mode | None) -> bool:
         return False
     name = mode if isinstance(mode, str) else mode.name
     return name in _INCREMENTAL_REVIEW_NAMES
+
+
+def _publication_outcome_inputs(
+    tool_state: ToolState,
+    *,
+    result: AgentResult,
+    verdict_protocol: str | None,
+) -> tuple[bool | None, tuple[str, str] | None]:
+    """Return ``(terminal_publication_receipt, terminal_publication_mismatch)``.
+
+    Both are "not applicable" (``None``) unless this is a review-mode run under
+    the enforce protocol whose final attempt's submission was accepted: only
+    then does the run owe GitHub a review. The receipt counts only when it is
+    bound to a verdict: the deterministic record's own diagnostic review (no
+    sha, no verdict) is never a receipt, and neither is a review on this head
+    that proves no verdict (see :func:`_publication_unproven`).
+    """
+    if (
+        not _is_review_mode(tool_state.selected_mode)
+        or verdict_protocol == "shadow"
+        or not result.terminal_submission_received
+    ):
+        return None, None
+    review = tool_state.review
+    receipt = review is not None and review.verdict is not None
+    mismatch: tuple[str, str] | None = None
+    if tool_state.terminal_publication_mismatch:
+        submission = tool_state.terminal_submission
+        published = review.verdict if review is not None else None
+        recorded = submission.verdict if submission is not None else None
+        mismatch = (published or "an unknown verdict", recorded or "an unknown verdict")
+    return receipt, mismatch
+
+
+def _publication_unproven(tool_state: ToolState) -> bool:
+    """True when the run's receipt is a review on a head that proves no verdict.
+
+    That is a review GitHub holds for this run (it has a ``reviewed_sha``) but
+    whose receipt carries no verdict, e.g. one recovered after a lost create
+    response whose state is ``COMMENTED``. The classifier uses it only to name
+    the specific reason when ``terminal_publication_receipt`` is ``False``.
+    """
+    review = tool_state.review
+    return review is not None and review.verdict is None and review.reviewed_sha is not None
 
 
 def _publish_span_attrs(outcome: RunOutcome, mode: Mode | None) -> dict[str, Any]:
@@ -88,6 +157,9 @@ def _classify_outcome(
     verdict_protocol: Literal["shadow", "enforce"] | None = None,
     final_summary_written: bool = False,
     terminal_publication_failed: bool = False,
+    terminal_publication_receipt: bool | None = None,
+    terminal_publication_mismatch: tuple[str, str] | None = None,
+    terminal_publication_unproven: bool = False,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
 
@@ -102,7 +174,17 @@ def _classify_outcome(
     (``terminal_publication_failed``) -> ``RunOutcome.inconclusive`` (#619
     Task 3a — a *recorded* verdict that never published must not read as a
     clean run); a review-mode run with no terminal submission at all ->
-    ``RunOutcome.inconclusive``; otherwise (the closed ``SetupFailurePolicy``
+    ``RunOutcome.inconclusive``; a received submission whose receipt shows a
+    different published verdict (``terminal_publication_mismatch`` =
+    ``(published, recorded)``) -> ``RunOutcome.inconclusive`` naming both; a
+    received submission with no receipt (``terminal_publication_receipt`` is
+    ``False``) -> ``RunOutcome.inconclusive``, with a distinct reason when
+    ``terminal_publication_unproven`` says the run's review on this head proves
+    no verdict. The publication inputs default
+    to "not applicable" (``None``), so a caller that never publishes (the
+    offline classifier) is unchanged, and neither applies under the shadow
+    protocol. A roster slot skipped for missing credentials is not an input:
+    a published verdict classifies by that verdict. Otherwise (the closed ``SetupFailurePolicy``
     value ``"warn"`` or no failure surface) -> ``RunOutcome.passed``. Each
     non-pass branch logs a warning here so the call site only needs the tuple.
     """
@@ -134,6 +216,23 @@ def _classify_outcome(
             return RunOutcome.passed, None
         logger.warning("» {}", _MISSING_TERMINAL_VERDICT_REASON)
         return RunOutcome.inconclusive, _MISSING_TERMINAL_VERDICT_REASON
+    if (
+        _is_review_mode(mode)
+        and verdict_protocol != "shadow"
+        and result.terminal_submission_received
+    ):
+        if terminal_publication_mismatch is not None:
+            reason = _publication_mismatch_reason(*terminal_publication_mismatch)
+            logger.warning("» {}", reason)
+            return RunOutcome.inconclusive, reason
+        if terminal_publication_receipt is False:
+            reason = (
+                _UNPROVEN_RECEIPT_TERMINAL_VERDICT_REASON
+                if terminal_publication_unproven
+                else _NO_RECEIPT_TERMINAL_VERDICT_REASON
+            )
+            logger.warning("» {}", reason)
+            return RunOutcome.inconclusive, reason
     # ``setup_policy`` is the closed ``SetupFailurePolicy`` vocabulary; any
     # value other than ``fail`` / ``inconclusive`` (i.e. ``warn``, or the
     # Pydantic default the action-input resolver accepted) means "proceed
@@ -151,6 +250,8 @@ def _verdict_protocol_publish(
     final_summary_written: bool,
     terminal_verdict: str,
     terminal_publication_failed: bool = False,
+    terminal_publication_receipt: bool | None = None,
+    terminal_publication_mismatch: tuple[str, str] | None = None,
 ) -> VerdictProtocolPublish:
     """Predict the enforce-path verdict protocol and build publish span attrs.
 
@@ -170,6 +271,8 @@ def _verdict_protocol_publish(
         prep_reason=prep_reason,
         final_summary_written=final_summary_written,
         terminal_publication_failed=terminal_publication_failed,
+        terminal_publication_receipt=terminal_publication_receipt,
+        terminal_publication_mismatch=terminal_publication_mismatch,
     )
     diagnostic = VerdictDiagnostic(prediction.diagnostic)
     attrs = span_attrs_for_verdict_diagnostic(diagnostic, summary=result.output or "")
@@ -184,6 +287,8 @@ __all__ = [
     "VerdictProtocolPublish",
     "_classify_outcome",
     "_is_review_mode",
+    "_publication_outcome_inputs",
+    "_publication_unproven",
     "_publish_span_attrs",
     "_verdict_protocol_publish",
 ]

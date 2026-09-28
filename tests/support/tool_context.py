@@ -1,14 +1,74 @@
-"""Test helpers for binding GitHub clients on :class:`~mergecraft.mcp.context.ToolContext`."""
+"""Test helpers for building and binding :class:`~mergecraft.mcp.context.ToolContext`.
+
+Trust is never implicit here. :func:`make_tool_context` requires ``trust_tier``
+as a keyword with no default, so every test that goes through it says which
+tier it runs under. ``ToolContext``'s own default is the restrictive
+``"untrusted"`` (unknown trust fails closed); a test that needs the permissive
+tier has to ask for it by name.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, Literal
 
-from mergecraft.mcp.context import ToolContext
+from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.shared import bind_selected_mode, reset_selected_mode
+from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.modes import compute_modes
 from mergecraft.scm.github import GitHubScmAdapter, github_client_from_scm
 from mergecraft.utils.github import GitHubClient
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.scm.protocol import ScmProvider
+
+TrustTier = Literal["trusted", "untrusted"]
+
+
+def make_tool_context(
+    tmp_path: Path,
+    *,
+    trust_tier: TrustTier,
+    github: GitHubClient | None = None,
+    scm: ScmProvider | None = None,
+    event: PayloadEvent | None = None,
+    tool_state: ToolState | None = None,
+    **overrides: Any,
+) -> ToolContext:
+    """Build a local ``acme/demo`` context with an explicit trust tier.
+
+    ``trust_tier`` is required: the test states which tier it runs under
+    instead of inheriting whatever ``ToolContext`` defaults to. ``overrides``
+    are passed straight to the constructor (``pr_approve_enabled=True``,
+    ``authority_trust="untrusted"``, …).
+    """
+    state = tool_state or init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    kwargs: dict[str, Any] = {
+        "agent_id": "claude",
+        "repo": RepoIdentity(owner="acme", name="demo"),
+        "payload": ResolvedPayload(
+            event=event or PayloadEvent(trigger="pull_request", issue_number=7, is_pr=True),
+            shell="restricted",
+        ),
+        "github_installation_token": "",
+        "git_token": "",
+        "api_token": "",
+        "modes": compute_modes("claude"),
+        "tool_state": state,
+        "mcp_server_url": "",
+        "tmpdir": str(tmp_path),
+        "trust_tier": trust_tier,
+    }
+    if scm is not None:
+        kwargs["scm"] = scm
+    else:
+        kwargs["github"] = github or GitHubClient(token="")
+    kwargs.update(overrides)
+    return ToolContext(**kwargs)
 
 
 def bind_github_client(ctx: ToolContext, client: GitHubClient) -> None:

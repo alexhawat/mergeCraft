@@ -100,6 +100,7 @@ def _ctx(
         pr_approve_enabled=True,
         static_checks=list(static_checks or []),
         static_checks_enabled=static_checks_enabled,
+        trust_tier="trusted",
     )
 
 

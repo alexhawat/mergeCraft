@@ -309,6 +309,7 @@ async def test_hydrate_merges_pre_checkout_ledger_records(tmp_path: Path) -> Non
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
     hydrated = await ledger.hydrate_finding_ledger_from_progress_comment(ctx)
@@ -382,6 +383,7 @@ async def test_hydrate_collision_prefers_newer_recorded_at(tmp_path: Path) -> No
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
     hydrated = await ledger.hydrate_finding_ledger_from_progress_comment(ctx)

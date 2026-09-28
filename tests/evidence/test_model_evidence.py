@@ -61,6 +61,7 @@ def _make_ctx(tmp_path: Path, *, resolved_model: str | None = "claude-sonnet-4-5
         mcp_server_url="",
         tmpdir=str(tmp_path),
         resolved_model=resolved_model,
+        trust_tier="trusted",
     )
 
 

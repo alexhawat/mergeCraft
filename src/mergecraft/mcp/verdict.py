@@ -957,17 +957,16 @@ def submit_review_verdict_tool(ctx: ToolContext):
             for row in merged_raw
         ]
         validated = validated.model_copy(update={"findings": merged_findings, "summary": summary})
-        trust = (
-            ctx.tool_state.trust_tier
-            if ctx.tool_state.trust_tier in {"trusted", "untrusted"}
-            else "trusted"
+        # Unknown or missing trust is untrusted: only an explicit "trusted" earns it.
+        trust: Literal["trusted", "untrusted"] = (
+            "trusted" if ctx.tool_state.trust_tier == "trusted" else "untrusted"
         )
         normalized_findings = normalize_agent_findings_via_pipeline(
             list(validated.findings),
             rule_id="agent:terminal",
             dedupe=True,
             repo_root=repo_root,
-            trust_tier=trust,  # type: ignore[arg-type]
+            trust_tier=trust,
         )
         enforced_verdict = enforce_terminal_verdict_from_finalized_findings(
             requested=requested_verdict,
@@ -1020,8 +1019,8 @@ def submit_review_verdict_tool(ctx: ToolContext):
         description=(
             "Record the terminal review verdict for this run: approve or request_changes, "
             "a summary, and structured findings. Identical re-submissions are idempotent; "
-            "conflicting payloads are rejected. Does not publish to GitHub — call "
-            "create_pull_request_review separately when publication is required."
+            "conflicting payloads are rejected. This records the verdict; the run publishes "
+            "it to GitHub as one review, with the findings as inline comments, after you stop."
         ),
         input_schema={
             "type": "object",

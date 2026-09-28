@@ -108,6 +108,7 @@ def _ctx(tmp_path: Path) -> Any:
         github=GitHubClient(token=""),
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 

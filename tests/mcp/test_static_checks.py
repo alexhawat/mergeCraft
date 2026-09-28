@@ -52,6 +52,7 @@ def _ctx(
         tmpdir=str(tmp_path),
         static_checks=static_checks or [],
         static_checks_enabled=enabled,
+        trust_tier="trusted",
     )
 
 

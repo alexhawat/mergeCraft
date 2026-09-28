@@ -555,6 +555,115 @@ def test_prepare_chain_attempt_clears_a_prior_terminal_submission() -> None:
     ar._prepare_chain_attempt(None, 3)
 
 
+def test_prepare_chain_attempt_keeps_the_publication_receipt() -> None:
+    """Green guard: a fallback keeps the earlier attempt's receipt.
+
+    The receipt is what stops a second POST on the same head; the next
+    attempt's verdict is compared against it rather than silently replacing it.
+    """
+    from mergecraft.mcp.tool_state import ReviewRecord
+
+    state = _tool_state(selected_mode="Review")
+    receipt = ReviewRecord(id=41, node_id="n41", reviewed_sha="abc123")
+    state.review = receipt
+    state.terminal_publication_failed = True
+    ar._prepare_chain_attempt(state, 1)
+    assert state.review is receipt
+    assert state.terminal_publication_failed is True
+
+
+async def test_a_fallback_attempt_with_a_different_verdict_sets_the_mismatch_flag(
+    tmp_path: Path,
+) -> None:
+    """Attempt 0 published ``request_changes``; attempt 1 records ``approve`` on the same head."""
+    from mergecraft.mcp.review import publish_pull_request_review
+    from tests.support.publication import (
+        RecordingReviewGitHub,
+        finding,
+        publication_ctx,
+        submit_verdict,
+    )
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", [finding("Unchecked index.")])
+    await publish_pull_request_review(ctx)
+
+    ar._prepare_chain_attempt(ctx.tool_state, 1)
+    await submit_verdict(ctx, "approve")
+    response = await publish_pull_request_review(ctx)
+
+    assert len(github.review_payloads) == 1
+    assert ctx.tool_state.terminal_publication_mismatch is True
+    assert not (response.get("success") is True and response.get("skipped") is True)
+
+
+# ---------------------------------------------------------------------------
+# _chain_deadline — a malformed run budget keeps a finite deadline
+# ---------------------------------------------------------------------------
+
+
+def _warnings_during(action: Any) -> tuple[Any, list[str]]:
+    from loguru import logger
+
+    captured: list[str] = []
+    sink_id = logger.add(lambda message: captured.append(str(message)), level="WARNING")
+    try:
+        value = action()
+    finally:
+        logger.remove(sink_id)
+    return value, captured
+
+
+def test_malformed_run_timeout_keeps_a_finite_chain_deadline(monkeypatch: MonkeyPatch) -> None:
+    """Error: ``MERGECRAFT_RUN_TIMEOUT_S=not-a-number`` must not remove the chain deadline."""
+    import time
+
+    from mergecraft.utils.run_bounds import _DEFAULT_RUN_TIMEOUT_S
+
+    monkeypatch.setenv("MERGECRAFT_RUN_TIMEOUT_S", "not-a-number")
+    before = time.monotonic()
+    deadline, warnings = _warnings_during(ar._chain_deadline)
+    after = time.monotonic()
+
+    assert deadline is not None, "a malformed run timeout silently disabled the chain deadline"
+    assert before + _DEFAULT_RUN_TIMEOUT_S <= deadline <= after + _DEFAULT_RUN_TIMEOUT_S
+    assert warnings, "the fallback must warn, not log at debug"
+
+
+def test_failing_run_bounds_resolution_warns_and_uses_the_default(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Error: any resolution failure keeps a finite deadline and says so at warning."""
+    import time
+
+    import mergecraft.utils.run_bounds as run_bounds_mod
+
+    def _boom(**_kwargs: Any) -> Any:
+        msg = "could not convert string to float: 'soon'"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(run_bounds_mod, "resolve_run_bounds", _boom)
+    before = time.monotonic()
+    deadline, warnings = _warnings_during(ar._chain_deadline)
+
+    assert deadline is not None
+    assert deadline >= before + run_bounds_mod._DEFAULT_RUN_TIMEOUT_S
+    assert any("deadline" in line.lower() or "timeout" in line.lower() for line in warnings)
+
+
+def test_configured_run_timeout_sets_the_chain_deadline(monkeypatch: MonkeyPatch) -> None:
+    """Green guard: a valid run timeout bounds the chain exactly."""
+    import time
+
+    monkeypatch.setenv("MERGECRAFT_RUN_TIMEOUT_S", "120")
+    before = time.monotonic()
+    deadline = ar._chain_deadline()
+    after = time.monotonic()
+    assert deadline is not None
+    assert before + 120 <= deadline <= after + 120
+
+
 def test_attach_model_evidence_stamps_fallback_fields() -> None:
     stamped = ar._attach_model_evidence(
         AgentResult(success=True, metadata={"keep": 1}),

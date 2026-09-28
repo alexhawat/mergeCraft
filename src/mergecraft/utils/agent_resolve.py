@@ -737,14 +737,22 @@ def _chain_deadline() -> float | None:
     attempt-count cap alone is not a bound: ten 1500s timeouts is a four-hour
     run. This ceiling reuses the existing per-run ``run_timeout_s`` budget
     rather than introducing a second notion of "too long" (#444).
+
+    A malformed run-bounds override (``resolve_run_bounds`` raises
+    ``ValueError`` when an env value does not parse) keeps the chain bounded:
+    it falls back to the default run timeout and logs a warning.
     """
-    from mergecraft.utils.run_bounds import resolve_run_bounds
+    from mergecraft.utils.run_bounds import _DEFAULT_RUN_TIMEOUT_S, resolve_run_bounds
 
     try:
         run_timeout_s = resolve_run_bounds().run_timeout_s
-    except Exception as exc:  # pragma: no cover - defensive: never block a run
-        logger.debug("chain deadline unavailable, continuing unbounded: {}", exc)
-        return None
+    except ValueError as exc:
+        logger.warning(
+            "chain deadline: run bounds unresolvable ({}); using the default run timeout {}s",
+            exc,
+            _DEFAULT_RUN_TIMEOUT_S,
+        )
+        run_timeout_s = _DEFAULT_RUN_TIMEOUT_S
     if run_timeout_s <= 0:
         return None
     return time.monotonic() + run_timeout_s
@@ -966,12 +974,18 @@ def promote_model_evidence(
 
 
 def _prepare_chain_attempt(tool_state: ToolState | None, fallback_index: int) -> None:
-    """Stamp the active chain index and drop any prior attempt's terminal submit."""
+    """Stamp the active chain index and drop the prior attempt's submission and packet.
+
+    The prepared evidence packet is built from the attempt that submitted; a
+    fallback attempt rebuilds it, so the run record describes the final attempt
+    rather than the one before it.
+    """
     if tool_state is None:
         return
     stamp_attempt_id(tool_state, attempt_id=fallback_index, fallback_index=fallback_index)
     tool_state.terminal_submission = None
     tool_state.terminal_submission_conflict = False
+    tool_state.prepared_run_packet = None
 
 
 async def run_with_model_chain(

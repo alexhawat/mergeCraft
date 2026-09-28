@@ -9,10 +9,19 @@ from typing import Any
 import httpx
 import pytest
 import yaml
+from tests.support.publication import (
+    RecordingReviewGitHub,
+    finding,
+    publication_ctx,
+    review_thread,
+    submit_verdict,
+    unified_diff,
+)
 from tests.support.tool_context import (
     bind_github_client,
     bind_review_publication_scope,
     github_client_from_ctx,
+    write_capable_mcp_mode,
 )
 
 from mergecraft.agents.shared import AgentResult
@@ -95,6 +104,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
     bind_review_publication_scope(tool_ctx)
     return tool_ctx
@@ -540,6 +550,7 @@ async def test_approve_422_falls_back_to_comment_and_keeps_approval(tmp_path: Pa
         mcp_server_url="",
         tmpdir=str(tmp_path),
         pr_approve_enabled=True,
+        trust_tier="trusted",
     )
     bind_review_publication_scope(ctx)
     spec = create_pull_request_review_tool(ctx)
@@ -594,10 +605,30 @@ def _stale_thread(body: str) -> dict[str, Any]:
     }
 
 
-def _incremental_ctx(github: GitHubClient, tmp_path: Path, changed: list[str]) -> ToolContext:
+def _incremental_ctx(
+    github: GitHubClient,
+    tmp_path: Path,
+    changed: list[str],
+    *,
+    publishers: frozenset[str] = frozenset({"mergecraft"}),
+    incremental_diff: str | None = None,
+) -> ToolContext:
+    """An IncrementalReview re-review bound to PR #7.
+
+    ``publishers`` pre-resolves the run's expected-publisher set (no lookup),
+    and ``incremental_diff`` is the patch since the last reviewed commit; by
+    default it touches lines 1-5 of every path in ``changed``.
+    """
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
     state.selected_mode = "IncrementalReview"
-    primary_repo_state(state).incremental_changed_paths = changed
+    primary = primary_repo_state(state)
+    primary.incremental_changed_paths = changed
+    patch = incremental_diff
+    if patch is None:
+        patch = "".join(unified_diff(path, start=1, count=5) for path in changed)
+    incremental_path = tmp_path / "incremental.patch"
+    incremental_path.write_text(patch, encoding="utf-8")
+    primary.incremental_diff_path = str(incremental_path)
     ctx = ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -610,8 +641,10 @@ def _incremental_ctx(github: GitHubClient, tmp_path: Path, changed: list[str]) -
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
     bind_review_publication_scope(ctx)
+    ctx.publisher_logins = publishers
     return ctx
 
 
@@ -698,3 +731,262 @@ async def test_self_review_config_publishes_comments_before_isolated_approval(
     github = github_client_from_ctx(ctx)
     assert isinstance(github, _RecordingGitHub)
     assert [body["event"] for body in github.review_payloads] == ["COMMENT"]
+
+
+# ── thread retirement: a touched line, an expected author, a finding gone ─────
+#
+# A re-review retires a thread only when its anchored line falls inside an
+# incremental-diff hunk (or GitHub marks it outdated), every comment's author is
+# in the run's expected-publisher set, and none of its fingerprints is still
+# raised anywhere in the terminal submission — inline, demoted to the body, or
+# deferred. The create-review response's login is never added to the set.
+
+_APP_BOT = "mergecraft-app[bot]"
+_OLD = stamp_finding_fingerprint(path="src/app.py", body="Old finding.")
+
+
+def _rereview_ctx(
+    tmp_path: Path,
+    *,
+    threads: list[dict[str, Any]],
+    incremental_diff: str,
+    publishers: frozenset[str] = frozenset({_APP_BOT}),
+    full_diff: str | None = None,
+    reviewer_login: str = _APP_BOT,
+) -> tuple[ToolContext, RecordingReviewGitHub]:
+    github = RecordingReviewGitHub(threads=threads, reviewer_login=reviewer_login)
+    kwargs: dict[str, Any] = {}
+    if full_diff is not None:
+        kwargs["diff_text"] = full_diff
+    ctx = publication_ctx(
+        tmp_path, github=github, trust_tier="trusted", mode="IncrementalReview", **kwargs
+    )
+    primary = primary_repo_state(ctx.tool_state)
+    primary.incremental_changed_paths = ["src/app.py"]
+    incremental_path = tmp_path / "incremental.patch"
+    incremental_path.write_text(incremental_diff, encoding="utf-8")
+    primary.incremental_diff_path = str(incremental_path)
+    ctx.publisher_logins = publishers
+    return ctx, github
+
+
+async def _post_rereview(ctx: ToolContext, comments: list[dict[str, Any]]) -> Any:
+    return await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "re-review", "comments": comments}
+    )
+
+
+_NEW_COMMENT = {"path": "src/app.py", "line": 12, "body": "A different finding."}
+
+
+@pytest.mark.asyncio
+async def test_rereview_keeps_a_thread_whose_line_no_hunk_touched(tmp_path: Path) -> None:
+    """The file changed (lines 40-44), the finding's line (3) did not: the thread stays open."""
+    ctx, github = _rereview_ctx(
+        tmp_path,
+        threads=[review_thread(thread_id="T-line3", body=_OLD, author=_APP_BOT, line=3)],
+        incremental_diff=unified_diff("src/app.py", start=40, count=5),
+    )
+    await _post_rereview(ctx, [_NEW_COMMENT])
+    assert github.resolved == []
+
+
+@pytest.mark.asyncio
+async def test_rereview_resolves_a_thread_whose_line_a_hunk_touched(tmp_path: Path) -> None:
+    """Green guard: the finding's own line changed and the finding is gone."""
+    ctx, github = _rereview_ctx(
+        tmp_path,
+        threads=[review_thread(thread_id="T-line42", body=_OLD, author=_APP_BOT, line=42)],
+        incremental_diff=unified_diff("src/app.py", start=40, count=5),
+    )
+    await _post_rereview(ctx, [_NEW_COMMENT])
+    assert github.resolved == ["T-line42"]
+
+
+@pytest.mark.asyncio
+async def test_rereview_keeps_the_thread_of_a_finding_demoted_to_the_body(tmp_path: Path) -> None:
+    """The finding was re-raised, but its anchor is not in the diff, so it went to the body.
+
+    Only the final inline list used to count as "still raised"; a demoted
+    finding therefore looked fixed and its thread was closed.
+    """
+    ctx, github = _rereview_ctx(
+        tmp_path,
+        threads=[review_thread(thread_id="T-old", body=_OLD, author=_APP_BOT, outdated=True)],
+        incremental_diff=unified_diff("src/app.py", start=1, count=5),
+        full_diff=unified_diff("src/other.py", start=1, count=5),
+    )
+    await _post_rereview(ctx, [{"path": "src/app.py", "line": 3, "body": "Old finding."}])
+
+    posted = github.review_payloads[-1]
+    assert not posted.get("comments"), "fixture error: the re-raised finding must be demoted"
+    assert FINDING_MARKER_PREFIX in str(posted.get("body") or "")
+    assert github.resolved == []
+
+
+@pytest.mark.asyncio
+async def test_rereview_keeps_the_thread_of_a_finding_still_in_the_terminal_submission(
+    tmp_path: Path,
+) -> None:
+    """A deferred finding: recorded in the submission, never posted inline, still open."""
+    ctx, github = _rereview_ctx(
+        tmp_path,
+        threads=[review_thread(thread_id="T-old", body=_OLD, author=_APP_BOT, outdated=True)],
+        incremental_diff=unified_diff("src/app.py", start=1, count=5),
+    )
+    await submit_verdict(
+        ctx,
+        "request_changes",
+        [finding("Old finding.", line=3), finding("A different finding.", line=12)],
+    )
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": submission.summary, "comments": [_NEW_COMMENT]}
+    )
+    assert github.review_payloads, "fixture error: the re-review must have been posted"
+    assert github.resolved == []
+
+
+@pytest.mark.asyncio
+async def test_rereview_keeps_a_marked_thread_by_an_unexpected_author(tmp_path: Path) -> None:
+    """The marker is typeable by anyone; the author is not in the publisher set."""
+    ctx, github = _rereview_ctx(
+        tmp_path,
+        threads=[review_thread(thread_id="T-forged", body=_OLD, author="mallory", outdated=True)],
+        incremental_diff=unified_diff("src/app.py", start=1, count=5),
+    )
+    await _post_rereview(ctx, [_NEW_COMMENT])
+    assert github.resolved == []
+
+
+@pytest.mark.parametrize(
+    "publishers", [frozenset(), frozenset({_APP_BOT})], ids=["job_token", "app_configured"]
+)
+@pytest.mark.asyncio
+async def test_rereview_never_trusts_the_shared_actions_bot(
+    tmp_path: Path, publishers: frozenset[str]
+) -> None:
+    """The create-review response came from ``github-actions[bot]``; its threads still stay open."""
+    ctx, github = _rereview_ctx(
+        tmp_path,
+        threads=[
+            review_thread(
+                thread_id="T-actions", body=_OLD, author="github-actions[bot]", outdated=True
+            )
+        ],
+        incremental_diff=unified_diff("src/app.py", start=1, count=5),
+        publishers=publishers,
+        reviewer_login="github-actions[bot]",
+    )
+    await _post_rereview(ctx, [_NEW_COMMENT])
+    assert github.resolved == []
+    assert "github-actions[bot]" not in (ctx.publisher_logins or frozenset())
+
+
+@pytest.mark.asyncio
+async def test_rereview_with_no_expected_publisher_resolves_nothing_and_says_why(
+    tmp_path: Path,
+) -> None:
+    from loguru import logger
+
+    ctx, github = _rereview_ctx(
+        tmp_path,
+        threads=[review_thread(thread_id="T-app", body=_OLD, author=_APP_BOT, outdated=True)],
+        incremental_diff=unified_diff("src/app.py", start=1, count=5),
+        publishers=frozenset(),
+    )
+    captured: list[str] = []
+    sink_id = logger.add(lambda message: captured.append(str(message)), level="INFO")
+    try:
+        result = await _post_rereview(ctx, [_NEW_COMMENT])
+    finally:
+        logger.remove(sink_id)
+
+    assert result.is_error is False
+    assert github.resolved == []
+    assert any("publisher" in line.lower() for line in captured), captured
+
+
+# ── resolve_review_thread fails closed on a missing payload ──────────────────
+
+
+class _ResolvePayloadGitHub(RecordingReviewGitHub):
+    """Answers the resolve mutation with a scripted GraphQL payload."""
+
+    def __init__(self, payload: Any) -> None:
+        super().__init__()
+        self._payload = payload
+
+    async def graphql(self, query: str, variables: dict[str, Any] | None = None) -> Any:
+        self.graphql_calls.append(query)
+        return self._payload
+
+
+_MALFORMED_RESOLVE_PAYLOADS = [
+    pytest.param({}, id="empty"),
+    pytest.param(None, id="null"),
+    pytest.param({"resolveReviewThread": None}, id="null_mutation"),
+    pytest.param({"resolveReviewThread": {"thread": None}}, id="null_thread"),
+    pytest.param({"resolveReviewThread": {"thread": {}}}, id="thread_without_state"),
+]
+
+
+@pytest.mark.parametrize("payload", _MALFORMED_RESOLVE_PAYLOADS)
+@pytest.mark.asyncio
+async def test_resolve_review_thread_treats_a_missing_payload_as_not_resolved(
+    tmp_path: Path, payload: Any
+) -> None:
+    from mergecraft.mcp.review_comments import resolve_review_thread
+
+    ctx = publication_ctx(tmp_path, github=_ResolvePayloadGitHub(payload), trust_tier="trusted")
+    assert await resolve_review_thread(ctx, "T1") is False
+
+
+@pytest.mark.parametrize("state", [True, False])
+@pytest.mark.asyncio
+async def test_resolve_review_thread_reports_what_github_said(tmp_path: Path, state: bool) -> None:
+    """Green guard: a well-formed payload is reported as-is."""
+    from mergecraft.mcp.review_comments import resolve_review_thread
+
+    payload = {"resolveReviewThread": {"thread": {"id": "T1", "isResolved": state}}}
+    ctx = publication_ctx(tmp_path, github=_ResolvePayloadGitHub(payload), trust_tier="trusted")
+    assert await resolve_review_thread(ctx, "T1") is state
+
+
+@pytest.mark.parametrize("payload", _MALFORMED_RESOLVE_PAYLOADS)
+@pytest.mark.asyncio
+async def test_resolve_tool_does_not_mark_the_run_updated_on_a_missing_payload(
+    tmp_path: Path, payload: Any
+) -> None:
+    import json
+
+    from mergecraft.mcp.review_comments import resolve_review_thread_tool
+
+    ctx = publication_ctx(tmp_path, github=_ResolvePayloadGitHub(payload), trust_tier="trusted")
+    # The MCP tool is default-denied in review-only runs; the internal helper
+    # above is what thread retirement calls. The tool's own contract is pinned
+    # under a write-capable mode.
+    with write_capable_mcp_mode():
+        result = await resolve_review_thread_tool(ctx).execute({"thread_id": "T1"})
+
+    assert result.is_error is False
+    assert json.loads(result.content[0]["text"])["isResolved"] is False
+    assert ctx.tool_state.was_updated is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_tool_marks_the_run_updated_when_github_resolved(tmp_path: Path) -> None:
+    """Green guard: a real resolution is still recorded."""
+    import json
+
+    from mergecraft.mcp.review_comments import resolve_review_thread_tool
+
+    payload = {"resolveReviewThread": {"thread": {"id": "T1", "isResolved": True}}}
+    ctx = publication_ctx(tmp_path, github=_ResolvePayloadGitHub(payload), trust_tier="trusted")
+    with write_capable_mcp_mode():
+        result = await resolve_review_thread_tool(ctx).execute({"thread_id": "T1"})
+
+    assert result.is_error is False
+    assert json.loads(result.content[0]["text"])["isResolved"] is True
+    assert ctx.tool_state.was_updated is True

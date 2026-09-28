@@ -221,6 +221,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A Review run that records its verdict now publishes exactly one GitHub
+  review from it, with the recorded findings as inline comments. A recorded
+  verdict that never reached GitHub reads `inconclusive` with its own reason
+  instead of passing, and a later attempt whose verdict differs from the review
+  already posted on the same head is reported as a mismatch naming both
+  verdicts rather than silently skipped. Findings that GitHub did not show
+  inline are listed. Each fresh run still posts its own review.
+
+- Auto-resolving earlier review threads now requires the thread's line to have
+  changed (or GitHub to mark it outdated), every comment to come from the
+  run's expected publisher (never the shared Actions bot), and the finding to
+  be absent from the whole submission, including findings demoted to the body
+  or deferred. With no known publisher, nothing is resolved and the run says so.
+  A missing or malformed resolve response no longer counts as resolved.
+
+- Issue-comment and pull-request-review listings page through every result up
+  to the page cap and report `incomplete` when the cap cuts them, so the newest
+  reviews are no longer dropped after the first hundred.
+
+- An unknown or missing trust tier is treated as `untrusted` everywhere,
+  including a tool context built without one. A malformed run timeout keeps a
+  finite chain deadline with a warning, and a failed closing-issues lookup is
+  reported as unavailable instead of as "no closing issues".
+
 - Review prompts name only tools that exist and only finding fields the schemas
   accept: every registered tool name is interpolated, so it renders as the
   harness's real tool reference; the `collateral` list is gone (collateral still

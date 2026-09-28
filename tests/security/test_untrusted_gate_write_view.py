@@ -119,6 +119,7 @@ def _ctx(repo: Path, tmpdir: Path, *, command: str) -> ToolContext:
         tmpdir=str(tmpdir),
         static_checks=[StaticCheckConfig(name="gate", command=command)],
         static_checks_enabled=True,
+        trust_tier="trusted",
     )
 
 

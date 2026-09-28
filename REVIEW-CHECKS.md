@@ -90,8 +90,9 @@ packet wins over every other signal — including the recorded
 ## Terminal verdict vs structural verdict (VP2)
 
 A review run is not complete until the agent records a **terminal
-submission** through `submit_review_verdict`. Provider success, review
-prose, and `create_pull_request_review` publication are separate acts:
+submission** through `submit_review_verdict`. Provider success and review
+prose are not a verdict, and recording a verdict is not publishing it: the
+agent records, and the run publishes.
 
 - **Agent verdict** — the model's `approve` / `request_changes` choice,
   summary, and structured findings submitted through the typed MCP tool.
@@ -116,6 +117,18 @@ has never been an input to `decide_approval` and cannot approve a pull
 request. A run whose provider returned successfully but never called
 `submit_review_verdict` now reports `inconclusive` (`neutral` check
 conclusion) instead of `passed`.
+
+**The run publishes the recorded verdict.** After the final attempt's
+submission is accepted, the run posts it to GitHub as one review whose inline
+comments are the submission's findings. It posts once per head: if the agent
+already published the same verdict, nothing is posted again. If an earlier
+attempt already published a *different* verdict on the same head, nothing is
+posted either (GitHub cannot take a review back, and a second one would
+duplicate every inline thread), and the run reports `inconclusive`, naming the
+verdict GitHub shows and the one it recorded. A published review that shows
+fewer findings inline than were recorded lists the missing ones in the publish
+response. A recorded verdict that never reached GitHub reports `inconclusive`
+with its own reason. Each fresh run still posts its own review.
 
 **Fallback interaction.** Semantic fallback advances when
 `terminal_submission_received` is false — whether because no submission

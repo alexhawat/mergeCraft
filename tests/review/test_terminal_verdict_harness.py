@@ -39,6 +39,7 @@ def ctx(tmp_path):
         mcp_server_url="",
         tmpdir=str(tmp_path),
         pr_approve_enabled=True,
+        trust_tier="trusted",
     )
 
 

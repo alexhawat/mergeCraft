@@ -69,6 +69,7 @@ def _ctx(tmp_path: Path, *, github: _RecordingGitHub | None = None) -> ToolConte
         mcp_server_url="",
         tmpdir=str(tmp_path),
         run_id="33126460925",
+        trust_tier="trusted",
     )
 
 

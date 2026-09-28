@@ -63,6 +63,7 @@ def _ctx(tmp_path: Path, *, analyzers_ran: bool = True) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 
@@ -315,3 +316,60 @@ async def test_static_checks_alone_satisfy_the_ordering_gate(tmp_path: Path) -> 
     payload = await _plan(ctx, [_finding("boom")])
     assert payload["ready"] is True
     assert payload["deterministicChecks"] == ["run_static_checks"]
+
+
+# ── unknown trust is untrusted ────────────────────────────────────────────────
+
+
+def _spy_draft_normalization(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import mergecraft.mcp.verification as verification_mod
+
+    seen: list[str] = []
+    real = verification_mod.normalize_agent_findings_via_pipeline
+
+    def _spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(str(kwargs.get("trust_tier")))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(verification_mod, "normalize_agent_findings_via_pipeline", _spy)
+    return seen
+
+
+def _explicit_ctx(tmp_path: Path) -> ToolContext:
+    from tests.support.tool_context import make_tool_context
+
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.analyzer_run = AnalyzerRunState(ran=True)
+    return make_tool_context(
+        tmp_path,
+        trust_tier="trusted",
+        event=PayloadEvent(trigger="pull_request"),
+        tool_state=state,
+    )
+
+
+@pytest.mark.parametrize("tier", [None, "weird", ""])
+async def test_unknown_trust_tier_normalizes_draft_findings_as_untrusted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str | None
+) -> None:
+    seen = _spy_draft_normalization(monkeypatch)
+    ctx = _explicit_ctx(tmp_path)
+    ctx.tool_state.trust_tier = tier
+
+    await _plan(ctx, [_finding("Session token logged in plaintext.")])
+
+    assert seen == ["untrusted"]
+
+
+@pytest.mark.parametrize("tier", ["trusted", "untrusted"])
+async def test_known_trust_tier_reaches_draft_normalization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str
+) -> None:
+    """Green guard: a recognized tier is passed through unchanged."""
+    seen = _spy_draft_normalization(monkeypatch)
+    ctx = _explicit_ctx(tmp_path)
+    ctx.tool_state.trust_tier = tier
+
+    await _plan(ctx, [_finding("Session token logged in plaintext.")])
+
+    assert seen == [tier]

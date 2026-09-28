@@ -473,6 +473,7 @@ def test_api_key_never_reaches_run_packet(monkeypatch: pytest.MonkeyPatch, tmp_p
         mcp_server_url="",
         tmpdir=str(tmp_path),
         resolved_model="provider_1/some-model",
+        trust_tier="trusted",
     )
     packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
     blob = packet.model_dump_json() + json.dumps(config.model_dump(mode="json"))

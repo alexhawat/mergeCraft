@@ -87,6 +87,7 @@ def _ctx(scm: _StubScm, *, token: str = "") -> ToolContext:
         scm=scm,  # type: ignore[arg-type]
         tool_state=state,
         github_installation_token=token,
+        trust_tier="trusted",
     )
 
 

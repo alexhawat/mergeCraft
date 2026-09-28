@@ -57,6 +57,7 @@ def _ctx(tmp_path: Path, *, shell: Shell = "restricted") -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 

@@ -105,6 +105,7 @@ def _ctx_for(repo: Path, github: GitHubClient, tmp_path: Path) -> ToolContext:
         tool_state=state,
         modes=compute_modes("claude"),
         tmpdir=str(tmp_path / "artifacts"),
+        trust_tier="trusted",
     )
 
 

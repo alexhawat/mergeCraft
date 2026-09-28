@@ -100,6 +100,8 @@ def _tool_ctx(repo_root: Path) -> ToolContext:
         signed_commits=True,
         xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
         static_checks_enabled=True,
+        # Local acme/demo context on the operator's own machine: trusted by choice.
+        trust_tier="trusted",
     )
 
 

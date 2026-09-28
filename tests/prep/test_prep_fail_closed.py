@@ -85,6 +85,7 @@ def _ctx_with_prep(
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 

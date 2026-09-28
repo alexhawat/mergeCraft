@@ -52,6 +52,7 @@ def _ctx(tmp_path: Path, github: RecordingGitHub) -> ToolContext:
         mcp_server_url="",
         tmpdir=str(tmp_path),
         pr_approve_enabled=True,
+        trust_tier="trusted",
     )
     bind_github_client(tool_ctx, github)
     return tool_ctx

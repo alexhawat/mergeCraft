@@ -336,3 +336,119 @@ class TestRunOutcomeHelpers:
         """No two outcomes collapse to the same machine-readable code."""
         codes = [error_code_for_outcome(outcome) for outcome in RunOutcome]
         assert len(codes) == len(set(codes))
+
+
+# ── publication and the run outcome ──────────────────────────────────────────
+#
+# Phase 4 publishes the accepted terminal verdict, and the outcome follows what
+# actually reached GitHub. A roster slot skipped for missing credentials is a
+# configuration warning, not an outcome: a run whose recorded verdict was
+# published classifies by that verdict like any other run, and keeps its
+# published review event.
+
+_CREDENTIAL_GAP = (
+    "reviewer 'reviewer' slot p1 skipped for missing credentials: "
+    "provider 'openai', model 'openai/gpt-5'"
+)
+
+
+def _gap_findings() -> list[dict[str, Any]]:
+    from tests.support.publication import finding
+
+    return [finding("Verified Major: the retry loop never backs off.", line=12)]
+
+
+async def test_credential_gap_with_a_published_request_changes_classifies_by_its_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A skipped slot does not demote a published ``request_changes`` or soften its event."""
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    ctx.tool_state.credential_degradations = (_CREDENTIAL_GAP,)
+    await submit_verdict(ctx, "request_changes", _gap_findings())
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert [payload["event"] for payload in github.review_payloads] == ["REQUEST_CHANGES"]
+    assert record.outcome is RunOutcome.passed
+    assert record.failure_reason is None
+
+
+async def test_credential_gap_with_an_agent_published_verdict_is_not_demoted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Green guard: the same run shape when the agent published the review itself."""
+    from mergecraft.mcp.review import create_pull_request_review_tool
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    ctx.tool_state.credential_degradations = (_CREDENTIAL_GAP,)
+    await submit_verdict(ctx, "request_changes", _gap_findings())
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    published = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": submission.summary, "request_changes": True}
+    )
+    assert published.is_error is False
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert [payload["event"] for payload in github.review_payloads] == ["REQUEST_CHANGES"]
+    assert record.outcome is RunOutcome.passed
+    assert record.failure_reason is None
+
+
+def test_credential_gap_is_not_a_classifier_input() -> None:
+    """The classifier reads the receipt, never the roster: a published verdict passes."""
+    from mergecraft.main_outcome import _classify_outcome
+
+    outcome, reason = _classify_outcome(
+        result=AgentResult(success=True, terminal_submission_received=True),
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        mode="Review",
+        verdict_protocol="enforce",
+        terminal_publication_receipt=True,
+    )
+    assert outcome is RunOutcome.passed
+    assert reason is None
+
+
+async def test_recorded_verdict_the_run_could_not_publish_is_not_passed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Error: the orchestrator's publish raises before any POST -> inconclusive, with a reason.
+
+    The publisher itself fails (no GitHub call at all), so neither the receipt
+    nor the POST-failure flag exists. The run must still not read as passed.
+    """
+    import mergecraft.main as main_mod
+    import mergecraft.mcp.review as review_mod
+    from tests.support.finalize_harness import run_finalize
+    from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
+
+    async def _publisher_unavailable(_ctx: Any) -> dict[str, Any]:
+        msg = "publisher unavailable"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(review_mod, "publish_pull_request_review", _publisher_unavailable)
+    monkeypatch.setattr(
+        main_mod, "publish_pull_request_review", _publisher_unavailable, raising=False
+    )
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "request_changes", _gap_findings())
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch)
+
+    assert github.review_payloads == []
+    assert ctx.tool_state.review is None
+    assert record.outcome is RunOutcome.inconclusive
+    assert record.failure_reason is not None
+    assert "publish" in record.failure_reason.lower()

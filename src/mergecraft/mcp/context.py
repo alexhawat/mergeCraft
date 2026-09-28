@@ -93,8 +93,8 @@ class ToolContext:
     ci_coverage_artifacts: list[str] = field(default_factory=list)
     ci_mutation_artifacts: list[str] = field(default_factory=list)
     analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto"
-    trust_tier: Literal["trusted", "untrusted"] = "trusted"
-    authority_trust: Literal["trusted", "untrusted"] = "trusted"
+    trust_tier: Literal["trusted", "untrusted"] = "untrusted"
+    authority_trust: Literal["trusted", "untrusted"] = "untrusted"
     analyzers_settings_enabled: bool = True
     sarif_upload_enabled: bool = False
     run_id: int | None = None
@@ -151,7 +151,7 @@ class ToolContext:
         ci_coverage_artifacts: list[str] | None = None,
         ci_mutation_artifacts: list[str] | None = None,
         analyzers_mode: Literal["off", "auto", "full", "untrusted-only"] = "auto",
-        trust_tier: Literal["trusted", "untrusted"] = "trusted",
+        trust_tier: Literal["trusted", "untrusted"] = "untrusted",
         authority_trust: Literal["trusted", "untrusted"] | None = None,
         analyzers_settings_enabled: bool = True,
         sarif_upload_enabled: bool = False,

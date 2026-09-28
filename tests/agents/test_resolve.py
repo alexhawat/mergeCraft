@@ -64,6 +64,7 @@ def test_subagent_denied_tools_derived_from_class_complement(tmp_path: Path) -> 
         mcp_server_url="",
         tmpdir=str(tmp_path),
         signed_commits=True,
+        trust_tier="trusted",
     )
     denied = subagent_denied_tool_names(ctx)
     assert "push_branch" in denied

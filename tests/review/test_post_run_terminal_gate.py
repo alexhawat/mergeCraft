@@ -49,6 +49,7 @@ def _tool_ctx(tmp_path: Path) -> ToolContext:
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 
@@ -220,3 +221,75 @@ async def test_retry_loop_keeps_going_while_the_issue_set_changes(
     # Attempt 1 (stop hook + unsubmitted) → attempt 2 (unsubmitted only, a
     # changed set) → attempt 3 collects the same set as attempt 2 and stops.
     assert len(prompts) == 2
+
+
+# ── finalize_agent_result copies terminal fields and preserves success ───────
+#
+# The function was documented as a "terminal hard-fail" but both of its
+# branches returned the same ``replace(...)``: it never failed anything. It
+# copies the terminal-submission fields onto the result and keeps ``success``
+# (and ``error``) exactly as the agent reported them. The missing-verdict case
+# is classified later by ``_classify_outcome``. These pins hold that behaviour
+# while the duplicate branch is collapsed.
+
+
+@pytest.mark.parametrize(
+    ("success", "error"), [(True, None), (False, "provider exited 1")], ids=["ok", "failed"]
+)
+@pytest.mark.asyncio
+async def test_finalize_preserves_success_and_error_on_both_paths(
+    tmp_path: Path, success: bool, error: str | None
+) -> None:
+    from mergecraft.agents.post_run import finalize_agent_result
+
+    tool_ctx = _tool_ctx(tmp_path)
+    tool_ctx.tool_state.selected_mode = "Review"
+    tool_ctx.tool_state.terminal_submission = _recorded_submission()
+
+    finalized = await finalize_agent_result(
+        _run_ctx(tool_ctx),
+        AgentResult(success=success, error=error, output="out", diagnostics={"keep": 1}),
+    )
+
+    assert finalized.success is success
+    assert finalized.error == error
+    assert finalized.output == "out"
+    assert finalized.terminal_submission_received is True
+    assert finalized.terminal_submission_id == "sub-recorded"
+    assert finalized.diagnostics.get("keep") == 1
+    assert finalized.diagnostics.get("attempt_id") == 0
+
+
+@pytest.mark.asyncio
+async def test_finalize_without_a_submission_does_not_fail_the_result(tmp_path: Path) -> None:
+    """Missing verdicts are classified by the outcome resolver, not by finalize."""
+    from mergecraft.agents.post_run import finalize_agent_result
+
+    tool_ctx = _tool_ctx(tmp_path)
+    tool_ctx.tool_state.selected_mode = "Review"
+
+    finalized = await finalize_agent_result(_run_ctx(tool_ctx), AgentResult(success=True))
+
+    assert finalized.success is True
+    assert finalized.terminal_submission_received is False
+    outcome, reason = _classify(finalized, mode="Review")
+    assert outcome is RunOutcome.inconclusive
+    assert reason == _MISSING_VERDICT_REASON
+
+
+def test_finalize_docstring_does_not_claim_a_hard_fail() -> None:
+    from mergecraft.agents.post_run import finalize_agent_result
+
+    doc = " ".join((finalize_agent_result.__doc__ or "").split()).lower()
+    assert "hard-fail" not in doc
+    assert "success" in doc
+
+
+@pytest.mark.parametrize("mode", ["Review", "IncrementalReview"])
+def test_post_run_nudge_no_longer_asks_for_create_pull_request_review(mode: str) -> None:
+    """The run publishes the recorded verdict; the nudge asks only for the verdict."""
+    from mergecraft.agents.post_run import build_unsubmitted_review_prompt
+
+    prompt = build_unsubmitted_review_prompt(mode)
+    assert "submit_review_verdict" in prompt
+    assert "create_pull_request_review" not in prompt

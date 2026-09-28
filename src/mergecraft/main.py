@@ -32,6 +32,9 @@ from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.main_outcome import (
     _classify_outcome,
+    _is_review_mode,
+    _publication_outcome_inputs,
+    _publication_unproven,
     _publish_span_attrs,
     _verdict_protocol_publish,
 )
@@ -360,6 +363,53 @@ def _short_circuit_setup_failure(
     return ("continue", None)
 
 
+def _publication_record_lines(tool_state: ToolState) -> list[str]:
+    """Record lines naming what GitHub shows when it differs from the recorded verdict.
+
+    A publication mismatch names both verdicts: the one GitHub shows (published
+    earlier in this run) and the final recorded one, which was not published.
+    A review on this head that proves no verdict (recovered after a lost create
+    response, state neither approval nor change request) says the recorded
+    verdict is not proven published. A same-verdict publication lists the
+    recorded findings its inline comments lack, by fingerprint. Empty when the
+    published review matches the record.
+    """
+    lines: list[str] = []
+    review = tool_state.review
+    submission = tool_state.terminal_submission
+    if tool_state.terminal_publication_mismatch:
+        published = review.verdict if review is not None and review.verdict else "unknown"
+        recorded = str(submission.verdict) if submission is not None else "unknown"
+        lines += [
+            "",
+            f"**Publication mismatch:** GitHub shows the `{published}` review this run "
+            f"published earlier on this head; the final recorded verdict `{recorded}` was "
+            "not published, and no second review was posted.",
+        ]
+    elif (
+        submission is not None
+        and review is not None
+        and review.verdict is None
+        and review.reviewed_sha is not None
+    ):
+        lines += [
+            "",
+            f"**Publication unproven:** GitHub shows a review this run published on this "
+            f"head, but it is neither an approval nor a change request; the final recorded "
+            f"verdict `{submission.verdict}` is not proven published, and no second review "
+            "was posted.",
+        ]
+    elif tool_state.publication_incomplete:
+        missing = sorted(tool_state.publication_incomplete)
+        lines += [
+            "",
+            f"**Publication incomplete:** the published review does not show {len(missing)} "
+            "recorded finding(s) as inline comments: "
+            + ", ".join(f"`{fingerprint}`" for fingerprint in missing),
+        ]
+    return lines
+
+
 async def publish_deterministic_record(
     *,
     pull_number: int,
@@ -418,6 +468,8 @@ async def publish_deterministic_record(
             modes=compute_modes("claude"),
             tool_state=tool_state,
             tmpdir=tmpdir or ".",
+            # No run event to derive trust from, so the record claims no trust.
+            trust_tier="untrusted",
         )
 
     tool_state = resolved_ctx.tool_state
@@ -449,6 +501,9 @@ async def publish_deterministic_record(
         comment_fallback_applied=tool_state.review_comment_fallback_applied,
         review_body_truncated=tool_state.review_body_truncated,
     )
+    publication_lines = _publication_record_lines(tool_state)
+    if publication_lines:
+        block = "\n".join([block.rstrip(), *publication_lines]) + "\n"
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
     review = tool_state.review
     existing_body = ""
@@ -1988,6 +2043,69 @@ def _scan_sinks_after_run(ctx: RunContext, *, extra_paths: Sequence[Path] = ()) 
     )
 
 
+_ORCHESTRATOR_PUBLISH_STEP = "orchestrator.publish_review"
+
+
+async def _publish_recorded_verdict(
+    tool_context: ToolContext,
+    agent_result: AgentResult,
+    *,
+    verdict_protocol: str | None,
+) -> None:
+    """Phase 4 — publish the accepted terminal submission once (the run owns publication).
+
+    A compliant Review run records one ``submit_review_verdict`` and publishes
+    nothing itself; the run publishes the final attempt's accepted verdict
+    here, before the outcome is classified. The publisher is idempotent on its
+    receipt: an agent-published review with the same verdict is not posted
+    again, and a receipt for a different verdict posts nothing and sets the
+    mismatch flag. A failure never escapes Phase 4; the classifier reads the
+    missing receipt (or ``terminal_publication_failed``) instead. The step is
+    recorded in the trajectory as ``orchestrator.publish_review``, ``ok`` only
+    when a receipt for the recorded verdict exists, including when the agent
+    already published it. The row carries the receipt's ``payload_hash`` and
+    the recorded findings GitHub's inline view lacks.
+    """
+    tool_state = tool_context.tool_state
+    if (
+        not _is_review_mode(tool_state.selected_mode)
+        or verdict_protocol == "shadow"
+        or not agent_result.terminal_submission_received
+        or tool_state.terminal_submission is None
+    ):
+        return
+    from mergecraft.evidence.trajectory import record_tool_call
+    from mergecraft.mcp.review import publish_pull_request_review
+
+    try:
+        response = await publish_pull_request_review(tool_context)
+    except Exception as exc:
+        logger.warning("» the run could not publish the recorded review verdict: {}", exc)
+        record_tool_call(
+            tool_state,
+            tool=_ORCHESTRATOR_PUBLISH_STEP,
+            arguments=None,
+            ok=False,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return
+    # A same-verdict skip (the agent already published this verdict) is
+    # recorded too: the receipt is present, and this row is where its hash and
+    # any inline gap are read. A skipped *mismatch* (``success: false``) is
+    # recorded as not ok.
+    receipt = tool_state.review
+    published = response.get("success") is True and receipt is not None
+    record_tool_call(
+        tool_state,
+        tool=_ORCHESTRATOR_PUBLISH_STEP,
+        arguments=None,
+        ok=published,
+        error=None if published else str(response.get("reason") or "no receipt"),
+        payload_hash=receipt.payload_hash if receipt is not None else None,
+        publication_incomplete=list(tool_state.publication_incomplete) if published else None,
+    )
+
+
 async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
@@ -2007,6 +2125,11 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
                 agent_result = await finalize_agent_result(ctx.run_ctx, agent_result)
             except Exception as exc:
                 logger.debug("post-run finalize skipped: {}", exc)
+        await _publish_recorded_verdict(
+            tool_context,
+            agent_result,
+            verdict_protocol=settings.gates.terminal_verdict,
+        )
 
     # SX-D10 / F2=A — post-run sink scan of the run temp dir *and* every
     # artifact source the evidence uploads read. It runs here: after the agent
@@ -2033,6 +2156,11 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     setup_reason = tool_state.setup_hook_failure or ""
     if ctx.budget_tracker is not None:
         ctx.run_bounds = ctx.budget_tracker.bounds
+    publication_receipt, publication_mismatch = _publication_outcome_inputs(
+        tool_state,
+        result=agent_result,
+        verdict_protocol=settings.gates.terminal_verdict,
+    )
     outcome: RunOutcome
     failure_reason: str | None
     if ctx.budget_exhaustion is not None:
@@ -2064,6 +2192,9 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             verdict_protocol=settings.gates.terminal_verdict,
             final_summary_written=tool_state.final_summary_written,
             terminal_publication_failed=tool_state.terminal_publication_failed,
+            terminal_publication_receipt=publication_receipt,
+            terminal_publication_mismatch=publication_mismatch,
+            terminal_publication_unproven=_publication_unproven(tool_state),
         )
     if sink_scan_error is not None:
         # A sink hit outranks the published verdict: the run failed, whatever
@@ -2080,6 +2211,8 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         final_summary_written=tool_state.final_summary_written,
         terminal_verdict=settings.gates.terminal_verdict,
         terminal_publication_failed=tool_state.terminal_publication_failed,
+        terminal_publication_receipt=publication_receipt,
+        terminal_publication_mismatch=publication_mismatch,
     )
     diagnostic_attrs = verdict_publish.attrs
     verdict_prediction = verdict_publish.prediction

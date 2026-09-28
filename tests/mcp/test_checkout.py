@@ -228,6 +228,7 @@ def _real_publishers(
         tool_state=state,
         github_installation_token=token,
         tmpdir=dir_,
+        trust_tier="trusted",
     )
     from mergecraft.review.authorship import expected_publisher_logins
 
@@ -302,6 +303,7 @@ def _reviews_ctx(github: GitHubClient, tmp_path: Path) -> ToolContext:
         github=github,
         tool_state=state,
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 

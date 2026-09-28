@@ -59,6 +59,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 
@@ -705,3 +706,76 @@ async def test_backfill_does_not_clobber_a_prior_downgrade(tmp_path: Path) -> No
     ]
     assert len(stored) == 1
     assert stored[0]["severity"] == "Minor"
+
+
+# ── unknown trust is untrusted ────────────────────────────────────────────────
+#
+# The terminal-finding normalization reads ``tool_state.trust_tier``. A missing
+# or unrecognized value must normalize as ``untrusted`` — never the permissive
+# tier. The context's own tier is set explicitly (``trusted``) so the test
+# isolates the tool-state fallback.
+
+
+def _spy_normalization(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    import mergecraft.mcp.verdict as verdict_mod
+
+    seen: list[str] = []
+    real = verdict_mod.normalize_agent_findings_via_pipeline
+
+    def _spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(str(kwargs.get("trust_tier")))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(verdict_mod, "normalize_agent_findings_via_pipeline", _spy)
+    return seen
+
+
+def _one_finding_payload() -> dict[str, Any]:
+    return {
+        "verdict": "request_changes",
+        "summary": "One finding stands.",
+        "findings": [
+            AgentFinding(
+                path="src/app.py", body="Unchecked index.", severity="Major", line=4
+            ).model_dump()
+        ],
+    }
+
+
+def _explicit_ctx(tmp_path: Path) -> ToolContext:
+    from tests.support.tool_context import make_tool_context
+
+    return make_tool_context(
+        tmp_path, trust_tier="trusted", event=PayloadEvent(trigger="pull_request")
+    )
+
+
+@pytest.mark.parametrize("tier", [None, "weird", ""])
+@pytest.mark.asyncio
+async def test_unknown_trust_tier_normalizes_as_untrusted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str | None
+) -> None:
+    seen = _spy_normalization(monkeypatch)
+    ctx = _explicit_ctx(tmp_path)
+    ctx.tool_state.trust_tier = tier
+
+    result = await _submit(ctx, _one_finding_payload())
+
+    assert result.is_error is False, _error_text(result)
+    assert seen == ["untrusted"]
+
+
+@pytest.mark.parametrize("tier", ["trusted", "untrusted"])
+@pytest.mark.asyncio
+async def test_known_trust_tier_is_passed_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str
+) -> None:
+    """Green guard: a recognized tier reaches normalization unchanged."""
+    seen = _spy_normalization(monkeypatch)
+    ctx = _explicit_ctx(tmp_path)
+    ctx.tool_state.trust_tier = tier
+
+    result = await _submit(ctx, _one_finding_payload())
+
+    assert result.is_error is False, _error_text(result)
+    assert seen == [tier]

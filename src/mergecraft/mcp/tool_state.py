@@ -111,9 +111,26 @@ class TerminalSubmission:
 
 @dataclass(slots=True)
 class ReviewRecord:
+    """Receipt for the one GitHub review this run published.
+
+    ``verdict`` and ``payload_hash`` bind the receipt to what was published:
+    ``payload_hash`` is ``sha256(verdict + "\n" + "\n".join(sorted(fingerprints)))``
+    over the ``mergecraft-finding:v1`` markers in the published body and inline
+    comments, and ``inline_fingerprints`` holds the markers GitHub shows inline.
+    The deterministic record's diagnostic review leaves all three unset. A review
+    recovered after its create response was lost is bound from what GitHub shows:
+    ``verdict`` from its state (``APPROVED`` / ``CHANGES_REQUESTED``; any other
+    state proves no verdict and leaves it unset), and ``inline_fingerprints`` from
+    its listed inline comments, or ``None`` when that list could not be read (the
+    inline set is unknown, so no publication gap is claimed from it).
+    """
+
     id: int
     node_id: str
     reviewed_sha: str | None
+    verdict: str | None = None
+    payload_hash: str | None = None
+    inline_fingerprints: tuple[str, ...] | None = ()
 
 
 @dataclass(slots=True)
@@ -353,6 +370,17 @@ class ToolState:
     # confirmed receipt or matching scope-checked replay clears the flag;
     # trajectory records retain the failed-attempt history.
     terminal_publication_failed: bool = False
+    # Set when this run's receipt on the current head carries a different
+    # verdict than the recorded terminal submission (a fallback attempt
+    # changed its mind after an earlier attempt published). GitHub cannot
+    # un-publish and a second review would duplicate every inline thread, so
+    # nothing is posted; ``main_outcome.py`` reads the run as inconclusive,
+    # naming both verdicts. Cleared by a matching receipt.
+    terminal_publication_mismatch: bool = False
+    # Fingerprints of recorded submission findings that GitHub does not show
+    # inline on the published review (sorted). Specific, not a mismatch: the
+    # published verdict is the recorded one.
+    publication_incomplete: list[str] = field(default_factory=list)
     terminal_submission: TerminalSubmission | None = None
     terminal_submission_conflict: bool = False
     reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)

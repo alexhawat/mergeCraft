@@ -35,6 +35,7 @@ from mergecraft.mcp.commit_info import get_commit_info_tool
 from mergecraft.mcp.issue_comments import get_issue_comments_tool
 from mergecraft.mcp.pr_info import get_pull_request_tool
 from mergecraft.mcp.review_comments import list_pull_request_reviews_tool
+from mergecraft.utils.github import GitHubClient
 
 # Operations the GitHub client + MCP tools exercise today. DG9.2's protocol must
 # express every one without leaking GitHub-shaped types into core call sites.
@@ -417,3 +418,58 @@ def test_checkout_and_diff_semantics_are_preserved() -> None:
     assert "incrementalDiffPath" in result
     assert result["lastReviewedSha"] == prior
     assert result["incrementalChangedPaths"] == ["src/a.py"]
+
+
+class _ScriptedGraphQLClient(GitHubClient):
+    """Answers every GraphQL call with one scripted payload."""
+
+    def __init__(self, payload: Any) -> None:
+        super().__init__(token="test-token")
+        self._payload = payload
+
+    async def graphql(self, query: str, variables: dict[str, Any] | None = None) -> Any:
+        del query, variables
+        return self._payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({}, id="empty"),
+        pytest.param({"resolveReviewThread": None}, id="null_mutation"),
+        pytest.param({"resolveReviewThread": {"thread": None}}, id="null_thread"),
+        pytest.param({"resolveReviewThread": {"thread": {}}}, id="thread_without_state"),
+    ],
+)
+async def test_adapter_resolve_review_thread_fails_closed_on_a_missing_payload(
+    payload: dict[str, Any],
+) -> None:
+    """Green guard: the SCM adapter already reports a missing payload as not resolved.
+
+    The MCP helper in ``mcp/review_comments.py`` must agree with it.
+    """
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    adapter = GitHubScmAdapter(_ScriptedGraphQLClient(payload))
+    assert await adapter.resolve_review_thread("acme", "demo", "T1") == {"isResolved": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({}, id="empty"),
+        pytest.param({"resolveReviewThread": {"thread": {}}}, id="thread_without_state"),
+    ],
+)
+async def test_mcp_resolve_helper_agrees_with_the_adapter(
+    tmp_path: Path, payload: dict[str, Any]
+) -> None:
+    from mergecraft.mcp.review_comments import resolve_review_thread
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    client = _ScriptedGraphQLClient(payload)
+    ctx = tool_ctx(tmp_path, github=client)
+    adapter_answer = await GitHubScmAdapter(client).resolve_review_thread("acme", "demo", "T1")
+    assert await resolve_review_thread(ctx, "T1") is adapter_answer["isResolved"]

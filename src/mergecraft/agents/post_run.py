@@ -111,8 +111,8 @@ def build_unsubmitted_review_prompt(mode: str) -> str:
                 "MISSING REVIEW OUTPUT — you selected Review mode but stopped without "
                 "recording a terminal verdict via `submit_review_verdict`.",
                 "",
-                "call `submit_review_verdict` now (approve or request_changes), then "
-                "call `create_pull_request_review` with the same outcome.",
+                "call `submit_review_verdict` now (approve or request_changes); the run "
+                "publishes the recorded verdict to GitHub.",
                 "",
                 "do NOT stop again until `submit_review_verdict` has been called successfully.",
             ]
@@ -120,12 +120,10 @@ def build_unsubmitted_review_prompt(mode: str) -> str:
     return "\n".join(
         [
             "MISSING REVIEW OUTPUT — you selected IncrementalReview mode but stopped "
-            "without calling `submit_review_verdict` / `create_pull_request_review` "
-            "or `report_progress`.",
+            "without calling `submit_review_verdict` or `report_progress`.",
             "",
             "do exactly one of:",
-            "- if you have findings: call `submit_review_verdict` then "
-            "`create_pull_request_review`",
+            "- if you have findings: call `submit_review_verdict` (the run publishes it)",
             "- if no review warranted: call `report_progress` with a short summary",
         ]
     )
@@ -244,16 +242,15 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
 
 
 async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> AgentResult:
-    """Terminal hard-fail if stopHook / unsubmittedReview still open."""
+    """Copy the terminal-submission fields onto ``result``; ``success`` is preserved.
+
+    Sets ``terminal_submission_received`` and ``terminal_submission_id`` from
+    the recorded submission and merges its diagnostics into
+    ``result.diagnostics``. It never changes ``success``: a missing or rejected
+    submission is classified later by the run-outcome step, not here.
+    """
     received, submission_id, terminal_diagnostics = _terminal_submission_fields(ctx)
     diagnostics = {**result.diagnostics, **terminal_diagnostics}
-    if not result.success:
-        return replace(
-            result,
-            terminal_submission_received=received,
-            terminal_submission_id=submission_id,
-            diagnostics=diagnostics,
-        )
     return replace(
         result,
         terminal_submission_received=received,

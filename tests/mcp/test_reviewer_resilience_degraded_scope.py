@@ -75,6 +75,7 @@ def _ctx(tmp_path: Path, github: GitHubClient) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
+        trust_tier="trusted",
     )
 
 
