@@ -18,13 +18,13 @@ dependencies = [
     "loguru==0.7.3",
     "httpx==0.28.1",
     "rich==15.0.0",
-    "typer==0.25.1",
+    "typer==0.27.2",
     "pyyaml==6.0.3",
     "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
     "fastapi==0.141.1",
-    "uvicorn[standard]==0.52.4",
-    "starlette==1.6.0",
+    "uvicorn[standard]==0.54.0",
+    "starlette==1.7.0",
     "jsonschema==4.26.0",
     "semver==3.1.0",
     "python-dotenv==1.2.3",
@@ -37,7 +37,7 @@ dependencies = [
     "tree-sitter==0.26.0",
     "tree-sitter-python==0.25.0",
     "typing-extensions==4.16.0",
-    "typesafe-sdk==0.6.0",
+    "typesafe-sdk==0.7.1",
     # CDP transport for the host-Chrome verify driver (`mergecraft.browser.cdp`).
     # Pinned to the version already locked transitively via uvicorn[standard].
     "websockets==15.0.1",
@@ -55,17 +55,17 @@ harbor = [
 # with these uninstalled (convention 5). Exact pins + `uv.lock` committed
 # gate via `make lockcheck`.
 tracing = [
-    "logfire==5.1.0",
-    "opentelemetry-api==1.44.0",
-    "opentelemetry-sdk==1.44.0",
-    "opentelemetry-exporter-otlp-proto-http==1.44.0",
-    "opentelemetry-semantic-conventions==0.65b0",
+    "logfire==5.1.1",
+    "opentelemetry-api==1.45.0",
+    "opentelemetry-sdk==1.45.0",
+    "opentelemetry-exporter-otlp-proto-http==1.45.0",
+    "opentelemetry-semantic-conventions==0.66b0",
 ]
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-xdist==3.8.0",
-    "ruff==0.16.7",
+    "ruff==0.16.9",
     "mypy==2.3.1",
     "pre-commit==4.6.2",
     "bandit[toml]==1.9.4",
@@ -81,13 +81,13 @@ dev = [
     # Pinned to the version in analyzers/catalog/ast-grep.yaml so dev/test
     # runs exercise the same declaration-node kinds as the managed binary
     # impact.py resolves at review time.
-    "ast-grep-cli==0.44.1",
+    "ast-grep-cli==0.45.3",
     # Pinned to analyzers/catalog/vulture.yaml — repo-native dead-code scan (#427).
     "vulture==2.16",
     # Pinned to analyzers/catalog/typos.yaml — repo-native typo checker (#427).
-    "typos==1.50.1",
+    "typos==1.50.3",
     # BR0 / D14b — property-based tests for redaction transforms (BR1 RED suite).
-    "hypothesis==6.168.0",
+    "hypothesis==6.168.1",
 ]
 
 [tool.hatch.build.targets.wheel]
