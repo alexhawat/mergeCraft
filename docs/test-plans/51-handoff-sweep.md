@@ -9,7 +9,7 @@ suite was written first, against the items' own contracts: every test that needs
 a product seam which does not exist yet **fails** (no skip, no `xfail`), and the
 green tests are real guards that the implementation waves must not regress.
 
-**Status: RED as committed.** Collection is clean (174 tests), `make lint` and
+**Status: RED as committed.** Collection is clean (175 tests), `make lint` and
 `make typecheck` exit 0, and 54 tests fail because the behaviour they name is
 not implemented yet. No test is skipped or xfailed to mask a contract. Each
 implementation wave greens its section by building the behaviour, not by
