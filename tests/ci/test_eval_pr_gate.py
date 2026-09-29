@@ -136,3 +136,21 @@ def test_release_yml_still_has_eval_gate() -> None:
     text = job_script_text(release)
     assert "--baseline" in text
     assert STRUCTURAL_BASELINE in text
+
+
+# ── the trajectory gate runs in the existing eval job, not a new one ─────────
+
+
+def test_eval_gate_job_runs_the_trajectory_gate() -> None:
+    """One step in the existing job; the gate is advisory until a protocol lands."""
+    text = job_script_text(ci_eval_gate_job())
+    assert "trajectory-gate" in text, (
+        "the eval-gate job must call `mergecraft eval trajectory-gate`"
+    )
+
+
+def test_trajectory_gate_adds_no_new_required_job() -> None:
+    """P-7: no new required check. The step joins the existing eval job."""
+    jobs = load_workflow("ci.yml").get("jobs") or {}
+    offenders = [name for name in jobs if "trajectory" in str(name).lower()]
+    assert not offenders, f"the trajectory gate added a new CI job: {offenders!r}"
