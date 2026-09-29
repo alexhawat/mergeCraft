@@ -68,6 +68,7 @@ from mergecraft.utils.secrets import build_agent_env
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from mergecraft.evidence.trajectory import ToolCallRecord
     from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.tracer import Tracer
 
@@ -89,6 +90,22 @@ CLAUDE_REVIEW_DENIED_TOOLS = (
 CLAUDE_DENIED_TOOLS = (*CLAUDE_EXEC_TOOLS, *CLAUDE_REVIEW_DENIED_TOOLS)
 CLAUDE_EXEC_TOOL_DENY_RULES = [*CLAUDE_DENIED_TOOLS, *[f"Agent({t})" for t in CLAUDE_DENIED_TOOLS]]
 CLAUDE_DISALLOWED_TOOLS = ",".join(CLAUDE_EXEC_TOOL_DENY_RULES)
+# HS4 — the credential paths the action image cannot move out of the agent
+# user's reach: the runner's command/home mounts, and other processes' kernel
+# ``environ``. The agent's OS identity cannot exclude them, so each gets a
+# Claude ``Read``/``Edit`` deny rule. The run-specific Codex ``auth.json`` (the
+# one file the image *does* control) is added by
+# :func:`_claude_unmovable_secret_paths` and is also written ``0600``.
+_CLAUDE_UNMOVABLE_SECRET_PATHS: tuple[str, ...] = (
+    "/github/file_commands",
+    "/github/home",
+    "/proc/*/environ",
+)
+# HS4 — only these tools name a file path a read-scope audit owns. ``Bash``
+# and the MCP tools keep their own trajectory substrate.
+_CLAUDE_READ_AUDIT_TOOLS: frozenset[str] = frozenset({"Read", "Glob", "Grep"})
+# Claude's native read tools carry the path under one of these input keys.
+_CLAUDE_READ_PATH_KEYS: tuple[str, ...] = ("file_path", "path", "pattern", "glob", "notebook_path")
 # O4 (OB3) — the effort level passed as ``--effort`` is the one request
 # parameter the claude harness exposes; the constant keeps the CLI flag and
 # the span attribute (``mergecraft.reasoning_effort``) from drifting apart.
@@ -215,6 +232,95 @@ async def _install(_token: str | None = None) -> str:
 
 def ctx_tmpdir_fallback() -> str:
     return os.environ.get("MERGECRAFT_TEMP_DIR") or "/tmp"
+
+
+def _claude_unmovable_secret_paths(ctx: AgentRunContext) -> list[str]:
+    """Return the run's credential paths Claude must be denied (HS4).
+
+    The static set is the runner's mounts and kernel state the image cannot
+    move. The run-specific Codex ``auth.json`` is appended because the image
+    controls that file's mode and a ``Read`` would otherwise expose the
+    subscription token to the reviewer.
+    """
+    paths = list(_CLAUDE_UNMOVABLE_SECRET_PATHS)
+    try:
+        from mergecraft.agents.codex import _codex_home
+
+        paths.append(str(_codex_home(ctx) / "auth.json"))
+    except Exception as exc:  # pragma: no cover — env resolution only; never fail the spawn
+        logger.debug("claude read scoping: could not resolve the Codex auth path: {}", exc)
+    return paths
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """Return whether ``path`` resolves inside ``root`` (no symlink surprises)."""
+    try:
+        path.relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _read_paths_from_tool_input(tool_input: object) -> list[str]:
+    """Return the file/glob paths named by a Claude read tool's input."""
+    if not isinstance(tool_input, dict):
+        return []
+    paths: list[str] = []
+    for key in _CLAUDE_READ_PATH_KEYS:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            paths.append(value)
+    return paths
+
+
+def audit_read_boundary(
+    records: Sequence[ToolCallRecord],
+    *,
+    checkout: Path,
+    tmpdir: Path,
+) -> list[str]:
+    """Return every read named by ``records`` that is outside the boundary (HS4).
+
+    The boundary is **checkout union run tmpdir** — the two roots a review run
+    is allowed to read. A ``Read`` / ``Glob`` / ``Grep`` call naming a path in
+    neither is an out-of-scope read: the original path string is returned and
+    each violation is logged as one run-record warning naming it. Only those
+    three tools are audited; a ``Bash`` call's paths belong to the trajectory
+    substrate, not this check. A relative path resolves against the checkout,
+    so a ``..`` escape is reported.
+
+    Detection only, and total: it never raises into the run — a path that
+    cannot be resolved is treated as out of boundary.
+    """
+    from mergecraft.security.review_integrity import assert_checkout_read_boundary
+
+    checkout_root = Path(checkout)
+    tmpdir_root = Path(tmpdir)
+    violations: list[str] = []
+    for record in records:
+        if getattr(record, "tool", None) not in _CLAUDE_READ_AUDIT_TOOLS:
+            continue
+        for raw in getattr(record, "paths", None) or ():
+            text = str(raw)
+            candidate = Path(text)
+            if not candidate.is_absolute():
+                candidate = checkout_root / candidate
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                resolved = candidate
+            if _is_within(resolved, tmpdir_root):
+                continue
+            try:
+                assert_checkout_read_boundary(checkout_root, [resolved])
+            except PermissionError:
+                violations.append(text)
+                logger.warning(
+                    "claude read boundary: read of {!r} is outside the checkout and run "
+                    "tmpdir; recorded as a run-record warning",
+                    text,
+                )
+    return violations
 
 
 _STDERR_TAIL_LINES = 20
@@ -348,6 +454,7 @@ def _claude_stream_event_handler(
     resolved_model: str | None = None,
     capture_policy: ContentCapture | None = None,
     input_prompt: str | None = None,
+    read_records: list[ToolCallRecord] | None = None,
 ) -> tuple[Any, Callable[[], None]]:
     """Build a per-event handler that emits ``tool.call`` / ``llm.call`` spans.
 
@@ -366,6 +473,8 @@ def _claude_stream_event_handler(
         span before an inner ``tool.call`` span, which would otherwise
         leave the tool span as the active span when the next test runs).
     """
+    from mergecraft.evidence.trajectory import ToolCallRecord
+
     # W5 / H1 / M2 — one ``ProviderLLMPair`` per attempt, not two
     # independent dicts keyed by the same id. Opening the provider span and
     # the LLM span is atomic: they share a ``parent_span_id`` and both
@@ -531,6 +640,20 @@ def _claude_stream_event_handler(
             tool_id = str(content_block.get("id") or "")
             tool_name = str(content_block.get("name") or "unknown")
             tool_input = content_block.get("input") or {}
+            # HS4 — record the read tool's paths whether or not a tracer is
+            # live. The post-run audit (``audit_read_boundary``) consumes this
+            # list; it is detection over the reads that actually happened.
+            if read_records is not None and tool_name in _CLAUDE_READ_AUDIT_TOOLS:
+                read_records.append(
+                    ToolCallRecord(
+                        sequence=len(read_records) + 1,
+                        tool=tool_name,
+                        signature=f"{tool_name}:{tool_id}",
+                        intent="read",
+                        ok=True,
+                        paths=_read_paths_from_tool_input(tool_input),
+                    )
+                )
             if tracer is None:
                 return
             span = tracer.start_span(
@@ -756,6 +879,19 @@ def _run_claude_once(
         if isinstance(harness_render.payload, str)
         else json.dumps(harness_render.payload)
     )
+    # HS4 — the deny list is the execution-tool set plus a ``Read``/``Edit``
+    # rule for every credential path the OS identity cannot move (the runner's
+    # mounts, other processes' ``environ``, and the run's Codex ``auth.json``).
+    # ``build_claude_native_fs_denies`` is the one builder; a lazy import keeps
+    # its monkeypatchable module attribute live for the read-scope pin.
+    from mergecraft.agents.gates import build_claude_native_fs_denies
+
+    disallowed_tools = ",".join(
+        [
+            *CLAUDE_EXEC_TOOL_DENY_RULES,
+            *build_claude_native_fs_denies(_claude_unmovable_secret_paths(ctx)),
+        ]
+    )
     cmd = [
         cli,
         "--print",
@@ -769,7 +905,7 @@ def _run_claude_once(
         "--mcp-config",
         mcp_config,
         "--disallowedTools",
-        CLAUDE_DISALLOWED_TOOLS,
+        disallowed_tools,
         "--agents",
         build_agents_json(
             verifier_denied_tools=ctx.verifier_denied_tools,
@@ -829,6 +965,7 @@ def _run_claude_once(
     capture_policy = (
         resolve_capture_policy(ctx.tool_state.trust_tier) if tracer is not None else None
     )
+    read_records: list[ToolCallRecord] = []
     handler, close_all_open_spans = _claude_stream_event_handler(
         tracer=tracer,
         parent_span_id=None,
@@ -836,6 +973,7 @@ def _run_claude_once(
         resolved_model=ctx.resolved_model,
         capture_policy=capture_policy,
         input_prompt=user_prompt,
+        read_records=read_records,
     )
 
     stderr_text = ""
@@ -872,6 +1010,21 @@ def _run_claude_once(
             close_all_open_spans()
         except Exception as exc:
             logger.debug("claude stream handler cleanup failed: {}", exc)
+
+    # HS4 — detection over the reads that actually happened: any ``Read`` /
+    # ``Glob`` / ``Grep`` path outside the checkout and run tmpdir becomes a
+    # run-record warning naming it. Total and non-throwing — a detection
+    # failure is a debug line, never a failed review.
+    try:
+        from mergecraft.mcp.tool_state import primary_repo_state
+
+        audit_read_boundary(
+            read_records,
+            checkout=Path(primary_repo_state(ctx.tool_state).dir),
+            tmpdir=Path(ctx.tmpdir),
+        )
+    except Exception as exc:
+        logger.debug("claude read boundary audit failed: {}", exc)
 
     if returncode == 0 and stderr_text.strip():
         for line in stderr_text.strip().splitlines()[-_STDERR_TAIL_LINES:]:

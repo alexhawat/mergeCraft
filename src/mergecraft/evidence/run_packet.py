@@ -320,7 +320,7 @@ def _assemble_packet_core(
         requested_model=requested_model,
         agent_id=ctx.agent_id,
     )
-    return build_packet(
+    packet = build_packet(
         change_id=change_id,
         agent_id=ctx.agent_id,
         agent_version=_agent_version(),
@@ -342,6 +342,40 @@ def _assemble_packet_core(
             state.terminal_submission.verdict if state.terminal_submission is not None else None
         ),
     )
+    return packet.model_copy(
+        update={
+            "reviewed_head_sha": _run_bound_reviewed_head_sha(state),
+            "progress_comment_id": _run_bound_progress_comment_id(state),
+        }
+    )
+
+
+def _run_bound_reviewed_head_sha(state: ToolState) -> str | None:
+    """Return the PR head this run checked out, or ``None`` (HS8).
+
+    The value comes from the run's own checkout state, so it is orchestrator-written
+    and never agent-controlled.
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    return primary_repo_state(state).checkout_sha or None
+
+
+def _run_bound_progress_comment_id(state: ToolState) -> int | None:
+    """Return the sticky comment id this run owns, or ``None`` (HS8).
+
+    Only an active ``ProgressComment`` names a sticky; an unset or deliberately
+    deleted comment records ``None`` rather than a fabricated id.
+    """
+    from mergecraft.mcp.tool_state import ProgressComment
+
+    progress = state.progress_comment
+    if not isinstance(progress, ProgressComment):
+        return None
+    try:
+        return int(progress.id)
+    except (TypeError, ValueError):
+        return None
 
 
 def build_run_packet(

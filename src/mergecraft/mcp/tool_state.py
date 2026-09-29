@@ -390,6 +390,12 @@ class ToolState:
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
     progress_comment: ProgressComment | Literal[False] | None = None
+    # HS8 — the sticky comment id read from the newest trusted workflow run's
+    # evidence artefact. Written by ``checkout_pr`` from that run's own record
+    # (never an agent), and consumed by HS1's run-bound sticky selection
+    # (``findings.ledger._run_bound_sticky_id``). ``None`` on a run whose
+    # trusted checkpoint was unavailable.
+    run_bound_progress_comment_id: int | None = None
     # None = unset, ProgressComment = active, False = deliberately deleted (TS uses null)
     had_progress_comment: bool = False
     last_progress_body: str | None = None
