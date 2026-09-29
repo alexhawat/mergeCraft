@@ -1,7 +1,10 @@
-"""Strict preparation models for the first human golden-case batch (#780).
+"""Strict preparation models for human golden-case batches (#780 and later).
 
-This module prepares inspectable evidence and a review sheet. It never applies
-decisions to corpus files and never manufactures an adjudication record.
+A manifest declares its own batch id and case list. The first batch (#780) stays
+a pinned fixture: batch ``golden-batch-001`` must carry exactly its frozen nine
+case ids, while a later declared batch carries its own. This module prepares
+inspectable evidence and a review sheet. It never applies decisions to corpus
+files and never manufactures an adjudication record.
 """
 
 from __future__ import annotations
@@ -30,6 +33,13 @@ GOLDEN_BATCH_001_CASE_IDS: tuple[str, ...] = (
     "golden-rust-tokio-concurrency-001",
     "golden-typescript-express-security-001",
 )
+
+#: Batches whose exact membership is pinned in code and must validate unchanged.
+#: A manifest may declare an id that is not listed here with its own case list;
+#: the 001 contract stays a frozen fixture.
+FROZEN_BATCH_CASE_IDS: dict[str, tuple[str, ...]] = {
+    "golden-batch-001": GOLDEN_BATCH_001_CASE_IDS,
+}
 
 EvidenceStatus = Literal["recovered", "missing"]
 HumanDecision = Literal["pending", "confirm", "correct", "abstain"]
@@ -151,22 +161,31 @@ class HumanBatchCase(BaseModel):
 
 
 class HumanBatchManifest(BaseModel):
-    """The frozen nine-case #780 review manifest."""
+    """A human adjudication batch declaring its own id and case list.
+
+    Batch ``golden-batch-001`` is pinned to :data:`GOLDEN_BATCH_001_CASE_IDS`;
+    any other declared batch id carries its own case ids.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1.0.0"]
-    batch_id: Literal["golden-batch-001"]
+    batch_id: str
     adjudicator_login: str
     cases: list[HumanBatchCase]
 
     @model_validator(mode="after")
     def _batch_is_complete_and_identity_matches(self) -> HumanBatchManifest:
+        if not self.batch_id.strip():
+            raise ValueError("batch_id must not be empty")
         case_ids = [row.case_id for row in self.cases]
         if len(case_ids) != len(set(case_ids)):
             raise ValueError("human batch case IDs must be unique")
-        if set(case_ids) != set(GOLDEN_BATCH_001_CASE_IDS):
-            raise ValueError("human batch must contain exactly the nine #780 golden case IDs")
+        frozen_case_ids = FROZEN_BATCH_CASE_IDS.get(self.batch_id)
+        if frozen_case_ids is not None and set(case_ids) != set(frozen_case_ids):
+            raise ValueError(f"{self.batch_id} must contain exactly the nine #780 golden case IDs")
+        if frozen_case_ids is None and not self.cases:
+            raise ValueError("a declared human batch must contain at least one case")
         if not self.adjudicator_login.strip():
             raise ValueError("adjudicator_login must not be empty")
         for row in self.cases:
@@ -280,6 +299,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "FROZEN_BATCH_CASE_IDS",
     "GOLDEN_BATCH_001_CASE_IDS",
     "CorrectedCorpusFields",
     "EvidenceStatus",
