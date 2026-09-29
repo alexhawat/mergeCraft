@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import tempfile
 import uuid
 from collections.abc import Sequence
@@ -397,6 +398,16 @@ def run(
         help="Extra instructions appended to the offline Review prompt.",
         rich_help_panel=_PANEL_AGENT,
     ),
+    capture_verdicts: bool = typer.Option(
+        False,
+        "--capture-verdicts",
+        help=(
+            "Capture every saved verifier verdict — confirm, downgrade and drop — to "
+            "<evidence-dir>/judge-verdicts.jsonl for offline judge calibration. "
+            "Off by default; ordinary reviews write nothing new."
+        ),
+        rich_help_panel=_PANEL_AGENT,
+    ),
     verification_report: Path | None = typer.Option(
         None,
         "--verification-report",
@@ -569,6 +580,10 @@ def run(
         if wizard.prompt is not None:
             prompt = wizard.prompt
     configure_logging()
+    # HS2 — one explicit opt-in. Setting the Action's own variable before the run
+    # starts keeps the read-once-at-run-start contract on both paths.
+    if capture_verdicts:
+        os.environ["MERGECRAFT_CAPTURE_VERDICTS"] = "1"
     effective_output_format = _resolve_review_output_format(ctx, output_format=output_format)
     invocation_root = Path.cwd().resolve()
     root = cwd.resolve()

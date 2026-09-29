@@ -418,6 +418,11 @@ class ToolState:
     author: str | None = None
     # GitHub ``author_association`` of the triggering comment / event.
     author_association: str | None = None
+    # HS2 — ``MERGECRAFT_CAPTURE_VERDICTS`` read once at run start. When set,
+    # every saved verifier verdict is appended to ``<evidence_dir>/judge-verdicts.jsonl``
+    # for offline judge calibration. Off by default so ordinary reviews write
+    # nothing new; operator-controlled, never agent-controlled.
+    capture_verdicts: bool = False
     # ``derive_trust_tier()``'s execution-trust value for this run (trusted|untrusted).
     trust_tier: str | None = None
     # Authority axis — whether terminal approval semantics may apply (plan 13 D13).
