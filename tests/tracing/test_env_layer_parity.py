@@ -208,9 +208,8 @@ def test_malformed_control_value_fails_closed(key: str, malformed: str) -> None:
     permissive content level stands; the fix fails the configuration. The
     message names the variable and never echoes the value.
     """
-    from mergecraft.config.env import EnvSettingsError
-
     from mergecraft.cli.tracing_precedence import resolve_tracing_settings
+    from mergecraft.config.env import EnvSettingsError
 
     canary = f"{malformed}-canary-49a"
     env = {**_SENTINEL, key: canary}

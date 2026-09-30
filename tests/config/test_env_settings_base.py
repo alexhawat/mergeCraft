@@ -68,8 +68,9 @@ _REJECTED_SPELLINGS = [
 @pytest.mark.parametrize("raw", _TRUE_SPELLINGS)
 def test_env_bool_accepts_the_true_spellings(raw: str) -> None:
     """The four true spellings, case-insensitive and stripped, parse True."""
-    from mergecraft.config.env import EnvBool
     from pydantic import TypeAdapter
+
+    from mergecraft.config.env import EnvBool
 
     assert TypeAdapter(EnvBool).validate_python(raw) is True
 
@@ -77,8 +78,9 @@ def test_env_bool_accepts_the_true_spellings(raw: str) -> None:
 @pytest.mark.parametrize("raw", _FALSE_SPELLINGS)
 def test_env_bool_accepts_the_false_spellings(raw: str) -> None:
     """The four false spellings, case-insensitive and stripped, parse False."""
-    from mergecraft.config.env import EnvBool
     from pydantic import TypeAdapter
+
+    from mergecraft.config.env import EnvBool
 
     assert TypeAdapter(EnvBool).validate_python(raw) is False
 
@@ -90,16 +92,18 @@ def test_env_bool_rejects_widened_spellings_as_none(raw: str) -> None:
     Pydantic's own ``bool`` accepts ``t`` and ``y``; widening a control to
     those spellings is the failure this vocabulary exists to prevent.
     """
-    from mergecraft.config.env import EnvBool
     from pydantic import TypeAdapter
+
+    from mergecraft.config.env import EnvBool
 
     assert TypeAdapter(EnvBool).validate_python(raw) is None
 
 
 def test_env_bool_none_stays_none() -> None:
     """An absent value parses ``None`` — "no opinion", not ``False``."""
-    from mergecraft.config.env import EnvBool
     from pydantic import TypeAdapter
+
+    from mergecraft.config.env import EnvBool
 
     assert TypeAdapter(EnvBool).validate_python(None) is None
 
@@ -141,9 +145,10 @@ def _env_bool_probe() -> Any:
     The probe is a real settings model, so it exercises the type exactly as a
     production model would rather than validating a bare value.
     """
-    from mergecraft.config.env import EnvBool
     from pydantic import Field, create_model
     from pydantic_settings import BaseSettings, SettingsConfigDict
+
+    from mergecraft.config.env import EnvBool
 
     return create_model(
         "_Ps1EnvBoolProbe",
@@ -220,8 +225,9 @@ def test_registered_models_are_constructed_per_read() -> None:
 
 def test_registered_models_are_settings_models() -> None:
     """Every registered model is a ``BaseSettings`` the startup gate can validate."""
-    from mergecraft.config.env import registered_env_models
     from pydantic_settings import BaseSettings
+
+    from mergecraft.config.env import registered_env_models
 
     models = registered_env_models()
     assert models
@@ -259,8 +265,9 @@ def _is_secret_annotation(annotation: Any) -> bool:
 
 def test_no_registered_model_dump_leaks_a_secret() -> None:
     """``repr`` / ``model_dump`` / ``model_dump_json`` mask every secret field."""
-    from mergecraft.config.env import from_env, registered_env_models
     from pydantic import SecretStr
+
+    from mergecraft.config.env import from_env, registered_env_models
 
     secret_models = 0
     for model in registered_env_models():

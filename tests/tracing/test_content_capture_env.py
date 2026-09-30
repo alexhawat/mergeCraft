@@ -170,7 +170,6 @@ def test_malformed_content_level_fails_closed(
     monkeypatch.setenv("MERGECRAFT_TRACING_CONTENT", canary)
 
     from mergecraft.config.env import EnvSettingsError
-
     from mergecraft.tracing.content import resolve_content_capture
 
     with pytest.raises(EnvSettingsError) as excinfo:
@@ -191,7 +190,6 @@ def test_malformed_export_flag_fails_closed(
     monkeypatch.setenv("MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT", canary)
 
     from mergecraft.config.env import EnvSettingsError
-
     from mergecraft.tracing.content import resolve_content_capture
 
     with pytest.raises(EnvSettingsError) as excinfo:

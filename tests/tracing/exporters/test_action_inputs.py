@@ -328,9 +328,8 @@ def test_malformed_input_tracing_fails_closed(monkeypatch: pytest.MonkeyPatch) -
     canary = "flase-canary-action-tracing"
     monkeypatch.setenv("INPUT_TRACING", canary)
 
-    from mergecraft.config.env import EnvSettingsError
-
     from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+    from mergecraft.config.env import EnvSettingsError
 
     with pytest.raises(EnvSettingsError) as excinfo:
         resolve_tracing_from_action_inputs()
@@ -347,9 +346,8 @@ def test_malformed_input_export_untrusted_fails_closed(
     canary = "flase-canary-action-export-untrusted"
     monkeypatch.setenv("INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT", canary)
 
-    from mergecraft.config.env import EnvSettingsError
-
     from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+    from mergecraft.config.env import EnvSettingsError
 
     with pytest.raises(EnvSettingsError) as excinfo:
         resolve_tracing_from_action_inputs()
