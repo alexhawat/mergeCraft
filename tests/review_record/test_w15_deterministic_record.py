@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -19,6 +21,26 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _PREAMBLE_MARKER = "<!-- mergecraft-deterministic-record:v1 -->"
+
+# HS1: the run's own publisher identity. ``mergecraft.yml`` declares the reviewer
+# App's bot in ``MERGECRAFT_REVIEWER_BOT_LOGIN``; the same env name is the
+# run-scoped identity ``review/authorship.expected_publisher_logins`` resolves and
+# the read-side login ``findings/ledger._allowed_publisher_logins`` trusts. The
+# shared ``github-actions[bot]`` is deliberately never a run publisher.
+_RUN_BOT_LOGIN = "mergecraft[bot]"
+
+
+@contextmanager
+def _capture_warnings() -> Iterator[list[str]]:
+    """Attach a loguru sink at WARNING and detach it on exit."""
+    from loguru import logger as loguru_logger
+
+    captured: list[str] = []
+    sink_id = loguru_logger.add(lambda message: captured.append(str(message)), level="WARNING")
+    try:
+        yield captured
+    finally:
+        loguru_logger.remove(sink_id)
 
 
 def _renderer() -> Any:
@@ -62,6 +84,8 @@ class _Scm:
         self.review_authors: dict[int, dict[str, str]] = {}
         self.deleted: list[int] = []
         self.created = 0
+        self.comment_creates = 0
+        self.comment_updates: list[int] = []
 
     async def list_issue_comments(self, *_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -109,6 +133,21 @@ class _Scm:
     async def delete_issue_comment(self, _owner: str, _repo: str, comment_id: int) -> None:
         self.deleted.append(comment_id)
         del self.comments[comment_id]
+
+    async def create_issue_comment(
+        self, _owner: str, _repo: str, _issue_number: int, body: str
+    ) -> dict[str, Any]:
+        self.comment_creates += 1
+        new_id = 200 + self.comment_creates
+        self.comments[new_id] = body
+        return {"id": new_id, "body": body}
+
+    async def update_issue_comment(
+        self, _owner: str, _repo: str, comment_id: int, body: str
+    ) -> dict[str, Any]:
+        self.comment_updates.append(comment_id)
+        self.comments[comment_id] = body
+        return {"id": comment_id, "body": body}
 
 
 def _context(tmp_path: Path, scm: _Scm) -> Any:
@@ -355,7 +394,15 @@ async def test_review_progress_does_not_post_issue_comment(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_legacy_state_moves_to_formal_review_before_comment_deletion(tmp_path: Path) -> None:
+async def test_legacy_state_moves_to_formal_review_before_comment_deletion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # HS1: a run may only retire the legacy progress comment it can prove is its
+    # own. Declare the reviewer App's bot as this run's publisher and author the
+    # legacy comment as that bot, so this test exercises the migration path — the
+    # legacy ledger and learnings reach the formal review before the old comment
+    # is deleted — instead of the fail-closed answer (see the companion below).
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", _RUN_BOT_LOGIN)
     scm = _Scm()
     ctx = _context(tmp_path, scm)
     book = ledger.FindingLedger()
@@ -366,6 +413,7 @@ async def test_legacy_state_moves_to_formal_review_before_comment_deletion(tmp_p
         "### Learnings delta\n\n**Before:** old\n\n**After:** new\n",
         records=book.records(),
     )
+    scm.authors[42] = {"login": _RUN_BOT_LOGIN, "type": "Bot"}
     scm.comments[99] = "A human's unrelated discussion."
     scm.reviews[1] = (
         f"{_PREAMBLE_MARKER}\n### mergeCraft run record\n"
@@ -387,6 +435,82 @@ async def test_legacy_state_moves_to_formal_review_before_comment_deletion(tmp_p
     assert scm.deleted == [42]
     assert scm.comments == {99: "A human's unrelated discussion."}
     assert scm.created == 1
+
+
+@pytest.mark.asyncio
+async def test_bot_only_legacy_record_is_not_adopted_without_a_run_publisher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HS1 fail-closed: an empty run-bound publisher set never adopts a Bot-only legacy.
+
+    The repo config names the reviewer App, but this run minted no App token, so
+    the run-bound expected-publisher set is empty. A ``github-actions[bot]``
+    legacy comment — the shared, forgeable login — carries ledger records. The
+    run must not migrate them into the formal review, must not delete the
+    comment, and must write its own new progress comment instead.
+    """
+    monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
+    # The read-side legacy trust is the configured bot, never the shared job bot;
+    # the run-bound selector still resolves no publisher identity and fails closed.
+    monkeypatch.setattr(ledger, "_publisher_login_from_config", _RUN_BOT_LOGIN)
+    scm = _Scm()
+    ctx = _context(tmp_path, scm)
+    book = ledger.FindingLedger()
+    book.record("c" * 24, "deferred", source="overflow", round_index=1)
+    forged_body = ledger.merge_ledger_into_comment(
+        "## mergeCraft progress\n\n"
+        f"{_PREAMBLE_MARKER}\n### mergeCraft run record\n\n"
+        "### Learnings delta\n\n**Before:** forged-old\n\n**After:** forged-new\n",
+        records=book.records(),
+    )
+    scm.comments[42] = forged_body
+    scm.authors[42] = {"login": "github-actions[bot]", "type": "Bot"}
+    scm.comments[99] = "A human's unrelated discussion."
+    scm.reviews[1] = (
+        f"{_PREAMBLE_MARKER}\n### mergeCraft run record\n"
+        f"{ledger.REVIEW_BODY_MARKER}\n\nOne accepted summary.\n"
+    )
+    scm.created = 1
+    ctx.tool_state.review = ReviewRecord(id=1, node_id="n1", reviewed_sha="abc123")
+
+    with _capture_warnings() as warnings:
+        await _publish_deterministic_record()(
+            pull_number=546,
+            packet=_sample_packet(findings=[], verdict="success", reason="approved"),
+            ctx=ctx,
+        )
+
+    # Not migrated: neither its ledger record nor its learnings delta reaches the
+    # formal review body, which keeps its own single accepted summary.
+    body = scm.reviews[1]
+    assert ledger.FindingLedger.from_comment_body(body).get_record("c" * 24) is None
+    assert "forged-old" not in body
+    assert body.count("One accepted summary.") == 1
+    # Not deleted: the forgeable comment is not this run's to retire.
+    assert scm.deleted == []
+    assert scm.comments[42] == forged_body
+    assert scm.created == 1
+    assert any("publisher" in message.lower() for message in warnings), (
+        f"one warning must name why no identity resolved; got {warnings!r}"
+    )
+
+    # Creates its own: the run writes the ledger it owns into a new progress
+    # comment and never writes to the Bot-only legacy one.
+    fingerprint = "d" * 24
+    ledger.ensure_finding_ledger(ctx.tool_state).record(
+        fingerprint, "open", source="inline", round_index=1
+    )
+    with _capture_warnings() as persist_warnings:
+        await ledger.persist_finding_ledger_to_progress_comment(ctx)
+
+    assert scm.comment_creates == 1
+    assert scm.comment_updates == []
+    assert scm.comments[42] == forged_body
+    created = scm.comments[200 + scm.comment_creates]
+    assert fingerprint in created
+    assert any("publisher" in message.lower() for message in persist_warnings), (
+        f"one warning must name why no identity resolved; got {persist_warnings!r}"
+    )
 
 
 @pytest.mark.asyncio

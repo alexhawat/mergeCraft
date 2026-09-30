@@ -62,6 +62,19 @@ A `github-actions[bot]` comment is never selected by type alone.
 | With an empty publisher set the writer creates a new comment and warns why | integration | `tests/findings/test_sticky_selection_author.py::test_persist_with_an_empty_publisher_set_creates_and_warns` | red → authorship wave |
 | `hydrate`, `persist` and `upsert` keep ignoring a human marker | integration | `tests/findings/test_sticky_selection_author.py::test_hydrate_ignores_a_human_ledger_marker`, `::test_persist_ignores_a_human_ledger_marker`, `::test_upsert_ignores_a_human_ledger_marker` | green (guard) |
 
+### The legacy progress-comment migration needs a run publisher identity
+
+`publish_deterministic_record` retires a legacy progress comment only when the
+run can prove the comment is its own (HS1's publisher rule). With an empty
+run-bound publisher set a Bot-only legacy comment is never adopted: its ledger
+and learnings stay out of the formal review, it is not deleted, and the run
+writes a new progress comment instead.
+
+| Behaviour | Layer | Test | Status |
+| --- | --- | --- | --- |
+| A legacy progress comment authored by the run's declared publisher is migrated into the formal review before the old comment is deleted | integration | `tests/review_record/test_w15_deterministic_record.py::test_legacy_state_moves_to_formal_review_before_comment_deletion` | green (guard) |
+| With an empty run-bound publisher set, a `github-actions[bot]` legacy comment carrying ledger records is not migrated, not deleted, and a new progress comment is written instead | integration | `tests/review_record/test_w15_deterministic_record.py::test_bot_only_legacy_record_is_not_adopted_without_a_run_publisher` | green (guard) |
+
 ### The read-only operator view has no run context
 
 `mergecraft findings ledger` never feeds a run. With no App configured it reads a
@@ -295,3 +308,26 @@ the pre-fix behaviour and passes against the shipped one.
   discarded it — the Action half of the capture control was dead. Proof of
   discrimination: restoring the pre-fix capture resolver failed the new
   resolver-equality pin and the retrievability pin (3 failed, 8 passed).
+
+### Publisher-identity round (test-side, the HS1 migration test)
+
+The review-record suite encoded the pre-HS1 contract: its SCM double authored
+every mergeCraft-looking comment as `github-actions[bot]` — the shared, forgeable
+login — and expected the legacy progress comment to be migrated and retired
+anyway. HS1 withholds that login, so with no run-bound id and an empty
+publisher set the run correctly refuses to adopt the comment.
+`test_legacy_state_moves_to_formal_review_before_comment_deletion` now declares
+the run's publisher identity through `MERGECRAFT_REVIEWER_BOT_LOGIN` (the
+mechanism `tests/findings/test_sticky_selection_author.py` exercises) and authors
+the legacy comment as that publisher's bot, so it exercises the migration it was
+written for: the ledger record reaches the review body, the learnings delta
+survives, the accepted summary appears once, the old comment is deleted, the
+human comment is untouched, and no extra comment is created.
+
+A companion pins the fail-closed inverse the definition of done names and no test
+held: `test_bot_only_legacy_record_is_not_adopted_without_a_run_publisher`. With
+an empty run-bound publisher set and no run-bound id, a `github-actions[bot]`
+legacy comment carrying ledger records is not migrated into the review body, is
+not deleted, and the run writes a new progress comment instead. Discrimination:
+running the companion against the pre-HS1 Bot-type selection migrates the record,
+which fails its first assertion.
