@@ -599,6 +599,30 @@ def _stricter_shell(
     return resolved
 
 
+def _resolve_model_pin(
+    inputs: ActionInputs,
+    json_payload: JsonPayload | None,
+    settings: RepoSettings,
+) -> bool:
+    """Resolve the tri-state model pin: Action input > JSON payload > repo.
+
+    A pin cannot be an OR of "some layer said yes" — an OR has no way to say
+    *no*, so an explicit ``model_pin: disabled`` could never override a repo
+    ``modelPin: true``. Unset (``None``) defers to the next layer; the repo
+    setting is the floor. ``modelExplicit`` follows the same resolution.
+    """
+    if inputs.model_pin == "enabled":
+        return True
+    if inputs.model_pin == "disabled":
+        return False
+    if json_payload is not None:
+        if json_payload.model_pin is not None:
+            return json_payload.model_pin
+        if json_payload.model_explicit is not None:
+            return json_payload.model_explicit
+    return settings.model_pin
+
+
 def resolve_payload(
     resolved_prompt_input: str | JsonPayload | None = None,
     repo_settings: RepoSettings | None = None,
@@ -650,6 +674,8 @@ def resolve_payload(
         github_actor if not is_mergecraft(github_actor) else None
     )
 
+    model_pin = _resolve_model_pin(inputs, json_payload, settings)
+
     return {
         "~mergecraft": True,
         "version": (json_payload.version if json_payload else None) or _package_version(),
@@ -659,21 +685,14 @@ def resolve_payload(
         # unless the operator opts into pinning via ``model_pin: enabled`` (or
         # ``.mergecraft/config.yaml``'s ``modelPin: true``).
         #
-        # ``modelExplicit`` is kept for downstream consumers that still branch on
-        # it — it now reflects the explicit-pin opt-in only, not the bare
-        # presence of a ``model:`` input. ``modelHead`` is the new head-slug
-        # signal.
+        # ``model_pin`` is tri-state: an explicit input (``enabled`` / ``disabled``)
+        # wins, else the JSON payload's ``modelPin`` (or legacy ``modelExplicit``),
+        # else the repo ``modelPin``. ``modelExplicit`` is kept for downstream
+        # consumers that still branch on it and follows the same resolution;
+        # ``modelHead`` is the head-slug signal.
         "modelHead": (json_payload.model if json_payload else None) or inputs.model or None,
-        "modelExplicit": bool(
-            (json_payload.model_explicit if json_payload else None)
-            or (inputs.model and inputs.model_pin == "enabled")
-            or (settings.model and settings.model_pin)
-        ),
-        "modelPin": (
-            inputs.model_pin == "enabled"
-            or bool(json_payload.model_explicit if json_payload else None)
-            or settings.model_pin
-        ),
+        "modelExplicit": model_pin,
+        "modelPin": model_pin,
         "prompt": prompt,
         "triggerer": triggerer,
         "baseInstructions": json_payload.base_instructions if json_payload else None,

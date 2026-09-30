@@ -20,6 +20,7 @@ Surfaces in this class (Pydantic `extra="forbid"`):
 | `AnalyzersSettings` | Analyzer enablement and trust-adjacent toggles |
 | `TracingSettings` | Whether reviewed-repo content may leave the runner |
 | Optional-feature blocks (`StaticCheckDefinition`, `CiEvidenceSettings`, `ModeDefinition`, `TraceSinkEntry`) | **Flipped to `forbid` at pre-0.0.1.** The one-release warning shim has ended — an unknown key now fails closed the same way the security/runtime blocks do, so a typo on a `staticChecks` / `ciEvidence` / `modes` / `tracing.sinks` entry aborts instead of silently dropping |
+| `trust.agentSandbox` | An unrecognised tier is a configuration error, never a silent fall-back. A value written to *remove* privilege (`off`, `false`, a typo) must not be read as the more permissive default tier. Only `never` / `merged-only` / `dispatch` / `same-repo` validate; the error names all four |
 
 Invalid enum values on `push` / `shell`, unknown keys on those models, and
 unparseable Action inputs that drive runtime (`timeout`) all fail closed.

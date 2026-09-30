@@ -17,11 +17,9 @@ from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
 )
 from mergecraft.config.io import (
-    append_config_mapping,
-    config_has_yaml_comments,
     config_path_for_root,
     load_config_dict,
-    write_config_dict,
+    patch_config_dict,
 )
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
 
@@ -131,11 +129,9 @@ def _split_model_slugs(value: str) -> list[str]:
     return slugs
 
 
-def _write_config_data(path: Path, data: dict[str, object], *, patch: dict[str, object]) -> None:
-    if config_has_yaml_comments(path):
-        append_config_mapping(path, patch)
-        return
-    write_config_dict(path, data)
+def _write_config_data(path: Path, *, patch: dict[str, object]) -> None:
+    """Write *patch* into *path*, preserving comments and never duplicating a key."""
+    patch_config_dict(path, patch)
 
 
 def config_set(
@@ -177,7 +173,7 @@ def config_set(
     except ValidationError as exc:
         cli_bail(f"config validation failed: {exc}")
 
-    _write_config_data(config_path, data, patch=patch)
+    _write_config_data(config_path, patch=patch)
     try:
         display = str(config_path.relative_to(root))
     except ValueError:
