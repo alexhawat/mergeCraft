@@ -83,14 +83,24 @@ def write_config_dict(path: Path, data: dict[str, Any]) -> None:
         raise
 
 
+def _is_sequence_item(stripped_line: str) -> bool:
+    """True when *stripped_line* is a YAML block-sequence entry (``- item``)."""
+    return stripped_line == "-" or stripped_line.startswith("- ")
+
+
 def _top_level_block_span(lines: list[str], key: str) -> tuple[int, int] | None:
     """Return ``(start, end)`` of the top-level *key* block, or ``None``.
 
     ``end`` is exclusive and covers the header plus every line that belongs to
-    its value — deeper-indented mapping/sequence entries, and the blank or
-    comment lines between them. Trailing blank lines are excluded so a
-    replacement does not swallow the separator before the next top-level key.
-    A scalar value on the header line (``key: value``) is a one-line block.
+    its value — deeper-indented mapping entries, and the blank or comment lines
+    between them. Trailing blank lines are excluded so a replacement does not
+    swallow the separator before the next top-level key. A scalar value on the
+    header line (``key: value``) is a one-line block.
+
+    ``yaml.safe_dump`` renders a top-level sequence's items at column 0
+    (``models:\\n- a\\n- b``), so a column-0 ``- item`` is part of the current
+    block, not the next top-level key; that only applies to a block whose
+    header carries no inline scalar value.
     """
     header = re.compile(rf"^([ \t]*){re.escape(key)}:(.*)$")
     for index, line in enumerate(lines):
@@ -107,11 +117,14 @@ def _top_level_block_span(lines: list[str], key: str) -> tuple[int, int] | None:
         last_content = end
         for offset in range(index + 1, len(lines)):
             candidate = lines[offset]
-            if not candidate.strip():
+            stripped = candidate.strip()
+            if not stripped:
                 end = offset + 1
                 continue
             candidate_indent = len(candidate) - len(candidate.lstrip(" \t"))
-            if candidate_indent == 0:
+            if candidate_indent == 0 and not _is_sequence_item(stripped):
+                # A new top-level key. A column-0 ``- item`` is this block's own
+                # sequence value, so it does not end the block.
                 break
             end = offset + 1
             last_content = end
