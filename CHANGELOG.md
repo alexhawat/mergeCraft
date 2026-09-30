@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   true`. **Fix:** none required — the values still parse and round-trip; remove
   the key if the warning is unwanted.
 
+- A malformed tracing environment variable or tracing Action input — the enable
+  flag, the region, the content level, or the untrusted-content export — now
+  fails configuration instead of being ignored. A typo such as `flase` used to
+  drop the value and let a lower layer's more permissive one win; the run now
+  fails closed as a configuration error naming the variable, and never prints
+  its value. **Fix:** correct the spelling; `MERGECRAFT_TRACING_REGION` still
+  accepts `us` and `eu`.
+
 ### Fixed
 
 - `doctor`, `config show` / `config explain` and the config loader now agree on
@@ -62,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   context `plan` field and the `proxyModel` producers and consumers were removed,
   none of which had a reader. `api_token`, the remote upload path, the local
   upload fallback and the provider catalog are unchanged.
+
+- Provider commands read `.env` values the same way the CLI startup load does, so
+  a single-quoted value no longer keeps its surrounding quotes and `export `,
+  inline comments and `${VAR}` interpolation mean the same thing to every reader
+  of the file.
 
 ### Added
 
@@ -130,6 +143,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared `github-actions[bot]` login when no reviewer App is configured.
 
 ### Changed
+
+- The local `.env` file and the tracing environment layer are read through one
+  typed model each, so a variable's exact name and type live in one place and a
+  new environment read has a defined home. Behaviour is unchanged apart from the
+  two entries above.
 
 - Progress comments are recognised by the identity that published them, not by
   any bot: the sticky selector uses the run's expected-publisher set, or the
