@@ -77,6 +77,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
 | `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set (#140). |
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
+| `mergecraft eval trajectory-gate` | Compare a candidate trajectory report against a frozen baseline. |
 | `mergecraft eval trajectory-score --labels LABELS` | Score the deterministic trajectory auditor against frozen labels. |
 | `mergecraft evidence show <finding-id>` | Show the evidence packet for a finding. |
 | `mergecraft evidence verify <finding-id>` | Replay verification for a finding's evidence packet (not an approval). |

@@ -17,6 +17,7 @@ Exports:
     prepare_run_packet: Assemble once with enforce-mode fail-closed fallback.
     resolve_prepared_run_packet: Return the cached packet snapshot (D7).
     emit_run_packet: Write a pre-assembled packet; never rebuilds.
+    resolve_evidence_dir: Resolve the run's evidence directory (shared policy).
     resolve_packet_path: Resolve the stable on-disk destination.
 """
 
@@ -52,29 +53,41 @@ _PACKET_DIR_ENV = "MERGECRAFT_EVIDENCE_DIR"
 """Operator override for the packet's parent directory."""
 
 
-def resolve_packet_path(*, tmpdir: str, change_slug: str) -> Path:
-    """Return the stable on-disk destination for this run's packet.
+def resolve_evidence_dir(*, tmpdir: str) -> Path:
+    """Return the directory this run's evidence artefacts live in.
 
     Resolution order, first hit wins:
 
     1. ``MERGECRAFT_EVIDENCE_DIR`` — explicit operator override.
-    2. ``RUNNER_TEMP`` — the GitHub-provided per-job scratch directory. It
-       survives the step, so a later ``actions/upload-artifact`` step can
-       read it, and it is *outside* the checkout, so the packet can never
-       be swept into a commit by an agent running ``git add -A``.
-    3. ``tmpdir`` — the run's own temp dir (local / offline runs).
+    2. ``RUNNER_TEMP/mergecraft`` — the GitHub-provided per-job scratch
+       directory. It survives the step, so a later
+       ``actions/upload-artifact`` step can read it, and it is *outside* the
+       checkout, so an artefact can never be swept into a commit by an agent
+       running ``git add -A``.
+    3. ``tmpdir/evidence`` — the run's own temp dir (local / offline runs).
 
-    ``change_slug`` disambiguates concurrent runs sharing a directory.
+    This is the single destination policy for the run's evidence. The packet
+    (:func:`resolve_packet_path`) and the opt-in judge-verdict capture
+    (:func:`mergecraft.evidence.verdict_capture.resolve_capture_dir`) both
+    resolve through it, so a workflow that uploads one finds the other.
     """
     override = os.environ.get(_PACKET_DIR_ENV)
     runner_temp = os.environ.get("RUNNER_TEMP")
     if override:
-        base = Path(override)
-    elif runner_temp:
-        base = Path(runner_temp) / "mergecraft"
-    else:
-        base = Path(tmpdir) / "evidence"
-    return base / f"{change_slug}-{PACKET_FILENAME}"
+        return Path(override)
+    if runner_temp:
+        return Path(runner_temp) / "mergecraft"
+    return Path(tmpdir) / "evidence"
+
+
+def resolve_packet_path(*, tmpdir: str, change_slug: str) -> Path:
+    """Return the stable on-disk destination for this run's packet.
+
+    The parent directory comes from :func:`resolve_evidence_dir` (the run's
+    evidence policy); ``change_slug`` disambiguates concurrent runs sharing a
+    directory in the basename.
+    """
+    return resolve_evidence_dir(tmpdir=tmpdir) / f"{change_slug}-{PACKET_FILENAME}"
 
 
 def _slugify(change_id: str) -> str:
@@ -751,6 +764,7 @@ __all__ = [
     "classify_run_blast_radius",
     "emit_run_packet",
     "prepare_run_packet",
+    "resolve_evidence_dir",
     "resolve_packet_path",
     "resolve_prepared_run_packet",
 ]

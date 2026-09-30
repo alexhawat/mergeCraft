@@ -713,7 +713,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-nous
-          path: ${{ runner.temp }}/packet-nous.json
+          path: |
+            ${{ runner.temp }}/packet-nous.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 
@@ -883,7 +885,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-codex
-          path: ${{ runner.temp }}/packet-codex.json
+          path: |
+            ${{ runner.temp }}/packet-codex.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 
@@ -1027,7 +1031,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-claude
-          path: ${{ runner.temp }}/packet-claude.json
+          path: |
+            ${{ runner.temp }}/packet-claude.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 

@@ -50,8 +50,6 @@ CAPTURE_ENV = "MERGECRAFT_CAPTURE_VERDICTS"
 CAPTURE_FILENAME = "judge-verdicts.jsonl"
 """One JSON line per saved verdict, under the run's evidence directory."""
 
-_EVIDENCE_DIR_ENV = "MERGECRAFT_EVIDENCE_DIR"
-
 
 def capture_verdicts_enabled(tool_state: Any | None = None) -> bool:
     """Return whether verdict capture is on for this run.
@@ -67,17 +65,18 @@ def capture_verdicts_enabled(tool_state: Any | None = None) -> bool:
 
 
 def resolve_capture_dir(*, tmpdir: str) -> Path:
-    """Return the run's evidence directory.
+    """Return the run's evidence directory — the same one the packet uses.
 
-    ``MERGECRAFT_EVIDENCE_DIR`` is the operator override; otherwise the file
-    lands beside the offline run's evidence under ``<tmpdir>/evidence``. In an
-    Action run ``tmpdir`` is already inside the runner-owned ``$RUNNER_TEMP``, so
-    the JSONL stays outside the PR checkout and survives the step.
+    Delegates to :func:`mergecraft.evidence.run_packet.resolve_evidence_dir`,
+    the single destination policy: ``MERGECRAFT_EVIDENCE_DIR`` override, then
+    ``$RUNNER_TEMP/mergecraft`` in an Action run, then ``<tmpdir>/evidence``
+    offline. In an Action run the JSONL therefore lands where the workflow
+    uploads its evidence — not under the ephemeral run dir, which is discarded
+    with the runner, making the capture artefact unretrievable.
     """
-    override = os.environ.get(_EVIDENCE_DIR_ENV, "").strip()
-    if override:
-        return Path(override)
-    return Path(tmpdir) / "evidence"
+    from mergecraft.evidence.run_packet import resolve_evidence_dir
+
+    return resolve_evidence_dir(tmpdir=tmpdir)
 
 
 def _digest(text: str) -> str:
