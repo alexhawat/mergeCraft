@@ -34,6 +34,26 @@ def test_default_api_base_url_honours_github_api_url_env(
     assert _default_api_base_url() == "http://127.0.0.1:9/api/v3"
 
 
+def test_default_server_url_falls_back_to_public_github(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CF4.4 — the web host defaults to github.com when unset."""
+    from mergecraft.utils.github import _default_server_url
+
+    monkeypatch.delenv("GITHUB_SERVER_URL", raising=False)
+    assert _default_server_url() == "https://github.com"
+
+
+def test_default_server_url_honours_github_server_url_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CF4.4 — GHES points the web host via ``GITHUB_SERVER_URL``."""
+    from mergecraft.utils.github import _default_server_url
+
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://ghe.example/")
+    assert _default_server_url() == "https://ghe.example"
+
+
 @pytest.mark.asyncio
 async def test_github_client_uses_default_api_base_url_when_base_url_omitted(
     monkeypatch: pytest.MonkeyPatch,

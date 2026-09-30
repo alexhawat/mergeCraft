@@ -183,3 +183,41 @@ def test_doctor_mcp_probe_does_not_treat_3764_as_the_mcp_port(
     lowered = output.lower()
     names_fixed_port = "3764" in lowered and "ephemeral" not in lowered
     assert not names_fixed_port, output
+
+
+# ── CF3.5 — the tripwire is a hard failure on the rendered table (CF-D10) ───
+
+
+def test_doctor_fails_closed_when_rendered_output_would_leak_a_secret(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A probe detail carrying a credential value aborts before the table prints.
+
+    ``assert_output_contains_no_secrets`` existed but was never called. It now
+    runs against the rendered text before printing: a leak exits
+    ``CLI_CONFIGURATION_EXIT_CODE``, prints nothing of the table, and names the
+    env key, never the value.
+    """
+    from mergecraft.cli import doctor_cmd
+    from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
+
+    _init_git_repo(tmp_path)
+    secret = "doctor-leak-fixture"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    monkeypatch.chdir(tmp_path)
+
+    leaky = doctor_cmd.ProbeResult("provider", "ok", f"token={secret}")
+    monkeypatch.setattr(doctor_cmd, "run_doctor_probes", lambda _root: [leaky])
+
+    result = runner.invoke(
+        app,
+        ["doctor"],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    output = _plain(result.stdout + result.stderr)
+    diagnostic = f"{output}\n{result.exception or ''}"
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, diagnostic
+    assert secret not in output, "the credential value was echoed"
+    assert "OPENAI_API_KEY" in diagnostic, diagnostic
+    assert "mergecraft doctor" not in output, f"the doctor table was printed: {output!r}"
