@@ -265,11 +265,10 @@ def test_no_registered_model_dump_leaks_a_secret() -> None:
     secret_models = 0
     for model in registered_env_models():
         mapping: dict[str, str] = {}
-        for _name, field in model.model_fields.items():
+        for name, field in model.model_fields.items():
             if _is_secret_annotation(field.annotation):
-                alias = _first_alias(field)
-                if alias:
-                    mapping[alias] = _CANARY_VALUE
+                # An explicit alias wins; otherwise the field name is the env name.
+                mapping[_first_alias(field) or name] = _CANARY_VALUE
         if not mapping:
             continue
         secret_models += 1
