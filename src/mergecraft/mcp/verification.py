@@ -48,6 +48,52 @@ _NOT_READY_REASON = (
     "checkable facts are settled before any judge sees the finding (D14, #45)."
 )
 
+# A verdict with no recoverable blast-radius lane still names one: a calibration
+# case requires a non-empty lane, and "unknown" is honest rather than fabricated.
+_UNKNOWN_LANE = "unknown"
+
+
+def _capture_verdict_if_enabled(ctx: ToolContext, verdict: Any) -> None:
+    """Append one saved verdict to the run's calibration capture when on (HS2).
+
+    Total and non-throwing: a capture artefact is an audit surface, so failing to
+    write one degrades to a missing line and never fails the review.
+    """
+    from mergecraft.evidence.verdict_capture import (
+        capture_verdict_record,
+        capture_verdicts_enabled,
+        resolve_capture_dir,
+    )
+
+    if not capture_verdicts_enabled(ctx.tool_state):
+        return
+    try:
+        from mergecraft.agents.verifier import AgentFinding
+        from mergecraft.evidence.packet import DeterministicCheck
+
+        row = _finding_row_for_fingerprint(ctx, verdict.fingerprint) or {}
+        line = row.get("line")
+        finding = AgentFinding(
+            path=str(row.get("path") or ""),
+            body=str(row.get("body") or ""),
+            severity=str(row.get("severity") or ""),
+            line=line if isinstance(line, int) else None,
+            fingerprint=verdict.fingerprint,
+        )
+        checks = [
+            DeterministicCheck(name=name, status="completed", command=name)
+            for name in verdict.deterministic_checks
+        ]
+        capture_verdict_record(
+            evidence_dir=resolve_capture_dir(tmpdir=ctx.tmpdir),
+            verdict=verdict,
+            finding=finding,
+            deterministic_checks=checks,
+            lane=verdict.lane or _UNKNOWN_LANE,
+        )
+    except Exception as err:  # a capture artefact never fails a review
+        logger.warning("judge-verdict capture skipped: {}", err)
+
 
 def _validate_publication_finding(
     ctx: ToolContext,
@@ -485,10 +531,11 @@ def record_finding_verdict_tool(ctx: ToolContext):
             pin=pin,
             deterministic_checks=completed,
             new_severity=JudgeVerdict.parse_severity(params.get("new_severity")),
-            lane=_run_lane(ctx),
+            lane=_run_lane(ctx) or _UNKNOWN_LANE,
         )
         path = ctx.tool_state.learnings_file_path or learnings_file_path(ctx.tmpdir)
         outcome = record_verifier_verdict(verdict, learnings_path=Path(path))
+        _capture_verdict_if_enabled(ctx, verdict)
         stored_row = next(
             (
                 row

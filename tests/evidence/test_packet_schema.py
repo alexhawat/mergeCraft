@@ -65,6 +65,37 @@ def test_evidence_packet_requires_schema_version() -> None:
     assert fields["schema_version"].is_required() is True
 
 
+def test_packet_schema_declares_run_bound_review_fields() -> None:
+    """The packet carries the orchestrator-written run-bound review identity.
+
+    ``reviewed_head_sha`` is the PR head the trusted run checked out and
+    ``progress_comment_id`` is that run's sticky comment id. Both are written by
+    the orchestrator; neither is agent-controlled. The schema is derived from
+    the model, so the properties must appear there too (D3).
+    """
+    packet_mod = import_module("mergecraft.evidence.packet")
+
+    fields = packet_mod.MergeEvidencePacket.model_fields
+    assert "reviewed_head_sha" in fields
+    assert "progress_comment_id" in fields
+
+    schema = packet_mod.packet_output_schema()
+    properties = schema.get("properties")
+    assert isinstance(properties, dict)
+    assert "reviewed_head_sha" in properties
+    assert "progress_comment_id" in properties
+
+
+def test_packet_run_bound_fields_default_to_none() -> None:
+    """A packet built before the fields existed still validates (P-6, forward-compatible)."""
+    packet_mod = import_module("mergecraft.evidence.packet")
+
+    packet = packet_mod.MergeEvidencePacket(**_packet_kwargs())
+
+    assert packet.reviewed_head_sha is None
+    assert packet.progress_comment_id is None
+
+
 def test_packet_schema_version_is_pinned() -> None:
     """The current schema version is a literal the suite pins (D7).
 

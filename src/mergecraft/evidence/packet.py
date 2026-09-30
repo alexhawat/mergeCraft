@@ -88,7 +88,12 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   terminal verdict can bind the structural conclusion downward, never up).
 #   Optional and defaults to ``None`` — a packet built before this version
 #   still validates.
-PACKET_SCHEMA_VERSION = "1.12.0"
+# - 1.13.0 — run-bound review identity: ``reviewed_head_sha`` is the PR head the
+#   trusted self-review run checked out, and ``progress_comment_id`` is the
+#   sticky comment id that run owns. Both are written by the orchestrator from
+#   the run's own checkout and sticky state — never agent-controlled — and
+#   default to ``None``, so a packet built before this version still validates.
+PACKET_SCHEMA_VERSION = "1.13.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -273,6 +278,13 @@ class MergeEvidencePacket(BaseModel):
     # field feeds into as a one-way ratchet; see
     # ``mergecraft.agents.gates._decide_approval_from_packet``).
     agent_terminal_verdict: Literal["approve", "request_changes"] | None = None
+    # HS8 — the run-bound review identity, written by the orchestrator from the
+    # run's own checkout and sticky state, never from an agent. ``reviewed_head_sha``
+    # is the PR head this run checked out; ``progress_comment_id`` is the sticky
+    # comment id this run owns. Both default to ``None`` so a packet built before
+    # the fields existed still validates.
+    reviewed_head_sha: str | None = None
+    progress_comment_id: int | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:

@@ -97,6 +97,19 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mergecraft"]
+# Script-, Make- and test-only support modules. Every caller for the paths below
+# runs from the checkout, so the installed wheel tolerates their absence.
+# src/mergecraft/evals/corpora.py is deliberately NOT excluded: a shipped CLI
+# path (cli/eval_cmd.py, evals/human_batch.py) imports it at runtime.
+exclude = [
+    "src/mergecraft/evals/mcp_public.py",
+    "src/mergecraft/evals/quality_metrics.py",
+    "src/mergecraft/evals/skill_taxonomy_gate.py",
+    "src/mergecraft/utils/git_ref.py",
+    "src/mergecraft/integrations/live_providers.py",
+    "src/mergecraft/mcp/codegen.py",
+    "src/mergecraft/scm/errors.py",
+]
 artifacts = [
     "src/mergecraft/skills/**/*.md",
     "src/mergecraft/policy/packs/**/*.yaml",

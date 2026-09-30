@@ -38,6 +38,22 @@ def test_evidence_packet_round_trips_through_dict() -> None:
     assert reparsed == packet
 
 
+def test_run_bound_review_fields_round_trip_through_json() -> None:
+    """The orchestrator-written fields survive serialization like every other field."""
+    packet_mod = import_module("mergecraft.evidence.packet")
+
+    payload = sample_minimal_packet_dict()
+    payload["reviewed_head_sha"] = "a" * 40
+    payload["progress_comment_id"] = 4242
+    packet = packet_mod.MergeEvidencePacket(**payload)
+
+    reparsed = packet_mod.MergeEvidencePacket.model_validate_json(packet.model_dump_json())
+
+    assert reparsed == packet
+    assert reparsed.reviewed_head_sha == "a" * 40
+    assert reparsed.progress_comment_id == 4242
+
+
 def test_evidence_packet_rejects_unknown_fields() -> None:
     """``extra=\"forbid\"`` rejects unknown fields (D3 — packet composes Finding strictly)."""
     packet_mod = import_module("mergecraft.evidence.packet")

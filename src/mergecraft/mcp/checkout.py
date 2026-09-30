@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import re
+import zipfile
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,17 +29,17 @@ from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from mergecraft.mcp.context import ToolContext
     from mergecraft.xrepo.review import BaseManifestLookup
 
 __all__ = [
     "GitHubClient",
+    "RunBoundReviewState",
     "checkout_pr_tool",
     "ensure_local_base_branch_alias",
     "get_git_status",
     "list_mergecraft_reviews",
+    "recover_run_bound_review_state",
 ]
 
 
@@ -300,8 +305,299 @@ async def list_mergecraft_reviews(ctx: ToolContext, *, pull_number: int) -> list
     return [review for review in raw if is_mergecraft_authored(review, publishers=publishers)]
 
 
+# HS8 — the trusted self-review workflow whose runs carry the run-bound
+# checkpoint. The repo-relative path identifies the file; the basename is the
+# documented Actions-API ``{workflow_id}`` spelling, tried second.
+_WORKFLOW_PATH = ".github/workflows/mergecraft.yml"
+_WORKFLOW_FILE = _WORKFLOW_PATH.rsplit("/", 1)[-1]
+_TRUSTED_RUN_EVENT = "pull_request_target"
+_TRUSTED_RUN_CONCLUSION = "success"
+# The evidence artefact each review rung uploads, and the packet member inside it.
+_EVIDENCE_ARTIFACT_PREFIX = "mergecraft-evidence-"
+_EVIDENCE_PACKET_MEMBER = "merge-evidence.json"
+
+
+@dataclass(frozen=True)
+class RunBoundReviewState:
+    """The run-bound review identity read from trusted workflow runs (HS8).
+
+    ``reviewed_head_sha`` is ``""`` and ``round_index`` is ``0`` when no trusted
+    run's evidence was readable — the fail-closed answers. ``progress_comment_id``
+    is ``None`` then, so the sticky selector never mistakes an unread checkpoint
+    for a fresh one.
+    """
+
+    reviewed_head_sha: str = ""
+    round_index: int = 0
+    progress_comment_id: int | None = None
+
+
+_UNAVAILABLE_RUN_BOUND_STATE = RunBoundReviewState()
+
+
+def _as_mapping(value: object) -> Mapping[str, Any]:
+    """Return ``value`` when it is a mapping, else an empty one (total coercion)."""
+    return value if isinstance(value, Mapping) else {}
+
+
+def _filter_trusted_runs(runs: object, *, pull_number: int) -> list[dict[str, Any]]:
+    """Return the trusted runs for ``pull_number``, newest first (HS8).
+
+    Trusted means a ``pull_request_target`` run that concluded ``success`` and
+    names this PR. ``pull_request_target`` always runs the default branch's
+    workflow definition, so a workflow added or edited on the PR branch cannot
+    produce one — that is the property the checkpoint relies on.
+    """
+    if not isinstance(runs, list):
+        return []
+    trusted: list[dict[str, Any]] = []
+    for run in runs:
+        row = _as_mapping(run)
+        if row.get("event") != _TRUSTED_RUN_EVENT:
+            continue
+        if row.get("conclusion") != _TRUSTED_RUN_CONCLUSION:
+            continue
+        pull_numbers = {
+            _as_mapping(entry).get("number") for entry in row.get("pull_requests") or []
+        }
+        if pull_number not in pull_numbers:
+            continue
+        trusted.append(dict(row))
+    trusted.sort(key=lambda row: str(row.get("created_at") or ""), reverse=True)
+    return trusted
+
+
+async def _list_mergecraft_workflow_runs(ctx: ToolContext) -> object:
+    """List this repo's trusted-event ``mergecraft.yml`` runs (HS8).
+
+    Both the repo-relative path and the file-name spellings of the Actions-API
+    ``{workflow_id}`` are tried so the read works against GitHub and against a
+    recorded double alike. Returns the raw ``workflow_runs`` list; when neither
+    form yields the expected shape it warns once naming the repo and returns
+    ``None`` (an unexpected Actions API shape, never a silent fallback).
+    """
+    for workflow_ref in (_WORKFLOW_PATH, _WORKFLOW_FILE):
+        endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/workflows/{workflow_ref}/runs"
+        payload = await ctx.scm.get(
+            endpoint,
+            params={"event": _TRUSTED_RUN_EVENT, "per_page": _REVIEWS_PAGE_SIZE},
+        )
+        if isinstance(payload, Mapping) and isinstance(payload.get("workflow_runs"), list):
+            return payload["workflow_runs"]
+    # Neither ``{workflow_id}`` spelling produced a mapping carrying a
+    # ``workflow_runs`` list. That is an unexpected Actions API shape, not the
+    # benign "this PR has no trusted runs" case (which returns an empty list),
+    # so it is named once here rather than falling back silently (HS8 / P-8).
+    logger.warning(
+        "run-bound checkpoint: workflow runs listing for {}/{} returned no "
+        "`workflow_runs` list; falling back",
+        ctx.repo.owner,
+        ctx.repo.name,
+    )
+    return None
+
+
+def _packet_from_artifact_zip(
+    blob: bytes, *, artifact_id: int | None = None
+) -> dict[str, Any] | None:
+    """Return the evidence packet stored inside an artefact zip, or ``None``.
+
+    Total and fail-closed: an unreadable zip, a zip with no
+    ``merge-evidence.json`` member, and a member that does not decode to a JSON
+    object each log one warning naming the artefact and the reason, then return
+    ``None``. A malformed payload degrades to a missing checkpoint, never an
+    exception into the run (HS8 / P-8).
+    """
+    where = f"artefact {artifact_id}" if artifact_id is not None else "evidence artefact"
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            for name in archive.namelist():
+                if name.rsplit("/", 1)[-1] != _EVIDENCE_PACKET_MEMBER:
+                    continue
+                payload = json.loads(archive.read(name))
+                if isinstance(payload, dict):
+                    return payload
+                logger.warning(
+                    "run-bound checkpoint: {} member {} is not a JSON object; falling back",
+                    where,
+                    _EVIDENCE_PACKET_MEMBER,
+                )
+                return None
+    except (OSError, ValueError, zipfile.BadZipFile) as err:
+        logger.warning("run-bound checkpoint: {} unreadable: {}; falling back", where, err)
+        return None
+    # Every loop iteration either returned the packet or returned ``None`` above,
+    # so reaching here means no ``merge-evidence.json`` member was present.
+    logger.warning(
+        "run-bound checkpoint: {} contains no {} member; falling back",
+        where,
+        _EVIDENCE_PACKET_MEMBER,
+    )
+    return None
+
+
+async def _read_run_evidence_packet(ctx: ToolContext, *, run_id: int) -> dict[str, Any] | None:
+    """Read one trusted run's evidence packet from its ``mergecraft-evidence-*`` artefact."""
+    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{run_id}/artifacts"
+    listing = await ctx.scm.get(endpoint)
+    if not isinstance(listing, Mapping):
+        logger.warning(
+            "run-bound checkpoint: run {} artefacts listing was not an object; falling back",
+            run_id,
+        )
+        return None
+    artifacts = listing.get("artifacts")
+    if not isinstance(artifacts, list):
+        logger.warning(
+            "run-bound checkpoint: run {} artefacts listing has no `artifacts` list; falling back",
+            run_id,
+        )
+        return None
+    candidate = next(
+        (
+            dict(_as_mapping(artifact))
+            for artifact in artifacts
+            if str(_as_mapping(artifact).get("name") or "").startswith(_EVIDENCE_ARTIFACT_PREFIX)
+            and not _as_mapping(artifact).get("expired")
+        ),
+        None,
+    )
+    if candidate is None:
+        logger.warning(
+            "run-bound checkpoint: run {} has no unexpired {} artefact; falling back",
+            run_id,
+            _EVIDENCE_ARTIFACT_PREFIX,
+        )
+        return None
+    artifact_id = _coerce_int(candidate.get("id"))
+    if artifact_id is None:
+        logger.warning(
+            "run-bound checkpoint: run {} evidence artefact names no id; falling back", run_id
+        )
+        return None
+    try:
+        blob = await ctx.scm.download_artifact_zip(ctx.repo.owner, ctx.repo.name, artifact_id)
+    except Exception as err:
+        logger.warning(
+            "run-bound checkpoint: artefact {} could not be downloaded: {}", artifact_id, err
+        )
+        return None
+    return _packet_from_artifact_zip(blob, artifact_id=artifact_id)
+
+
+def _coerce_int(raw: object) -> int | None:
+    """Return ``raw`` as an int when it names one, else ``None`` (total coercion).
+
+    Artefact ids, run ids and the sticky comment id all arrive from JSON, so a
+    value a caller mirrored as ``"555"`` is still the id it names.
+    """
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.strip().lstrip("-").isdigit():
+        return int(raw)
+    return None
+
+
+async def recover_run_bound_review_state(
+    ctx: ToolContext, *, pull_number: int
+) -> RunBoundReviewState:
+    """Read the run-bound checkpoint and sticky id from trusted workflow runs (HS8).
+
+    A trusted run is a ``pull_request_target`` run of
+    ``.github/workflows/mergecraft.yml`` that concluded ``success`` for this PR.
+    Its evidence packet names ``reviewed_head_sha`` (taken from the newest
+    trusted run) and ``progress_comment_id``; the count of trusted runs is the
+    round index. Anything unavailable — an unreadable artefact, an Actions API
+    error, no trusted run — is fail-closed (``""`` / ``0`` / ``None``) with one
+    warning naming the reason, never a fabricated checkpoint.
+    """
+    try:
+        runs = await _list_mergecraft_workflow_runs(ctx)
+    except Exception as err:
+        logger.warning("run-bound checkpoint: listing workflow runs failed: {}", err)
+        return _UNAVAILABLE_RUN_BOUND_STATE
+    trusted = _filter_trusted_runs(runs, pull_number=pull_number)
+    if not trusted:
+        return _UNAVAILABLE_RUN_BOUND_STATE
+    run_id = _coerce_int(trusted[0].get("id"))
+    if run_id is None:
+        return _UNAVAILABLE_RUN_BOUND_STATE
+    try:
+        packet = await _read_run_evidence_packet(ctx, run_id=run_id)
+    except Exception as err:
+        logger.warning("run-bound checkpoint: reading run {} failed: {}", run_id, err)
+        return _UNAVAILABLE_RUN_BOUND_STATE
+    if packet is None:
+        return _UNAVAILABLE_RUN_BOUND_STATE
+    return RunBoundReviewState(
+        reviewed_head_sha=str(packet.get("reviewed_head_sha") or ""),
+        round_index=len(trusted),
+        progress_comment_id=_coerce_int(packet.get("progress_comment_id")),
+    )
+
+
+def _is_trusted_self_review_run(ctx: ToolContext) -> bool:
+    """Return whether this run is the trusted ``pull_request_target`` self-review (HS8).
+
+    ``PayloadEvent.trigger`` names the PR *action* the workflow ran for
+    (``pull_request_synchronize``, ``pull_request_opened``, …), never the
+    workflow event itself, so it cannot tell a ``pull_request_target`` run apart
+    from a ``pull_request`` one. The ambient ``GITHUB_EVENT_NAME`` is the signal
+    the rest of the codebase uses for that distinction (``main`` reads it for the
+    operator-owned settings snapshot), and the MCP server runs in-process on the
+    run that has it set. A payload that already spells ``pull_request_target`` is
+    honoured too, so a recorded payload can drive the trusted path directly.
+    """
+    if ctx.payload.event.trigger == _TRUSTED_RUN_EVENT:
+        return True
+    return os.environ.get("GITHUB_EVENT_NAME", "") == _TRUSTED_RUN_EVENT
+
+
+async def _consume_run_bound_review_state(
+    ctx: ToolContext, *, pull_number: int
+) -> RunBoundReviewState:
+    """Read and record the run-bound checkpoint on the run's tool state (HS8).
+
+    Only the trusted self-review event (``pull_request_target``) consumes it: a
+    run that is not the trusted self-review must not adopt another run's
+    checkpoint or sticky, so it keeps the fail-closed answer and the
+    publisher-set fallback.
+    """
+    if not _is_trusted_self_review_run(ctx):
+        return _UNAVAILABLE_RUN_BOUND_STATE
+    state = await recover_run_bound_review_state(ctx, pull_number=pull_number)
+    ctx.tool_state.run_bound_progress_comment_id = state.progress_comment_id
+    return state
+
+
+def _round_index(
+    run_bound: RunBoundReviewState,
+    prior_reviews: list[dict[str, Any]],
+    *,
+    publishers: frozenset[str],
+) -> int:
+    """Return the 1-based review round, preferring the run-bound count (HS8).
+
+    The run-bound ``round_index`` counts prior trusted runs, so this run's own
+    round is that plus one. With no trusted checkpoint it falls back to the
+    publisher-set count (``review_round_index``).
+    """
+    if run_bound.round_index > 0:
+        return run_bound.round_index + 1
+    return review_round_index(prior_reviews, publishers=publishers)
+
+
 async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head_sha: str) -> str:
-    """Fetch prior reviews and return the last mergeCraft-reviewed SHA (``""`` if none)."""
+    """Return the last reviewed SHA, preferring the run-bound checkpoint (HS8).
+
+    Falls back to the expected-publisher review scan when no trusted run's
+    evidence named a head.
+    """
+    run_bound = await recover_run_bound_review_state(ctx, pull_number=pull_number)
+    if run_bound.reviewed_head_sha:
+        return run_bound.reviewed_head_sha
     reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
     return last_reviewed_sha(reviews, head_sha=head_sha) or ""
 
@@ -623,6 +919,11 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             raise RuntimeError(msg)
 
+        # HS8 — read the run-bound checkpoint once and record the sticky id on
+        # the tool state so HS1's selection can use it. Fail-closed when the
+        # trusted evidence is unavailable; the publisher scan below then applies.
+        run_bound = await _consume_run_bound_review_state(ctx, pull_number=pull_number)
+
         local_branch = f"pr-{pull_number}"
 
         # Fetch PR head into local_branch. checkout_pr can run more than once
@@ -667,7 +968,7 @@ def checkout_pr_tool(ctx: ToolContext):
             _rebaseline_config_after_checkout(ctx)
             prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
             publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
-            round_index = review_round_index(prior_reviews, publishers=publishers)
+            round_index = _round_index(run_bound, prior_reviews, publishers=publishers)
             ctx.tool_state.review_round_index = round_index
             result: dict[str, Any] = {
                 "pullNumber": pull_number,
@@ -801,15 +1102,16 @@ def checkout_pr_tool(ctx: ToolContext):
 
         prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
         publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
-        round_index = review_round_index(prior_reviews, publishers=publishers)
+        round_index = _round_index(run_bound, prior_reviews, publishers=publishers)
         ctx.tool_state.review_round_index = round_index
 
         # A re-review should pay for the new commits, not the whole PR. The key is
         # emitted only when the range is real: the prompt tells the reviewer to
         # read this path first, so advertising a path that does not resolve is
-        # worse than not advertising one at all.
+        # worse than not advertising one at all. The run-bound checkpoint (HS8)
+        # outranks the publisher scan when a trusted run named a head.
         if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
-            prior_sha = (
+            prior_sha = run_bound.reviewed_head_sha or (
                 last_reviewed_sha(
                     prior_reviews,
                     head_sha=state.checkout_sha or "",

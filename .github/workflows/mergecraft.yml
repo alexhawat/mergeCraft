@@ -685,7 +685,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || 'github-actions[bot]' }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || '' }}
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -713,7 +713,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-nous
-          path: ${{ runner.temp }}/packet-nous.json
+          path: |
+            ${{ runner.temp }}/packet-nous.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 
@@ -855,7 +857,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_codex.outputs.app-slug && format('{0}[bot]', steps.app_token_codex.outputs.app-slug) || 'github-actions[bot]' }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_codex.outputs.app-slug && format('{0}[bot]', steps.app_token_codex.outputs.app-slug) || '' }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -883,7 +885,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-codex
-          path: ${{ runner.temp }}/packet-codex.json
+          path: |
+            ${{ runner.temp }}/packet-codex.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 
@@ -999,7 +1003,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_claude.outputs.app-slug && format('{0}[bot]', steps.app_token_claude.outputs.app-slug) || 'github-actions[bot]' }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_claude.outputs.app-slug && format('{0}[bot]', steps.app_token_claude.outputs.app-slug) || '' }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -1027,7 +1031,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-claude
-          path: ${{ runner.temp }}/packet-claude.json
+          path: |
+            ${{ runner.temp }}/packet-claude.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 

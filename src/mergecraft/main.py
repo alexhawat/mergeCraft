@@ -899,6 +899,11 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     )
     if pr_number is not None:
         tool_state.pr_number = int(pr_number)
+    # HS2 — read the capture flag once, at run start, so a mid-run env change
+    # cannot turn verdict capture on or off partway through a review.
+    from mergecraft.evidence.verdict_capture import capture_verdicts_enabled
+
+    tool_state.capture_verdicts = capture_verdicts_enabled()
     ctx.tool_state = tool_state
     tmpdir = create_temp_directory()
     ctx.tmpdir = tmpdir

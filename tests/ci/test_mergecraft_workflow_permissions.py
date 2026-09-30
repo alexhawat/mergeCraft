@@ -118,7 +118,44 @@ class TestWaitForCiBehaviourAnchors:
         assert not offenders, f"check-runs poll still discards stderr, hiding a 403: {offenders}"
 
 
+class TestReviewJobRunBoundIdentity:
+    """The self-review checkpoint is bound to a trusted ``pull_request_target`` run.
+
+    Reading the trusted run's evidence artefact needs the Actions read scope on
+    the job that runs the review. And because the shared ``github-actions[bot]``
+    login is withheld by ``review/authorship.py`` (any same-repo collaborator can
+    forge it), no review rung may declare it as its bot login.
+    """
+
+    def test_review_job_grants_actions_read(self) -> None:
+        review = job(load_workflow(_WORKFLOW), "review")
+        permissions = review.get("permissions")
+        assert isinstance(permissions, dict), "the review job must declare job-level permissions"
+        assert permissions.get("actions") == "read", (
+            "the review job downloads the trusted run's evidence artefact through the "
+            f"Actions API, so it needs `actions: read`; got {permissions!r}"
+        )
+
+    def test_no_rung_declares_the_shared_job_bot_as_its_login(self) -> None:
+        text = read_text(_WORKFLOW_PATH)
+        declarations = [
+            line for line in text.splitlines() if "MERGECRAFT_REVIEWER_BOT_LOGIN:" in line
+        ]
+        assert declarations, "no rung declares MERGECRAFT_REVIEWER_BOT_LOGIN"
+        offenders = [line.strip() for line in declarations if "github-actions[bot]" in line]
+        assert not offenders, (
+            "a rung falls back to the shared, forgeable github-actions[bot] login: "
+            f"{offenders!r}; the fallback must be an empty string"
+        )
+        missing_empty = [line.strip() for line in declarations if "|| ''" not in line]
+        assert not missing_empty, (
+            "each MERGECRAFT_REVIEWER_BOT_LOGIN fallback must resolve to an empty string "
+            f"when no App minted a token; got {missing_empty!r}"
+        )
+
+
 __all__ = [
+    "TestReviewJobRunBoundIdentity",
     "TestWaitForCiBehaviourAnchors",
     "TestWaitForCiPermissions",
     "TestWorkflowLevelPermissionsUnchanged",
