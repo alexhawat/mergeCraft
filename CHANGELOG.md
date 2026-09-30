@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft review --capture-verdicts` (or `MERGECRAFT_CAPTURE_VERDICTS=1`)
+  persists every saved verifier verdict — including ones that end in `drop`,
+  which never publish and so cannot be reconstructed afterwards — as one
+  redacted line per verdict in `judge-verdicts.jsonl` beside the run's evidence
+  packet, in the calibration-case shape the judge-calibration tooling reads.
+  Capture is off by default, so an ordinary review writes nothing new.
+
+- A self-review's incremental checkpoint and progress-comment identity can come
+  from the workflow run itself: when the latest successful `pull_request_target`
+  run of the self-review workflow left an evidence artefact, its
+  `reviewed_head_sha` and sticky-comment id drive the checkpoint and the round
+  index. A workflow definition that exists only on a pull-request branch cannot
+  produce such a run, so the identity is not forgeable by the PR author.
+
+- `mergecraft eval trajectory-gate` reads an approved trajectory protocol —
+  pre-registered minimums per check plus a tolerance — and compares a candidate
+  report against a frozen baseline, failing and naming any check outside the
+  tolerance. Until a protocol is approved it reports `no approved protocol —
+  advisory` and exits 0.
+
+- Human golden-batch manifests declare their own batch id and case list, so a
+  later batch can be reviewed without a code change; the first batch's nine case
+  ids stay pinned as a frozen fixture.
+
 - Behaviour-verification reports record which driver produced them — `cdp`,
   `stub`, or unset when not recorded — so a report says whether its page came
   from a real browser or the non-browser fallback.
@@ -38,7 +62,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/opencode.md` documents the integration: engine selection, commands,
   subagents, V2 MCP wiring, JEV scope, and Logfire tracing.
 
+### Security
+
+- The Claude reviewer can no longer read the run's credential material. The
+  driver denies reads of the runner's file-command mounts, the runner home and
+  other processes' environments, writes the Codex auth file root-only, and
+  records a run warning when a `Read`, `Glob` or `Grep` call names a path outside
+  the checkout and the run's own temporary directory.
+
+- The review job declares `actions: read`, and no review rung falls back to the
+  shared `github-actions[bot]` login when no reviewer App is configured.
+
 ### Changed
+
+- Progress comments are recognised by the identity that published them, not by
+  any bot: the sticky selector uses the run's expected-publisher set, or the
+  sticky id recorded by a trusted self-review run, and never falls back to
+  matching any bot-authored comment. **Breaking:** when neither identity is
+  available, a run creates a new progress comment rather than adopting an
+  existing bot-authored one, so a repository whose sticky was posted by the
+  shared Actions bot starts a fresh comment — and with it a fresh ledger —
+  instead of reusing the old one.
+
+- The built wheel no longer ships seven test-, script- and eval-support modules
+  that no runtime caller imports (`evals/mcp_public.py`,
+  `evals/quality_metrics.py`, `evals/skill_taxonomy_gate.py`, `utils/git_ref.py`,
+  `integrations/live_providers.py`, `mcp/codegen.py`, `scm/errors.py`). Each is
+  still present in the checkout for the script, Make and test callers that use
+  it.
+
+- The Gemini and Codex harness deny lists name the `push_branch` tool the way
+  each CLI documents it, matching the spelling the other harnesses already used.
 
 - The release regression gate now fails when a run adds failed or inconclusive
   cases, instead of scoring only what survived: a detection half whose every
