@@ -372,8 +372,9 @@ async def _list_mergecraft_workflow_runs(ctx: ToolContext) -> object:
 
     Both the repo-relative path and the file-name spellings of the Actions-API
     ``{workflow_id}`` are tried so the read works against GitHub and against a
-    recorded double alike. Returns the raw ``workflow_runs`` list, or ``None``
-    when neither form is recognised.
+    recorded double alike. Returns the raw ``workflow_runs`` list; when neither
+    form yields the expected shape it warns once naming the repo and returns
+    ``None`` (an unexpected Actions API shape, never a silent fallback).
     """
     for workflow_ref in (_WORKFLOW_PATH, _WORKFLOW_FILE):
         endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/workflows/{workflow_ref}/runs"
@@ -383,11 +384,31 @@ async def _list_mergecraft_workflow_runs(ctx: ToolContext) -> object:
         )
         if isinstance(payload, Mapping) and isinstance(payload.get("workflow_runs"), list):
             return payload["workflow_runs"]
+    # Neither ``{workflow_id}`` spelling produced a mapping carrying a
+    # ``workflow_runs`` list. That is an unexpected Actions API shape, not the
+    # benign "this PR has no trusted runs" case (which returns an empty list),
+    # so it is named once here rather than falling back silently (HS8 / P-8).
+    logger.warning(
+        "run-bound checkpoint: workflow runs listing for {}/{} returned no "
+        "`workflow_runs` list; falling back",
+        ctx.repo.owner,
+        ctx.repo.name,
+    )
     return None
 
 
-def _packet_from_artifact_zip(blob: bytes) -> dict[str, Any] | None:
-    """Return the evidence packet stored inside an artefact zip, or ``None``."""
+def _packet_from_artifact_zip(
+    blob: bytes, *, artifact_id: int | None = None
+) -> dict[str, Any] | None:
+    """Return the evidence packet stored inside an artefact zip, or ``None``.
+
+    Total and fail-closed: an unreadable zip, a zip with no
+    ``merge-evidence.json`` member, and a member that does not decode to a JSON
+    object each log one warning naming the artefact and the reason, then return
+    ``None``. A malformed payload degrades to a missing checkpoint, never an
+    exception into the run (HS8 / P-8).
+    """
+    where = f"artefact {artifact_id}" if artifact_id is not None else "evidence artefact"
     try:
         with zipfile.ZipFile(io.BytesIO(blob)) as archive:
             for name in archive.namelist():
@@ -396,8 +417,22 @@ def _packet_from_artifact_zip(blob: bytes) -> dict[str, Any] | None:
                 payload = json.loads(archive.read(name))
                 if isinstance(payload, dict):
                     return payload
+                logger.warning(
+                    "run-bound checkpoint: {} member {} is not a JSON object; falling back",
+                    where,
+                    _EVIDENCE_PACKET_MEMBER,
+                )
+                return None
     except (OSError, ValueError, zipfile.BadZipFile) as err:
-        logger.warning("run-bound checkpoint: evidence artefact unreadable: {}", err)
+        logger.warning("run-bound checkpoint: {} unreadable: {}; falling back", where, err)
+        return None
+    # Every loop iteration either returned the packet or returned ``None`` above,
+    # so reaching here means no ``merge-evidence.json`` member was present.
+    logger.warning(
+        "run-bound checkpoint: {} contains no {} member; falling back",
+        where,
+        _EVIDENCE_PACKET_MEMBER,
+    )
     return None
 
 
@@ -406,9 +441,17 @@ async def _read_run_evidence_packet(ctx: ToolContext, *, run_id: int) -> dict[st
     endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{run_id}/artifacts"
     listing = await ctx.scm.get(endpoint)
     if not isinstance(listing, Mapping):
+        logger.warning(
+            "run-bound checkpoint: run {} artefacts listing was not an object; falling back",
+            run_id,
+        )
         return None
     artifacts = listing.get("artifacts")
     if not isinstance(artifacts, list):
+        logger.warning(
+            "run-bound checkpoint: run {} artefacts listing has no `artifacts` list; falling back",
+            run_id,
+        )
         return None
     candidate = next(
         (
@@ -439,7 +482,7 @@ async def _read_run_evidence_packet(ctx: ToolContext, *, run_id: int) -> dict[st
             "run-bound checkpoint: artefact {} could not be downloaded: {}", artifact_id, err
         )
         return None
-    return _packet_from_artifact_zip(blob)
+    return _packet_from_artifact_zip(blob, artifact_id=artifact_id)
 
 
 def _coerce_int(raw: object) -> int | None:
