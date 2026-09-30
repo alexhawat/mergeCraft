@@ -5,7 +5,7 @@ Locked decision **PD-D8** — one ``## Environment variables`` section in
 ``docs/cli.md``, operator-facing knobs only. Secrets, internal IPC, test seams,
 generated values and control-weakening switches are never public knobs.
 
-The two lists below are the contract (PD0 recon classifies all 103 names read by
+The two lists below are the contract (PD0 recon classified the names read by
 ``src/``); this test also asserts they partition the names ``src/`` actually
 reads, so a name can neither be invented nor dropped. The never-document check is
 scoped to the new section: several never-document names (secrets, opt-in
@@ -37,6 +37,7 @@ DOCUMENT: tuple[str, ...] = (
     "MERGECRAFT_AGENT_TIMEOUT",
     "MERGECRAFT_CACHE_DIR",
     "MERGECRAFT_CACHE_MAX_BYTES",
+    "MERGECRAFT_CAPTURE_VERDICTS",
     "MERGECRAFT_CDP_URL",
     "MERGECRAFT_CONFIG",
     "MERGECRAFT_CONTEXT_RETRIEVAL_TIMEOUT_S",
