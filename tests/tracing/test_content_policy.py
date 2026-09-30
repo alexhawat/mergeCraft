@@ -267,7 +267,13 @@ def test_original_size_is_reported_before_truncation(content_module: Any) -> Non
 def test_invalid_level_falls_back_to_default_not_full(
     monkeypatch: MonkeyPatch, content_module: Any
 ) -> None:
-    """An unrecognised level (config or env) falls back to the default — fail safe, never open."""
+    """An unrecognised YAML level falls back to the default — fail safe, never open.
+
+    The env layer is stricter: a non-empty unknown ``MERGECRAFT_TRACING_CONTENT``
+    is a configuration error rather than a silent fall-through (the 49a
+    fail-closed contract, pinned in ``test_content_capture_env.py``), because the
+    fall-through could pick a more permissive level than the operator chose.
+    """
     content = content_module
     redacted = content.ContentCapture.REDACTED
 
@@ -275,8 +281,12 @@ def test_invalid_level_falls_back_to_default_not_full(
     assert content.resolve_content_capture("everything", "trusted") == redacted
     assert content.resolve_content_capture("EVERYTHING", "trusted") != content.ContentCapture.FULL
 
+    from mergecraft.config.env import EnvSettingsError
+
     monkeypatch.setenv(_ENV_VAR, "bogus")
-    assert content.resolve_content_capture(None, "trusted") == redacted
+    with pytest.raises(EnvSettingsError) as excinfo:
+        content.resolve_content_capture(None, "trusted")
+    assert _ENV_VAR in str(excinfo.value)
 
 
 def test_untrusted_export_flag_lifts_cap(monkeypatch: MonkeyPatch, content_module: Any) -> None:

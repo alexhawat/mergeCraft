@@ -125,6 +125,23 @@ environment:
 
 The throwaway script is not committed.
 
+## Reconciliation after the green waves
+
+Two **pre-existing** regression pins still asserted the pre-49 tracing env
+behaviour and were amended in the reconciliation pass (the 49a contract wins;
+`tests/` is owned solely by `test-creator`):
+
+- `tests/tracing/test_content_policy.py::test_invalid_level_falls_back_to_default_not_full`
+  — the YAML half is unchanged (an unknown configured level still falls through
+  to the `redacted` default, never `full`); the env half now expects
+  `EnvSettingsError` for a non-empty unknown `MERGECRAFT_TRACING_CONTENT`, which
+  is section 4's fail-closed contract.
+- `tests/config/test_tracing_tri_state.py::test_cli_precedence_layer_is_already_tri_state`
+  — re-authored against `TracingEnv.from_env(...)`; the CLI-precedence
+  `_parse_bool` helper it pinned was deleted in 49a. The tri-state intent is
+  unchanged (unset is distinguishable from `false`) and an unknown non-empty
+  value now fails closed.
+
 ## Out of scope
 
 The run budgets, the config-file locator, the repository-settings-not-env
