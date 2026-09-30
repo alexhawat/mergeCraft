@@ -375,3 +375,59 @@ def _resolve_tracing_for_args(args: list[str], env: dict[str, str], cwd: Path) -
         config_path=env.get("MERGECRAFT_CONFIG"),
         cwd=cwd,
     )
+
+
+# ---------------------------------------------------------------------------
+# The env layer moves onto the typed ``TracingEnv`` model. Well-formed values
+# keep the merge above byte-for-byte; a malformed control value fails closed.
+# ---------------------------------------------------------------------------
+
+
+def _env_layer(env: dict[str, str]) -> dict[str, Any]:
+    """Resolve the env layer alone (sentinel keeps the read hermetic)."""
+    from mergecraft.cli.tracing_precedence import resolve_tracing_settings
+
+    return resolve_tracing_settings(cli_args=[], env={"__SENTINEL__": "1", **env}, config_path=None)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "MERGECRAFT_TRACING",
+        "MERGECRAFT_TRACING_REGION",
+        "MERGECRAFT_TRACING_CONTENT",
+        "MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT",
+    ],
+)
+def test_env_layer_malformed_control_value_fails_closed(key: str) -> None:
+    """A typo on a control-carrying tracing key raises, naming the variable."""
+    from mergecraft.config.env import EnvSettingsError
+
+    canary = f"flase-canary-{key}"
+    with pytest.raises(EnvSettingsError) as excinfo:
+        _env_layer({key: canary})
+
+    assert key in str(excinfo.value)
+    assert canary not in str(excinfo.value)
+
+
+def test_env_layer_region_is_stripped_and_lowercased() -> None:
+    """A valid region keeps the current normalisation (``"  EU  "`` → ``"eu"``)."""
+    assert _env_layer({"MERGECRAFT_TRACING_REGION": "  EU  "})["region"] == "eu"
+
+
+def test_env_layer_empty_tracing_to_stays_present() -> None:
+    """An empty ``MERGECRAFT_TRACING_TO`` is present as an empty string, not dropped."""
+    assert _env_layer({"MERGECRAFT_TRACING_TO": ""})["tracing_to"] == ""
+
+
+def test_env_layer_unknown_region_is_ignored_today_becomes_an_error() -> None:
+    """A malformed region no longer silently means the US ingest default.
+
+    Today an unknown region is dropped, so the US default stands. The
+    fail-closed contract makes it a configuration error naming the key.
+    """
+    from mergecraft.config.env import EnvSettingsError
+
+    with pytest.raises(EnvSettingsError):
+        _env_layer({"MERGECRAFT_TRACING_REGION": "north-pole"})

@@ -159,3 +159,37 @@ def test_process_cwd_anchor_bails_for_writers_outside_a_repository(
 
     with pytest.raises(typer.Exit):
         local_env_path_for_process_cwd()
+
+
+# ── the path anchor and the parser agree on one ``.env`` ────────────────────
+
+
+def test_process_cwd_anchor_loads_a_corpus_from_the_repo_root(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The file the subdirectory load finds is parsed like ``load_dotenv``."""
+    root = _git_repo(tmp_path)
+    (root / ".env").write_text("D=\"x y\"\nE='q'\nF=${D}\n", encoding="utf-8")
+    for key in ("D", "E", "F"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(root / "src" / "deep")
+
+    cli_app._load_local_env()
+
+    assert os.environ["D"] == "x y"
+    assert os.environ["E"] == "q"
+    assert os.environ["F"] == "x y"
+
+
+def test_explicit_env_path_loads_the_corpus(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``MERGECRAFT_ENV`` names one file; its quoting means one thing."""
+    explicit = tmp_path / "custom.env"
+    explicit.write_text("D=\"x y\"\nE='q'\n", encoding="utf-8")
+    for key in ("D", "E"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MERGECRAFT_ENV", str(explicit))
+
+    cli_app._load_local_env()
+
+    assert os.environ["D"] == "x y"
+    assert os.environ["E"] == "q"

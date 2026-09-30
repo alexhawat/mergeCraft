@@ -138,3 +138,96 @@ def test_actions_with_no_env_file_is_a_silent_noop(
     cli_app._load_local_env()
 
     assert _KEY not in os.environ
+
+
+# ── the ``.env`` corpus: one parser, one meaning ────────────────────────────
+
+_CORPUS = (
+    "export A=1\n"
+    "B=\n"
+    "bare C\n"
+    'D="x y"\n'
+    "E='q'\n"
+    "# a comment\n"
+    "F=${A}z\n"
+    "G=inline # comment\n"
+    'H="hash # inside"\n'
+)
+_CORPUS_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H"]
+# Frozen literal — ``load_dotenv(override=False, encoding="utf-8")`` over
+# ``_CORPUS`` in a clean environment.
+_CORPUS_EXPECTED = {
+    "A": "1",
+    "B": "",
+    "C": None,
+    "D": "x y",
+    "E": "q",
+    "F": "1z",
+    "G": "inline",
+    "H": "hash # inside",
+}
+
+
+def _clear_corpus_keys(monkeypatch: MonkeyPatch) -> None:
+    for key in _CORPUS_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_corpus_loads_exactly_like_load_dotenv(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``export``, a bare key, empty values, quotes, comments and interpolation.
+
+    The startup load populates ``os.environ`` with the same map
+    ``load_dotenv(override=False)`` produces: the bare ``C`` line is dropped,
+    ``B=`` is a present empty value, ``E='q'`` loses its single quotes, the
+    inline comment is stripped and ``F`` interpolates ``A``.
+    """
+    root = _git_repo(tmp_path)
+    (root / ".env").write_text(_CORPUS, encoding="utf-8")
+    _clear_corpus_keys(monkeypatch)
+    monkeypatch.chdir(root / "src" / "deep")
+
+    cli_app._load_local_env()
+
+    observed = {key: os.environ.get(key) for key in _CORPUS_KEYS}
+    assert observed == _CORPUS_EXPECTED
+
+
+def test_corpus_pre_set_environment_wins(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``override=False`` is the contract: a preset key is not replaced.
+
+    The interpolation of ``F`` still reads the *process* value of ``A`` — the
+    same thing ``load_dotenv`` does — so the file and the process agree on one
+    meaning.
+    """
+    root = _git_repo(tmp_path)
+    (root / ".env").write_text(_CORPUS, encoding="utf-8")
+    _clear_corpus_keys(monkeypatch)
+    monkeypatch.setenv("A", "PROCESS")
+    monkeypatch.setenv("D", "preset-d")
+    monkeypatch.chdir(root / "src" / "deep")
+
+    cli_app._load_local_env()
+
+    assert os.environ["A"] == "PROCESS"
+    assert os.environ["D"] == "preset-d"
+    assert os.environ["E"] == "q"
+    assert os.environ["F"] == "PROCESSz"
+
+
+def test_actions_reads_only_the_explicit_env_over_the_workspace_corpus(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """In Actions, ``MERGECRAFT_ENV`` selects one file; the workspace corpus is ignored."""
+    root = _git_repo(tmp_path)
+    (root / ".env").write_text(_CORPUS, encoding="utf-8")
+    explicit = tmp_path / "explicit.env"
+    explicit.write_text("A=from-explicit\n", encoding="utf-8")
+    _clear_corpus_keys(monkeypatch)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("MERGECRAFT_ENV", str(explicit))
+    monkeypatch.chdir(root / "src" / "deep")
+
+    cli_app._load_local_env()
+
+    assert os.environ["A"] == "from-explicit"
+    assert "D" not in os.environ, "the workspace corpus must not be read in Actions"
