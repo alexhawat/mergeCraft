@@ -191,13 +191,14 @@ not part of the operator contract.
 | `MERGECRAFT_AGENT_TIMEOUT` | Seconds before an agent subprocess is killed | `3600` | every harness invocation and the credential broker |
 | `MERGECRAFT_CACHE_DIR` | Run-cache root directory | `~/.cache/mergecraft/run-cache` (honours `XDG_CACHE_HOME`) | CLI runs that use the cache |
 | `MERGECRAFT_CACHE_MAX_BYTES` | Byte ceiling for the run cache, in bytes | `536870912` (512 MiB) | cache prune and eviction |
+| `MERGECRAFT_CAPTURE_VERDICTS` | Opt-in verifier-verdict capture; `1` appends one redacted line per verdict (including dropped findings) to `judge-verdicts.jsonl` in the run's evidence directory | unset — capture off | offline `mergecraft review --capture-verdicts` and Action review runs |
 | `MERGECRAFT_CDP_URL` | Chrome DevTools Protocol base URL for the browser driver | `http://127.0.0.1:9222` | `verify-behavior` browser driver |
 | `MERGECRAFT_CONFIG` | Explicit path to the repo config file | unset — discovered at `<repo>/.mergecraft/config.yaml` | config resolution and the `config`/`tracing` commands |
 | `MERGECRAFT_CONTEXT_RETRIEVAL_TIMEOUT_S` | Seconds allowed for one context-retrieval call | `30` | review context retrieval |
 | `MERGECRAFT_COST_BUDGET_USD` | Per-run spend ceiling, in US dollars | `50.0` | budget enforcement (exhaustion maps to inconclusive) |
 | `MERGECRAFT_EGRESS_DNS_RESOLVERS` | Comma-separated IPv4 resolvers allowed inside the analyzer network namespace | host `/etc/resolv.conf` nameservers (fallback `1.1.1.1`) | isolated analyzers |
 | `MERGECRAFT_ENV` | Explicit path to the `.env` file loaded at CLI startup | unset — git-root `.env`, skipped inside GitHub Actions | CLI startup and credential writers |
-| `MERGECRAFT_EVIDENCE_DIR` | Parent directory for the emitted evidence packet | unset — `$RUNNER_TEMP/mergecraft`, else the run temp dir | review evidence-packet emission |
+| `MERGECRAFT_EVIDENCE_DIR` | Parent directory for the emitted evidence packet and the captured `judge-verdicts.jsonl` | unset — `$RUNNER_TEMP/mergecraft`, else the run temp dir | review evidence-packet emission |
 | `MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S` | Upper bound, in seconds, applied to every registered external operation | `600` | external I/O within a run |
 | `MERGECRAFT_KEEP_TMP` | Truthy keeps the run's temporary directories | unset — temp dirs are cleaned up | local and offline review |
 | `MERGECRAFT_LATENCY_BUDGET_MS` | Latency budget, in milliseconds, for the selected `--profile` bundle | unset — the profile's own value | profile budget bundles |
