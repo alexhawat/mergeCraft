@@ -13,10 +13,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
-from mergecraft.config.settings import _DEFAULT_CONFIG_REL, default_settings, load_repo_settings
+from mergecraft.config.layered import load_layered_config_dict, resolved_config_path
+from mergecraft.config.settings import default_settings, load_repo_settings
 from mergecraft.utils.agent_resolve import configured_model_slugs, resolve_effective_model_slug
 
 _TRUE_VALUES = {"true", "1", "yes", "on"}
@@ -40,26 +39,9 @@ _LAYER_RANK = {
 }
 
 
-def _config_path(cwd: Path) -> Path | None:
-    env_path = os.environ.get("MERGECRAFT_CONFIG")
-    if env_path:
-        candidate = Path(env_path)
-        if candidate.is_file():
-            return candidate
-    candidate = cwd / _DEFAULT_CONFIG_REL
-    return candidate if candidate.is_file() else None
-
-
-def _load_yaml_raw(config_path: Path | None) -> dict[str, Any]:
-    if config_path is None or not config_path.is_file():
-        return {}
-    loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if loaded is None:
-        return {}
-    if not isinstance(loaded, dict):
-        msg = f"config must be a mapping: {config_path}"
-        raise ValueError(msg)
-    return loaded
+def _load_yaml_raw(cwd: Path) -> dict[str, Any]:
+    """Return the merged YAML view reads run with (committed < local < env)."""
+    return load_layered_config_dict(root=cwd)
 
 
 def _parse_bool(value: str | None) -> bool | None:
@@ -101,7 +83,7 @@ def _resolve_tracing_enabled_layers(
         cwd=cwd,
     )
     layers: dict[ConfigLayer, Any] = {}
-    raw = _load_yaml_raw(config_path)
+    raw = _load_yaml_raw(cwd)
     tracing_block = raw.get("tracing")
     if isinstance(tracing_block, dict) and "enabled" in tracing_block:
         layers[ConfigLayer.YAML] = bool(tracing_block["enabled"])
@@ -145,7 +127,7 @@ def resolve_setting(
 ) -> tuple[Any, ConfigLayer]:
     """Return the resolved value and its winning precedence layer."""
     root = (cwd or Path.cwd()).resolve()
-    config_path = _config_path(root)
+    config_path = resolved_config_path(root)
     normalized = key.strip().lower()
     if normalized in {"model", "models"}:
         layers = _resolve_model_layers(cwd=root, cli_model=cli_model)
@@ -177,7 +159,7 @@ def explain_setting(
 ) -> dict[str, Any]:
     """Return resolved value, winning layer, and every layer that contributed."""
     root = (cwd or Path.cwd()).resolve()
-    config_path = _config_path(root)
+    config_path = resolved_config_path(root)
     normalized = key.strip().lower()
     if normalized in {"model", "models"}:
         layers = _resolve_model_layers(cwd=root, cli_model=cli_model)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -86,9 +87,66 @@ def load_layered_config_dict(
     return migrate_config(merge_config_dicts(committed, local_raw))
 
 
+@dataclass(frozen=True, slots=True)
+class ConfigSources:
+    """Contributing config files for one read view, lowest precedence first.
+
+    ``files`` are the files that actually exist and contribute, in the order
+    they are merged. ``env_config_missing`` records that ``MERGECRAFT_CONFIG``
+    named a file that is not there — the caller reports that instead of
+    silently diagnosing the committed defaults.
+    """
+
+    files: tuple[Path, ...]
+    env_config_missing: bool = False
+
+
+def resolve_config_sources(root: Path) -> ConfigSources:
+    """Return the config files a read view contributes, lowest precedence first.
+
+    One resolver for every read view (``doctor``, ``config show/explain`` and
+    the layered loader), so none diagnoses a config the review would not run
+    with. Precedence matches :func:`load_layered_config_dict`:
+
+    1. an existing ``MERGECRAFT_CONFIG`` file — the sole contributor (a missing
+       one sets :attr:`ConfigSources.env_config_missing` and falls through);
+    2. the committed ``.mergecraft/config.yaml`` under *root*;
+    3. ``.mergecraft/config.local.yaml`` under *root*, off CI only, merged last.
+
+    An explicit path (a ``--config`` flag) is the caller's concern; it wins
+    before this resolver is consulted.
+    """
+    env_path = os.environ.get("MERGECRAFT_CONFIG")
+    env_config_missing = False
+    if env_path:
+        candidate = Path(env_path)
+        if candidate.is_file():
+            return ConfigSources(files=(candidate.resolve(),))
+        env_config_missing = True
+
+    files: list[Path] = []
+    committed = config_path_for_root(root)
+    if committed.is_file():
+        files.append(committed)
+    if not running_in_github_actions():
+        local = local_config_path(root)
+        if local.is_file():
+            files.append(local)
+    return ConfigSources(files=tuple(files), env_config_missing=env_config_missing)
+
+
+def resolved_config_path(root: Path) -> Path | None:
+    """Return the highest-precedence contributing config file, or ``None``."""
+    sources = resolve_config_sources(root)
+    return sources.files[-1] if sources.files else None
+
+
 __all__ = [
+    "ConfigSources",
     "load_layered_config_dict",
     "local_config_path",
     "merge_config_dicts",
+    "resolve_config_sources",
+    "resolved_config_path",
     "running_in_github_actions",
 ]

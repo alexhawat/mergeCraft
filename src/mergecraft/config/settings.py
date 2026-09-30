@@ -1132,18 +1132,18 @@ def _resolve_config_path(
         candidate = Path(path)
         return candidate if candidate.is_file() else None
 
-    env_path = os.environ.get("MERGECRAFT_CONFIG")
-    if env_path:
-        candidate = Path(env_path)
-        if candidate.is_file():
-            return candidate
-        logger.warning("MERGECRAFT_CONFIG set but file missing: {}", env_path)
+    # Lazy import: ``config.layered`` imports ``config.io``, which imports this
+    # module — a top-level import would cycle.
+    from mergecraft.config.layered import resolve_config_sources
 
     base = _workspace_root(root)
-    candidate = base / _DEFAULT_CONFIG_REL
-    if candidate.is_file():
-        return candidate
-    return None
+    sources = resolve_config_sources(base)
+    if sources.env_config_missing:
+        logger.warning(
+            "MERGECRAFT_CONFIG set but file missing: {}",
+            os.environ.get("MERGECRAFT_CONFIG"),
+        )
+    return sources.files[-1] if sources.files else None
 
 
 def _known_analyzer_ids_from_catalog() -> frozenset[str]:
