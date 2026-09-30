@@ -27,15 +27,14 @@ inputs:
     required: false
   model_pin:
     description: >-
-      #37 — opt into the legacy "use exactly this model" semantics
-      for the `model:` input. Default `disabled`: `model:` becomes the chain
-      head; the configured `models:` / `modelFallbacks:` tail is walked on
-      credential miss or retryable failure. Set to `enabled` to collapse the
-      chain to `[model]` (suppress fallbacks). Wire this through `.mergecraft/
-      config.yaml`'s `modelPin: true` for repo-wide default; the action input
-      wins.
+      #37 — choose the chain semantics for the `model:` input. Leave unset to
+      follow the repository's `.mergecraft/config.yaml` `modelPin` setting.
+      Set to `enabled` to collapse the chain to `[model]` (suppress the
+      configured `models:` / `modelFallbacks:` fallbacks); set to `disabled`
+      to force the chain-preserving behaviour for this run, overriding a
+      repository `modelPin: true`. An explicit value here wins over the
+      repository setting.
     required: false
-    default: "disabled"
   cwd:
     description: "Working directory for the agent (defaults to GITHUB_WORKSPACE)"
     required: false

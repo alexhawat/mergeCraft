@@ -7,7 +7,6 @@ secret presence via ``--github``.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from dataclasses import dataclass
@@ -23,6 +22,7 @@ from mergecraft.agents.registry import AgentRole, RegistryValidationError, load_
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
+from mergecraft.cli.global_surface import CLI_JSON_SCHEMA_VERSION, cli_json_dumps
 from mergecraft.cli.provider_toggle import resolve_provider_secrets
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.config.runtime_provider_registry import (
@@ -57,9 +57,10 @@ STATUS_JSON_SCHEMA: dict[str, Any] = {
         "Roster view of reviewer agents, modelChain slots, credential presence, "
         "workflow wiring, dispatch levels, and optional GitHub secret presence."
     ),
-    "required": ["schemaVersion", "reviewers"],
+    "required": ["schemaVersion", "schema_version", "reviewers"],
     "properties": {
         "schemaVersion": {"type": "integer", "const": STATUS_JSON_SCHEMA_VERSION},
+        "schema_version": {"type": "string", "const": CLI_JSON_SCHEMA_VERSION},
         "headline": {"type": "string"},
         "skipped": {
             "type": "array",
@@ -622,7 +623,7 @@ def provider_status_cmd(
     except RegistryValidationError as exc:
         cli_bail(str(exc))
     if json_output:
-        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        typer.echo(cli_json_dumps(payload))
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     _render_text(payload)
 

@@ -266,11 +266,22 @@ def _read_self_review_level(settings: Any) -> SelfReviewLevel:
 
 
 def _read_agent_sandbox_level(settings: Any) -> AgentSandboxLevel:
+    """Read ``trust.agentSandbox`` and refuse an unknown value (fail closed).
+
+    The duck-typed snapshot path bypasses Pydantic validation, so a value the
+    schema validator would have refused can arrive here. Falling open to
+    ``dispatch`` would grant more than the operator asked for (an ``off`` meant
+    to remove privilege), so raise instead, naming the four tiers.
+    """
     trust = getattr(settings, "trust", None)
     raw = getattr(trust, "agent_sandbox", "dispatch")
-    if raw in _AGENT_SANDBOX_LEVELS:
+    if isinstance(raw, str) and raw in _AGENT_SANDBOX_LEVELS:
         return raw  # type: ignore[return-value]  # — value verified against AgentSandboxLevel literals above
-    return "dispatch"
+    msg = (
+        "trust.agentSandbox must be one of 'never', 'merged-only', "
+        f"'dispatch', 'same-repo' (got {raw!r})"
+    )
+    raise ValueError(msg)
 
 
 def _read_sandbox_trusted_authors(settings: Any) -> tuple[str, ...]:

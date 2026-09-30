@@ -19,6 +19,7 @@ from mergecraft.cli.exits import (
     error_code_for_outcome,
 )
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.utils import gha_log
 
 app = mergecraft_typer(
     help="Run the GitHub Action runtime flow.",
@@ -31,7 +32,15 @@ _STATE_ENV = "STATE_token"
 
 
 def _set_failed(message: str) -> None:
-    console.print(f"::error::{message}")
+    """Fail the step with exactly one escaped ``::error::`` line on stdout.
+
+    The command line is written directly to stdout (not through Rich): Rich
+    would interpret ``[...]`` as markup, soft-wrap long lines (mangling the
+    command) and target stderr. The message can carry raw exception text and
+    PR-controlled titles/paths, so it is escaped through the shared workflow
+    command escaper. The human-readable ``logger.error`` line stays.
+    """
+    gha_log.error(message)
     logger.error("{}", message)
     raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 

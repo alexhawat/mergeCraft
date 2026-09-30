@@ -9,25 +9,21 @@ Contracts:
   optional-feature blocks (``staticChecks``, ``ciEvidence``, custom mode
   definitions, tracing sink entries) is asserted separately in
   ``test_optional_feature_strictness.py``.
-- The historical warn-shim helper ``_warn_unknown_config_keys`` remains
-  importable as a symbol anchor — direct calls still warn — but it is no
-  longer wired into the model-validator path. This suite pins that
-  contract so the helper cannot be silently deleted or repurposed.
+- The historical warn-shim helper ``_warn_unknown_config_keys`` has been
+  deleted outright (CF2.4). It is not rewired and not preserved as a symbol
+  anchor; this suite pins its absence so it cannot silently reappear.
 """
 
 from __future__ import annotations
 
 import pytest
-from loguru import logger
 from pydantic import ValidationError
 
 from mergecraft.config.settings import (
     AnalyzersSettings,
     GatesSettings,
-    ModeDefinition,
     RepoSettings,
     TracingSettings,
-    _warn_unknown_config_keys,
 )
 
 
@@ -83,28 +79,10 @@ def test_load_repo_settings_fails_closed_on_unknown_key(tmp_path) -> None:
         load_repo_settings(path=config, root=tmp_path, load_learnings_files=False)
 
 
-def test_warn_unknown_config_keys_logs_for_optional_models() -> None:
-    """W6.2 / D4 / D8 — ``_warn_unknown_config_keys`` warns when called directly.
+def test_warn_unknown_config_keys_is_deleted() -> None:
+    """CF2.4 — the retired shim is gone, not rewired and not a symbol anchor."""
+    from mergecraft.config import settings as settings_mod
 
-    The shim was retired in D8 (``_OPTIONAL_FEATURE_EXTRA = "forbid"``), so
-    the model-validator path no longer calls this helper — that policy is
-    pinned separately by
-    ``tests/config/test_optional_feature_strictness.py``. This test keeps the
-    helper anchored as an importable symbol: deleting the function (or
-    silently swallowing its log call) must break this test.
-    """
-    messages: list[str] = []
-    sink_id = logger.add(lambda record: messages.append(record.record["message"]), level="WARNING")
-    try:
-        # Direct symbol anchor — only this path still applies post-D8.
-        _warn_unknown_config_keys(
-            "ModeDefinition",
-            {"id": "x", "name": "n", "description": "d", "mysteryKey": 1},
-            ModeDefinition.model_fields,
-        )
-    finally:
-        logger.remove(sink_id)
-    joined = "\n".join(messages)
-    assert "mysteryKey" in joined, f"unknown key not named in warning: {joined!r}"
-    assert "ModeDefinition" in joined, f"model name missing from warning: {joined!r}"
-    assert "config-failure-policy" in joined or "ignored" in joined.lower()
+    assert not hasattr(settings_mod, "_warn_unknown_config_keys"), (
+        "_warn_unknown_config_keys must be deleted with its test, not rewired"
+    )

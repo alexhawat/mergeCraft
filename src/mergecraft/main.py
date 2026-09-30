@@ -1244,7 +1244,7 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     ctx.agent_id = agent_id
     ctx.resolved_model = resolved_model
     ctx.selected_slug = selected_slug
-    tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")
+    tool_state.model = resolved_model or payload.get("model")
 
     from mergecraft.utils.agent_resolve import collect_roster_credential_degradations
 
@@ -1352,7 +1352,6 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
         job_id=os.environ.get("GITHUB_JOB"),
         oss=run_context.oss,
-        plan="unknown",
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         budget_tracker=ctx.budget_tracker,
@@ -1644,7 +1643,6 @@ def _promote_and_finalize_agent_result(
     assert ctx.tool_context is not None
     tool_state = ctx.tool_state
     tool_context = ctx.tool_context
-    payload = ctx.payload
     chain_for_decision = ctx.chain_for_decision
     output_schema = ctx.output_schema
 
@@ -1663,7 +1661,7 @@ def _promote_and_finalize_agent_result(
         )
         fallback_raw = meta.get("fallback_index")
         fallback_index = fallback_raw if isinstance(fallback_raw, int) else 0
-        executed = payload.get("proxyModel") or resolved_model or winning_slug
+        executed = resolved_model or winning_slug
         promote_model_evidence(
             tool_state,
             requested_model=requested,

@@ -350,3 +350,24 @@ def test_provider_status_is_read_only(tmp_path: Path, monkeypatch: MonkeyPatch) 
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
     after = snapshot_paths(tmp_path)
     assert before == after, "status must not mutate config, env, or workflow files"
+
+
+def test_provider_status_json_carries_both_schema_stamps(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """CF4.1 — additive ``schema_version`` beside the established ``schemaVersion``.
+
+    ``docs/cli.md`` promises every CLI ``--json`` payload carries
+    ``schema_version: "1.0.0"``; ``docs/agent-roster.md`` documents the integer
+    ``schemaVersion: 1``. Both must be present — dropping the established key
+    would be a breaking change.
+    """
+    _require_status_subcommand()
+    bootstrap_status_repo(tmp_path, monkeypatch, config_body=CHAIN_REVIEWER_CONFIG)
+    register_chain_providers(tmp_path, _invoke)
+
+    result = _invoke("provider", "status", "--json", "--cwd", str(tmp_path))
+    payload = parse_status_json(result.stdout)
+
+    assert payload["schemaVersion"] == 1
+    assert payload["schema_version"] == "1.0.0"

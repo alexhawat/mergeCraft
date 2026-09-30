@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import json
-
 import typer
 
+from mergecraft.cli.global_surface import cli_json_dumps
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.enterprise.health import health_payload
 
 app = mergecraft_typer(
     name="health",
-    help="Enterprise health check (emits JSON).",
+    help="Liveness + telemetry mode — not a readiness probe (emits JSON).",
     no_args_is_help=False,
 )
 
@@ -19,7 +18,7 @@ __all__ = ["app"]
 
 
 def _emit() -> None:
-    typer.echo(json.dumps(health_payload()))
+    typer.echo(cli_json_dumps(health_payload()))
 
 
 @app.callback(invoke_without_command=True)

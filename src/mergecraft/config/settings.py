@@ -23,7 +23,6 @@ from mergecraft.config.compat import CONFIG_SCHEMA_VERSION, migrate_config
 from mergecraft.enterprise.controls import EnterpriseSettings
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 
-AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
 CliTrustOverride = Literal["trusted", "untrusted"]
 TrustTier = Literal["trusted", "untrusted"]
@@ -31,6 +30,12 @@ TrustTier = Literal["trusted", "untrusted"]
 # TS2 / D4 — executable repo-declared keys that may run only on trusted tier.
 TIER_GATED_EXECUTABLE_FIELDS: frozenset[str] = frozenset(
     {"setup_script", "prepush_script", "stop_script"}
+)
+
+# The four documented ``trust.agentSandbox`` tiers. An unrecognised value is a
+# configuration error, never a silent fall-back to ``dispatch``.
+_AGENT_SANDBOX_TIERS: Final[frozenset[str]] = frozenset(
+    {"never", "merged-only", "dispatch", "same-repo"}
 )
 
 
@@ -45,33 +50,6 @@ def _tier_gated_field(*, default: Any = None, alias: str | None = None, **kwargs
 # (D8 flipped at pre-0.0.1; see ``docs/config-failure-policy.md``).
 _SECURITY_RUNTIME_EXTRA: Literal["forbid"] = "forbid"
 _OPTIONAL_FEATURE_EXTRA: Literal["forbid"] = "forbid"
-
-
-def _warn_unknown_config_keys(model_name: str, data: object, fields: dict[str, Any]) -> object:
-    """Warn on unknown keys for optional-feature models (D4 one-release shim).
-
-    The shim was retired in D8 (``_OPTIONAL_FEATURE_EXTRA = "forbid"``); the
-    helper is preserved as a direct symbol anchor for tests that still assert
-    it warns when called, and as a fallback for any future caller that wants
-    to surface a soft warning before raising.
-    """
-    if not isinstance(data, dict):
-        return data
-    known: set[str] = set()
-    for name, info in fields.items():
-        known.add(name)
-        alias = getattr(info, "alias", None)
-        if isinstance(alias, str):
-            known.add(alias)
-    for key in data:
-        if key not in known:
-            logger.warning(
-                "unknown config key {!r} on {} ignored "
-                "(will be forbidden in a future release; see docs/config-failure-policy.md)",
-                key,
-                model_name,
-            )
-    return data
 
 
 class _OptionalFeatureModel(BaseModel):
@@ -244,7 +222,13 @@ class GatesSettings(BaseModel):
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     gate_action: GateMode = "shadow"
-    thermostat: GateMode = "shadow"
+    thermostat: GateMode = Field(
+        default="shadow",
+        description=(
+            "Reserved — no effect. The standalone runtime does not consume a "
+            "gate thermostat today; setting it only logs a warning."
+        ),
+    )
     terminal_verdict: GateMode = "enforce"
     jev: GateMode = "shadow"
     override: dict[str, str] = Field(default_factory=dict)
@@ -471,7 +455,13 @@ class TracingSettings(BaseModel):
     enabled: bool | None = None
     retention_days: int = Field(default=30, alias="retentionDays", gt=0)
     sinks: list[TraceSinkEntry] = Field(default_factory=list)
-    redaction: bool = True
+    redaction: bool = Field(
+        default=True,
+        description=(
+            "Reserved — no effect. Export paths redact reviewed content before it "
+            "leaves the runner regardless of this value; setting it only logs a warning."
+        ),
+    )
     content: str = Field(default="redacted", exclude_if=lambda value: value == "redacted")
     export_untrusted_content: bool = Field(
         default=False,
@@ -543,11 +533,22 @@ class TrustSettings(BaseModel):
     @field_validator("agent_sandbox", mode="before")
     @classmethod
     def _coerce_agent_sandbox(cls, value: object) -> str:
+        """Normalize a valid tier; refuse anything else (fail closed).
+
+        A value an operator wrote to *remove* privilege (``off``, ``false``, a
+        typo) must not be read as the default ``dispatch`` tier, which grants
+        more than they asked for. Only the four documented tiers validate; the
+        error names all four so the correction is obvious.
+        """
         if isinstance(value, str):
             normalized = value.strip().lower()
-            if normalized in {"never", "merged-only", "dispatch", "same-repo"}:
+            if normalized in _AGENT_SANDBOX_TIERS:
                 return normalized
-        return "dispatch"
+        msg = (
+            "trust.agentSandbox must be one of 'never', 'merged-only', "
+            f"'dispatch', 'same-repo' (got {value!r})"
+        )
+        raise ValueError(msg)
 
     @field_validator("sandbox_trusted_authors", mode="before")
     @classmethod
@@ -767,7 +768,14 @@ class RepoSettings(BaseModel):
     modes: list[ModeDefinition] = Field(default_factory=list)
     setup_script: str | None = _tier_gated_field(default=None, alias="setupScript")
     prepush_script: str | None = _tier_gated_field(default=None, alias="prepushScript")
-    stop_script: str | None = _tier_gated_field(default=None, alias="stopScript")
+    stop_script: str | None = _tier_gated_field(
+        default=None,
+        alias="stopScript",
+        description=(
+            "Reserved — no effect. Declared for trusted-tier gating but never "
+            "executed by the standalone runtime; setting it only logs a warning."
+        ),
+    )
     # S1 / D10 — ``setup_failure_policy`` decides what a trusted-tier
     # ``setup_script`` failure means. Closed vocabulary
     # (``inconclusive`` | ``fail`` | ``warn``); default ``inconclusive``
@@ -792,8 +800,22 @@ class RepoSettings(BaseModel):
     # ``findings carryover`` have no such env and read this instead. Unset
     # means the job-token bot, ``github-actions[bot]``.
     reviewer_bot_login: str | None = Field(default=None, alias="reviewerBotLogin")
-    auto_merge_enabled: bool = Field(default=False, alias="autoMergeEnabled")
-    blast_radius_override: RuleSet = Field(default_factory=RuleSet, alias="blastRadiusOverride")
+    auto_merge_enabled: bool = Field(
+        default=False,
+        alias="autoMergeEnabled",
+        description=(
+            "Plumbed only — no consumer in the standalone runtime. ``init`` "
+            "scaffolds ``false``; setting it to ``true`` only logs a warning."
+        ),
+    )
+    blast_radius_override: RuleSet = Field(
+        default_factory=RuleSet,
+        alias="blastRadiusOverride",
+        description=(
+            "Reserved — no effect. Blast-radius routing is not consumed by the "
+            "standalone runtime; setting it only logs a warning."
+        ),
+    )
     signed_commits: bool = Field(default=False, alias="signedCommits")
     mode_instructions: dict[str, str] = Field(default_factory=dict, alias="modeInstructions")
     static_checks: list[StaticCheckDefinition] = Field(default_factory=list, alias="staticChecks")
@@ -811,7 +833,14 @@ class RepoSettings(BaseModel):
     orchestrator: OrchestratorKind = "llm"
     # AP6 / D9 — operator-authored pipeline used when the repo pipeline is untrusted
     # or absent. Path relative to repo root or absolute.
-    operator_pipeline: str | None = Field(default=None, alias="operatorPipeline")
+    operator_pipeline: str | None = Field(
+        default=None,
+        alias="operatorPipeline",
+        description=(
+            "Reserved — no effect. The operator-authored pipeline path is not "
+            "consumed by the standalone runtime; setting it only logs a warning."
+        ),
+    )
     # AP6 — optional repo-local pipeline file path (default ``.mergecraft/pipeline.yaml``).
     pipeline: str | None = None
     learnings: str | None = None
@@ -947,8 +976,6 @@ class RunContextData(BaseModel):
     repo_settings: RepoSettings = Field(alias="repoSettings")
     api_token: str = Field(default="", alias="apiToken")
     oss: bool = False
-    plan: AccountPlan = "none"
-    proxy_model: str | None = Field(default=None, alias="proxyModel")
     db_secrets: dict[str, str] | None = Field(default=None, alias="dbSecrets")
 
 
@@ -1102,18 +1129,18 @@ def _resolve_config_path(
         candidate = Path(path)
         return candidate if candidate.is_file() else None
 
-    env_path = os.environ.get("MERGECRAFT_CONFIG")
-    if env_path:
-        candidate = Path(env_path)
-        if candidate.is_file():
-            return candidate
-        logger.warning("MERGECRAFT_CONFIG set but file missing: {}", env_path)
+    # Lazy import: ``config.layered`` imports ``config.io``, which imports this
+    # module — a top-level import would cycle.
+    from mergecraft.config.layered import resolve_config_sources
 
     base = _workspace_root(root)
-    candidate = base / _DEFAULT_CONFIG_REL
-    if candidate.is_file():
-        return candidate
-    return None
+    sources = resolve_config_sources(base)
+    if sources.env_config_missing:
+        logger.warning(
+            "MERGECRAFT_CONFIG set but file missing: {}",
+            os.environ.get("MERGECRAFT_CONFIG"),
+        )
+    return sources.files[-1] if sources.files else None
 
 
 def _known_analyzer_ids_from_catalog() -> frozenset[str]:
@@ -1135,12 +1162,53 @@ def _warn_unknown_analyzer_overrides(analyzers: dict[str, Any]) -> None:
             logger.warning("unknown analyzer id in config overrides: {}", analyzer_id)
 
 
+def _value_differs_from_default(mapping: dict[str, Any], key: str, default: object) -> bool:
+    """True when *mapping* sets *key* to something other than *default*."""
+    if key not in mapping:
+        return False
+    return bool(mapping[key] != default)
+
+
+def _warn_reserved_settings(raw: dict[str, Any]) -> None:
+    """Log one warning per reserved key set to a non-default value.
+
+    These settings validate and round-trip but have no consumer in the
+    standalone runtime. They are kept rather than removed — a model with
+    ``extra="forbid"`` would turn a key an existing consumer already has into
+    a hard failure — so the warning is how the operator learns the key does
+    nothing. ``modelIndex`` / ``providersSeeded`` have live readers and are
+    deliberately not checked here.
+    """
+    reserved: list[str] = []
+    gates = raw.get("gates")
+    if isinstance(gates, dict) and _value_differs_from_default(gates, "thermostat", "shadow"):
+        reserved.append("gates.thermostat")
+    tracing = raw.get("tracing")
+    if isinstance(tracing, dict) and _value_differs_from_default(tracing, "redaction", True):
+        reserved.append("tracing.redaction")
+    if _value_differs_from_default(raw, "stopScript", None):
+        reserved.append("stopScript")
+    if _value_differs_from_default(raw, "blastRadiusOverride", {}):
+        reserved.append("blastRadiusOverride")
+    if _value_differs_from_default(raw, "operatorPipeline", None):
+        reserved.append("operatorPipeline")
+    if raw.get("autoMergeEnabled") is True:
+        reserved.append("autoMergeEnabled")
+    for key in reserved:
+        logger.warning(
+            "reserved config key {!r} has no effect — it is accepted for "
+            "forward compatibility and ignored by the runtime",
+            key,
+        )
+
+
 def _merge_settings(raw: dict[str, Any] | None) -> RepoSettings:
     base = default_settings()
     if not raw:
         return base
     if analyzers := raw.get("analyzers"):
         _warn_unknown_analyzer_overrides(analyzers)
+    _warn_reserved_settings(raw)
     overlay = RepoSettings.model_validate(raw)
     unset = overlay.model_dump(exclude_unset=True)
     if not unset:

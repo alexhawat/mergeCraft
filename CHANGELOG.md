@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- An invalid `trust.agentSandbox` value (for example `off`, a bare `false`, or a
+  typo like `nevr`) now fails configuration validation instead of quietly
+  becoming `dispatch`. **Fix:** set one of `never`, `merged-only`, `dispatch`, or
+  `same-repo`; the four tiers still normalize whitespace and case.
+
+- The `model_pin` action input no longer carries a default. Leaving it unset
+  follows the repository's `modelPin` setting, and an explicit `disabled` now
+  overrides a repository `modelPin: true`. **Fix:** leave `model_pin` unset to
+  follow the repository, or set `enabled` / `disabled` explicitly; the previous
+  `disabled` default meant an unset input could never override the repository.
+
+- Settings the standalone runtime does not consume are accepted but now warn
+  once when set to a non-default value: `gates.thermostat`, `tracing.redaction`,
+  `stopScript`, `blastRadiusOverride`, `operatorPipeline`, and `autoMergeEnabled:
+  true`. **Fix:** none required — the values still parse and round-trip; remove
+  the key if the warning is unwanted.
+
+### Fixed
+
+- `doctor`, `config show` / `config explain` and the config loader now agree on
+  which files contribute. `config.local.yaml` is reported outside CI, and a
+  `MERGECRAFT_CONFIG` that points at a missing file is reported by key and
+  filename instead of "no config file (defaults apply)".
+
+- `doctor` fails before printing anything when its rendered output would contain
+  a credential value, naming the environment key and never the value.
+
+- Comment-preserving config writes replace a top-level key in place instead of
+  appending a second copy, so a repeated write no longer duplicates a mapping or
+  a list (for example `models:` or `providers:`), and a list no longer unions its
+  old and new values.
+
+- `provider status --json` and `health --json` carry the shared
+  `schema_version: "1.0.0"` stamp; `provider status` keeps its existing
+  `schemaVersion: 1`. `health` now describes what it checks — liveness plus the
+  resolved telemetry mode, not a readiness probe.
+
+- Logfire workflow wiring accepts the lowercase `alexhawat/mergecraft@<ref>`
+  spelling the docs print, while still refusing similarly-prefixed forks and an
+  empty ref.
+
+- `watch` and the review comment's run link honour `GITHUB_API_URL` /
+  `GITHUB_SERVER_URL` for GitHub Enterprise hosts. `watch` also emits a timeline
+  event that carries no id once instead of on every poll.
+
+- Workflow failure annotations are escaped before they reach the command stream,
+  so a newline or `%` in a pull-request title or an exception message can no
+  longer inject a workflow command or a log group.
+
+- The unused hosted-plan residue is gone: the two `AccountPlan` vocabularies, the
+  context `plan` field and the `proxyModel` producers and consumers were removed,
+  none of which had a reader. `api_token`, the remote upload path, the local
+  upload fallback and the provider catalog are unchanged.
+
 ### Added
 
 - `mergecraft review --capture-verdicts` (or `MERGECRAFT_CAPTURE_VERDICTS=1`)
