@@ -23,10 +23,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.config.settings import load_repo_settings
-
-_TRUE_VALUES = {"true", "1", "yes", "on"}
-_FALSE_VALUES = {"false", "0", "no", "off"}
 
 _TRACING_FLAGS = {
     "--tracing",
@@ -53,17 +51,6 @@ def _flag_value(args: list[str], flag: str) -> str | None:
 def _flag_present(args: list[str], flag: str) -> bool:
     """True when ``flag`` appears in ``args``."""
     return any(token == flag or token.startswith(flag + "=") for token in args)
-
-
-def _parse_bool(value: str | None) -> bool | None:
-    if value is None:
-        return None
-    lowered = value.strip().lower()
-    if lowered in _TRUE_VALUES:
-        return True
-    if lowered in _FALSE_VALUES:
-        return False
-    return None
 
 
 def _load_yaml_tracing(config_path: str | None) -> dict[str, Any]:
@@ -113,46 +100,47 @@ def _resolve_cli_layer(args: list[str]) -> dict[str, Any]:
 
 
 def _resolve_env_layer(env: dict[str, str]) -> dict[str, Any]:
-    """Layer 2 — ``MERGECRAFT_TRACING*`` env vars."""
+    """Layer 2 — ``MERGECRAFT_TRACING*`` env vars, read through ``TracingEnv``.
+
+    Key presence is preserved exactly as before: an absent variable is omitted,
+    a present-but-empty pass-through variable (``MERGECRAFT_TRACING_TO``,
+    ``MERGECRAFT_TRACE_DIR``, ``MERGECRAFT_LOGFIRE_TOKEN``,
+    ``MERGECRAFT_OTEL_ENDPOINT``) keeps its empty value, and the
+    control-carrying variables (enable flag, region, content level,
+    untrusted-content export) omit an empty value. A non-empty unknown value on
+    a control-carrying variable fails closed inside the model instead of being
+    dropped. ``logfire_token`` leaves this boundary as a plain ``str``.
+    """
+    model = TracingEnv.from_env(env)
     out: dict[str, Any] = {}
-    if "MERGECRAFT_TRACING" in env:
-        parsed = _parse_bool(env["MERGECRAFT_TRACING"])
-        if parsed is not None:
-            out["enabled"] = parsed
-    if "MERGECRAFT_TRACING_TO" in env:
-        out["tracing_to"] = env["MERGECRAFT_TRACING_TO"]
-    if "MERGECRAFT_TRACE_DIR" in env:
-        out["trace_dir"] = env["MERGECRAFT_TRACE_DIR"]
-    if "MERGECRAFT_LOGFIRE_TOKEN" in env:
-        out["logfire_token"] = env["MERGECRAFT_LOGFIRE_TOKEN"]
-    if "MERGECRAFT_OTEL_ENDPOINT" in env:
-        out["otel_endpoint"] = env["MERGECRAFT_OTEL_ENDPOINT"]
+    if model.tracing_enabled is not None:
+        out["enabled"] = model.tracing_enabled
+    if model.tracing_to is not None:
+        out["tracing_to"] = model.tracing_to
+    if model.trace_dir is not None:
+        out["trace_dir"] = model.trace_dir
+    if model.logfire_token is not None:
+        out["logfire_token"] = model.logfire_token.get_secret_value()
+    if model.otel_endpoint is not None:
+        out["otel_endpoint"] = model.otel_endpoint
     # ``MERGECRAFT_TRACING_PROJECT`` carries the Logfire project label. This is
     # informational only — Logfire routes spans by the token itself, not a
     # header. The CLI ``auth logfire`` command writes this alongside
     # ``MERGECRAFT_LOGFIRE_TOKEN`` so the operator never has to edit ``.env``
     # by hand.
-    if "MERGECRAFT_TRACING_PROJECT" in env:
-        project = env["MERGECRAFT_TRACING_PROJECT"].strip()
-        if project:
-            out["tracing_project"] = project
+    if model.tracing_project is not None:
+        out["tracing_project"] = model.tracing_project
     # ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region
     # (``us`` / ``eu``). Logfire routes spans to region-specific ingest
     # endpoints; this overrides the YAML ``region`` default (``us``). The
     # CLI ``--region`` flag (``tracing logfire enable``) sits above this in
     # the precedence stack via the merged dict.
-    if "MERGECRAFT_TRACING_REGION" in env:
-        region = env["MERGECRAFT_TRACING_REGION"].strip().lower()
-        if region in {"us", "eu"}:
-            out["region"] = region
-    if "MERGECRAFT_TRACING_CONTENT" in env:
-        content = env["MERGECRAFT_TRACING_CONTENT"].strip()
-        if content:
-            out["content"] = content
-    if "MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT" in env:
-        parsed = _parse_bool(env["MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"])
-        if parsed is not None:
-            out["export_untrusted_content"] = parsed
+    if model.tracing_region is not None:
+        out["region"] = model.tracing_region
+    if model.tracing_content is not None:
+        out["content"] = model.tracing_content
+    if model.export_untrusted_content is not None:
+        out["export_untrusted_content"] = model.export_untrusted_content
     return out
 
 

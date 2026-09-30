@@ -14,7 +14,6 @@ Exports:
 from __future__ import annotations
 
 import getpass
-import os
 from pathlib import Path
 
 import typer
@@ -41,6 +40,7 @@ from mergecraft.cli.tracing_logfire_wf_yaml import (
     render_workflow_diff,
 )
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.utils.git_hardening import git_argv
 
 # ``MERGECRAFT_TRACING_REGION`` selects the Logfire OTLP data region; it is
@@ -194,13 +194,17 @@ def logfire_enable(
 
     # Resolve per-key precedence: flag > env (.env, loaded by main()) > prompt.
     # Each key is independent so a partial `.env` (token present, project
-    # absent) prompts only for the missing piece.
+    # absent) prompts only for the missing piece. The env reads go through the
+    # typed tracing model, so the token is a ``SecretStr`` until this boundary.
+    tracing_env = TracingEnv()
     token_source: str  # one of "flag" | "env" | "prompt" — used for logging only
     if token is not None and token.strip():
         token_source = "flag"
         token = token.strip()
     else:
-        env_token = os.environ.get(LOGFIRE_RUNTIME_TOKEN_ENV, "").strip()
+        env_token = (
+            tracing_env.logfire_token.get_secret_value() if tracing_env.logfire_token else ""
+        ).strip()
         if env_token:
             token_source = "env"
             token = env_token
@@ -216,7 +220,7 @@ def logfire_enable(
         project_source = "flag"
         project = project.strip()
     else:
-        env_project = os.environ.get(LOGFIRE_PROJECT_ENV, "").strip()
+        env_project = (tracing_env.tracing_project or "").strip()
         if env_project:
             project_source = "env"
             project = env_project

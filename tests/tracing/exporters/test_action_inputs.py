@@ -313,3 +313,71 @@ def test_apply_tracing_overrides_content_without_enablement(
     assert out.tracing.enabled is True
     assert out.tracing.content == "full"
     assert out.tracing.export_untrusted_content is True
+
+
+# ---------------------------------------------------------------------------
+# The tracing Action inputs move onto the typed input model. The two
+# control-carrying inputs fail closed on a malformed value; the ``tracing-to``
+# shorthand still raises on an unknown sink, exactly as today.
+# ---------------------------------------------------------------------------
+
+
+def test_malformed_input_tracing_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``INPUT_TRACING=<typo>`` raises instead of deferring to the next layer."""
+    _clear_action_tracing_env(monkeypatch)
+    canary = "flase-canary-action-tracing"
+    monkeypatch.setenv("INPUT_TRACING", canary)
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+    from mergecraft.config.env import EnvSettingsError
+
+    with pytest.raises(EnvSettingsError) as excinfo:
+        resolve_tracing_from_action_inputs()
+
+    assert "INPUT_TRACING" in str(excinfo.value)
+    assert canary not in str(excinfo.value)
+
+
+def test_malformed_input_export_untrusted_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT=<typo>`` raises, never caps silently."""
+    _clear_action_tracing_env(monkeypatch)
+    canary = "flase-canary-action-export-untrusted"
+    monkeypatch.setenv("INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT", canary)
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+    from mergecraft.config.env import EnvSettingsError
+
+    with pytest.raises(EnvSettingsError) as excinfo:
+        resolve_tracing_from_action_inputs()
+
+    assert "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT" in str(excinfo.value)
+    assert canary not in str(excinfo.value)
+
+
+def test_unknown_input_tracing_to_still_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown ``tracing-to`` shorthand keeps raising (unchanged behaviour)."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "not-a-sink")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    with pytest.raises(ValueError, match="tracing-to"):
+        resolve_tracing_from_action_inputs()
+
+
+def test_valid_input_tracing_still_maps_to_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Guard — the well-formed values keep resolving exactly as before."""
+    _clear_action_tracing_env(monkeypatch)
+    monkeypatch.setenv("INPUT_TRACING", "true")
+    monkeypatch.setenv("INPUT_TRACING_TO", "otel")
+    monkeypatch.setenv("INPUT_OTEL_ENDPOINT", "https://collector.example:4318/")
+
+    from mergecraft.action.inputs import resolve_tracing_from_action_inputs
+
+    resolved = resolve_tracing_from_action_inputs()
+    assert resolved["enabled"] is True
+    assert resolved["sinks"][0]["type"] == "otel"
+    assert resolved["sinks"][0]["endpoint"] == "https://collector.example:4318/"

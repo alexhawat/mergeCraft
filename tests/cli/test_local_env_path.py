@@ -25,11 +25,19 @@ from mergecraft.cli.local_env import (
 from mergecraft.cli.provider_cmd import _config_path, _env_path
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
 
 _REAL_SUBPROCESS_RUN = subprocess.run
+
+# Keys ``_load_local_env`` can write straight into ``os.environ`` from this
+# module: the credential the startup load exports and the ``D``/``E``/``F``
+# corpus. ``os.environ.setdefault`` bypasses ``monkeypatch``, so a key that was
+# *absent* at ``monkeypatch.delenv`` time is never recorded for teardown and the
+# value outlives the test.
+_LOADER_WRITTEN_KEYS = ["MERGECRAFT_LOGFIRE_TOKEN", "D", "E", "F"]
 
 
 def _git_repo(tmp_path: Path) -> Path:
@@ -58,6 +66,26 @@ def _isolate_from_ambient_repos(tmp_path: Path, monkeypatch: MonkeyPatch) -> Non
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.resolve()))
     monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_keys_written_by_the_loader() -> Iterator[None]:
+    """Undo the straight-``os.environ`` writes the startup load makes.
+
+    ``_load_local_env`` populates ``os.environ`` directly, so a key that was
+    absent when the per-test ``monkeypatch.delenv`` ran is not recorded for
+    teardown. Snapshot here and restore: absent-before keys are deleted,
+    present-before keys are put back.
+    """
+    before = {key: os.environ[key] for key in _LOADER_WRITTEN_KEYS if key in os.environ}
+    try:
+        yield
+    finally:
+        for key in _LOADER_WRITTEN_KEYS:
+            if key in before:
+                os.environ[key] = before[key]
+            else:
+                os.environ.pop(key, None)
 
 
 # ── the ``--cwd`` anchor: literal, paired with the config path ───────────────
@@ -159,3 +187,37 @@ def test_process_cwd_anchor_bails_for_writers_outside_a_repository(
 
     with pytest.raises(typer.Exit):
         local_env_path_for_process_cwd()
+
+
+# ── the path anchor and the parser agree on one ``.env`` ────────────────────
+
+
+def test_process_cwd_anchor_loads_a_corpus_from_the_repo_root(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The file the subdirectory load finds is parsed like ``load_dotenv``."""
+    root = _git_repo(tmp_path)
+    (root / ".env").write_text("D=\"x y\"\nE='q'\nF=${D}\n", encoding="utf-8")
+    for key in ("D", "E", "F"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(root / "src" / "deep")
+
+    cli_app._load_local_env()
+
+    assert os.environ["D"] == "x y"
+    assert os.environ["E"] == "q"
+    assert os.environ["F"] == "x y"
+
+
+def test_explicit_env_path_loads_the_corpus(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """``MERGECRAFT_ENV`` names one file; its quoting means one thing."""
+    explicit = tmp_path / "custom.env"
+    explicit.write_text("D=\"x y\"\nE='q'\n", encoding="utf-8")
+    for key in ("D", "E"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MERGECRAFT_ENV", str(explicit))
+
+    cli_app._load_local_env()
+
+    assert os.environ["D"] == "x y"
+    assert os.environ["E"] == "q"

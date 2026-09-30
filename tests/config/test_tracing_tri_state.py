@@ -52,12 +52,25 @@ def test_tracing_settings_enabled_defaults_to_unset() -> None:
 
 
 def test_cli_precedence_layer_is_already_tri_state() -> None:
-    """Baseline — the CLI precedence helper keeps unset distinct (regression pin)."""
-    from mergecraft.cli.tracing_precedence import _parse_bool
+    """Baseline — the env layer keeps unset distinct from ``false`` (regression pin).
 
-    assert _parse_bool(None) is None
-    assert _parse_bool("garbage") is None
-    assert _parse_bool("OFF") is False
+    The env layer now parses through ``TracingEnv`` (the CLI-precedence
+    ``_parse_bool`` helper was deleted in the 49a wave); the tri-state contract is
+    unchanged, and a non-empty unknown value on a control-carrying key fails
+    closed instead of silently reading as unset.
+    """
+    import pytest
+
+    from mergecraft.config.env import EnvSettingsError, TracingEnv
+
+    assert TracingEnv.from_env({}).tracing_enabled is None
+    assert TracingEnv.from_env({"MERGECRAFT_TRACING": "false"}).tracing_enabled is False
+    assert TracingEnv.from_env({"MERGECRAFT_TRACING": "OFF"}).tracing_enabled is False
+    assert TracingEnv.from_env({"MERGECRAFT_TRACING": "true"}).tracing_enabled is True
+
+    with pytest.raises(EnvSettingsError) as excinfo:
+        TracingEnv.from_env({"MERGECRAFT_TRACING": "garbage"})
+    assert "MERGECRAFT_TRACING" in str(excinfo.value)
 
 
 def test_apply_tracing_overrides_input_beats_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
