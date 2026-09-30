@@ -712,7 +712,6 @@ def resolve_payload(
         "shell": resolved_shell,
         "statusChecks": inputs.status_checks == "enabled",
         "suggestEvalAdd": inputs.suggest_eval_add == "enabled",
-        "proxyModel": None,
     }
 
 

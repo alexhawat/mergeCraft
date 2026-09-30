@@ -23,7 +23,6 @@ from mergecraft.config.compat import CONFIG_SCHEMA_VERSION, migrate_config
 from mergecraft.enterprise.controls import EnterpriseSettings
 from mergecraft.types import PushPermission, ShellPermission  # noqa: TC001
 
-AccountPlan = Literal["none", "payg"]
 HeadingDepth = Literal[1, 2, 3, 4, 5, 6]
 CliTrustOverride = Literal["trusted", "untrusted"]
 TrustTier = Literal["trusted", "untrusted"]
@@ -977,8 +976,6 @@ class RunContextData(BaseModel):
     repo_settings: RepoSettings = Field(alias="repoSettings")
     api_token: str = Field(default="", alias="apiToken")
     oss: bool = False
-    plan: AccountPlan = "none"
-    proxy_model: str | None = Field(default=None, alias="proxyModel")
     db_secrets: dict[str, str] | None = Field(default=None, alias="dbSecrets")
 
 

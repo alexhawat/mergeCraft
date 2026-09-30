@@ -802,8 +802,8 @@ async def resolve_run_context_data(
 ) -> RunContextData:
     """Build ``RunContextData`` from local settings + GitHub ``repos.get``.
 
-    Does **not** call mergecraft.com — ``api_token`` is empty, ``plan`` is ``none``,
-    and ``oss`` is derived from ``repo.private``.
+    Does **not** call mergecraft.com — the standalone context carries an empty
+    ``api_token`` and its ``oss`` flag derived from ``repo.private``.
     """
     repo_ctx = parse_repo_context(repository)
     repo_settings = settings if settings is not None else load_repo_settings(settings_path)
@@ -817,8 +817,6 @@ async def resolve_run_context_data(
             "repo_settings": repo_settings.model_dump(by_alias=True),
             "api_token": "",
             "oss": not private,
-            "plan": "none",
-            "proxy_model": None,
             "db_secrets": None,
         }
     )
