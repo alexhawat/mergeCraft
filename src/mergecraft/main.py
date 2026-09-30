@@ -850,8 +850,13 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     ctx.scm = create_github_scm(ctx.job_token, client=github_client)
     run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
-    export_tracing_env_from_action_inputs()
     try:
+        # Both the tracing Action-input model and the registered env models
+        # read malformed control-carrying settings here. Keeping the export
+        # inside the ``try`` maps an unparseable ``INPUT_TRACING`` to
+        # ``_ConfigurationError`` (→ ``configuration_error``) instead of
+        # letting it fall through to the generic ``infra_error`` bucket.
+        export_tracing_env_from_action_inputs()
         validate_env_settings()
     except EnvSettingsError as exc:
         # A malformed control-carrying setting fails configuration before any

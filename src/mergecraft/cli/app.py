@@ -57,7 +57,9 @@ from mergecraft.cli import (
     workflow_cmd,
     xrepo_cmd,
 )
+from mergecraft.cli.consoles import err_console
 from mergecraft.cli.exits import (
+    CLI_CONFIGURATION_EXIT_CODE,
     CLI_SUCCESS_EXIT_CODE,
 )
 from mergecraft.cli.global_surface import (
@@ -70,7 +72,7 @@ from mergecraft.cli.global_surface import (
 )
 from mergecraft.cli.local_env import _configured_env_path, local_env_path_for_process_cwd
 from mergecraft.cli.typer_group import MergecraftTyperGroup
-from mergecraft.config.env import LocalDotEnv
+from mergecraft.config.env import EnvSettingsError, LocalDotEnv
 from mergecraft.config.layered import running_in_github_actions
 
 
@@ -274,7 +276,17 @@ def _load_local_env() -> None:
 
 def main() -> None:
     _load_local_env()
-    app()
+    try:
+        app()
+    except EnvSettingsError as exc:
+        # A malformed control-carrying environment variable (e.g. a typo'd
+        # ``MERGECRAFT_TRACING``) must exit through the named configuration
+        # code, not a Rich traceback. ``typer.Exit`` raised by ``cli_bail``
+        # only becomes the process code inside Click's ``Command.main()``;
+        # ``main`` runs outside it, so raise ``SystemExit`` directly. The
+        # message names the variable and never the value.
+        err_console.print(str(exc), style="red")
+        raise SystemExit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
 
 if __name__ == "__main__":
