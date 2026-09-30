@@ -21,6 +21,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any, Literal
 
+from mergecraft.config.env.action_inputs import ActionInputEnv
+from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.config.runtime_provider_registry import (
     provider_credential_env_names,
     provider_credential_env_suffixes,
@@ -66,12 +68,10 @@ def _read_input(name: str) -> str | None:
 def _read_logfire_region() -> Literal["us", "eu"] | None:
     """Return a valid Logfire region from ``MERGECRAFT_TRACING_REGION``.
 
-    Invalid or unset values return ``None`` so the sink keeps the US default.
+    An unset value returns ``None`` so the sink keeps the US default; a
+    non-empty unknown value fails closed naming the variable.
     """
-    raw = os.environ.get("MERGECRAFT_TRACING_REGION")
-    if raw is None or raw == "":
-        return None
-    region = raw.strip().lower()
+    region = TracingEnv().tracing_region
     if region == "us":
         return "us"
     if region == "eu":
@@ -104,9 +104,10 @@ def _resolve_local_path(raw_path: str | None) -> str:
 
 
 def resolve_tracing_from_action_inputs() -> dict[str, Any]:
-    """Resolve the four action inputs to a tracing settings dict.
+    """Resolve the tracing action inputs to a tracing settings dict.
 
-    Returns a dict shaped as::
+    The six ``INPUT_TRACING*`` values are read through :class:`ActionInputEnv`
+    (exact names, empty means unset). Returns a dict shaped as::
 
         {
             "enabled": bool | None,
@@ -123,14 +124,14 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
     value when the action input was provided — ``TracingSettings`` does
     **not** carry it (D5).
     """
-    tracing_input = _read_input("INPUT_TRACING")
-    tracing_to = _read_input("INPUT_TRACING_TO")
-    logfire_token = _read_input("INPUT_LOGFIRE_TOKEN")
-    otel_endpoint = _read_input("INPUT_OTEL_ENDPOINT")
-    tracing_content = _read_input("INPUT_TRACING_CONTENT")
-    export_untrusted = _parse_bool(_read_input("INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT"))
+    inputs = ActionInputEnv()
+    tracing_to = inputs.tracing_to
+    logfire_token = inputs.logfire_token
+    otel_endpoint = inputs.otel_endpoint
+    tracing_content = inputs.tracing_content
+    export_untrusted = inputs.export_untrusted_content
 
-    enabled = _parse_bool(tracing_input)
+    enabled = inputs.tracing_enabled
     sinks: list[dict[str, Any]] = []
 
     if enabled and tracing_to:
@@ -173,10 +174,8 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
 
 def logfire_token_resolvable() -> bool:
     """Return whether ``MERGECRAFT_LOGFIRE_TOKEN`` resolves for the Logfire sink."""
-    from mergecraft.tracing.exporters import resolve_token_ref
-
-    token = resolve_token_ref("MERGECRAFT_LOGFIRE_TOKEN")
-    return bool(isinstance(token, str) and token.strip())
+    token = TracingEnv().logfire_token
+    return bool(token is not None and token.get_secret_value().strip())
 
 
 def export_tracing_env_from_action_inputs() -> None:
@@ -207,10 +206,10 @@ def _action_logfire_tracing_enabled() -> bool:
     resolved = resolve_tracing_from_action_inputs()
     enabled: bool | None = resolved.get("enabled")
     if enabled is None:
-        enabled = _parse_bool(os.environ.get("MERGECRAFT_TRACING"))
+        enabled = TracingEnv().tracing_enabled
     if not enabled:
         return False
-    tracing_to = _read_input("INPUT_TRACING_TO")
+    tracing_to = ActionInputEnv().tracing_to
     if tracing_to == "logfire":
         return True
     sinks = resolved.get("sinks")
@@ -253,7 +252,7 @@ def apply_tracing_overrides(settings: Any) -> Any:
     resolved = resolve_tracing_from_action_inputs()
     enabled: bool | None = resolved["enabled"]
     if enabled is None:
-        enabled = _parse_bool(os.environ.get("MERGECRAFT_TRACING"))
+        enabled = TracingEnv().tracing_enabled
 
     update: dict[str, Any] = {}
     if enabled is not None:

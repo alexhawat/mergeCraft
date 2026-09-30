@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.tracing.otel_context import (
     override_span_context,
     parse_mergecraft_otel_span_id,
@@ -833,10 +834,7 @@ def _resolve_logfire_project(entry: Any) -> str | None:
     project = getattr(entry, "project", None)
     if project:
         return str(project)
-    import os
-
-    env_project = os.environ.get("MERGECRAFT_TRACING_PROJECT", "").strip()
-    return env_project or None
+    return TracingEnv().tracing_project
 
 
 def _build_logfire_sink(

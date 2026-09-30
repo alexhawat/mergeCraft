@@ -2199,8 +2199,11 @@ runner. It governs model payloads (prompts, completions, reasoning) via
 
 Resolution (`resolve_content_capture(configured, trust_tier)`):
 `MERGECRAFT_TRACING_CONTENT` env → the YAML `tracing.content` field → the
-default `redacted`. An unrecognised value at any step falls through to the
-next, ending at the default — fail safe, never `full`. Bodies are
+default `redacted`. The environment value must be one of the four levels —
+an unrecognised value fails configuration (naming the variable, never the
+value) rather than being ignored, so a typo cannot fall through to a more
+permissive layer. An unrecognised **YAML** level still falls through to the
+next step, ending at the default — fail safe, never `full`. Bodies are
 byte-capped at the shared `TRACE_ATTRS_JSON_MAX_BYTES` budget and flagged
 `.truncated`; `.chars` / `.bytes` / `.sha256` always describe the
 **original** payload, so the hash detects prompt drift between two

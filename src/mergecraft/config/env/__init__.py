@@ -19,6 +19,7 @@ from mergecraft.config.env._base import (
     EnvSettings,
     EnvSettingsError,
     ExactFlag,
+    fail_closed_env_bool,
     from_env,
     register_env_model,
     registered_env_models,
@@ -29,6 +30,7 @@ from mergecraft.config.env.dotenv import (
     LocalDotEnv,
     local_dotenv_values,
 )
+from mergecraft.config.env.tracing import TracingEnv
 
 __all__ = [
     "ENV_SETTINGS_CONFIG",
@@ -38,6 +40,8 @@ __all__ = [
     "EnvSettingsError",
     "ExactFlag",
     "LocalDotEnv",
+    "TracingEnv",
+    "fail_closed_env_bool",
     "from_env",
     "local_dotenv_values",
     "register_env_model",

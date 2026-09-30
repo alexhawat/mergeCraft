@@ -11,6 +11,7 @@ Exports:
     ExactFlag: a raw value whose only enabled spelling is exactly ``"1"``.
     EnvSettingsError: a malformed value that must fail configuration.
     EnvSettings: base model; construction surfaces ``EnvSettingsError``.
+    fail_closed_env_bool: the control-variable boolean (unknown value raises).
     from_env: validate a mapping without touching ``os.environ``.
     register_env_model: add a model to the startup validation registry.
     registered_env_models: the registry, as classes (never cached instances).
@@ -33,6 +34,7 @@ __all__ = [
     "EnvSettings",
     "EnvSettingsError",
     "ExactFlag",
+    "fail_closed_env_bool",
     "from_env",
     "register_env_model",
     "registered_env_models",
@@ -114,6 +116,28 @@ class EnvSettingsError(ValueError):
         del value  # never retained: the value may be a secret
         self.variable = variable
         super().__init__(f"invalid value for environment variable {variable}")
+
+
+def fail_closed_env_bool(variable: str, value: Any) -> bool | None:
+    """Parse a control-carrying boolean, raising on a non-empty unknown value.
+
+    The vocabulary is exactly :data:`EnvBool`'s (``true/1/yes/on`` /
+    ``false/0/no/off``, case-insensitive and stripped). The difference is the
+    unknown case: a non-empty value outside that set raises
+    :class:`EnvSettingsError` naming *variable* instead of being ignored, so a
+    typo meant to *disable* a control cannot let a lower precedence layer's more
+    permissive value stand (fail closed). An absent value, ``None``, and an
+    empty or whitespace-only value are still "no opinion" (``None``).
+
+    The message names the variable and never the value, so the error can cross a
+    logging boundary without leaking a credential.
+    """
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        return None
+    parsed = _parse_env_bool(value)
+    if parsed is None:
+        raise EnvSettingsError(variable)
+    return parsed
 
 
 def _raise_env_settings_error(error: ValidationError) -> NoReturn:
