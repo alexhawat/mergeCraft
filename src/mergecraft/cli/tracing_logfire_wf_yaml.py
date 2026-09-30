@@ -42,34 +42,38 @@ import yaml
 
 DEFAULT_WORKFLOW_RELATIVE_PATH = ".github/workflows/mergecraft.yml"
 
-# The exact ``uses:`` value this module wires into. GitHub treats
-# ``alexhawat/mergeCraft`` (canonical, capital C) and ``alexhawat/mergecraft``
-# (lowercased in chat) as different owners at the URL level, but the
-# operator-facing reference is the canonical form. Matching exactly avoids
-# silently mutating forks with a similarly-named action.
+# The ``uses:`` value this module wires into. GitHub treats owner and repo
+# names case-insensitively, so ``alexhawat/mergecraft`` (the lowercase form
+# TRACING.md prints) is the *same* action as the canonical
+# ``alexhawat/mergeCraft`` and is wired too. Matching stays anchored on the
+# ``@`` boundary so a fork with a similarly-named prefix is refused.
 #
 # IMPORTANT: callers must match against ``<uses> + "@"``, NOT just the
 # prefix. A bare ``startswith(_ACTION_USES)`` (or a regex using ``\b``)
 # also matches similarly-prefixed forks like ``alexhawat/mergeCraft-fork``
-# / ``alexhawat/mergecraft`` (lowercased) / etc. -- and would happily wire
+# / ``alexhawat/mergecraftx`` / etc. -- and would happily wire
 # ``${{ secrets.LOGFIRE_TOKEN }}`` into a different action. Use the
 # ``_is_action_uses`` helper below for the structural check, and the
-# ``_ACTION_USES_AT_RE`` constant for the line-based regex.
+# case-insensitive ``uses_re`` in ``_find_action_steps`` for the
+# line-based match.
 _ACTION_USES = "alexhawat/mergeCraft"
 
 
 def _is_action_uses(uses: str, action_uses: str = _ACTION_USES) -> bool:
-    """Return ``True`` iff ``uses`` is the canonical action followed by ``@<ref>``.
+    """Return ``True`` iff ``uses`` is the action followed by ``@<ref>``.
 
-    The ``@`` is mandatory -- a bare ``startswith`` would also match
-    ``alexhawat/mergeCraft-fork``, ``alexhawat/mergeCraft-anything``, etc.,
-    and silently wire the Logfire token into a fork. The reference after
-    the ``@`` must also be non-empty.
+    Owner and repo names are case-insensitive per GitHub, so the owner/repo
+    part is compared case-insensitively: ``alexhawat/mergecraft@<sha>`` (the
+    spelling the docs print) matches the canonical ``alexhawat/mergeCraft``.
+    The ``@`` is mandatory and the reference after it must be non-empty --
+    a bare ``startswith`` would also match ``alexhawat/mergeCraft-fork``,
+    ``alexhawat/mergecraftx`` and similar forks, and silently wire the
+    Logfire token into an action we do not own.
     """
-    if not uses.startswith(action_uses + "@"):
+    prefix = action_uses + "@"
+    if uses[: len(prefix)].casefold() != prefix.casefold():
         return False
-    ref = uses[len(action_uses) + 1 :]
-    return bool(ref)
+    return bool(uses[len(prefix) :])
 
 
 # Owned keys -- every key whose value this module is willing to insert
@@ -171,8 +175,10 @@ def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple
     lines = text.splitlines(keepends=True)
     out: list[tuple[int, int, int]] = []
     # Require ``@`` immediately after the action name. ``\b`` would also
-    # match ``alexhawat/mergeCraft-fork``, ``alexhawat/mergecraft`` (lower-
-    # cased), etc. -- a fork that we must not wire the Logfire token into.
+    # match ``alexhawat/mergeCraft-fork``, ``alexhawat/mergecraftx``, etc. --
+    # a fork that we must not wire the Logfire token into. Owner/repo names
+    # are case-insensitive, hence ``re.IGNORECASE`` so the lowercase docs
+    # spelling matches too.
     # Match both step shapes documented by the README:
     #   - multi-line form: ``- name: foo`` then ``  uses: alexhawat/mergeCraft@X``
     #   - inline form:     ``- uses: alexhawat/mergeCraft@X``
@@ -183,7 +189,8 @@ def _find_action_steps(text: str, action_uses: str = _ACTION_USES) -> list[tuple
     uses_re = re.compile(
         r"^(?P<ws>[ \t]*)"
         r"(?:-(?P<inline>[ \t]+)|(?P<multiline>[ \t]+))"
-        r"uses:[ \t]*" + re.escape(action_uses) + r"@"
+        r"uses:[ \t]*" + re.escape(action_uses) + r"@(?=\S)",
+        re.IGNORECASE,
     )
     cum: list[int] = []
     offset = 0

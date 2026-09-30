@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 DEFAULT_API_URL = "https://api.github.com"
+DEFAULT_SERVER_URL = "https://github.com"
 DEFAULT_ACCEPT = "application/vnd.github+json"
 DEFAULT_API_VERSION = "2022-11-28"
 GITHUB_LIST_PAGE_SIZE: Final[int] = 100
@@ -158,6 +159,17 @@ def _default_api_base_url() -> str:
     live LLMs (D6).
     """
     return (os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL).rstrip("/")
+
+
+def _default_server_url() -> str:
+    """Resolve the GitHub web (HTML) host (GHES / Actions / E2E mock).
+
+    Honours the runner-provided ``GITHUB_SERVER_URL`` (standard GitHub Actions
+    / GHES env) before falling back to ``https://github.com``, with any
+    trailing slash stripped. This is the *web* host used to build run links;
+    the REST base is ``_default_api_base_url`` (``GITHUB_API_URL``).
+    """
+    return (os.environ.get("GITHUB_SERVER_URL") or DEFAULT_SERVER_URL).rstrip("/")
 
 
 def usable_github_token(token: str) -> str:
