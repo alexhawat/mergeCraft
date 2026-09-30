@@ -25,6 +25,7 @@ from mergecraft.cli import app as cli_app
 from mergecraft.config.layered import running_in_github_actions
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
@@ -171,6 +172,29 @@ _CORPUS_EXPECTED = {
 def _clear_corpus_keys(monkeypatch: MonkeyPatch) -> None:
     for key in _CORPUS_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+# Every key ``_load_local_env`` can write into ``os.environ`` from this module.
+# ``os.environ.setdefault`` bypasses ``monkeypatch``, so a key that was *absent*
+# when the fixture ran is never recorded for teardown and the value outlives the
+# test — ``pytest-randomly`` then varies whether the next test sees it. Snapshot
+# the keys here and restore them after every test: absent-before keys are
+# deleted, present-before keys are put back.
+_LOADER_WRITTEN_KEYS = [*_CORPUS_KEYS, _KEY]
+
+
+@pytest.fixture(autouse=True)
+def _restore_keys_written_by_the_loader() -> Iterator[None]:
+    """Undo the straight-``os.environ`` writes the startup load makes."""
+    before = {key: os.environ[key] for key in _LOADER_WRITTEN_KEYS if key in os.environ}
+    try:
+        yield
+    finally:
+        for key in _LOADER_WRITTEN_KEYS:
+            if key in before:
+                os.environ[key] = before[key]
+            else:
+                os.environ.pop(key, None)
 
 
 def test_corpus_loads_exactly_like_load_dotenv(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

@@ -25,11 +25,19 @@ from mergecraft.cli.local_env import (
 from mergecraft.cli.provider_cmd import _config_path, _env_path
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
 
 _REAL_SUBPROCESS_RUN = subprocess.run
+
+# Keys ``_load_local_env`` can write straight into ``os.environ`` from this
+# module: the credential the startup load exports and the ``D``/``E``/``F``
+# corpus. ``os.environ.setdefault`` bypasses ``monkeypatch``, so a key that was
+# *absent* at ``monkeypatch.delenv`` time is never recorded for teardown and the
+# value outlives the test.
+_LOADER_WRITTEN_KEYS = ["MERGECRAFT_LOGFIRE_TOKEN", "D", "E", "F"]
 
 
 def _git_repo(tmp_path: Path) -> Path:
@@ -58,6 +66,26 @@ def _isolate_from_ambient_repos(tmp_path: Path, monkeypatch: MonkeyPatch) -> Non
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.resolve()))
     monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_keys_written_by_the_loader() -> Iterator[None]:
+    """Undo the straight-``os.environ`` writes the startup load makes.
+
+    ``_load_local_env`` populates ``os.environ`` directly, so a key that was
+    absent when the per-test ``monkeypatch.delenv`` ran is not recorded for
+    teardown. Snapshot here and restore: absent-before keys are deleted,
+    present-before keys are put back.
+    """
+    before = {key: os.environ[key] for key in _LOADER_WRITTEN_KEYS if key in os.environ}
+    try:
+        yield
+    finally:
+        for key in _LOADER_WRITTEN_KEYS:
+            if key in before:
+                os.environ[key] = before[key]
+            else:
+                os.environ.pop(key, None)
 
 
 # ── the ``--cwd`` anchor: literal, paired with the config path ───────────────

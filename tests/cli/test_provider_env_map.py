@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from _pytest.monkeypatch import MonkeyPatch
+
 # ``export ``, an empty value, a bare key, double/single quotes, a comment, an
 # inline comment, interpolation and a quoted hash all in one file.
 _CORPUS = (
@@ -37,6 +39,8 @@ _CORPUS = (
     "G=inline # comment\n"
     'H="hash # inside"\n'
 )
+
+_CORPUS_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H"]
 
 # Frozen literal — ``DotEnv(interpolate=True, override=False).dict()`` for
 # ``_CORPUS`` (the same ladder ``load_dotenv(override=False)`` exports).
@@ -64,12 +68,22 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_read_env_map_matches_the_startup_load_on_the_corpus(tmp_path: Path) -> None:
+def test_read_env_map_matches_the_startup_load_on_the_corpus(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
     """Every quote mode, ``export``, inline comment and interpolation mean the same."""
     from mergecraft.cli.provider_cmd import _read_env_map
 
     env_path = tmp_path / "corpus.env"
     _write(env_path, _CORPUS)
+
+    # ``F=${A}z`` interpolates from the *process* environment (python-dotenv
+    # resolves with ``os.environ`` winning over the file's own values for an
+    # ``override=False`` read), so the frozen literal only holds in a clean
+    # environment. Clear the corpus keys for the duration of the read instead of
+    # inheriting whatever a previous test left behind.
+    for key in _CORPUS_KEYS:
+        monkeypatch.delenv(key, raising=False)
 
     assert _read_env_map(env_path) == _CORPUS_EXPECTED
 

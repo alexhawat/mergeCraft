@@ -142,6 +142,32 @@ behaviour and were amended in the reconciliation pass (the 49a contract wins;
   unchanged (unset is distinguishable from `false`) and an unknown non-empty
   value now fails closed.
 
+## Test-isolation fix (verifier pass)
+
+The wave verifier found that the `.env` corpus tests leaked keys into the
+process environment. `_load_local_env` populates `os.environ` with
+`os.environ.setdefault`, which bypasses `monkeypatch`; a key that was *absent*
+when `monkeypatch.delenv(key, raising=False)` ran was therefore never recorded
+for teardown, and the written value outlived the test. `pytest-randomly` varies
+the order, so
+`tests/cli/test_provider_env_map.py::test_read_env_map_matches_the_startup_load_on_the_corpus`
+could interpolate `F=${A}z` from whatever a previous loader test had left in
+`os.environ` and fail intermittently (`F: 'from-explicitz'`).
+
+- `tests/cli/test_local_env_loader.py` — a new autouse
+  `_restore_keys_written_by_the_loader` fixture snapshots the keys the loader can
+  write (`A`–`H` and the credential) per test and restores them afterwards:
+  absent-before keys are deleted, present-before keys are put back.
+- `tests/cli/test_local_env_path.py` — the same fixture, for the same class of
+  straight-`os.environ` write at the three loader sites in that module.
+- `tests/cli/test_provider_env_map.py::test_read_env_map_matches_the_startup_load_on_the_corpus`
+  — clears `A`–`H` for the duration of the read so the frozen literal holds
+  whatever ran before. `_CORPUS_EXPECTED` is unchanged: the literal is the
+  oracle, the isolation is what moved.
+
+Both serial orders of the loader and provider modules pass, and the three-module
+selection passes under `pytest-randomly`.
+
 ## Out of scope
 
 The run budgets, the config-file locator, the repository-settings-not-env
