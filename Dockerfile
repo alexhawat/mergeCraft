@@ -41,11 +41,27 @@ COPY --from=node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3
 # the vulnerable npm 10 bundle. No floating global installation is used.
 ADD --checksum=sha256:9f58bff01604cb1b14008fef14dceb14d836a49225e45c6c2e37de3be3e707f0 \
     https://registry.npmjs.org/npm/-/npm-11.19.1.tgz /tmp/npm.tgz
+# No npm release (11.x or 12.x) bundles a fixed brace-expansion or undici yet,
+# so both are replaced in place with the patched releases, pinned by checksum.
+# npm's own ranges accept them: minimatch wants brace-expansion ^5.0.5 and
+# node-gyp wants undici ^6.25.0. Drop these two when npm ships them.
+ADD --checksum=sha256:ef8448ec78f20b692f04fa6d01f39b5ab34c66404bea3429f5a39c6c9e0be8b4 \
+    https://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.12.tgz /tmp/brace-expansion.tgz
+ADD --checksum=sha256:e18191aac9c0ff43dac7fe9b10b7041a22d07addb7b66a6e8ac14a52a5b69b74 \
+    https://registry.npmjs.org/undici/-/undici-6.28.1.tgz /tmp/undici.tgz
 RUN mkdir -p /usr/local/lib/node_modules/npm \
     && tar -xzf /tmp/npm.tgz --strip-components=1 -C /usr/local/lib/node_modules/npm \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+        /usr/local/lib/node_modules/npm/node_modules/undici \
+    && mkdir /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+        /usr/local/lib/node_modules/npm/node_modules/undici \
+    && tar -xzf /tmp/brace-expansion.tgz --strip-components=1 \
+        -C /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
+    && tar -xzf /tmp/undici.tgz --strip-components=1 \
+        -C /usr/local/lib/node_modules/npm/node_modules/undici \
     && ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && rm /tmp/npm.tgz
+    && rm /tmp/npm.tgz /tmp/brace-expansion.tgz /tmp/undici.tgz
 
 # uv is the supported Python package installer in this image. Even pip's
 # latest release vendors vulnerable msgpack/setuptools; remove that unused
