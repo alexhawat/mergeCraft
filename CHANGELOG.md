@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A self-review re-run on a job token now picks up the earlier run's checkpoint and
+  progress comment. The reader looked for a packet file name the workflow never
+  uploads, so every re-review started again from scratch. It now reads the file
+  each review step uploads, preferring the last step that ran.
+
 - `doctor`, `config show` / `config explain` and the config loader now agree on
   which files contribute. `config.local.yaml` is reported outside CI, and a
   `MERGECRAFT_CONFIG` that points at a missing file is reported by key and
