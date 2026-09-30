@@ -90,6 +90,10 @@ fail-closed with a named warning.
 | A missing artefact falls back without selecting a comment | unit | `tests/mcp/test_checkout_run_bound_checkpoint.py::test_a_missing_artifact_falls_back_without_selecting_a_comment` | red → run-bound identity wave |
 | An Actions API error falls back and warns | unit | `tests/mcp/test_checkout_run_bound_checkpoint.py::test_an_api_error_falls_back_and_warns` | red → run-bound identity wave |
 | No trusted run is fail-closed | unit | `tests/mcp/test_checkout_run_bound_checkpoint.py::test_no_trusted_run_is_fail_closed` | red → run-bound identity wave |
+| The gate is the run's event name, never the PR action: with `GITHUB_EVENT_NAME=pull_request_target` the checkpoint and sticky id reach `tool_state` even though the payload trigger is a PR action (`pull_request_synchronize`) | unit | `tests/mcp/test_checkout_run_bound_checkpoint.py::test_consume_uses_the_event_name_not_the_pr_action` | green (guard) |
+| A `pull_request`-event run, a non-success run, another PR's run and a run with no PR are all ignored when the checkpoint is consumed | unit | `tests/mcp/test_checkout_run_bound_checkpoint.py::test_consume_ignores_a_pull_request_event_a_failed_run_and_another_pr` | green (guard) |
+| An unset, empty or foreign event name consumes nothing | unit | `tests/mcp/test_checkout_run_bound_checkpoint.py::test_consume_is_inert_without_the_trusted_event_name` | green (guard) |
+| Each previously-silent reader fallback (no `workflow_runs` list, non-object artefacts listing, no `artifacts` list, no `merge-evidence.json` member, non-object packet member) logs a named warning and returns the fail-closed value; the happy paths stay silent | unit | `tests/mcp/test_checkout_run_bound_checkpoint.py::test_a_runs_listing_without_the_workflow_runs_list_warns_and_fails_closed`, `::test_a_workflow_runs_listing_returns_silently`, `::test_an_artefacts_listing_that_is_not_an_object_warns_and_fails_closed`, `::test_an_artefacts_listing_without_the_artifacts_list_warns_and_fails_closed`, `::test_a_readable_artefacts_listing_returns_silently`, `::test_a_zip_without_the_packet_member_warns_and_fails_closed`, `::test_a_packet_member_that_is_not_a_json_object_warns_and_fails_closed`, `::test_a_packet_member_returns_silently` | green (guard) |
 
 ### The evidence packet carries the run-bound review identity
 
@@ -130,6 +134,9 @@ strict calibration case.
 | A canary in the finding body is redacted before the line is written | unit | `tests/mcp/test_verdict_capture.py::test_a_canary_in_the_finding_body_is_redacted` | red → authorship/verdict wave |
 | The offline review path exposes the one enabling flag | functional | `tests/mcp/test_verdict_capture.py::test_offline_review_exposes_the_capture_flag` | red → authorship/verdict wave |
 | In an Action run the capture artefact is readable from the directory the packet is uploaded from, not the ephemeral run tmpdir | integration | `tests/mcp/test_verdict_capture.py::test_capture_is_retrievable_from_the_action_evidence_directory` | red → capture-persistence fix |
+| The capture resolver and the packet resolver share one destination policy — offline, `RUNNER_TEMP` set, and `MERGECRAFT_EVIDENCE_DIR` override | unit | `tests/mcp/test_verdict_capture.py::test_capture_dir_and_packet_dir_share_one_resolution_policy` | green (guard) |
+| Every review rung's evidence-upload step names `judge-verdicts.jsonl` alongside its packet | integration | `tests/ci/test_capture_artifact_upload.py::test_each_review_rung_uploads_the_capture_file_alongside_its_packet` | green (guard) |
+| The uploaded capture path is the resolver's Action destination (`$RUNNER_TEMP/mergecraft`), not a run tmpdir | integration | `tests/ci/test_capture_artifact_upload.py::test_the_uploaded_capture_path_matches_the_action_destination` | green (guard) |
 
 ### The trajectory scorer reads an approved protocol and compares a baseline
 
@@ -256,3 +263,35 @@ contract. Neither is weakened, and both are RED against the shipped product code
   evidence packet uses. An autouse fixture now clears `RUNNER_TEMP` /
   `MERGECRAFT_EVIDENCE_DIR` for the offline rows so they pin the offline
   location deterministically on a runner host.
+
+### Guard round (test-side, after the trusted-run gate was rewritten)
+
+Two behavioural guards had no committed test; one of them hid a shipped defect.
+Both are now pinned, and each pin is proven to discriminate: it fails against
+the pre-fix behaviour and passes against the shipped one.
+
+* **The trusted-run gate reads the run's event name, not the PR action.**
+  `PayloadEvent.trigger` names the pull-request *action*
+  (`pull_request_synchronize`, `pull_request_opened`, …), never the workflow
+  event, so a gate that compared it to `pull_request_target` never fired on a
+  real self-review and the run-bound checkpoint and sticky id were silently
+  never consumed. The reader's own tests drove `recover_run_bound_review_state`
+  directly with a context whose trigger already spelled the event name, so they
+  could not have caught it. The new tests drive the real gate
+  (`_consume_run_bound_review_state`) with a realistic action trigger and the
+  ambient `GITHUB_EVENT_NAME` set, and assert the checkpoint reaches
+  `tool_state`. The event name is set explicitly because the shared conftest
+  clears every `GITHUB_EVENT_*` variable. Proof of discrimination: restoring the
+  old action-based predicate made the two new positive tests fail (2 failed, 20
+  passed); the shipped predicate passes all 22.
+* **Each silent reader fallback names why, and the capture artefact is
+  uploaded.** Five run-bound reader branches that used to fall back silently now
+  log one named warning and return the fail-closed value; the happy paths stay
+  silent. And the three review rungs' evidence-upload steps now name
+  `judge-verdicts.jsonl` beside the packet, with a focused pin that the capture
+  and packet resolvers share one destination policy across an offline run, a
+  runner-temp run and an explicit directory override. Before that fix an Action
+  run with capture enabled wrote the JSONL under the ephemeral run tmpdir and
+  discarded it — the Action half of the capture control was dead. Proof of
+  discrimination: restoring the pre-fix capture resolver failed the new
+  resolver-equality pin and the retrievability pin (3 failed, 8 passed).

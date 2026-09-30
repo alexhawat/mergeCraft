@@ -132,14 +132,19 @@ class _ActionsScm:
         return self._zips[artifact_id]
 
 
-def _ctx(tmp_path: Path, scm: _ActionsScm) -> ToolContext:
+def _ctx(
+    tmp_path: Path,
+    scm: _ActionsScm,
+    *,
+    trigger: str = "pull_request_target",
+) -> ToolContext:
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
     state.pr_number = _PR_NUMBER
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
         payload=ResolvedPayload(
-            event=PayloadEvent(trigger="pull_request_target", issue_number=_PR_NUMBER, is_pr=True),
+            event=PayloadEvent(trigger=trigger, issue_number=_PR_NUMBER, is_pr=True),
         ),
         scm=scm,  # type: ignore[arg-type]  # deliberate Actions-API double
         github_installation_token="",
@@ -324,3 +329,271 @@ async def test_no_trusted_run_is_fail_closed(tmp_path: Path) -> None:
     assert state.reviewed_head_sha == ""
     assert state.round_index == 0
     assert state.progress_comment_id is None
+
+
+# ── the trusted-run gate reads the event name, never the PR action ────────────
+#
+# ``PayloadEvent.trigger`` is the PR *action* (``pull_request_synchronize``,
+# ``pull_request_opened``, …), never the workflow event. A gate that compares it
+# to ``pull_request_target`` therefore never fires on a real self-review: the
+# run-bound checkpoint is never consumed, ``run_bound_progress_comment_id``
+# stays ``None``, and every self-review silently degrades to a full review. The
+# ambient ``GITHUB_EVENT_NAME`` is the signal that tells the two events apart,
+# and the MCP server runs in-process on the run that has it set. The tests below
+# drive the real gate (``_consume_run_bound_review_state``) with a realistic
+# action trigger so a revert to the action-based predicate is a hard failure.
+#
+# ``tests/conftest.py`` clears ``GITHUB_EVENT_NAME`` (and every other
+# ``GITHUB_EVENT_*``) for every test, so each test sets what it needs.
+
+
+async def _consume(
+    scm: _ActionsScm,
+    tmp_path: Path,
+    *,
+    trigger: str = "pull_request_synchronize",
+) -> tuple[ToolContext, checkout_module.RunBoundReviewState]:
+    ctx = _ctx(tmp_path, scm, trigger=trigger)
+    state = await checkout_module._consume_run_bound_review_state(ctx, pull_number=_PR_NUMBER)
+    return ctx, state
+
+
+@pytest.mark.asyncio
+async def test_consume_uses_the_event_name_not_the_pr_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real self-review's payload trigger is a PR action, so the event name wins.
+
+    The trusted run's ``reviewed_head_sha``, round index and progress-comment id
+    must reach ``tool_state`` even though the payload names
+    ``pull_request_synchronize``. A gate reading ``payload.event.trigger`` never
+    fires here and the run-bound identity is lost.
+    """
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+    entry = _trusted_run(
+        run_id=501,
+        head_sha="e" * 40,
+        progress_comment_id=777,
+        created_at="2026-09-29T12:00:00Z",
+    )
+    scm = _scm_with_runs([entry])
+
+    ctx, state = await _consume(scm, tmp_path)
+
+    assert state.reviewed_head_sha == "e" * 40
+    assert state.round_index == 1
+    assert state.progress_comment_id == 777
+    assert ctx.tool_state.run_bound_progress_comment_id == 777, (
+        "the run-bound sticky id must reach tool_state on a real self-review"
+    )
+
+
+@pytest.mark.asyncio
+async def test_consume_ignores_a_pull_request_event_a_failed_run_and_another_pr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only this PR's successful ``pull_request_target`` runs move the checkpoint."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+    trusted = _trusted_run(
+        run_id=601,
+        head_sha="f" * 40,
+        progress_comment_id=321,
+        created_at="2026-09-29T11:00:00Z",
+    )
+    scm = _scm_with_runs(
+        [trusted],
+        extra_runs=[
+            _run(701, event="pull_request", created_at="2026-09-29T14:00:00Z"),
+            _run(702, conclusion="cancelled", created_at="2026-09-29T14:00:00Z"),
+            _run(703, pull_number=_OTHER_PR_NUMBER, created_at="2026-09-29T14:00:00Z"),
+            _run(704, pull_number=None, created_at="2026-09-29T14:00:00Z"),
+        ],
+    )
+
+    ctx, state = await _consume(scm, tmp_path)
+
+    assert state.reviewed_head_sha == "f" * 40
+    assert state.round_index == 1
+    assert state.progress_comment_id == 321
+    assert ctx.tool_state.run_bound_progress_comment_id == 321
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_name",
+    [None, "", "pull_request", "issue_comment", "workflow_dispatch"],
+)
+async def test_consume_is_inert_without_the_trusted_event_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event_name: str | None,
+) -> None:
+    """An unset or foreign event name consumes nothing, even with trusted runs."""
+    if event_name is None:
+        monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    else:
+        monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
+    entry = _trusted_run(
+        run_id=801,
+        head_sha="a" * 40,
+        progress_comment_id=999,
+        created_at="2026-09-29T12:00:00Z",
+    )
+    scm = _scm_with_runs([entry])
+
+    ctx, state = await _consume(scm, tmp_path)
+
+    assert state.reviewed_head_sha == ""
+    assert state.round_index == 0
+    assert state.progress_comment_id is None
+    assert ctx.tool_state.run_bound_progress_comment_id is None
+
+
+# ── every silent run-bound fallback now names why ────────────────────────────
+#
+# Each unavailable branch on the reader path logs exactly one warning naming the
+# run/artefact and the reason, then returns the unchanged fail-closed value. The
+# happy paths stay silent. Assertions use a distinctive substring, not the whole
+# sentence, so a reworded message keeps the pin.
+
+
+class _ShapeScm(_ActionsScm):
+    """Return caller-shaped payloads for the runs / artefacts endpoints.
+
+    Extends the Actions double so a test can hand a malformed listing (a
+    non-mapping, or a mapping without the expected list) to the real reader.
+    """
+
+    def __init__(
+        self,
+        *,
+        runs_payload: object = None,
+        artifacts_payload: object = None,
+        zips: dict[int, bytes] | None = None,
+    ) -> None:
+        super().__init__(runs=[], zips=zips)
+        self._runs_payload = runs_payload
+        self._artifacts_payload = artifacts_payload
+
+    async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        if "/actions/runs/" in path and path.endswith("/artifacts"):
+            return self._artifacts_payload
+        if path.endswith("mergecraft.yml/runs"):
+            return self._runs_payload
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_runs_listing_without_the_workflow_runs_list_warns_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    scm = _ShapeScm(runs_payload={"message": "Not Found"})
+
+    with _capture_warnings() as warnings:
+        runs = await checkout_module._list_mergecraft_workflow_runs(_ctx(tmp_path, scm))
+
+    assert runs is None
+    assert any("workflow_runs" in message for message in warnings), (
+        f"a runs listing without the expected list must be named; got {warnings!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_workflow_runs_listing_returns_silently(tmp_path: Path) -> None:
+    scm = _ShapeScm(runs_payload={"workflow_runs": []})
+
+    with _capture_warnings() as warnings:
+        runs = await checkout_module._list_mergecraft_workflow_runs(_ctx(tmp_path, scm))
+
+    assert runs == []
+    assert warnings == []
+
+
+@pytest.mark.asyncio
+async def test_an_artefacts_listing_that_is_not_an_object_warns_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    scm = _ShapeScm(artifacts_payload=["not", "a", "mapping"])
+
+    with _capture_warnings() as warnings:
+        packet = await checkout_module._read_run_evidence_packet(_ctx(tmp_path, scm), run_id=100)
+
+    assert packet is None
+    assert any("artefacts listing was not an object" in message for message in warnings), (
+        f"a non-object artefacts listing must be named; got {warnings!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_artefacts_listing_without_the_artifacts_list_warns_and_fails_closed(
+    tmp_path: Path,
+) -> None:
+    scm = _ShapeScm(artifacts_payload={"total_count": 0})
+
+    with _capture_warnings() as warnings:
+        packet = await checkout_module._read_run_evidence_packet(_ctx(tmp_path, scm), run_id=100)
+
+    assert packet is None
+    assert any("has no `artifacts` list" in message for message in warnings), (
+        f"an artefacts listing without the list must be named; got {warnings!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_readable_artefacts_listing_returns_silently(tmp_path: Path) -> None:
+    artifact_id = 5
+    blob = _packet_zip(reviewed_head_sha="a" * 40, progress_comment_id=42)
+    scm = _ShapeScm(
+        artifacts_payload={
+            "artifacts": [{"id": artifact_id, "name": _ARTIFACT_NAME, "expired": False}]
+        },
+        zips={artifact_id: blob},
+    )
+
+    with _capture_warnings() as warnings:
+        packet = await checkout_module._read_run_evidence_packet(_ctx(tmp_path, scm), run_id=100)
+
+    assert packet is not None
+    assert packet["progress_comment_id"] == 42
+    assert warnings == []
+
+
+def test_a_zip_without_the_packet_member_warns_and_fails_closed() -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("other.txt", "not the packet")
+
+    with _capture_warnings() as warnings:
+        packet = checkout_module._packet_from_artifact_zip(buffer.getvalue(), artifact_id=1000)
+
+    assert packet is None
+    assert any("contains no merge-evidence.json member" in message for message in warnings), (
+        f"a zip without the packet member must be named; got {warnings!r}"
+    )
+
+
+def test_a_packet_member_that_is_not_a_json_object_warns_and_fails_closed() -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("merge-evidence.json", json.dumps([1, 2, 3]))
+
+    with _capture_warnings() as warnings:
+        packet = checkout_module._packet_from_artifact_zip(buffer.getvalue(), artifact_id=1001)
+
+    assert packet is None
+    assert any("is not a JSON object" in message for message in warnings), (
+        f"a non-object packet member must be named; got {warnings!r}"
+    )
+
+
+def test_a_packet_member_returns_silently() -> None:
+    payload = {"reviewed_head_sha": "a" * 40, "progress_comment_id": 5}
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("merge-evidence.json", json.dumps(payload))
+
+    with _capture_warnings() as warnings:
+        packet = checkout_module._packet_from_artifact_zip(buffer.getvalue(), artifact_id=1002)
+
+    assert packet == payload
+    assert warnings == []

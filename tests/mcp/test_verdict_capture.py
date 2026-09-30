@@ -21,7 +21,8 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -29,16 +30,14 @@ from typer.testing import CliRunner
 from mergecraft.agents.verifier import JudgeVerdict, judge_pin, record_verifier_verdict
 from mergecraft.cli.app import app
 from mergecraft.evals.judge_calibration import JudgeCalibrationCase
-from mergecraft.evidence.run_packet import resolve_packet_path
+from mergecraft.evidence.run_packet import resolve_evidence_dir, resolve_packet_path
+from mergecraft.evidence.verdict_capture import resolve_capture_dir
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow, init_tool_state
 from mergecraft.mcp.verification import record_finding_verdict_tool
 from mergecraft.modes import compute_modes
 from mergecraft.review_taxonomy import finding_fingerprint
 from mergecraft.utils.github import GitHubClient
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 runner = CliRunner()
 _CAPTURE_ENV = "MERGECRAFT_CAPTURE_VERDICTS"
@@ -363,3 +362,53 @@ def test_offline_review_exposes_the_capture_flag() -> None:
 
     assert result.exit_code == 0, result.output
     assert "--capture-verdicts" in result.output
+
+
+# ── the capture file and the packet share one destination policy ─────────────
+
+
+@pytest.mark.parametrize(
+    ("runner_temp", "override"),
+    [
+        (None, None),
+        ("/runner/temp", None),
+        (None, "/custom/evidence"),
+    ],
+)
+def test_capture_dir_and_packet_dir_share_one_resolution_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner_temp: str | None,
+    override: str | None,
+) -> None:
+    """The capture file and the packet must resolve to the same directory.
+
+    The workflow uploads evidence from one directory. If the capture resolver
+    drifted from the packet resolver — as it did when it wrote under the
+    ephemeral run tmpdir — an Action run with capture on uploads nothing and the
+    control is dead. Pin the shared policy across an offline run, an Action run
+    (``RUNNER_TEMP`` set) and the explicit operator override.
+    """
+    if runner_temp is None:
+        monkeypatch.delenv("RUNNER_TEMP", raising=False)
+    else:
+        monkeypatch.setenv("RUNNER_TEMP", runner_temp)
+    if override is None:
+        monkeypatch.delenv("MERGECRAFT_EVIDENCE_DIR", raising=False)
+    else:
+        monkeypatch.setenv("MERGECRAFT_EVIDENCE_DIR", override)
+
+    capture_dir = resolve_capture_dir(tmpdir=str(tmp_path))
+    packet_dir = resolve_packet_path(tmpdir=str(tmp_path), change_slug="acme-demo-42").parent
+
+    assert capture_dir == packet_dir, (
+        "the capture file and the packet resolve to different directories; the "
+        "workflow uploads one of them, so the other is discarded"
+    )
+    assert capture_dir == resolve_evidence_dir(tmpdir=str(tmp_path))
+    if override is not None:
+        assert capture_dir == Path(override)
+    elif runner_temp is not None:
+        assert capture_dir == Path(runner_temp) / "mergecraft"
+    else:
+        assert capture_dir == tmp_path / "evidence"
