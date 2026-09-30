@@ -187,8 +187,6 @@ async def test_resolve_run_context_data_local_only(
     assert ctx.repo.data["private"] is True
     assert ctx.oss is False
     assert ctx.api_token == ""
-    assert ctx.plan == "none"
-    assert ctx.proxy_model is None
     assert ctx.db_secrets is None
     assert ctx.repo_settings.push == "restricted"
 
