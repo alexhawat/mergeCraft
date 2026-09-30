@@ -2907,6 +2907,11 @@ back to `./.env` and stays silent when it is missing, so global invocations are
 unaffected. Inside GitHub Actions the startup load reads no `.env` from the
 workspace unless `MERGECRAFT_ENV` names one.
 
+The `provider` commands read `.env` values the same way the startup load does —
+one parser, one meaning. `export ` prefixes, single- and double-quoted values,
+inline comments and `${VAR}` interpolation all resolve identically, so a
+credential written with `auth` reads back exactly as it was stored.
+
 ### Credential detection (`credential_status_for_slug`)
 
 `has_credentials_for_slug` and `mergecraft provider status` delegate to a

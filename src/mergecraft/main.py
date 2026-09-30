@@ -29,6 +29,7 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
+from mergecraft.config.env import EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.main_outcome import (
     _classify_outcome,
@@ -850,6 +851,14 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
     export_tracing_env_from_action_inputs()
+    try:
+        validate_env_settings()
+    except EnvSettingsError as exc:
+        # A malformed control-carrying setting fails configuration before any
+        # subprocess or agent exists. ``_ConfigurationError`` maps to
+        # ``RunOutcome.configuration_error``; the message names the variable
+        # and never the value.
+        raise _ConfigurationError(str(exc)) from exc
     settings = apply_tracing_overrides(run_context.repo_settings)
     for tracing_warning in collect_tracing_warnings_for_summary():
         logger.warning(tracing_warning)

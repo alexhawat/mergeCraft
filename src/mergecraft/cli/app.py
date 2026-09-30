@@ -6,7 +6,6 @@ import os
 import sys
 
 import typer
-from dotenv import load_dotenv
 
 import mergecraft
 from mergecraft import __version__, format_version_display, version_json_payload
@@ -69,8 +68,9 @@ from mergecraft.cli.global_surface import (
     emit_cli_json,
     validate_log_level_option,
 )
-from mergecraft.cli.local_env import local_env_path_for_process_cwd
+from mergecraft.cli.local_env import _configured_env_path, local_env_path_for_process_cwd
 from mergecraft.cli.typer_group import MergecraftTyperGroup
+from mergecraft.config.env import LocalDotEnv
 from mergecraft.config.layered import running_in_github_actions
 
 
@@ -249,24 +249,27 @@ def _load_local_env() -> None:
     in ``os.environ`` — ``mergecraft config tracing`` reports ``enabled: false``
     because the env layer is empty.
 
-    ``override=False`` is the contract: env vars already set by the operator,
-    the GitHub Action, or earlier CLI steps win. Only missing keys are populated
-    from the file. The file is silent-on-missing so global invocations from
-    outside a checkout are unaffected.
+    The file is parsed by :class:`mergecraft.config.env.LocalDotEnv`, the one
+    ``.env`` reader, so the startup load, ``jev`` and ``provider`` all read the
+    same file the same way. Keys already set by the operator, the GitHub Action
+    or an earlier CLI step win: only missing keys are populated from the file.
+    The file is silent-on-missing so global invocations from outside a checkout
+    are unaffected.
 
     Inside GitHub Actions the load is skipped unless ``$MERGECRAFT_ENV`` names a
     file: the job workspace holds the reviewed checkout, so a PR that adds a
-    ``.env`` could otherwise set ``MERGECRAFT_*`` keys the workflow never chose
-    (E5 / TB-D14). This mirrors the ``config.local.yaml`` rule
+    ``.env`` could otherwise set ``MERGECRAFT_*`` keys the workflow never chose.
+    This mirrors the ``config.local.yaml`` rule
     (:func:`mergecraft.config.layered.running_in_github_actions`). Outside
     Actions nothing changes; an explicit ``$MERGECRAFT_ENV`` always wins.
     """
-    if running_in_github_actions() and not os.environ.get("MERGECRAFT_ENV"):
+    if running_in_github_actions() and _configured_env_path() is None:
         return
     env_path = local_env_path_for_process_cwd(on_missing_repo="use-process-cwd")
     if not env_path.is_file():
         return
-    load_dotenv(env_path, override=False, encoding="utf-8")
+    for key, value in LocalDotEnv.from_file(env_path).raw_values().items():
+        os.environ.setdefault(key, value)
 
 
 def main() -> None:
