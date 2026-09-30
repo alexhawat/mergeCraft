@@ -34,6 +34,12 @@ _MALFORMED_CASES = [
     ("MERGECRAFT_TRACING_REGION", "north-pole-canary-49a"),
     ("MERGECRAFT_TRACING_CONTENT", "capture-everything-canary-49a"),
     ("MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT", "flase-canary-49a"),
+    # The two control-carrying tracing Action inputs. ``_setup_run`` parses them
+    # (via ``export_tracing_env_from_action_inputs``) inside the same ``try`` as
+    # the registered env models, so a malformed ``INPUT_*`` value fails closed on
+    # the configuration-error path rather than the generic infra-error bucket.
+    ("INPUT_TRACING", "flase-canary-49a"),
+    ("INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT", "flase-canary-49a"),
 ]
 
 

@@ -168,6 +168,40 @@ could interpolate `F=${A}z` from whatever a previous loader test had left in
 Both serial orders of the loader and provider modules pass, and the three-module
 selection passes under `pytest-randomly`.
 
+## Regression pins for the fail-closed startup paths
+
+Two guards were added after the release-half implementation landed, because the
+contract named the tracing **Action inputs** explicitly and one classification
+and one exit path had no committed test that failed without the fix.
+
+- `tests/action/test_env_fail_closed_startup.py` — the malformed-tracing
+  parametrisation now also carries the two control-carrying Action inputs,
+  `INPUT_TRACING` and `INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT`, alongside the
+  four `MERGECRAFT_*` keys. The four assertions are unchanged — outcome
+  `configuration_error`, no agent spawned, the MCP server never started, the key
+  named and the canary absent from every output field. Before the orchestrator
+  moved the Action-input export inside its configuration `try`, an unparseable
+  `INPUT_TRACING` escaped the setup phase and landed the run in `infra_error`.
+  Non-vacuity: raising the same configuration error from the setup phase (the
+  pre-fix ordering) drives the real orchestrator to `infra_error`, so the
+  `configuration_error` assertion is the discriminator.
+- `tests/cli/test_cli_configuration_error_exit.py` — drives the real entrypoint
+  `mergecraft.cli.app.main()` (not `CliRunner`, which enters Click's
+  `Command.main()` and never calls `main()`) with a malformed
+  `MERGECRAFT_TRACING` / `MERGECRAFT_TRACING_REGION`. It asserts `SystemExit`
+  with `CLI_CONFIGURATION_EXIT_CODE`, the variable named and the canary absent
+  from stdout and stderr; a guard case asserts a well-formed value keeps the
+  ordinary success exit. Before the fix, `main()` called `app()` directly, so
+  the error escaped as a Rich traceback and process exit code 1. The module also
+  documents why the `INPUT_*` keys are not reachable through this subcommand —
+  `mergecraft config tracing` resolves the `MERGECRAFT_*` env layer through
+  `TracingEnv`, which has no `INPUT_*` alias; those keys are pinned on the
+  Action startup path instead.
+
+Both modules are hermetic (no workspace `.env`, no ambient `MERGECRAFT_*` /
+`GITHUB_*` / `INPUT_*`, no network) and rebind the process-global loguru sink
+after each test so a captured stream is never written to once it closes.
+
 ## Out of scope
 
 The run budgets, the config-file locator, the repository-settings-not-env
