@@ -10,9 +10,13 @@ few paths cannot be moved out of the agent user's reach:
 * ``/proc/*/environ`` of other processes — kernel state;
 * ``<codex home>/auth.json`` — written by ``agents/codex._setup_codex_auth``.
 
-The wiring point is :func:`mergecraft.agents.gates.build_claude_native_fs_denies`
-(``Read(<path>)`` / ``Edit(<path>)`` rules). This suite pins that the Claude
-driver passes those paths to the builder and that the resulting rules reach the
+The wiring point is :func:`mergecraft.agents.gates.build_claude_native_fs_denies`.
+An **absolute** path is spelled ``//<path>`` — a single leading ``/`` anchors at
+the primary working directory, not the filesystem root, so ``Read(/github/home)``
+denies ``<cwd>/github/home``, a path that does not exist. Each path also needs
+its ``/**`` subtree form so a file argument and a directory argument are both
+covered. This suite pins that the Claude driver passes those paths to the
+builder, that the builder anchors them, and that the resulting rules reach the
 CLI invocation (argv, or a settings file written beside the MCP config).
 """
 
@@ -21,15 +25,14 @@ from __future__ import annotations
 import importlib
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import pytest
 
 from mergecraft.agents.claude import _run_claude_once
 from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
 from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
 from mergecraft.mcp.tool_state import init_tool_state
-
-if TYPE_CHECKING:
-    import pytest
 
 # The paths HW0's static table says the image cannot move; each needs a Claude
 # deny rule. ``auth.json`` is matched by basename because the Codex home is
@@ -163,11 +166,28 @@ def test_native_read_denies_reach_the_claude_invocation(
     )
 
 
-def test_the_builder_emits_read_and_edit_rules_for_each_secret_path() -> None:
-    """The helper itself: every supplied path becomes a Read and Edit rule."""
+@pytest.mark.parametrize("verb", ["Read", "Edit"])
+def test_the_builder_emits_read_and_edit_rules_for_each_secret_path(verb: str) -> None:
+    """The helper itself: an absolute path is anchored ``//`` with an exact + subtree rule.
+
+    Claude Code resolves a single leading ``/`` against the primary working
+    directory, so ``Read(/github/home)`` denies ``<cwd>/github/home`` — a path
+    that does not exist — and the control is dead. The fail-closed spelling is
+    the gitignore-style ``//`` for the filesystem root, and both the exact rule
+    (a file argument) and its ``/**`` subtree (a directory argument) are needed.
+    """
     from mergecraft.agents.gates import build_claude_native_fs_denies
 
     rules = build_claude_native_fs_denies(["/secret/auth.json"])
 
-    assert "Read(/secret/auth.json)" in rules
-    assert "Edit(/secret/auth.json)" in rules
+    assert f"{verb}(//secret/auth.json)" in rules, (
+        f"{verb}(/secret/auth.json) anchors at the working directory, not the "
+        f"filesystem root, and denies nothing; got {rules!r}"
+    )
+    assert f"{verb}(//secret/auth.json/**)" in rules, (
+        f"the anchored subtree rule must cover a directory argument; got {rules!r}"
+    )
+    assert f"{verb}(/secret/auth.json)" not in rules, (
+        f"the single-slash absolute form is anchored at the working directory and "
+        f"denies nothing; got {rules!r}"
+    )

@@ -29,6 +29,7 @@ from typer.testing import CliRunner
 from mergecraft.agents.verifier import JudgeVerdict, judge_pin, record_verifier_verdict
 from mergecraft.cli.app import app
 from mergecraft.evals.judge_calibration import JudgeCalibrationCase
+from mergecraft.evidence.run_packet import resolve_packet_path
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow, init_tool_state
 from mergecraft.mcp.verification import record_finding_verdict_tool
@@ -43,6 +44,20 @@ runner = CliRunner()
 _CAPTURE_ENV = "MERGECRAFT_CAPTURE_VERDICTS"
 _CANARY = "sk-canary-verdict-capture-do-not-leak-7f3a9b2c1d4e5f6a"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+
+
+@pytest.fixture(autouse=True)
+def _offline_evidence_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the offline capture location against ambient Action environment.
+
+    The offline coverage below pins where capture writes with **no** Action
+    context. A stray ``RUNNER_TEMP`` (present on every GitHub runner) or an
+    operator ``MERGECRAFT_EVIDENCE_DIR`` would otherwise relocate the artefact
+    out from under ``tmp_path`` and make these tests assert the wrong thing.
+    The Action-location pin sets ``RUNNER_TEMP`` itself.
+    """
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
+    monkeypatch.delenv("MERGECRAFT_EVIDENCE_DIR", raising=False)
 
 
 @contextmanager
@@ -304,6 +319,39 @@ async def test_a_canary_in_the_finding_body_is_redacted(
     text = files[0].read_text(encoding="utf-8")
     assert _CANARY not in text, "the packet redaction must run before the line is written"
     assert "plaintext" in text, "the non-secret part of the finding body must survive"
+
+
+# ── Action runs: the capture must survive the runner ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_capture_is_retrievable_from_the_action_evidence_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An Action run must still have the capture file after the runner ends.
+
+    The workflow uploads its evidence from the directory
+    ``resolve_packet_path`` names (``$RUNNER_TEMP/mergecraft`` in an Action run,
+    where ``MERGECRAFT_EVIDENCE_DIR`` is never set). A capture written under the
+    ephemeral run tmpdir is discarded with the runner, so the Action half of the
+    control is dead. The capture must resolve through the same destination
+    policy the packet uses.
+    """
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(runner_temp))
+    monkeypatch.setenv(_CAPTURE_ENV, "1")
+
+    ctx = _ctx(tmp_path / "run")
+    fingerprint = _seed_finding(ctx)
+    await _verdict(ctx, fingerprint=fingerprint, verdict="confirm", reason="Confirmed.")
+
+    upload_dir = resolve_packet_path(tmpdir=ctx.tmpdir, change_slug="acme-demo-42").parent
+    assert (upload_dir / "judge-verdicts.jsonl").is_file(), (
+        "the capture artefact is not retrievable after the runner ends: the "
+        f"Action uploads its evidence from {upload_dir}, but the file was written "
+        f"elsewhere (found {_capture_files(tmp_path)!r})"
+    )
 
 
 # ── offline review flag ──────────────────────────────────────────────────────

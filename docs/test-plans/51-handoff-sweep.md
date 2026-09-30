@@ -39,7 +39,7 @@ the implementation has one target.
 | Trajectory scorer | `score_trajectory_labels(label_sets, *, protocol=None)`, `compare_trajectory_report(candidate, baseline, *, protocol)` | `quality_eligible` / `advisory` in the report's eligibility; comparison names failing rule ids |
 | Trajectory CLI | `mergecraft eval trajectory-gate --protocol … --baseline … --candidate …` | exits 0 advisory with no protocol; non-zero outside tolerance |
 | Verdict capture | `<evidence_dir>/judge-verdicts.jsonl`, one JSON line per saved verdict | the machine-written half of `JudgeCalibrationCase`; enabled by `MERGECRAFT_CAPTURE_VERDICTS=1` / `mergecraft review --capture-verdicts` |
-| Native read denies | `mergecraft.agents.gates.build_claude_native_fs_denies(extra_secret_paths)` | emits `Read(<path>)` and `Edit(<path>)` per path |
+| Native read denies | `mergecraft.agents.gates.build_claude_native_fs_denies(extra_secret_paths)` | emits anchored `Read(//<path>)`, `Read(//<path>/**)`, `Edit(//<path>)` and `Edit(//<path>/**)` per absolute path; never the single-slash form |
 | Read audit | `mergecraft.agents.claude.audit_read_boundary(records, *, checkout, tmpdir)` | returns the out-of-boundary paths and logs one run-record warning each |
 | Batch manifest | `HumanBatchManifest` accepts a manifest-declared `batch_id` and case list | `golden-batch-001`'s nine ids stay a pinned fixture |
 
@@ -129,6 +129,7 @@ strict calibration case.
 | The saved verdict carries a pinned judge and the policy fields | unit | `tests/mcp/test_verdict_capture.py::test_captured_record_carries_the_pinned_judge_and_policy_fields` | red → authorship/verdict wave |
 | A canary in the finding body is redacted before the line is written | unit | `tests/mcp/test_verdict_capture.py::test_a_canary_in_the_finding_body_is_redacted` | red → authorship/verdict wave |
 | The offline review path exposes the one enabling flag | functional | `tests/mcp/test_verdict_capture.py::test_offline_review_exposes_the_capture_flag` | red → authorship/verdict wave |
+| In an Action run the capture artefact is readable from the directory the packet is uploaded from, not the ephemeral run tmpdir | integration | `tests/mcp/test_verdict_capture.py::test_capture_is_retrievable_from_the_action_evidence_directory` | red → capture-persistence fix |
 
 ### The trajectory scorer reads an approved protocol and compares a baseline
 
@@ -159,7 +160,7 @@ reads that actually happened are recorded.
 | --- | --- | --- | --- |
 | The driver passes every image secret path to the native deny builder | unit | `tests/agents/test_claude_read_scope.py::test_driver_passes_the_image_secret_paths_to_the_native_fs_deny_builder` | red → read-scoping wave |
 | The resulting `Read(...)` deny rules reach the Claude invocation | unit | `tests/agents/test_claude_read_scope.py::test_native_read_denies_reach_the_claude_invocation` | red → read-scoping wave |
-| The builder emits a `Read` and an `Edit` rule per path | unit | `tests/agents/test_claude_read_scope.py::test_the_builder_emits_read_and_edit_rules_for_each_secret_path` | green (guard) |
+| The builder anchors an absolute path at the filesystem root (`//`) with both an exact and a `/**` subtree rule, and never emits the single-slash form | unit | `tests/agents/test_claude_read_scope.py::test_the_builder_emits_read_and_edit_rules_for_each_secret_path[Read]`, `::test_the_builder_emits_read_and_edit_rules_for_each_secret_path[Edit]` | red → read-scoping fix |
 | An out-of-boundary read warns and names the path | unit | `tests/agents/test_claude_read_log_check.py::test_a_read_outside_the_boundary_warns_and_names_the_path` | red → read-scoping wave |
 | In-boundary reads record nothing | unit | `tests/agents/test_claude_read_log_check.py::test_reads_inside_the_checkout_or_run_tmpdir_record_nothing` | red → read-scoping wave |
 | Non-read tools are not audited | unit | `tests/agents/test_claude_read_log_check.py::test_non_read_tools_are_not_audited` | red → read-scoping wave |
@@ -235,3 +236,23 @@ The implementation waves turn each red section green; `test-creator` then
 re-reads this document and reconciles the status column. No test is edited by an
 implementation wave, and no assertion is weakened to reach green. This section
 records each pass.
+
+### Fix round 1 (test-side, after the final verification gate)
+
+Two assertions certified dead controls; both were re-pinned to the fail-closed
+contract. Neither is weakened, and both are RED against the shipped product code.
+
+* **Deny-rule anchoring.** `tests/agents/test_claude_read_scope.py::test_the_builder_emits_read_and_edit_rules_for_each_secret_path`
+  was rewritten (and parametrised over `Read`/`Edit`) to pin the four anchored
+  forms for an absolute path — `Read(//p)`, `Read(//p/**)`, `Edit(//p)`,
+  `Edit(//p/**)` — and to reject the single-slash `Read(/p)` / `Edit(/p)` that
+  anchors at the working directory and denies nothing. The sibling substring and
+  regex pins still hold unchanged. The old spelling in the "Names this suite
+  pins" table is corrected the same way.
+* **Action capture retrievability.** `tests/mcp/test_verdict_capture.py` gained
+  `test_capture_is_retrievable_from_the_action_evidence_directory`, which sets
+  `RUNNER_TEMP`, records a verdict, and asserts the capture file is present in
+  the directory `resolve_packet_path` names — the same destination policy the
+  evidence packet uses. An autouse fixture now clears `RUNNER_TEMP` /
+  `MERGECRAFT_EVIDENCE_DIR` for the offline rows so they pin the offline
+  location deterministically on a runner host.
