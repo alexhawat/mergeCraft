@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Both Action images replace the brace-expansion and undici copies bundled
+  inside npm with their patched releases, pinned by checksum. No npm release
+  ships the fixes yet, and the old copies carried three HIGH advisories.
+
 - A self-review re-run on a job token now picks up the earlier run's checkpoint and
   progress comment. The reader looked for a packet file name the workflow never
   uploads, so every re-review started again from scratch. It now reads the file
