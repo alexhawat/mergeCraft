@@ -847,11 +847,6 @@ def validate_config_secret_split(
     return violations
 
 
-def _indexed_label_from_env(env_map: Mapping[str, str], env_index: int) -> str | None:
-    raw = env_map.get(f"LLM_PROVIDER_{env_index}", "").strip()
-    return raw or None
-
-
 def _indexed_value(env_map: Mapping[str, str], env_index: int, suffix: str) -> str | None:
     raw = env_map.get(f"LLM_PROVIDER_{env_index}_{suffix}", "").strip()
     return raw or None
