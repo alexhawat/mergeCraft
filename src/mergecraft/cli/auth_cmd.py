@@ -47,7 +47,6 @@ TOKENHUB_API_SECRET = "TOKENHUB_API_KEY"
 MINIMAX_API_SECRET = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
-DEFAULT_NOUS_PORTAL = "https://inference-api.nousresearch.com/v1"
 DEFAULT_TOKENHUB = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 # Logfire setup (issue #56 / D5). ``LOGFIRE_TOKEN`` is the Action secret the
 # ``logfire-token`` input maps to; ``MERGECRAFT_LOGFIRE_TOKEN`` is the
