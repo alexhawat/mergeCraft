@@ -34,7 +34,7 @@ import json
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -45,12 +45,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from mergecraft.tracing.event import TraceEvent
-
-
-class _SinkProtocol(Protocol):
-    """Structural contract for any sink — kept private to this module."""
-
-    def write(self, event: TraceEvent) -> None: ...
 
 
 def _now_utc() -> datetime:
