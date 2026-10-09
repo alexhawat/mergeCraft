@@ -20,7 +20,6 @@ from mergecraft.scm.types import ListedItems
 from mergecraft.utils.retry_policy import (
     DEFAULT_STOP,
     DEFAULT_WAIT,
-    is_transient_http_error,
     retry_transient_safe_methods,
 )
 
@@ -143,11 +142,6 @@ def parse_repo_context(repository: str | None = None) -> RepoContext:
         msg = f"Invalid GITHUB_REPOSITORY format: {github_repo}. Expected 'owner/repo'"
         raise ValueError(msg)
     return RepoContext(owner=parts[0], name=parts[1])
-
-
-def _is_transient_http_error(exc: BaseException) -> bool:
-    """Backward-compatible alias for ``is_transient_http_error`` (W9 tests)."""
-    return is_transient_http_error(exc)
 
 
 def _default_api_base_url() -> str:
