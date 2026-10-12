@@ -45,7 +45,7 @@ a read-only verifier; typed findings drive inline comments and the
 Install the generated `skills/<harness>/mergecraft/SKILL.md` package. The raw
 `skills/mergecraft/SKILL.md` is a generator template; replace a copied template
 with the generated package to repair relative links. Documentation currently
-uses verified commit `bb865d5c8e03d97269cb5100656bf047fcd22c65`, because Action tag
+uses verified commit `09d441236e80a10758d4058b64e7ac60fe52925e`, because Action tag
 `v0.1.0a1` predates the MCP documentation. Release maintainers can set
 `MERGECRAFT_AGENT_PACKAGES_REF` when generating packages for another verified ref.
 Fetch that ref first: an unresolved explicit override fails instead of silently
