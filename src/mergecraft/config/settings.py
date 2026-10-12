@@ -1122,27 +1122,6 @@ def _read_text(path: Path) -> str | None:
     return text
 
 
-def _resolve_config_path(
-    path: Path | str | None = None, *, root: Path | None = None
-) -> Path | None:
-    if path is not None:
-        candidate = Path(path)
-        return candidate if candidate.is_file() else None
-
-    # Lazy import: ``config.layered`` imports ``config.io``, which imports this
-    # module — a top-level import would cycle.
-    from mergecraft.config.layered import resolve_config_sources
-
-    base = _workspace_root(root)
-    sources = resolve_config_sources(base)
-    if sources.env_config_missing:
-        logger.warning(
-            "MERGECRAFT_CONFIG set but file missing: {}",
-            os.environ.get("MERGECRAFT_CONFIG"),
-        )
-    return sources.files[-1] if sources.files else None
-
-
 def _known_analyzer_ids_from_catalog() -> frozenset[str]:
     """Catalog ids without importing ``mergecraft.analyzers`` (avoids loguru re-init)."""
     catalog_dir = Path(__file__).resolve().parent.parent / "analyzers" / "catalog"
