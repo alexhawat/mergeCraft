@@ -4,7 +4,7 @@ agent: build
 ---
 
 Set up mergeCraft in this repository per
-<https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md>, using the
+<https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md>, using the
 `opencode` harness.
 
 1. Install the CLI (uv fetches its own Python — do not install Python):

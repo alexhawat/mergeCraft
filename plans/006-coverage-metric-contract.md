@@ -35,7 +35,7 @@ Only these implementation paths, plus this plan's status and an appropriate chan
 
 Use the existing `_pct` zero-total convention and script subprocess tests. Keep the native combined global 82 threshold. The arithmetic fix itself must leave every numeric module/prefix floor unchanged. A later attributable rebaseline from the complete report may change a number only through the documented buffer formula and a recorded measurement rationale, never merely to make a gate pass. Prefix line calculations already have the right semantics, so do not rewrite them unnecessarily.
 
-Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS.md, CONTRIBUTING.md, `docs/_standards/coding-standards.md`, and `docs/REVIEW-DOCTRINE.md`. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under `evidence/`. No generated file hand-edits.
+Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS-mergecraft.md, CONTRIBUTING.md, `docs/_standards/coding-standards.md`, and `docs/REVIEW-DOCTRINE.md`. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under `evidence/`. No generated file hand-edits.
 
 ## Start and verification commands
 

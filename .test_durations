@@ -8666,7 +8666,7 @@
     "tests/security/test_untrusted_config_execution.py::test_untrusted_setup_script_is_not_executed": 3.094908457947895,
     "tests/security/test_untrusted_config_execution.py::test_untrusted_static_check_commands_are_dropped": 3.499608666053973,
     "tests/security/test_untrusted_config_execution.py::test_untrusted_stop_script_is_not_executed": 2.9292646661633626,
-    "tests/skills/test_no_comment_trigger_claim.py::test_doc_does_not_advertise_a_comment_trigger[AGENTS.md]": 0.0007207089802250266,
+    "tests/skills/test_no_comment_trigger_claim.py::test_doc_does_not_advertise_a_comment_trigger[AGENTS-mergecraft.md]": 0.0007207089802250266,
     "tests/skills/test_no_comment_trigger_claim.py::test_doc_does_not_advertise_a_comment_trigger[README.md]": 0.002771915984340012,
     "tests/skills/test_no_comment_trigger_claim.py::test_doc_does_not_advertise_a_comment_trigger[llms-full.txt]": 0.008932916913181543,
     "tests/skills/test_no_comment_trigger_claim.py::test_doc_does_not_advertise_a_comment_trigger[skills/claude-code/mergecraft/SKILL.md]": 0.0011331250425428152,

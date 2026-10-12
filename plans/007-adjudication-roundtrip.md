@@ -35,7 +35,7 @@ Only these implementation paths, plus this plan's status and an appropriate chan
 
 Reuse AdjudicationRecord and strict Pydantic models rather than allowing arbitrary extras. Match CLI temporary-directory tests and the existing packaged byte-sync tests.
 
-Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
+Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS-mergecraft.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
 
 ## Start and verification commands
 

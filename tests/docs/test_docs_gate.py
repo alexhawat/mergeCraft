@@ -26,7 +26,7 @@ from tests.docs.support import (
 )
 
 README = REPO_ROOT / "README.md"
-AGENTS_MD = REPO_ROOT / "AGENTS.md"
+AGENTS_MD = REPO_ROOT / "AGENTS-mergecraft.md"
 SKILL_MD = REPO_ROOT / "skills" / "mergecraft" / "SKILL.md"
 INSTALL_DOC = REPO_ROOT / "docs" / "install.md"
 LLMS_TXT = REPO_ROOT / "llms.txt"
@@ -182,7 +182,7 @@ def test_unpinned_install_line_is_the_documented_form() -> None:
     """D11: consumer install stays unpinned; no ``git+…@v…`` variant in agent surfaces."""
     surfaces = (
         ("README.md", _read(README)),
-        ("AGENTS.md", _read(AGENTS_MD)),
+        ("AGENTS-mergecraft.md", _read(AGENTS_MD)),
         ("skills/mergecraft/SKILL.md", _read(SKILL_MD)),
     )
     missing_unpinned = [label for label, text in surfaces if _UNPINNED_INSTALL not in text]
@@ -240,12 +240,14 @@ def test_llms_full_includes_agents_and_readme() -> None:
     text = _read(LLMS_FULL)
     headers = _LLMS_FULL_HEADER.findall(text)
     assert "README.md" in headers, "llms-full.txt must include a README.md section header"
-    assert "AGENTS.md" in headers, "llms-full.txt must include an AGENTS.md section header"
+    assert "AGENTS-mergecraft.md" in headers, (
+        "llms-full.txt must include an AGENTS-mergecraft.md section header"
+    )
 
     readme_excerpt = _read(README).splitlines()[0].strip()
     agents_excerpt = _read(AGENTS_MD).splitlines()[0].strip()
     assert readme_excerpt in text, "llms-full.txt must embed README.md body content"
-    assert agents_excerpt in text, "llms-full.txt must embed AGENTS.md body content"
+    assert agents_excerpt in text, "llms-full.txt must embed AGENTS-mergecraft.md body content"
 
 
 def test_manifest_see_also_links_resolve() -> None:

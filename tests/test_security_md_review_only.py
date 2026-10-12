@@ -1,7 +1,7 @@
 """W3 — ``SECURITY.md`` is the public review-only contract (D9 / #350).
 
 The guarantee lives in ``SECURITY.md`` (and CHANGELOG).
-Not README.md. Not AGENTS.md. File 7 owns those (D6).
+Not README.md. Not AGENTS-mergecraft.md. File 7 owns those (D6).
 """
 
 from __future__ import annotations

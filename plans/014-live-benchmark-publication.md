@@ -36,7 +36,7 @@ bench-detect:
 
 Start an isolated `codex/014-live-benchmark-publication` branch from current main. The audit checkout was older pre-0.0.1 with an existing local config edit; preserve that edit. Run `git merge-base --is-ancestor be9993367386b03f982c795ceb1d80e4a0bfcf1d HEAD` (expected 0), then `git diff --stat be9993367386b03f982c795ceb1d80e4a0bfcf1d..HEAD -- docs/eval-methodology.md evals/bench/smoke-manifest.json evals/bench/campaign-manifest.json evals/results src/mergecraft/evals/publication.py src/mergecraft/cli/eval_cmd.py Makefile README.md docs/cli.md llms-full.txt tests/evals/test_benchmark_publication.py` and compare any changes against this plan before implementation.
 
-Read AGENTS.md, CONTRIBUTING.md, docs/REVIEW-DOCTRINE.md and docs/eval-methodology.md. Python3.11+, uv, Make-only recurring commands, strict typed models, loguru and camelCase config aliases apply. Reuse existing schemas and evaluator machinery. Do not change consumer approval policy or trust boundaries, create new evidence/ artifacts, fabricate human records, or run paid/live work without its concrete authorization. Generated files must come from their generator. Conventional Commits ≤72-character subjects; no --no-verify.
+Read AGENTS-mergecraft.md, CONTRIBUTING.md, docs/REVIEW-DOCTRINE.md and docs/eval-methodology.md. Python3.11+, uv, Make-only recurring commands, strict typed models, loguru and camelCase config aliases apply. Reuse existing schemas and evaluator machinery. Do not change consumer approval policy or trust boundaries, create new evidence/ artifacts, fabricate human records, or run paid/live work without its concrete authorization. Generated files must come from their generator. Conventional Commits ≤72-character subjects; no --no-verify.
 
 ## Commands
 

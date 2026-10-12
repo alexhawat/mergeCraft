@@ -40,7 +40,7 @@ _RELATIVE_LINK = re.compile(r"\(\.\./\.\./([^)]+)\)")
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 DEFAULT_BLOB_REF = "pre-0.0.1"
-DOCUMENTATION_REF = "bb865d5c8e03d97269cb5100656bf047fcd22c65"
+DOCUMENTATION_REF = "09d441236e80a10758d4058b64e7ac60fe52925e"
 
 
 def _blob_ref() -> str:

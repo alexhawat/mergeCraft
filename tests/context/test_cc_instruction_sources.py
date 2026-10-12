@@ -1,6 +1,6 @@
 """W8 / W11 — remaining instruction sources + trust-tiered external files (#357).
 
-Does not author mergeCraft's own AGENTS.md / skill (file 7).
+Does not author mergeCraft's own AGENTS-mergecraft.md / skill (file 7).
 """
 
 from __future__ import annotations

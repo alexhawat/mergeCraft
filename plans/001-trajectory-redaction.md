@@ -27,7 +27,7 @@ Only these implementation paths, plus this plan's status and an appropriate chan
 
 Use the existing `mergecraft.analyzers.redact.redact_secrets`; match the real ToolState fixture in tests/evidence/test_trajectory_read_coverage.py. Do not add a competing credential regex.
 
-Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
+Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS-mergecraft.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
 
 ## Start and verification commands
 

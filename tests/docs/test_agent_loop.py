@@ -3,7 +3,7 @@
 Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan.md``
 (Batch DD). W9.1 landed — xfail markers removed.
 
-D16: nothing under ``skills/``. D6: do not treat AGENTS.md / README.md as
+D16: nothing under ``skills/``. D6: do not treat AGENTS-mergecraft.md / README.md as
 this contract. D12: the page may cite both ``protocol_version`` and
 ``schema_version``.
 """
@@ -38,7 +38,7 @@ _LOOP_STEPS = (
 
 def _page_text() -> str:
     assert AGENT_LOOP_DOC.is_file(), (
-        f"W9.1 must ship {AGENT_LOOP_RELPATH} (not AGENTS.md, README.md, or skills/)"
+        f"W9.1 must ship {AGENT_LOOP_RELPATH} (not AGENTS-mergecraft.md, README.md, or skills/)"
     )
     return AGENT_LOOP_DOC.read_text(encoding="utf-8")
 
@@ -61,7 +61,7 @@ def test_agent_loop_page_exists_under_docs() -> None:
 
 
 def test_agent_loop_is_not_a_skill_or_landing_page() -> None:
-    """Edge: D16 / D6 — the loop must not live in skills/, AGENTS.md, or README.md."""
+    """Edge: D16 / D6 — the loop must not live in skills/, AGENTS-mergecraft.md, or README.md."""
     assert not (REPO_ROOT / "skills" / "agent-loop.md").is_file()
     assert AGENT_LOOP_DOC.is_file()
     skills_loop = (

@@ -41,7 +41,7 @@ Only these implementation paths, plus this plan's status and an appropriate chan
 
 Use captured_sink in tests/tracing/instrumentation/conftest.py and trace_event_payload where its exporters/conftest.py is actually in fixture scope. Preserve disabled-tracing NullSink and nonthrowing exporters. Consult the repository Logfire instrumentation skill when implementing.
 
-Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
+Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS-mergecraft.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
 
 ## Start and verification commands
 

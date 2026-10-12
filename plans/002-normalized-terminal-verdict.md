@@ -32,7 +32,7 @@ Only these implementation paths, plus this plan's status and an appropriate chan
 
 Reuse `agents/gates.py::blocking_findings` and existing normalization/adaptation helpers. The harness fixture is useful for policy replay, but it does not submit or publish through MCP; use the real `submit_review_verdict` tool path and a fake SCM for the end-to-end assertion.
 
-Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
+Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS-mergecraft.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
 
 ## Start and verification commands
 

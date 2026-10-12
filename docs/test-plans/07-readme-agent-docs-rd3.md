@@ -17,15 +17,15 @@ Authoring wave: **RD3.1** (RED) · Implementation: **RD3.2** (LLM-agent install 
 
 | # | Contract | Layer | Primary test |
 | --- | --- | --- | --- |
-| RD3a | `AGENTS.md` teaches `mergecraft review` / `mergecraft init`; `diff-review` only as alias | functional | `test_agents_md_exists_and_teaches_review_not_diff_review_as_primary` |
-| RD3b | `AGENTS.md` stops before interactive auth; never invent credentials | functional | `test_agents_md_stops_on_interactive_auth` |
-| RD3c | `AGENTS.md` uses unpinned install; no dangling `@pre-0.0.1` / `@vX.Y.Z` without tag | functional | `test_agents_md_install_ref_resolves` |
+| RD3a | `AGENTS-mergecraft.md` teaches `mergecraft review` / `mergecraft init`; `diff-review` only as alias | functional | `test_agents_md_exists_and_teaches_review_not_diff_review_as_primary` |
+| RD3b | `AGENTS-mergecraft.md` stops before interactive auth; never invent credentials | functional | `test_agents_md_stops_on_interactive_auth` |
+| RD3c | `AGENTS-mergecraft.md` uses unpinned install; no dangling `@pre-0.0.1` / `@vX.Y.Z` without tag | functional | `test_agents_md_install_ref_resolves` |
 | RD3d | Contributor section names `make lint` / `make test` for this repo | functional | `test_agents_md_this_repo_uses_make` |
 | RD3e | Consumer skill frontmatter `name: mergecraft` + `description:` | unit | `test_skill_frontmatter` |
 | RD3f | `skills-lock.json` mergecraft hash matches SKILL.md SHA-256 | unit | `test_skill_lock_hash_matches` |
 | RD3g | `.claude-plugin/plugin.json` + `marketplace.json` point at skill/commands | unit | `test_plugin_manifests` |
 | RD3h | Slash commands `mergecraft-setup` and `mergecraft-review` exist | functional | `test_slash_commands_exist` |
-| RD3i | Copilot instructions point at `AGENTS.md` | functional | `test_copilot_instructions_point_at_agents_md` |
+| RD3i | Copilot instructions point at `AGENTS-mergecraft.md` | functional | `test_copilot_instructions_point_at_agents_md` |
 | RD3j | README replaces RD3 placeholder with agent section + `mergecraft init` prompt | functional | `test_readme_has_for_ai_coding_agents_section` |
 | RD3k | README badges/links skill + `llms.txt` | functional | `test_readme_agent_badges` |
 | RD3l | `llms.txt` maps README, AGENTS, REVIEW-CHECKS, ANALYZERS, skill | functional | `test_llms_txt_lists_required_urls` |
@@ -36,7 +36,7 @@ Authoring wave: **RD3.1** (RED) · Implementation: **RD3.2** (LLM-agent install 
 ## RD3.1 notes
 
 - Live tree @ RD2 Final (`9218d1cf`) ships outline-B landing with the HTML comment
-  `<!-- RD3: For AI coding agents -->` only — no `AGENTS.md`, `llms.txt`, consumer skill,
+  `<!-- RD3: For AI coding agents -->` only — no `AGENTS-mergecraft.md`, `llms.txt`, consumer skill,
   plugin manifests, slash commands, or Copilot instructions yet.
 - Three **green pins** assert D6/D7 gitignore boundaries without xfail; the repo's
   `xpass-check` hook rejects XPASS in the allowed tree.
@@ -48,15 +48,15 @@ Authoring wave: **RD3.1** (RED) · Implementation: **RD3.2** (LLM-agent install 
 
 | Blocker | What RD3.2 must ship |
 | --- | --- |
-| `AGENTS.md` | Consumer + contributor split; review/init; stop-before-auth; unpinned install; make targets |
+| `AGENTS-mergecraft.md` | Consumer + contributor split; review/init; stop-before-auth; unpinned install; make targets |
 | Consumer skill | `skills/mergecraft/SKILL.md` with Agent-Skills frontmatter + setup checklist |
 | Lockfile | Append `mergecraft` entry to `skills-lock.json` with SHA-256 hash |
 | Plugin | `.claude-plugin/plugin.json` + `marketplace.json` (D8) |
 | Commands | `commands/mergecraft-setup.md`, `commands/mergecraft-review.md` |
-| Copilot | `.github/copilot-instructions.md` → `AGENTS.md` |
+| Copilot | `.github/copilot-instructions.md` → `AGENTS-mergecraft.md` |
 | `llms.txt` | Curated map linking README, AGENTS, REVIEW-CHECKS, ANALYZERS, skill |
 | README section | Replace RD3 placeholder with prompts, skill/plugin install, badges |
-| Manifest | Append rows for `AGENTS.md`, skill, `llms.txt` |
+| Manifest | Append rows for `AGENTS-mergecraft.md`, skill, `llms.txt` |
 
 ## Acceptance (RD3.1)
 

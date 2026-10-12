@@ -82,7 +82,7 @@ negotiation is #379 (already shipped).
 
 ### Impl must satisfy (W9.1 — GREEN; markers removed)
 
-`docs/agent-loop.md` must exist (not under `skills/`, not AGENTS.md / README.md).
+`docs/agent-loop.md` must exist (not under `skills/`, not AGENTS-mergecraft.md / README.md).
 Body must:
 
 - Describe the five-step loop: external agent **changes** code → mergeCraft
@@ -103,7 +103,7 @@ lane B also appends) with `path: docs/agent-loop.md` and non-empty
 | # | Contract | Layer | Scenario | Primary test | Marker |
 |---|----------|-------|----------|--------------|--------|
 | DD383a | `docs/agent-loop.md` exists under `docs/` | functional | happy | `tests/docs/test_agent_loop.py::test_agent_loop_page_exists_under_docs` | GREEN |
-| DD383b | Not skills/ / AGENTS.md / README.md (D16/D6) | functional | edge | `test_agent_loop_is_not_a_skill_or_landing_page` | GREEN |
+| DD383b | Not skills/ / AGENTS-mergecraft.md / README.md (D16/D6) | functional | edge | `test_agent_loop_is_not_a_skill_or_landing_page` | GREEN |
 | DD383c | Five-step loop (change → review → consume findings → decide → review new diff) | functional | happy | `test_agent_loop_describes_the_five_step_loop` | GREEN |
 | DD383d | Names `mergecraft review --agent` + five JSONL events | functional | happy | `test_agent_loop_names_review_agent_and_jsonl_events` | GREEN |
 | DD383e | Cites EXIT-CODES and named exits 0/10/11/12/20/30/40/50/2 | functional | happy | `test_agent_loop_points_at_exit_codes` | GREEN |
