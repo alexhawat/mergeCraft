@@ -97,7 +97,7 @@ RUN apt-get update -qq \
         iproute2 \
         iptables \
         jq \
-        libpcre2-8-0=10.42-1+deb12u1 \
+        libpcre2-8-0=10.42-1+deb12u2 \
         openssh-client \
         procps \
         sudo \
