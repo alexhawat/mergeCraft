@@ -6,7 +6,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 
 | Page | Audience | Purpose |
 |------|----------|---------|
-| [AGENTS](../AGENTS.md) | consumer | Cross-vendor agent guidance — consumer setup and mergeCraft development rules. |
+| [AGENTS-mergecraft](../AGENTS-mergecraft.md) | consumer | Cross-vendor agent guidance — consumer setup and mergeCraft development rules. |
 | [CONTRIBUTING](../CONTRIBUTING.md) | contributor | Contributor setup, make targets, and PR expectations for mergeCraft itself. |
 | [Landing README](../README.md) | consumer | Product landing page — install, features, and pointers to generated reference pages. |
 | [REVIEW-CHECKS](../REVIEW-CHECKS.md) | contributor | Enumerated review checks mergeCraft applies on pull requests. |

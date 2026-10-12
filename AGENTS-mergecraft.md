@@ -1,4 +1,4 @@
-# AGENTS.md — guidance for AI agents
+# AGENTS-mergecraft.md — guidance for AI agents
 
 Cross-vendor entry point for agents setting up mergeCraft in a **consumer** repo
 or contributing to **this** repository. Read [`README.md`](README.md) for the

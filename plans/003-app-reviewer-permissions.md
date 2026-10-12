@@ -34,7 +34,7 @@ Only these implementation paths, plus this plan's status and an appropriate chan
 
 Match TokenRef.aclose and existing httpx.MockTransport cases in tests/utils/test_token.py. Use GitHub's explicit installation permission contract; do not expand to all installation grants.
 
-Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
+Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS-mergecraft.md, CONTRIBUTING.md and docs/REVIEW-DOCTRINE.md. Do not change trust-tier authority, approval policy or public schemas outside the listed scope. Do not write new material under evidence/. No generated file hand-edits.
 
 ## Start and verification commands
 

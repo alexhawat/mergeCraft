@@ -32,7 +32,7 @@ Authoring wave: **RD4.1** (RED) · Implementation: **RD4.2** (docs gate + `llms-
 
 ## RD4.1 notes
 
-- Precondition @ `fb8c4c9b`: `AGENTS.md`, skill, `llms.txt`, and README agent section exist (RD3 Final).
+- Precondition @ `fb8c4c9b`: `AGENTS-mergecraft.md`, skill, `llms.txt`, and README agent section exist (RD3 Final).
 - `git tag --list` is empty — pin gate skips tag-existence half with an explicit message when
   that branch would otherwise run; zero `@v…` matches keeps (a) trivially green (D11).
 - `test_manifest_see_also_links_resolve` resolves markdown targets from each source file's

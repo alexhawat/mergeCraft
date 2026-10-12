@@ -7,7 +7,7 @@ pages:
     generator: null
     purpose: Product landing page — install, features, and pointers to generated reference pages.
 
-  - path: AGENTS.md
+  - path: AGENTS-mergecraft.md
     audience: consumer
     template: consumer
     generator: null

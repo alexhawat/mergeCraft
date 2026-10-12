@@ -49,5 +49,5 @@ provider credentials securely — never paste secrets into the skill body.
 
 All targets implement the [Agent Skills](https://agentskills.io/specification) open
 standard (`name` + `description` frontmatter). Future harnesses must cite a primary source
-with a retrieval date here, or ship the `AGENTS.md` + `llms.txt` fallback instead of
+with a retrieval date here, or ship the `AGENTS-mergecraft.md` + `llms.txt` fallback instead of
 inventing a path.
