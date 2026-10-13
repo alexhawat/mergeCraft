@@ -26,7 +26,6 @@ from mergecraft.utils.secrets import resolve_env
 from mergecraft.utils.workspace import (
     WorkspacePathError,
     allowed_workspace_roots,
-    git_repo_root,
     resolve_allowed_working_directory,
 )
 
@@ -414,12 +413,6 @@ def _spawn_shell(
         stderr=stderr,
         start_new_session=True,
     )
-
-
-def primary_repo_state_dir_safe(fallback: str) -> str:
-    """Best-effort work-tree root for *fallback*, without requiring a ``ctx``."""
-    root = git_repo_root(fallback)
-    return str(root) if root is not None else fallback
 
 
 def shell_tool(ctx: ToolContext):
