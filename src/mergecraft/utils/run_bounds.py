@@ -24,12 +24,8 @@ if TYPE_CHECKING:
 
 BudgetKind = Literal["token", "cost", "tool_call"]
 
-_DEFAULT_TOKEN_BUDGET: Final[int] = 2_000_000
-_DEFAULT_COST_BUDGET_USD: Final[float] = 50.0
-_DEFAULT_TOOL_CALL_BUDGET: Final[int] = 500
 _DEFAULT_RUN_TIMEOUT_S: Final[float] = 3600.0
 _DEFAULT_CONTEXT_RETRIEVAL_TIMEOUT_S: Final[float] = 30.0
-_DEFAULT_MAX_DIFF_LINES: Final[int] = 50_000
 _DEFAULT_EXTERNAL_OPERATION_TIMEOUT_S: Final[float] = 600.0
 _DEFAULT_CACHE_MAX_BYTES: Final[int] = 512 * 1024 * 1024
 
