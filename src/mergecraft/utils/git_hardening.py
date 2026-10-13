@@ -86,11 +86,6 @@ def _no_ext_diff_insertion_index(args: Sequence[str]) -> int | None:
     return None
 
 
-def _needs_no_ext_diff(args: Sequence[str]) -> bool:
-    """Return whether *args* invoke git's external diff driver."""
-    return _no_ext_diff_insertion_index(args) is not None
-
-
 def normalize_git_remote_url(url: str) -> str:
     """Return *url* stripped of surrounding whitespace and a trailing slash."""
     return url.strip().rstrip("/")
