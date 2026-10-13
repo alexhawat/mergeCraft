@@ -204,11 +204,6 @@ def format_analyzer_inline_body(
     return "\n".join(lines)
 
 
-def enrich_analyzer_comment_body(body: str) -> str:
-    """Return review comment bodies unchanged (formatting is upstream)."""
-    return body
-
-
 _SHORT_ID_LINE_RE = re.compile(
     rf"^\*\*{re.escape(FINDING_SHORT_ID_PREFIX)}[0-9a-f]{{6,}}\*\*\s*\n?",
     re.MULTILINE,
