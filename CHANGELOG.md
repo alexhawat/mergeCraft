@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The MCP server no longer mounts a webhook endpoint; a signed delivery was
+  verified but processed nothing, and its replay window could never fire.
+
+- Provider circuit-breaker, health, budget and routing-eval helpers that no
+  review path called are removed.
+
+- Four context-retrieval modules no review path imported are removed.
+
+### Changed
+
+- Agent entries with `dispatch: ensemble` or `shadow` are refused as not
+  implemented instead of being accepted and ignored.
+
+- `mergecraft policy` help and enforcement docs state that a review run does not
+  enforce policy rules.
+
+- Recorded Jev transports and the canary assertion moved out of the runtime
+  package into the test suite.
+
 ### Breaking
 
 - An invalid `trust.agentSandbox` value (for example `off`, a bare `false`, or a
