@@ -1048,13 +1048,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0.10`) sets the hard ceiling — set tolerance `0` to restore strict enforcement
 - Run record and job step summary token lines name target, ceiling, over-target
   status, and per-phase attribution when phases are recorded
-- Enforcement modes and the approval gate now agree on what blocks. The
-  gate-facing severity is the single authority, so ``contributes_blocker`` is
+- Policy enforcement modes score a rule's blocking intent from the finding's
+  gate-facing severity, so ``contributes_blocker`` is
   read off it rather than computed beside it. ``blocking`` floors a
   non-blocking declared severity to ``Major`` and ``warning`` caps blocking
   severities to ``Minor``, and ``required`` resolves to ``Major`` while declared
   evidence is outstanding so a ``Minor`` or ``Trivial`` obligation still blocks;
-  the declared severity is preserved on the finding's ``evidence`` list. **This reverses MCB-12's "blocking no longer promotes
+  the declared severity is preserved on the finding's ``evidence`` list. No
+  review path calls ``evaluate_enforcement``, so the scoring does not reach the
+  approval gate. **This reverses MCB-12's "blocking no longer promotes
   Minor"**, which left the blocking intent in a field ``decide_approval`` never
   read, so a ``blocking`` rule silently passed while a ``warning`` rule blocked
   (#554)
@@ -1115,9 +1117,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required static checks block approval unless every row is explicitly
   ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``,
   and unknown statuses no longer satisfy the gate (MCB-16)
-- Policy ``required`` enforcement consults ``policy.evidence`` and contributes a
-  blocker until declared evidence is present; ``blocking`` no longer promotes
-  declared ``Minor`` findings to ``Major`` (MCB-12)
+- Policy ``required`` enforcement consults ``policy.evidence`` and scores the
+  rule as blocking until declared evidence is present; ``blocking`` no longer
+  promotes declared ``Minor`` findings to ``Major``. Review does not apply the
+  result: no review path calls ``evaluate_enforcement``, so a rule cannot gate a
+  merge yet (MCB-12)
 - Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
   refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
   explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
@@ -1128,14 +1132,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verifier citation paths are confined to the checkout root via
   ``resolve_confined_path``, rejecting traversal, absolute paths, prefix collisions,
   and out-of-root symlinks, and must fall inside the changed-path set (MCB-20)
-- Shipped ``operational_readiness`` policy pack rules now declare required
-  evidence keys so ``enforcement: required`` can gate merge (MCB-12)
+- Shipped ``operational_readiness`` policy pack rules now declare the required
+  evidence keys ``enforcement: required`` consults before it treats the rule as
+  satisfied (MCB-12)
 
 ### Changed
 
-- Policy enforcement modes are pairwise distinguishable: ``advisory`` caps blocking
-  severities to ``Trivial``, ``warning`` and ``required`` preserve declared
-  severity, and ``required`` clears only when ``policy.evidence`` is satisfied
+- Policy enforcement modes are pairwise distinguishable when a rule is
+  evaluated: ``advisory`` caps blocking severities to ``Trivial``, ``warning``
+  and ``required`` preserve declared severity, and ``required`` clears only when
+  ``policy.evidence`` is satisfied. Review does not consult these modes yet
   (MCB-12)
 
 ### Fixed
@@ -1589,11 +1595,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.
-- Provider routing now tracks capability dimensions (context, reasoning, tools, structured IO, cost, latency, residency), require/prefer/fallback intents, per-specialist and per-risk model selection, heterogeneous verifier/judge models, health tracking, bounded retryable-only retries, circuit breakers with cooldown, degradation when a non-required provider is down, fail-closed required-model pins, run-manifest provider/model hashes, per-provider budgets, routing-quality eval, residency allow-lists, and a nightly catalog smoke (#371)
-- Review specialists now report unique useful findings plus latency, cost, precision, and recall; specialists that add cost without review value can be skipped via per-agent circuit breakers (#370)
+- A provider capability catalog names context size, reasoning and tool support, structured-output support, cost, latency and data residency for the bundled models, and a residency allow-list check refuses a model outside the regions the enterprise policy permits (#371)
+- Review specialists now report unique useful findings plus latency, cost, precision, and recall (#370)
 - Review profiles now include `standard`, `api_compatibility`, `migration`, `monorepo`, and `cross_repo` (hyphen aliases on the CLI); `mergecraft profile recommend --risk` auto-selects from change risk, with CLI then policy overrides; profile budget exhaustion stays `inconclusive`, never a clean pass (#369)
 - `.mergecraft/config.yaml` now carries a `schema_version`; unversioned files migrate on load, unknown versions fail closed, and deprecated keys warn before a breaking removal (#368)
-- Review profiles now carry an explicit latency budget; ensemble spend over the profile cost ceiling fails closed; cheap classification runs before specialists, independent work can run in parallel, and structural summaries compress context before an LLM step; early-stop fires when evidence is already sufficient, routing considers remaining budget, and regression/monorepo benches exist without publishing measured cost or latency numbers (#367)
+- Review profiles record an explicit ``latency_budget_ms`` field beside their token, cost and tool-call budgets — the three budgets are exported to the run, the latency figure is recorded only; ensemble spend over the profile cost ceiling fails closed; cheap classification runs before specialists, independent work can run in parallel, and structural summaries compress context before an LLM step; early-stop fires when evidence is already sufficient, routing considers remaining budget, and regression/monorepo benches exist without publishing measured cost or latency numbers (#367)
 - `mergecraft doctor --supply-chain` verifies lockfile reproducibility, bundled agent-CLI provenance, and analyzer version pins; every run manifest now records runtime and tool versions (#366)
 - Failure-injection, soak, high-concurrency, monorepo, and large-PR harnesses now pin production SLOs for review completion, time to first finding, total review latency, and publication success, with a closed reliability error taxonomy and per-stage latency metrics (#364)
 - A mid-review provider outage degrades instead of crashing; corrupt local cache rebuilds, disk and memory preflight fail closed, giant repositories skip or partial, SCM publication is idempotent, runs resume from a checkpoint, cleanup runs on timeout/cancel/crash, and diagnostic bundles redact secrets (#365)
@@ -1657,10 +1663,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`docs/dev/provider-harness.md`); opt-in sanitized capture under
   `.ignorelocal/provider-harness/records/`.
 - Cross-repository intelligence indexes linked repos at pinned commits, contract surfaces (OpenAPI, GraphQL, protobuf, exports), cross-repo blast radius, reproducible citations, and ticket acceptance-criteria mapping under `mergecraft.xrepo` and `mergecraft.requirements`
-- Repository context engine indexes repo maps, per-file symbol indexes (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
-- Call graph, change graph (changed symbol → dependents → tests → contracts), budget-aware dynamic expansion, targeted git blame, and `mergecraft context inspect` for provenance-backed context retrieval
+- Repository context engine indexes per-file symbols (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
+- Call graph, change graph (changed symbol → dependents → tests → contracts), and `mergecraft context inspect` for provenance-backed context retrieval
 - Feedback capture for findings (accepted / dismissed / disputed) keyed by fingerprint, with bounded negative-memory suppression, TTL/recency weighting, contradiction detection, and `mergecraft memory list|show|forget|export|import|feedback` lifecycle verbs (DG7)
-- Policy-as-code package (`mergecraft.policy`) with schema-validated YAML rules, deterministic org/repo/path scoping, enforcement modes mapped onto the existing approval gate (D7), required-evidence inconclusive handling (D8), and bounded exceptions with expiry
+- Policy-as-code package (`mergecraft.policy`) with schema-validated YAML rules, deterministic org/repo/path scoping, enforcement modes that classify a rule's blocking intent (review does not consult them), required-evidence inconclusive handling (D8), and bounded exceptions with expiry
 - `mergecraft policy lint|test|explain` — validate policy rules, run should-trigger/should-not fixtures, and list effective rules with source layers
 - Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
 - Large-PR review engine (DG2): cluster changed paths by dependency and intent, build hierarchical diff context (map → summaries → raw hunks) with token-budget scope reduction that reserves verbatim hunks for high-risk regions, record disputed/waived/stale finding lifecycle states, and emit advisory-only PR split recommendations from independent change groups
@@ -1688,7 +1694,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `mergecraft eval gate` — a release regression gate comparing a candidate result set against baseline with a declared tolerance band, wired as a blocking job in the release workflow
 - Added agent registry binding model, prompt, toolset and budget per role with `mergecraft agents list|show|set` and `make agents-check`
 - Added registry-driven harness render for Claude, OpenCode, Codex, Gemini, and Cursor with per-agent models and declared Codex degradation in run metadata
-- Added typed specialist handoff, model-diversity policy for verification, and ensemble or shadow dispatch modes on agent bindings
+- Added typed specialist handoff and model-diversity policy for verification. An agent binding's `dispatch` key accepts `single`; `ensemble` and `shadow` are refused with a configuration error naming the mode as not implemented, instead of being accepted and then ignored
 - Added change classifier and risk-based lens routing with recorded per-lens reasons in Review mode
 - Promoted 20 themed review lenses from Review prose into registry entries with `mergecraft lens list|show|test`
 - Added pluggable orchestrator with declarative pipeline file, trust gate for untrusted sources, and `mergecraft pipeline lint|show|explain`

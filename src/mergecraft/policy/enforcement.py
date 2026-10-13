@@ -1,4 +1,10 @@
-"""Policy enforcement modes mapped onto the existing approval gate (D7)."""
+"""Policy enforcement modes that score a rule violation's blocking intent.
+
+The evaluation engine stands alone: it turns a rule violation into a finding
+whose severity encodes the mode's intent, and nothing in review consumes that
+result yet, so a rule's enforcement mode changes how the rule is scored, never
+what a verdict decides.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +64,7 @@ def _gate_facing_severity(
     declared: str,
     violation: dict[str, Any],
 ) -> str:
-    """Map a rule's declared severity to the gate-facing finding severity (D7, D12, #554).
+    """Map a rule's declared severity to the gate-facing finding severity (#554).
 
     The gate-facing severity is the single authority for whether a violation
     blocks: ``decide_approval`` reads ``Finding.severity`` and nothing else, so
@@ -135,15 +141,17 @@ def evaluate_enforcement(
     *,
     violation: dict[str, Any],
 ) -> EnforcementResult:
-    """Map a policy violation to a gate-facing enforcement outcome (D7, D12, #554).
+    """Map a policy violation to an enforcement outcome (#554).
 
-    Blocking intent lives in one place: the gate-facing severity. ``blocking``
-    floors a non-blocking declared severity to ``Major`` so the rule blocks.
-    ``required`` consults ``policy.evidence`` and blocks at ``Major`` until
-    declared evidence is present, whatever severity the rule declared. ``warning`` and ``advisory`` never block — ``advisory`` caps
-    blocking severities to ``Trivial`` and ``warning`` to ``Minor``. The
-    declared severity is kept on the finding's ``evidence`` list whenever the
-    gate-facing value differs.
+    Blocking intent lives in one place: the finding's gate-facing severity.
+    ``blocking`` floors a non-blocking declared severity to ``Major``.
+    ``required`` consults ``policy.evidence`` and reports ``Major`` until
+    declared evidence is present, whatever severity the rule declared.
+    ``warning`` and ``advisory`` never block — ``advisory`` caps blocking
+    severities to ``Trivial`` and ``warning`` to ``Minor``. The declared
+    severity is kept on the finding's ``evidence`` list whenever the
+    gate-facing value differs. No review path calls this yet, so the outcome is
+    not applied to any approval gate.
     """
     finding = _violation_finding(mode=mode, violation=violation)
     contributes_blocker = _contributes_blocker(mode=mode, violation=violation)

@@ -1,8 +1,8 @@
-"""Agent registry — model, prompt, toolset and budget per role and lens (AP1).
+"""Agent registry — model, prompt, toolset and budget per role and lens.
 
 Loads bundled defaults plus ``.mergecraft/config.yaml`` overrides. Per-agent
 model chains reuse :func:`mergecraft.utils.agent_resolve.effective_model_chain`
-and :func:`pick_runnable_slug_from_chain` (D3).
+and :func:`pick_runnable_slug_from_chain`.
 """
 
 from __future__ import annotations
@@ -100,6 +100,9 @@ class RegistryValidationError(ValueError):
     """Raised when a registry binding fails structural validation."""
 
 
+_UNIMPLEMENTED_DISPATCH_MODES: Final[frozenset[str]] = frozenset({"ensemble", "shadow"})
+
+
 class AgentBinding(BaseModel):
     """Frozen resolved identity for one agent role or lens."""
 
@@ -121,7 +124,7 @@ class AgentBinding(BaseModel):
 
 
 class ResolvedAgentModel(BaseModel):
-    """Per-agent model resolution with executed-model recording (D4)."""
+    """Per-agent model resolution with executed-model recording."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -302,7 +305,7 @@ class Registry:
     the role-named key first, then every other key in config declaration order
     (not alphabetical — ``reviewer10`` does not sort before ``reviewer2``).
     :meth:`resolve_role_levels` groups those bindings into dispatch levels from
-    each binding's ``after:`` dependency (D15).
+    each binding's ``after:`` dependency.
     """
 
     def __init__(
@@ -364,7 +367,7 @@ class Registry:
         return self._ordered_role_bindings(key)
 
     def resolve_role_levels(self, role: AgentRole | str) -> tuple[tuple[AgentBinding, ...], ...]:
-        """Return dispatch levels for *role* derived from ``after:`` edges (D15)."""
+        """Return dispatch levels for *role* derived from ``after:`` edges."""
         key = AgentRole(role) if isinstance(role, str) else role
         entries = self._ordered_role_entries(key)
         if not entries:
@@ -494,6 +497,13 @@ def load_registry(
                 settings, base_role, model_head=model_head
             )
         merged = _apply_override(base, override, agent_key=agent_key, settings=settings)
+        if merged.dispatch in _UNIMPLEMENTED_DISPATCH_MODES:
+            mode = merged.dispatch
+            msg = (
+                f"agent {agent_key!r} requests dispatch: {mode!r}, which is not "
+                "implemented; only 'single' dispatch is supported"
+            )
+            raise RegistryValidationError(msg)
         if merged.lens is not None and merged.lens in lens_keys:
             stale_key = lens_keys[merged.lens]
             if stale_key != agent_key:
@@ -509,7 +519,7 @@ def load_registry(
     ]
     if len(orchestrator_keys) > 1:
         joined = ", ".join(orchestrator_keys)
-        msg = f"cannot load multiple orchestrator bindings (D7): {joined}"
+        msg = f"cannot load multiple orchestrator bindings: {joined}"
         raise RegistryValidationError(msg)
 
     all_nodes = tuple(
@@ -545,7 +555,7 @@ def resolve_agent_model(
     settings: RepoSettings,
     slug_runnable: Callable[[str], bool] | None = None,
 ) -> ResolvedAgentModel:
-    """Resolve the runnable model for ``binding``, recording the executed slug (D4)."""
+    """Resolve the runnable model for ``binding``, recording the executed slug."""
     chain = list(binding.model_chain) or effective_model_chain(settings)
     requested = chain[0]
     executed: str | None = None

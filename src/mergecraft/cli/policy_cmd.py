@@ -1,4 +1,4 @@
-"""``mergecraft policy`` — lint, test, explain, effective, and simulate (DG5, #358)."""
+"""``mergecraft policy`` — lint, test, explain, effective, and simulate (#358)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,10 @@ from mergecraft.policy.scoping import EffectiveRule, ScopeContext, resolve_effec
 
 app = mergecraft_typer(
     name="policy",
-    help="Lint, test, explain, and simulate versioned policy-as-code rules.",
+    help=(
+        "Lint, test, explain, and simulate versioned policy-as-code rules.\n\n"
+        "Review does not enforce policy rules."
+    ),
     no_args_is_help=True,
 )
 
