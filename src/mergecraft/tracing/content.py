@@ -48,19 +48,17 @@ shared ``cap.TRACE_ATTRS_JSON_MAX_BYTES``.
 from __future__ import annotations
 
 import hashlib
-import os
 from enum import StrEnum
 from typing import Any, Final
 
 from loguru import logger
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
 
 CONTENT_ENV_VAR: Final[str] = "MERGECRAFT_TRACING_CONTENT"
 EXPORT_UNTRUSTED_ENV_VAR: Final[str] = "MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT"
-_TRUE_VALUES: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
-_FALSE_VALUES: Final[frozenset[str]] = frozenset({"0", "false", "no", "off"})
 
 
 class ContentCapture(StrEnum):
@@ -96,24 +94,6 @@ def _parse_level(raw: str | None) -> ContentCapture | None:
         return None
 
 
-def _env_export_untrusted() -> bool | None:
-    """Parse ``MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`` when set."""
-    raw = os.environ.get(EXPORT_UNTRUSTED_ENV_VAR)
-    if raw is None or not raw.strip():
-        return None
-    lowered = raw.strip().lower()
-    if lowered in _TRUE_VALUES:
-        return True
-    if lowered in _FALSE_VALUES:
-        return False
-    logger.warning(
-        "unknown {} value {!r} — ignoring (untrusted bodies stay capped)",
-        EXPORT_UNTRUSTED_ENV_VAR,
-        raw,
-    )
-    return None
-
-
 def resolve_content_capture(
     configured: str | None,
     trust_tier: str,
@@ -123,14 +103,16 @@ def resolve_content_capture(
     """Resolve the effective capture level: env → configured → default, then D7.
 
     Precedence is ``MERGECRAFT_TRACING_CONTENT`` over the YAML ``content``
-    field over the D6 default (``redacted``); an unrecognised value at any
-    step falls through to the next, ending at the default — fail safe,
-    never open. The D7 untrusted cap applies **after** precedence: at any
-    tier other than ``trusted`` a body-emitting level is lowered to
-    ``metadata`` unless the operator set the explicit export-untrusted
-    knob (env beats the ``export_untrusted`` argument). ``off`` and
-    ``metadata`` pass through unchanged (the cap lowers, it never raises —
-    and never to ``off``).
+    field over the D6 default (``redacted``). The environment level is
+    validated by the typed tracing model — a non-empty unknown value fails
+    configuration instead of falling through — while an unrecognised YAML
+    value still falls through to the next step, ending at the default: fail
+    safe, never ``full``. The D7 untrusted cap applies **after** precedence:
+    at any tier other than ``trusted`` a body-emitting level is lowered to
+    ``metadata`` unless the operator set the explicit export-untrusted knob
+    (env beats the ``export_untrusted`` argument). ``off`` and ``metadata``
+    pass through unchanged (the cap lowers, it never raises — and never to
+    ``off``).
 
     Args:
         configured (str | None): The YAML ``tracing.content`` value, if any.
@@ -142,12 +124,13 @@ def resolve_content_capture(
     Returns:
         ContentCapture: The effective, cap-applied capture level.
     """
-    level = _parse_level(os.environ.get(CONTENT_ENV_VAR))
+    env = TracingEnv()
+    level = _parse_level(env.tracing_content)
     if level is None:
         level = _parse_level(configured)
     if level is None:
         level = _DEFAULT
-    env_flag = _env_export_untrusted()
+    env_flag = env.export_untrusted_content
     allow_untrusted_bodies = env_flag if env_flag is not None else bool(export_untrusted)
     if trust_tier != "trusted" and level.emits_body and not allow_untrusted_bodies:
         return ContentCapture.METADATA

@@ -34,6 +34,7 @@ from mergecraft.cli.exits import (
 from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.tracing.redaction import redact_attrs
 from mergecraft.tracing.sinks import read_jsonl_events
 
@@ -218,7 +219,7 @@ def traces_show(
     """Read back the local JSONL traces for the given run id (re-redacts on render)."""
     target_dir = trace_dir
     if target_dir is None:
-        env_dir = os.environ.get("MERGECRAFT_TRACE_DIR")
+        env_dir = TracingEnv().trace_dir
         if env_dir:
             target_dir = Path(env_dir)
     if target_dir is None:

@@ -28,7 +28,6 @@ from typing import Any
 
 import typer
 import yaml
-from dotenv import dotenv_values
 from loguru import logger
 from pydantic import ValidationError
 
@@ -40,6 +39,7 @@ from mergecraft.cli.local_env import local_env_path_for_cwd
 from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
 from mergecraft.cli.trust_cmd import GhRunner, _default_gh_runner, _gh_json, _gh_optional_json
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.config.env import LocalDotEnv
 from mergecraft.config.io import config_has_yaml_comments, patch_config_dict
 from mergecraft.config.settings import RepoSettings, load_repo_settings
 from mergecraft.jev.client import TYPESAFE_API_KEY_ENV
@@ -443,15 +443,24 @@ def _current_repo_slug() -> str | None:
 
 
 def _typesafe_key_from_env_or_file(cwd: Path) -> str | None:
-    """Return a non-empty ``TYPESAFE_API_KEY`` from the process env or the repo ``.env``."""
-    from_env = os.environ.get(TYPESAFE_API_KEY_ENV, "").strip()
-    if from_env:
-        return from_env
+    """Return a non-empty ``TYPESAFE_API_KEY`` from the process env or the repo ``.env``.
+
+    The process environment wins. The file is read through
+    :class:`mergecraft.config.env.LocalDotEnv`, so its quoting means the same
+    here as it does to the startup load. The credential stays a ``SecretStr``
+    inside the model and is unwrapped only at this consumer boundary.
+    """
+    from_process_env = os.environ.get(TYPESAFE_API_KEY_ENV, "").strip()
+    if from_process_env:
+        return from_process_env
     env_path = local_env_path_for_cwd(cwd)
     if not env_path.is_file():
         return None
-    from_file = (dotenv_values(env_path).get(TYPESAFE_API_KEY_ENV) or "").strip()
-    return from_file or None
+    from_file = LocalDotEnv.from_file(env_path).TYPESAFE_API_KEY
+    if from_file is None:
+        return None
+    unwrapped = from_file.get_secret_value().strip()
+    return unwrapped or None
 
 
 def _request_typesafe_api_key() -> str | None:

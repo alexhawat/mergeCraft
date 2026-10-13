@@ -23,6 +23,7 @@ from mergecraft.cli.local_env import (
     local_env_path_for_process_cwd,
 )
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.config.env import LocalDotEnv
 from mergecraft.config.io import load_config_dict as _load_config_dict_raw
 from mergecraft.config.io import patch_config_dict
 from mergecraft.config.io import write_config_dict as _write_config_dict
@@ -781,21 +782,17 @@ class MigrationPlan:
 
 
 def _read_env_map(env_path: Path) -> dict[str, str]:
-    """Parse ``KEY=value`` lines from *env_path* (secrets stay file-local)."""
+    """Read ``KEY=value`` pairs from *env_path* through the shared ``.env`` reader.
+
+    Provider commands and the CLI startup load must give one file one meaning,
+    so the file is parsed by :class:`mergecraft.config.env.LocalDotEnv` over the
+    same ``python-dotenv`` ladder the startup load uses: ``export `` prefixes,
+    single- and double-quoted values, inline comments and ``${VAR}``
+    interpolation all resolve identically. Values stay file-local strings.
+    """
     if not env_path.is_file():
         return {}
-    out: dict[str, str] = {}
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if value.startswith('"') and value.endswith('"'):
-            value = value[1:-1]
-        out[key] = value
-    return out
+    return LocalDotEnv.from_file(env_path).raw_values()
 
 
 def migration_secret_fingerprint(value: str) -> str:

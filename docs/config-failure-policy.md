@@ -21,6 +21,7 @@ Surfaces in this class (Pydantic `extra="forbid"`):
 | `TracingSettings` | Whether reviewed-repo content may leave the runner |
 | Optional-feature blocks (`StaticCheckDefinition`, `CiEvidenceSettings`, `ModeDefinition`, `TraceSinkEntry`) | **Flipped to `forbid` at pre-0.0.1.** The one-release warning shim has ended — an unknown key now fails closed the same way the security/runtime blocks do, so a typo on a `staticChecks` / `ciEvidence` / `modes` / `tracing.sinks` entry aborts instead of silently dropping |
 | `trust.agentSandbox` | An unrecognised tier is a configuration error, never a silent fall-back. A value written to *remove* privilege (`off`, `false`, a typo) must not be read as the more permissive default tier. Only `never` / `merged-only` / `dispatch` / `same-repo` validate; the error names all four |
+| Tracing environment variables and tracing Action inputs | A malformed value on `MERGECRAFT_TRACING`, `MERGECRAFT_TRACING_REGION`, `MERGECRAFT_TRACING_CONTENT` or `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT` — and on their `INPUT_TRACING` / `INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT` Action-input twins — is a configuration error instead of being ignored. Ignoring a typo in the enable flag, the region, the capture level or the untrusted-content export would let a lower-precedence layer's more permissive value stand |
 
 Invalid enum values on `push` / `shell`, unknown keys on those models, and
 unparseable Action inputs that drive runtime (`timeout`) all fail closed.
