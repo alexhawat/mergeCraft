@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from mergecraft.utils.privilege import wrap_agent_command
@@ -68,3 +70,26 @@ def test_setpriv_argv_carries_no_new_privs_and_cleared_caps(
     assert "--no-new-privs" in argv
     assert "--inh-caps=-all" in argv
     assert "--bounding-set=-all" in argv
+
+
+def test_no_non_strict_xfail_remains_in_this_file() -> None:
+    """The quarantined privilege pin is fixed or made strict — never left non-strict.
+
+    A ``strict=False`` mark quietly absorbs a real failure. ``test_allow_root_env_var_overrides``
+    is the only non-strict xfail in this file, and it is quarantined by a test bug
+    (the missing passwd/bounding-set stubs the sibling above supplies), not by
+    product behaviour. This pin turns that quarantine into a ratchet DC4.4 removes.
+    """
+    module = sys.modules[__name__]
+    surviving = module.test_setpriv_argv_carries_no_new_privs_and_cleared_caps
+    # Surviving surface: the stubbed hardened-argv sibling is a plain, passing test.
+    assert callable(surviving)
+    for name, obj in vars(module).items():
+        if not name.startswith("test_") or not callable(obj):
+            continue
+        for mark in getattr(obj, "pytestmark", []):
+            if mark.name != "xfail":
+                continue
+            assert mark.kwargs.get("strict") is not False, (
+                f"{name} still carries a non-strict xfail: {mark.kwargs!r}"
+            )
