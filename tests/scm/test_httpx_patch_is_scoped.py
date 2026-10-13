@@ -2,8 +2,10 @@
 
 An autouse conftest fixture installed a latin-1 header normaliser on
 ``httpx._models`` and never restored it, so every later test in the same worker
-saw the mutated library. The patch is either scoped to the tests that need it
-through ``monkeypatch`` or deleted with ``tests/scm/_httpx_compat.py``.
+saw the mutated library. The only tests that needed it pushed non-ASCII header
+bytes through ``TestClient`` on the removed webhook route, so the patch
+machinery — ``tests/scm/_httpx_compat.py`` and its fixture — is deleted rather
+than scoped.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ _CONFTEST = _REPO_ROOT / "tests" / "scm" / "conftest.py"
 
 _SECRET = "scoped-httpx-patch-secret"
 _BODY = b'{"action":"opened"}'
+_NON_ASCII_BYTE = bytes([0x80]).decode("latin-1")
 
 
 def test_httpx_models_carries_no_process_wide_patch_marker() -> None:
@@ -40,16 +43,14 @@ def test_httpx_models_carries_no_process_wide_patch_marker() -> None:
         )
 
 
-def test_the_patch_is_monkeypatch_scoped_or_deleted() -> None:
-    """When the compat module survives, its applying fixture is non-autouse and restores via monkeypatch."""
-    if not _COMPAT.is_file():
-        return  # deleted with the tests that needed it
-    source = _CONFTEST.read_text(encoding="utf-8")
-    call = source.find("install_httpx_latin1_header_values(")
-    assert call != -1, "the compat module exists but the conftest never applies it"
-    decorator = source.rfind("@pytest.fixture", 0, call)
-    assert decorator != -1, "the patch is applied outside a pytest fixture"
-    fixture_block = source[decorator:call]
-    decorator_line = fixture_block.splitlines()[0]
-    assert "autouse=True" not in decorator_line, decorator_line
-    assert "monkeypatch" in fixture_block, fixture_block
+def test_the_process_wide_patch_machinery_is_gone() -> None:
+    """The compat module and its conftest wiring are deleted, not merely scoped."""
+    assert not _COMPAT.is_file(), "tests/scm/_httpx_compat.py should have been deleted"
+    conftest_source = _CONFTEST.read_text(encoding="utf-8")
+    assert "install_httpx_latin1_header_values" not in conftest_source
+    assert "_mergecraft_latin1_patched" not in conftest_source
+    # Surviving surface: non-ASCII headers still fail closed with plain dicts.
+    headers = sign_webhook_payload("github", body=_BODY, secret=_SECRET)
+    headers["X-Hub-Signature-256"] = f"sha256={_NON_ASCII_BYTE}"
+    with pytest.raises(PermissionError):
+        verify_webhook_signature("github", headers=headers, body=_BODY, secret=_SECRET)

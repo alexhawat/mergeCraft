@@ -59,13 +59,14 @@ and the Bearer-guarded `/mcp` surface must be untouched.
 ### No `tests/scm/` fixture patches httpx for the whole process
 
 The autouse fixture installed a latin-1 header normaliser on `httpx._models`
-and never restored it. The patch becomes a non-autouse `monkeypatch` fixture or
-is deleted with the tests that needed it.
+and never restored it. Every test that needed it pushed non-ASCII header bytes
+through `TestClient` on the webhook route, so the patch and its fixture are
+deleted rather than scoped.
 
 | Behaviour | Layer | Test |
 | --- | --- | --- |
 | After any `tests/scm/` test has run, httpx carries no patch marker; signature verification needs no process-wide patch | unit | `tests/scm/test_httpx_patch_is_scoped.py::test_httpx_models_carries_no_process_wide_patch_marker` |
-| When the compat module survives, the applying fixture is non-autouse and restores via `monkeypatch` | integration | `tests/scm/test_httpx_patch_is_scoped.py::test_the_patch_is_monkeypatch_scoped_or_deleted` |
+| The compat module and its conftest wiring are gone, not merely scoped; non-ASCII headers still fail closed with plain dicts | integration | `tests/scm/test_httpx_patch_is_scoped.py::test_the_process_wide_patch_machinery_is_gone` |
 
 ### The provider-health module keeps only the called surfaces
 
@@ -144,7 +145,8 @@ quarantine into a ratchet the privilege wave removes.
   the shipped redactor removes a canary; the plain roster reader returns the
   first reviewer slug.
 * **Edge cases** — three SCM rows in the generated table; three providers with
-  no ingress path; a compat module that survives versus one that is deleted;
+  no ingress path; the compat module and its fixture deleted, with the
+  process-wide marker absent;
   every unused name in the provider-health module, constants and dataclasses
   included; an omitted `dispatch` key beside an explicit one; three profiles
   and the full exported variable set; four removed context modules beside the
@@ -162,3 +164,45 @@ The removal waves make each red section green; `test-creator` then re-reads
 this document and reconciles the pins — removing the now-satisfied markers the
 waves cannot touch themselves. No implementation wave edits a test, and no
 assertion is weakened to reach green. This section records each pass.
+
+### DC2b (2026-10-13) — prunes the pins of `07797935`
+
+The prior wave (option A, `07797935`) removed the inert webhook route and the
+ingress-only replay store; this pass prunes the `tests/scm/` pins that named the
+removed code and finishes the process-wide-httpx-patch cleanup.
+
+* **Deleted, pinned to removed code.** `tests/scm/test_ingress_idempotency.py`
+  (imported `mergecraft.scm.ingress` — a hard collection error); the seven
+  route/store tests in `tests/scm/test_cd_webhooks.py`
+  (`test_webhook_replay_protection_rejects_stale_or_reused_delivery`,
+  `test_webhook_event_processing_fails_closed_without_delivery_id`,
+  `test_webhook_event_processing_is_idempotent_on_delivery_id`,
+  `test_webhook_ingress_rejects_invalid_hmac_before_processing`,
+  `test_webhook_ingress_verifies_then_processes_a_valid_payload`,
+  `test_http_webhook_route_rejects_empty_secret_for_github_and_gitlab`,
+  `test_http_webhook_route_accepts_signed_github_and_gitlab_deliveries`); and
+  `test_webhook_headers.py::test_route_never_returns_500_on_an_unauthenticated_path`.
+  The signature, rate-limit, conformance, permission and review-only tests stay.
+* **The three surviving `tests/scm/test_webhook_headers.py` tests** call
+  `verify_webhook_signature` directly with dicts, so the file drops its autouse
+  latin-1 fixture and the `TestClient` / `_httpx_compat` imports with it.
+* **The process-wide httpx patch.** Nothing needs it anymore, so
+  `tests/scm/_httpx_compat.py` is deleted and `tests/scm/conftest.py` drops the
+  `install_httpx_latin1_header_values` import and the autouse fixture. The pin
+  `tests/scm/test_httpx_patch_is_scoped.py` now asserts the machinery is gone
+  (module absent, conftest wiring absent) beside the surviving direct-header
+  signature path; `test_httpx_models_carries_no_process_wide_patch_marker`
+  asserts no `_mergecraft_latin1_patched` marker survives a run. No
+  process-wide httpx mutation remains.
+* **Stale wording.** `tests/scm/conftest.py` drops the "RED suite" title and the
+  "not implemented yet" gate wording. `require_scm()` keeps a hard gate (the
+  import itself) but now asserts the `ScmProvider` surface is importable; the
+  vacuous `try/except _SCM_AVAILABLE` guard is collapsed.
+* **Absence paired with survival.** No pin asserts an absence alone: every
+  removed surface is paired with a surviving one (route absent ↔ `/health` and
+  `/mcp` answer; compat module absent ↔ non-ASCII headers still fail closed;
+  marker absent ↔ signature verification works).
+
+**Evidence.** `MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/scm tests/mcp -q -rxX`
+→ `1193 passed, 1 skipped` (no failures, no errors, no XPASS). `make lint`
+exit 0 · `make typecheck` exit 0.
