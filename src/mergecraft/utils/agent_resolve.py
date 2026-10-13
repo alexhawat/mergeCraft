@@ -1541,25 +1541,6 @@ def _emit_advanced_attempt(
         span.set_status("not_visited", "chain decided on an earlier entry")
 
 
-def _slug_runnable(slug: str) -> bool:
-    """Return whether ``slug`` should enter the runnable chain.
-
-    Combines the credential and binary gates (``select_runnable_model_slug``
-    callers see the same answer) and accepts unknown provider prefixes —
-    those are custom slugs the operator takes responsibility for; the
-    chain still requires the agent binary to be available.
-    """
-    if has_credentials_for_slug(slug):
-        return True
-    try:
-        provider = get_model_provider(slug)
-    except ValueError:
-        return False
-    # Unknown provider prefix — pass through; the binary gate is the
-    # real constraint and ``_agent_binary_available`` already covers it.
-    return provider not in {"anthropic", "openai", "google", "cursor", "bedrock", "vertex"}
-
-
 def _fail_loud_for_openai(*, model: str) -> None:
     hints = ("CODEX_AUTH_JSON", "OPENAI_API_KEY")
     env_list = ", ".join(hints)
