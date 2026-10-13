@@ -23,7 +23,6 @@ _DEFAULT_SEMGREP_RULES = _CATALOG_DIR / "semgrep-default-rules.yml"
 _DEFAULT_AST_GREP_RULE = _CATALOG_DIR / "ast-grep-default-rule.yml"
 
 RulesetSource = Literal["repo", "default"]
-PatternBackendName = Literal["semgrep", "opengrep"]
 
 PATTERN_SCANNER_IDS: frozenset[str] = frozenset({"semgrep", "opengrep"})
 PATTERN_TOOL_IDS: frozenset[str] = frozenset({"semgrep", "opengrep", "ast-grep"})
