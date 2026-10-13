@@ -9,12 +9,12 @@ route changes no behaviour the run observed, but the advertised surface does,
 so the pin is on the surface — route absent, key refused, module gone,
 residency still enforced.
 
-**Status: RED as committed.** Collection is clean, `make lint` and `make
-typecheck` exit 0, and 50 authored tests fail because the code they name has
-not been removed or changed yet. No test is skipped or xfailed to mask a
-contract; a removed surface is a plain failure until the deletion lands. The
-three passing tests and the single `xfail` in this set are pre-existing
-neighbours in `tests/utils/test_privilege_identity.py`, not new pins.
+**Status: green as reconciled.** The removal waves (DC2–DC4) have landed and
+this suite now passes in full: collection is clean, every pin is a real pass,
+and `make lint` / `make typecheck` exit 0. At DC1 all 50 authored pins were RED
+by design, because the code they name had not been removed yet; the
+reconciliation log below records each pass. No test is skipped or xfailed to
+mask a contract, and no `xfail` survives in the two files this plan names.
 
 Verification commands:
 
@@ -127,12 +127,16 @@ keeps working through both the direct helper and the enterprise gate.
 
 ### The quarantined privilege pin becomes a ratchet
 
-The only non-strict `xfail` in the named files is a test bug — the missing
-passwd and bounding-set stubs the sibling supplies. The pin turns that
-quarantine into a ratchet the privilege wave removes.
+The only non-strict `xfail` in the named files was a test bug — the missing
+passwd and bounding-set stubs its sibling already supplied, which made the pin
+depend on a real `mergecraft` user existing on the host. The pin now stubs those
+lookups itself and asserts the hardened `setpriv` argv, so it passes on macOS
+and Linux alike, and the companion pin keeps the file free of non-strict
+quarantines.
 
 | Behaviour | Layer | Test |
 | --- | --- | --- |
+| `MERGECRAFT_ALLOW_ROOT=1` admits root and still yields the hardened `setpriv` argv (`--no-new-privs`, `--inh-caps=-all`, `--bounding-set=-all`) with the agent command appended, without a real agent user | unit | `tests/utils/test_privilege_identity.py::test_allow_root_env_var_overrides` |
 | No test in the file carries a non-strict `xfail`; the stubbed hardened-argv sibling stays a plain, passing test | unit | `tests/utils/test_privilege_identity.py::test_no_non_strict_xfail_remains_in_this_file` |
 
 ## Scenario classes
@@ -271,9 +275,47 @@ test_resolve_model_params_for_model_is_gone`, which pins a helper that wave
 still owns). `tests/docs` and the rest of the suite are green. `make lint`
 exit 0 · `make typecheck` exit 0.
 
-**Findings left to the operator.** `docs/cli.md`'s environment-variable table
-still lists the latency-budget knob, which nothing exports or reads now;
-product docs are outside the test writer's remit. The
-`write_context_fixture_repo` helper in `tests/context/support.py` was used only
-by the deleted repo-map test and is now orphaned; it was left in place because
-the pruning hand-off named only the dynamic-expansion fixture.
+### DC4b (2026-10-14) — hosts the moved helpers and de-quarantines the pin
+
+The product wave removed the recorded Jev transports and the canary assertion
+from `src/`, and left the test-side move to this pass. No file under `src/`,
+`scripts/` or the build config was touched here.
+
+* **Recorded Jev transports hosted.** `tests/jev/support.py` gains
+  `RecordedTransport`, `FlakyRecordedTransport` and the private envelope helper
+  they share, importing what they need from the client and types modules lazily
+  so collection stays clean. The runtime keeps the `JevTransport` protocol and
+  `LiveTypeSafeTransport`. Every call site in `tests/jev/` (nine modules) and
+  the three `tests/verify/` modules that replayed a recorded envelope now build
+  the transport from the support module instead of the runtime client.
+* **Canary hook hosted.** `tests/analyzers/support.py` gains
+  `assert_no_canary`; `tests/analyzers/test_redact_json.py` and
+  `tests/analyzers/test_sarif_upload.py` import it from there. The shipped
+  redactor is unchanged and a planted canary still never reaches persisted
+  output.
+* **Privilege pin de-quarantined.** `test_allow_root_env_var_overrides` stubs
+  the passwd lookup and the `--bounding-set` probe exactly as its sibling does,
+  asserts the hardened argv beside the appended agent command, and carries no
+  mark. The file's ratchet pin is green, so the file holds no non-strict
+  `xfail`.
+* **Driver pins confirmed.** `tests/agents/test_harness_deny_list_pin.py`
+  carries no `xfail` and its docstring already states the pins are plain
+  failures, not xfails. No change was needed.
+* **Orphaned helper deleted.** `write_context_fixture_repo` in
+  `tests/context/support.py` had zero callers once the repo-map test was
+  deleted, so it is gone. A whole-tree search found no other zero-caller helper
+  in the files the removal waves touched.
+* **Absence paired with survival.** Every pin keeps a surviving surface beside
+  the removed one: the hosted transports sit beside the runtime protocol and
+  live transport, the canary hook beside the working redactor, and the hardened
+  argv beside the configuration-error refusal for a missing agent user.
+
+**Evidence.** `MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/jev
+tests/analyzers/test_redact_json.py tests/analyzers/test_sarif_upload.py
+tests/utils/test_privilege_identity.py tests/agents/test_harness_deny_list_pin.py
+tests/context -q -rxX` → `312 passed` (no failures, no errors, no XPASS, no
+XFAIL). `MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/verify tests/config
+tests/cli tests/agents tests/review -q -rxX` → `3185 passed, 4 skipped`. The
+reconciled pins run together (`tests/analyzers/test_redact_surface.py`,
+`tests/jev/test_runtime_has_no_recorded_transport.py` and the nine helper-surface
+pins) → `41 passed`. `make lint` exit 0 · `make typecheck` exit 0.

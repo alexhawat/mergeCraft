@@ -22,8 +22,9 @@ from typing import Any
 import pytest
 from tenacity import wait_none
 
-from mergecraft.jev.client import AsyncJevClient, RecordedTransport
+from mergecraft.jev.client import AsyncJevClient
 from mergecraft.jev.types import JevError, SystemOneResponse
+from tests.jev.support import RecordedTransport
 from tests.verify.fake_driver import FakeBrowserDriver
 from tests.verify.support import import_verify, make_input, require_symbol
 

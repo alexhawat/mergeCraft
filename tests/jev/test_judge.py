@@ -9,6 +9,7 @@ import pytest
 from tests.jev.support import (
     PINNED_MODEL,
     TRANSPORT_DIR,
+    RecordedTransport,
     assert_honest_skip,
     import_jev,
     load_review,
@@ -41,7 +42,7 @@ def test_jev_judge_pin_records_pinned_model() -> None:
 
 async def test_evidence_pack_over_unsupported_quote() -> None:
     module = _client()
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "evidence_says_nothing.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "evidence_says_nothing.json")
     finding = make_agent_finding(
         message="Untrusted input is executed via shell=True",
         path="src/mergecraft/mcp/shell.py",
@@ -62,9 +63,7 @@ async def test_evidence_pack_over_unsupported_quote() -> None:
 
 async def test_claim_pack_over_blocker_summary_with_no_findings_row() -> None:
     module = _client()
-    transport = module.RecordedTransport.from_fixture(
-        TRANSPORT_DIR / "claim_blocker_without_row.json"
-    )
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "claim_blocker_without_row.json")
     result = await _judge().judge_prose_claims(
         load_review("blocker_summary_no_findings.md"),
         findings=[],
@@ -86,7 +85,7 @@ async def test_judge_runs_beside_verifier_not_instead() -> None:
     )
     assert should_verify(finding) is True
     module = _client()
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "evidence_says_nothing.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "evidence_says_nothing.json")
     result = await _judge().run_parallel_judge(
         findings=[finding],
         review_body=load_review("blocker_summary_no_findings.md"),
@@ -124,7 +123,7 @@ def _assert_run_scoped_attestations(result: Any) -> None:
 async def test_unsupported_evidence_emits_jev_evidence_unsupported() -> None:
     """F-UNBACKED-RULE-IDS: deleting the ``jev-evidence-unsupported`` emit-if fails this test."""
     module = _client()
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "evidence_says_nothing.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "evidence_says_nothing.json")
     finding = make_agent_finding(
         message="Untrusted input is executed via shell=True",
         path="src/mergecraft/mcp/shell.py",
@@ -142,9 +141,7 @@ async def test_unsupported_evidence_emits_jev_evidence_unsupported() -> None:
 async def test_unbacked_blocker_emits_jev_claim_unbacked_blocker() -> None:
     """F-UNBACKED-RULE-IDS: deleting the ``jev-claim-unbacked-blocker`` emit-if fails this test."""
     module = _client()
-    transport = module.RecordedTransport.from_fixture(
-        TRANSPORT_DIR / "claim_blocker_without_row.json"
-    )
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "claim_blocker_without_row.json")
     result = await _judge().judge_prose_claims(
         load_review("blocker_summary_no_findings.md"),
         findings=[],
@@ -157,7 +154,7 @@ async def test_unbacked_blocker_emits_jev_claim_unbacked_blocker() -> None:
 async def test_verdict_mismatch_emits_jev_claim_verdict_mismatch() -> None:
     """F-UNBACKED-RULE-IDS: deleting the ``jev-claim-verdict-mismatch`` emit-if fails this test."""
     module = _client()
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "claim_verdict_mismatch.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "claim_verdict_mismatch.json")
     result = await _judge().judge_prose_claims(
         "The change is approved even though the summary request_changes it.\n",
         findings=[],
@@ -170,9 +167,7 @@ async def test_verdict_mismatch_emits_jev_claim_verdict_mismatch() -> None:
 async def test_two_terminal_verdicts_violate_exactly_one_verdict_rule() -> None:
     """Plan 21 D6 rule 4: two terminal verdicts must emit a run-scoped attestation."""
     module = _client()
-    transport = module.RecordedTransport.from_fixture(
-        TRANSPORT_DIR / "claim_blocker_without_row.json"
-    )
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "claim_blocker_without_row.json")
     result = await _judge().judge_prose_claims(
         load_review("two_terminal_verdicts.md"),
         findings=[],

@@ -8,6 +8,7 @@ import pytest
 
 from tests.jev.support import (
     TRANSPORT_DIR,
+    RecordedTransport,
     assert_honest_skip,
     import_jev,
     loguru_lines,
@@ -42,9 +43,7 @@ async def test_lens_selection_uses_recorded_transport() -> None:
     from mergecraft.agents.lenses._definitions import LENS_DEFINITIONS
 
     client_mod = import_jev("client")
-    transport = client_mod.RecordedTransport.from_fixture(
-        TRANSPORT_DIR / "lens_privilege_drop.json"
-    )
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "lens_privilege_drop.json")
     selected = await import_jev("questions").select_lenses(
         state={"diff": "setpriv --reuid without HOME"},
         client=client_mod.AsyncJevClient(api_key="mc-test-jev-key", transport=transport),

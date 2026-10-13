@@ -117,28 +117,6 @@ def write_change_graph_fixture_repo(root: Path) -> None:
     )
 
 
-def write_context_fixture_repo(root: Path) -> None:
-    """Lay down a miniature repo for map + symbol indexing tests."""
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "pyproject.toml").write_text(
-        '[project]\nname = "demo"\nversion = "0.1.0"\n\n[project.scripts]\n'
-        'demo-cli = "myservice.cli:main"\n',
-        encoding="utf-8",
-    )
-    (root / "Makefile").write_text("test:\n\tpytest\n", encoding="utf-8")
-    (root / "src" / "myservice").mkdir(parents=True)
-    (root / "src" / "myservice" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "src" / "myservice" / "cli.py").write_text(
-        "def main() -> None:\n    run_service()\n\ndef run_service() -> None:\n    return None\n",
-        encoding="utf-8",
-    )
-    (root / "services" / "api").mkdir(parents=True)
-    (root / "services" / "api" / "main.py").write_text(
-        "def handle_request() -> str:\n    return 'ok'\n",
-        encoding="utf-8",
-    )
-
-
 class RecordingCache:
     """In-memory cache that records get/set calls for cache-key assertions."""
 

@@ -45,7 +45,8 @@ def test_jsonl_is_redacted_line_wise() -> None:
 def test_trufflehog_fixture_canary_never_reaches_persisted_output(tmp_path: Path) -> None:
     """MCB-04: persisted analyzer blobs must not retain the planted canary."""
     from mergecraft.analyzers.parse import persist_analyzer_output
-    from mergecraft.analyzers.redact import assert_no_canary, redact_analyzer_output
+    from mergecraft.analyzers.redact import redact_analyzer_output
+    from tests.analyzers.support import assert_no_canary
 
     redacted = redact_analyzer_output(_JSON_CANARY, tool_id="trufflehog")
     assert_no_canary(redacted, _TRUFFLEHOG_CANARY)

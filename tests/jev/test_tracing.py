@@ -7,6 +7,7 @@ from typing import Any
 from tests.jev.support import (
     PINNED_MODEL,
     TRANSPORT_DIR,
+    RecordedTransport,
     import_jev,
 )
 
@@ -17,7 +18,7 @@ def _jev_spans(sink: Any) -> list[Any]:
 
 async def test_each_call_emits_one_genai_span(memory_tracer: dict[str, Any]) -> None:
     module = import_jev("client")
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
     client = module.AsyncJevClient(
         api_key="mc-test-jev-key",
         transport=transport,
@@ -43,7 +44,7 @@ async def test_jev_specific_attrs_live_under_mergecraft_not_gen_ai(
     memory_tracer: dict[str, Any],
 ) -> None:
     module = import_jev("client")
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
     client = module.AsyncJevClient(
         api_key="mc-test-jev-key",
         transport=transport,
@@ -73,7 +74,7 @@ async def test_unreported_usage_does_not_zero_gen_ai_usage_attrs(
     memory_tracer: dict[str, Any],
 ) -> None:
     module = import_jev("client")
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "usage_tokens_none.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "usage_tokens_none.json")
     client = module.AsyncJevClient(
         api_key="mc-test-jev-key",
         transport=transport,

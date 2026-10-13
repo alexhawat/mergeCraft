@@ -13,6 +13,7 @@ from tests.jev.support import (
     PINNED_MODEL,
     TEST_API_KEY,
     TRANSPORT_DIR,
+    RecordedTransport,
     import_jev,
     loguru_lines,
     make_agent_finding,
@@ -139,7 +140,7 @@ async def test_client_logs_model_and_usage_on_every_call() -> None:
     _clear_log_redactor()
     try:
         module = import_jev("client")
-        transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
+        transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
         client = module.AsyncJevClient(api_key=TEST_API_KEY, transport=transport)
         with loguru_lines() as logs:
             await client.call(
@@ -176,9 +177,7 @@ async def test_evidence_attestation_requires_relation_confidence_floor(
     monkeypatch.setattr("mergecraft.config.settings.default_settings", lambda: configured)
     judge = import_jev("judge")
     client_mod = import_jev("client")
-    transport = client_mod.RecordedTransport.from_fixture(
-        TRANSPORT_DIR / "evidence_says_nothing.json"
-    )
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "evidence_says_nothing.json")
     finding = make_agent_finding(
         message="claim",
         evidence=["def add(left, right): return left + right"],
@@ -205,7 +204,7 @@ async def test_unit_battery_ignores_speculative_style_nit_answer() -> None:
     """Speculative ``style_nit`` is batched but unused by unit routing."""
     policy = import_jev("policy")
     client_mod = import_jev("client")
-    transport = client_mod.RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
     client = client_mod.AsyncJevClient(api_key=TEST_API_KEY, transport=transport)
     assessment = await policy.unit_battery(
         make_hunk_unit(),

@@ -21,17 +21,37 @@ def test_root_outside_action_image_refuses_with_policy_message(
         wrap_agent_command(["echo", "hi"])
 
 
-@pytest.mark.xfail(
-    reason="green after AP6: image identity gate + hardened setpriv argv",
-    strict=False,
-)
 def test_allow_root_env_var_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``MERGECRAFT_ALLOW_ROOT=1`` admits root and still hardens the ``setpriv`` argv.
+
+    Stubs the passwd lookup and the ``--bounding-set`` probe the same way the
+    sibling ``test_setpriv_argv_carries_no_new_privs_and_cleared_caps`` does, so
+    the pin passes on macOS and Linux without a real ``mergecraft`` user.
+    """
+    from unittest.mock import MagicMock
+
+    class _Pw:
+        pw_uid = 10001
+        pw_gid = 10001
+        pw_name = "mergecraft"
+
+    fake_pwd = MagicMock()
+    fake_pwd.getpwnam.return_value = _Pw()
+    monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
     monkeypatch.setattr("mergecraft.utils.privilege.os.getuid", lambda: 0)
     monkeypatch.setenv("MERGECRAFT_ALLOW_ROOT", "1")
     monkeypatch.setattr("mergecraft.utils.privilege._in_action_image", lambda: False)
     monkeypatch.setattr("mergecraft.utils.privilege.shutil.which", lambda _n: "/usr/bin/setpriv")
+    monkeypatch.setattr(
+        "mergecraft.utils.privilege._setpriv_supports_bounding_set",
+        lambda: True,
+    )
     wrapped = wrap_agent_command(["echo", "hi"])
     assert wrapped[0] == "setpriv"
+    assert "--no-new-privs" in wrapped
+    assert "--inh-caps=-all" in wrapped
+    assert "--bounding-set=-all" in wrapped
+    assert wrapped[-2:] == ["echo", "hi"]
 
 
 def test_in_action_image_detects_is_sandbox_and_opt_dir(monkeypatch: pytest.MonkeyPatch) -> None:

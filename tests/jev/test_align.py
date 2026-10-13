@@ -6,6 +6,7 @@ from typing import Any
 
 from tests.jev.support import (
     TRANSPORT_DIR,
+    RecordedTransport,
     import_jev,
     load_withdrawn,
     make_agent_finding,
@@ -18,9 +19,7 @@ def _align() -> Any:
 
 async def test_withdrawn_reraise_is_detected() -> None:
     client_mod = import_jev("client")
-    transport = client_mod.RecordedTransport.from_fixture(
-        TRANSPORT_DIR / "align_withdrawn_reraise.json"
-    )
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "align_withdrawn_reraise.json")
     finding = make_agent_finding(
         message="wrap_agent_command drops uid without redirecting HOME",
         path="src/mergecraft/utils/privilege.py",
@@ -39,7 +38,7 @@ async def test_withdrawn_reraise_is_detected() -> None:
 
 async def test_semantic_dedupe_keeps_the_stronger_severity() -> None:
     client_mod = import_jev("client")
-    transport = client_mod.RecordedTransport.from_fixture(TRANSPORT_DIR / "align_same_defect.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "align_same_defect.json")
     weaker = make_agent_finding(
         message="duplicate finding, weaker copy",
         severity="Minor",
@@ -60,7 +59,7 @@ async def test_semantic_dedupe_keeps_the_stronger_severity() -> None:
 async def test_semantic_dedupe_is_escalate_only_when_weaker_arrives_first() -> None:
     """Guard-deletion: keeping the first member must fail this test (N5)."""
     client_mod = import_jev("client")
-    transport = client_mod.RecordedTransport.from_fixture(TRANSPORT_DIR / "align_same_defect.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "align_same_defect.json")
     first = make_agent_finding(message="weaker copy arriving first", severity="Minor")
     second = make_agent_finding(message="stronger paraphrase", severity="Critical")
     kept = await _align().semantic_dedupe_pair(
