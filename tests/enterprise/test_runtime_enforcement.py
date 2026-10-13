@@ -50,12 +50,15 @@ def test_reset_process_tracer_cache_clears_leaked_enterprise_opt_out() -> None:
 
 
 def test_residency_policy_blocks_routed_us_model() -> None:
-    """A bound EU-only allow-list refuses catalog models in us-east-1."""
-    from mergecraft.agents.provider_health import route_model
+    """A bound EU-only allow-list refuses a catalog model routed out of region."""
+    from mergecraft.enterprise.runtime import enforce_routed_model_residency
 
     bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
     with pytest.raises(PermissionError, match="residency"):
-        route_model(specialist="security", risk="high")
+        enforce_routed_model_residency("anthropic/claude-opus")
+    # Surviving surface: the same routed model passes on an allow-list that covers it.
+    bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("us-east-1",)))
+    enforce_routed_model_residency("anthropic/claude-opus")
 
 
 def test_apply_enterprise_proxy_sets_http_and_clears_stale_no_proxy(

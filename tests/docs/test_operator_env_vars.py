@@ -13,7 +13,7 @@ debugging switches) are already referenced elsewhere in tracked docs for
 legitimate reasons, and PD-D7/PD-D8 remove no existing text. The section is
 where "public knobs" are enumerated, so that is where the rule is enforced.
 
-These assertions fail until PD4; do not xfail: RED is the point.
+These assertions are the gate; do not xfail.
 """
 
 from __future__ import annotations
@@ -47,7 +47,6 @@ DOCUMENT: tuple[str, ...] = (
     "MERGECRAFT_EVIDENCE_DIR",
     "MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S",
     "MERGECRAFT_KEEP_TMP",
-    "MERGECRAFT_LATENCY_BUDGET_MS",
     "MERGECRAFT_LOG_FORMAT",
     "MERGECRAFT_LOG_LEVEL",
     "MERGECRAFT_MAX_DIFF_LINES",
@@ -115,7 +114,6 @@ NEVER_DOCUMENT: tuple[str, ...] = (
     "MERGECRAFT_GIT_ORIGIN",
     "MERGECRAFT_GIT_URL",
     "MERGECRAFT_INSTALL_REF",
-    "MERGECRAFT_LIVE_E2E",
     "MERGECRAFT_LIVE_PROVIDER",
     "MERGECRAFT_LOGFIRE_TOKEN",
     "MERGECRAFT_MARKER",
@@ -127,7 +125,6 @@ NEVER_DOCUMENT: tuple[str, ...] = (
     "MERGECRAFT_PERMANENT_CURRENT_DECISION",
     "MERGECRAFT_PROBE_ALLOW_SUDO",
     "MERGECRAFT_PROBE_TEST_DOUBLE",
-    "MERGECRAFT_PROFILE",
     "MERGECRAFT_PROVIDER_EXTRA_OPTIONS",
     "MERGECRAFT_REVIEWER_BOT_LOGIN",
     "MERGECRAFT_REVIEW_",
@@ -141,7 +138,6 @@ NEVER_DOCUMENT: tuple[str, ...] = (
     "MERGECRAFT_TRUST_TIER",
     "MERGECRAFT_UV_INSTALL_PACKAGE",
     "MERGECRAFT_VERIFIER_MCP_NAME",
-    "MERGECRAFT_WEBHOOK_SECRET",
 )
 
 

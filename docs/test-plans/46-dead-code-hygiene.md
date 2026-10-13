@@ -206,3 +206,74 @@ removed code and finishes the process-wide-httpx-patch cleanup.
 **Evidence.** `MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/scm tests/mcp -q -rxX`
 → `1193 passed, 1 skipped` (no failures, no errors, no XPASS). `make lint`
 exit 0 · `make typecheck` exit 0.
+
+### DC3b (2026-10-13) — prunes the pins of the unwired-seam deletion
+
+The product wave removed eleven provider routing/breaker/budget helpers with
+their dataclasses and constants, four context-retrieval modules no review path
+imported, two profile environment exports nothing read, and made
+`dispatch: ensemble | shadow` a config error. This pass deletes the
+pre-existing tests that named the removed code, retargets the one residency
+test at the surviving function, and finishes the environment-variable
+inventory.
+
+* **Provider surface trimmed.** `tests/agents/test_ce_providers.py` keeps only
+  the called surface: `capability_catalog` (every capability dimension), the
+  residency allow-list check (an in-region pass and an out-of-region refusal),
+  and the three non-regression guards beside them (retry classification, no
+  OTLP exporter edit, no published cost-per-review). The thirteen tests that
+  pinned `route_model`, `ProviderHealth`, `ProviderBreaker`,
+  `verifier_judge_models`, `should_retry_provider`, `degrade_unavailable`,
+  `resolve_required_model`, `manifest_provider_stamp`,
+  `enforce_provider_budget`, `evaluate_routing_quality` and the nightly smoke
+  are gone; `tests/agents/test_provider_health_surface.py` is the pin that the
+  names are absent and the two called surfaces work.
+* **Residency retargeted.** `tests/enterprise/test_runtime_enforcement.py`
+  `test_residency_policy_blocks_routed_us_model` no longer imports the removed
+  routing helper; it drives the surviving enterprise gate
+  `enforce_routed_model_residency` on a catalog model — refused under an
+  out-of-region allow-list, accepted under one that covers it. This is the one
+  residency test on that function in the file; the in-region Vertex case beside
+  it is unchanged.
+* **Context modules pruned.**
+  `tests/context/test_repo_map.py`, `test_dynamic_expansion.py` and
+  `test_git_history.py` are deleted with the modules they imported.
+  `tests/context/test_cc_instruction_sources.py` loses only the
+  `external_files` string-load case (and its now-unused `pytest` import);
+  `tests/context/test_cc_search_explain.py` drops `repo_map.py` and
+  `git_history.py` from the retrieval half's file list.
+  `tests/context/support.py` loses `write_dynamic_expansion_fixture_repo`,
+  which the deleted expansion tests were its only callers. Every other context
+  test stays, and `tests/context/test_context_surface.py` keeps pinning that
+  the four modules are gone beside the seven that survive.
+* **Environment inventory reconciled.** Deleting the webhook route, the
+  nightly-smoke gate and the two profile exports left four `MERGECRAFT_*`
+  names in `tests/docs/test_operator_env_vars.py` that `src/` no longer reads,
+  so the document/never-document partition failed. The latency-budget name
+  moves out of the documented set, and the profile, live-end-to-end and
+  webhook-secret names out of the never-document set, so the two lists again
+  classify exactly the names `src/` reads.
+* **Left alone.** `tests/support/ce_batch.py` names no removed symbol (the
+  provider-health module path still exists). `tests/cli/test_ce_profiles.py`
+  and `tests/cli/test_profiles.py` assert no deleted environment key, so they
+  keep the recorded `latency_budget_ms` field and pass unchanged.
+* **Absence paired with survival.** No pruned test asserted an absence alone:
+  the provider pin keeps the catalog and both residency outcomes beside the
+  gone names, and the context pin keeps the surviving modules and the
+  `context` verbs beside the removed ones.
+
+**Evidence.** `MERGECRAFT_PYTEST_JOBS=0 uv run pytest tests/agents
+tests/enterprise tests/context tests/policy tests/cli/test_policy_verbs.py
+tests/cli/test_ce_profiles.py tests/cli/test_profiles.py -q -rxX` →
+`1155 passed, 2 skipped`, with the one deliberate red left for the last
+removal wave (`tests/agents/test_openai_compatible_gateways_surface.py::
+test_resolve_model_params_for_model_is_gone`, which pins a helper that wave
+still owns). `tests/docs` and the rest of the suite are green. `make lint`
+exit 0 · `make typecheck` exit 0.
+
+**Findings left to the operator.** `docs/cli.md`'s environment-variable table
+still lists the latency-budget knob, which nothing exports or reads now;
+product docs are outside the test writer's remit. The
+`write_context_fixture_repo` helper in `tests/context/support.py` was used only
+by the deleted repo-map test and is now orphaned; it was left in place because
+the pruning hand-off named only the dynamic-expansion fixture.

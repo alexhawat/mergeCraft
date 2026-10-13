@@ -117,21 +117,6 @@ def write_change_graph_fixture_repo(root: Path) -> None:
     )
 
 
-def write_dynamic_expansion_fixture_repo(root: Path) -> None:
-    """Lay down nested scopes for on-demand expansion tests."""
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "src" / "demo").mkdir(parents=True)
-    (root / "src" / "demo" / "__init__.py").write_text("", encoding="utf-8")
-    (root / "src" / "demo" / "widget.py").write_text(
-        "class Widget:\n"
-        "    def render(self) -> str:\n"
-        "        return self._body()\n\n"
-        "    def _body(self) -> str:\n"
-        "        return 'x' * 200\n",
-        encoding="utf-8",
-    )
-
-
 def write_context_fixture_repo(root: Path) -> None:
     """Lay down a miniature repo for map + symbol indexing tests."""
     root.mkdir(parents=True, exist_ok=True)
