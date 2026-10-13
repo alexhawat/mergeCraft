@@ -1,4 +1,4 @@
-"""GitHub and GitLab webhook security, idempotency, and review conformance (#361).
+"""GitHub and GitLab webhook security and review conformance (#361).
 
 Exports:
     SUPPORTED_WEBHOOK_PROVIDERS: GitHub and GitLab only (no Bitbucket).
@@ -6,8 +6,6 @@ Exports:
     assert_review_only_webhook_capabilities: Refuse commit / push / edit.
     conforming_review_request: Identical review mode across providers.
     handle_webhook_rate_limit: Surface 429 as retryable; do not drop the event.
-    process_webhook_event: Process each delivery id once.
-    reject_webhook_replay: Reject stale timestamps and reused nonces.
     sign_webhook_payload: Produce provider signature headers for a body.
     verify_webhook_signature: Timing-safe HMAC check for a supported provider.
 """
@@ -16,9 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import threading
-import time
-from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -27,8 +22,6 @@ if TYPE_CHECKING:
 
 SUPPORTED_WEBHOOK_PROVIDERS: frozenset[str] = frozenset({"github", "gitlab"})
 
-REPLAY_SKEW_SECONDS = 300
-_MAX_DELIVERY_STORE_ENTRIES = 1024
 _MAX_SIGNATURE_HEADER_BYTES = 8192
 _SIGNATURE_HEADER_TOO_LONG_MSG = "webhook signature/header exceeds maximum length"
 
@@ -43,19 +36,7 @@ _REVIEW_ONLY_FORBIDDEN: frozenset[str] = frozenset(
 )
 
 _GITHUB_SIGNATURE_HEADER = "X-Hub-Signature-256"
-_GITHUB_DELIVERY_HEADER = "X-GitHub-Delivery"
 _GITLAB_TOKEN_HEADER = "X-Gitlab-Token"
-_GITLAB_UUID_HEADERS = ("X-Gitlab-Event-UUID", "X-Gitlab-Webhook-UUID")
-
-
-@dataclass(frozen=True, slots=True)
-class WebhookProcessResult:
-    """Outcome of one webhook delivery, reused for duplicate ids."""
-
-    result_id: str
-    duplicate: bool
-    provider: str
-    event: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,74 +65,6 @@ class ConformingReviewRequest:
     snapshot: ReviewSnapshot
     stages: tuple[ReviewStageSpec, ...] = ()
     stages_ran: tuple[ReviewStageName, ...] = ()
-
-
-class _WebhookDeliveryStore:
-    """Process-local delivery and nonce store (not shared across workers).
-
-    Missing delivery ids / nonces are fail-closed — callers must not invent
-    ``{provider}:anonymous`` keys. Restarting the process clears this map.
-    Entries expire after the replay window and are capped at
-    ``_MAX_DELIVERY_STORE_ENTRIES``; this is per-process only and does not
-    coordinate across uvicorn workers.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._deliveries: OrderedDict[str, tuple[WebhookProcessResult, float]] = OrderedDict()
-        self._nonces: OrderedDict[str, float] = OrderedDict()
-
-    def _evict(self, ttl_seconds: int) -> None:
-        now = time.monotonic()
-        while self._deliveries:
-            _, inserted_at = next(iter(self._deliveries.values()))
-            if now - inserted_at <= ttl_seconds:
-                break
-            self._deliveries.popitem(last=False)
-        while self._nonces:
-            inserted_at = next(iter(self._nonces.values()))
-            if now - inserted_at <= ttl_seconds:
-                break
-            self._nonces.popitem(last=False)
-        while len(self._deliveries) >= _MAX_DELIVERY_STORE_ENTRIES:
-            self._deliveries.popitem(last=False)
-        while len(self._nonces) >= _MAX_DELIVERY_STORE_ENTRIES:
-            self._nonces.popitem(last=False)
-
-    def remember_nonce(self, nonce: str, *, ttl_seconds: int) -> None:
-        if not nonce.strip():
-            msg = "missing webhook delivery id"
-            raise ValueError(msg)
-        with self._lock:
-            self._evict(ttl_seconds)
-            if nonce in self._nonces:
-                msg = f"replay of webhook nonce {nonce!r} rejected"
-                raise ValueError(msg)
-            self._nonces[nonce] = time.monotonic()
-
-    def process(
-        self,
-        key: str,
-        result: WebhookProcessResult,
-        *,
-        ttl_seconds: int,
-    ) -> WebhookProcessResult:
-        with self._lock:
-            self._evict(ttl_seconds)
-            existing_entry = self._deliveries.get(key)
-            if existing_entry is not None:
-                existing = existing_entry[0]
-                return WebhookProcessResult(
-                    result_id=existing.result_id,
-                    duplicate=True,
-                    provider=existing.provider,
-                    event=existing.event,
-                )
-            self._deliveries[key] = (result, time.monotonic())
-            return result
-
-
-_store = _WebhookDeliveryStore()
 
 
 def _require_supported(provider: str) -> str:
@@ -240,82 +153,6 @@ def verify_webhook_signature(
         raise PermissionError(msg)
 
 
-def webhook_delivery_id(provider: str, headers: dict[str, str]) -> str:
-    """Return the provider delivery nonce, or raise when it is missing."""
-    name = _require_supported(provider)
-    return _delivery_nonce(name, headers)
-
-
-def webhook_event_name(provider: str, headers: dict[str, str]) -> str:
-    """Return the provider event name from headers, or ``unknown``."""
-    name = _require_supported(provider)
-    if name == "github":
-        return _header(headers, "X-GitHub-Event") or "unknown"
-    return _header(headers, "X-Gitlab-Event") or "unknown"
-
-
-def _delivery_nonce(provider: str, headers: dict[str, str]) -> str:
-    if provider == "github":
-        nonce = _header(headers, _GITHUB_DELIVERY_HEADER)
-    else:
-        nonce = None
-        for name in _GITLAB_UUID_HEADERS:
-            nonce = _header(headers, name)
-            if nonce:
-                break
-    if nonce is None or not nonce.strip():
-        msg = "missing webhook delivery id"
-        raise ValueError(msg)
-    return nonce
-
-
-def raise_on_replay_skew(received_at_skew_seconds: int) -> None:
-    """Reject webhook deliveries outside the replay freshness window."""
-    if abs(received_at_skew_seconds) > REPLAY_SKEW_SECONDS:
-        msg = f"stale webhook timestamp (skew {received_at_skew_seconds}s exceeds replay window)"
-        raise ValueError(msg)
-
-
-def reject_webhook_replay(
-    provider: str,
-    *,
-    headers: dict[str, str],
-    body: bytes,
-    received_at_skew_seconds: int,
-) -> None:
-    """Reject a stale timestamp or a reused delivery nonce."""
-    _ = body
-    name = _require_supported(provider)
-    raise_on_replay_skew(received_at_skew_seconds)
-    _store.remember_nonce(
-        _delivery_nonce(name, headers),
-        ttl_seconds=REPLAY_SKEW_SECONDS,
-    )
-
-
-def process_webhook_event(
-    provider: str,
-    *,
-    delivery_id: str,
-    event: str,
-    body: dict[str, Any],
-) -> WebhookProcessResult:
-    """Process ``delivery_id`` once; later copies return the stored result as a duplicate."""
-    _ = body
-    name = _require_supported(provider)
-    if not delivery_id.strip():
-        msg = "missing webhook delivery id"
-        raise ValueError(msg)
-    key = f"{name}:{delivery_id}"
-    result = WebhookProcessResult(
-        result_id=delivery_id,
-        duplicate=False,
-        provider=name,
-        event=event,
-    )
-    return _store.process(key, result, ttl_seconds=REPLAY_SKEW_SECONDS)
-
-
 def handle_webhook_rate_limit(
     provider: str,
     *,
@@ -373,20 +210,13 @@ def assert_review_only_webhook_capabilities(*, requested_capability: str) -> Non
 
 
 __all__ = [
-    "REPLAY_SKEW_SECONDS",
     "SUPPORTED_WEBHOOK_PROVIDERS",
     "ConformingReviewRequest",
-    "WebhookProcessResult",
     "WebhookRateLimitOutcome",
     "assert_provider_permissions",
     "assert_review_only_webhook_capabilities",
     "conforming_review_request",
     "handle_webhook_rate_limit",
-    "process_webhook_event",
-    "raise_on_replay_skew",
-    "reject_webhook_replay",
     "sign_webhook_payload",
     "verify_webhook_signature",
-    "webhook_delivery_id",
-    "webhook_event_name",
 ]

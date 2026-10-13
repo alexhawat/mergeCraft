@@ -1376,12 +1376,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   userinfo (MCB-31)
 - ``tests/tracing/test_redaction_doctests.py`` executes
   ``mergecraft.tracing.redaction`` doctests (D3)
-- SCM webhook ingress encodes signature operands with UTF-8 surrogateescape before
-  ``compare_digest``, so non-ASCII header bytes return 401 instead of raising
-  ``TypeError`` on unauthenticated paths (MCB-11)
-- Webhook redelivery through ``accept_webhook`` returns ``duplicate=True`` instead
-  of rejecting a reused delivery nonce; the replay store is bounded with TTL and
-  ``max_entries``, and far-future skew is rejected with ``abs()`` (MCB-13)
+- Webhook signature verification encodes signature operands with UTF-8 surrogateescape
+  before ``compare_digest``, so non-ASCII header bytes are rejected instead of raising
+  ``TypeError`` (MCB-11)
+- The MCP server no longer mounts a webhook endpoint: a signed delivery was verified
+  but processed nothing (MCB-13)
 - CI workflow log and SARIF artifact zip ingestion now use bounded
   `zf.open(info).read(n)` decompression with per-member, aggregate, member-count,
   and expansion-ratio caps instead of unbounded `zf.read(name)` (MCB-14)
@@ -1574,7 +1573,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file, and `--agent` JSONL) with `make cli-examples` / `cli-examples-check` and
   `docs/cli-examples.md` tour page
 - Agent-loop reference workflow (`docs/agent-loop.md`) for `mergecraft review --agent` (#383)
-- CLI, GitHub Action, and SCM webhooks now enter one review engine over one immutable snapshot (#380)
+- CLI and GitHub Action runs now enter one review engine over one immutable snapshot (#380)
 - `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)
 - `mergecraft review --agent` negotiates protocol version against CLI JSON `schema_version` (both fields kept, aliased), reports retryable mismatches, and names token/cost/tool-call budgets (#379)
 - `mergecraft review --agent` streams the first finding before the verdict; `--use-cache` and `--resume` reuse a local result cache; cancelling a review cleans up child processes (#378)
@@ -1741,7 +1740,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Evidence image uploads, issue comments, and PR label tools work on review-only runs again
 - Linked-repo contract breakage is included in ordinary PR checkout, not only `mergecraft xrepo explain`
 - Linked-repo checkout reads only operator-granted siblings, and skips a sibling whose HEAD is not the pinned SHA
-- Incoming GitHub and GitLab webhooks fail closed without a configured secret; reused delivery IDs are rejected for the lifetime of the process
+- Webhook signature verification fails closed without a configured secret
 - Untrusted download and clone URLs are SSRF-checked, and binary downloads pin DNS to the validated addresses
 - `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit
 - `bundler-audit` now runs the gem CLI (`bundler-audit check --format json`) instead of `bundle audit`, so Ruby lockfile audits actually execute
@@ -1848,11 +1847,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Mutating MCP tools other than review-session verbs (`select_mode`, checkout, review publication) are refused unless a write-capable mode is selected, including before mode selection (#350)
-- GitLab webhook `X-Gitlab-Token` is compared as a shared secret, not an HMAC of the body; missing delivery ids fail closed instead of accepting anonymous (#361)
+- GitLab webhook `X-Gitlab-Token` is compared as a shared secret, not an HMAC of the body (#361)
 - External URL retrieval also blocks decimal, hex, and short IPv4 forms, IPv6-mapped loopback, and DNS that resolves to loopback, link-local, or metadata; DNS failure is fail-closed (#362)
 - Dependency and container-image vulnerability gates no longer report a pass without running a scanner (#362)
 - Network egress is allow-listed (`allow_egress`), external retrieval refuses SSRF targets (loopback, link-local metadata, `file:`), dependency and container-image vulnerability gates are invocable and the image gate is not `make security`, public comments redact secret tokens, and `docs/THREAT-MODEL.md` ties those controls to `tests/security/test_cd_egress.py` plus an independent security review before a stable release (#362)
-- GitHub webhook deliveries require a matching HMAC; GitLab uses shared-secret `X-Gitlab-Token`; stale or reused deliveries are rejected and each delivery id is processed once; a provider 429 is retried instead of dropped, and webhook adapters still cannot commit, push, or edit (#361)
+- GitHub webhooks are authenticated with a matching HMAC and GitLab with a shared-secret `X-Gitlab-Token`; a provider 429 surfaces as retryable instead of dropping the event, and webhook adapters still cannot commit, push, or edit (#361)
 - `SECURITY.md` states the review-only guarantee: identify, investigate, verify, explain, prioritize, and suggest; no source edits, applied fixes, commits, pushes, or code-changing pull requests (#350)
 - Review runs are review-only: `Fix`, `Build`, `Task`, `AddressReviews`, and `ResolveConflicts` are no longer selectable, and a Review or IncrementalReview run cannot edit the workspace, commit, push, or open a code-changing PR. Illustrative diffs stay GitHub suggestion comments (#350)
 - `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.

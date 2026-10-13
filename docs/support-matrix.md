@@ -20,9 +20,9 @@ notes stay in [compatibility-matrix.md](compatibility-matrix.md).
 
 | SCM | Role | Status |
 |------|------|------|
-| `github` | Webhook + review ingress | Supported |
-| `gitlab` | Webhook + review ingress | Not supported yet |
-| `bitbucket` | Webhook ingress | Not supported |
+| `github` | Review adapter | Supported |
+| `gitlab` | Review adapter | Not supported yet |
+| `bitbucket` | Review adapter | Not supported |
 
 ## Languages
 
