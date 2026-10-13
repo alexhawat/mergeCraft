@@ -611,19 +611,6 @@ def _round_index(
     return review_round_index(prior_reviews, publishers=publishers)
 
 
-async def _recover_last_reviewed_sha(ctx: ToolContext, *, pull_number: int, head_sha: str) -> str:
-    """Return the last reviewed SHA, preferring the run-bound checkpoint (HS8).
-
-    Falls back to the expected-publisher review scan when no trusted run's
-    evidence named a head.
-    """
-    run_bound = await recover_run_bound_review_state(ctx, pull_number=pull_number)
-    if run_bound.reviewed_head_sha:
-        return run_bound.reviewed_head_sha
-    reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
-    return last_reviewed_sha(reviews, head_sha=head_sha) or ""
-
-
 def changed_paths_in_diff(diff_text: str) -> list[str]:
     """Return the post-image paths named by a unified diff, in first-seen order."""
     seen: dict[str, None] = {}
