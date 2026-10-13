@@ -20,8 +20,6 @@ from loguru import logger
 
 from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
 from mergecraft.agents.openai_compatible_gateways import (
-    CUSTOM_PROVIDER_API_KEY_ENV,
-    CUSTOM_PROVIDER_BASE_URL_ENV,
     SINGLETON_PROVIDER_ID,
     ProviderConfig,
     _provider_config_for_model,
@@ -72,9 +70,6 @@ if TYPE_CHECKING:
     from typing import IO
 
     from mergecraft.tracing.content import ContentCapture
-
-# Re-exported for tests / callers that import these names from opencode.
-__all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
 
 # OpenCode provider.options accepts transport keys only — generation knobs belong
 # on model entries (``limit`` / ``options``) or the primary ``build`` agent.

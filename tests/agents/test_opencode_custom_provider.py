@@ -13,11 +13,11 @@ from tests.cli.support_provider_registry import (
     scaffold_mergecraft_home,
 )
 
-from mergecraft.agents.opencode import (
+from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
-    build_security_config,
 )
+from mergecraft.agents.opencode import build_security_config
 
 if TYPE_CHECKING:
     from pathlib import Path
