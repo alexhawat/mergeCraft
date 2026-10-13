@@ -26,7 +26,7 @@ The expected deliverable is primarily operator evidence, not a product-code patc
 
 Begin in a clean isolated worktree at the exact operator-selected main SHA after the selected fixes merge. Preserve the user's original checkout and local config edit. Run `git merge-base --is-ancestor be9993367386b03f982c795ceb1d80e4a0bfcf1d HEAD` (expected 0), then inspect `git diff --stat be9993367386b03f982c795ceb1d80e4a0bfcf1d..HEAD -- .craft.yml .github/workflows/release.yml .github/workflows/ci-cd.yml pyproject.toml CHANGELOG.md action.yml docs/release-process.md` before relying on this handoff.
 
-Read AGENTS.md, CONTRIBUTING.md, `docs/_standards/coding-standards.md`, `docs/REVIEW-DOCTRINE.md`, `docs/eval-methodology.md`, and `docs/release-process.md`. Python 3.11+, uv, Make-only recurring commands, strict typed models, loguru and camelCase config aliases apply to any separately approved code fix. Do not weaken trust or release gates, create new `evidence/` artifacts, fabricate human records, or run paid/live work without concrete authorization. Generated files must come from their generator. Conventional Commits use subjects ≤72 characters; no `--no-verify`.
+Read AGENTS-mergecraft.md, CONTRIBUTING.md, `docs/_standards/coding-standards.md`, `docs/REVIEW-DOCTRINE.md`, `docs/eval-methodology.md`, and `docs/release-process.md`. Python 3.11+, uv, Make-only recurring commands, strict typed models, loguru and camelCase config aliases apply to any separately approved code fix. Do not weaken trust or release gates, create new `evidence/` artifacts, fabricate human records, or run paid/live work without concrete authorization. Generated files must come from their generator. Conventional Commits use subjects ≤72 characters; no `--no-verify`.
 
 ## Commands
 

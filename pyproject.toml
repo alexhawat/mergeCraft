@@ -39,7 +39,7 @@ dependencies = [
     "anyio==4.15.1",
     "defusedxml==0.7.1",
     "tenacity==9.1.4",
-    "pyjwt[crypto]==2.14.0",
+    "pyjwt[crypto]==2.15.0",
     "tree-sitter==0.26.0",
     "tree-sitter-python==0.25.0",
     "typing-extensions==4.16.0",

@@ -312,9 +312,19 @@ _WORKFLOW_PATH = ".github/workflows/mergecraft.yml"
 _WORKFLOW_FILE = _WORKFLOW_PATH.rsplit("/", 1)[-1]
 _TRUSTED_RUN_EVENT = "pull_request_target"
 _TRUSTED_RUN_CONCLUSION = "success"
-# The evidence artefact each review rung uploads, and the packet member inside it.
+# The evidence artefact each review rung uploads. ``mergecraft.yml`` names it
+# ``mergecraft-evidence-<rung>`` and stores the rung's packet at the artefact
+# root as ``packet-<rung>.json`` (``tests/mcp/test_checkout_run_bound_checkpoint.py``
+# pins the reader to the workflow's own upload steps). Rungs are listed in the
+# order the reader tries them: the last rung that ran is the one whose verdict
+# the run recorded, so it goes first.
 _EVIDENCE_ARTIFACT_PREFIX = "mergecraft-evidence-"
-_EVIDENCE_PACKET_MEMBER = "merge-evidence.json"
+_EVIDENCE_RUNGS = ("claude", "codex", "nous")
+
+
+def _packet_member_for(rung: str) -> str:
+    """Return the packet file name the ``rung``'s evidence artefact carries (HS8)."""
+    return f"packet-{rung}.json"
 
 
 @dataclass(frozen=True)
@@ -398,21 +408,20 @@ async def _list_mergecraft_workflow_runs(ctx: ToolContext) -> object:
 
 
 def _packet_from_artifact_zip(
-    blob: bytes, *, artifact_id: int | None = None
+    blob: bytes, *, member: str, artifact_id: int | None = None
 ) -> dict[str, Any] | None:
-    """Return the evidence packet stored inside an artefact zip, or ``None``.
+    """Return the evidence packet stored as ``member`` inside an artefact zip, or ``None``.
 
-    Total and fail-closed: an unreadable zip, a zip with no
-    ``merge-evidence.json`` member, and a member that does not decode to a JSON
-    object each log one warning naming the artefact and the reason, then return
-    ``None``. A malformed payload degrades to a missing checkpoint, never an
-    exception into the run (HS8 / P-8).
+    Total and fail-closed: an unreadable zip, a zip with no ``member``, and a
+    member that does not decode to a JSON object each log one warning naming
+    the artefact and the reason, then return ``None``. A malformed payload
+    degrades to a missing checkpoint, never an exception into the run (HS8 / P-8).
     """
     where = f"artefact {artifact_id}" if artifact_id is not None else "evidence artefact"
     try:
         with zipfile.ZipFile(io.BytesIO(blob)) as archive:
             for name in archive.namelist():
-                if name.rsplit("/", 1)[-1] != _EVIDENCE_PACKET_MEMBER:
+                if name.rsplit("/", 1)[-1] != member:
                     continue
                 payload = json.loads(archive.read(name))
                 if isinstance(payload, dict):
@@ -420,24 +429,29 @@ def _packet_from_artifact_zip(
                 logger.warning(
                     "run-bound checkpoint: {} member {} is not a JSON object; falling back",
                     where,
-                    _EVIDENCE_PACKET_MEMBER,
+                    member,
                 )
                 return None
     except (OSError, ValueError, zipfile.BadZipFile) as err:
         logger.warning("run-bound checkpoint: {} unreadable: {}; falling back", where, err)
         return None
     # Every loop iteration either returned the packet or returned ``None`` above,
-    # so reaching here means no ``merge-evidence.json`` member was present.
+    # so reaching here means no ``member`` was present.
     logger.warning(
         "run-bound checkpoint: {} contains no {} member; falling back",
         where,
-        _EVIDENCE_PACKET_MEMBER,
+        member,
     )
     return None
 
 
 async def _read_run_evidence_packet(ctx: ToolContext, *, run_id: int) -> dict[str, Any] | None:
-    """Read one trusted run's evidence packet from its ``mergecraft-evidence-*`` artefact."""
+    """Read one trusted run's evidence packet from its ``mergecraft-evidence-*`` artefacts.
+
+    A run uploads one artefact per rung that emitted a packet. They are tried
+    in ``_EVIDENCE_RUNGS`` order (the last rung that ran first), and the first
+    readable packet wins; an unreadable one is named and the next is tried.
+    """
     endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{run_id}/artifacts"
     listing = await ctx.scm.get(endpoint)
     if not isinstance(listing, Mapping):
@@ -453,36 +467,44 @@ async def _read_run_evidence_packet(ctx: ToolContext, *, run_id: int) -> dict[st
             run_id,
         )
         return None
-    candidate = next(
-        (
-            dict(_as_mapping(artifact))
-            for artifact in artifacts
-            if str(_as_mapping(artifact).get("name") or "").startswith(_EVIDENCE_ARTIFACT_PREFIX)
-            and not _as_mapping(artifact).get("expired")
-        ),
-        None,
-    )
-    if candidate is None:
+    by_rung: dict[str, dict[str, Any]] = {}
+    for artifact in artifacts:
+        row = _as_mapping(artifact)
+        name = str(row.get("name") or "")
+        rung = name.removeprefix(_EVIDENCE_ARTIFACT_PREFIX)
+        if rung == name or rung not in _EVIDENCE_RUNGS or row.get("expired"):
+            continue
+        by_rung.setdefault(rung, dict(row))
+    candidates = [(rung, by_rung[rung]) for rung in _EVIDENCE_RUNGS if rung in by_rung]
+    if not candidates:
         logger.warning(
             "run-bound checkpoint: run {} has no unexpired {} artefact; falling back",
             run_id,
             _EVIDENCE_ARTIFACT_PREFIX,
         )
         return None
-    artifact_id = _coerce_int(candidate.get("id"))
-    if artifact_id is None:
-        logger.warning(
-            "run-bound checkpoint: run {} evidence artefact names no id; falling back", run_id
+    for rung, candidate in candidates:
+        artifact_id = _coerce_int(candidate.get("id"))
+        if artifact_id is None:
+            logger.warning(
+                "run-bound checkpoint: run {} {} evidence artefact names no id; skipping",
+                run_id,
+                rung,
+            )
+            continue
+        try:
+            blob = await ctx.scm.download_artifact_zip(ctx.repo.owner, ctx.repo.name, artifact_id)
+        except Exception as err:
+            logger.warning(
+                "run-bound checkpoint: artefact {} could not be downloaded: {}", artifact_id, err
+            )
+            continue
+        packet = _packet_from_artifact_zip(
+            blob, member=_packet_member_for(rung), artifact_id=artifact_id
         )
-        return None
-    try:
-        blob = await ctx.scm.download_artifact_zip(ctx.repo.owner, ctx.repo.name, artifact_id)
-    except Exception as err:
-        logger.warning(
-            "run-bound checkpoint: artefact {} could not be downloaded: {}", artifact_id, err
-        )
-        return None
-    return _packet_from_artifact_zip(blob, artifact_id=artifact_id)
+        if packet is not None:
+            return packet
+    return None
 
 
 def _coerce_int(raw: object) -> int | None:

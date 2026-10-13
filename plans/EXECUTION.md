@@ -4,7 +4,7 @@ This is the delivery contract for the fifteen numbered plans. A plan being ready
 
 ## Start from the actual integration baseline
 
-1. Read `AGENTS.md`, `CONTRIBUTING.md`, and the numbered plan in full. Read `docs/REVIEW-DOCTRINE.md` before changing review behavior.
+1. Read `AGENTS-mergecraft.md`, `CONTRIBUTING.md`, and the numbered plan in full. Read `docs/REVIEW-DOCTRINE.md` before changing review behavior.
 2. Fetch current main and inspect PR #817. The audit baseline is `be9993367386b03f982c795ceb1d80e4a0bfcf1d`; the audited #817 head is `d72b4e77dd47d7937527837b3f653a858804cf4e`. Refresh any changed source assumptions before implementation. Do not merge #817 automatically or use its combined percentages as true line coverage.
 3. Create a `codex/` implementation branch and isolated worktree. Preserve unrelated local changes. Include these committed plans in the executor context; each executor must be able to read its full plan.
 4. Use separate worktrees for parallel source changes. Each executor owns only its assigned paths, writes focused regressions, runs the plan's relevant Make targets, and reports actual commands/results. Never share a mutable development environment while dependency installation is running.

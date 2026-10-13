@@ -31,7 +31,7 @@ Only these implementation paths, plus this plan's status and an appropriate chan
 
 Do not change `scripts/ci_resume.sh` unless a demonstrated incompatibility requires it. Use pytest-split's existing `least_duration` scheme, pytest-cov/coverage.py raw databases, and the exact current coverage selection `tests -m "not integration"`, including tests marked `coverage`. Keep every recurring entry point behind Make and preserve serial `ci-resume` stage semantics.
 
-Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS.md, CONTRIBUTING.md, `docs/_standards/coding-standards.md`, and `docs/REVIEW-DOCTRINE.md`. Do not change trust-tier authority, approval policy, coverage floors, or public schemas outside the listed scope. Do not write new material under `evidence/`. No generated file hand-edits.
+Python 3.11+, uv, src layout, strict typing, loguru and existing camelCase configuration aliases apply. Read AGENTS-mergecraft.md, CONTRIBUTING.md, `docs/_standards/coding-standards.md`, and `docs/REVIEW-DOCTRINE.md`. Do not change trust-tier authority, approval policy, coverage floors, or public schemas outside the listed scope. Do not write new material under `evidence/`. No generated file hand-edits.
 
 ## Command contract to implement
 

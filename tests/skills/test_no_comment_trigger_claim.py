@@ -2,7 +2,7 @@
 
 `scripts/example_workflows/minimal.yml.tpl` documents on-demand runs "without a
 comment trigger" and the hardened template declares no comment trigger by
-design (issue #72 / D5-D6). Ten `SKILL.md` files, `AGENTS.md`, `README.md` and
+design (issue #72 / D5-D6). Ten `SKILL.md` files, `AGENTS-mergecraft.md`, `README.md` and
 the generated `llms-full.txt` nevertheless told users to trigger a review by
 commenting `@mergecraft review` (#792) — a comment that does nothing and
 reports nothing.
@@ -13,7 +13,7 @@ must keep passing: this test flags only the *advertising* form (a "comment"
 verb offering the trigger), never the corrective or troubleshooting form. A
 broad "the string is absent" check would forbid the corrective sentence too.
 
-`llms-full.txt` is generated from `README.md` and `AGENTS.md`
+`llms-full.txt` is generated from `README.md` and `AGENTS-mergecraft.md`
 (`scripts/gen_llms_full.py`); `README.md` is checked directly so a hand-edited
 bundle cannot hide the claim its source still makes.
 """
@@ -33,7 +33,7 @@ _SKILL_FILES = tuple(
 )
 
 # The ten shipped skills, plus the docs that carry the same claim.
-_DOCS = (*_SKILL_FILES, "AGENTS.md", "README.md", "llms-full.txt")
+_DOCS = (*_SKILL_FILES, "AGENTS-mergecraft.md", "README.md", "llms-full.txt")
 
 # "comment" / "commenting" / "commented" offered within a clause of the marker.
 _COMMENT_TRIGGER_RE = re.compile(

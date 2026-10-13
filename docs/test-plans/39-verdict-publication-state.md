@@ -117,6 +117,24 @@ implementation has one target.
 | The `orchestrator.publish_review` step carries the receipt's `payload_hash`, in state and in the built trajectory; its `publication_incomplete` is empty when nothing is missing | functional | `tests/evidence/test_trajectory_completion.py::test_the_publish_step_carries_the_receipt_hash` | green |
 | The `orchestrator.publish_review` step is recorded (ok) even when the agent published the same verdict, and its `publication_incomplete` lists the sorted missing fingerprints | functional | `tests/evidence/test_trajectory_completion.py::test_the_publish_step_lists_findings_missing_from_the_inline_view` | green |
 
+### A recovered review is bound from what GitHub shows
+
+When a publish attempt's response is lost and the run recovers the review GitHub
+accepted, the receipt is bound from the review's own state and listed inline
+comments, never from the payload this run sent. These are ordinary regression
+tests; the behaviour landed before they were written.
+
+| Contract | Layer | Test | Status |
+| --- | --- | --- | --- |
+| `APPROVED` proves `approve`, `CHANGES_REQUESTED` proves `request_changes` (case and whitespace ignored); `COMMENTED`, a missing or any other state proves none | unit | `tests/review/test_recovered_receipt.py::test_recovered_review_state_maps_to_the_verdict_it_proves`, `::test_a_recovered_review_without_a_state_proves_no_verdict` | green |
+| The recovered review's inline comments are listed from its own endpoint; an empty readable list is `[]`; a raising call, a non-list page or a listing cut at the page cap is unknown (`None`), never `[]` | unit | `::test_recovered_inline_comments_are_listed_from_the_review_endpoint`, `::test_a_readable_empty_listing_is_an_empty_list_not_unknown`, `::test_an_unreadable_inline_listing_is_unknown_never_empty` | green |
+| The recovered receipt takes its verdict from the state, `inline_fingerprints` from the listed comments (or `None`), `payload_hash` only when both are known (body markers included), and `reviewed_sha` from `commit_id` or the searched head | unit | `::test_a_recovered_approval_binds_verdict_inline_set_and_hash`, `::test_a_recovered_comment_review_proves_no_verdict_and_has_no_hash`, `::test_an_unreadable_inline_set_leaves_fingerprints_and_hash_unknown`, `::test_reviewed_sha_falls_back_to_the_searched_head` | green |
+| `ReviewRecord.inline_fingerprints` defaults to `()` and may be `None` | unit | `::test_review_record_inline_fingerprints_default_empty_and_may_be_unknown` | green |
+| Only a verdict-bound review counts as a receipt; the inputs are not applicable outside the enforced review path | unit | `::test_only_a_verdict_bound_review_counts_as_a_receipt`, `::test_receipt_inputs_are_not_applicable_outside_the_enforced_review_path` | green |
+| Publication is unproven exactly for a verdict-less review on a head; the classifier names that reason instead of "no receipt"; the record gains one "Publication unproven:" line | unit | `::test_publication_is_unproven_exactly_for_a_verdict_less_review_on_a_head`, `::test_an_unproven_receipt_has_its_own_inconclusive_reason`, `::test_the_record_says_the_publication_is_unproven`, `::test_a_verdict_bound_receipt_adds_no_unproven_line` | green |
+| Through Phase 4 with a lost create response, no case posts again: a recovered approval for a recorded approve passes; a recovered change request is a mismatch naming both verdicts; a recovered COMMENT is inconclusive and unproven; an unreadable inline set claims no publication gap | functional | `::test_a_recovered_approval_for_a_recorded_approve_passes`, `::test_a_recovered_change_request_for_a_recorded_approve_is_a_mismatch`, `::test_a_recovered_comment_review_leaves_the_verdict_unproven`, `::test_an_unreadable_recovered_inline_set_claims_no_publication_gap` | green |
+| A live APPROVE that falls back to COMMENT still binds the recorded `approve` | integration | `::test_the_live_approve_fallback_still_binds_the_recorded_approve` | green (guard) |
+
 ### Thread retirement by line and author
 
 | Contract | Layer | Test | Status |

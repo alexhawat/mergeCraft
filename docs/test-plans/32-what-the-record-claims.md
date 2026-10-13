@@ -29,7 +29,7 @@ make lint && make typecheck                      # wave verify targets
 | **J3** shipped examples export a pin equal to their `uses:` ref | unit | `tests/ci/test_checkout_credential_persistence.py::test_shipped_examples_export_the_pin_they_run[*]` | **RED** | Q3 |
 | **J3** templates export `MERGECRAFT_ACTION_SHA: __ACTION_PIN__` | unit | `tests/ci/test_checkout_credential_persistence.py::test_workflow_templates_export_the_pin_placeholder[*]` | **RED** | Q3 |
 | **J3** README example honours the dispatch prompt it declares | unit | `tests/ci/test_checkout_credential_persistence.py::test_readme_examples_honour_a_dispatch_prompt_they_declare` | **RED** | Q3 |
-| **J4** no doc advertises `@mergecraft review` as a trigger | functional | `tests/skills/test_no_comment_trigger_claim.py::test_doc_does_not_advertise_a_comment_trigger[*]` (10 `SKILL.md` + `AGENTS.md` + `README.md` + `llms-full.txt`) | **RED** | Q3 |
+| **J4** no doc advertises `@mergecraft review` as a trigger | functional | `tests/skills/test_no_comment_trigger_claim.py::test_doc_does_not_advertise_a_comment_trigger[*]` (10 `SKILL.md` + `AGENTS-mergecraft.md` + `README.md` + `llms-full.txt`) | **RED** | Q3 |
 | **J4** corrective/troubleshooting prose stays allowed (Q-D1, Q-D4) | unit | `tests/skills/test_no_comment_trigger_claim.py::test_the_corrective_wording_is_allowed` | no (GREEN) | Q3 must keep it |
 | **J4** the pre-fix sentences are genuinely flagged | unit | `tests/skills/test_no_comment_trigger_claim.py::test_the_advertising_wording_is_flagged` | no (GREEN) | Q3 must keep it |
 | **J5** budget path renders `{input} input / {output} output used (…)` | unit | `tests/review_record/test_token_summary_split_801.py::test_token_summary_from_usage_with_budget_splits_input_and_output` | **RED** | Q4 |
@@ -68,8 +68,8 @@ make lint && make typecheck                      # wave verify targets
   therefore pins the `pre-0.0.1` contract the fix lands: *declare the prompt
   input and honour it*. The rationale is in the test docstring.
 * **J4 includes `README.md`** in addition to the ten `SKILL.md` files,
-  `AGENTS.md` and `llms-full.txt`. `llms-full.txt` is generated from
-  `README.md` + `AGENTS.md` (`scripts/gen_llms_full.py`), so the generated
+  `AGENTS-mergecraft.md` and `llms-full.txt`. `llms-full.txt` is generated from
+  `README.md` + `AGENTS-mergecraft.md` (`scripts/gen_llms_full.py`), so the generated
   bundle cannot be honest while its source still advertises the trigger. The
   `pre-0.0.1` correction fixes README's copy too.
 

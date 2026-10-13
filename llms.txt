@@ -9,7 +9,7 @@
 - README.md — landing page, numbered install, Example 1 workflow
 - README.md#for-agents — For LLM / Agents (copy/paste setup prompts)
 - docs/install.md — Python 3.11+ floor, Action vs CLI, Docker fallback
-- AGENTS.md — cross-vendor agent guidance (consumer setup + this-repo development)
+- AGENTS-mergecraft.md — cross-vendor agent guidance (consumer setup + this-repo development)
 - skills/mergecraft/SKILL.md — Agent-Skills consumer skill (setup checklist + CLI)
 - skills/README.md — per-harness install matrix and regeneration notes
 - skills/harnesses.yaml — harness manifest (install paths + primary sources)
@@ -42,7 +42,7 @@
 
 ## Agent surfaces
 
-- .github/copilot-instructions.md — GitHub Copilot pointer to AGENTS.md
+- .github/copilot-instructions.md — GitHub Copilot pointer to AGENTS-mergecraft.md
 - .claude-plugin/plugin.json — Claude plugin manifest (skill + slash commands)
 - commands/mergecraft-setup.md — slash command: scaffold without auth
 - commands/mergecraft-review.md — slash command: local mergecraft review

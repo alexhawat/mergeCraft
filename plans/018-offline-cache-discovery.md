@@ -26,7 +26,7 @@ the analyzer cache's provisioning and integrity checks.
 
 ## Required fix and scope
 
-Read AGENTS.md, CONTRIBUTING.md, the review doctrine and the source boundaries
+Read AGENTS-mergecraft.md, CONTRIBUTING.md, the review doctrine and the source boundaries
 above before changing code. Work in an isolated branch and use Make for checks.
 Keep the filter exact: exclude a path equal to
 `.mergecraft/analyzer-cache` or below `.mergecraft/analyzer-cache/` after Git's

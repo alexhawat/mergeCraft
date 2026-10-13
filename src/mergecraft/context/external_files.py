@@ -1,7 +1,7 @@
 """Trust-tiered external context files with type, size, and provenance (#357).
 
 External files are data, never merged into the standing instruction bundle.
-Does not author mergeCraft's own AGENTS.md / skill (file 7).
+Does not author mergeCraft's own AGENTS-mergecraft.md / skill (file 7).
 
 Module: mergecraft.context.external_files
 Depends: dataclasses, hashlib

@@ -26,12 +26,14 @@ from __future__ import annotations
 
 import io
 import json
+import posixpath
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from tests.ci.workflow_support import load_workflow
 from tests.evidence.support import sample_minimal_packet_dict
 
 from mergecraft.mcp import checkout as checkout_module
@@ -46,6 +48,7 @@ _PR_NUMBER = 7
 _OTHER_PR_NUMBER = 8
 _WORKFLOW = ".github/workflows/mergecraft.yml"
 _ARTIFACT_NAME = "mergecraft-evidence-claude"
+_PACKET_MEMBER = "packet-claude.json"
 
 
 @contextmanager
@@ -77,18 +80,25 @@ def _run(
     }
 
 
-def _packet_zip(*, reviewed_head_sha: str, progress_comment_id: int | None) -> bytes:
+def _packet_zip(
+    *,
+    reviewed_head_sha: str,
+    progress_comment_id: int | None,
+    member: str = _PACKET_MEMBER,
+) -> bytes:
     payload = sample_minimal_packet_dict()
     payload["reviewed_head_sha"] = reviewed_head_sha
     payload["progress_comment_id"] = progress_comment_id
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("merge-evidence.json", json.dumps(payload))
+        archive.writestr(member, json.dumps(payload))
     return buffer.getvalue()
 
 
-def _artifact(*, artifact_id: int, expired: bool = False) -> dict[str, Any]:
-    return {"id": artifact_id, "name": _ARTIFACT_NAME, "expired": expired}
+def _artifact(
+    *, artifact_id: int, expired: bool = False, name: str = _ARTIFACT_NAME
+) -> dict[str, Any]:
+    return {"id": artifact_id, "name": name, "expired": expired}
 
 
 class _ActionsScm:
@@ -564,10 +574,12 @@ def test_a_zip_without_the_packet_member_warns_and_fails_closed() -> None:
         archive.writestr("other.txt", "not the packet")
 
     with _capture_warnings() as warnings:
-        packet = checkout_module._packet_from_artifact_zip(buffer.getvalue(), artifact_id=1000)
+        packet = checkout_module._packet_from_artifact_zip(
+            buffer.getvalue(), member=_PACKET_MEMBER, artifact_id=1000
+        )
 
     assert packet is None
-    assert any("contains no merge-evidence.json member" in message for message in warnings), (
+    assert any(f"contains no {_PACKET_MEMBER} member" in message for message in warnings), (
         f"a zip without the packet member must be named; got {warnings!r}"
     )
 
@@ -575,10 +587,12 @@ def test_a_zip_without_the_packet_member_warns_and_fails_closed() -> None:
 def test_a_packet_member_that_is_not_a_json_object_warns_and_fails_closed() -> None:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("merge-evidence.json", json.dumps([1, 2, 3]))
+        archive.writestr(_PACKET_MEMBER, json.dumps([1, 2, 3]))
 
     with _capture_warnings() as warnings:
-        packet = checkout_module._packet_from_artifact_zip(buffer.getvalue(), artifact_id=1001)
+        packet = checkout_module._packet_from_artifact_zip(
+            buffer.getvalue(), member=_PACKET_MEMBER, artifact_id=1001
+        )
 
     assert packet is None
     assert any("is not a JSON object" in message for message in warnings), (
@@ -590,10 +604,134 @@ def test_a_packet_member_returns_silently() -> None:
     payload = {"reviewed_head_sha": "a" * 40, "progress_comment_id": 5}
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("merge-evidence.json", json.dumps(payload))
+        archive.writestr(_PACKET_MEMBER, json.dumps(payload))
 
     with _capture_warnings() as warnings:
-        packet = checkout_module._packet_from_artifact_zip(buffer.getvalue(), artifact_id=1002)
+        packet = checkout_module._packet_from_artifact_zip(
+            buffer.getvalue(), member=_PACKET_MEMBER, artifact_id=1002
+        )
 
     assert packet == payload
     assert warnings == []
+
+
+# ── the reader matches what the self-review workflow uploads ──────────────────
+
+
+def _workflow_evidence_uploads() -> dict[str, list[str]]:
+    """Map each ``mergecraft-evidence-*`` artefact name to its upload ``path:`` entries."""
+    uploads: dict[str, list[str]] = {}
+    for job in (load_workflow("mergecraft.yml").get("jobs") or {}).values():
+        for step in job.get("steps") or []:
+            if not str(step.get("uses") or "").startswith("actions/upload-artifact"):
+                continue
+            with_block = step.get("with") or {}
+            name = str(with_block.get("name") or "")
+            if name.startswith("mergecraft-evidence-"):
+                paths = str(with_block.get("path") or "").split("\n")
+                uploads[name] = [path.strip() for path in paths if path.strip()]
+    return uploads
+
+
+def _zip_as_uploaded(paths: list[str], files: dict[str, bytes]) -> bytes:
+    """Build the artefact zip ``actions/upload-artifact`` produces for ``paths``.
+
+    The action stores each file relative to the paths' least common ancestor,
+    so a single file sits at the zip root and several files keep their layout
+    below the shared directory. ``files`` maps a path's basename to its bytes;
+    paths with no content are skipped, as ``if-no-files-found: ignore`` does.
+    """
+    present = [path for path in paths if posixpath.basename(path) in files]
+    root = posixpath.dirname(present[0]) if len(present) == 1 else posixpath.commonpath(present)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for path in present:
+            archive.writestr(posixpath.relpath(path, root), files[posixpath.basename(path)])
+    return buffer.getvalue()
+
+
+def test_the_reader_knows_every_rung_the_workflow_uploads() -> None:
+    uploads = _workflow_evidence_uploads()
+
+    assert uploads, "mergecraft.yml uploads no mergecraft-evidence-* artefact"
+    assert {name.removeprefix("mergecraft-evidence-") for name in uploads} == set(
+        checkout_module._EVIDENCE_RUNGS
+    )
+
+
+@pytest.mark.parametrize("with_capture", [False, True])
+def test_the_reader_finds_the_packet_in_each_uploaded_artefact(with_capture: bool) -> None:
+    """Reader and workflow agree on the member name, with or without the capture file."""
+    payload = {"reviewed_head_sha": "c" * 40, "progress_comment_id": 77}
+    for name, paths in _workflow_evidence_uploads().items():
+        rung = name.removeprefix("mergecraft-evidence-")
+        member = checkout_module._packet_member_for(rung)
+        files = {member: json.dumps(payload).encode()}
+        if with_capture:
+            files["judge-verdicts.jsonl"] = b"{}\n"
+        assert any(posixpath.basename(path) == member for path in paths), (
+            f"{name} does not upload {member}; its paths are {paths!r}"
+        )
+
+        with _capture_warnings() as warnings:
+            packet = checkout_module._packet_from_artifact_zip(
+                _zip_as_uploaded(paths, files), member=member, artifact_id=1
+            )
+
+        assert packet == payload, f"{name}: the reader did not find {member}"
+        assert warnings == []
+
+
+# ── several rungs in one run ─────────────────────────────────────────────────
+
+
+def _multi_rung_scm(
+    rungs: dict[str, tuple[str, int] | None],
+) -> _ActionsScm:
+    """One trusted run uploading one artefact per rung; ``None`` is an unreadable zip."""
+    artifacts: list[dict[str, Any]] = []
+    zips: dict[int, bytes] = {}
+    for index, (rung, packet) in enumerate(rungs.items(), start=1):
+        artifact_id = 900 + index
+        artifacts.append(_artifact(artifact_id=artifact_id, name=f"mergecraft-evidence-{rung}"))
+        zips[artifact_id] = (
+            b"not a zip"
+            if packet is None
+            else _packet_zip(
+                reviewed_head_sha=packet[0],
+                progress_comment_id=packet[1],
+                member=f"packet-{rung}.json",
+            )
+        )
+    return _ActionsScm(runs=[_run(90)], artifacts={90: artifacts}, zips=zips)
+
+
+async def test_the_last_rung_that_ran_wins(tmp_path: Path) -> None:
+    scm = _multi_rung_scm({"nous": ("a" * 40, 1), "codex": ("b" * 40, 2)})
+
+    state = await _recover(scm, tmp_path)
+
+    assert state.reviewed_head_sha == "b" * 40
+    assert state.progress_comment_id == 2
+
+
+async def test_an_unreadable_later_rung_falls_back_to_the_earlier_one(tmp_path: Path) -> None:
+    scm = _multi_rung_scm({"nous": ("a" * 40, 1), "claude": None})
+
+    with _capture_warnings() as warnings:
+        state = await _recover(scm, tmp_path)
+
+    assert state.reviewed_head_sha == "a" * 40
+    assert state.progress_comment_id == 1
+    assert any("unreadable" in message for message in warnings), warnings
+
+
+async def test_an_artefact_for_an_unknown_rung_is_ignored(tmp_path: Path) -> None:
+    scm = _multi_rung_scm({"other": ("d" * 40, 9)})
+
+    with _capture_warnings() as warnings:
+        state = await _recover(scm, tmp_path)
+
+    assert state.reviewed_head_sha == ""
+    assert state.progress_comment_id is None
+    assert any("has no unexpired" in message for message in warnings), warnings

@@ -94,7 +94,7 @@ Authoring wave: **W4** (Batch CB RED) · Implementation: **W5** `#351 pr` · **W
 
 Helper: `tests/support/dead_package_wiring.py` (runtime import scan; `TYPE_CHECKING` and package-internal imports do not count).
 
-Out of scope (D8 — no tests): P12–P31 / #377–#385. D6 — no README / `docs/cli.md` / `AGENTS.md` / file 7 / 20b product files.
+Out of scope (D8 — no tests): P12–P31 / #377–#385. D6 — no README / `docs/cli.md` / `AGENTS-mergecraft.md` / file 7 / 20b product files.
 
 After each impl wave, recon **deletes** the matching W4.1 current-state "unwired" pins and **un-xfails** `green after W5|W6|W7` markers (`strict=False`).
 
@@ -205,7 +205,7 @@ Authoring wave: **W8** (Batch CC RED) · Implementation: **W9** `#354` · **W10*
 
 Helper: `tests/support/cc_batch.py`.
 
-Out of scope honoured (no extra tests): D8 P12–P31 / #377–#385; D6 file 7 / 20b; #354 second `decide_approval()`; #355 rebuild of dedup/causality; #355→memory until W13; #356 retrieval half already shipped; #357 authoring mergeCraft AGENTS.md; #358 schema/enforcement already shipped; #359 engine widening; #360 producing dismissal codes.
+Out of scope honoured (no extra tests): D8 P12–P31 / #377–#385; D6 file 7 / 20b; #354 second `decide_approval()`; #355 rebuild of dedup/causality; #355→memory until W13; #356 retrieval half already shipped; #357 authoring mergeCraft AGENTS-mergecraft.md; #358 schema/enforcement already shipped; #359 engine widening; #360 producing dismissal codes.
 
 Canonical impl modules the RED suite pins (W9–W13):
 
