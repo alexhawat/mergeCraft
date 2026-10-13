@@ -198,7 +198,7 @@ def build_reviewer_tools(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[ToolSpec]:
-    """Primary reviewer surface — class-filtered with publication admission (D9).
+    """Primary reviewer surface — class-filtered with publication admission.
 
     ``PRIMARY_MUTATING_ALLOWLIST`` explicitly names ``create_pull_request_review``
     (and ``checkout_pr``), plus the three session tools the primary must call:
@@ -220,7 +220,7 @@ def build_verifier_tools(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[ToolSpec]:
-    """Read-only verifier surface — class-filtered, distinct from reviewer (H4)."""
+    """Read-only verifier surface — class-filtered, distinct from reviewer."""
     return _filter_tools_by_class(
         build_orchestrator_tools(ctx, output_schema),
         VERIFIER_ALLOWED_TOOL_CLASSES,
@@ -315,8 +315,8 @@ def _register_mcp_route(
                 status_code=400,
             )
         items = body if isinstance(body, list) else [body]
-        # D10 (OB4) — the dispatch-issued agent id, forwarded by the agent
-        # CLI's MCP client config as a header on every call.
+        # The dispatch-issued agent id, forwarded by the agent CLI's MCP
+        # client config as a header on every call.
         calling_agent_id = request.headers.get("x-mergecraft-agent-id") or None
         # A JSON-RPC message with no `id` is a notification. The streamable-HTTP
         # spec requires 202 with an empty body for a notification-only POST;

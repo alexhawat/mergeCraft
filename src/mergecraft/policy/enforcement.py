@@ -79,7 +79,7 @@ def _gate_facing_severity(
     ``Minor`` or ``Trivial`` up so the obligation actually blocks, and holding
     ``Critical`` down so the mode stays distinguishable from ``blocking``. ``blocking`` floors a
     non-blocking declared severity up to ``Major`` so a blocking rule actually
-    blocks (#554; reverses MCB-12, which left the intent in an unread flag).
+    blocks (#554; reverses an earlier change that left the intent in an unread flag).
 
     The declared severity is preserved on the finding's ``evidence`` list
     whenever it differs, so capping never hides what the rule asked for.

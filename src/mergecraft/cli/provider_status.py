@@ -262,19 +262,6 @@ def list_repo_secrets(repo_slug: str) -> list[str] | None:
     return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
 
 
-def secret_is_present(
-    repo_slug: str,
-    name: str,
-    *,
-    present_names: set[str] | None = None,
-) -> bool:
-    """Return whether *name* exists as an Actions secret on *repo_slug*."""
-    if present_names is not None:
-        return name in present_names
-    names = list_repo_secrets(repo_slug)
-    return False if names is None else name in names
-
-
 def _resolve_repo_slug(cwd: Path) -> str:
     """Return ``owner/repo`` for *cwd*, or a placeholder when origin is unreadable."""
     from mergecraft.cli.provider_toggle import resolve_repo_slug
@@ -642,5 +629,4 @@ __all__ = [
     "list_repo_secrets",
     "provider_status_cmd",
     "register",
-    "secret_is_present",
 ]

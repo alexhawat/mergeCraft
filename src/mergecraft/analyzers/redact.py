@@ -421,13 +421,6 @@ def install_loguru_redaction_filter() -> None:
     set_message_redactor(redact_log_message)
 
 
-def assert_no_canary(text: str, canary: str) -> None:
-    """Test hook: raise when a planted canary secret appears in output material."""
-    if canary in text:
-        msg = "canary secret escaped the redaction boundary"
-        raise AssertionError(msg)
-
-
 def _looks_like_secret_shape(token: str) -> bool:
     """True when ``token`` matches a known credential prefix or dense secret shape."""
     for pattern in _SECRET_PATTERNS:
@@ -490,7 +483,6 @@ def classify_entropy_redaction_hits(hits: Iterable[Any]) -> dict[str, list[dict[
 
 
 __all__ = [
-    "assert_no_canary",
     "cache_key_fragment",
     "classify_entropy_redaction_hits",
     "install_loguru_redaction_filter",

@@ -88,7 +88,7 @@ class AgentRole(StrEnum):
 def _mutating_allowlist_for(role: AgentRole) -> frozenset[str]:
     """Return the mutating-tool allowlist for *role*.
 
-    The reviewer uses ``PRIMARY_MUTATING_ALLOWLIST`` (D9 dual allowlist);
+    The reviewer uses ``PRIMARY_MUTATING_ALLOWLIST`` (the dual allowlist);
     all other roles use the narrower ``READONLY_MUTATING_ALLOWLIST``.
     """
     if role is AgentRole.reviewer:
