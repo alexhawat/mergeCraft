@@ -247,9 +247,7 @@ def apply_harness_provider_env_wiring(
     keys_to_strip = frozenset(strip_env_keys)
 
     def _do(block: str, step_indent: int) -> tuple[str, bool]:
-        block0, stripped = _strip_env_keys_from_block(
-            block, keys_to_strip, at_indent=step_indent
-        )
+        block0, stripped = _strip_env_keys_from_block(block, keys_to_strip, at_indent=step_indent)
         block2, mod_env = _insert_owned_keys_into_block(
             block0,
             key="env",

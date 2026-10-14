@@ -561,9 +561,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
             target=target,
             create_if_missing=target == AgentRosterTarget.LOCAL or _is_role_named_agent(agent_name),
         )
-        validated_slug = _prepare_assign_slug(
-            target_dir, target, config_path, raw, slug
-        )
+        validated_slug = _prepare_assign_slug(target_dir, target, config_path, raw, slug)
         if target == AgentRosterTarget.COMMITTED:
             _auto_wire_provider_for_assign(
                 target_dir,
