@@ -9,6 +9,8 @@ from loguru import logger
 
 from mergecraft.config.runtime_provider_registry import provider_credential_env_names
 
+OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
+
 # Patterns for sensitive env var names (used by normalize_env / redaction).
 SENSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"_KEY$", re.IGNORECASE),
@@ -220,7 +222,7 @@ ACTIVE_PROVIDER_KEY_BY_AGENT: dict[str, str | None] = {
     "claude": "ANTHROPIC_API_KEY",
     "codex": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
-    "opencode": None,
+    "opencode": "OPENCODE_API_KEY",
 }
 
 # Cloud BYOK env vars for Claude Code Bedrock / Vertex routing. Re-injected only
@@ -308,6 +310,19 @@ def build_agent_env(
         oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
         if oauth:
             env["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
+    if agent_id == "opencode" and OPENCODE_AUTH_ENV not in registry_mapped:
+        from mergecraft.security.opencode_auth import (
+            opencode_api_key_from_auth_json,
+            opencode_auth_usable,
+        )
+
+        auth_raw = os.environ.get(OPENCODE_AUTH_ENV, "").strip()
+        if auth_raw and opencode_auth_usable(auth_raw):
+            env[OPENCODE_AUTH_ENV] = auth_raw
+            if "OPENCODE_API_KEY" not in registry_mapped:
+                derived = opencode_api_key_from_auth_json(auth_raw)
+                if derived:
+                    env["OPENCODE_API_KEY"] = derived
     # Bedrock / Vertex BYOK for Claude *or* OpenCode: reinject when the USE
     # flags are set (callers set them from model id / BEDROCK_MODEL_ID match).
     use_bedrock = bool(

@@ -111,8 +111,19 @@ def _has_cursor_auth() -> bool:
     return _has_env("CURSOR_API_KEY")
 
 
+def _has_opencode_zen_auth() -> bool:
+    if _has_env("OPENCODE_API_KEY"):
+        return True
+    raw = os.environ.get("OPENCODE_AUTH_JSON", "").strip()
+    if not raw:
+        return False
+    from mergecraft.security.opencode_auth import opencode_auth_usable
+
+    return opencode_auth_usable(raw)
+
+
 _BUILTIN_CLI_AUTH_PROVIDERS: frozenset[str] = frozenset(
-    {"anthropic", "openai", "google", "cursor", "bedrock", "vertex"}
+    {"anthropic", "openai", "google", "cursor", "bedrock", "vertex", "opencode", "opencode-go"}
 )
 
 
@@ -145,6 +156,8 @@ def _cli_auth_available(provider: str) -> bool:
         return _has_bedrock_auth() and bool(os.environ.get(BEDROCK_MODEL_ID_ENV, "").strip())
     if provider == "vertex":
         return _has_vertex_auth() and bool(os.environ.get(VERTEX_MODEL_ID_ENV, "").strip())
+    if provider in {"opencode", "opencode-go"}:
+        return _has_opencode_zen_auth()
     return False
 
 
@@ -1737,6 +1750,24 @@ def resolve_runtime_agent(
             msg = (
                 f"configuration error: provider {provider!r} is not registered — "
                 "add it with `mergecraft provider add`"
+            )
+            raise ModelFallbackPolicyError(msg)
+
+        if provider in {"opencode", "opencode-go"}:
+            if _has_opencode_zen_auth():
+                return agents["opencode"]
+            zen_entry = lookup_registry_entry(resolved_settings, provider)
+            if zen_entry is not None:
+                if indexed_credential_for_entry(zen_entry):
+                    return resolve_agent(zen_entry.harness)
+                msg = (
+                    f"configuration error: provider {provider!r} is registered but missing "
+                    f"credentials — run `mergecraft provider auth {provider}`"
+                )
+                raise ModelFallbackPolicyError(msg)
+            msg = (
+                f"configuration error: OpenCode Zen credentials missing — set "
+                f"OPENCODE_AUTH_JSON (mergecraft provider auth {provider}) or OPENCODE_API_KEY"
             )
             raise ModelFallbackPolicyError(msg)
 

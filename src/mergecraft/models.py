@@ -254,6 +254,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="OpenCode",
             env_vars=("OPENCODE_API_KEY",),
+            managed_credentials=("OPENCODE_AUTH_JSON",),
             models={
                 "big-pickle": ModelDef(
                     display_name="Big Pickle",
@@ -366,6 +367,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="OpenCode Go",
             env_vars=("OPENCODE_API_KEY",),
+            managed_credentials=("OPENCODE_AUTH_JSON",),
             models={
                 "glm-5.1": ModelDef(
                     display_name="GLM 5.1",
@@ -377,6 +379,16 @@ PROVIDERS: dict[str, ProviderConfig] = {
                     display_name="Kimi K2",
                     resolve="opencode-go/kimi-k2.7-code",
                     open_router_resolve="openrouter/moonshotai/kimi-k2.7-code",
+                ),
+                "deepseek-v4-pro": ModelDef(
+                    display_name="DeepSeek V4 Pro",
+                    resolve="opencode-go/deepseek-v4-pro",
+                    open_router_resolve="openrouter/deepseek/deepseek-v4-pro",
+                ),
+                "deepseek-v4.1-flash": ModelDef(
+                    display_name="DeepSeek V4.1 Flash",
+                    resolve="opencode-go/deepseek-v4.1-flash",
+                    open_router_resolve="openrouter/deepseek/deepseek-v4-flash",
                 ),
             },
         )

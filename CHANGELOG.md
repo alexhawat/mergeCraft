@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- OpenCode Zen / Go subscription billing via `mergecraft provider auth opencode`
+  (or `mergecraft auth opencode`): stores the same `auth.json` shape OpenCode
+  CLI uses (`OPENCODE_AUTH_JSON` / indexed `LLM_PROVIDER_<N>_OPENCODE_AUTH_JSON`).
+  The opencode harness writes that file under an isolated `XDG_DATA_HOME` for
+  `opencode serve` / `opencode run` and reinjects `OPENCODE_API_KEY` when needed.
+  OpenCode Zen authenticates with billing-backed API keys, not OAuth device
+  tokens like Codex — see [OpenCode Zen](https://opencode.ai/docs/zen/).
+
 ### Removed
 
 - The MCP server no longer mounts a webhook endpoint; a signed delivery was
