@@ -152,7 +152,7 @@ BYOK provider keys from the model catalog (`mergecraft.models.PROVIDERS`).
 | `deepseek` | DeepSeek | `DEEPSEEK_API_KEY` |
 | `moonshotai` | Moonshot AI | `MOONSHOT_API_KEY` |
 | `opencode` | OpenCode | `OPENCODE_API_KEY` |
-| `opencode-go` | OpenCode Go | `OPENCODE_API_KEY` |
+| `opencode-go` | OpenCode Go | `OPENCODE_GO_API_KEY` |
 | `bedrock` | Amazon Bedrock | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION`, `BEDROCK_MODEL_ID` |
 | `vertex` | Google Vertex AI | `VERTEX_SERVICE_ACCOUNT_JSON`, `GOOGLE_CLOUD_PROJECT`, `VERTEX_LOCATION`, `VERTEX_MODEL_ID` |
 | `nous` | Nous Portal | `NOUS_API_KEY`, `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` |

@@ -19,14 +19,20 @@ from mergecraft.agents.registry import (
 )
 from mergecraft.cli.agents_cmd import (
     _tool_ctx,
+    ensure_registered_model_slug,
     validate_agent_binding_override,
     validate_registered_model_slug,
 )
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.init_cmd import _ensure_gitignore_line
+from mergecraft.cli.provider_cmd import load_provider_registry
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.cli.workflow_cmd import (
+    wire_primary_workflow_model,
+    wire_registry_provider_to_workflow,
+)
 from mergecraft.config.agent_roster import (
     AgentRosterError,
     add_model,
@@ -280,6 +286,51 @@ def _wired_providers_from_workflow(workflow_path: Path) -> frozenset[str]:
     return frozenset()  # unreachable — cli_bail exits
 
 
+def _prepare_assign_slug(
+    target_dir: Path,
+    target: AgentRosterTarget,
+    config_path: Path,
+    raw: dict[str, Any],
+    slug: str,
+) -> str:
+    try:
+        provider, model_id = parse_model(slug)
+    except ValueError as exc:
+        cli_bail(str(exc))
+    if target == AgentRosterTarget.COMMITTED:
+        data = load_config_dict(config_path)
+        updated, validated = ensure_registered_model_slug(data, provider, model_id)
+        if updated is not data:
+            write_config_dict(config_path, updated)
+            raw["providers"] = updated.get("providers", [])
+        return validated
+    return _validate_slug(target_dir, target, raw, slug)
+
+
+def _auto_wire_provider_for_assign(
+    target_dir: Path,
+    *,
+    slug: str,
+    allow_unwired: bool,
+) -> None:
+    if allow_unwired:
+        return
+    try:
+        provider, _model_id = parse_model(slug)
+    except ValueError:
+        return
+    workflow_path = target_dir / DEFAULT_WORKFLOW_RELATIVE_PATH
+    if not workflow_path.is_file():
+        return
+    if provider.lower() in _wired_providers_from_workflow(workflow_path):
+        return
+    registry = load_provider_registry(config_path_for_root(target_dir))
+    entry = registry.lookup(provider)
+    if entry is None:
+        return
+    wire_registry_provider_to_workflow(target_dir, entry, force=True)
+
+
 def _local_override_slot_indices(
     agent_name: str,
     merged_chain: tuple[str, ...],
@@ -510,7 +561,15 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
             target=target,
             create_if_missing=target == AgentRosterTarget.LOCAL or _is_role_named_agent(agent_name),
         )
-        validated_slug = _validate_slug(target_dir, target, raw, slug)
+        validated_slug = _prepare_assign_slug(
+            target_dir, target, config_path, raw, slug
+        )
+        if target == AgentRosterTarget.COMMITTED:
+            _auto_wire_provider_for_assign(
+                target_dir,
+                slug=validated_slug,
+                allow_unwired=allow_unwired,
+            )
         _ensure_provider_wired_in_workflow(
             target_dir,
             target,
@@ -526,6 +585,8 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
 
         entry["modelChain"] = chain
         _persist_entry(target_dir, target, config_path, raw, agents, agent_name, entry)
+        if target == AgentRosterTarget.COMMITTED and index == 0:
+            wire_primary_workflow_model(target_dir, validated_slug, force=True)
         console.print(f"[green]{message} on agents.{agent_name}[/green]")
 
     @roster_app.command("add-model")

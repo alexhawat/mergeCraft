@@ -163,9 +163,17 @@ def credential_env_keys_for_entry(entry: ProviderRegistryEntry) -> tuple[str, ..
     treat the whole tuple as one OR, the way ``indexed_credential_for_entry``
     does when it reads them.
     """
-    return tuple(
+    from mergecraft.workflow.auth_manifest import flat_credential_env_keys
+
+    keys: list[str] = [
         indexed_env_key(entry.env_index, suffix) for suffix in _credential_suffixes_for_entry(entry)
-    )
+    ]
+    auth_kind = (entry.auth_kind or _AUTH_KIND_API_KEY).strip().lower()
+    if auth_kind == _AUTH_KIND_API_KEY:
+        for flat_key in flat_credential_env_keys(entry.label):
+            if flat_key not in keys:
+                keys.append(flat_key)
+    return tuple(keys)
 
 
 def indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
@@ -174,6 +182,13 @@ def indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
         value = _read_env_value(indexed_env_key(entry.env_index, suffix))
         if value:
             return value
+        if suffix == "API_KEY":
+            from mergecraft.workflow.auth_manifest import flat_credential_env_keys
+
+            for flat_key in flat_credential_env_keys(entry.label):
+                flat_value = _read_env_value(flat_key)
+                if flat_value:
+                    return flat_value
     workflow_key = f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{entry.env_index}"
     return _read_env_value(workflow_key)
 
@@ -286,7 +301,10 @@ def resolve_registry_gateway_endpoint(
 def _harness_env_name_for_suffix(label: str, suffix: str) -> str | None:
     """Map one indexed credential suffix to the harness env var native CLIs consume."""
     if suffix == "API_KEY":
-        return _BUILTIN_LABEL_TO_HARNESS_API_KEY.get(label.strip().lower())
+        lowered = label.strip().lower()
+        if lowered == "opencode-go":
+            return "OPENCODE_API_KEY"
+        return _BUILTIN_LABEL_TO_HARNESS_API_KEY.get(lowered)
     if suffix in {
         "CODEX_AUTH_JSON",
         "CLAUDE_CODE_OAUTH_TOKEN",
@@ -354,6 +372,12 @@ def _read_indexed_credential_value(entry: ProviderRegistryEntry, suffix: str) ->
     if value:
         return value
     if suffix == "API_KEY":
+        from mergecraft.workflow.auth_manifest import flat_credential_env_keys
+
+        for flat_key in flat_credential_env_keys(entry.label):
+            flat_value = _read_env_value(flat_key)
+            if flat_value:
+                return flat_value
         workflow_key = f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{entry.env_index}"
         return _read_env_value(workflow_key)
     return None

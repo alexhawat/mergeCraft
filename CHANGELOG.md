@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `mergecraft workflow provider add` wires harness providers without a custom base
+  URL using `LLM_PROVIDER_<N>: <label>` plus provider-specific credential env keys
+  (for example `OPENCODE_GO_API_KEY` for `opencode-go`).
+- `mergecraft agent assign-model` on the committed roster registers missing models,
+  auto-wires harness providers into `mergecraft.yml`, and updates `with.model` for
+  p0 assignments.
+
 ### Removed
 
 - The MCP server no longer mounts a webhook endpoint; a signed delivery was
