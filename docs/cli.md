@@ -20,7 +20,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft agent set-after <name> <after>` | Change dispatch ordering after agent creation. |
 | `mergecraft agent show <name>` | Show one agent's chain, resolved model, and effective limits. |
 | `mergecraft agent-local add-model <name> <slug>` | Append a registered model to an agent's chain (no-op when duplicate). |
-| `mergecraft agent-local assign-model <name> <slot> <slug>` | Assign a registered model to a positional slot (idempotent). |
+| `mergecraft agent-local assign-model <name> <slot> <slug>` | Register the model when needed, assign the slot, wire harness providers into `mergecraft.yml`, and set `with.model` on p0 (idempotent). |
 | `mergecraft agent-local create <name>` | Create a new roster entry with role defaults. |
 | `mergecraft agent-local delete <name>` | Remove an agent binding (refuses the last required reviewer or verifier). |
 | `mergecraft agent-local list` | List every agent, role, model chain, and dispatch level. |

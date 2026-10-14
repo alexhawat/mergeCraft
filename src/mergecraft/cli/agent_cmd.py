@@ -551,7 +551,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
-        """Assign a registered model to a positional slot (idempotent)."""
+        """Register the model when needed, assign the slot, wire harness providers into ``mergecraft.yml``, and set ``with.model`` on p0 (idempotent)."""
         agent_name = _validate_agent_name(name)
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)
