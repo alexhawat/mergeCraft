@@ -380,6 +380,16 @@ PROVIDERS: dict[str, ProviderConfig] = {
                     resolve="opencode-go/kimi-k2.7-code",
                     open_router_resolve="openrouter/moonshotai/kimi-k2.7-code",
                 ),
+                "deepseek-v4-pro": ModelDef(
+                    display_name="DeepSeek V4 Pro",
+                    resolve="opencode-go/deepseek-v4-pro",
+                    open_router_resolve="openrouter/deepseek/deepseek-v4-pro",
+                ),
+                "deepseek-v4-flash": ModelDef(
+                    display_name="DeepSeek V4 Flash",
+                    resolve="opencode-go/deepseek-v4-flash",
+                    open_router_resolve="openrouter/deepseek/deepseek-v4-flash",
+                ),
             },
         )
     ),

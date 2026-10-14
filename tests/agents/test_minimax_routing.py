@@ -439,6 +439,8 @@ _EXISTING_SLUGS: tuple[str, ...] = (
     "opencode/minimax-m2.5-free",
     "opencode-go/glm-5.1",
     "opencode-go/kimi-k2",
+    "opencode-go/deepseek-v4-pro",
+    "opencode-go/deepseek-v4-flash",
     "bedrock/byok",
     "vertex/byok",
     "nous/deepseek/deepseek-v4-flash",
