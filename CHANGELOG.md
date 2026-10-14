@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft workflow provider add` wires harness providers without a custom base
+  URL using `LLM_PROVIDER_<N>: <label>` plus provider-specific credential env keys
+  (for example `OPENCODE_GO_API_KEY` for `opencode-go`).
+- `mergecraft agent assign-model` on the committed roster registers missing models,
+  auto-wires harness providers into `mergecraft.yml`, and updates `with.model` for
+  p0 assignments.
 - OpenCode Zen / Go subscription billing via `mergecraft provider auth opencode`
   (or `mergecraft auth opencode`): stores the same `auth.json` shape OpenCode
   CLI uses (`OPENCODE_AUTH_JSON` / indexed `LLM_PROVIDER_<N>_OPENCODE_AUTH_JSON`).

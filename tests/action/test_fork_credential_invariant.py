@@ -19,6 +19,7 @@ _PROVIDER_ENV_KEYS: tuple[str, ...] = (
     "CODEX_AUTH_JSON",
     "OPENCODE_AUTH_JSON",
     "OPENCODE_API_KEY",
+    "OPENCODE_GO_API_KEY",
 )
 
 

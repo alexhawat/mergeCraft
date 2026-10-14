@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +15,9 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.provider_cmd import (
+    AUTH_KIND_API_KEY,
     _config_path,
+    _entry_auth_kind,
     _load_config_dict,
     _provider_entries,
     _write_env_label,
@@ -28,6 +30,7 @@ from mergecraft.cli.workflow_wf_yaml import (
     DEFAULT_WORKFLOW_RELATIVE_PATH,
     WorkflowChange,
     WorkflowYamlError,
+    apply_harness_provider_env_wiring,
     apply_model_prioritize,
     apply_model_wiring,
     apply_provider_env_wiring,
@@ -43,6 +46,7 @@ from mergecraft.config.provider_registry import (
 from mergecraft.config.roster_unwired import collect_unwired_roster_models, reviewer_p0_slug
 from mergecraft.workflow.auth_manifest import (
     WorkflowAuthManifestError,
+    flat_credential_env_keys,
     iter_mergecraft_action_steps,
     secret_name_to_provider_label,
 )
@@ -149,6 +153,96 @@ def _restore_workflow(workflow: Path, previous: str | None) -> None:
         console.print(f"[red]could not restore {workflow} after a failed config write: {exc}[/red]")
 
 
+def _registry_entry_base_url(entry: Mapping[str, Any]) -> str:
+    """Return a custom OpenAI-compatible base URL, or ``""`` for harness-native providers."""
+    return str(entry.get("url") or "").strip()
+
+
+def wire_registry_provider_to_workflow(
+    repo_root: Path,
+    entry: Mapping[str, Any],
+    *,
+    force: bool = True,
+) -> None:
+    """Write harness or custom-provider env wiring for *entry* when the workflow exists."""
+    workflow = _resolve_workflow_path(_workflow_option(), repo_root)
+    if not workflow.is_file():
+        return
+    env_index = int(entry["envIndex"])
+    base_url = _registry_entry_base_url(entry)
+    label = str(entry.get("label", ""))
+    try:
+        if base_url:
+            change = apply_provider_env_wiring(
+                workflow_path=workflow,
+                env_index=env_index,
+                label=label,
+                base_url=base_url,
+                secret_name=_primary_secret_name(dict(entry)),
+                step_selector="primary",
+                force=force,
+            )
+        else:
+            change = apply_harness_provider_env_wiring(
+                workflow_path=workflow,
+                env_canonical=build_harness_provider_env_canonical(dict(entry)),
+                step_selector="primary",
+                force=force,
+                strip_env_keys=(
+                    f"LLM_PROVIDER_{env_index}_API_KEY",
+                    f"MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{env_index}",
+                ),
+            )
+    except WorkflowYamlError as exc:
+        cli_bail(str(exc))
+    if change.was_modified:
+        _atomic_write_text(workflow, change.new_text)
+
+
+def wire_primary_workflow_model(
+    repo_root: Path,
+    model_slug: str,
+    *,
+    force: bool = True,
+) -> None:
+    """Set ``with.model`` on the primary mergeCraft workflow step to *model_slug*."""
+    workflow = _resolve_workflow_path(_workflow_option(), repo_root)
+    if not workflow.is_file():
+        return
+    try:
+        change = apply_model_wiring(
+            workflow_path=workflow,
+            model_slug=model_slug,
+            step_selector="primary",
+            force=force,
+        )
+    except WorkflowYamlError as exc:
+        cli_bail(str(exc))
+    if change.was_modified:
+        _atomic_write_text(workflow, change.new_text)
+
+
+def build_harness_provider_env_canonical(entry: dict[str, Any]) -> list[tuple[str, str]]:
+    """Return workflow ``env:`` pairs for a harness provider with no custom base URL."""
+    env_index = int(entry["envIndex"])
+    label = str(entry.get("label", "")).strip().lower()
+    auth_kind = _entry_auth_kind(entry)
+    canonical: list[tuple[str, str]] = [(f"LLM_PROVIDER_{env_index}", label)]
+    indexed = indexed_credential_keys(entry)
+    if auth_kind == AUTH_KIND_API_KEY:
+        flat = flat_credential_env_keys(label)
+        secret = _primary_secret_name(entry)
+        secret_ref = f"${{{{ secrets.{secret} }}}}"
+        if flat:
+            canonical.append((flat[0], secret_ref))
+        elif indexed:
+            canonical.append((indexed[0], secret_ref))
+    else:
+        for key in indexed:
+            canonical.append((key, f"${{{{ secrets.{key} }}}}"))
+    return canonical
+
+
 def _plan_provider_for_workflow(
     repo_root: Path,
     *,
@@ -181,8 +275,8 @@ def _plan_provider_for_workflow(
                 except ValueError as exc:
                     cli_bail(str(exc))
             if resolved_url is None:
-                cli_bail(f"provider {normalised_label!r} requires --url (absolute http(s) URL)")
-            elif url is None:
+                return entry, env_index, None
+            if url is None:
                 # A stored row is written into workflow YAML verbatim, so it has
                 # to clear the same bar as a freshly supplied --url.
                 try:
@@ -309,18 +403,29 @@ def _apply_workflow_sync(repo_root: Path, workflow_path: Path) -> WorkflowChange
                     f"provider {provider_label!r} is not registered — run "
                     f"[cyan]mergecraft provider add --label {provider_label}[/cyan] first"
                 )
-            base_url = str(entry.get("url", "")).strip()
-            if not base_url:
-                cli_bail(f"provider {provider_label!r} has no base URL in the registry")
-            provider_change = apply_provider_env_wiring(
-                workflow_path=scratch,
-                env_index=int(entry["envIndex"]),
-                label=str(entry.get("label", provider_label)),
-                base_url=base_url,
-                secret_name=_primary_secret_name(entry),
-                step_selector="primary",
-                force=False,
-            )
+            base_url = _registry_entry_base_url(entry)
+            if base_url:
+                provider_change = apply_provider_env_wiring(
+                    workflow_path=scratch,
+                    env_index=int(entry["envIndex"]),
+                    label=str(entry.get("label", provider_label)),
+                    base_url=base_url,
+                    secret_name=_primary_secret_name(entry),
+                    step_selector="primary",
+                    force=False,
+                )
+            else:
+                env_index = int(entry["envIndex"])
+                provider_change = apply_harness_provider_env_wiring(
+                    workflow_path=scratch,
+                    env_canonical=build_harness_provider_env_canonical(entry),
+                    step_selector="primary",
+                    force=False,
+                    strip_env_keys=(
+                        f"LLM_PROVIDER_{env_index}_API_KEY",
+                        f"MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{env_index}",
+                    ),
+                )
             if provider_change.was_modified:
                 scratch.write_text(provider_change.new_text, encoding="utf-8")
                 current_text = provider_change.new_text
@@ -487,20 +592,31 @@ def provider_add_cmd(
         persist=apply,
     )
     secret_name = _primary_secret_name(entry)
-    base_url = str(entry.get("url", ""))
-    if not base_url:
-        cli_bail(f"provider {label!r} has no base URL")
+    base_url = _registry_entry_base_url(entry)
 
     try:
-        change = apply_provider_env_wiring(
-            workflow_path=workflow,
-            env_index=env_index,
-            label=str(entry.get("label", label)),
-            base_url=base_url,
-            secret_name=secret_name,
-            step_selector=step,
-            force=force,
-        )
+        if base_url:
+            change = apply_provider_env_wiring(
+                workflow_path=workflow,
+                env_index=env_index,
+                label=str(entry.get("label", label)),
+                base_url=base_url,
+                secret_name=secret_name,
+                step_selector=step,
+                force=force,
+            )
+        else:
+            env_index = int(entry["envIndex"])
+            change = apply_harness_provider_env_wiring(
+                workflow_path=workflow,
+                env_canonical=build_harness_provider_env_canonical(entry),
+                step_selector=step,
+                force=force,
+                strip_env_keys=(
+                    f"LLM_PROVIDER_{env_index}_API_KEY",
+                    f"MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_{env_index}",
+                ),
+            )
     except WorkflowYamlError as exc:
         cli_bail(str(exc))
 

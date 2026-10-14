@@ -6,6 +6,7 @@ The roster lives in `.mergecraft/config.yaml`; GitHub Actions auth wiring stays
 in `.github/workflows/mergecraft.yml`.
 
 ```bash
+mergecraft agent assign-model reviewer p0 opencode-go/deepseek-v4.1-flash  # register + roster + workflow (one command)
 mergecraft agent assign-model reviewer p0 nous/tencent/hy3   # exact slot, idempotent
 mergecraft agent assign-model reviewer p1 openai/gpt-codex   # backup
 mergecraft agent add-model    reviewer2 anthropic/claude-sonnet  # append, no index
