@@ -1,4 +1,4 @@
-"""Risk-based lens routing against registry trigger signals (AP4)."""
+"""Risk-based lens routing against registry trigger signals."""
 
 from __future__ import annotations
 
@@ -19,16 +19,6 @@ if TYPE_CHECKING:
 RiskBand = Literal["low", "medium", "high"]
 
 _LANE_RANK: dict[RiskBand, int] = {"low": 0, "medium": 1, "high": 2}
-
-LENS_ROUTING_STEP4_NOTE = (
-    "\n\n   **Classifier routing (AP4):** after checkout, run the deterministic change "
-    "classifier (`classify_change`) and lens router (`route_lenses`) against the diff "
-    "payload. Treat `selected_lens_ids` as the registry-backed starting set of themed "
-    "lenses — each entry includes a recorded reason. You may add subsystem lenses or omit "
-    "a selected lens only after investigating why routing flagged it; skipped lenses are "
-    "recorded with reasons and are as informative as selected ones. Trivial doc-only diffs "
-    "route zero lenses — skip specialists per step 3."
-)
 
 
 class LensRoutingEntry(BaseModel):
@@ -154,7 +144,7 @@ def route_lenses_complement(
     prior_dispatched_lens_ids: Sequence[str],
     dispatch_budget: int,
 ) -> LensRoutingDecision:
-    """Bias routing toward lenses that did not run in the prior round (RC9)."""
+    """Bias routing toward lenses that did not run in the prior round."""
     baseline = route_lenses(classification, registry=registry)
     if classification.is_trivial or dispatch_budget <= 0:
         return baseline
@@ -203,7 +193,6 @@ def lens_id_from_agent_id(agent_id: str) -> str | None:
 
 
 __all__ = [
-    "LENS_ROUTING_STEP4_NOTE",
     "LensRoutingDecision",
     "LensRoutingEntry",
     "lens_id_from_agent_id",

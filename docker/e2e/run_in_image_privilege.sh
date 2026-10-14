@@ -26,6 +26,9 @@ STABLE_TESTS=(
   tests/security/test_trust_ordering_attacks.py
   # The only root lane the symlink-target chown test has.
   tests/utils/test_privilege_chown.py
+  # HS4 — no credential path in the image is readable by the agent user; the
+  # in-image readability class only runs as root inside this container.
+  tests/security/test_agent_readable_secrets.py
 )
 # AP1.5 RED markers remain until test-creator reconciles — --runxfail avoids XPASS ratchet.
 PRIVILEGE_IDENTITY_TESTS=(tests/utils/test_privilege_identity.py)

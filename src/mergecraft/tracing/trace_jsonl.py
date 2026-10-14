@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
+from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.tracing.sinks import read_jsonl_events
 
 
 def default_trace_dir(*, repo_root: Path | None = None) -> Path:
     """Resolve ``MERGECRAFT_TRACE_DIR`` or the default ``.mergecraft/traces`` path."""
-    env_dir = os.environ.get("MERGECRAFT_TRACE_DIR")
+    env_dir = TracingEnv().trace_dir
     if env_dir:
         return Path(env_dir)
     if repo_root is not None:

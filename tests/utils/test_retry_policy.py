@@ -20,7 +20,8 @@ import httpx
 import pytest
 import tenacity
 
-from mergecraft.utils.github import GitHubClient, _is_transient_http_error
+from mergecraft.utils.github import GitHubClient
+from mergecraft.utils.retry_policy import is_transient_http_error
 
 
 def _status_error(status: int) -> httpx.HTTPStatusError:
@@ -34,20 +35,20 @@ class TestTransientClassification:
 
     @pytest.mark.parametrize("status", [429, 500, 502, 503], ids=["429", "500", "502", "503"])
     def test_retryable_statuses(self, status: int) -> None:
-        assert _is_transient_http_error(_status_error(status)) is True
+        assert is_transient_http_error(_status_error(status)) is True
 
     def test_transport_error_retries(self) -> None:
         exc = httpx.TransportError("connection reset")
-        assert _is_transient_http_error(exc) is True
+        assert is_transient_http_error(exc) is True
 
     @pytest.mark.parametrize(
         "status", [400, 401, 403, 404, 422], ids=["400", "401", "403", "404", "422"]
     )
     def test_permanent_statuses_do_not_retry(self, status: int) -> None:
-        assert _is_transient_http_error(_status_error(status)) is False
+        assert is_transient_http_error(_status_error(status)) is False
 
     def test_unrelated_exception_is_permanent(self) -> None:
-        assert _is_transient_http_error(ValueError("boom")) is False
+        assert is_transient_http_error(ValueError("boom")) is False
 
 
 class _FlakyTransport:

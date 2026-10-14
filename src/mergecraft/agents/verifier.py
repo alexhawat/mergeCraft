@@ -36,6 +36,7 @@ Exports:
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import TYPE_CHECKING, Final, Literal, cast
 
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
 __all__ = [
     "HIGH_STAKES_LANES",
     "VERIFIER_AGENT_NAME",
+    "VERIFIER_JUDGE_POLICY_ID",
     "VERIFIER_JUDGE_VERSION",
     "VERIFIER_RUBRIC",
     "VERIFIER_RUBRIC_VERSION",
@@ -82,6 +84,8 @@ __all__ = [
     "record_withdrawn_finding",
     "should_verify",
     "verifier_denied_tool_names",
+    "verifier_policy_parameters",
+    "verifier_prompt_sha256",
 ]
 
 # ── judge pin (D14 / #45) ─────────────────────────────────────────────────────
@@ -151,6 +155,25 @@ VERIFIER_SYSTEM_PROMPT = (
     "`reachable` no → drop. `introduced-here` no → downgrade (pre-existing, not "
     "this pull request's). `not-already-refuted` no → drop, citing the entry.\n"
 )
+
+# HS2 — the policy identity and prompt digest a captured verdict is calibrated
+# against. Plan 47's judge calibration requires one prompt/policy contract per
+# candidate, so these are constant for a given verifier contract and move only
+# with a rubric/judge-version bump.
+VERIFIER_JUDGE_POLICY_ID: Final[str] = "verifier-judge"
+
+
+def verifier_prompt_sha256() -> str:
+    """Return the digest of the verifier's system prompt (the judge candidate)."""
+    return hashlib.sha256(VERIFIER_SYSTEM_PROMPT.encode("utf-8")).hexdigest()
+
+
+def verifier_policy_parameters() -> dict[str, str]:
+    """Return the explicit, constant policy parameters a captured verdict carries."""
+    return {
+        "judge_version": VERIFIER_JUDGE_VERSION,
+        "rubric_version": VERIFIER_RUBRIC_VERSION,
+    }
 
 
 def verifier_denied_tool_names(

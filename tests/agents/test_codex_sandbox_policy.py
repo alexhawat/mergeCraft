@@ -166,9 +166,16 @@ def test_unrecognised_codex_sandbox_env_warns_and_returns_none(
     assert CODEX_SANDBOX_ENV in str(call_args[0]) or CODEX_SANDBOX_ENV in str(call_args)
 
 
-@pytest.mark.parametrize("raw", ["", "not-a-tier", "DISPATCH"])
-def test_absent_or_malformed_agent_sandbox_defaults_to_dispatch(tmp_path: Path, raw: str) -> None:
-    """Absent / malformed trust.agentSandbox falls back to dispatch, not same-repo."""
+@pytest.mark.parametrize("raw", ["", "DISPATCH"])
+def test_absent_or_case_variant_agent_sandbox_defaults_to_dispatch(
+    tmp_path: Path, raw: str
+) -> None:
+    """Absent / case-variant trust.agentSandbox resolves to dispatch, not same-repo.
+
+    An empty value maps to the absent field (default ``dispatch``); the
+    documented strip/lower normalization maps ``DISPATCH`` onto the
+    ``dispatch`` tier. Both still honour the operator override.
+    """
     write_trust_config(tmp_path, agent_sandbox=raw if raw else None)
     resolve = import_trust_policy_symbol("resolve_agent_sandbox_decision")
     event_name, event = scenario_event_and_name("workflow_dispatch")
@@ -186,6 +193,28 @@ def test_absent_or_malformed_agent_sandbox_defaults_to_dispatch(tmp_path: Path, 
     assert decision_honours_override(decision) is True
     tier = getattr(decision, "configured_tier", None) or getattr(decision, "resolved_tier", None)
     assert tier in {None, "dispatch"}
+
+
+def test_unknown_agent_sandbox_tier_fails_closed(tmp_path: Path) -> None:
+    """An unrecognised trust.agentSandbox fails validation — never read as dispatch.
+
+    The prior behaviour silently coerced any invalid value to ``dispatch``; the
+    locked contract is fail-closed validation, and the error names the four
+    accepted tiers so the operator can fix the typo. Loading the settings
+    snapshot is where the config first reaches the schema, so that is the
+    observation point.
+    """
+    from pydantic import ValidationError
+
+    from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
+
+    write_trust_config(tmp_path, agent_sandbox="not-a-tier")
+    with pytest.raises(ValidationError) as exc_info:
+        capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
+    message = str(exc_info.value)
+    assert "agentSandbox" in message, message
+    for tier in ("never", "merged-only", "dispatch", "same-repo"):
+        assert tier in message, f"error does not name tier {tier!r}: {message}"
 
 
 def test_agent_sandbox_policy_reads_base_snapshot_not_pr_head(tmp_path: Path) -> None:

@@ -11,7 +11,7 @@
 
 ## Scope and contract
 
-Read AGENTS.md, CONTRIBUTING.md, coding standards and REVIEW-DOCTRINE. Preserve the existing trust, sandbox, hash and redirect checks. Work in an isolated branch; use Make for checks, Conventional Commits, and no hook bypass.
+Read AGENTS-mergecraft.md, CONTRIBUTING.md, coding standards and REVIEW-DOCTRINE. Preserve the existing trust, sandbox, hash and redirect checks. Work in an isolated branch; use Make for checks, Conventional Commits, and no hook bypass.
 
 Scope: `src/mergecraft/analyzers/{execution,adapters,provision,contracts,supply_chain}.py` only where needed to propagate the cause; analyzer tests for these paths; `tests/analyzers/support.py` and existing live planted-finding tests only for narrowly classified outage handling. Keep the result backward compatible where practical. Root maintains this plan and the index.
 

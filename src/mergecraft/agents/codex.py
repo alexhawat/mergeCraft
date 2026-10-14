@@ -51,7 +51,11 @@ from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
 from mergecraft.tracing.genai import resolve_capture_policy
-from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
+from mergecraft.types import (
+    MERGECRAFT_MCP_NAME,
+    MERGECRAFT_VERIFIER_MCP_NAME,
+    format_mcp_tool_ref,
+)
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
@@ -239,6 +243,12 @@ def _setup_codex_auth(
         codex_home.mkdir(parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
         auth_path.write_text(raw, encoding="utf-8")
+        # HS4 — the subscription credential must not be group/world-readable.
+        # The run home is chowned to the agent user after this write so the Codex
+        # CLI (dropped via setpriv) can still read its own ``auth.json`` as
+        # ``0600`` root-owned; the mode, not the owner, is what keeps other
+        # processes and the agent's ``Read`` tool out of it.
+        os.chmod(auth_path, 0o600)
         return
     if raw:
         logger.warning(
@@ -316,9 +326,19 @@ def _codex_mcp_tool_preamble() -> str:
 def _build_subagent_instructions(subagent_block: str | None = None) -> str:
     if subagent_block is not None:
         return subagent_block
+    # T9 / DC-D12 — the mutating MCP tools are denied to subagents; name the
+    # ``push_branch`` one in the CLI spelling Codex documents
+    # (``mergecraft_<tool>``), never the bare name, so a subagent that reads
+    # this instruction sees a tool it could actually call.
+    push_branch_ref = format_mcp_tool_ref("codex", "push_branch")
+    read_only_note = (
+        "Subagents are read-only: the mutating mergeCraft MCP tools "
+        f"(for example `{push_branch_ref}`) are not available to them."
+    )
     return "\n\n".join(
         [
             "Registered read-only subagents (spawn via Codex subagent tooling when needed):",
+            read_only_note,
             f"## {REVIEWER_AGENT_NAME}",
             REVIEWER_SYSTEM_PROMPT,
             f"## {VERIFIER_AGENT_NAME}",

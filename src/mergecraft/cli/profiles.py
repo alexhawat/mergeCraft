@@ -1,4 +1,4 @@
-"""Named review profiles — model chain, analyzer focus, and budget bundles (CC4).
+"""Named review profiles — model chain, analyzer focus, and budget bundles.
 
 Eight product profiles: fast, standard, deep, security, api_compatibility,
 migration, monorepo, cross_repo. CLI hyphens map to the canonical names.
@@ -275,13 +275,16 @@ def profile_budget_exhaustion_outcome(*, profile: str) -> RunOutcome:
 
 
 def profile_env_overrides(profile: ReviewProfile) -> dict[str, str]:
-    """Env patches that apply a profile's budget bundle."""
+    """Env patches that apply a profile's budget bundle.
+
+    Only variables ``mergecraft.utils.run_bounds`` reads are exported; the
+    profile's ``latency_budget_ms`` is recorded on the profile but is not
+    consumed by the run.
+    """
     return {
         "MERGECRAFT_TOKEN_BUDGET": str(profile.token_budget),
         "MERGECRAFT_COST_BUDGET_USD": str(profile.cost_budget_usd),
         "MERGECRAFT_TOOL_CALL_BUDGET": str(profile.tool_call_budget),
-        "MERGECRAFT_LATENCY_BUDGET_MS": str(profile.latency_budget_ms),
-        "MERGECRAFT_PROFILE": profile.name,
     }
 
 

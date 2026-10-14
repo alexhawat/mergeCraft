@@ -10,6 +10,7 @@ from tests.jev.support import (
     PINNED_MODEL,
     TEST_API_KEY,
     TRANSPORT_DIR,
+    RecordedTransport,
     import_jev,
     loguru_lines,
     make_agent_finding,
@@ -31,7 +32,7 @@ def _settings_with_pack(pack_id: str, *, enabled_pack: bool) -> Any:
 
 def _client_for(settings: Any, fixture_name: str) -> tuple[Any, Any]:
     module = _client_mod()
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
     client = module.AsyncJevClient(api_key=TEST_API_KEY, transport=transport, settings=settings)
     return client, transport
 

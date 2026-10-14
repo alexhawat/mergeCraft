@@ -20,7 +20,6 @@ from mergecraft.scm.types import ListedItems
 from mergecraft.utils.retry_policy import (
     DEFAULT_STOP,
     DEFAULT_WAIT,
-    is_transient_http_error,
     retry_transient_safe_methods,
 )
 
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 DEFAULT_API_URL = "https://api.github.com"
+DEFAULT_SERVER_URL = "https://github.com"
 DEFAULT_ACCEPT = "application/vnd.github+json"
 DEFAULT_API_VERSION = "2022-11-28"
 GITHUB_LIST_PAGE_SIZE: Final[int] = 100
@@ -144,11 +144,6 @@ def parse_repo_context(repository: str | None = None) -> RepoContext:
     return RepoContext(owner=parts[0], name=parts[1])
 
 
-def _is_transient_http_error(exc: BaseException) -> bool:
-    """Backward-compatible alias for ``is_transient_http_error`` (W9 tests)."""
-    return is_transient_http_error(exc)
-
-
 def _default_api_base_url() -> str:
     """Resolve the GitHub REST base URL (GHES / Actions / E2E mock).
 
@@ -158,6 +153,17 @@ def _default_api_base_url() -> str:
     live LLMs (D6).
     """
     return (os.environ.get("GITHUB_API_URL") or DEFAULT_API_URL).rstrip("/")
+
+
+def _default_server_url() -> str:
+    """Resolve the GitHub web (HTML) host (GHES / Actions / E2E mock).
+
+    Honours the runner-provided ``GITHUB_SERVER_URL`` (standard GitHub Actions
+    / GHES env) before falling back to ``https://github.com``, with any
+    trailing slash stripped. This is the *web* host used to build run links;
+    the REST base is ``_default_api_base_url`` (``GITHUB_API_URL``).
+    """
+    return (os.environ.get("GITHUB_SERVER_URL") or DEFAULT_SERVER_URL).rstrip("/")
 
 
 def usable_github_token(token: str) -> str:
@@ -790,8 +796,8 @@ async def resolve_run_context_data(
 ) -> RunContextData:
     """Build ``RunContextData`` from local settings + GitHub ``repos.get``.
 
-    Does **not** call mergecraft.com — ``api_token`` is empty, ``plan`` is ``none``,
-    and ``oss`` is derived from ``repo.private``.
+    Does **not** call mergecraft.com — the standalone context carries an empty
+    ``api_token`` and its ``oss`` flag derived from ``repo.private``.
     """
     repo_ctx = parse_repo_context(repository)
     repo_settings = settings if settings is not None else load_repo_settings(settings_path)
@@ -805,8 +811,6 @@ async def resolve_run_context_data(
             "repo_settings": repo_settings.model_dump(by_alias=True),
             "api_token": "",
             "oss": not private,
-            "plan": "none",
-            "proxy_model": None,
             "db_secrets": None,
         }
     )

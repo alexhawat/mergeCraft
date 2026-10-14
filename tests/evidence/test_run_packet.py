@@ -32,6 +32,7 @@ from mergecraft.mcp.tool_state import (
     AnalyzerRunState,
     AnalyzerStatusRow,
     ApprovalRecord,
+    ProgressComment,
     init_tool_state,
     primary_repo_state,
 )
@@ -175,6 +176,46 @@ def test_emit_writes_a_packet_with_populated_blast_radius(tmp_path: Path) -> Non
     assert packet["findings"], "analyzer findings did not reach the packet"
     assert packet["decision"] is not None
     assert packet["self_assessment"] == {"approved": True, "sha": "deadbeef"}
+
+
+def test_packet_records_the_orchestrator_reviewed_head_sha(tmp_path: Path) -> None:
+    """``reviewed_head_sha`` is the PR head the orchestrator checked out.
+
+    It is not agent-controlled: the value comes from the run's checkout state,
+    so a packet written by a review run always names exactly what it reviewed.
+    """
+    ctx = _make_ctx(tmp_path)
+    primary_repo_state(ctx.tool_state).checkout_sha = "a" * 40
+
+    written = _emit(ctx, run_succeeded=True)
+
+    assert written is not None
+    packet = json.loads(written.read_text(encoding="utf-8"))
+    assert packet["reviewed_head_sha"] == "a" * 40
+
+
+def test_packet_records_the_run_bound_progress_comment_id(tmp_path: Path) -> None:
+    """``progress_comment_id`` names the run's sticky, written by the orchestrator."""
+    ctx = _make_ctx(tmp_path)
+    ctx.tool_state.progress_comment = ProgressComment(id="555", type="issue")
+
+    written = _emit(ctx, run_succeeded=True)
+
+    assert written is not None
+    packet = json.loads(written.read_text(encoding="utf-8"))
+    assert packet["progress_comment_id"] == 555
+
+
+def test_packet_run_bound_fields_default_to_none_without_run_state(tmp_path: Path) -> None:
+    """A run with no checkout or sticky records null, never a fabricated value."""
+    ctx = _make_ctx(tmp_path)
+
+    written = _emit(ctx, run_succeeded=True)
+
+    assert written is not None
+    packet = json.loads(written.read_text(encoding="utf-8"))
+    assert packet["reviewed_head_sha"] is None
+    assert packet["progress_comment_id"] is None
 
 
 def test_files_changed_includes_scope_exception_paths(tmp_path: Path) -> None:

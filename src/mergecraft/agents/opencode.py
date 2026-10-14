@@ -20,8 +20,6 @@ from loguru import logger
 
 from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
 from mergecraft.agents.openai_compatible_gateways import (
-    CUSTOM_PROVIDER_API_KEY_ENV,
-    CUSTOM_PROVIDER_BASE_URL_ENV,
     SINGLETON_PROVIDER_ID,
     ProviderConfig,
     _provider_config_for_model,
@@ -69,12 +67,13 @@ from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from typing import IO
 
     from mergecraft.tracing.content import ContentCapture
 
-# Re-exported for tests / callers that import these names from opencode.
-__all_gateway_envs__ = (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV)
+OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
+OPENCODE_API_KEY_ENV = "OPENCODE_API_KEY"
 
 # OpenCode provider.options accepts transport keys only — generation knobs belong
 # on model entries (``limit`` / ``options``) or the primary ``build`` agent.
@@ -129,6 +128,57 @@ class ProviderTimeoutError(RuntimeError):
 def _api_key_from_env(api_key_env: str) -> str:
     """Read a provider API key from the environment at emit time (HA1 / D16)."""
     return os.environ.get(api_key_env, "").strip()
+
+
+def _opencode_data_home(ctx: AgentRunContext) -> Path:
+    """Return the XDG data root parent for this run's isolated ``auth.json``."""
+    return Path(ctx.tmpdir) / "opencode-xdg-data"
+
+
+def _with_flat_opencode_auth(env: dict[str, str], *, model: str | None) -> dict[str, str]:
+    from mergecraft.config.runtime_provider_registry import harness_env_for_active_provider
+
+    registry_resolved = any(
+        value.strip() for value in harness_env_for_active_provider(model, "opencode").values()
+    )
+    if not registry_resolved and OPENCODE_AUTH_ENV not in env:
+        flat = os.environ.get(OPENCODE_AUTH_ENV, "").strip()
+        if flat:
+            env[OPENCODE_AUTH_ENV] = flat
+    return env
+
+
+def _setup_opencode_auth(
+    ctx: AgentRunContext,
+    *,
+    data_home: Path,
+    credential_env: Mapping[str, str] | None = None,
+) -> None:
+    """Write ``auth.json`` under an isolated XDG data root for ``opencode serve``."""
+    from mergecraft.security.opencode_auth import opencode_auth_usable
+
+    source: Mapping[str, str] = credential_env if credential_env is not None else os.environ
+    raw = source.get(OPENCODE_AUTH_ENV, "").strip()
+    if raw and opencode_auth_usable(raw):
+        auth_dir = data_home / "opencode"
+        auth_dir.mkdir(parents=True, exist_ok=True)
+        auth_path = auth_dir / "auth.json"
+        auth_path.write_text(raw, encoding="utf-8")
+        os.chmod(auth_path, 0o600)
+        return
+    if raw:
+        logger.warning(
+            "{} is set but not usable OpenCode auth JSON — falling back to {} when present",
+            OPENCODE_AUTH_ENV,
+            OPENCODE_API_KEY_ENV,
+        )
+
+
+def _resolved_opencode_credentials(ctx: AgentRunContext) -> dict[str, str]:
+    return _with_flat_opencode_auth(
+        build_agent_env("opencode", model=ctx.resolved_model),
+        model=ctx.resolved_model,
+    )
 
 
 def _positive_int(value: object) -> int | None:
@@ -799,22 +849,29 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     config_path = config_dir / "opencode.json"
     config_path.write_text(config_json, encoding="utf-8")
 
+    credential_env = _resolved_opencode_credentials(ctx)
+    data_home = _opencode_data_home(ctx)
+    _setup_opencode_auth(ctx, data_home=data_home, credential_env=credential_env)
+
     # Baseline AFTER our own writes, before the agent runs. ``_evidence_dir``
     # falls back to ``<tmpdir>/evidence`` when neither MERGECRAFT_EVIDENCE_DIR
     # nor RUNNER_TEMP is set (evidence/run_packet.py:71); when that tmpdir sits
-    # inside the checkout, hashing first would make ``opencode.json`` — a file
-    # mergeCraft itself just wrote — read as tampering, and every review would
-    # fail closed. The gate still covers the whole agent session, which is the
-    # mutation this check exists to catch.
+    # inside the checkout, hashing first would make ``opencode.json`` and the
+    # isolated ``auth.json`` under ``opencode-xdg-data`` — files mergeCraft
+    # itself just wrote — read as tampering, and every review would fail closed.
+    # The gate still covers the whole agent session, which is the mutation this
+    # check exists to catch.
     baseline = _capture_integrity_baseline(ctx)
     if baseline is None:
         return AgentResult(
             success=False,
             error="review integrity baseline could not be captured; refusing read-only review",
         )
+
     extras: dict[str, str] = {
         "OPENCODE_CONFIG_CONTENT": config_json,
         "OPENCODE_CONFIG": str(config_path),
+        "XDG_DATA_HOME": str(data_home),
     }
     model_s = (model or "").strip()
     bedrock_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
@@ -823,7 +880,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         extras["CLAUDE_CODE_USE_BEDROCK"] = "1"
     if vertex_id and model_s == vertex_id:
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
-    env = build_agent_env("opencode", extras)
+    env = build_agent_env("opencode", extras, model=model)
+    env.update({k: v for k, v in credential_env.items() if k not in env})
 
     # Prefer serve + HTTP when available; fall back to `opencode run`.
     #

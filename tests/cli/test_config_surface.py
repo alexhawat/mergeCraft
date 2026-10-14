@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -16,7 +17,6 @@ from mergecraft.run_outcome import RunOutcome
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
-
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -159,3 +159,56 @@ def test_config_explain_model_reports_cli_over_env_and_yaml(
     yaml_only = explain_setting("model", cwd=tmp_path)
     assert yaml_only["winner"] == ConfigLayer.YAML.value
     assert yaml_only["value"] == "anthropic/claude-sonnet"
+
+
+def _top_level_key_count(raw: str, key: str) -> int:
+    return raw.count(f"\n{key}:") + (1 if raw.startswith(f"{key}:") else 0)
+
+
+def test_config_set_on_commented_config_does_not_duplicate_key(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A commented config is edited in place, not appended to (CF2.6)."""
+    path = _write_config(tmp_path, "# keep this note\nmodels:\n  - anthropic/claude-sonnet\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["config", "set", "model", "openai/gpt-5.3-codex"],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    output = _plain(result.stdout + result.stderr)
+    assert result.exit_code == 0, output
+    raw = path.read_text(encoding="utf-8")
+    assert _top_level_key_count(raw, "models") == 1, f"duplicate models key:\n{raw}"
+    assert "# keep this note" in raw
+    assert yaml.safe_load(raw)["models"] == ["openai/gpt-5.3-codex"]
+
+
+def test_config_set_on_commented_list_config_is_idempotent(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A list value set twice leaves one copy, not the union of both writes.
+
+    ``yaml.safe_dump`` renders a top-level sequence's items at column 0, so the
+    second ``config set`` must still recognise the existing ``models:`` items
+    as part of the block. A union here means the previous value was never
+    removed, and the file grows on every write.
+    """
+    path = _write_config(tmp_path, "# keep this note\nmodels:\n  - anthropic/claude-sonnet\n")
+    monkeypatch.chdir(tmp_path)
+
+    for _ in range(2):
+        result = runner.invoke(
+            app,
+            ["config", "set", "model", "openai/gpt-5.3-codex"],
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+        assert result.exit_code == 0, _plain(result.stdout + result.stderr)
+
+    raw = path.read_text(encoding="utf-8")
+    assert _top_level_key_count(raw, "models") == 1, f"duplicate models key:\n{raw}"
+    assert yaml.safe_load(raw)["models"] == ["openai/gpt-5.3-codex"], f"list unioned:\n{raw}"
+    assert raw.count("openai/gpt-5.3-codex") == 1, f"value duplicated:\n{raw}"
+    assert "# keep this note" in raw

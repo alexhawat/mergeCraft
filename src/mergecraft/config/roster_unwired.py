@@ -1,10 +1,10 @@
-"""Scan roster model chains against a workflow auth manifest (D1a)."""
+"""Scan roster model chains against a workflow auth manifest."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mergecraft.config.agent_roster import AgentRosterError, Roster, load_roster
+from mergecraft.config.agent_roster import Roster, load_roster
 from mergecraft.models import parse_model
 
 if TYPE_CHECKING:
@@ -47,17 +47,8 @@ def reviewer_p0_slug(raw: Mapping[str, object]) -> str | None:
     return None
 
 
-def reviewer_p0_slug_from_config(raw: Mapping[str, object]) -> str | None:
-    """Return reviewer p0 slug or raise when roster parsing fails."""
-    try:
-        return reviewer_p0_slug(raw)
-    except AgentRosterError as exc:
-        raise ValueError(str(exc)) from exc
-
-
 __all__ = [
     "collect_unwired_roster_models",
     "iter_roster_model_slots",
     "reviewer_p0_slug",
-    "reviewer_p0_slug_from_config",
 ]

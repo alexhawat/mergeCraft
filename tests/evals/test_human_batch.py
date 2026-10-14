@@ -394,3 +394,69 @@ def test_corrected_fields_are_merged_through_strict_corpus_case_validation(
 
     with pytest.raises(ValidationError, match="extra_forbidden"):
         verify_corrected_cases(manifest, repo_root=tmp_path)
+
+
+# ── batch 002: the manifest declares its own batch ID and case list ──────────
+#
+# Plan 47's first human batch ended in abstentions on all nine rows, so a second
+# batch is needed. The model must stop freezing ``golden-batch-001`` and accept a
+# manifest-declared batch ID with its own case list — while 001's frozen nine
+# stay pinned. No batch-002 data is authored here; this is the model contract.
+
+_BATCH_002_CASE_IDS = (
+    "golden-002-go-api-breakage",
+    "golden-002-python-race",
+    "golden-002-rust-unsafe",
+)
+
+
+def _batch_002_payload() -> dict[str, object]:
+    return {
+        "schema_version": "1.0.0",
+        "batch_id": "golden-batch-002",
+        "adjudicator_login": "alexhawat",
+        "cases": [
+            {"case_id": case_id, "evidence_status": "missing", "decision": "pending"}
+            for case_id in _BATCH_002_CASE_IDS
+        ],
+    }
+
+
+def test_a_manifest_declaring_batch_002_with_its_own_ids_validates() -> None:
+    manifest = HumanBatchManifest.model_validate(_batch_002_payload())
+
+    assert manifest.batch_id == "golden-batch-002"
+    assert {row.case_id for row in manifest.cases} == set(_BATCH_002_CASE_IDS)
+
+
+def test_batch_001_frozen_set_still_validates_unchanged() -> None:
+    """001's nine IDs stay a pinned fixture even after generalisation."""
+    manifest = HumanBatchManifest.model_validate(_manifest_payload())
+
+    assert manifest.batch_id == "golden-batch-001"
+    assert {row.case_id for row in manifest.cases} == set(GOLDEN_BATCH_001_CASE_IDS)
+    assert len(manifest.cases) == 9
+
+
+def test_batch_001_still_requires_exactly_the_frozen_nine() -> None:
+    """Generalisation must not drop the 001 pin: a missing ID still fails."""
+    payload = _manifest_payload()
+    cases = payload["cases"]
+    assert isinstance(cases, list)
+    cases.pop()
+
+    with pytest.raises(ValidationError, match="nine"):
+        HumanBatchManifest.model_validate(payload)
+
+
+def test_batch_002_rows_keep_the_agreement_guard() -> None:
+    """A batch-002 row cannot claim a confirm without recovered evidence either."""
+    payload = _batch_002_payload()
+    cases = payload["cases"]
+    assert isinstance(cases, list)
+    row = cases[0]
+    assert isinstance(row, dict)
+    row["decision"] = "confirm"
+
+    with pytest.raises(ValidationError, match="recovered evidence"):
+        HumanBatchManifest.model_validate(payload)

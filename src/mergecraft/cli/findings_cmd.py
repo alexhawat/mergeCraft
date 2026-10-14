@@ -40,6 +40,7 @@ from mergecraft.cli.typer_group import MergecraftTyperGroup
 from mergecraft.findings.ledger import (
     LEDGER_SCHEMA_VERSION,
     FindingLedger,
+    configured_publisher_login,
     fetch_review_ledger,
 )
 from mergecraft.findings.select import (
@@ -310,6 +311,16 @@ def ledger(
             await client.aclose()
 
     records = asyncio.run(_run())
+    # The operator view has no run context: it cannot resolve a run-bound
+    # progress-comment id or a run's publisher set. With no App configured it
+    # reads a Bot-type comment, which is an unauthenticated read — say so, so a
+    # forgeable comment is never mistaken for a trusted one.
+    if not configured_publisher_login():
+        console.print(
+            "[yellow]no reviewer App is configured: any Bot-type sticky read below is "
+            "unauthenticated — its author is not proven to be this project's "
+            "publisher. Configure the reviewer App or a PAT for a trusted identity.[/yellow]"
+        )
     if emit_json:
         emit_cli_json(
             {

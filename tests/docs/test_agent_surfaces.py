@@ -1,6 +1,6 @@
 """RD3 — LLM-agent install surface contracts.
 
-Pins ``AGENTS.md``, the consumer skill, plugin manifests, slash commands, Copilot
+Pins ``AGENTS-mergecraft.md``, the consumer skill, plugin manifests, slash commands, Copilot
 instructions, ``llms.txt``, and the README agent section.
 """
 
@@ -23,7 +23,7 @@ from tests.docs.support import (
     readme_agent_section_region,
 )
 
-AGENTS_MD = REPO_ROOT / "AGENTS.md"
+AGENTS_MD = REPO_ROOT / "AGENTS-mergecraft.md"
 SKILL_MD = REPO_ROOT / "skills" / "mergecraft" / "SKILL.md"
 SKILLS_LOCK = REPO_ROOT / "skills-lock.json"
 PLUGIN_JSON = REPO_ROOT / ".claude-plugin" / "plugin.json"
@@ -65,7 +65,9 @@ def _development_section(agents_text: str) -> str:
         agents_text,
         re.MULTILINE | re.IGNORECASE | re.DOTALL,
     )
-    assert match, "AGENTS.md needs a development/contributor section for this repo (RD3.2)"
+    assert match, (
+        "AGENTS-mergecraft.md needs a development/contributor section for this repo (RD3.2)"
+    )
     return match.group(1)
 
 
@@ -77,33 +79,41 @@ def _sha256_file(path: Path) -> str:
 
 def test_agents_md_exists_and_teaches_review_not_diff_review_as_primary() -> None:
     text = _read(AGENTS_MD)
-    assert "mergecraft review" in text, "AGENTS.md must teach mergecraft review as primary (D10)"
-    assert "mergecraft init" in text, "AGENTS.md must document mergecraft init for consumer setup"
+    assert "mergecraft review" in text, (
+        "AGENTS-mergecraft.md must teach mergecraft review as primary (D10)"
+    )
+    assert "mergecraft init" in text, (
+        "AGENTS-mergecraft.md must document mergecraft init for consumer setup"
+    )
     if "diff-review" in text:
         assert "alias" in text.lower(), (
-            "AGENTS.md must describe diff-review as a deprecated alias when mentioned (D10)"
+            "AGENTS-mergecraft.md must describe diff-review as a deprecated alias when mentioned (D10)"
         )
 
 
 def test_agents_md_stops_on_interactive_auth() -> None:
     text = _read(AGENTS_MD).lower()
-    assert "mergecraft provider auth" in text, "AGENTS.md must document mergecraft provider auth"
-    assert "never" in text, "AGENTS.md must tell agents never to invent credentials"
+    assert "mergecraft provider auth" in text, (
+        "AGENTS-mergecraft.md must document mergecraft provider auth"
+    )
+    assert "never" in text, "AGENTS-mergecraft.md must tell agents never to invent credentials"
     assert any(token in text for token in ("credential", "secret", "token")), (
-        "AGENTS.md must warn about credential/secret handling before interactive auth"
+        "AGENTS-mergecraft.md must warn about credential/secret handling before interactive auth"
     )
 
 
 def test_agents_md_install_ref_resolves() -> None:
     text = _read(AGENTS_MD)
-    assert _UNPINNED_INSTALL in text, "AGENTS.md must teach the unpinned uv tool install form (D11)"
-    _assert_no_unresolvable_version_pins(text, label="AGENTS.md")
+    assert _UNPINNED_INSTALL in text, (
+        "AGENTS-mergecraft.md must teach the unpinned uv tool install form (D11)"
+    )
+    _assert_no_unresolvable_version_pins(text, label="AGENTS-mergecraft.md")
 
 
 def test_agents_md_this_repo_uses_make() -> None:
     region = _development_section(_read(AGENTS_MD)).lower()
-    assert "make lint" in region, "AGENTS.md contributor section must name make lint"
-    assert "make test" in region, "AGENTS.md contributor section must name make test"
+    assert "make lint" in region, "AGENTS-mergecraft.md contributor section must name make lint"
+    assert "make test" in region, "AGENTS-mergecraft.md contributor section must name make test"
 
 
 def test_skill_frontmatter() -> None:
@@ -144,8 +154,8 @@ def test_slash_commands_exist() -> None:
 
 def test_copilot_instructions_point_at_agents_md() -> None:
     text = _read(COPILOT_INSTRUCTIONS)
-    assert "AGENTS.md" in text, (
-        ".github/copilot-instructions.md must point contributors/agents at AGENTS.md (D7)"
+    assert "AGENTS-mergecraft.md" in text, (
+        ".github/copilot-instructions.md must point contributors/agents at AGENTS-mergecraft.md (D7)"
     )
 
 
@@ -224,7 +234,7 @@ def test_llms_txt_lists_required_urls() -> None:
     text = _read(LLMS_TXT)
     required = (
         "README.md",
-        "AGENTS.md",
+        "AGENTS-mergecraft.md",
         "REVIEW-CHECKS.md",
         "docs/ANALYZERS.md",
         "skills/mergecraft/SKILL.md",
@@ -234,7 +244,7 @@ def test_llms_txt_lists_required_urls() -> None:
 
 
 def test_claude_md_still_gitignored() -> None:
-    """Pin, expected GREEN: tracked agent entry is AGENTS.md, not CLAUDE.md (D6)."""
+    """Pin, expected GREEN: tracked agent entry is AGENTS-mergecraft.md, not CLAUDE.md (D6)."""
     gitignore = GITIGNORE.read_text(encoding="utf-8")
     assert "CLAUDE.md" in gitignore, ".gitignore must ignore CLAUDE.md (D6)"
     tracked = subprocess.run(

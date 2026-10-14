@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from mergecraft.cli.errors import cli_bail
+from mergecraft.config.env import LocalDotEnv, from_env
 from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
@@ -33,8 +34,14 @@ if TYPE_CHECKING:
 
 
 def _configured_env_path() -> Path | None:
-    """Return ``$MERGECRAFT_ENV`` when set (tests pin a temp file)."""
-    configured = os.environ.get("MERGECRAFT_ENV")
+    """Return ``$MERGECRAFT_ENV`` when set (tests pin a temp file).
+
+    The variable is read through the ``.env`` model's mapping seam rather than
+    a bare ``os.environ`` lookup, so its name is declared once, in
+    ``mergecraft.config.env``, and the value is validated on the way in. An
+    empty value means "unset".
+    """
+    configured = from_env(LocalDotEnv, os.environ).MERGECRAFT_ENV
     return Path(configured).resolve() if configured else None
 
 

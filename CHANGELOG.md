@@ -9,6 +9,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft workflow provider add` wires harness providers without a custom base
+  URL using `LLM_PROVIDER_<N>: <label>` plus provider-specific credential env keys
+  (for example `OPENCODE_GO_API_KEY` for `opencode-go`).
+- `mergecraft agent assign-model` on the committed roster registers missing models,
+  auto-wires harness providers into `mergecraft.yml`, and updates `with.model` for
+  p0 assignments.
+- OpenCode Zen / Go subscription billing via `mergecraft provider auth opencode`
+  (or `mergecraft auth opencode`): stores the same `auth.json` shape OpenCode
+  CLI uses (`OPENCODE_AUTH_JSON` / indexed `LLM_PROVIDER_<N>_OPENCODE_AUTH_JSON`).
+  The opencode harness writes that file under an isolated `XDG_DATA_HOME` for
+  `opencode serve` / `opencode run` and reinjects `OPENCODE_API_KEY` when needed.
+  OpenCode Zen authenticates with billing-backed API keys, not OAuth device
+  tokens like Codex — see [OpenCode Zen](https://opencode.ai/docs/zen/).
+
+### Removed
+
+- The MCP server no longer mounts a webhook endpoint; a signed delivery was
+  verified but processed nothing, and its replay window could never fire.
+
+- Provider circuit-breaker, health, budget and routing-eval helpers that no
+  review path called are removed.
+
+- Four context-retrieval modules no review path imported are removed.
+
+### Changed
+
+- Agent entries with `dispatch: ensemble` or `shadow` are refused as not
+  implemented instead of being accepted and ignored.
+
+- `mergecraft policy` help and enforcement docs state that a review run does not
+  enforce policy rules.
+
+- Recorded Jev transports and the canary assertion moved out of the runtime
+  package into the test suite.
+
+### Breaking
+
+- An invalid `trust.agentSandbox` value (for example `off`, a bare `false`, or a
+  typo like `nevr`) now fails configuration validation instead of quietly
+  becoming `dispatch`. **Fix:** set one of `never`, `merged-only`, `dispatch`, or
+  `same-repo`; the four tiers still normalize whitespace and case.
+
+- The `model_pin` action input no longer carries a default. Leaving it unset
+  follows the repository's `modelPin` setting, and an explicit `disabled` now
+  overrides a repository `modelPin: true`. **Fix:** leave `model_pin` unset to
+  follow the repository, or set `enabled` / `disabled` explicitly; the previous
+  `disabled` default meant an unset input could never override the repository.
+
+- Settings the standalone runtime does not consume are accepted but now warn
+  once when set to a non-default value: `gates.thermostat`, `tracing.redaction`,
+  `stopScript`, `blastRadiusOverride`, `operatorPipeline`, and `autoMergeEnabled:
+  true`. **Fix:** none required — the values still parse and round-trip; remove
+  the key if the warning is unwanted.
+
+- A malformed tracing environment variable or tracing Action input — the enable
+  flag, the region, the content level, or the untrusted-content export — now
+  fails configuration instead of being ignored. A typo such as `flase` used to
+  drop the value and let a lower layer's more permissive one win; the run now
+  fails closed as a configuration error naming the variable, and never prints
+  its value. **Fix:** correct the spelling; `MERGECRAFT_TRACING_REGION` still
+  accepts `us` and `eu`.
+
+### Fixed
+
+- Both Action images replace the brace-expansion and undici copies bundled
+  inside npm with their patched releases, pinned by checksum. No npm release
+  ships the fixes yet, and the old copies carried three HIGH advisories.
+
+- A self-review re-run on a job token now picks up the earlier run's checkpoint and
+  progress comment. The reader looked for a packet file name the workflow never
+  uploads, so every re-review started again from scratch. It now reads the file
+  each review step uploads, preferring the last step that ran.
+
+- `doctor`, `config show` / `config explain` and the config loader now agree on
+  which files contribute. `config.local.yaml` is reported outside CI, and a
+  `MERGECRAFT_CONFIG` that points at a missing file is reported by key and
+  filename instead of "no config file (defaults apply)".
+
+- `doctor` fails before printing anything when its rendered output would contain
+  a credential value, naming the environment key and never the value.
+
+- Comment-preserving config writes replace a top-level key in place instead of
+  appending a second copy, so a repeated write no longer duplicates a mapping or
+  a list (for example `models:` or `providers:`), and a list no longer unions its
+  old and new values.
+
+- `provider status --json` and `health --json` carry the shared
+  `schema_version: "1.0.0"` stamp; `provider status` keeps its existing
+  `schemaVersion: 1`. `health` now describes what it checks — liveness plus the
+  resolved telemetry mode, not a readiness probe.
+
+- Logfire workflow wiring accepts the lowercase `alexhawat/mergecraft@<ref>`
+  spelling the docs print, while still refusing similarly-prefixed forks and an
+  empty ref.
+
+- `watch` and the review comment's run link honour `GITHUB_API_URL` /
+  `GITHUB_SERVER_URL` for GitHub Enterprise hosts. `watch` also emits a timeline
+  event that carries no id once instead of on every poll.
+
+- Workflow failure annotations are escaped before they reach the command stream,
+  so a newline or `%` in a pull-request title or an exception message can no
+  longer inject a workflow command or a log group.
+
+- The unused hosted-plan residue is gone: the two `AccountPlan` vocabularies, the
+  context `plan` field and the `proxyModel` producers and consumers were removed,
+  none of which had a reader. `api_token`, the remote upload path, the local
+  upload fallback and the provider catalog are unchanged.
+
+- Provider commands read `.env` values the same way the CLI startup load does, so
+  a single-quoted value no longer keeps its surrounding quotes and `export `,
+  inline comments and `${VAR}` interpolation mean the same thing to every reader
+  of the file.
+
+### Added
+
+- `mergecraft review --capture-verdicts` (or `MERGECRAFT_CAPTURE_VERDICTS=1`)
+  persists every saved verifier verdict — including ones that end in `drop`,
+  which never publish and so cannot be reconstructed afterwards — as one
+  redacted line per verdict in `judge-verdicts.jsonl` beside the run's evidence
+  packet, in the calibration-case shape the judge-calibration tooling reads.
+  Capture is off by default, so an ordinary review writes nothing new.
+
+- A self-review's incremental checkpoint and progress-comment identity can come
+  from the workflow run itself: when the latest successful `pull_request_target`
+  run of the self-review workflow left an evidence artefact, its
+  `reviewed_head_sha` and sticky-comment id drive the checkpoint and the round
+  index. A workflow definition that exists only on a pull-request branch cannot
+  produce such a run, so the identity is not forgeable by the PR author.
+
+- `mergecraft eval trajectory-gate` reads an approved trajectory protocol —
+  pre-registered minimums per check plus a tolerance — and compares a candidate
+  report against a frozen baseline, failing and naming any check outside the
+  tolerance. Until a protocol is approved it reports `no approved protocol —
+  advisory` and exits 0.
+
+- Human golden-batch manifests declare their own batch id and case list, so a
+  later batch can be reviewed without a code change; the first batch's nine case
+  ids stay pinned as a frozen fixture.
+
 - Behaviour-verification reports record which driver produced them — `cdp`,
   `stub`, or unset when not recorded — so a report says whether its page came
   from a real browser or the non-browser fallback.
@@ -38,7 +177,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/opencode.md` documents the integration: engine selection, commands,
   subagents, V2 MCP wiring, JEV scope, and Logfire tracing.
 
+### Security
+
+- The Claude reviewer can no longer read the run's credential material. The
+  driver denies reads of the runner's file-command mounts, the runner home and
+  other processes' environments, writes the Codex auth file root-only, and
+  records a run warning when a `Read`, `Glob` or `Grep` call names a path outside
+  the checkout and the run's own temporary directory.
+
+- The review job declares `actions: read`, and no review rung falls back to the
+  shared `github-actions[bot]` login when no reviewer App is configured.
+
 ### Changed
+
+- The local `.env` file and the tracing environment layer are read through one
+  typed model each, so a variable's exact name and type live in one place and a
+  new environment read has a defined home. Behaviour is unchanged apart from the
+  two entries above.
+
+- Progress comments are recognised by the identity that published them, not by
+  any bot: the sticky selector uses the run's expected-publisher set, or the
+  sticky id recorded by a trusted self-review run, and never falls back to
+  matching any bot-authored comment. **Breaking:** when neither identity is
+  available, a run creates a new progress comment rather than adopting an
+  existing bot-authored one, so a repository whose sticky was posted by the
+  shared Actions bot starts a fresh comment — and with it a fresh ledger —
+  instead of reusing the old one.
+
+- The built wheel no longer ships seven test-, script- and eval-support modules
+  that no runtime caller imports (`evals/mcp_public.py`,
+  `evals/quality_metrics.py`, `evals/skill_taxonomy_gate.py`, `utils/git_ref.py`,
+  `integrations/live_providers.py`, `mcp/codegen.py`, `scm/errors.py`). Each is
+  still present in the checkout for the script, Make and test callers that use
+  it.
+
+- The Gemini and Codex harness deny lists name the `push_branch` tool the way
+  each CLI documents it, matching the spelling the other harnesses already used.
 
 - The release regression gate now fails when a run adds failed or inconclusive
   cases, instead of scoring only what survived: a detection half whose every
@@ -911,13 +1085,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0.10`) sets the hard ceiling — set tolerance `0` to restore strict enforcement
 - Run record and job step summary token lines name target, ceiling, over-target
   status, and per-phase attribution when phases are recorded
-- Enforcement modes and the approval gate now agree on what blocks. The
-  gate-facing severity is the single authority, so ``contributes_blocker`` is
+- Policy enforcement modes score a rule's blocking intent from the finding's
+  gate-facing severity, so ``contributes_blocker`` is
   read off it rather than computed beside it. ``blocking`` floors a
   non-blocking declared severity to ``Major`` and ``warning`` caps blocking
   severities to ``Minor``, and ``required`` resolves to ``Major`` while declared
   evidence is outstanding so a ``Minor`` or ``Trivial`` obligation still blocks;
-  the declared severity is preserved on the finding's ``evidence`` list. **This reverses MCB-12's "blocking no longer promotes
+  the declared severity is preserved on the finding's ``evidence`` list. No
+  review path calls ``evaluate_enforcement``, so the scoring does not reach the
+  approval gate. **This reverses MCB-12's "blocking no longer promotes
   Minor"**, which left the blocking intent in a field ``decide_approval`` never
   read, so a ``blocking`` rule silently passed while a ``warning`` rule blocked
   (#554)
@@ -978,9 +1154,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Required static checks block approval unless every row is explicitly
   ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``,
   and unknown statuses no longer satisfy the gate (MCB-16)
-- Policy ``required`` enforcement consults ``policy.evidence`` and contributes a
-  blocker until declared evidence is present; ``blocking`` no longer promotes
-  declared ``Minor`` findings to ``Major`` (MCB-12)
+- Policy ``required`` enforcement consults ``policy.evidence`` and scores the
+  rule as blocking until declared evidence is present; ``blocking`` no longer
+  promotes declared ``Minor`` findings to ``Major``. Review does not apply the
+  result: no review path calls ``evaluate_enforcement``, so a rule cannot gate a
+  merge yet (MCB-12)
 - Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
   refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
   explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
@@ -991,14 +1169,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verifier citation paths are confined to the checkout root via
   ``resolve_confined_path``, rejecting traversal, absolute paths, prefix collisions,
   and out-of-root symlinks, and must fall inside the changed-path set (MCB-20)
-- Shipped ``operational_readiness`` policy pack rules now declare required
-  evidence keys so ``enforcement: required`` can gate merge (MCB-12)
+- Shipped ``operational_readiness`` policy pack rules now declare the required
+  evidence keys ``enforcement: required`` consults before it treats the rule as
+  satisfied (MCB-12)
 
 ### Changed
 
-- Policy enforcement modes are pairwise distinguishable: ``advisory`` caps blocking
-  severities to ``Trivial``, ``warning`` and ``required`` preserve declared
-  severity, and ``required`` clears only when ``policy.evidence`` is satisfied
+- Policy enforcement modes are pairwise distinguishable when a rule is
+  evaluated: ``advisory`` caps blocking severities to ``Trivial``, ``warning``
+  and ``required`` preserve declared severity, and ``required`` clears only when
+  ``policy.evidence`` is satisfied. Review does not consult these modes yet
   (MCB-12)
 
 ### Fixed
@@ -1239,12 +1419,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   userinfo (MCB-31)
 - ``tests/tracing/test_redaction_doctests.py`` executes
   ``mergecraft.tracing.redaction`` doctests (D3)
-- SCM webhook ingress encodes signature operands with UTF-8 surrogateescape before
-  ``compare_digest``, so non-ASCII header bytes return 401 instead of raising
-  ``TypeError`` on unauthenticated paths (MCB-11)
-- Webhook redelivery through ``accept_webhook`` returns ``duplicate=True`` instead
-  of rejecting a reused delivery nonce; the replay store is bounded with TTL and
-  ``max_entries``, and far-future skew is rejected with ``abs()`` (MCB-13)
+- Webhook signature verification encodes signature operands with UTF-8 surrogateescape
+  before ``compare_digest``, so non-ASCII header bytes are rejected instead of raising
+  ``TypeError`` (MCB-11)
+- The MCP server no longer mounts a webhook endpoint: a signed delivery was verified
+  but processed nothing (MCB-13)
 - CI workflow log and SARIF artifact zip ingestion now use bounded
   `zf.open(info).read(n)` decompression with per-member, aggregate, member-count,
   and expansion-ratio caps instead of unbounded `zf.read(name)` (MCB-14)
@@ -1437,7 +1616,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file, and `--agent` JSONL) with `make cli-examples` / `cli-examples-check` and
   `docs/cli-examples.md` tour page
 - Agent-loop reference workflow (`docs/agent-loop.md`) for `mergecraft review --agent` (#383)
-- CLI, GitHub Action, and SCM webhooks now enter one review engine over one immutable snapshot (#380)
+- CLI and GitHub Action runs now enter one review engine over one immutable snapshot (#380)
 - `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)
 - `mergecraft review --agent` negotiates protocol version against CLI JSON `schema_version` (both fields kept, aliased), reports retryable mismatches, and names token/cost/tool-call budgets (#379)
 - `mergecraft review --agent` streams the first finding before the verdict; `--use-cache` and `--resume` reuse a local result cache; cancelling a review cleans up child processes (#378)
@@ -1453,11 +1632,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added: generated CLI and Action reference pages (`docs/cli.md`,
   `docs/action-reference.md`) plus a docs manifest; `make docs-check`
   replaces landing-README table splices.
-- Provider routing now tracks capability dimensions (context, reasoning, tools, structured IO, cost, latency, residency), require/prefer/fallback intents, per-specialist and per-risk model selection, heterogeneous verifier/judge models, health tracking, bounded retryable-only retries, circuit breakers with cooldown, degradation when a non-required provider is down, fail-closed required-model pins, run-manifest provider/model hashes, per-provider budgets, routing-quality eval, residency allow-lists, and a nightly catalog smoke (#371)
-- Review specialists now report unique useful findings plus latency, cost, precision, and recall; specialists that add cost without review value can be skipped via per-agent circuit breakers (#370)
+- A provider capability catalog names context size, reasoning and tool support, structured-output support, cost, latency and data residency for the bundled models, and a residency allow-list check refuses a model outside the regions the enterprise policy permits (#371)
+- Review specialists now report unique useful findings plus latency, cost, precision, and recall (#370)
 - Review profiles now include `standard`, `api_compatibility`, `migration`, `monorepo`, and `cross_repo` (hyphen aliases on the CLI); `mergecraft profile recommend --risk` auto-selects from change risk, with CLI then policy overrides; profile budget exhaustion stays `inconclusive`, never a clean pass (#369)
 - `.mergecraft/config.yaml` now carries a `schema_version`; unversioned files migrate on load, unknown versions fail closed, and deprecated keys warn before a breaking removal (#368)
-- Review profiles now carry an explicit latency budget; ensemble spend over the profile cost ceiling fails closed; cheap classification runs before specialists, independent work can run in parallel, and structural summaries compress context before an LLM step; early-stop fires when evidence is already sufficient, routing considers remaining budget, and regression/monorepo benches exist without publishing measured cost or latency numbers (#367)
+- Review profiles record an explicit ``latency_budget_ms`` field beside their token, cost and tool-call budgets — the three budgets are exported to the run, the latency figure is recorded only; ensemble spend over the profile cost ceiling fails closed; cheap classification runs before specialists, independent work can run in parallel, and structural summaries compress context before an LLM step; early-stop fires when evidence is already sufficient, routing considers remaining budget, and regression/monorepo benches exist without publishing measured cost or latency numbers (#367)
 - `mergecraft doctor --supply-chain` verifies lockfile reproducibility, bundled agent-CLI provenance, and analyzer version pins; every run manifest now records runtime and tool versions (#366)
 - Failure-injection, soak, high-concurrency, monorepo, and large-PR harnesses now pin production SLOs for review completion, time to first finding, total review latency, and publication success, with a closed reliability error taxonomy and per-stage latency metrics (#364)
 - A mid-review provider outage degrades instead of crashing; corrupt local cache rebuilds, disk and memory preflight fail closed, giant repositories skip or partial, SCM publication is idempotent, runs resume from a checkpoint, cleanup runs on timeout/cancel/crash, and diagnostic bundles redact secrets (#365)
@@ -1521,10 +1700,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`docs/dev/provider-harness.md`); opt-in sanitized capture under
   `.ignorelocal/provider-harness/records/`.
 - Cross-repository intelligence indexes linked repos at pinned commits, contract surfaces (OpenAPI, GraphQL, protobuf, exports), cross-repo blast radius, reproducible citations, and ticket acceptance-criteria mapping under `mergecraft.xrepo` and `mergecraft.requirements`
-- Repository context engine indexes repo maps, per-file symbol indexes (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
-- Call graph, change graph (changed symbol → dependents → tests → contracts), budget-aware dynamic expansion, targeted git blame, and `mergecraft context inspect` for provenance-backed context retrieval
+- Repository context engine indexes per-file symbols (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
+- Call graph, change graph (changed symbol → dependents → tests → contracts), and `mergecraft context inspect` for provenance-backed context retrieval
 - Feedback capture for findings (accepted / dismissed / disputed) keyed by fingerprint, with bounded negative-memory suppression, TTL/recency weighting, contradiction detection, and `mergecraft memory list|show|forget|export|import|feedback` lifecycle verbs (DG7)
-- Policy-as-code package (`mergecraft.policy`) with schema-validated YAML rules, deterministic org/repo/path scoping, enforcement modes mapped onto the existing approval gate (D7), required-evidence inconclusive handling (D8), and bounded exceptions with expiry
+- Policy-as-code package (`mergecraft.policy`) with schema-validated YAML rules, deterministic org/repo/path scoping, enforcement modes that classify a rule's blocking intent (review does not consult them), required-evidence inconclusive handling (D8), and bounded exceptions with expiry
 - `mergecraft policy lint|test|explain` — validate policy rules, run should-trigger/should-not fixtures, and list effective rules with source layers
 - Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
 - Large-PR review engine (DG2): cluster changed paths by dependency and intent, build hierarchical diff context (map → summaries → raw hunks) with token-budget scope reduction that reserves verbatim hunks for high-risk regions, record disputed/waived/stale finding lifecycle states, and emit advisory-only PR split recommendations from independent change groups
@@ -1552,7 +1731,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `mergecraft eval gate` — a release regression gate comparing a candidate result set against baseline with a declared tolerance band, wired as a blocking job in the release workflow
 - Added agent registry binding model, prompt, toolset and budget per role with `mergecraft agents list|show|set` and `make agents-check`
 - Added registry-driven harness render for Claude, OpenCode, Codex, Gemini, and Cursor with per-agent models and declared Codex degradation in run metadata
-- Added typed specialist handoff, model-diversity policy for verification, and ensemble or shadow dispatch modes on agent bindings
+- Added typed specialist handoff and model-diversity policy for verification. An agent binding's `dispatch` key accepts `single`; `ensemble` and `shadow` are refused with a configuration error naming the mode as not implemented, instead of being accepted and then ignored
 - Added change classifier and risk-based lens routing with recorded per-lens reasons in Review mode
 - Promoted 20 themed review lenses from Review prose into registry entries with `mergecraft lens list|show|test`
 - Added pluggable orchestrator with declarative pipeline file, trust gate for untrusted sources, and `mergecraft pipeline lint|show|explain`
@@ -1604,7 +1783,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Evidence image uploads, issue comments, and PR label tools work on review-only runs again
 - Linked-repo contract breakage is included in ordinary PR checkout, not only `mergecraft xrepo explain`
 - Linked-repo checkout reads only operator-granted siblings, and skips a sibling whose HEAD is not the pinned SHA
-- Incoming GitHub and GitLab webhooks fail closed without a configured secret; reused delivery IDs are rejected for the lifetime of the process
+- Webhook signature verification fails closed without a configured secret
 - Untrusted download and clone URLs are SSRF-checked, and binary downloads pin DNS to the validated addresses
 - `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit
 - `bundler-audit` now runs the gem CLI (`bundler-audit check --format json`) instead of `bundle audit`, so Ruby lockfile audits actually execute
@@ -1711,11 +1890,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Mutating MCP tools other than review-session verbs (`select_mode`, checkout, review publication) are refused unless a write-capable mode is selected, including before mode selection (#350)
-- GitLab webhook `X-Gitlab-Token` is compared as a shared secret, not an HMAC of the body; missing delivery ids fail closed instead of accepting anonymous (#361)
+- GitLab webhook `X-Gitlab-Token` is compared as a shared secret, not an HMAC of the body (#361)
 - External URL retrieval also blocks decimal, hex, and short IPv4 forms, IPv6-mapped loopback, and DNS that resolves to loopback, link-local, or metadata; DNS failure is fail-closed (#362)
 - Dependency and container-image vulnerability gates no longer report a pass without running a scanner (#362)
 - Network egress is allow-listed (`allow_egress`), external retrieval refuses SSRF targets (loopback, link-local metadata, `file:`), dependency and container-image vulnerability gates are invocable and the image gate is not `make security`, public comments redact secret tokens, and `docs/THREAT-MODEL.md` ties those controls to `tests/security/test_cd_egress.py` plus an independent security review before a stable release (#362)
-- GitHub webhook deliveries require a matching HMAC; GitLab uses shared-secret `X-Gitlab-Token`; stale or reused deliveries are rejected and each delivery id is processed once; a provider 429 is retried instead of dropped, and webhook adapters still cannot commit, push, or edit (#361)
+- GitHub webhooks are authenticated with a matching HMAC and GitLab with a shared-secret `X-Gitlab-Token`; a provider 429 surfaces as retryable instead of dropping the event, and webhook adapters still cannot commit, push, or edit (#361)
 - `SECURITY.md` states the review-only guarantee: identify, investigate, verify, explain, prioritize, and suggest; no source edits, applied fixes, commits, pushes, or code-changing pull requests (#350)
 - Review runs are review-only: `Fix`, `Build`, `Task`, `AddressReviews`, and `ResolveConflicts` are no longer selectable, and a Review or IncrementalReview run cannot edit the workspace, commit, push, or open a code-changing PR. Illustrative diffs stay GitHub suggestion comments (#350)
 - `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.

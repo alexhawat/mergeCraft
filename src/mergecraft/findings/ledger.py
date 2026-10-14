@@ -11,6 +11,7 @@ import json
 import os
 import re
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -21,7 +22,7 @@ from loguru import logger
 from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState, validate_lifecycle_state
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import AnalyzerRunState, ToolState
@@ -174,9 +175,10 @@ def is_sticky_progress_comment(body: str) -> bool:
     """Return whether ``body`` looks like the mergeCraft sticky progress comment.
 
     This is a body-only shape test: it answers "could this text be our
-    comment?", not "is this comment ours?". Author trust is decided by the
-    selector (:func:`_select_sticky_progress_comment`), which applies the
-    interim bot-author rule before this shape check counts for anything.
+    comment?", not "is this comment ours?". Author trust is decided by
+    :func:`select_sticky_progress_comment` (HS1: run-bound id, then the
+    expected-publisher set, then create-new), which never accepts a Bot-type
+    match on its own.
     """
     lowered = body.lower()
     return (
@@ -248,6 +250,27 @@ def _allowed_publisher_logins() -> frozenset[str]:
         return override
     from_config = _publisher_login_from_repo_config()
     return frozenset({from_config or _DEFAULT_PUBLISHER_LOGIN})
+
+
+def configured_publisher_login() -> str:
+    """Return the reviewer App bot login configured for this checkout, or ``""``.
+
+    The read-only operator view (``findings ledger``) has no run context, so it
+    cannot resolve a run-bound comment id or a publisher set from credentials.
+    It uses the configured App slug when one is set — ``MERGECRAFT_REVIEWER_BOT_LOGIN``
+    or ``reviewerBotLogin`` from repo config — and otherwise reads a Bot-type
+    comment and says the result is unauthenticated. The shared Actions job bot is
+    not an App identity, so it counts as unconfigured.
+    """
+    declared = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    if declared:
+        if declared.casefold() == _DEFAULT_PUBLISHER_LOGIN.casefold():
+            return ""
+        return declared
+    configured = _publisher_login_from_repo_config().strip()
+    if configured.casefold() == _DEFAULT_PUBLISHER_LOGIN.casefold():
+        return ""
+    return configured
 
 
 def _check_run_rows(payload: object) -> list[Mapping[str, object]]:
@@ -322,6 +345,189 @@ def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
     return str(user.get("login") or "") in _allowed_publisher_logins()
 
 
+# ── HS1 — one authorship rule for the sticky comment (P-17) ──────────────────
+#
+# The run-scoped ledger paths (``persist`` / ``upsert`` / ``hydrate``) set these
+# for the duration of their sticky lookup. When ``_run_scope_publishers`` is not
+# ``None`` — even when it is the empty set — selection follows HS1's three-step
+# order and never falls back to a Bot-type match. Callers with no run scope (the
+# read-only operator view and the progress-comment writers that predate the
+# scope) keep the body-shape + Bot-type fallback below.
+_run_scope_publishers: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
+    "mergecraft_sticky_publishers",
+    default=None,
+)
+_run_scope_progress_comment_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "mergecraft_sticky_run_bound_comment_id",
+    default=None,
+)
+
+
+def _comment_author_login(comment: Mapping[str, object]) -> str:
+    """Return the casefolded author login of ``comment``, or ``""`` when unnamed."""
+    user = comment.get("user")
+    if not isinstance(user, Mapping):
+        return ""
+    return str(user.get("login") or "").strip().casefold()
+
+
+def _comment_author_is_bot(comment: Mapping[str, object]) -> bool:
+    """Return whether ``comment``'s author is GitHub-typed as a bot."""
+    user = comment.get("user")
+    if not isinstance(user, Mapping):
+        return False
+    return str(user.get("type") or "") == "Bot"
+
+
+def _carries_ledger_marker(body: str) -> bool:
+    """Return whether ``body`` carries a mergeCraft ledger or record marker."""
+    return (
+        DETERMINISTIC_RECORD_MARKER in body
+        or LEDGER_MARKER_PREFIX in body
+        or LEDGER_MARKER_V2_PREFIX in body
+    )
+
+
+def _step_one_run_bound(
+    comments: Sequence[Mapping[str, object]],
+    run_bound_comment_id: int | None,
+    *,
+    return_body: bool,
+) -> str | dict[str, Any] | None:
+    """HS1 step 1 — the trusted run's own artefact names the sticky by id.
+
+    The id proves which comment the trusted run owns, so a job-token-only run
+    keeps its cross-run ledger even though no publisher identity resolves. The
+    comment must still be a Bot and still carry a marker: an id alone is not
+    permission to trust a human comment or a markerless body.
+    """
+    if run_bound_comment_id is None:
+        return None
+    target = str(run_bound_comment_id)
+    for comment in comments:
+        if str(comment.get("id") or "") != target:
+            continue
+        body = str(comment.get("body") or "")
+        if not _comment_author_is_bot(comment):
+            return None
+        if not _carries_ledger_marker(body):
+            return None
+        return body if return_body else dict(comment)
+    return None
+
+
+def _step_two_publisher(
+    comments: Sequence[Mapping[str, object]],
+    publishers: frozenset[str],
+    *,
+    return_body: bool,
+) -> str | dict[str, Any] | None:
+    """HS1 step 2 — the expected-publisher set.
+
+    A sticky is this run's only when a login the run publishes as wrote it. An
+    empty set authorizes nothing. Ledger-marker preference is applied inside the
+    set (LG-D4): a marker-bearing publisher comment beats a heading-only one.
+    """
+    if not publishers:
+        return None
+    allowed = {login.casefold() for login in publishers}
+    progress_body = ""
+    progress: dict[str, Any] | None = None
+    for comment in comments:
+        body = str(comment.get("body") or "")
+        if not is_sticky_progress_comment(body):
+            continue
+        if _comment_author_login(comment) not in allowed:
+            continue
+        if _carries_ledger_marker(body):
+            return body if return_body else dict(comment)
+        if return_body:
+            progress_body = body
+        else:
+            progress = dict(comment)
+    return progress_body if return_body else progress
+
+
+def _warn_no_publisher_identity() -> None:
+    """Log the one HS1 step-3 warning naming why no existing sticky was trusted."""
+    logger.warning(
+        "finding ledger: no publisher identity resolved for this run and no "
+        "run-bound progress-comment id, so no existing sticky progress comment "
+        "can be trusted as this run's; creating a new progress comment. Configure "
+        "the reviewer App or publish with a PAT to restore the cross-run ledger."
+    )
+
+
+def _select_hs1(
+    comments: Sequence[Mapping[str, object]],
+    *,
+    publishers: frozenset[str],
+    run_bound_comment_id: int | None,
+    return_body: bool,
+) -> str | dict[str, Any] | None:
+    """Apply HS1's three-step order; step 3 creates-new (never Bot-type)."""
+    bound = _step_one_run_bound(comments, run_bound_comment_id, return_body=return_body)
+    if bound is not None:
+        return bound
+    publisher_match = _step_two_publisher(comments, publishers, return_body=return_body)
+    if publisher_match is not None:
+        return publisher_match
+    _warn_no_publisher_identity()
+    return "" if return_body else None
+
+
+def select_sticky_progress_comment(
+    ctx: ToolContext,
+    comments: Sequence[Mapping[str, object]],
+    *,
+    run_bound_comment_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Select the run's sticky progress comment under HS1's three-step order.
+
+    The publisher set is resolved from the run's own credentials
+    (:func:`mergecraft.review.authorship.expected_publisher_logins`), never from
+    a PR-forgeable comment body. ``run_bound_comment_id`` is the id the trusted
+    workflow run's own artefact names (HS8); it outranks the publisher scan and
+    is the only path that selects on a job-token-only run. When neither is
+    available the writer creates a new comment and one warning names why — this
+    selector never falls back to a Bot-type match.
+    """
+    from mergecraft.review.authorship import expected_publisher_logins
+
+    selected = _select_hs1(
+        comments,
+        publishers=expected_publisher_logins(ctx),
+        run_bound_comment_id=run_bound_comment_id,
+        return_body=False,
+    )
+    return selected if isinstance(selected, dict) else None
+
+
+def _run_bound_sticky_id(ctx: ToolContext) -> int | None:
+    """Return the run-bound sticky id HS8 records, when the run state carries one."""
+    raw = getattr(ctx.tool_state, "run_bound_progress_comment_id", None)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+@contextmanager
+def _run_sticky_scope(ctx: ToolContext) -> Iterator[None]:
+    """Scope a sticky lookup to the run's publisher set and run-bound id (HS1)."""
+    from mergecraft.review.authorship import expected_publisher_logins
+
+    publisher_token = _run_scope_publishers.set(expected_publisher_logins(ctx))
+    id_token = _run_scope_progress_comment_id.set(_run_bound_sticky_id(ctx))
+    try:
+        yield
+    finally:
+        _run_scope_progress_comment_id.reset(id_token)
+        _run_scope_publishers.reset(publisher_token)
+
+
 def _select_sticky_progress_comment(
     comments: Sequence[Mapping[str, object]],
     *,
@@ -329,11 +535,20 @@ def _select_sticky_progress_comment(
 ) -> str | dict[str, Any] | None:
     """Select the sticky progress comment; ledger markers win over heading heuristics.
 
-    Only a trusted (bot-authored) comment is considered; an untrusted comment
-    that carries a sticky shape is skipped with a warning naming its id, so a
-    forged marker is visible in the run log rather than silently trusted. The
-    ledger-marker preference is applied after that author filter (LG-D4).
+    Under a run scope (``_run_sticky_scope``) this applies HS1's order. Without
+    one — the read-only operator view and the pre-scope progress-comment writers
+    — it keeps the legacy body-shape + Bot-type fallback, which is
+    unauthenticated by construction: ``github-actions[bot]`` is shared and
+    forgeable, so a caller that needs identity must run inside the scope.
     """
+    publishers = _run_scope_publishers.get()
+    if publishers is not None:
+        return _select_hs1(
+            comments,
+            publishers=publishers,
+            run_bound_comment_id=_run_scope_progress_comment_id.get(),
+            return_body=return_body,
+        )
     progress_body = ""
     progress: dict[str, Any] | None = None
     for comment in comments:
@@ -676,9 +891,10 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
             )
             legacy = str(comment.get("body") or "")
         elif issue_number is not None:
-            legacy = await fetch_sticky_progress_comment_body(
-                ctx.scm, ctx.repo.owner, ctx.repo.name, int(issue_number)
-            )
+            with _run_sticky_scope(ctx):
+                legacy = await fetch_sticky_progress_comment_body(
+                    ctx.scm, ctx.repo.owner, ctx.repo.name, int(issue_number)
+                )
         else:
             legacy = ""
         if legacy:
@@ -747,12 +963,13 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
             tool_state.last_progress_body = body_with_ledger
             return
 
-        sticky = await fetch_sticky_progress_comment(
-            ctx.scm,
-            ctx.repo.owner,
-            ctx.repo.name,
-            int(issue_number),
-        )
+        with _run_sticky_scope(ctx):
+            sticky = await fetch_sticky_progress_comment(
+                ctx.scm,
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(issue_number),
+            )
         if sticky is not None:
             # A selected sticky is always updated. Guarding on a non-empty body
             # meant a sticky the selector returned without content fell through
@@ -1252,12 +1469,13 @@ async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) ->
             tool_state.last_progress_body = body_with_ledger
             return
 
-        sticky = await fetch_sticky_progress_comment(
-            ctx.scm,
-            ctx.repo.owner,
-            ctx.repo.name,
-            int(issue_number),
-        )
+        with _run_sticky_scope(ctx):
+            sticky = await fetch_sticky_progress_comment(
+                ctx.scm,
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(issue_number),
+            )
         if sticky is not None:
             existing_body = str(sticky.get("body") or "")
             merged = merge_deterministic_record_into_comment(
@@ -1299,6 +1517,7 @@ __all__ = [
     "LEDGER_MARKER_V2_PREFIX",
     "LEDGER_SCHEMA_VERSION",
     "FindingLedger",
+    "configured_publisher_login",
     "ensure_finding_ledger",
     "fetch_review_ledger",
     "fetch_review_record_bodies",
@@ -1315,6 +1534,7 @@ __all__ = [
     "record_published_findings_in_ledger",
     "record_withdrawn_in_ledger",
     "render_deterministic_review_block",
+    "select_sticky_progress_comment",
     "sticky_progress_comment_body",
     "upsert_sticky_progress_comment",
 ]

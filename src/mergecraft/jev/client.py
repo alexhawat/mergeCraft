@@ -1,22 +1,21 @@
-"""Pinned async Jev client: retry, trace, cost, kill-switch (J2).
+"""Pinned async Jev client: retry, trace, cost, kill-switch.
 
-Wraps TypeSafe's ``AsyncTypeSafeClient``. Tests drive this module against
-recorded transport fixtures — CI makes zero live TypeSafe calls (D14).
+Wraps TypeSafe's ``AsyncTypeSafeClient`` behind the :class:`JevTransport`
+seam. Tests pass a recorded transport; CI makes zero live TypeSafe calls.
 
 Exports:
-    PINNED_MODEL: Versioned Jev model id (D8).
+    PINNED_MODEL: Versioned Jev model id.
     TYPESAFE_API_KEY_ENV: Credential environment variable.
     TypeSafeAPIError: HTTP/API failure with ``status_code`` and ``code``.
     AsyncJevClient: Public async client.
-    RecordedTransport: Replay a recorded TypeSafe envelope.
-    FlakyRecordedTransport: Transient-then-success recorded transport.
+    JevTransport: Async ``system_one`` seam — recorded in tests, live in production.
+    LiveTypeSafeTransport: Dispatch through ``AsyncTypeSafeClient``.
     map_typesafe_error: Map ``TypeSafeAPIError`` onto ``ProviderFailureClass``.
     mapped_retry_policy: TypeSafe ``RetryPolicy`` using repo retry conventions.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from typing import TYPE_CHECKING, Any, Protocol
@@ -44,8 +43,6 @@ from mergecraft.utils.provider_failure import ProviderFailureClass
 from mergecraft.utils.retry_policy import DEFAULT_STOP, DEFAULT_WAIT
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.config.settings import JevSettings
     from mergecraft.tracing import Tracer
 
@@ -132,98 +129,8 @@ def _is_retryable_typesafe(exc: BaseException) -> bool:
     return isinstance(exc, TypeSafeAPIError) and (exc.status_code == 429 or exc.status_code >= 500)
 
 
-def _raise_from_envelope(error: dict[str, Any], http: dict[str, Any] | None) -> None:
-    status = error.get("status_code")
-    if not isinstance(status, int):
-        raw_http = http or {}
-        raw_status = raw_http.get("status")
-        status = raw_status if isinstance(raw_status, int) else 500
-    code = error.get("code")
-    if not isinstance(code, str) or not code:
-        code = "typesafe_error"
-    raise TypeSafeAPIError(code, status_code=status, code=code, body=error)
-
-
-class RecordedTransport:
-    """Replay one recorded TypeSafe envelope. Never opens a network socket."""
-
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self._payload = payload
-        self.calls = 0
-        self.last_model: str | None = None
-
-    @classmethod
-    def from_fixture(cls, path: Path) -> RecordedTransport:
-        """Load a recorded envelope from disk.
-
-        Args:
-            path: JSON fixture path under ``tests/jev/fixtures/transport/``.
-
-        Returns:
-            RecordedTransport: Ready to replay the envelope.
-        """
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            msg = f"transport fixture must be a JSON object: {path}"
-            raise TypeError(msg)
-        return cls(raw)
-
-    async def system_one(
-        self,
-        *,
-        state: dict[str, Any],
-        questions: dict[str, Any],
-        model: str,
-    ) -> SystemOneResponse:
-        del state, questions
-        self.calls += 1
-        self.last_model = model
-        error = self._payload.get("error")
-        if isinstance(error, dict):
-            http = self._payload.get("http")
-            _raise_from_envelope(error, http if isinstance(http, dict) else None)
-        body = self._payload.get("body", self._payload)
-        if not isinstance(body, dict):
-            raise JevError("recorded transport body is not an object", code="invalid_response")
-        return parse_system_one_response(body)
-
-
-class FlakyRecordedTransport:
-    """Fail ``fail_times`` times from a recorded error, then succeed."""
-
-    def __init__(
-        self,
-        *,
-        failures: dict[str, Any],
-        success: Path,
-        fail_times: int,
-    ) -> None:
-        self._failures = failures
-        self._success = RecordedTransport.from_fixture(success)
-        self._fail_times = fail_times
-        self.calls = 0
-        self.last_model: str | None = None
-
-    async def system_one(
-        self,
-        *,
-        state: dict[str, Any],
-        questions: dict[str, Any],
-        model: str,
-    ) -> SystemOneResponse:
-        self.calls += 1
-        self.last_model = model
-        if self.calls <= self._fail_times:
-            error = self._failures.get("error")
-            http = self._failures.get("http")
-            if isinstance(error, dict):
-                _raise_from_envelope(error, http if isinstance(http, dict) else None)
-            raise TypeSafeAPIError("server_error", status_code=500, code="server_error")
-        return await self._success.system_one(state=state, questions=questions, model=model)
-
-
 class LiveTypeSafeTransport:
-    """Dispatch through ``AsyncTypeSafeClient``. Unused in CI (D14)."""
+    """Dispatch through ``AsyncTypeSafeClient``. Unused in CI."""
 
     def __init__(self, *, api_key: str) -> None:
         self._api_key = api_key
@@ -347,7 +254,7 @@ class AsyncJevClient:
         """Explicit constructor cap, else the bound run cap, else a local fallback.
 
         ``current_run_budget`` is read at use time so a client built before
-        ``bind_run_budget`` still shares the per-run cap (E-D9).
+        ``bind_run_budget`` still shares the per-run cap.
         """
         from mergecraft.agents.token_budget import current_run_budget, token_budget_for
 
@@ -363,7 +270,7 @@ class AsyncJevClient:
         return self._fallback_budget
 
     def availability_skip(self, *, pack_id: str | None = None) -> JevCallResult | None:
-        """Return an honest skip when this client must not dispatch (D4).
+        """Return an honest skip when this client must not dispatch.
 
         Args:
             pack_id: Optional pack to honor ``JevSettings.packs``.
@@ -399,11 +306,11 @@ class AsyncJevClient:
             state: Structured unit payload. ``None`` is ``invalid_state``.
             pack_id: Versioned question-pack id recorded on the span.
             unit_id: Stable unit id recorded on the span.
-            trust_tier: ``trusted`` or ``untrusted`` (D5 / D9). Defaults to
+            trust_tier: ``trusted`` or ``untrusted``. Defaults to
                 ``untrusted`` so a caller that omits it keeps the nonce
                 fence rather than silently losing it.
-            ratchet_applied: Whether the one-way ratchet is in force (D9).
-            questions: Optional question dict; recorded transport ignores it.
+            ratchet_applied: Whether the one-way ratchet is in force.
+            questions: Optional question dict forwarded to the transport.
 
         Returns:
             JevCallResult: A completed call or an honest skip.
@@ -568,11 +475,9 @@ __all__ = [
     "PINNED_MODEL",
     "TYPESAFE_API_KEY_ENV",
     "AsyncJevClient",
-    "FlakyRecordedTransport",
     "JevError",
     "JevTransport",
     "LiveTypeSafeTransport",
-    "RecordedTransport",
     "TypeSafeAPIError",
     "map_typesafe_error",
     "mapped_retry_policy",

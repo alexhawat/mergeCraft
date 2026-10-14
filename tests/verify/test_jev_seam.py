@@ -18,9 +18,9 @@ import re
 from pathlib import Path
 from typing import Any, get_origin
 
-from mergecraft.jev.client import AsyncJevClient, RecordedTransport
+from mergecraft.jev.client import AsyncJevClient
 from mergecraft.jev.types import JevCallResult, parse_system_one_response
-from tests.jev.support import FORBIDDEN_COUNT_NAMES
+from tests.jev.support import FORBIDDEN_COUNT_NAMES, RecordedTransport
 from tests.verify.support import import_verify, require_symbol
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "transport"

@@ -21,6 +21,7 @@ result without raising.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -385,3 +386,43 @@ def test_issue_comment_on_plain_issue_stays_trusted(
     monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
     tier = derive_trust_tier(event=_comment_on_plain_issue_event())
     assert tier == "trusted"
+
+
+# ── agent-sandbox duck-typed read: an unknown tier must not fall open ────────
+#
+# ``_read_agent_sandbox_level`` reads ``trust.agent_sandbox`` off a snapshot
+# object that bypasses Pydantic validation. Before the fix an unrecognised
+# value fell open to ``dispatch`` — the same "a request for less privilege is
+# read as the default" defect the schema validator carried. The duck-typed
+# path refuses the value the same way the schema validator does.
+
+
+def _duck_settings(agent_sandbox: object) -> SimpleNamespace:
+    return SimpleNamespace(trust=SimpleNamespace(agent_sandbox=agent_sandbox))
+
+
+@pytest.mark.parametrize("bad", ["off", "false", "nevr", "", "NONE", "same_repo"])
+def test_read_agent_sandbox_level_refuses_unknown_value(bad: str) -> None:
+    """An unknown duck-typed tier is refused, never read as ``dispatch``."""
+    from mergecraft.config.trust_policy import _read_agent_sandbox_level
+
+    with pytest.raises(ValueError, match=r"agentSandbox|agent_sandbox") as exc_info:
+        _read_agent_sandbox_level(_duck_settings(bad))
+    text = str(exc_info.value)
+    assert "agentSandbox" in text or "agent_sandbox" in text, text
+    for tier in ("never", "merged-only", "dispatch", "same-repo"):
+        assert tier in text, f"error does not name tier {tier!r}: {text}"
+
+
+@pytest.mark.parametrize("tier", ["never", "merged-only", "dispatch", "same-repo"])
+def test_read_agent_sandbox_level_returns_valid_tier(tier: str) -> None:
+    from mergecraft.config.trust_policy import _read_agent_sandbox_level
+
+    assert _read_agent_sandbox_level(_duck_settings(tier)) == tier
+
+
+def test_read_agent_sandbox_level_defaults_when_trust_absent() -> None:
+    """A settings object with no ``trust`` block keeps the documented default."""
+    from mergecraft.config.trust_policy import _read_agent_sandbox_level
+
+    assert _read_agent_sandbox_level(SimpleNamespace()) == "dispatch"

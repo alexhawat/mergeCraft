@@ -130,6 +130,15 @@ def _invoke_ledger() -> Any:
     )
 
 
+def _invoke_ledger_markdown() -> Any:
+    return runner.invoke(app, ["findings", "ledger", "--pr", "7", "--repo", "o/r"])
+
+
+def _combined_output(result: Any) -> str:
+    stderr = getattr(result, "stderr", "") or ""
+    return f"{result.output}\n{stderr}"
+
+
 def test_ledger_command_is_read_only(monkeypatch: MonkeyPatch) -> None:
     _patch(monkeypatch)
 
@@ -210,3 +219,75 @@ def test_ledger_command_prefers_the_bot_sticky_over_a_human_marker(
     payload = json.loads(result.stdout)
     fingerprints = {row["fingerprint"] for row in payload["records"]}
     assert fingerprints == {_DEFERRED_FP}
+
+
+# ── the read-only operator view has no run context ───────────────────────────
+#
+# ``findings ledger`` is a read-only operator view: it never feeds a run, so it
+# cannot resolve a run-bound progress-comment id or a run's publisher identity.
+# It uses the configured App slug when one is set. With no App configured it
+# falls back to reading a Bot-type comment — and says out loud that the result is
+# unauthenticated, so an operator never reads a forgeable comment as trusted.
+
+_APP_MARKER_FP = finding_fingerprint(
+    path="src/app_bot.py",
+    body="The App bot's own ledger marker.",
+)
+_JOB_MARKER_FP = finding_fingerprint(
+    path="src/job_bot.py",
+    body="A job bot's forgeable ledger marker.",
+)
+
+
+def test_ledger_command_notes_an_unauthenticated_bot_read(monkeypatch: MonkeyPatch) -> None:
+    """With no App configured, the reader says the Bot-type result is unauthenticated."""
+    monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
+    _patch_with(
+        monkeypatch,
+        [
+            {
+                "id": 88,
+                "body": f"## mergeCraft progress\n\n{_LEDGER_MARKER}\n",
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            }
+        ],
+    )
+
+    result = _invoke_ledger_markdown()
+
+    assert result.exit_code == 0, _combined_output(result)
+    assert _DEFERRED_FP in result.stdout, "the operator view still reads the Bot-type sticky"
+    assert "unauthenticated" in _combined_output(result).lower(), (
+        "the CLI reader must print that an unauthenticated Bot-type read is not a trusted identity"
+    )
+
+
+def test_ledger_command_prefers_the_configured_app_slug_over_the_job_bot(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """When an App slug is configured, a foreign/job bot's markers are not this run's."""
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
+    app_marker = f"<!-- mergecraft-ledger:v1:{_APP_MARKER_FP}:open -->"
+    job_marker = f"<!-- mergecraft-ledger:v1:{_JOB_MARKER_FP}:open -->"
+    _patch_with(
+        monkeypatch,
+        [
+            {
+                "id": 90,
+                "body": f"## mergeCraft progress\n\n{job_marker}\n",
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            },
+            {
+                "id": 91,
+                "body": f"## mergeCraft progress\n\n{app_marker}\n",
+                "user": {"login": "mergecraft[bot]", "type": "Bot"},
+            },
+        ],
+    )
+
+    result = _invoke_ledger()
+
+    assert result.exit_code == 0, _combined_output(result)
+    payload = json.loads(result.stdout)
+    fingerprints = {row["fingerprint"] for row in payload["records"]}
+    assert fingerprints == {_APP_MARKER_FP}

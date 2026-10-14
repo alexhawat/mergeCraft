@@ -14,6 +14,7 @@ from mergecraft.findings.ledger import (
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ProgressComment, ReviewReplyRecord, primary_repo_state
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
+from mergecraft.utils.github import _default_server_url
 from mergecraft.utils.learnings import (
     ensure_learnings_review_delta,
     merge_learnings_delta_into_review_body,
@@ -28,9 +29,9 @@ def _footer(ctx: ToolContext) -> str:
     if ctx.tool_state.model:
         parts.append(f" · `{ctx.tool_state.model}`")
     if ctx.run_id is not None:
+        server = _default_server_url()
         parts.append(
-            f" · [run](https://github.com/{ctx.repo.owner}/{ctx.repo.name}"
-            f"/actions/runs/{ctx.run_id})"
+            f" · [run]({server}/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{ctx.run_id})"
         )
     return "".join(parts)
 

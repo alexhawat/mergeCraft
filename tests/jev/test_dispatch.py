@@ -9,6 +9,7 @@ import pytest
 from tests.jev.support import (
     TEST_API_KEY,
     TRANSPORT_DIR,
+    RecordedTransport,
     assert_honest_skip,
     import_jev,
     loguru_lines,
@@ -27,7 +28,7 @@ def _client_mod() -> Any:
 
 def _recorded_client(fixture_name: str = "unit_happy.json") -> Any:
     module = _client_mod()
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
     return module.AsyncJevClient(api_key=TEST_API_KEY, transport=transport), transport
 
 
@@ -87,7 +88,7 @@ async def test_unit_battery_skip_does_not_raise_jev_error(monkeypatch: pytest.Mo
 async def test_dispatch_residual_units_asks_residual_not_analyzer_flagged() -> None:
     """F-UNBACKED-DISPATCH: analyzer-flagged hunks are not re-asked; residual hunks are."""
     module = _client_mod()
-    inner = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
+    inner = RecordedTransport.from_fixture(TRANSPORT_DIR / "unit_happy.json")
     transport = _StateRecordingTransport(inner)
     client = module.AsyncJevClient(api_key=TEST_API_KEY, transport=transport)
     flagged = make_hunk_unit(

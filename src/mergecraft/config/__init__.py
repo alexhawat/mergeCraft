@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from mergecraft.config.settings import (
-    AccountPlan,
     CliTrustOverride,
     HeadingDepth,
     LearningsHeading,
@@ -23,7 +22,6 @@ from mergecraft.config.settings import (
 from mergecraft.types import PushPermission, ShellPermission
 
 __all__ = [
-    "AccountPlan",
     "CliTrustOverride",
     "HeadingDepth",
     "LearningsHeading",

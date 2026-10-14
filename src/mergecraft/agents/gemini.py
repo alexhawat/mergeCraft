@@ -44,7 +44,7 @@ from mergecraft.tracing.tracer import (
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
-from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
@@ -143,7 +143,18 @@ def write_mcp_config(
         headers["X-MergeCraft-Agent-Id"] = agent_id
     if headers:
         server_config["headers"] = headers
-    excluded_tools = [str(name) for name in ctx.subagent_denied_tools]
+    # T9 / DC-D12 — the per-server exclusion list must carry the documented
+    # Gemini CLI spelling (``mcp_<server>_<tool>``), not just the bare MCP name,
+    # or the CLI never matches it. The bare name stays beside it so the
+    # existing contents are unchanged; the formatted ref is what the subagent
+    # actually has to be denied.
+    excluded_tools: list[str] = []
+    for name in ctx.subagent_denied_tools:
+        bare = str(name)
+        excluded_tools.append(bare)
+        documented_ref = format_mcp_tool_ref("gemini", bare)
+        if documented_ref != bare:
+            excluded_tools.append(documented_ref)
     if excluded_tools:
         server_config["excludeTools"] = excluded_tools
 

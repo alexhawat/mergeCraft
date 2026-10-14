@@ -23,6 +23,7 @@ from mergecraft.cli.local_env import (
     local_env_path_for_process_cwd,
 )
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.config.env import LocalDotEnv
 from mergecraft.config.io import load_config_dict as _load_config_dict_raw
 from mergecraft.config.io import patch_config_dict
 from mergecraft.config.io import write_config_dict as _write_config_dict
@@ -47,11 +48,13 @@ AUTH_KIND_API_KEY = "api_key"
 AUTH_KIND_OAUTH = "oauth"
 AUTH_KIND_DEVICE_CODE = "device_code"
 AUTH_KIND_CLOUD_CHAIN = "cloud_chain"
+AUTH_KIND_OPENCODE_ZEN = "opencode_zen"
 
 AUTH_KIND_PRIMARY_SUFFIX: dict[str, str] = {
     AUTH_KIND_API_KEY: "API_KEY",
     AUTH_KIND_OAUTH: "CLAUDE_CODE_OAUTH_TOKEN",
     AUTH_KIND_DEVICE_CODE: "CODEX_AUTH_JSON",
+    AUTH_KIND_OPENCODE_ZEN: "OPENCODE_AUTH_JSON",
 }
 
 BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
@@ -70,6 +73,7 @@ LEGACY_API_KEY_MIGRATIONS: dict[str, tuple[str, str]] = {
     "NOUS_API_KEY": ("nous", "API_KEY"),
     "TOKENHUB_API_KEY": ("tokenhub", "API_KEY"),
     "MERGECRAFT_CUSTOM_PROVIDER_API_KEY": ("minimax", "API_KEY"),
+    "OPENCODE_API_KEY": ("opencode", "API_KEY"),
 }
 
 LEGACY_LABEL_TO_API_KEY_ENV: dict[str, str] = {
@@ -446,6 +450,7 @@ def resolve_auth_strategy(auth_kind: str) -> AuthStrategy:
         AUTH_KIND_OAUTH: _run_oauth_strategy,
         AUTH_KIND_DEVICE_CODE: _run_device_code_strategy,
         AUTH_KIND_CLOUD_CHAIN: _run_cloud_chain_strategy,
+        AUTH_KIND_OPENCODE_ZEN: _run_opencode_zen_strategy,
     }
     handler = handlers.get(normalised)
     if handler is None:
@@ -657,6 +662,30 @@ def _run_device_code_strategy(
     _persist_indexed_credentials(entry, scope, {suffix: value}, cwd=cwd, target=target)
 
 
+def _run_opencode_zen_strategy(
+    entry: Mapping[str, Any],
+    scope: str,
+    *,
+    cwd: Path | None = None,
+    target: AuthTarget | None = None,
+) -> None:
+    from mergecraft.security.opencode_auth import build_opencode_zen_auth_json
+
+    console.print(
+        "create an API key at [cyan]https://opencode.ai/auth[/cyan] "
+        "(OpenCode Zen billing — same console for OpenCode Go), then paste it below."
+    )
+    api_key = _cancelable_getpass("OpenCode Zen API key (Enter to cancel): ")
+    if api_key is None:
+        return
+    if not api_key.strip():
+        console.print("canceled.")
+        return
+    auth_json = build_opencode_zen_auth_json(api_key)
+    suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_OPENCODE_ZEN]
+    _persist_indexed_credentials(entry, scope, {suffix: auth_json}, cwd=cwd, target=target)
+
+
 def _run_cloud_chain_strategy(
     entry: Mapping[str, Any],
     scope: str,
@@ -781,21 +810,17 @@ class MigrationPlan:
 
 
 def _read_env_map(env_path: Path) -> dict[str, str]:
-    """Parse ``KEY=value`` lines from *env_path* (secrets stay file-local)."""
+    """Read ``KEY=value`` pairs from *env_path* through the shared ``.env`` reader.
+
+    Provider commands and the CLI startup load must give one file one meaning,
+    so the file is parsed by :class:`mergecraft.config.env.LocalDotEnv` over the
+    same ``python-dotenv`` ladder the startup load uses: ``export `` prefixes,
+    single- and double-quoted values, inline comments and ``${VAR}``
+    interpolation all resolve identically. Values stay file-local strings.
+    """
     if not env_path.is_file():
         return {}
-    out: dict[str, str] = {}
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if value.startswith('"') and value.endswith('"'):
-            value = value[1:-1]
-        out[key] = value
-    return out
+    return LocalDotEnv.from_file(env_path).raw_values()
 
 
 def migration_secret_fingerprint(value: str) -> str:
@@ -845,11 +870,6 @@ def validate_config_secret_split(
                 if key in BEDROCK_CLOUD_SUFFIXES or key in VERTEX_CLOUD_SUFFIXES:
                     continue
     return violations
-
-
-def _indexed_label_from_env(env_map: Mapping[str, str], env_index: int) -> str | None:
-    raw = env_map.get(f"LLM_PROVIDER_{env_index}", "").strip()
-    return raw or None
 
 
 def _indexed_value(env_map: Mapping[str, str], env_index: int, suffix: str) -> str | None:

@@ -1,8 +1,8 @@
-"""Per-run budgets, external-operation timeouts, and large-input degradation (CC3).
+"""Per-run budgets, external-operation timeouts, and large-input degradation.
 
 A single resolved :class:`RunBounds` object is threaded from settings through
 the offline review and Action orchestrators. Budget exhaustion maps to
-``RunOutcome.inconclusive`` — never a partial approval (D12).
+``RunOutcome.inconclusive`` — never a partial approval.
 """
 
 from __future__ import annotations
@@ -24,12 +24,8 @@ if TYPE_CHECKING:
 
 BudgetKind = Literal["token", "cost", "tool_call"]
 
-_DEFAULT_TOKEN_BUDGET: Final[int] = 2_000_000
-_DEFAULT_COST_BUDGET_USD: Final[float] = 50.0
-_DEFAULT_TOOL_CALL_BUDGET: Final[int] = 500
 _DEFAULT_RUN_TIMEOUT_S: Final[float] = 3600.0
 _DEFAULT_CONTEXT_RETRIEVAL_TIMEOUT_S: Final[float] = 30.0
-_DEFAULT_MAX_DIFF_LINES: Final[int] = 50_000
 _DEFAULT_EXTERNAL_OPERATION_TIMEOUT_S: Final[float] = 600.0
 _DEFAULT_CACHE_MAX_BYTES: Final[int] = 512 * 1024 * 1024
 
@@ -65,7 +61,7 @@ class RunBounds:
 
     @property
     def token_ceiling(self) -> int:
-        """Hard token ceiling: target plus configured tolerance band (D9)."""
+        """Hard token ceiling: target plus configured tolerance band."""
         if self.token_budget_tolerance <= 0.0:
             return self.token_budget
         return int(self.token_budget * (1.0 + self.token_budget_tolerance))
@@ -73,7 +69,7 @@ class RunBounds:
 
 @dataclass(frozen=True, slots=True)
 class ScopeReduction:
-    """Recorded scope omission when a diff exceeds ``max_diff_lines`` (D12)."""
+    """Recorded scope omission when a diff exceeds ``max_diff_lines``."""
 
     original_lines: int
     kept_lines: int
@@ -188,7 +184,7 @@ class BudgetTracker:
 
         Catching the exception at a higher level (e.g. the MCP JSON-RPC
         handler) is allowed — the orchestrator's ``_finalize`` still reads
-        ``last_exhausted`` and applies ``budget_exhaustion_outcome`` (D12).
+        ``last_exhausted`` and applies ``budget_exhaustion_outcome``.
         """
         self.last_exhausted = exc
         raise exc
@@ -326,10 +322,9 @@ def format_token_budget_summary(
     total is rendered.
 
     The input/output sums come only from ``AgentUsage`` rows, so any other
-    budgeted tokens would be dropped and total consumption under-reported. The
-    only non-agent charge today is dynamic context expansion, recorded at the
-    ``context_expansion`` phase (:mod:`mergecraft.context.dynamic_expansion`);
-    it is rendered as its own component so the published components sum to
+    budgeted tokens would be dropped and total consumption under-reported. Such
+    a charge lands on its own phase (for example ``context_expansion``) and is
+    rendered as its own component so the published components sum to
     ``tracker.tokens_used``.
     """
     bounds = tracker.bounds
@@ -407,7 +402,7 @@ def timeout_for_external_operation(
 
 
 def budget_exhaustion_outcome(exc: BudgetExhausted) -> RunOutcome:
-    """Map budget exhaustion to ``inconclusive`` — never ``passed`` (D12)."""
+    """Map budget exhaustion to ``inconclusive`` — never ``passed``."""
     logger.warning("run budget exhausted ({}): {}", exc.kind, exc)
     return RunOutcome.inconclusive
 
@@ -416,7 +411,7 @@ def outcome_with_scope_reduction(
     outcome: RunOutcome,
     reduction: ScopeReduction | None,
 ) -> RunOutcome:
-    """Downgrade a would-be pass when scope was reduced (D12)."""
+    """Downgrade a would-be pass when scope was reduced."""
     if reduction is None:
         return outcome
     if outcome is RunOutcome.passed:
@@ -453,7 +448,7 @@ def apply_diff_line_budget(
     *,
     max_lines: int,
 ) -> tuple[str, ScopeReduction | None]:
-    """Truncate an oversized diff by file, recording omitted scope (D12)."""
+    """Truncate an oversized diff by file, recording omitted scope."""
     if not diff_text.strip():
         return diff_text, None
     blocks = _diff_file_blocks(diff_text)

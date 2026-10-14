@@ -18,8 +18,6 @@ if TYPE_CHECKING:
     from mergecraft.utils.github import GitHubClient
     from mergecraft.utils.run_bounds import BudgetTracker
 
-AccountPlan = Literal["free", "pro", "team", "enterprise", "unknown"]
-
 
 @dataclass(slots=True)
 class RepoIdentity:
@@ -100,7 +98,6 @@ class ToolContext:
     run_id: int | None = None
     job_id: str | None = None
     oss: bool = False
-    plan: AccountPlan = "unknown"
     resolved_model: str | None = None
     suggest_eval_add: bool = False
     budget_tracker: BudgetTracker | None = None
@@ -158,7 +155,6 @@ class ToolContext:
         run_id: int | None = None,
         job_id: str | None = None,
         oss: bool = False,
-        plan: AccountPlan = "unknown",
         resolved_model: str | None = None,
         suggest_eval_add: bool = False,
         budget_tracker: BudgetTracker | None = None,
@@ -214,7 +210,6 @@ class ToolContext:
         self.run_id = run_id
         self.job_id = job_id
         self.oss = oss
-        self.plan = plan
         self.resolved_model = resolved_model
         self.suggest_eval_add = suggest_eval_add
         self.budget_tracker = budget_tracker

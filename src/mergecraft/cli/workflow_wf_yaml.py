@@ -9,6 +9,7 @@ YAML stay byte-stable.
 from __future__ import annotations
 
 import difflib
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,9 +21,11 @@ from mergecraft.cli.tracing_logfire_wf_yaml import (
     WiringChange,
     _create_env_block,
     _create_with_block,
+    _derive_child_indent,
     _find_mapping_block,
     _insert_owned_keys_into_block,
     _is_action_uses,
+    _line_indent_len,
     _mutate_steps,
     _splice_secret,
 )
@@ -142,6 +145,143 @@ def _assert_provider_env_wired(
                 raise WorkflowYamlError(
                     f"mergeCraft step {step_id!r} missing env.{api_key}={expected_api!r}"
                 )
+
+
+def _assert_harness_provider_env_wired(
+    text: str,
+    *,
+    step_identifiers: list[str],
+    env_canonical: list[tuple[str, str]],
+) -> None:
+    if not step_identifiers:
+        return
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise WorkflowYamlError(f"mutation produced invalid YAML: {exc}") from exc
+    if not isinstance(parsed, dict):
+        return
+    jobs = parsed.get("jobs")
+    if not isinstance(jobs, dict):
+        return
+    targets = set(step_identifiers)
+    expected = dict(env_canonical)
+    for job_def in jobs.values():
+        if not isinstance(job_def, dict):
+            continue
+        steps = job_def.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str) or not _is_action_uses(uses):
+                continue
+            step_id = step.get("id") or step.get("name") or f"step[{i}]"
+            if step_id not in targets:
+                continue
+            env_map = step.get("env")
+            if not isinstance(env_map, dict):
+                raise WorkflowYamlError(f"mergeCraft step {step_id!r} missing env: mapping")
+            for key, value in expected.items():
+                if env_map.get(key) != value:
+                    raise WorkflowYamlError(
+                        f"mergeCraft step {step_id!r} missing env.{key}={value!r}"
+                    )
+
+
+def _strip_env_keys_from_block(
+    block: str,
+    keys: frozenset[str],
+    *,
+    at_indent: int | None = None,
+) -> tuple[str, bool]:
+    """Remove selected keys from the step's direct ``env:`` children."""
+    if not keys:
+        return block, False
+    key_re = re.compile(r"^[ \t]*(?P<k>[A-Za-z0-9_-]+|MERGECRAFT_[A-Z_]+):.*\n")
+    env_block = _find_mapping_block(block, "env", at_indent=at_indent)
+    if env_block is None:
+        return block, False
+    child_indent_ws = _derive_child_indent(block, env_block[0], env_block[1], env_block[2])
+    if child_indent_ws is None:
+        return block, False
+    child_indent = len(child_indent_ws)
+    lines = block[env_block[0] : env_block[1]].splitlines(keepends=True)
+    if not lines:
+        return block, False
+    modified = False
+    new_lines = [lines[0]]
+    for ln in lines[1:]:
+        stripped = ln.strip()
+        if not stripped:
+            new_lines.append(ln)
+            continue
+        if _line_indent_len(ln) != child_indent:
+            new_lines.append(ln)
+            continue
+        match = key_re.match(ln)
+        if match is not None and match.group("k") in keys:
+            modified = True
+            continue
+        new_lines.append(ln)
+    if not modified:
+        return block, False
+    if len(new_lines) <= 1:
+        return block[: env_block[0]] + block[env_block[1] :], True
+    new_inner = "".join(new_lines)
+    return block[: env_block[0]] + new_inner + block[env_block[1] :], True
+
+
+def apply_harness_provider_env_wiring(
+    *,
+    workflow_path: Path,
+    env_canonical: list[tuple[str, str]],
+    step_selector: str,
+    force: bool,
+    strip_env_keys: tuple[str, ...] = (),
+) -> WorkflowChange:
+    """Insert harness-provider ``env:`` keys (label + flat credentials, no custom base URL)."""
+    text = _read_workflow_text(workflow_path)
+    keys_to_strip = frozenset(strip_env_keys)
+
+    def _do(block: str, step_indent: int) -> tuple[str, bool]:
+        block0, stripped = _strip_env_keys_from_block(block, keys_to_strip, at_indent=step_indent)
+        block2, mod_env = _insert_owned_keys_into_block(
+            block0,
+            key="env",
+            canonical=env_canonical,
+            env_style=True,
+            force=force,
+            at_indent=step_indent,
+        )
+        if not mod_env and _find_mapping_block(block2, "env", at_indent=step_indent) is None:
+            block2 = _create_env_block(block2, env_canonical, at_indent=step_indent)
+            mod_env = True
+        block3, mod_env2 = _insert_owned_keys_into_block(
+            block2,
+            key="env",
+            canonical=env_canonical,
+            env_style=True,
+            force=force,
+            at_indent=step_indent,
+        )
+        return block3, mod_env or mod_env2 or stripped
+
+    def _post_check(cur_text: str, *, step_identifiers: list[str]) -> None:
+        _assert_harness_provider_env_wired(
+            cur_text,
+            step_identifiers=step_identifiers,
+            env_canonical=env_canonical,
+        )
+
+    return _mutate_steps(
+        text,
+        step_selector=step_selector,
+        mutate_one=_do,
+        post_mutation_check=_post_check,
+    )
 
 
 def apply_provider_env_wiring(
@@ -372,6 +512,7 @@ __all__ = [
     "WORKFLOW_OWNED_WITH_KEYS",
     "WorkflowChange",
     "WorkflowYamlError",
+    "apply_harness_provider_env_wiring",
     "apply_model_prioritize",
     "apply_model_wiring",
     "apply_provider_env_wiring",

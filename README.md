@@ -18,7 +18,7 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 
 [**For LLM / Agents**](#for-agents) · [Problem](#problem) · [How it works in GitHub Action](#how-it-works) · [Install](#install) · [Features](#features) · [Docs](#docs)
 
-[Agent skill](skills/mergecraft/SKILL.md) · [AGENTS.md](AGENTS.md) · [llms.txt](llms.txt)
+[Agent skill](skills/mergecraft/SKILL.md) · [AGENTS-mergecraft.md](AGENTS-mergecraft.md) · [llms.txt](llms.txt)
 
 </div>
 
@@ -37,7 +37,7 @@ the block below, and paste. That is the whole install.
 ```text
 Set up mergeCraft (BYOK AI PR review) in this repository.
 
-Reference: https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md
+Reference: https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md
 
 Do all of this yourself, without asking me, except where step 4 says STOP:
 
@@ -128,8 +128,8 @@ config keys, exit codes, and failure modes.
      .github/skills/mergecraft/   -> GitHub Copilot (cloud agent, code review,
                                      CLI, VS Code agent mode)
 
-   If your agent is none of these, copy AGENTS.md and llms.txt to the repo
-   root -- every agent reads those.
+   If your agent is none of these, copy AGENTS-mergecraft.md (as AGENTS.md) and
+   llms.txt to the repo root -- every agent reads those.
 
 3. Also copy commands/ to your agent's slash-command directory if it has one
    (Claude Code: .claude/commands/).
@@ -155,7 +155,7 @@ Then: `/mergecraft-setup` to scaffold, `/mergecraft-review` to review a local di
 **Cursor** (chat or composer):
 
 ```text
-Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md and set
+Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md and set
 mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python —
 do not install Python), run `mergecraft init`, wire .mergecraft/config.yaml, and
 open a PR with the workflow. Print the `mergecraft provider auth <provider> --scope github` command for
@@ -169,7 +169,7 @@ Grok Bot does not read `.agents/skills/` in consumer repos. The in-account
 **mergeCraft** bot follows this same recipe:
 
 ```text
-Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md and set
+Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md and set
 mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python —
 do not install Python), run `mergecraft init` in the consumer repo (never in the
 mergeCraft source tree), wire .mergecraft/config.yaml, and open a PR with the
@@ -184,7 +184,7 @@ enable it for this Bot) so you keep the knowledge.
 
 ```text
 Task: make this repo use mergeCraft for AI PR review.
-Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md first.
+Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md first.
 Create a branch that adds .github/workflows/mergecraft.yml, pinning the action
 to a full 40-character commit SHA you resolved from the repo (never an invented
 tag), plus a .mergecraft/config.yaml whose `models:`
@@ -197,7 +197,7 @@ model is not Anthropic/OpenAI/Google:
 
 ```text
 Set up mergeCraft in this repo per
-https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md, using the opencode
+https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md, using the opencode
 harness. Install with uv, run `mergecraft init`, then set in
 .mergecraft/config.yaml:
     harness: opencode
@@ -215,7 +215,7 @@ Open a PR.
 
 ```text
 Set up mergeCraft in this repo. Follow
-https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md. Install with uv
+https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md. Install with uv
 (do not install Python), run `mergecraft init`, set `models:` to
 ["google/gemini-3.1-pro-preview"] in .mergecraft/config.yaml, and open a PR
 with the workflow. Print `mergecraft provider auth google --scope github` for me to run — do not
@@ -223,11 +223,11 @@ handle the API key.
 ```
 
 **GitHub Copilot** (CLI, VS Code agent mode, or cloud agent) — copy the
-generated package, then follow `AGENTS.md`. Copilot also reads
+generated package, then follow `AGENTS-mergecraft.md`. Copilot also reads
 [`.github/copilot-instructions.md`](.github/copilot-instructions.md):
 
 ```text
-Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS.md and set
+Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md and set
 mergeCraft up in this repo. Install the CLI with uv (uv fetches its own Python —
 do not install Python), run `mergecraft init`, wire .mergecraft/config.yaml, and
 open a PR with the workflow. Print the `mergecraft provider auth <provider> --scope github` command for
@@ -241,7 +241,7 @@ package; give them the machine-readable entry point and let them plan:
 
 ```text
 Read https://raw.githubusercontent.com/alexhawat/mergeCraft/main/llms.txt —
-it is a curated map of this project's docs. Then read AGENTS.md and
+it is a curated map of this project's docs. Then read AGENTS-mergecraft.md and
 docs/authentication.md. Goal: install mergeCraft as the PR reviewer for the
 repo in the current working directory.
 
@@ -275,7 +275,7 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 
 | Surface | What it gives an agent |
 |---|---|
-| [`AGENTS.md`](AGENTS.md) | Cross-vendor setup + contribution guidance, read natively by Codex, Cursor, Grok Bot, OpenCode, Gemini CLI and Copilot |
+| [`AGENTS-mergecraft.md`](AGENTS-mergecraft.md) | Cross-vendor setup + contribution guidance for Codex, Cursor, Grok Bot, OpenCode, Gemini CLI and Copilot |
 | [`skills/mergecraft/SKILL.md`](skills/mergecraft/SKILL.md) | Agent-Skills package: setup checklist, CLI map, config keys, troubleshooting |
 | [`llms.txt`](llms.txt) · [`llms-full.txt`](llms-full.txt) | Curated doc map, and the full corpus in one file |
 | [`.claude-plugin/`](.claude-plugin/plugin.json) · [`commands/`](commands/) | Claude plugin manifest and `/mergecraft-setup` · `/mergecraft-review` |
@@ -493,6 +493,7 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 |----------|-----------------------------|---------|-------------------|
 | Anthropic Claude | `mergecraft provider auth anthropic --scope github` → indexed credentials | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` |
 | OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
+| OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` | `OPENCODE_API_KEY` | Zen: `opencode/gpt-5.6-sol`; Go: `opencode-go/deepseek-v4-pro` (cheaper: `opencode-go/deepseek-v4.1-flash`) |
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials | `GEMINI_API_KEY` | `google/gemini-3.1-pro-preview` |
 | Nous Portal | — | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` |
 | Tencent TokenHub | — | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` |
@@ -514,7 +515,7 @@ When `harness:` is unset, mergeCraft infers the runtime from the model slug — 
 
 | Doc | What it covers |
 |-----|----------------|
-| [`AGENTS.md`](AGENTS.md) | Agent entry point — consumer setup and contributing |
+| [`AGENTS-mergecraft.md`](AGENTS-mergecraft.md) | Agent entry point — consumer setup and contributing |
 | [`docs/glossary.md`](docs/glossary.md) | Plain-language definitions for landing-page terms |
 | [`docs/install.md`](docs/install.md) | Action vs CLI vs Docker install paths |
 | [`docs/authentication.md`](docs/authentication.md) | Providers, custom gateways, model fallback chains |

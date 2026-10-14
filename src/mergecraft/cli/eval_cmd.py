@@ -89,7 +89,11 @@ from mergecraft.evals.scoring import (
 )
 from mergecraft.evals.store import CATEGORY_REJECTED, CATEGORY_REVERTED, FAILURE_CATEGORIES
 from mergecraft.evals.trajectory_scoring import (
+    DEFAULT_TRAJECTORY_PROTOCOL_PATH,
+    TrajectoryScoreReport,
+    compare_trajectory_report,
     load_trajectory_label_sets,
+    load_trajectory_protocol,
     score_trajectory_labels,
 )
 from mergecraft.models import get_model_provider
@@ -1069,6 +1073,92 @@ def trajectory_score_cmd(
         rendered = f"{value:.2%}" if value is not None else "undefined"
         console.print(f"  {metric_name:<17}: {rendered}")
     console.print(f"  eligibility    : {report.eligibility.reason}")
+
+
+def _emit_trajectory_gate_advisory(
+    ctx: typer.Context,
+    *,
+    json_output: bool,
+    reason: str,
+) -> None:
+    """Report the gate as advisory and exit 0 — nothing is enforced yet."""
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json({"status": "advisory", "advisory": True, "reason": reason})
+        return
+    console.print(f"[yellow]trajectory gate: {reason}[/yellow]")
+
+
+@app.command("trajectory-gate")
+def trajectory_gate_cmd(
+    ctx: typer.Context,
+    protocol: Path = typer.Option(
+        DEFAULT_TRAJECTORY_PROTOCOL_PATH,
+        "--protocol",
+        help="Approved trajectory protocol JSON; without it the gate is advisory.",
+    ),
+    baseline: Path | None = typer.Option(
+        None,
+        "--baseline",
+        help="Frozen baseline TrajectoryScoreReport JSON.",
+    ),
+    candidate: Path | None = typer.Option(
+        None,
+        "--candidate",
+        help="Candidate TrajectoryScoreReport JSON to compare against the baseline.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the comparison result as JSON.",
+    ),
+) -> None:
+    """Compare a candidate trajectory report against a frozen baseline.
+
+    The gate reads the approved protocol (per-check sample minimums plus a
+    tolerance) and fails when a candidate report drifts outside the tolerance,
+    naming the check. Until an approved protocol is committed there is nothing
+    to enforce, so the gate reports ``no approved protocol — advisory`` and
+    exits 0.
+    """
+    protocol_path = protocol if protocol is not None else DEFAULT_TRAJECTORY_PROTOCOL_PATH
+    if not protocol_path.is_file():
+        _emit_trajectory_gate_advisory(
+            ctx,
+            json_output=json_output,
+            reason="no approved protocol — advisory",
+        )
+        return
+    if baseline is None or candidate is None or not baseline.is_file() or not candidate.is_file():
+        _emit_trajectory_gate_advisory(
+            ctx,
+            json_output=json_output,
+            reason="no frozen baseline or candidate report — advisory",
+        )
+        return
+    try:
+        loaded_protocol = load_trajectory_protocol(protocol_path)
+        baseline_report = TrajectoryScoreReport.model_validate_json(
+            baseline.read_text(encoding="utf-8")
+        )
+        candidate_report = TrajectoryScoreReport.model_validate_json(
+            candidate.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+        cli_bail(f"invalid trajectory gate input: {exc}")
+    result = compare_trajectory_report(candidate_report, baseline_report, protocol=loaded_protocol)
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(result.model_dump(mode="json"))
+    else:
+        console.print("trajectory gate: comparing against an approved protocol")
+        console.print(f"  tolerance: {result.tolerance:.2%}")
+        if result.passed:
+            console.print("  [green]candidate is within tolerance[/green]")
+        else:
+            console.print("  [red]candidate is outside tolerance[/red]")
+            for rule_id in result.failures:
+                console.print(f"  [red]failed check[/red]: {rule_id}")
+    if not result.passed:
+        raise typer.Exit(code=CLI_FAILED_EXIT_CODE)
 
 
 @app.command("publish-benchmark")

@@ -1351,11 +1351,16 @@ def test_apply_logfire_wiring_handles_nameless_action_step(tmp_path: Path) -> No
 
 # Blocker 2 (security): ``\b`` and bare ``startswith`` also match the
 # canonical action name as a prefix of a fork -- ``alexhawat/mergeCraft-fork``,
-# ``alexhawat/mergecraft`` (lowercased), etc. The fix requires ``@``
-# immediately after the action name in both the regex and the parsed
-# ``startswith`` checks. A successful wire against a fork would
-# happily inject ``${{ secrets.LOGFIRE_TOKEN }}`` into a different
-# action.
+# ``alexhawat/mergecraftx``, etc. The fix requires ``@`` immediately after the
+# action name in both the regex and the parsed ``startswith`` checks. A
+# successful wire against a fork would happily inject
+# ``${{ secrets.LOGFIRE_TOKEN }}`` into a different action.
+#
+# CF4.3 — GitHub owner/repo names are case-insensitive, so
+# ``alexhawat/mergecraft@<sha>`` is the *same* action as the canonical
+# ``alexhawat/mergeCraft@<sha>`` and must now be wired. The fork-prefix and
+# empty-ref shapes below stay refused; the case split is its own fixture so a
+# regression in either half fails on its own.
 _FORK_SIMILAR_TEMPLATE = """\
 name: mergecraft
 on:
@@ -1368,6 +1373,24 @@ jobs:
         uses: alexhawat/mergeCraft-fork@deadbeef # similar repo name
         with:
           prompt: hi
+      - name: sibling
+        uses: alexhawat/mergecraftx@cafebabe # not the action
+        with:
+          prompt: hi
+      - name: empty-ref
+        uses: alexhawat/mergeCraft@ # empty ref must be refused
+        with:
+          prompt: hi
+"""
+
+_LOWERCASE_ACTION_TEMPLATE = """\
+name: mergecraft
+on:
+  pull_request:
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
       - name: lowcased
         uses: alexhawat/mergecraft@f5b070bddce40099dab77778231cac3456a55157
         with:
@@ -1376,24 +1399,21 @@ jobs:
 
 
 def test_apply_logfire_wiring_rejects_similar_fork_action_uses(tmp_path: Path) -> None:
-    """Wiring refuses steps whose ``uses:`` only prefix-matches the canonical action.
+    """Wiring refuses prefix look-alikes and an empty ref.
 
-    Regression for round-4 blocker 2: ``\b`` in the regex and bare
-    ``startswith(_ACTION_USES)`` in the parsed-view checks also match
-    ``alexhawat/mergeCraft-fork`` (a different repo / potential fork)
-    and ``alexhawat/mergecraft`` (lowercased; GitHub treats it as a
-    different owner). Wiring such a step would silently inject
-    ``${{ secrets.LOGFIRE_TOKEN }}`` into an action we don't own.
-    The fix requires ``@`` immediately after the action name in both
-    checks; this test asserts that ``--step all`` (which would
-    otherwise sweep every match) reports zero affected steps.
+    Regression for round-4 blocker 2 plus CF4.3: ``alexhawat/mergeCraft-fork``
+    (a different repo / potential fork), ``alexhawat/mergecraftx`` (a
+    similarly named repo) and ``alexhawat/mergeCraft@`` (the action with an
+    empty ref) are not the action. Wiring any of them would silently inject
+    ``${{ secrets.LOGFIRE_TOKEN }}`` into something we don't own. This test
+    asserts that ``--step all`` (which would otherwise sweep every match)
+    reports zero affected steps.
     """
     workflow = tmp_path / "mergecraft.yml"
     _write_workflow(workflow, _FORK_SIMILAR_TEMPLATE)
-    # No real ``uses: alexhawat/mergeCraft@vN`` step exists in the file --
+    # No real ``uses: alexhawat/mergeCraft@<ref>`` step exists in the file --
     # both selectors raise the same "no matching step" error they would
-    # raise for any file with zero matching action steps. The fork and
-    # lowercase variants never match the canonical-action regex.
+    # raise for any file with zero matching action steps.
     with pytest.raises(LogfireWorkflowError, match="no ``uses: alexhawat/mergeCraft`` step found"):
         apply_logfire_wiring(
             workflow_path=workflow,
@@ -1410,6 +1430,32 @@ def test_apply_logfire_wiring_rejects_similar_fork_action_uses(tmp_path: Path) -
             step_selector="primary",
             force=False,
         )
+
+
+def test_apply_logfire_wiring_accepts_lowercase_action_reference(tmp_path: Path) -> None:
+    """CF4.3 — the docs' own lowercase spelling is wired, not refused.
+
+    GitHub treats owner and repo names case-insensitively; ``TRACING.md``
+    prints ``uses: alexhawat/mergecraft@<ref>``. Wiring that step must inject
+    the Logfire keys exactly as it does for the canonical casing.
+    """
+    workflow = tmp_path / "mergecraft.yml"
+    _write_workflow(workflow, _LOWERCASE_ACTION_TEMPLATE)
+    change = apply_logfire_wiring(
+        workflow_path=workflow,
+        secret_name="LOGFIRE_TOKEN",
+        project_var_name="LOGFIRE_PROJECT",
+        step_selector="primary",
+        force=False,
+    )
+    assert change.was_modified
+    parsed = yaml.safe_load(change.new_text)
+    step = parsed["jobs"]["review"]["steps"][0]
+    assert step["uses"] == "alexhawat/mergecraft@f5b070bddce40099dab77778231cac3456a55157"
+    assert step["with"]["tracing"] == "true"
+    assert step["with"]["tracing-to"] == "logfire"
+    assert step["with"]["logfire-token"] == "${{ secrets.LOGFIRE_TOKEN }}"
+    assert step["env"]["MERGECRAFT_TRACING_PROJECT"] == "${{ vars.LOGFIRE_PROJECT }}"
 
 
 # Blocker 1 (deepseek elevated): ``_strip_owned_keys`` and

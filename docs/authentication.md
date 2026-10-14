@@ -32,6 +32,7 @@ run on `pull_request_target` (opened / synchronize).
 |----------|-----------------------------|---------|-------------------|------------------|
 | Anthropic Claude | `mergecraft provider auth anthropic --scope github` → indexed credentials (Claude Pro/Max) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` | `claude` |
 | OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
+| OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` (billing-backed API key from [opencode.ai/auth](https://opencode.ai/auth)) | `OPENCODE_API_KEY` | Zen: `opencode/gpt-5.6-sol`; Go: `opencode-go/deepseek-v4-pro` (cheaper: `opencode-go/deepseek-v4.1-flash`) — [OpenCode Go models](https://opencode.ai/docs/go/) | `opencode` |
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
 | Nous Portal | — (API key) | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` | `opencode` |
 | Tencent TokenHub | — (API key) | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` | `opencode` |
@@ -111,6 +112,11 @@ with the directory they consulted named in the error; the startup load falls
 back to `./.env` and stays silent when it is missing, so global invocations are
 unaffected. Inside GitHub Actions the startup load reads no `.env` from the
 workspace unless `MERGECRAFT_ENV` names one.
+
+The `provider` commands read `.env` values the same way the startup load does —
+one parser, one meaning. `export ` prefixes, single- and double-quoted values,
+inline comments and `${VAR}` interpolation all resolve identically, so a
+credential written with `auth` reads back exactly as it was stored.
 
 ### Credential detection (`credential_status_for_slug`)
 

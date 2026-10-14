@@ -254,6 +254,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="OpenCode",
             env_vars=("OPENCODE_API_KEY",),
+            managed_credentials=("OPENCODE_AUTH_JSON",),
             models={
                 "big-pickle": ModelDef(
                     display_name="Big Pickle",
@@ -365,7 +366,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
     "opencode-go": _provider(
         ProviderConfig(
             display_name="OpenCode Go",
-            env_vars=("OPENCODE_API_KEY",),
+            env_vars=("OPENCODE_GO_API_KEY",),
             models={
                 "glm-5.1": ModelDef(
                     display_name="GLM 5.1",
@@ -377,6 +378,16 @@ PROVIDERS: dict[str, ProviderConfig] = {
                     display_name="Kimi K2",
                     resolve="opencode-go/kimi-k2.7-code",
                     open_router_resolve="openrouter/moonshotai/kimi-k2.7-code",
+                ),
+                "deepseek-v4-pro": ModelDef(
+                    display_name="DeepSeek V4 Pro",
+                    resolve="opencode-go/deepseek-v4-pro",
+                    open_router_resolve="openrouter/deepseek/deepseek-v4-pro",
+                ),
+                "deepseek-v4.1-flash": ModelDef(
+                    display_name="DeepSeek V4.1 Flash",
+                    resolve="opencode-go/deepseek-v4.1-flash",
+                    open_router_resolve="openrouter/deepseek/deepseek-v4-flash",
                 ),
             },
         )
@@ -723,22 +734,6 @@ def is_auto_tier(slug: str | None) -> TypeGuard[AutoTier]:
     return slug in (AUTO_EFFICIENT, AUTO_INTELLIGENT)
 
 
-def default_auto_tier(*, has_card: bool) -> AutoTier:
-    return AUTO_INTELLIGENT if has_card else AUTO_EFFICIENT
-
-
-def resolve_auto_tier(*, model: str | None, has_card: bool) -> AutoTier:
-    if not has_card:
-        return AUTO_EFFICIENT
-    if is_auto_tier(model):
-        return model
-    return default_auto_tier(has_card=has_card)
-
-
-def is_card_gated_model(slug: str) -> bool:
-    return resolve_openrouter_model(slug) is not None
-
-
 # ── resolution ───────────────────────────────────────────────────────────────
 
 _MAX_FALLBACK_DEPTH = 10
@@ -770,26 +765,6 @@ def resolve_display_alias(slug: str) -> ModelAlias | None:
 def resolve_cli_model(slug: str) -> str | None:
     alias = resolve_display_alias(slug)
     return alias.resolve if alias else None
-
-
-def resolve_openrouter_model(slug: str) -> str | None:
-    alias = resolve_display_alias(slug)
-    return alias.open_router_resolve if alias else None
-
-
-# ── default proxy model ──────────────────────────────────────────────────────
-
-_default_proxy_alias = resolve_display_alias(AUTO_EFFICIENT)
-if _default_proxy_alias is None or _default_proxy_alias.open_router_resolve is None:
-    msg = f"DEFAULT_PROXY_MODEL: {AUTO_EFFICIENT} has no openRouterResolve"
-    raise RuntimeError(msg)
-
-DEFAULT_PROXY_MODEL = _default_proxy_alias.open_router_resolve
-_default_proxy_display_name = _default_proxy_alias.display_name
-
-
-def get_auto_select_hint_model() -> str:
-    return _default_proxy_display_name
 
 
 # ── bedrock / vertex routing ─────────────────────────────────────────────────

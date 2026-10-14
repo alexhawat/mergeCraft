@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import ValidationError
@@ -718,3 +718,87 @@ def test_normalize_suggest_eval_add_maps_boolish(
 def test_normalize_suggest_eval_add_passes_unknown_strings_through() -> None:
     """Unknown tokens stay lowercased for Pydantic to reject downstream."""
     assert ActionInputs._normalize_suggest_eval_add("  Maybe  ") == "maybe"
+
+
+# ── CF2.2 — ``model_pin`` is tri-state (CF-D2) ──────────────────────────────
+#
+# ``modelExplicit`` and ``modelPin`` were OR-chains, which cannot express
+# "no". With ``action.yml`` declaring ``default: disabled`` the input was
+# *always* set inside the Action, so the repo's ``modelPin: true`` could never
+# win. The contract is now: an explicit Action input beats the JSON payload
+# beats the repo; unset defers to the repo. ``modelExplicit`` follows the same
+# rule as ``modelPin``.
+
+
+def _resolve_model_pin(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    input_value: str | None,
+    repo_model_pin: bool,
+    json_payload: JsonPayload | None = None,
+) -> dict[str, Any]:
+    monkeypatch.delenv("INPUT_MODEL", raising=False)
+    if input_value is None:
+        monkeypatch.delenv("INPUT_MODEL_PIN", raising=False)
+    else:
+        monkeypatch.setenv("INPUT_MODEL_PIN", input_value)
+    settings = RepoSettings(model_pin=repo_model_pin)
+    prompt: str | JsonPayload = "do work" if json_payload is None else json_payload
+    return resolve_payload(resolved_prompt_input=prompt, repo_settings=settings)
+
+
+@pytest.mark.parametrize(
+    ("input_value", "repo_model_pin", "expected"),
+    [
+        ("disabled", True, False),
+        ("enabled", False, True),
+        (None, True, True),
+        ("disabled", False, False),
+        ("enabled", True, True),
+        (None, False, False),
+    ],
+)
+def test_model_pin_is_tri_state(
+    monkeypatch: pytest.MonkeyPatch,
+    input_value: str | None,
+    repo_model_pin: bool,
+    expected: bool,
+) -> None:
+    """Explicit input wins; unset defers to the repo (never an OR of the two)."""
+    payload = _resolve_model_pin(
+        monkeypatch, input_value=input_value, repo_model_pin=repo_model_pin
+    )
+    assert payload["modelPin"] is expected
+    assert payload["modelExplicit"] is expected
+
+
+def test_json_payload_model_pin_beats_repo_when_input_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON payload ``modelPin`` sits between the Action input and the repo."""
+    payload = _resolve_model_pin(
+        monkeypatch,
+        input_value=None,
+        repo_model_pin=False,
+        json_payload=JsonPayload.model_validate(
+            {"~mergecraft": True, "version": "0.1.0", "prompt": "hi", "modelPin": True}
+        ),
+    )
+    assert payload["modelPin"] is True
+    assert payload["modelExplicit"] is True
+
+
+def test_explicit_input_disabled_beats_json_payload_pin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit ``disabled`` input overrides a JSON payload that asked to pin."""
+    payload = _resolve_model_pin(
+        monkeypatch,
+        input_value="disabled",
+        repo_model_pin=True,
+        json_payload=JsonPayload.model_validate(
+            {"~mergecraft": True, "version": "0.1.0", "prompt": "hi", "modelExplicit": True}
+        ),
+    )
+    assert payload["modelPin"] is False
+    assert payload["modelExplicit"] is False

@@ -8,7 +8,6 @@ from mergecraft.review.engine import (
     ReviewRun,
 )
 from mergecraft.review.lens_routing import (
-    LENS_ROUTING_STEP4_NOTE,
     LensRoutingDecision,
     LensRoutingEntry,
     load_routing_registry,
@@ -22,7 +21,6 @@ from mergecraft.review.snapshot import (
 )
 
 __all__ = [
-    "LENS_ROUTING_STEP4_NOTE",
     "LensRoutingDecision",
     "LensRoutingEntry",
     "ReviewEngine",

@@ -5,7 +5,7 @@ Locked decision **PD-D9** — a pytest in ``tests/docs/`` (not a make target)
 using GitHub slug rules plus explicit ``<span id>`` / ``<a id>`` / ``<a name>``
 anchors; ``{#id}`` is **not** an anchor. Scope: ``docs/**/*.md``,
 ``README.md``, ``REVIEW-CHECKS.md``, ``SECURITY.md``, ``CONTRIBUTING.md``,
-``AGENTS.md``; ``CHANGELOG.md`` and the generated ``docs/action-reference.md``
+``AGENTS-mergecraft.md``; ``CHANGELOG.md`` and the generated ``docs/action-reference.md``
 are excluded. Relative links resolve against the containing file's directory;
 a directory target is valid.
 
@@ -46,7 +46,13 @@ _INLINE_CODE_RE = re.compile(r"(`+)(.+?)\1", re.DOTALL)
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:")
 _IGNORED_DIR = ".ignorelocal"
 
-_ROOT_FILES = ("README.md", "REVIEW-CHECKS.md", "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md")
+_ROOT_FILES = (
+    "README.md",
+    "REVIEW-CHECKS.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "AGENTS-mergecraft.md",
+)
 _EXCLUDED = frozenset({"docs/action-reference.md"})
 
 

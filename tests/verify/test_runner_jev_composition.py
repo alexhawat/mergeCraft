@@ -13,7 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from mergecraft.jev.client import AsyncJevClient, RecordedTransport
+from mergecraft.jev.client import AsyncJevClient
+from tests.jev.support import RecordedTransport
 from tests.verify.fake_driver import FakeBrowserDriver
 from tests.verify.support import import_verify, make_input, require_symbol
 

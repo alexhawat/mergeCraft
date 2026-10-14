@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import typer
@@ -16,6 +17,7 @@ from loguru import logger
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.utils.git_hardening import git_argv
+from mergecraft.utils.github import _default_api_base_url, _default_server_url
 from mergecraft.yes import OpOptions, op
 
 REQUEST_TIMEOUT_MS = 35_000
@@ -38,7 +40,8 @@ def _parse_git_remote() -> tuple[str, str]:
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):  # fmt: skip
         cli_bail("not a git repository or no 'origin' remote found.")
-    match = re.search(r"github\.com(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
+    host = urlparse(_default_server_url()).hostname or "github.com"
+    match = re.search(rf"{re.escape(host)}(?::\d+)?[:/]+([^/]+)/(.+?)(?:\.git)?(?:/)?$", url)
     if not match:
         cli_bail(f"could not parse github owner/repo from remote: {url}")
     return match.group(1), match.group(2)
@@ -51,6 +54,28 @@ def _resolve_repo(positional: str | None) -> tuple[str, str]:
     if not match:
         cli_bail(f'invalid repo "{positional}" — expected <owner>/<repo>')
     return match.group(1), match.group(2)
+
+
+def _event_fingerprint(event: dict[str, Any]) -> str:
+    """Stable identity for a timeline event that carries no integer ``id``.
+
+    ``committed`` and ``cross-referenced`` timeline events have no ``id``, so
+    the id-only dedup re-emitted them on every poll. The fingerprint is the
+    event kind plus ``created_at`` plus the commit ``sha`` / source issue
+    number, which stays constant across polls for the same event.
+    """
+    kind = event.get("event") or event.get("type") or "unknown"
+    created = event.get("created_at") or event.get("submitted_at") or ""
+    sha = event.get("sha") or ""
+    number = ""
+    source = event.get("source")
+    if isinstance(source, dict):
+        issue = source.get("issue")
+        if isinstance(issue, dict):
+            number = str(issue.get("number") or "")
+    if not number:
+        number = str(event.get("number") or event.get("issue_number") or "")
+    return f"{kind}|{created}|{sha}|{number}"
 
 
 async def _poll_timeline(ctx: dict[str, Any]) -> dict[str, Any]:
@@ -67,7 +92,7 @@ async def _poll_timeline(ctx: dict[str, Any]) -> dict[str, Any]:
         "X-GitHub-Api-Version": "2022-11-28",
     }
     params: dict[str, str] = {"per_page": "100"}
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/timeline"
+    url = f"{_default_api_base_url()}/repos/{owner}/{repo}/issues/{number}/timeline"
     if cursor and str(cursor).startswith("http"):
         url = str(cursor)
         params = {}
@@ -92,6 +117,7 @@ async def _poll_timeline(ctx: dict[str, Any]) -> dict[str, Any]:
                 break
 
         last_id = ctx.get("last_id")
+        seen_fingerprints = ctx.get("seen_fingerprints")
         new_events: list[dict[str, Any]] = []
         max_id = last_id or 0
         for event in events:
@@ -102,6 +128,11 @@ async def _poll_timeline(ctx: dict[str, Any]) -> dict[str, Any]:
                 if last_id is not None and eid <= last_id:
                     continue
                 max_id = max(max_id, eid)
+            elif seen_fingerprints is not None:
+                fingerprint = _event_fingerprint(event)
+                if fingerprint in seen_fingerprints:
+                    continue
+                seen_fingerprints.add(fingerprint)
             new_events.append(
                 {
                     "cursor": str(eid) if eid is not None else "",
@@ -131,7 +162,14 @@ def run(
         None, help="Target repo as owner/name (defaults to git remote)."
     ),
     pr: int = typer.Option(..., "--pr", help="Pull request / issue number to watch."),
-    since: str | None = typer.Option(None, "--since", help="Resume cursor (last seen event id)."),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help=(
+            "Resume cursor (last seen event id). Numeric ids only; timeline "
+            "events without an id re-emit once after a restart."
+        ),
+    ),
     pretty: bool = typer.Option(False, "--pretty", "-p", help="Human-readable output."),
 ) -> None:
     """Stream a PR/issue timeline as one JSON line per new event."""
@@ -147,6 +185,7 @@ def run(
 
     last_id: int | None = int(since) if since and since.isdigit() else None
     cursor: str | None = since if since and since.startswith("http") else None
+    seen_fingerprints: set[str] = set()
 
     async def _loop() -> None:
         nonlocal last_id, cursor
@@ -160,6 +199,7 @@ def run(
                         "token": token,
                         "cursor": cursor,
                         "last_id": last_id,
+                        "seen_fingerprints": seen_fingerprints,
                     }
                 )
                 cursor = result.get("cursor")

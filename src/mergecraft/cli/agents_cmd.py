@@ -32,7 +32,7 @@ from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.agent_roster import model_chain_from_entry
 from mergecraft.config.io import write_config_dict
-from mergecraft.config.model_registry import normalize_model_id
+from mergecraft.config.model_registry import allocate_model_index, normalize_model_id
 from mergecraft.config.settings import AgentBindingOverride, load_repo_settings
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -150,6 +150,41 @@ def validate_registered_model_slug(
     )
     cli_bail(msg)
     return ""  # unreachable — cli_bail exits
+
+
+def ensure_registered_model_slug(
+    data: dict[str, Any],
+    provider_label: str,
+    model_id: str,
+) -> tuple[dict[str, Any], str]:
+    """Register *model_id* on *provider_label* when absent; return updated config and slug."""
+    entries = _provider_entries(data)
+    labels = _registered_labels(entries)
+    provider_label = provider_label.strip()
+    provider_idx = _find_provider_index(entries, provider_label)
+    if provider_idx is None:
+        cli_bail(_unknown_provider_message(provider_label, labels))
+
+    entry = dict(entries[provider_idx])
+    provider_name = str(entry.get("label", provider_label))
+    normalised_id = normalize_model_id(provider_name, model_id)
+    if not normalised_id:
+        cli_bail("model id must not be empty")
+
+    models = _model_rows(entry)
+    for row in models:
+        if _model_id_from_row(row) == normalised_id:
+            slug = format_model_slug(provider_name, normalised_id)
+            return data, slug
+
+    model_index = allocate_model_index(models)
+    models.append({"id": normalised_id, "modelIndex": model_index})
+    entry["models"] = models
+    entries[provider_idx] = entry
+    data = dict(data)
+    data["providers"] = entries
+    slug = format_model_slug(provider_name, normalised_id)
+    return data, slug
 
 
 def validate_agent_binding_override(entry: dict[str, Any]) -> AgentBindingOverride:

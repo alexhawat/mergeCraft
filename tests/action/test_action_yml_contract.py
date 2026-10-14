@@ -57,7 +57,6 @@ class TestDeclaredDefaultsParse:
     @pytest.mark.parametrize(
         ("input_name", "env_var"),
         [
-            ("model_pin", "INPUT_MODEL_PIN"),
             ("analyzers", "INPUT_ANALYZERS"),
             ("allow_pr_target_comments", "INPUT_ALLOW_PR_TARGET_COMMENTS"),
             ("tracing", "INPUT_TRACING"),
@@ -68,7 +67,6 @@ class TestDeclaredDefaultsParse:
             ("tracing-export-untrusted-content", "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT"),
         ],
         ids=[
-            "model_pin",
             "analyzers",
             "allow_pr_target_comments",
             "tracing",
@@ -284,6 +282,20 @@ class TestActionYmlHygiene:
         assert "default" not in spec, (
             "sarif_upload must not declare a default: an absent input has to reach "
             "resolve_sarif_upload_enabled as empty so repo config can decide"
+        )
+
+    def test_model_pin_declares_no_default(self, action_yml: dict[str, Any]) -> None:
+        """``model_pin`` must be tri-state: unset has to reach the resolver.
+
+        With ``default: disabled`` the input is never absent inside the Action,
+        so a repo's ``modelPin: true`` can never win and the action reference's
+        "the action input wins" precedence is unreachable. An unset input must
+        resolve to ``None`` so the repo setting can decide.
+        """
+        spec = action_yml["inputs"]["model_pin"]
+        assert "default" not in spec, (
+            "model_pin must not declare a default: an unset input has to resolve to None "
+            "so the repo's modelPin can decide"
         )
 
     def test_sarif_upload_description_carries_no_expression(

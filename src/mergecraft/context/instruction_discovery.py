@@ -3,7 +3,7 @@
 Discovers CLAUDE.md / AGENTS.md / SKILL.md plus GEMINI.md, Copilot instructions,
 Windsurf rules, and a configurable extra filename list. Untrusted
 sources render through the nonce fence as data, never into the instruction bundle.
-Does not author mergeCraft's own AGENTS.md / skill (file 7).
+Does not author mergeCraft's own AGENTS-mergecraft.md / skill (file 7).
 """
 
 from __future__ import annotations

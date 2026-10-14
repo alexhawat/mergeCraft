@@ -38,6 +38,7 @@ app = mergecraft_typer(
 )
 
 CODEX_AUTH_SECRET = "CODEX_AUTH_JSON"
+OPENCODE_AUTH_SECRET = "OPENCODE_AUTH_JSON"
 CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN"
 GEMINI_API_SECRET = "GEMINI_API_KEY"
 CURSOR_API_SECRET = "CURSOR_API_KEY"
@@ -47,7 +48,6 @@ TOKENHUB_API_SECRET = "TOKENHUB_API_KEY"
 MINIMAX_API_SECRET = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 MINIMAX_BASE_URL = "https://api.minimax.io/v1"
 CLAUDE_OAUTH_TOKEN_PREFIX = "sk-ant-oat"
-DEFAULT_NOUS_PORTAL = "https://inference-api.nousresearch.com/v1"
 DEFAULT_TOKENHUB = "https://tokenhub-intl.tencentcloudmaas.com/v1"
 # Logfire setup (issue #56 / D5). ``LOGFIRE_TOKEN`` is the Action secret the
 # ``logfire-token`` input maps to; ``MERGECRAFT_LOGFIRE_TOKEN`` is the
@@ -383,6 +383,32 @@ def auth_codex(scope: str = _SCOPE_OPTION) -> None:
         return
 
     _persist_credential(target=target, name=CODEX_AUTH_SECRET, value=value)
+
+
+@app.command("opencode")
+def auth_opencode(scope: str = _SCOPE_OPTION) -> None:
+    """Save OpenCode Zen credentials as OPENCODE_AUTH_JSON."""
+    from mergecraft.security.opencode_auth import build_opencode_zen_auth_json
+
+    _legacy_auth_hint("opencode")
+    target = _resolve_auth_target(scope)
+    console.print(
+        "create an API key at [cyan]https://opencode.ai/auth[/cyan], then paste it below."
+    )
+    try:
+        api_key = getpass.getpass("OpenCode Zen API key (Enter to cancel): ").strip()
+    except (EOFError, KeyboardInterrupt):  # fmt: skip
+        console.print("canceled.")
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
+    if not api_key:
+        console.print("canceled.")
+        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
+
+    value = build_opencode_zen_auth_json(api_key)
+    if _legacy_auth_shim("opencode", scope, {"OPENCODE_AUTH_JSON": value}, target=target):
+        return
+
+    _persist_credential(target=target, name=OPENCODE_AUTH_SECRET, value=value)
 
 
 @app.command("claude")

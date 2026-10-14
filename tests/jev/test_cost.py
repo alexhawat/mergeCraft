@@ -9,6 +9,7 @@ import pytest
 from tests.jev.support import (
     PINNED_MODEL,
     TRANSPORT_DIR,
+    RecordedTransport,
     import_jev,
 )
 
@@ -77,7 +78,7 @@ def test_unknown_model_does_not_invent_zero_cost() -> None:
 
 async def test_client_survives_usage_input_tokens_none() -> None:
     module = _client()
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / "usage_tokens_none.json")
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "usage_tokens_none.json")
     client = module.AsyncJevClient(api_key="mc-test-jev-key", transport=transport)
     result = await client.call(state={"hunk": "x"}, pack_id="unit/v1", unit_id="u")
     assert result.skipped is False

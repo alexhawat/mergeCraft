@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from datetime import datetime  # noqa: TC003 - Pydantic resolves this annotation at runtime
 from hashlib import sha256
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal, Self
 
 from loguru import logger
@@ -28,12 +29,12 @@ from mergecraft.evidence.trajectory_audit import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.tracing.tracer import NullTracer, Tracer
 
 TRAJECTORY_LABEL_SCHEMA_VERSION: Final[Literal["1.0.0"]] = "1.0.0"
 TRAJECTORY_SCORER_VERSION: Final[str] = "1.0.0"
+TRAJECTORY_PROTOCOL_SCHEMA_VERSION: Final[Literal["1.0.0"]] = "1.0.0"
+DEFAULT_TRAJECTORY_PROTOCOL_PATH: Final[Path] = Path("evals/trajectories/protocol-v1.json")
 
 TrajectorySplit = Literal["development", "calibration", "held_out"]
 TrajectoryTruth = Literal["positive", "negative", "unknown"]
@@ -100,9 +101,11 @@ class TrajectoryLabelCase(BaseModel):
     case_id: str
     trajectory: TrajectoryRecord
     trajectory_sha256: str
-    labelled_at: datetime | None
-    provenance: TrajectoryLabelProvenance
-    adjudication: AdjudicationRecord | None
+    # A case that omits provenance is agent-seeded by default: it stays in the
+    # advisory development tier and can never establish an independent claim.
+    labelled_at: datetime | None = None
+    provenance: TrajectoryLabelProvenance = "agent-seeded"
+    adjudication: AdjudicationRecord | None = None
     labels: list[TrajectoryCheckLabel]
 
     @field_validator("case_id")
@@ -239,6 +242,45 @@ def load_trajectory_label_sets(path: Path) -> list[TrajectoryLabelSet]:
     return label_sets
 
 
+class TrajectoryProtocol(BaseModel):
+    """Pre-registered sample minimums and a comparison tolerance.
+
+    The protocol is the one artefact that turns an independently labelled
+    report into a quality claim. It pins, per runtime check, how many
+    independent samples a report must carry before it can be eligible, and the
+    relative drift a candidate report may show against a frozen baseline before
+    the comparison fails.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["1.0.0"]
+    sample_minimums: dict[str, int]
+    tolerance: float = Field(ge=0.0)
+
+    @field_validator("sample_minimums")
+    @classmethod
+    def _sample_minimums_cover_every_check(cls, value: dict[str, int]) -> dict[str, int]:
+        unknown = sorted(set(value) - _RULE_ID_SET)
+        if unknown:
+            raise ValueError(f"unknown trajectory check in sample_minimums: {unknown}")
+        missing = sorted(_RULE_ID_SET - set(value))
+        if missing:
+            raise ValueError(
+                f"sample_minimums must pre-register every trajectory check: missing={missing}"
+            )
+        for rule_id, minimum in value.items():
+            if minimum < 1:
+                raise ValueError(f"sample_minimums[{rule_id!r}] must be at least 1, got {minimum}")
+        return value
+
+
+def load_trajectory_protocol(path: Path) -> TrajectoryProtocol:
+    """Load and validate one approved trajectory protocol JSON file."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    return TrajectoryProtocol.model_validate(payload)
+
+
 class TrajectoryRuleMetrics(BaseModel):
     """Confusion counts and rates for one trajectory check."""
 
@@ -368,6 +410,83 @@ class TrajectoryScoreReport(BaseModel):
     disagreements: list[TrajectoryDisagreement]
 
 
+class TrajectoryComparisonResult(BaseModel):
+    """Outcome of comparing a candidate report against a frozen baseline.
+
+    ``failures`` holds the rule ids whose per-check counts drifted outside the
+    protocol tolerance, so the failing check is named rather than summarised.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    passed: bool
+    tolerance: float = Field(ge=0.0)
+    failures: list[str]
+    compared_checks: int = Field(ge=0)
+
+
+_COUNT_METRICS: Final[tuple[str, ...]] = ("true_positive", "false_positive", "false_negative")
+
+
+def _counts_drift_outside_tolerance(
+    baseline: TrajectoryRuleMetrics,
+    candidate: TrajectoryRuleMetrics,
+    tolerance: float,
+) -> bool:
+    """True when any per-check count drifts by more than *tolerance*.
+
+    Each count is compared as a symmetric relative difference,
+    ``|candidate - baseline| / max(|candidate|, |baseline|, 1)``. The floor of
+    one bounds a move away from zero (an all-zero baseline cannot divide by
+    zero), so a move from 0 to *n* reads as a drift of exactly 1.0 — only a
+    tolerance of 1.0 or wider admits it, and any genuine count change at a
+    tighter tolerance is named.
+    """
+    for metric in _COUNT_METRICS:
+        baseline_value = float(getattr(baseline, metric))
+        candidate_value = float(getattr(candidate, metric))
+        scale = max(abs(candidate_value), abs(baseline_value), 1.0)
+        if abs(candidate_value - baseline_value) / scale > tolerance:
+            return True
+    return False
+
+
+def compare_trajectory_report(
+    candidate: TrajectoryScoreReport,
+    baseline: TrajectoryScoreReport,
+    *,
+    protocol: TrajectoryProtocol,
+) -> TrajectoryComparisonResult:
+    """Compare a candidate report's per-check counts against a frozen baseline.
+
+    A check fails when any of its confusion counts drifts by more than the
+    protocol ``tolerance`` relative to the baseline (counts scale by a floor of
+    one so a move away from zero is never lost). The returned ``failures`` name
+    every such check by rule id.
+    """
+    baseline_by_rule = {row.rule_id: row for row in baseline.per_check}
+    candidate_by_rule = {row.rule_id: row for row in candidate.per_check}
+    failures: list[str] = []
+    for rule_id in _RULE_IDS:
+        baseline_row = baseline_by_rule.get(rule_id)
+        candidate_row = candidate_by_rule.get(rule_id)
+        if (
+            baseline_row is None
+            or candidate_row is None
+            or _counts_drift_outside_tolerance(baseline_row, candidate_row, protocol.tolerance)
+        ):
+            failures.append(rule_id)
+    known = set(_RULE_IDS)
+    extra = sorted((set(baseline_by_rule) | set(candidate_by_rule)) - known)
+    failures.extend(rule_id for rule_id in extra if rule_id not in failures)
+    return TrajectoryComparisonResult(
+        passed=not failures,
+        tolerance=protocol.tolerance,
+        failures=failures,
+        compared_checks=len(_RULE_IDS),
+    )
+
+
 def _rate(numerator: int, denominator: int) -> float | None:
     return numerator / denominator if denominator else None
 
@@ -403,9 +522,16 @@ def _emit_case_score(
 def score_trajectory_labels(
     label_sets: list[TrajectoryLabelSet],
     *,
+    protocol: TrajectoryProtocol | None = None,
     tracer: Tracer | NullTracer | None = None,
 ) -> TrajectoryScoreReport:
-    """Run the current auditor and score exact rule/path multiplicities."""
+    """Run the current auditor and score exact rule/path multiplicities.
+
+    ``quality_eligible`` is true only when the labels are independent, an
+    approved ``protocol`` is supplied, and every runtime check carries at least
+    its pre-registered independent sample minimum. Without a protocol the
+    report stays advisory and nothing is enforced.
+    """
     validate_label_sets(label_sets)
     aggregate: dict[str, list[int]] = {rule_id: [0, 0, 0] for rule_id in _RULE_IDS}
     label_counts: dict[str, Counter[str]] = {rule_id: Counter() for rule_id in _RULE_IDS}
@@ -522,13 +648,31 @@ def score_trajectory_labels(
         for label_set in label_sets
         for case in label_set.cases
     )
-    if independent:
+    if not independent:
+        quality_eligible = False
+        advisory = True
+        reason = "development or non-independent labels are advisory only"
+    elif protocol is None:
+        quality_eligible = False
+        advisory = True
         reason = (
-            "labels are independently human-adjudicated; quality eligibility remains "
-            "pending an approved sample-count and tolerance manifest"
+            "no approved protocol — advisory; independent labels cannot support a quality "
+            "claim until a protocol pins per-check sample minimums and a tolerance"
         )
     else:
-        reason = "development or non-independent labels are advisory only"
+        below_minimum = [
+            rule_id
+            for rule_id in _RULE_IDS
+            if label_counts[rule_id]["independent"] < protocol.sample_minimums[rule_id]
+        ]
+        if below_minimum:
+            quality_eligible = False
+            advisory = True
+            reason = "checks below their pre-registered sample minimum: " + ", ".join(below_minimum)
+        else:
+            quality_eligible = True
+            advisory = False
+            reason = "independent labels meet every pre-registered sample minimum"
     return TrajectoryScoreReport(
         label_sets=len(label_sets),
         cases_total=len(all_cases),
@@ -565,8 +709,8 @@ def score_trajectory_labels(
         ),
         eligibility=TrajectoryEligibility(
             independent=independent,
-            quality_eligible=False,
-            advisory=True,
+            quality_eligible=quality_eligible,
+            advisory=advisory,
             reason=reason,
             provenance_counts=dict(sorted(provenance_counts.items())),
             per_check={
@@ -586,10 +730,13 @@ def score_trajectory_labels(
 
 
 __all__ = [
+    "DEFAULT_TRAJECTORY_PROTOCOL_PATH",
     "TRAJECTORY_LABEL_SCHEMA_VERSION",
+    "TRAJECTORY_PROTOCOL_SCHEMA_VERSION",
     "TRAJECTORY_SCORER_VERSION",
     "TrajectoryCaseScore",
     "TrajectoryCheckLabel",
+    "TrajectoryComparisonResult",
     "TrajectoryDisagreement",
     "TrajectoryEligibility",
     "TrajectoryExactMatch",
@@ -600,13 +747,16 @@ __all__ = [
     "TrajectoryLabelSetReference",
     "TrajectoryMacroMetrics",
     "TrajectoryMicroMetrics",
+    "TrajectoryProtocol",
     "TrajectoryRuleMetrics",
     "TrajectoryScoreReport",
     "TrajectorySplit",
     "TrajectoryTruth",
     "canonical_label_set_sha256",
     "canonical_trajectory_sha256",
+    "compare_trajectory_report",
     "load_trajectory_label_sets",
+    "load_trajectory_protocol",
     "score_trajectory_labels",
     "validate_label_sets",
 ]

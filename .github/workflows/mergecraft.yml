@@ -167,7 +167,7 @@ env:
   # Single Action SHA for all three review rungs (D10 / #532). Bump here only;
   # every `uses: alexhawat/mergeCraft@…` below must match — enforced by
   # `make action-pin-check`.
-  MERGECRAFT_ACTION_SHA: "6197b4787c10fe391063834f537e322ff5ba55a2"
+  MERGECRAFT_ACTION_SHA: "e855e1dd0fae87068d04a74622298722385fc5de"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -659,7 +659,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@6197b4787c10fe391063834f537e322ff5ba55a2 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@e855e1dd0fae87068d04a74622298722385fc5de # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -685,7 +685,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || 'github-actions[bot]' }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || '' }}
           MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
           MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -713,7 +713,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-nous
-          path: ${{ runner.temp }}/packet-nous.json
+          path: |
+            ${{ runner.temp }}/packet-nous.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 
@@ -833,7 +835,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@6197b4787c10fe391063834f537e322ff5ba55a2 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@e855e1dd0fae87068d04a74622298722385fc5de # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -855,7 +857,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_codex.outputs.app-slug && format('{0}[bot]', steps.app_token_codex.outputs.app-slug) || 'github-actions[bot]' }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_codex.outputs.app-slug && format('{0}[bot]', steps.app_token_codex.outputs.app-slug) || '' }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -883,7 +885,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-codex
-          path: ${{ runner.temp }}/packet-codex.json
+          path: |
+            ${{ runner.temp }}/packet-codex.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 
@@ -981,7 +985,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now 3ed2c798 (#582).
-        uses: alexhawat/mergeCraft@6197b4787c10fe391063834f537e322ff5ba55a2 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@e855e1dd0fae87068d04a74622298722385fc5de # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -999,7 +1003,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_claude.outputs.app-slug && format('{0}[bot]', steps.app_token_claude.outputs.app-slug) || 'github-actions[bot]' }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_claude.outputs.app-slug && format('{0}[bot]', steps.app_token_claude.outputs.app-slug) || '' }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
@@ -1027,7 +1031,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mergecraft-evidence-claude
-          path: ${{ runner.temp }}/packet-claude.json
+          path: |
+            ${{ runner.temp }}/packet-claude.json
+            ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 

@@ -12,15 +12,28 @@ if TYPE_CHECKING:
 _LEGACY_NOUS_API_KEY = "NOUS_API_KEY"
 _LEGACY_NOUS_WARNED = False
 
+
+def _flat_registry_credential_env_keys(label: str) -> tuple[str, ...]:
+    """Flat workflow credential env names for *label*, excluding D7 legacy nous alias."""
+    from mergecraft.workflow.auth_manifest import flat_credential_env_keys
+
+    keys = flat_credential_env_keys(label)
+    if label.strip().lower() == "nous":
+        return tuple(key for key in keys if key != _LEGACY_NOUS_API_KEY)
+    return keys
+
+
 _AUTH_KIND_API_KEY = "api_key"
 _AUTH_KIND_OAUTH = "oauth"
 _AUTH_KIND_DEVICE_CODE = "device_code"
 _AUTH_KIND_CLOUD_CHAIN = "cloud_chain"
+_AUTH_KIND_OPENCODE_ZEN = "opencode_zen"
 
 _AUTH_KIND_PRIMARY_SUFFIX: dict[str, str] = {
     _AUTH_KIND_API_KEY: "API_KEY",
     _AUTH_KIND_OAUTH: "CLAUDE_CODE_OAUTH_TOKEN",
     _AUTH_KIND_DEVICE_CODE: "CODEX_AUTH_JSON",
+    _AUTH_KIND_OPENCODE_ZEN: "OPENCODE_AUTH_JSON",
 }
 
 _BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
@@ -65,6 +78,8 @@ _BUILTIN_LABEL_TO_HARNESS_API_KEY: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "google": "GEMINI_API_KEY",
     "cursor": "CURSOR_API_KEY",
+    "opencode": "OPENCODE_API_KEY",
+    "opencode-go": "OPENCODE_GO_API_KEY",
 }
 
 # Seed-only default URLs for ``provider seed`` — not used at runtime (BE / D4).
@@ -163,9 +178,15 @@ def credential_env_keys_for_entry(entry: ProviderRegistryEntry) -> tuple[str, ..
     treat the whole tuple as one OR, the way ``indexed_credential_for_entry``
     does when it reads them.
     """
-    return tuple(
+    keys: list[str] = [
         indexed_env_key(entry.env_index, suffix) for suffix in _credential_suffixes_for_entry(entry)
-    )
+    ]
+    auth_kind = (entry.auth_kind or _AUTH_KIND_API_KEY).strip().lower()
+    if auth_kind == _AUTH_KIND_API_KEY:
+        for flat_key in _flat_registry_credential_env_keys(entry.label):
+            if flat_key not in keys:
+                keys.append(flat_key)
+    return tuple(keys)
 
 
 def indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
@@ -174,6 +195,11 @@ def indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
         value = _read_env_value(indexed_env_key(entry.env_index, suffix))
         if value:
             return value
+        if suffix == "API_KEY":
+            for flat_key in _flat_registry_credential_env_keys(entry.label):
+                flat_value = _read_env_value(flat_key)
+                if flat_value:
+                    return flat_value
     workflow_key = f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{entry.env_index}"
     return _read_env_value(workflow_key)
 
@@ -286,9 +312,13 @@ def resolve_registry_gateway_endpoint(
 def _harness_env_name_for_suffix(label: str, suffix: str) -> str | None:
     """Map one indexed credential suffix to the harness env var native CLIs consume."""
     if suffix == "API_KEY":
-        return _BUILTIN_LABEL_TO_HARNESS_API_KEY.get(label.strip().lower())
+        lowered = label.strip().lower()
+        if lowered == "opencode-go":
+            return "OPENCODE_API_KEY"
+        return _BUILTIN_LABEL_TO_HARNESS_API_KEY.get(lowered)
     if suffix in {
         "CODEX_AUTH_JSON",
+        "OPENCODE_AUTH_JSON",
         "CLAUDE_CODE_OAUTH_TOKEN",
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",
@@ -354,6 +384,10 @@ def _read_indexed_credential_value(entry: ProviderRegistryEntry, suffix: str) ->
     if value:
         return value
     if suffix == "API_KEY":
+        for flat_key in _flat_registry_credential_env_keys(entry.label):
+            flat_value = _read_env_value(flat_key)
+            if flat_value:
+                return flat_value
         workflow_key = f"MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{entry.env_index}"
         return _read_env_value(workflow_key)
     return None

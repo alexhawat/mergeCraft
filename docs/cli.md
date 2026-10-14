@@ -12,7 +12,7 @@ Pass `--help` to any invocation below for its full flag set.
 | Command | Description |
 |---------|-------------|
 | `mergecraft agent add-model <name> <slug>` | Append a registered model to an agent's chain (no-op when duplicate). |
-| `mergecraft agent assign-model <name> <slot> <slug>` | Assign a registered model to a positional slot (idempotent). |
+| `mergecraft agent assign-model <name> <slot> <slug>` | Register the model when needed, assign the slot, wire harness providers into `mergecraft.yml`, and set `with.model` on p0 for the `reviewer` agent (idempotent). |
 | `mergecraft agent create <name>` | Create a new roster entry with role defaults. |
 | `mergecraft agent delete <name>` | Remove an agent binding (refuses the last required reviewer or verifier). |
 | `mergecraft agent list` | List every agent, role, model chain, and dispatch level. |
@@ -20,7 +20,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft agent set-after <name> <after>` | Change dispatch ordering after agent creation. |
 | `mergecraft agent show <name>` | Show one agent's chain, resolved model, and effective limits. |
 | `mergecraft agent-local add-model <name> <slug>` | Append a registered model to an agent's chain (no-op when duplicate). |
-| `mergecraft agent-local assign-model <name> <slot> <slug>` | Assign a registered model to a positional slot (idempotent). |
+| `mergecraft agent-local assign-model <name> <slot> <slug>` | Register the model when needed and assign the slot in `.mergecraft/config.local.yaml` (local-only; does not change CI workflow). |
 | `mergecraft agent-local create <name>` | Create a new roster entry with role defaults. |
 | `mergecraft agent-local delete <name>` | Remove an agent binding (refuses the last required reviewer or verifier). |
 | `mergecraft agent-local list` | List every agent, role, model chain, and dispatch level. |
@@ -49,6 +49,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft auth logfire` | Save a Logfire write token + project for the `logfire` tracing sink. |
 | `mergecraft auth minimax` | Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY. |
 | `mergecraft auth nous` | Save a Nous Portal API key as NOUS_API_KEY. |
+| `mergecraft auth opencode` | Save OpenCode Zen credentials as OPENCODE_AUTH_JSON. |
 | `mergecraft auth tokenhub` | Save a Tencent TokenHub API key as TOKENHUB_API_KEY. |
 | `mergecraft cache clear` | Remove every entry from the run cache. |
 | `mergecraft cache info` | Show cache location, byte ceiling, and current usage. |
@@ -77,6 +78,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
 | `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set (#140). |
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
+| `mergecraft eval trajectory-gate` | Compare a candidate trajectory report against a frozen baseline. |
 | `mergecraft eval trajectory-score --labels LABELS` | Score the deterministic trajectory auditor against frozen labels. |
 | `mergecraft evidence show <finding-id>` | Show the evidence packet for a finding. |
 | `mergecraft evidence verify <finding-id>` | Replay verification for a finding's evidence packet (not an approval). |
@@ -190,16 +192,16 @@ not part of the operator contract.
 | `MERGECRAFT_AGENT_TIMEOUT` | Seconds before an agent subprocess is killed | `3600` | every harness invocation and the credential broker |
 | `MERGECRAFT_CACHE_DIR` | Run-cache root directory | `~/.cache/mergecraft/run-cache` (honours `XDG_CACHE_HOME`) | CLI runs that use the cache |
 | `MERGECRAFT_CACHE_MAX_BYTES` | Byte ceiling for the run cache, in bytes | `536870912` (512 MiB) | cache prune and eviction |
+| `MERGECRAFT_CAPTURE_VERDICTS` | Opt-in verifier-verdict capture; `1` appends one redacted line per verdict (including dropped findings) to `judge-verdicts.jsonl` in the run's evidence directory | unset — capture off | offline `mergecraft review --capture-verdicts` and Action review runs |
 | `MERGECRAFT_CDP_URL` | Chrome DevTools Protocol base URL for the browser driver | `http://127.0.0.1:9222` | `verify-behavior` browser driver |
 | `MERGECRAFT_CONFIG` | Explicit path to the repo config file | unset — discovered at `<repo>/.mergecraft/config.yaml` | config resolution and the `config`/`tracing` commands |
 | `MERGECRAFT_CONTEXT_RETRIEVAL_TIMEOUT_S` | Seconds allowed for one context-retrieval call | `30` | review context retrieval |
 | `MERGECRAFT_COST_BUDGET_USD` | Per-run spend ceiling, in US dollars | `50.0` | budget enforcement (exhaustion maps to inconclusive) |
 | `MERGECRAFT_EGRESS_DNS_RESOLVERS` | Comma-separated IPv4 resolvers allowed inside the analyzer network namespace | host `/etc/resolv.conf` nameservers (fallback `1.1.1.1`) | isolated analyzers |
 | `MERGECRAFT_ENV` | Explicit path to the `.env` file loaded at CLI startup | unset — git-root `.env`, skipped inside GitHub Actions | CLI startup and credential writers |
-| `MERGECRAFT_EVIDENCE_DIR` | Parent directory for the emitted evidence packet | unset — `$RUNNER_TEMP/mergecraft`, else the run temp dir | review evidence-packet emission |
+| `MERGECRAFT_EVIDENCE_DIR` | Parent directory for the emitted evidence packet and the captured `judge-verdicts.jsonl` | unset — `$RUNNER_TEMP/mergecraft`, else the run temp dir | review evidence-packet emission |
 | `MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S` | Upper bound, in seconds, applied to every registered external operation | `600` | external I/O within a run |
 | `MERGECRAFT_KEEP_TMP` | Truthy keeps the run's temporary directories | unset — temp dirs are cleaned up | local and offline review |
-| `MERGECRAFT_LATENCY_BUDGET_MS` | Latency budget, in milliseconds, for the selected `--profile` bundle | unset — the profile's own value | profile budget bundles |
 | `MERGECRAFT_LOG_FORMAT` | Log sink format: `json` or `text` | `text` | CLI and Action logging |
 | `MERGECRAFT_LOG_LEVEL` | Loguru level name (`TRACE` through `CRITICAL`) | unset — `INFO`, or `DEBUG` under `ACTIONS_STEP_DEBUG` / `--verbose` | CLI logging |
 | `MERGECRAFT_MAX_DIFF_LINES` | Diff line ceiling before scope reduction is recorded | `50000` | review diff loading |

@@ -29,6 +29,7 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
+from mergecraft.config.env import EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.main_outcome import (
     _classify_outcome,
@@ -849,7 +850,20 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     ctx.scm = create_github_scm(ctx.job_token, client=github_client)
     run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
-    export_tracing_env_from_action_inputs()
+    try:
+        # Both the tracing Action-input model and the registered env models
+        # read malformed control-carrying settings here. Keeping the export
+        # inside the ``try`` maps an unparseable ``INPUT_TRACING`` to
+        # ``_ConfigurationError`` (→ ``configuration_error``) instead of
+        # letting it fall through to the generic ``infra_error`` bucket.
+        export_tracing_env_from_action_inputs()
+        validate_env_settings()
+    except EnvSettingsError as exc:
+        # A malformed control-carrying setting fails configuration before any
+        # subprocess or agent exists. ``_ConfigurationError`` maps to
+        # ``RunOutcome.configuration_error``; the message names the variable
+        # and never the value.
+        raise _ConfigurationError(str(exc)) from exc
     settings = apply_tracing_overrides(run_context.repo_settings)
     for tracing_warning in collect_tracing_warnings_for_summary():
         logger.warning(tracing_warning)
@@ -899,6 +913,11 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     )
     if pr_number is not None:
         tool_state.pr_number = int(pr_number)
+    # HS2 — read the capture flag once, at run start, so a mid-run env change
+    # cannot turn verdict capture on or off partway through a review.
+    from mergecraft.evidence.verdict_capture import capture_verdicts_enabled
+
+    tool_state.capture_verdicts = capture_verdicts_enabled()
     ctx.tool_state = tool_state
     tmpdir = create_temp_directory()
     ctx.tmpdir = tmpdir
@@ -1239,7 +1258,7 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     ctx.agent_id = agent_id
     ctx.resolved_model = resolved_model
     ctx.selected_slug = selected_slug
-    tool_state.model = payload.get("proxyModel") or resolved_model or payload.get("model")
+    tool_state.model = resolved_model or payload.get("model")
 
     from mergecraft.utils.agent_resolve import collect_roster_credential_degradations
 
@@ -1347,7 +1366,6 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
         job_id=os.environ.get("GITHUB_JOB"),
         oss=run_context.oss,
-        plan="unknown",
         resolved_model=ctx.resolved_model,
         suggest_eval_add=bool(payload.get("suggestEvalAdd")),
         budget_tracker=ctx.budget_tracker,
@@ -1639,7 +1657,6 @@ def _promote_and_finalize_agent_result(
     assert ctx.tool_context is not None
     tool_state = ctx.tool_state
     tool_context = ctx.tool_context
-    payload = ctx.payload
     chain_for_decision = ctx.chain_for_decision
     output_schema = ctx.output_schema
 
@@ -1658,7 +1675,7 @@ def _promote_and_finalize_agent_result(
         )
         fallback_raw = meta.get("fallback_index")
         fallback_index = fallback_raw if isinstance(fallback_raw, int) else 0
-        executed = payload.get("proxyModel") or resolved_model or winning_slug
+        executed = resolved_model or winning_slug
         promote_model_evidence(
             tool_state,
             requested_model=requested,

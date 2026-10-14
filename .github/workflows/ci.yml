@@ -382,6 +382,14 @@ jobs:
         # changes, regenerate the baseline from the same commit
         # (`mergecraft eval replay-bank` → `evals/results/latest.json`) so the
         # gate measures drift, not corpus edits.
+      - name: Trajectory gate (advisory until a protocol is approved)
+        run: |
+          set -euo pipefail
+          # The gate reads an approved protocol, compares a candidate report
+          # against a frozen baseline, and fails naming any check outside the
+          # declared tolerance. With no approved protocol yet it reports
+          # "no approved protocol — advisory" and exits 0.
+          make eval-trajectory-gate
 
   # R-D10 — optional, keyless fixture replay. Two hard-coded packets go
   # through the gate so the table can be published without a provider. This

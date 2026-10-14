@@ -61,6 +61,15 @@ def test_sharding_claims_durations_it_has() -> None:
     )
 
 
+def test_eval_trajectory_gate_target_has_a_help_string() -> None:
+    """A new Make target must be discoverable and call the CLI gate."""
+    body = makefile_target_body("eval-trajectory-gate")
+    header = body.splitlines()[0]
+    assert "##" in header, f"eval-trajectory-gate has no `##` help string: {header!r}"
+    assert "trajectory" in header.lower()
+    assert "trajectory-gate" in body, "the target must call `mergecraft eval trajectory-gate`"
+
+
 def test_workflow_lint_fails_when_it_cannot_lint(tmp_path: Path) -> None:
     """Off Linux with no cached binaries the script must not report success."""
     shim = tmp_path / "bin"

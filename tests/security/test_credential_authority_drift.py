@@ -35,6 +35,7 @@ _ENTRIES: tuple[ProviderRegistryEntry, ...] = tuple(
         {"label": "vertex", "harness": "claude", "envIndex": 4, "authKind": "cloud_chain"},
         {"label": "google", "harness": "gemini", "envIndex": 5, "authKind": "api_key"},
         {"label": "cursor", "harness": "cursor", "envIndex": 6, "authKind": "api_key"},
+        {"label": "opencode-go", "harness": "opencode", "envIndex": 7, "authKind": "api_key"},
     )
 )
 
@@ -48,8 +49,14 @@ def _indexed_names() -> frozenset[str]:
 
 
 def _flat_names() -> frozenset[str]:
+    from mergecraft.workflow.auth_manifest import flat_credential_env_keys
+
     names: set[str] = set()
     for entry in _ENTRIES:
+        auth = (entry.auth_kind or "api_key").strip().lower()
+        if auth == "api_key":
+            names.update(flat_credential_env_keys(entry.label))
+            continue
         for suffix in _credential_suffixes_for_entry(entry):
             harness_name = _harness_env_name_for_suffix(entry.label, suffix)
             if harness_name is not None:

@@ -390,6 +390,12 @@ class ToolState:
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
     progress_comment: ProgressComment | Literal[False] | None = None
+    # HS8 — the sticky comment id read from the newest trusted workflow run's
+    # evidence artefact. Written by ``checkout_pr`` from that run's own record
+    # (never an agent), and consumed by HS1's run-bound sticky selection
+    # (``findings.ledger._run_bound_sticky_id``). ``None`` on a run whose
+    # trusted checkpoint was unavailable.
+    run_bound_progress_comment_id: int | None = None
     # None = unset, ProgressComment = active, False = deliberately deleted (TS uses null)
     had_progress_comment: bool = False
     last_progress_body: str | None = None
@@ -418,6 +424,11 @@ class ToolState:
     author: str | None = None
     # GitHub ``author_association`` of the triggering comment / event.
     author_association: str | None = None
+    # HS2 — ``MERGECRAFT_CAPTURE_VERDICTS`` read once at run start. When set,
+    # every saved verifier verdict is appended to ``<evidence_dir>/judge-verdicts.jsonl``
+    # for offline judge calibration. Off by default so ordinary reviews write
+    # nothing new; operator-controlled, never agent-controlled.
+    capture_verdicts: bool = False
     # ``derive_trust_tier()``'s execution-trust value for this run (trusted|untrusted).
     trust_tier: str | None = None
     # Authority axis — whether terminal approval semantics may apply (plan 13 D13).

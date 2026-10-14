@@ -11,4 +11,4 @@ tools:
 
 Follow the mergeCraft skill at `.github/skills/mergecraft/SKILL.md` (copy from
 `skills/copilot/mergecraft/` if it is not installed). Do not duplicate
-`AGENTS.md` here. Never weaken trust tiers or commit secrets.
+`AGENTS-mergecraft.md` here. Never weaken trust tiers or commit secrets.

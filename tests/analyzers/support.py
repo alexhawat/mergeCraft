@@ -48,6 +48,17 @@ def finding_path_matches(expected: str, actual: str) -> bool:
     return actual == expected or actual == redacted_text(expected)
 
 
+def assert_no_canary(text: str, canary: str) -> None:
+    """Raise when a planted canary secret appears in output material.
+
+    The canary escape check belongs with the analyzer suite: it is an assertion
+    the tests make about analyzer output, not a shipped redaction primitive.
+    """
+    if canary in text:
+        msg = "canary secret escaped the redaction boundary"
+        raise AssertionError(msg)
+
+
 # W0.2 measured inline cap (D14).
 INLINE_BUDGET = 8
 

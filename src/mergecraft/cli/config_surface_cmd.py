@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import typer
@@ -17,27 +16,16 @@ from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
 )
 from mergecraft.config.io import (
-    append_config_mapping,
-    config_has_yaml_comments,
     config_path_for_root,
     load_config_dict,
-    write_config_dict,
+    patch_config_dict,
 )
-from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
+from mergecraft.config.layered import resolved_config_path
+from mergecraft.config.settings import RepoSettings
 
 _SETTABLE_KEYS = frozenset({"model", "models", "tracing.enabled", "tracing"})
 _TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
 _FALSE_VALUES = frozenset({"false", "0", "no", "off"})
-
-
-def _config_path(cwd: Path) -> Path | None:
-    env_path = os.environ.get("MERGECRAFT_CONFIG")
-    if env_path:
-        candidate = Path(env_path)
-        if candidate.is_file():
-            return candidate
-    candidate = cwd / _DEFAULT_CONFIG_REL
-    return candidate if candidate.is_file() else None
 
 
 def config_show(
@@ -94,7 +82,7 @@ def config_validate(
 ) -> None:
     """Validate repo config — unknown keys are rejected (extra=forbid)."""
     root = cwd.resolve()
-    config_path = config or _config_path(root)
+    config_path = config or resolved_config_path(root)
     if config_path is None or not config_path.is_file():
         console.print("[green]ok[/green] — no config file (defaults apply)")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
@@ -131,11 +119,9 @@ def _split_model_slugs(value: str) -> list[str]:
     return slugs
 
 
-def _write_config_data(path: Path, data: dict[str, object], *, patch: dict[str, object]) -> None:
-    if config_has_yaml_comments(path):
-        append_config_mapping(path, patch)
-        return
-    write_config_dict(path, data)
+def _write_config_data(path: Path, *, patch: dict[str, object]) -> None:
+    """Write *patch* into *path*, preserving comments and never duplicating a key."""
+    patch_config_dict(path, patch)
 
 
 def config_set(
@@ -156,7 +142,7 @@ def config_set(
         supported = ", ".join(sorted(_SETTABLE_KEYS))
         cli_bail(f"unsupported config key for set: {key!r} — supported: {supported}")
 
-    config_path = _config_path(root) or config_path_for_root(root)
+    config_path = config_path_for_root(root)
     data: dict[str, object] = load_config_dict(config_path)
     patch: dict[str, object]
     if normalized in {"model", "models"}:
@@ -177,7 +163,7 @@ def config_set(
     except ValidationError as exc:
         cli_bail(f"config validation failed: {exc}")
 
-    _write_config_data(config_path, data, patch=patch)
+    _write_config_data(config_path, patch=patch)
     try:
         display = str(config_path.relative_to(root))
     except ValueError:
@@ -187,7 +173,7 @@ def config_set(
 
 def validate_repo_config_or_raise(*, cwd: Path) -> None:
     """Raise ``ValueError`` when the workspace config fails validation."""
-    config_path = _config_path(cwd)
+    config_path = resolved_config_path(cwd)
     if config_path is None:
         return
     loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))

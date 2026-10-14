@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import typer
 import yaml
 from pydantic import ValidationError
+from rich.console import Console
 from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
@@ -20,7 +22,8 @@ from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
 from mergecraft.config.compat import migrate_config
-from mergecraft.config.settings import _DEFAULT_CONFIG_REL, RepoSettings
+from mergecraft.config.layered import merge_config_dicts, resolve_config_sources
+from mergecraft.config.settings import RepoSettings
 from mergecraft.evidence.run_manifest import runtime_tool_stamp
 from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES
@@ -114,25 +117,37 @@ def _auth_probe() -> ProbeResult:
 
 
 def _config_probe(cwd: Path) -> ProbeResult:
-    config_path = cwd / _DEFAULT_CONFIG_REL
-    env_path = os.environ.get("MERGECRAFT_CONFIG")
-    if env_path:
-        config_path = Path(env_path)
-    if not config_path.is_file():
+    sources = resolve_config_sources(cwd)
+    env_note = ""
+    if sources.env_config_missing:
+        env_path = os.environ.get("MERGECRAFT_CONFIG", "")
+        env_note = f"MERGECRAFT_CONFIG={env_path} does not exist"
+    if not sources.files:
+        if env_note:
+            return ProbeResult("config", "warn", f"{env_note}; no config file found")
         return ProbeResult("config", "ok", "no config file (defaults apply)")
+
+    merged: dict[str, Any] = {}
+    for path in sources.files:
+        try:
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            return ProbeResult("config", "fail", f"parse error: {exc}", hard_failure=True)
+        if loaded is None:
+            continue
+        if not isinstance(loaded, dict):
+            return ProbeResult("config", "fail", "config root must be a mapping", hard_failure=True)
+        merged = merge_config_dicts(merged, loaded)
+
     try:
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        return ProbeResult("config", "fail", f"parse error: {exc}", hard_failure=True)
-    if loaded is None:
-        return ProbeResult("config", "ok", "empty config file")
-    if not isinstance(loaded, dict):
-        return ProbeResult("config", "fail", "config root must be a mapping", hard_failure=True)
-    try:
-        RepoSettings.model_validate(migrate_config(loaded))
+        RepoSettings.model_validate(migrate_config(merged))
     except (TypeError, ValueError, ValidationError) as exc:
         return ProbeResult("config", "fail", f"validation error: {exc}", hard_failure=True)
-    return ProbeResult("config", "ok", str(config_path))
+
+    contributing = ", ".join(str(path) for path in sources.files)
+    if env_note:
+        return ProbeResult("config", "warn", f"{env_note}; contributing: {contributing}")
+    return ProbeResult("config", "ok", contributing)
 
 
 def _mcp_probe() -> ProbeResult:
@@ -276,6 +291,14 @@ def render_doctor_table(
     return table
 
 
+def _render_table_text(table: Table) -> str:
+    """Render *table* to plain text for a secret tripwire before it is printed."""
+    buffer = io.StringIO()
+    renderer = Console(file=buffer, stderr=True, no_color=True, soft_wrap=True, width=400)
+    renderer.print(table)
+    return buffer.getvalue()
+
+
 def run(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root to diagnose."),
     supply_chain: bool = typer.Option(
@@ -291,7 +314,16 @@ def run(
     if supply_chain:
         results = [*results, *run_supply_chain_probes(cwd=root)]
         title = "mergecraft doctor — supply-chain provenance"
-    console.print(render_doctor_table(results, title=title))
+    table = render_doctor_table(results, title=title)
+    # The tripwire is a hard failure checked on the rendered table *before* it
+    # is printed: a credential that reached a probe detail exits before any of
+    # the table lands, naming the env key and never the value.
+    try:
+        assert_output_contains_no_secrets(_render_table_text(table))
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
+    console.print(table)
     if any(row.hard_failure for row in results):
         raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
 

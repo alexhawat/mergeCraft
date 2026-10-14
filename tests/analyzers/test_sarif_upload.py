@@ -51,7 +51,6 @@ from loguru import logger
 from mergecraft.analyzers.budget import place_findings
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding, make_finding
-from mergecraft.analyzers.redact import assert_no_canary
 from mergecraft.analyzers.sarif_upload import (
     build_upload_document,
     encode_sarif_payload,
@@ -65,6 +64,7 @@ from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow, init_
 from mergecraft.modes import compute_modes
 from mergecraft.utils.code_scanning import report_sarif_upload
 from mergecraft.utils.github import GitHubClient
+from tests.analyzers.support import assert_no_canary
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

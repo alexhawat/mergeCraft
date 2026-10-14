@@ -533,6 +533,41 @@ def test_provider_seed_imports_all_builtin_catalog_entries(
     assert labels == set(PROVIDERS.keys())
 
 
+def test_provider_seed_does_not_duplicate_a_column_zero_providers_list(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Seeding a commented config keeps one entry per provider, not a union.
+
+    The seeded ``providers:`` value is a list, and ``yaml.safe_dump`` renders
+    top-level list items at column 0. A block reader that treats those items as
+    the next top-level key replaces only the header and leaves the old entries
+    behind, so a provider already in the file ends up twice.
+    """
+    cfg_dir = tmp_path / ".mergecraft"
+    cfg_dir.mkdir(parents=True)
+    config_path = cfg_dir / "config.yaml"
+    config_path.write_text(
+        "# keep this note\nproviders:\n- label: nous\n  harness: opencode\n  envIndex: 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    registry = import_provider_cmd()
+    seed_fn = getattr(registry, "seed_builtin_providers", None)
+    if seed_fn is None:
+        pytest.fail("provider_cmd.seed_builtin_providers is not implemented")
+
+    seed_fn(config_path)
+
+    raw = config_path.read_text(encoding="utf-8")
+    config = read_config(tmp_path)
+    labels = [entry["label"] for entry in provider_entries(config)]
+    assert len(labels) == len(set(labels)), f"duplicate provider labels:\n{raw}"
+    assert set(labels) == set(PROVIDERS.keys())
+    assert "# keep this note" in raw
+
+
 def test_provider_registry_does_not_read_providers_dict_at_runtime(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

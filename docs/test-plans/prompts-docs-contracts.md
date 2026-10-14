@@ -193,7 +193,7 @@ space becomes a hyphen **without collapsing** (so `Example 1 — auto review eve
 PR` → `example-1--auto-review-every-pr`). Explicit `<span id>`, `<a id>` and
 `<a name>` are anchors; `{#id}` is **not** (a `### Trust tier {#trust-tier}`
 heading slugs to `trust-tier-trust-tier`). Scope is `docs/**/*.md`, `README.md`,
-`REVIEW-CHECKS.md`, `SECURITY.md`, `CONTRIBUTING.md`, `AGENTS.md`;
+`REVIEW-CHECKS.md`, `SECURITY.md`, `CONTRIBUTING.md`, `AGENTS-mergecraft.md`;
 `CHANGELOG.md` and generated `docs/action-reference.md` are excluded. Relative
 targets resolve against the containing file's directory; a directory target is
 valid.
@@ -341,7 +341,7 @@ is unsatisfiable without unauthorised deletions: PD-D7/PD-D8 remove no existing
 text, and never-document names are already referenced legitimately elsewhere —
 secrets in `docs/authentication.md` (`MERGECRAFT_LOGFIRE_TOKEN`,
 `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`, `MERGECRAFT_APP_PRIVATE_KEY`), the
-control-weakening switches in `AGENTS.md`, the generated `MERGECRAFT_ACTION_SHA`
+control-weakening switches in `AGENTS-mergecraft.md`, the generated `MERGECRAFT_ACTION_SHA`
 in `docs/workflows.md`, etc. The rule is therefore enforced where "public knobs"
 are actually enumerated: the new `docs/cli.md` `## Environment variables`
 section. `docs/cli.md`'s pre-existing line 50 (an `auth` command that stores a

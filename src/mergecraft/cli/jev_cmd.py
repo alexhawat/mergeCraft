@@ -28,7 +28,6 @@ from typing import Any
 
 import typer
 import yaml
-from dotenv import dotenv_values
 from loguru import logger
 from pydantic import ValidationError
 
@@ -40,7 +39,8 @@ from mergecraft.cli.local_env import local_env_path_for_cwd
 from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
 from mergecraft.cli.trust_cmd import GhRunner, _default_gh_runner, _gh_json, _gh_optional_json
 from mergecraft.cli.typer_group import mergecraft_typer
-from mergecraft.config.io import append_config_mapping, config_has_yaml_comments, write_config_dict
+from mergecraft.config.env import LocalDotEnv
+from mergecraft.config.io import config_has_yaml_comments, patch_config_dict
 from mergecraft.config.settings import RepoSettings, load_repo_settings
 from mergecraft.jev.client import TYPESAFE_API_KEY_ENV
 
@@ -129,71 +129,15 @@ _JEV_HEADER = re.compile(r"^([ \t]*)jev:\s*(?:#.*)?$")
 _ENABLED_LINE = re.compile(r"^([ \t]+)enabled:[ \t]*([^#\n]*?)[ \t]*((?:#.*)?)$")
 
 
-def _jev_block_span(lines: list[str]) -> tuple[int, int, int] | None:
-    """Return ``(start, end, indent)`` of the ``jev:`` block, or None when absent.
+def _write_jev_data(path: Path, *, patch: dict[str, Any]) -> None:
+    """Write *patch* into *path*, preserving comments and never duplicating a key.
 
-    ``end`` is exclusive and covers the header plus every line that belongs to
-    the mapping — deeper-indented entries, and the blank or comment lines
-    between them. Trailing blanks are handed back to the caller so a replacement
-    does not swallow the separator before the next top-level key.
+    Delegates to the shared comment-preserving writer: it replaces the existing
+    top-level block in place and appends only when the key is absent, so a
+    repeated write never leaves a second ``jev:`` mapping for PyYAML to resolve
+    in favour of the one that drops the consumer's settings.
     """
-    for index, line in enumerate(lines):
-        header = _JEV_HEADER.match(line)
-        if not header:
-            continue
-        indent = len(header.group(1))
-        end = index + 1
-        last_content = end
-        for offset in range(index + 1, len(lines)):
-            candidate = lines[offset]
-            stripped = candidate.strip()
-            if not stripped:
-                end = offset + 1
-                continue
-            candidate_indent = len(candidate) - len(candidate.lstrip(" \t"))
-            if candidate_indent <= indent:
-                # A comment at or left of the header's column introduces
-                # whatever comes next, so it is not part of this mapping.
-                break
-            end = offset + 1
-            last_content = end
-        return index, last_content, indent
-    return None
-
-
-def patch_jev_block_yaml(text: str, block: dict[str, Any]) -> str:
-    """Replace the whole ``jev:`` mapping in place, preserving surrounding comments.
-
-    ``append_config_mapping`` appends a second top-level ``jev:`` key, and
-    PyYAML keeps the last one — so appending silently discards every Jev
-    setting already in the file. This rewrites the existing block instead, and
-    only appends when the file has no ``jev:`` mapping at all.
-    """
-    rendered = yaml.safe_dump({"jev": block}, sort_keys=False, default_flow_style=False)
-    lines = text.splitlines(keepends=True)
-    span = _jev_block_span(lines)
-    if span is None:
-        suffix = "" if text.endswith("\n") or not text else "\n"
-        return f"{text}{suffix}{rendered}"
-    start, end, _ = span
-    return "".join(lines[:start]) + rendered + "".join(lines[end:])
-
-
-def _write_jev_data(path: Path, data: dict[str, Any], *, patch: dict[str, Any]) -> None:
-    """Write *patch* into *path*, preserving comments when present (D-comment).
-
-    Never appends a second ``jev:`` key: an appended mapping wins under PyYAML
-    and drops every setting the consumer already had.
-    """
-    if config_has_yaml_comments(path):
-        block = patch.get("jev")
-        if not isinstance(block, dict):
-            append_config_mapping(path, patch)
-            return
-        current = path.read_text(encoding="utf-8") if path.is_file() else ""
-        path.write_text(patch_jev_block_yaml(current, block), encoding="utf-8")
-        return
-    write_config_dict(path, data)
+    patch_config_dict(path, patch)
 
 
 def _reloaded_jev_enabled(path: Path) -> bool | None:
@@ -245,14 +189,11 @@ def _set_jev_enabled(cwd: Path, *, enabled: bool) -> Path:
             # that still disagrees: fall back to rewriting the whole mapping,
             # which cannot leave a stale duplicate behind.
             logger.warning("jev enabled patch did not take on {}; rewriting the block", config_path)
-            config_path.write_text(
-                patch_jev_block_yaml(config_path.read_text(encoding="utf-8"), updated),
-                encoding="utf-8",
-            )
+            _write_jev_data(config_path, patch={"jev": updated})
             if _reloaded_jev_enabled(config_path) is not enabled:
                 cli_bail(f"could not set jev.enabled={enabled} in {config_path}")
         return config_path
-    _write_jev_data(config_path, data, patch={"jev": updated})
+    _write_jev_data(config_path, patch={"jev": updated})
     return config_path
 
 
@@ -502,15 +443,24 @@ def _current_repo_slug() -> str | None:
 
 
 def _typesafe_key_from_env_or_file(cwd: Path) -> str | None:
-    """Return a non-empty ``TYPESAFE_API_KEY`` from the process env or the repo ``.env``."""
-    from_env = os.environ.get(TYPESAFE_API_KEY_ENV, "").strip()
-    if from_env:
-        return from_env
+    """Return a non-empty ``TYPESAFE_API_KEY`` from the process env or the repo ``.env``.
+
+    The process environment wins. The file is read through
+    :class:`mergecraft.config.env.LocalDotEnv`, so its quoting means the same
+    here as it does to the startup load. The credential stays a ``SecretStr``
+    inside the model and is unwrapped only at this consumer boundary.
+    """
+    from_process_env = os.environ.get(TYPESAFE_API_KEY_ENV, "").strip()
+    if from_process_env:
+        return from_process_env
     env_path = local_env_path_for_cwd(cwd)
     if not env_path.is_file():
         return None
-    from_file = (dotenv_values(env_path).get(TYPESAFE_API_KEY_ENV) or "").strip()
-    return from_file or None
+    from_file = LocalDotEnv.from_file(env_path).TYPESAFE_API_KEY
+    if from_file is None:
+        return None
+    unwrapped = from_file.get_secret_value().strip()
+    return unwrapped or None
 
 
 def _request_typesafe_api_key() -> str | None:
@@ -682,7 +632,7 @@ def set_cmd(
     _validate_jev_block(updated)
 
     data["jev"] = updated
-    _write_jev_data(config_path, data, patch={"jev": updated})
+    _write_jev_data(config_path, patch={"jev": updated})
     try:
         display = str(config_path.relative_to(target))
     except ValueError:

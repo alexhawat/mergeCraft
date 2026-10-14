@@ -116,10 +116,27 @@ def subagent_denied_tool_names(
 def build_claude_native_fs_denies(
     extra_secret_paths: list[str] | None = None,
 ) -> list[str]:
+    """Return the Claude ``--disallowedTools`` rules for the credential paths (HS4).
+
+    Each supplied absolute path ``p`` yields four rules per the Claude Code
+    permission grammar: ``Read(//p)`` / ``Edit(//p)`` and their ``/**`` subtree
+    forms. A **single** leading ``/`` anchors at the primary working directory
+    (gitignore semantics), not the filesystem root — so ``Read(/github/home)``
+    would deny ``<cwd>/github/home``, a path that does not exist, and the control
+    would be dead. ``//`` is the absolute form. The exact rule covers a file
+    argument and the ``/**`` tree covers a directory argument; emitting fewer
+    rules would be a fail-open regression (P-6), so the builder is deliberately
+    more restrictive than the bare paths it is given.
+
+    ``GIT_NATIVE_WRITE_DENY_CLAUDE`` / ``GIT_NATIVE_READ_DENY_CLAUDE`` are
+    repository-relative (``.git/...``) and keep their behaviour unchanged.
+    """
     denies = [*GIT_NATIVE_WRITE_DENY_CLAUDE, *GIT_NATIVE_READ_DENY_CLAUDE]
     for path in extra_secret_paths or []:
-        denies.append(f"Read({path})")
-        denies.append(f"Edit({path})")
+        anchored = "//" + path.lstrip("/")
+        for verb in ("Read", "Edit"):
+            denies.append(f"{verb}({anchored})")
+            denies.append(f"{verb}({anchored}/**)")
     return denies
 
 

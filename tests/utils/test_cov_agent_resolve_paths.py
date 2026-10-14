@@ -837,24 +837,6 @@ def test_cost_attrs_drop_missing_and_non_numeric_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _slug_runnable
-# ---------------------------------------------------------------------------
-
-
-def test_slug_runnable_accepts_custom_prefixes_but_not_uncredentialled_natives() -> None:
-    assert ar._slug_runnable("openai/gpt") is False
-    assert ar._slug_runnable("acme/private-1") is True
-    assert ar._slug_runnable("no-slash") is False
-
-
-def test_slug_runnable_accepts_a_native_slug_once_credentials_exist(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
-    assert ar._slug_runnable("openai/gpt") is True
-
-
-# ---------------------------------------------------------------------------
 # resolve_model / _resolve_slug
 # ---------------------------------------------------------------------------
 
