@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.types import AgentId
 
-MAX_STDERR_LINES = 20
 # AR-D3 — the concurrent stderr drain keeps at most this many lines (tail-kept,
 # oldest dropped). 2,000 is well above the 20-line diagnostic tail the drivers
 # log and what ``is_retryable_cli_failure`` scans, while bounding memory on a
