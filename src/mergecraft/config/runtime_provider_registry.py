@@ -12,6 +12,16 @@ if TYPE_CHECKING:
 _LEGACY_NOUS_API_KEY = "NOUS_API_KEY"
 _LEGACY_NOUS_WARNED = False
 
+
+def _flat_registry_credential_env_keys(label: str) -> tuple[str, ...]:
+    """Flat workflow credential env names for *label*, excluding D7 legacy nous alias."""
+    from mergecraft.workflow.auth_manifest import flat_credential_env_keys
+
+    keys = flat_credential_env_keys(label)
+    if label.strip().lower() == "nous":
+        return tuple(key for key in keys if key != _LEGACY_NOUS_API_KEY)
+    return keys
+
 _AUTH_KIND_API_KEY = "api_key"
 _AUTH_KIND_OAUTH = "oauth"
 _AUTH_KIND_DEVICE_CODE = "device_code"
@@ -163,14 +173,12 @@ def credential_env_keys_for_entry(entry: ProviderRegistryEntry) -> tuple[str, ..
     treat the whole tuple as one OR, the way ``indexed_credential_for_entry``
     does when it reads them.
     """
-    from mergecraft.workflow.auth_manifest import flat_credential_env_keys
-
     keys: list[str] = [
         indexed_env_key(entry.env_index, suffix) for suffix in _credential_suffixes_for_entry(entry)
     ]
     auth_kind = (entry.auth_kind or _AUTH_KIND_API_KEY).strip().lower()
     if auth_kind == _AUTH_KIND_API_KEY:
-        for flat_key in flat_credential_env_keys(entry.label):
+        for flat_key in _flat_registry_credential_env_keys(entry.label):
             if flat_key not in keys:
                 keys.append(flat_key)
     return tuple(keys)
@@ -183,9 +191,7 @@ def indexed_credential_for_entry(entry: ProviderRegistryEntry) -> str | None:
         if value:
             return value
         if suffix == "API_KEY":
-            from mergecraft.workflow.auth_manifest import flat_credential_env_keys
-
-            for flat_key in flat_credential_env_keys(entry.label):
+            for flat_key in _flat_registry_credential_env_keys(entry.label):
                 flat_value = _read_env_value(flat_key)
                 if flat_value:
                     return flat_value
@@ -372,9 +378,7 @@ def _read_indexed_credential_value(entry: ProviderRegistryEntry, suffix: str) ->
     if value:
         return value
     if suffix == "API_KEY":
-        from mergecraft.workflow.auth_manifest import flat_credential_env_keys
-
-        for flat_key in flat_credential_env_keys(entry.label):
+        for flat_key in _flat_registry_credential_env_keys(entry.label):
             flat_value = _read_env_value(flat_key)
             if flat_value:
                 return flat_value
