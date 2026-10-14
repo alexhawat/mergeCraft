@@ -12,7 +12,7 @@ Pass `--help` to any invocation below for its full flag set.
 | Command | Description |
 |---------|-------------|
 | `mergecraft agent add-model <name> <slug>` | Append a registered model to an agent's chain (no-op when duplicate). |
-| `mergecraft agent assign-model <name> <slot> <slug>` | Register the model when needed, assign the slot, wire harness providers into `mergecraft.yml`, and set `with.model` on p0 (idempotent). |
+| `mergecraft agent assign-model <name> <slot> <slug>` | Register the model when needed, assign the slot, wire harness providers into `mergecraft.yml`, and set `with.model` on p0 for the `reviewer` agent (idempotent). |
 | `mergecraft agent create <name>` | Create a new roster entry with role defaults. |
 | `mergecraft agent delete <name>` | Remove an agent binding (refuses the last required reviewer or verifier). |
 | `mergecraft agent list` | List every agent, role, model chain, and dispatch level. |

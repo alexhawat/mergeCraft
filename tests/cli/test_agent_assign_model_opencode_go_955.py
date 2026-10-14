@@ -53,7 +53,6 @@ providers:
   - label: opencode-go
     harness: opencode
     envIndex: 1
-    authKind: api_key
 agents:
   reviewer:
     role: reviewer
@@ -68,7 +67,6 @@ providers:
   - label: opencode-go
     harness: opencode
     envIndex: 1
-    authKind: api_key
     url: null
 agents:
   reviewer:
@@ -127,6 +125,32 @@ def test_assign_model_opencode_go_with_explicit_null_url_registry(
     assert "OPENCODE_GO_API_KEY" in workflow_text
     assert "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1" not in workflow_text
     assert "None" not in workflow_text
+
+
+def test_assign_model_verifier_p0_does_not_rewrite_workflow_primary_model(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    config = (
+        _OPENCODE_GO_CONFIG.strip()
+        + """
+  verifier:
+    role: verifier
+    modelChain:
+      - opencode-go/glm-5.1
+"""
+    )
+    scaffold_mergecraft_home(tmp_path, config_body=config)
+    monkeypatch.chdir(tmp_path)
+    stub_mergecraft_env(monkeypatch, tmp_path)
+    scaffold_workflow_file(tmp_path, _WORKFLOW_API_KEY_ONLY)
+
+    slug = "opencode-go/kimi-k2"
+    result = _invoke("agent", "assign-model", "verifier", "p0", slug)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
+
+    workflow_text = (tmp_path / ".github/workflows/mergecraft.yml").read_text()
+    assert "model: opencode-go/glm-5.1" in workflow_text
+    assert "model: opencode-go/kimi-k2" not in workflow_text
 
 
 def test_workflow_provider_add_opencode_go_without_url(

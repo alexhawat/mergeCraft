@@ -19,7 +19,7 @@ BUILTIN_HARNESS_DEFAULTS: dict[str, str] = {
 _CLOUD_CHAIN_LABELS = frozenset({"bedrock", "vertex"})
 _DEVICE_CODE_LABELS = frozenset({"openai", "codex"})
 _OAUTH_LABELS = frozenset({"anthropic", "claude"})
-_OPENCODE_ZEN_LABELS = frozenset({"opencode", "opencode-go"})
+_OPENCODE_ZEN_LABELS = frozenset({"opencode"})
 
 # Alias — single predicate for harness/provider validity (D5).
 harness_supports_provider = ar._harness_supports_provider

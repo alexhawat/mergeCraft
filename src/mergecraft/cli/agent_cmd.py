@@ -585,13 +585,18 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
 
         entry["modelChain"] = chain
         _persist_entry(target_dir, target, config_path, raw, agents, agent_name, entry)
-        if target == AgentRosterTarget.COMMITTED and index == 0:
+        if (
+            target == AgentRosterTarget.COMMITTED
+            and index == 0
+            and agent_name == AgentRole.reviewer.value
+        ):
             wire_primary_workflow_model(target_dir, validated_slug, force=True)
         console.print(f"[green]{message} on agents.{agent_name}[/green]")
 
     assign_model_cmd.__doc__ = (
         "Register the model when needed, assign the slot, wire harness providers "
-        "into ``mergecraft.yml``, and set ``with.model`` on p0 (idempotent)."
+        "into ``mergecraft.yml``, and set ``with.model`` on p0 for the "
+        "``reviewer`` agent (idempotent)."
         if target == AgentRosterTarget.COMMITTED
         else "Register the model when needed and assign the slot in "
         "``.mergecraft/config.local.yaml`` (local-only; does not change CI workflow)."
