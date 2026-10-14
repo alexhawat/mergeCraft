@@ -19,6 +19,7 @@ BUILTIN_HARNESS_DEFAULTS: dict[str, str] = {
 _CLOUD_CHAIN_LABELS = frozenset({"bedrock", "vertex"})
 _DEVICE_CODE_LABELS = frozenset({"openai", "codex"})
 _OAUTH_LABELS = frozenset({"anthropic", "claude"})
+_OPENCODE_ZEN_LABELS = frozenset({"opencode", "opencode-go"})
 
 # Alias — single predicate for harness/provider validity (D5).
 harness_supports_provider = ar._harness_supports_provider
@@ -104,6 +105,8 @@ def default_auth_kind_for_label(label: str) -> str | None:
         return "device_code"
     if lowered in _OAUTH_LABELS:
         return "oauth"
+    if lowered in _OPENCODE_ZEN_LABELS:
+        return "opencode_zen"
     return "api_key"
 
 

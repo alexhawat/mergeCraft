@@ -61,6 +61,22 @@ agents:
       - opencode-go/glm-5.1
 """
 
+_OPENCODE_GO_CONFIG_NULL_URL = """
+models:
+  - opencode-go/glm-5.1
+providers:
+  - label: opencode-go
+    harness: opencode
+    envIndex: 1
+    authKind: api_key
+    url: null
+agents:
+  reviewer:
+    role: reviewer
+    modelChain:
+      - opencode-go/glm-5.1
+"""
+
 
 def _bootstrap_opencode_go_repo(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     scaffold_mergecraft_home(tmp_path, config_body=_OPENCODE_GO_CONFIG.strip())
@@ -91,6 +107,26 @@ def test_assign_model_opencode_go_registers_wires_roster_and_workflow_model(
     assert "OPENCODE_GO_API_KEY" in workflow_text
     assert slug in workflow_text
     assert "with:" in workflow_text
+
+
+def test_assign_model_opencode_go_with_explicit_null_url_registry(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """YAML ``url: null`` must not stringify to a truthy custom-provider URL."""
+    scaffold_mergecraft_home(tmp_path, config_body=_OPENCODE_GO_CONFIG_NULL_URL.strip())
+    monkeypatch.chdir(tmp_path)
+    stub_mergecraft_env(monkeypatch, tmp_path)
+    scaffold_workflow_file(tmp_path, _WORKFLOW_API_KEY_ONLY)
+
+    slug = "opencode-go/deepseek-v4.1-flash"
+    result = _invoke("agent", "assign-model", "reviewer", "p0", slug)
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
+
+    workflow_text = (tmp_path / ".github/workflows/mergecraft.yml").read_text()
+    assert "LLM_PROVIDER_1: opencode-go" in workflow_text
+    assert "OPENCODE_GO_API_KEY" in workflow_text
+    assert "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1" not in workflow_text
+    assert "None" not in workflow_text
 
 
 def test_workflow_provider_add_opencode_go_without_url(

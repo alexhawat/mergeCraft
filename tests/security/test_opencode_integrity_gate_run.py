@@ -255,6 +255,31 @@ async def test_integrity_gate_through_run(
     assert result.error is None
 
 
+async def test_opencode_auth_write_does_not_trip_gate_for_in_checkout_scratch(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Isolated ``auth.json`` under in-checkout ``tmpdir`` is not tampering."""
+    from mergecraft.security.opencode_auth import build_opencode_zen_auth_json
+
+    ctx, tracked = _harness(tmp_path)
+    monkeypatch.setenv(
+        "OPENCODE_AUTH_JSON",
+        build_opencode_zen_auth_json("integrity-gate-auth-key"),
+    )
+    _wire_run_path(
+        monkeypatch, run_path="serve_unavailable_fallback", tracked=tracked, mutate=False
+    )
+
+    result = await oc._run(ctx)
+
+    auth_path = oc._opencode_data_home(ctx) / "opencode" / "auth.json"
+    assert auth_path.is_file()
+    _assert_in_checkout_scratch(ctx, tracked)
+    assert tracked.read_text(encoding="utf-8") == "clean\n"
+    assert result.success is True
+    assert result.error is None
+
+
 async def test_own_config_write_does_not_trip_gate_for_in_checkout_scratch(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

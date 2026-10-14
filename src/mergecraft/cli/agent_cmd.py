@@ -554,7 +554,6 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         ),
         cwd: Path = typer.Option(Path("."), "--cwd", help="Working directory."),
     ) -> None:
-        """Register the model when needed, assign the slot, wire harness providers into ``mergecraft.yml``, and set ``with.model`` on p0 (idempotent)."""
         agent_name = _validate_agent_name(name)
         target_dir = resolve_target_dir(cwd)
         config_path, raw, agents = _load_agents_block(target_dir, target)
@@ -589,6 +588,14 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         if target == AgentRosterTarget.COMMITTED and index == 0:
             wire_primary_workflow_model(target_dir, validated_slug, force=True)
         console.print(f"[green]{message} on agents.{agent_name}[/green]")
+
+    assign_model_cmd.__doc__ = (
+        "Register the model when needed, assign the slot, wire harness providers "
+        "into ``mergecraft.yml``, and set ``with.model`` on p0 (idempotent)."
+        if target == AgentRosterTarget.COMMITTED
+        else "Register the model when needed and assign the slot in "
+        "``.mergecraft/config.local.yaml`` (local-only; does not change CI workflow)."
+    )
 
     @roster_app.command("add-model")
     def add_model_cmd(

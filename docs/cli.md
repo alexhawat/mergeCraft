@@ -20,7 +20,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft agent set-after <name> <after>` | Change dispatch ordering after agent creation. |
 | `mergecraft agent show <name>` | Show one agent's chain, resolved model, and effective limits. |
 | `mergecraft agent-local add-model <name> <slug>` | Append a registered model to an agent's chain (no-op when duplicate). |
-| `mergecraft agent-local assign-model <name> <slot> <slug>` | Register the model when needed, assign the slot, wire harness providers into `mergecraft.yml`, and set `with.model` on p0 (idempotent). |
+| `mergecraft agent-local assign-model <name> <slot> <slug>` | Register the model when needed and assign the slot in `.mergecraft/config.local.yaml` (local-only; does not change CI workflow). |
 | `mergecraft agent-local create <name>` | Create a new roster entry with role defaults. |
 | `mergecraft agent-local delete <name>` | Remove an agent binding (refuses the last required reviewer or verifier). |
 | `mergecraft agent-local list` | List every agent, role, model chain, and dispatch level. |
@@ -49,6 +49,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft auth logfire` | Save a Logfire write token + project for the `logfire` tracing sink. |
 | `mergecraft auth minimax` | Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY. |
 | `mergecraft auth nous` | Save a Nous Portal API key as NOUS_API_KEY. |
+| `mergecraft auth opencode` | Save OpenCode Zen credentials as OPENCODE_AUTH_JSON. |
 | `mergecraft auth tokenhub` | Save a Tencent TokenHub API key as TOKENHUB_API_KEY. |
 | `mergecraft cache clear` | Remove every entry from the run cache. |
 | `mergecraft cache info` | Show cache location, byte ceiling, and current usage. |

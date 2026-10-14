@@ -153,6 +153,11 @@ def _restore_workflow(workflow: Path, previous: str | None) -> None:
         console.print(f"[red]could not restore {workflow} after a failed config write: {exc}[/red]")
 
 
+def _registry_entry_base_url(entry: Mapping[str, Any]) -> str:
+    """Return a custom OpenAI-compatible base URL, or ``""`` for harness-native providers."""
+    return str(entry.get("url") or "").strip()
+
+
 def wire_registry_provider_to_workflow(
     repo_root: Path,
     entry: Mapping[str, Any],
@@ -164,7 +169,7 @@ def wire_registry_provider_to_workflow(
     if not workflow.is_file():
         return
     env_index = int(entry["envIndex"])
-    base_url = str(entry.get("url", "")).strip()
+    base_url = _registry_entry_base_url(entry)
     label = str(entry.get("label", ""))
     try:
         if base_url:
@@ -398,7 +403,7 @@ def _apply_workflow_sync(repo_root: Path, workflow_path: Path) -> WorkflowChange
                     f"provider {provider_label!r} is not registered — run "
                     f"[cyan]mergecraft provider add --label {provider_label}[/cyan] first"
                 )
-            base_url = str(entry.get("url", "")).strip()
+            base_url = _registry_entry_base_url(entry)
             if base_url:
                 provider_change = apply_provider_env_wiring(
                     workflow_path=scratch,
@@ -587,7 +592,7 @@ def provider_add_cmd(
         persist=apply,
     )
     secret_name = _primary_secret_name(entry)
-    base_url = str(entry.get("url", "")).strip()
+    base_url = _registry_entry_base_url(entry)
 
     try:
         if base_url:
