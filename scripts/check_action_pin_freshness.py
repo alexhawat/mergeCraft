@@ -96,7 +96,10 @@ STALENESS_WORKFLOW = ".github/workflows/action-pin-staleness.yml"
 # Chosen to catch a genuinely stale reviewer, not routine lag: a pin a few
 # merges behind still runs substantially current code, while hundreds of
 # commits behind is how #450 went unnoticed. Override for a tighter policy.
-MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "100"))
+# 120 since 2026-10-14 (#953): the post-batch-2 cycle was overdue by ~13 days
+# and reached 107 commits of drift, just past the old 100. This guard's failure
+# mode is gross skew (687 commits, PR #443); 120 stays far below it.
+MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "120"))
 
 # Product-code commits the pin may lag the default branch's tip by. Counted
 # over ``src/mergecraft/`` only: docs, tests and workflow commits do not change
