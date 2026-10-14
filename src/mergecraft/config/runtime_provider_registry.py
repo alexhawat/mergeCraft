@@ -22,6 +22,7 @@ def _flat_registry_credential_env_keys(label: str) -> tuple[str, ...]:
         return tuple(key for key in keys if key != _LEGACY_NOUS_API_KEY)
     return keys
 
+
 _AUTH_KIND_API_KEY = "api_key"
 _AUTH_KIND_OAUTH = "oauth"
 _AUTH_KIND_DEVICE_CODE = "device_code"
