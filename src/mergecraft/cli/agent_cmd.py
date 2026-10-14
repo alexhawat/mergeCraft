@@ -298,6 +298,9 @@ def _prepare_assign_slug(
     except ValueError as exc:
         cli_bail(str(exc))
     if target == AgentRosterTarget.COMMITTED:
+        models = raw.get("models")
+        if isinstance(models, list) and slug in [str(item) for item in models]:
+            return slug
         data = load_config_dict(config_path)
         updated, validated = ensure_registered_model_slug(data, provider, model_id)
         if updated is not data:
