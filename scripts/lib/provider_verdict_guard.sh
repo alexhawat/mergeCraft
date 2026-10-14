@@ -44,6 +44,21 @@ discard_baseline_verdict() {
   printf '%s' "${conclusion}"
 }
 
+# Print a rung's evidence packet. The self-review passes a file path in
+# ${NAME}_FILE, because a packet passed through env can exceed the 128 KiB a
+# single environment variable may hold and stop the step from starting (#923).
+# The packet itself in ${NAME} is still accepted for callers that pass it inline.
+read_packet() {
+  local name="$1"
+  local file_var="${name}_FILE"
+  local file="${!file_var:-}"
+  if [ -n "${file}" ] && [ -s "${file}" ]; then
+    cat "${file}"
+  else
+    printf '%s' "${!name:-}"
+  fi
+}
+
 verdict_from_packet() {
   local packet="$1"
   if [ -n "${packet}" ]; then

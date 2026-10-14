@@ -124,7 +124,8 @@ def test_evidence_packet_output_nonempty_for_pr_run(
     assert '"schema_version"' in written
 
 
-def test_mergecraft_workflow_persists_packet_via_env_not_inline_interpolation() -> None:
+def test_mergecraft_workflow_persists_packet_from_file_not_env_or_inline_interpolation() -> None:
+    """The persist step copies the packet file; the packet never rides env or the script (#923)."""
     workflow = yaml.safe_load(read_text(".github/workflows/mergecraft.yml"))
     steps = []
     for job in (workflow.get("jobs") or {}).values():
@@ -134,13 +135,14 @@ def test_mergecraft_workflow_persists_packet_via_env_not_inline_interpolation() 
             if not isinstance(step, dict):
                 continue
             name = str(step.get("name") or "")
-            if "Persist evidence packet" in name or "evidence packet" in name.lower():
+            if "Persist evidence packet" in name:
                 steps.append(step)
     assert steps, "expected an always() packet persistence step in mergecraft.yml"
     for step in steps:
         assert step.get("if") == "always()"
         env = step.get("env") or {}
-        assert "PACKET" in env
-        assert "${{" in str(env["PACKET"])
+        assert "PACKET" not in env
+        assert "outputs.evidence_packet != ''" in str(env.get("RUNG_EMITTED_PACKET"))
         run_body = str(step.get("run") or "")
-        assert "${{" not in run_body or "$PACKET" in run_body
+        assert "${{" not in run_body
+        assert '$RUNNER_TEMP"/mergecraft/' in run_body

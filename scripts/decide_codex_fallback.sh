@@ -7,8 +7,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "${ROOT}/scripts/lib/provider_verdict_guard.sh"
 
 need="false"
-if [ -n "${NOUS_PACKET:-}" ]; then
-  verdict="$(verdict_from_packet "${NOUS_PACKET}")"
+nous_packet="$(read_packet NOUS_PACKET)"
+if [ -n "${nous_packet}" ]; then
+  verdict="$(verdict_from_packet "${nous_packet}")"
   if verdict_blocks_codex_fallback "${verdict}"; then
     echo "packet decision.verdict=${verdict} — Nous review posted a verdict; not falling back to Codex."
   else
