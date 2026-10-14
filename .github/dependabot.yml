@@ -14,6 +14,11 @@ version: 2
 # major is the case that actually needs a human to read a changelog. Grouping
 # one into a batch would let it ride along behind a green check.
 #
+# Every ecosystem targets `main`, the branch releases are cut from. Until
+# 2026-10-14 they targeted `pre-0.0.1`, which stopped moving on 2026-09-24, so
+# its update PRs ran against a tree hundreds of commits behind `main` and failed
+# checks `main` already passes.
+#
 # `dependabot[bot]` is exempted from the `mergecraft review` gate — see the
 # comment in .github/workflows/mergecraft.yml. `changelog-preview` is
 # deliberately NOT exempted: it already passes on bot PRs, and skipping a
@@ -21,7 +26,7 @@ version: 2
 updates:
   - package-ecosystem: pip
     directory: /
-    target-branch: pre-0.0.1
+    target-branch: main
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -41,7 +46,7 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
-    target-branch: pre-0.0.1
+    target-branch: main
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -58,7 +63,7 @@ updates:
 
   - package-ecosystem: docker
     directory: /
-    target-branch: pre-0.0.1
+    target-branch: main
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -82,7 +87,7 @@ updates:
   # matters. Batch them hard.
   - package-ecosystem: npm
     directory: /docker/agent-clis
-    target-branch: pre-0.0.1
+    target-branch: main
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
