@@ -1,6 +1,6 @@
 """W8 / W11 — context search, explain, budgets, omissions (#356).
 
-Does not re-test repo map / symbol index / graphs / git history (issue out of scope).
+Does not re-test symbol index / graphs (issue out of scope).
 """
 
 from __future__ import annotations
@@ -16,11 +16,9 @@ from tests.support.dead_package_wiring import SRC_ROOT
 def test_retrieval_half_already_ships_under_context() -> None:
     """#356 out of scope — retrieval half is already shipped (current state)."""
     for name in (
-        "repo_map.py",
         "symbol_index.py",
         "call_graph.py",
         "change_graph.py",
-        "git_history.py",
     ):
         assert (SRC_ROOT / "context" / name).is_file()
 

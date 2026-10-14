@@ -201,7 +201,6 @@ not part of the operator contract.
 | `MERGECRAFT_EVIDENCE_DIR` | Parent directory for the emitted evidence packet and the captured `judge-verdicts.jsonl` | unset — `$RUNNER_TEMP/mergecraft`, else the run temp dir | review evidence-packet emission |
 | `MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S` | Upper bound, in seconds, applied to every registered external operation | `600` | external I/O within a run |
 | `MERGECRAFT_KEEP_TMP` | Truthy keeps the run's temporary directories | unset — temp dirs are cleaned up | local and offline review |
-| `MERGECRAFT_LATENCY_BUDGET_MS` | Latency budget, in milliseconds, for the selected `--profile` bundle | unset — the profile's own value | profile budget bundles |
 | `MERGECRAFT_LOG_FORMAT` | Log sink format: `json` or `text` | `text` | CLI and Action logging |
 | `MERGECRAFT_LOG_LEVEL` | Loguru level name (`TRACE` through `CRITICAL`) | unset — `INFO`, or `DEBUG` under `ACTIONS_STEP_DEBUG` / `--verbose` | CLI logging |
 | `MERGECRAFT_MAX_DIFF_LINES` | Diff line ceiling before scope reduction is recorded | `50000` | review diff loading |

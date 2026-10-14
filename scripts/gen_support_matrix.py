@@ -79,12 +79,13 @@ def gen_support_matrix() -> str:
             notes = "preferred" if defn.preferred else "—"
             model_rows.append((f"`{provider_key}/{model_id}`", f"`{provider_key}`", notes))
 
-    # Review operations are GitHub-only. Webhook signature support alone
-    # does not implement a GitLab review adapter.
+    # Review operations are GitHub-only, so the SCM axis advertises a review
+    # adapter rather than a webhook ingress: no SCM delivers to a listening
+    # endpoint.
     scm_rows = [
-        ("`github`", "Webhook + review ingress", "Supported"),
-        ("`gitlab`", "Webhook + review ingress", "Not supported yet"),
-        ("`bitbucket`", "Webhook ingress", "Not supported"),
+        ("`github`", "Review adapter", "Supported"),
+        ("`gitlab`", "Review adapter", "Not supported yet"),
+        ("`bitbucket`", "Review adapter", "Not supported"),
     ]
 
     language_rows = [(lang, "Analyzer catalog `languages:`") for lang in languages]

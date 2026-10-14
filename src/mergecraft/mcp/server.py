@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import secrets
 import threading
 from typing import TYPE_CHECKING, Any
@@ -105,7 +103,6 @@ from mergecraft.mcp.verification import (
     verify_agent_findings_tool,
 )
 from mergecraft.mcp.xrepo import checkout_repo_tool, list_repos_tool
-from mergecraft.scm.ingress import accept_webhook
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.process_group import kill_process_groups
 
@@ -201,7 +198,7 @@ def build_reviewer_tools(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[ToolSpec]:
-    """Primary reviewer surface — class-filtered with publication admission (D9).
+    """Primary reviewer surface — class-filtered with publication admission.
 
     ``PRIMARY_MUTATING_ALLOWLIST`` explicitly names ``create_pull_request_review``
     (and ``checkout_pr``), plus the three session tools the primary must call:
@@ -223,7 +220,7 @@ def build_verifier_tools(
     ctx: ToolContext,
     output_schema: JsonSchema | None = None,
 ) -> list[ToolSpec]:
-    """Read-only verifier surface — class-filtered, distinct from reviewer (H4)."""
+    """Read-only verifier surface — class-filtered, distinct from reviewer."""
     return _filter_tools_by_class(
         build_orchestrator_tools(ctx, output_schema),
         VERIFIER_ALLOWED_TOOL_CLASSES,
@@ -318,8 +315,8 @@ def _register_mcp_route(
                 status_code=400,
             )
         items = body if isinstance(body, list) else [body]
-        # D10 (OB4) — the dispatch-issued agent id, forwarded by the agent
-        # CLI's MCP client config as a header on every call.
+        # The dispatch-issued agent id, forwarded by the agent CLI's MCP
+        # client config as a header on every call.
         calling_agent_id = request.headers.get("x-mergecraft-agent-id") or None
         # A JSON-RPC message with no `id` is a notification. The streamable-HTTP
         # spec requires 202 with an empty body for a notification-only POST;
@@ -386,26 +383,6 @@ def create_mcp_app(
         if health_nonce is not None:
             payload["nonce"] = health_nonce
         return payload
-
-    @app.post("/webhooks/{provider}")
-    async def inbound_webhook(provider: str, request: Request) -> JSONResponse:
-        secret = os.environ.get("MERGECRAFT_WEBHOOK_SECRET", "")
-        body = await request.body()
-        headers = {key: value for key, value in request.headers.items()}
-        try:
-            result = accept_webhook(provider, headers=headers, body=body, secret=secret)
-        except PermissionError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=401)
-        except (ValueError, json.JSONDecodeError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse(
-            {
-                "result_id": result.result_id,
-                "duplicate": result.duplicate,
-                "provider": result.provider,
-                "event": result.event,
-            }
-        )
 
     primary_token = orchestrator_auth_token if orchestrator_auth_token is not None else auth_token
     if tools:

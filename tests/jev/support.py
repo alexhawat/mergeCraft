@@ -1,7 +1,12 @@
 """Shared helpers and pinned symbols for the Jev suite.
 
 Imports of ``mergecraft.jev`` stay inside helpers so collection stays clean
-if a submodule is unused. CI makes zero live TypeSafe calls (D14).
+if a submodule is unused. CI makes zero live TypeSafe calls.
+
+The recorded transports live here rather than in the runtime package: they
+replay checked-in envelopes and belong with the tests. ``RecordedTransport``
+and ``FlakyRecordedTransport`` mirror the ``mergecraft.jev.client.JevTransport``
+protocol, which the runtime keeps alongside ``LiveTypeSafeTransport``.
 """
 
 from __future__ import annotations
@@ -12,10 +17,13 @@ import subprocess
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.review_taxonomy import FindingSource
+
+if TYPE_CHECKING:
+    from mergecraft.jev.types import SystemOneResponse
 
 PINNED_MODEL: Final[str] = "jev-1.13.0"
 OFFLINE_DEMO_PATCH: Final[str] = (
@@ -202,7 +210,7 @@ def skipping_jev_client(
     from mergecraft.config.settings import JevSettings
 
     module = import_jev("client")
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
     settings = JevSettings(enabled=True, model=PINNED_MODEL, **settings_kwargs)
     client = module.AsyncJevClient(api_key=None, transport=transport, settings=settings)
     return client, transport
@@ -227,6 +235,103 @@ def watch_async_jev_client(monkeypatch: Any) -> list[Any]:
     if getattr(offline_mod, "AsyncJevClient", None) is not None:
         monkeypatch.setattr(offline_mod, "AsyncJevClient", WatchedAsyncJevClient)
     return seen
+
+
+def _raise_from_envelope(error: dict[str, Any], http: dict[str, Any] | None) -> None:
+    """Raise the structured ``TypeSafeAPIError`` a recorded error envelope carries."""
+    from mergecraft.jev.client import TypeSafeAPIError
+
+    status = error.get("status_code")
+    if not isinstance(status, int):
+        raw_http = http or {}
+        raw_status = raw_http.get("status")
+        status = raw_status if isinstance(raw_status, int) else 500
+    code = error.get("code")
+    if not isinstance(code, str) or not code:
+        code = "typesafe_error"
+    raise TypeSafeAPIError(code, status_code=status, code=code, body=error)
+
+
+class RecordedTransport:
+    """Replay one recorded TypeSafe envelope. Never opens a network socket."""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+        self.calls = 0
+        self.last_model: str | None = None
+
+    @classmethod
+    def from_fixture(cls, path: Path) -> RecordedTransport:
+        """Load a recorded envelope from disk.
+
+        Args:
+            path: JSON fixture path under ``tests/jev/fixtures/transport/``.
+
+        Returns:
+            RecordedTransport: Ready to replay the envelope.
+        """
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            msg = f"transport fixture must be a JSON object: {path}"
+            raise TypeError(msg)
+        return cls(raw)
+
+    async def system_one(
+        self,
+        *,
+        state: dict[str, Any],
+        questions: dict[str, Any],
+        model: str,
+    ) -> SystemOneResponse:
+        from mergecraft.jev.types import JevError, parse_system_one_response
+
+        del state, questions
+        self.calls += 1
+        self.last_model = model
+        error = self._payload.get("error")
+        if isinstance(error, dict):
+            http = self._payload.get("http")
+            _raise_from_envelope(error, http if isinstance(http, dict) else None)
+        body = self._payload.get("body", self._payload)
+        if not isinstance(body, dict):
+            raise JevError("recorded transport body is not an object", code="invalid_response")
+        return parse_system_one_response(body)
+
+
+class FlakyRecordedTransport:
+    """Fail ``fail_times`` times from a recorded error, then succeed."""
+
+    def __init__(
+        self,
+        *,
+        failures: dict[str, Any],
+        success: Path,
+        fail_times: int,
+    ) -> None:
+        self._failures = failures
+        self._success = RecordedTransport.from_fixture(success)
+        self._fail_times = fail_times
+        self.calls = 0
+        self.last_model: str | None = None
+
+    async def system_one(
+        self,
+        *,
+        state: dict[str, Any],
+        questions: dict[str, Any],
+        model: str,
+    ) -> SystemOneResponse:
+        from mergecraft.jev.client import TypeSafeAPIError
+
+        self.calls += 1
+        self.last_model = model
+        if self.calls <= self._fail_times:
+            error = self._failures.get("error")
+            http = self._failures.get("http")
+            if isinstance(error, dict):
+                _raise_from_envelope(error, http if isinstance(http, dict) else None)
+            raise TypeSafeAPIError("server_error", status_code=500, code="server_error")
+        return await self._success.system_one(state=state, questions=questions, model=model)
 
 
 class StateRecordingTransport:
@@ -256,10 +361,10 @@ class StateRecordingTransport:
 
 
 def inject_recorded_jev_client(monkeypatch: Any, fixture_name: str) -> StateRecordingTransport:
-    """Force review-path ``AsyncJevClient`` construction onto a recorded transport (D14)."""
+    """Force review-path ``AsyncJevClient`` construction onto a recorded transport."""
     client_mod = import_jev("client")
     original = client_mod.AsyncJevClient
-    inner = client_mod.RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
+    inner = RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
     transport = StateRecordingTransport(inner)
 
     class InjectedAsyncJevClient(original):  # type: ignore[misc,valid-type]

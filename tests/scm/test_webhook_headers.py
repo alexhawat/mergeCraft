@@ -1,20 +1,14 @@
-"""BR1.3 / BR4 — webhook header validation and route hardening (MCB-11, D8/D16)."""
+"""Webhook signature header validation (MCB-11).
+
+These call :func:`verify_webhook_signature` directly with plain header dicts, so
+they need no ``TestClient`` and no httpx header-normalising patch.
+"""
 
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-from tests.scm._httpx_compat import install_httpx_latin1_header_values
 
-from mergecraft.mcp.server import create_mcp_app
 from mergecraft.scm.webhooks import sign_webhook_payload
-
-
-@pytest.fixture(autouse=True)
-def _install_httpx_latin1_header_values() -> None:
-    """Match HTTP latin-1 header bytes when httpx builds TestClient requests."""
-    install_httpx_latin1_header_values()
-
 
 _WEBHOOK_SECRET = "br1-webhook-header-test-secret"
 _NON_ASCII_BYTE = bytes([0x80]).decode("latin-1")
@@ -99,20 +93,3 @@ def test_signature_header_8_kib_boundary() -> None:
             body=body,
             secret=_WEBHOOK_SECRET,
         )
-
-
-def test_route_never_returns_500_on_an_unauthenticated_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """D8: ingress route maps unexpected failures to 4xx, never 500."""
-    monkeypatch.setenv("MERGECRAFT_WEBHOOK_SECRET", _WEBHOOK_SECRET)
-    client = TestClient(create_mcp_app([]))
-    body = b'{"action":"opened"}'
-    headers = _signed_github_headers(body)
-    headers["X-Hub-Signature-256"] = f"sha256={_NON_ASCII_BYTE}"
-    response = client.post("/webhooks/github", content=body, headers=headers)
-    assert response.status_code != 500
-    assert response.status_code in {400, 401}
-    payload = response.json()
-    assert isinstance(payload, dict)
-    assert "error" in payload

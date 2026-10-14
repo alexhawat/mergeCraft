@@ -12,6 +12,8 @@ from tests.jev.support import (
     SKIP_REASONS,
     TEST_API_KEY,
     TRANSPORT_DIR,
+    FlakyRecordedTransport,
+    RecordedTransport,
     import_jev,
     load_transport_payload,
 )
@@ -28,7 +30,7 @@ def _recorded_client(
     **kwargs: Any,
 ) -> Any:
     module = _client_mod()
-    transport = module.RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / fixture_name)
     return module.AsyncJevClient(api_key=api_key, transport=transport, **kwargs)
 
 
@@ -59,7 +61,7 @@ async def test_call_sends_pinned_model_to_recorded_transport() -> None:
 
 async def test_retry_on_transient_then_success() -> None:
     module = _client_mod()
-    transport = module.FlakyRecordedTransport(
+    transport = FlakyRecordedTransport(
         failures=load_transport_payload("typesafe_500.json"),
         success=TRANSPORT_DIR / "unit_happy.json",
         fail_times=2,
@@ -73,7 +75,7 @@ async def test_retry_on_transient_then_success() -> None:
 
 async def test_permanent_typesafe_error_does_not_retry() -> None:
     module = _client_mod()
-    transport = module.FlakyRecordedTransport(
+    transport = FlakyRecordedTransport(
         failures=load_transport_payload("typesafe_400.json"),
         success=TRANSPORT_DIR / "unit_happy.json",
         fail_times=5,
@@ -93,7 +95,7 @@ async def test_permanent_typesafe_error_does_not_retry() -> None:
 
 async def test_rate_limit_maps_to_retryable_provider_failure() -> None:
     module = _client_mod()
-    transport = module.FlakyRecordedTransport(
+    transport = FlakyRecordedTransport(
         failures=load_transport_payload("typesafe_429.json"),
         success=TRANSPORT_DIR / "unit_happy.json",
         fail_times=5,

@@ -14,7 +14,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -22,15 +22,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import BeforeValidator
 
-if TYPE_CHECKING:
-    from mergecraft.tracing.genai import ModelParams
-
 CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
 CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS"
 PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
 
-# Indexed multi-provider convention (W3 / issue #71). Both halves must be
+# Indexed multi-provider convention (issue #71). Both halves must be
 # set per index; partial pairs are dropped. Discovery enumerates every
 # matching env-var suffix and pairs by numeric N. Gaps are preserved
 # (no renumbering).
@@ -41,7 +38,7 @@ INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OP
 # indexed pairs; ``"default"`` for the singleton back-compat alias.
 SINGLETON_PROVIDER_ID = "default"
 
-# Closed capability vocabulary (HA1 / D12). ``context_limit`` is a sibling
+# Closed capability vocabulary. ``context_limit`` is a sibling
 # field on ``ProviderConfig``, not a set member.
 CAPABILITY_VALUES: frozenset[str] = frozenset(
     {
@@ -188,7 +185,7 @@ def _resolve_legacy_gateway_preset(provider_id: str) -> tuple[str, str, str] | N
 
 
 def require_capabilities(config: ProviderConfig, required: frozenset[str]) -> None:
-    """Fail closed when ``config`` lacks a declared capability (D12).
+    """Fail closed when ``config`` lacks a declared capability.
 
     Production harnesses do not call this yet; HA1 lands the gate so a later
     wiring wave can require capabilities at resolve time without a new type.
@@ -294,7 +291,7 @@ def _parse_extra_options_env(env_name: str) -> dict[str, Any]:
 def _extra_options_for_provider(
     provider_id: str, *, indexed_env: str | None = None
 ) -> dict[str, Any]:
-    """Resolve ``extra_options`` for one provider from env (O4 / #295).
+    """Resolve ``extra_options`` for one provider from env (#295).
 
     Precedence:
     1. Indexed ``MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS_<N>`` when supplied.
@@ -334,7 +331,7 @@ def _indexed_api_key_env(n: int) -> str | None:
     """Return the env-var name holding the API key for index *n*, if any.
 
     ``LLM_PROVIDER_<N>_API_KEY`` wins when both indexed key surfaces are set;
-    otherwise fall back to ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>`` (D16).
+    otherwise fall back to ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>``.
     """
     llm_key = f"LLM_PROVIDER_{n}_API_KEY"
     if os.environ.get(llm_key, "").strip():
@@ -399,7 +396,7 @@ def _resolve_singleton_provider() -> ProviderConfig | None:
 def resolve_gateway_endpoints() -> dict[str, ProviderConfig]:
     """Return every configured OpenAI-compatible provider, keyed by provider id.
 
-    Multi-provider resolver (W3 / issue #71). The returned dict carries all
+    Multi-provider resolver (issue #71). The returned dict carries all
     providers the environment currently configures:
 
     - Indexed pairs ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>``
@@ -466,19 +463,6 @@ def _registry_env_index_for_provider(provider_id: str) -> int | None:
     return entry.env_index
 
 
-def resolve_model_params_for_model(model: str | None) -> ModelParams | None:
-    """Resolve request knobs from a configured gateway's ``extra_options`` (O4)."""
-    if not model:
-        return None
-    from mergecraft.tracing.genai import ModelParams, model_params_from_mapping
-
-    config = _provider_config_for_model(model)
-    if config is None or not config.extra_options:
-        return None
-    params = model_params_from_mapping(config.extra_options)
-    return None if params == ModelParams() else params
-
-
 __all__ = [
     "CAPABILITY_VALUES",
     "CUSTOM_PROVIDER_API_KEY_ENV",
@@ -492,5 +476,4 @@ __all__ = [
     "require_capabilities",
     "resolve_gateway_endpoint",
     "resolve_gateway_endpoints",
-    "resolve_model_params_for_model",
 ]

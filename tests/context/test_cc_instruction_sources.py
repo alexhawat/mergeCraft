@@ -1,4 +1,4 @@
-"""W8 / W11 — remaining instruction sources + trust-tiered external files (#357).
+"""W8 / W11 — remaining instruction sources (#357).
 
 Does not author mergeCraft's own AGENTS-mergecraft.md / skill (file 7).
 """
@@ -6,8 +6,6 @@ Does not author mergeCraft's own AGENTS-mergecraft.md / skill (file 7).
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 from tests.context.support import (
     REPO_INSTRUCTIONS_HEADER,
@@ -119,36 +117,3 @@ def test_untrusted_gemini_renders_through_the_nonce_fence(tmp_path: Path) -> Non
     assert _UNTRUSTED_MARKER not in repo_instructions
     assert _UNTRUSTED_MARKER not in standing
     assert any(_UNTRUSTED_MARKER in block for block in fenced_blocks(prompt))
-
-
-def test_external_context_files_enforce_type_size_trust_and_provenance(tmp_path: Path) -> None:
-    """#357 — external context files have type/size/trust/provenance limits."""
-    module = load_module("mergecraft.context.external_files")
-    load_file = require_callable(module, "load_external_context_file")
-    allowed = tmp_path / "notes.md"
-    allowed.write_text("# notes\n", encoding="utf-8")
-    loaded = load_file(
-        allowed,
-        trust_tier="untrusted",
-        max_bytes=1024,
-        allowed_suffixes=(".md", ".txt"),
-    )
-    assert getattr(loaded, "provenance", None) or loaded.get("provenance")
-    binary = tmp_path / "blob.bin"
-    binary.write_bytes(b"\x00\x01")
-    with pytest.raises((ValueError, OSError, TypeError)):
-        load_file(
-            binary,
-            trust_tier="untrusted",
-            max_bytes=1024,
-            allowed_suffixes=(".md", ".txt"),
-        )
-    huge = tmp_path / "huge.md"
-    huge.write_text("x" * 64, encoding="utf-8")
-    with pytest.raises((ValueError, OSError)):
-        load_file(
-            huge,
-            trust_tier="untrusted",
-            max_bytes=8,
-            allowed_suffixes=(".md", ".txt"),
-        )

@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from tests.support.cd_batch import (
     SUPPORTED_WEBHOOK_PROVIDERS,
     WEBHOOK_MODULE,
@@ -105,72 +104,6 @@ def test_gitlab_webhook_token_is_shared_secret_equality_not_hmac() -> None:
         )
 
 
-def test_webhook_replay_protection_rejects_stale_or_reused_delivery() -> None:
-    """Error: replay protection rejects a stale timestamp or reused nonce."""
-    module = require_module(WEBHOOK_MODULE)
-    check = require_callable(module, "reject_webhook_replay")
-    with pytest.raises(
-        (ValueError, PermissionError, RuntimeError),
-        match=r"replay|timestamp|nonce|stale",
-    ):
-        check(
-            provider="github",
-            headers={"X-Hub-Signature-256": "sha256=00", "X-GitHub-Delivery": "dup"},
-            body=b"{}",
-            received_at_skew_seconds=86_400,
-        )
-
-
-def test_webhook_event_processing_fails_closed_without_delivery_id() -> None:
-    """Error: missing delivery id is rejected, not stored as anonymous."""
-    module = require_module(WEBHOOK_MODULE)
-    process = require_callable(module, "process_webhook_event")
-    with pytest.raises(
-        (ValueError, PermissionError, RuntimeError), match=r"missing webhook delivery id"
-    ):
-        process(provider="github", delivery_id="", event="pull_request", body={"action": "opened"})
-    check = require_callable(module, "reject_webhook_replay")
-    with pytest.raises(
-        (ValueError, PermissionError, RuntimeError), match=r"missing webhook delivery id"
-    ):
-        check(
-            provider="github",
-            headers={"X-Hub-Signature-256": "sha256=00"},
-            body=b"{}",
-            received_at_skew_seconds=0,
-        )
-
-
-def test_webhook_event_processing_is_idempotent_on_delivery_id() -> None:
-    """Edge: the same delivery id is processed once."""
-    module = require_module(WEBHOOK_MODULE)
-    process = require_callable(module, "process_webhook_event")
-    first = process(
-        provider="github",
-        delivery_id="abc-1",
-        event="pull_request",
-        body={"action": "opened"},
-    )
-    second = process(
-        provider="github",
-        delivery_id="abc-1",
-        event="pull_request",
-        body={"action": "opened"},
-    )
-    duplicate = getattr(second, "duplicate", None)
-    if duplicate is None:
-        duplicate = second.get("duplicate")
-    assert duplicate is True
-    first_id = getattr(first, "result_id", None) or (
-        first.get("result_id") if isinstance(first, dict) else None
-    )
-    second_id = getattr(second, "result_id", None) or (
-        second.get("result_id") if isinstance(second, dict) else None
-    )
-    if first_id is not None:
-        assert second_id == first_id
-
-
 def test_webhook_rate_limit_is_handled_without_dropping_the_event() -> None:
     """Edge: a 429 from the provider is surfaced, not silently dropped."""
     module = require_module(WEBHOOK_MODULE)
@@ -212,109 +145,6 @@ def test_scm_adapters_cannot_bypass_review_only_restrictions() -> None:
         match=r"review-only|commit|push|edit",
     ):
         guard(requested_capability="commit")
-
-
-def test_webhook_ingress_rejects_invalid_hmac_before_processing() -> None:
-    """Error: the HTTP ingress refuses a bad signature and does not process."""
-    from mergecraft.scm.ingress import accept_webhook
-
-    with pytest.raises(
-        (ValueError, PermissionError, RuntimeError),
-        match=r"signature|hmac|unauthor",
-    ):
-        accept_webhook(
-            "github",
-            headers={"X-Hub-Signature-256": "sha256=deadbeef", "X-GitHub-Delivery": "ing-1"},
-            body=b'{"ok":true}',
-            secret="test-secret",
-        )
-
-
-def test_webhook_ingress_verifies_then_processes_a_valid_payload() -> None:
-    """Happy: ingress HMAC + replay check then processes the delivery once (D9 redelivery is duplicate)."""
-    from mergecraft.scm.ingress import accept_webhook
-
-    module = require_module(WEBHOOK_MODULE)
-    body = b'{"action":"opened"}'
-    signed = require_callable(module, "sign_webhook_payload")(
-        "github", body=body, secret="ingress-secret"
-    )
-    headers = {**signed, "X-GitHub-Delivery": "ing-valid-1", "X-GitHub-Event": "pull_request"}
-    first = accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
-    assert first.duplicate is False
-    second = accept_webhook("github", headers=headers, body=body, secret="ingress-secret")
-    assert second.duplicate is True
-    assert second.result_id == first.result_id
-
-
-def test_http_webhook_route_rejects_empty_secret_for_github_and_gitlab(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """HTTP /webhooks/{provider} fails closed when MERGECRAFT_WEBHOOK_SECRET is unset."""
-    from mergecraft.mcp.server import create_mcp_app
-    from mergecraft.scm.webhooks import sign_webhook_payload
-
-    monkeypatch.delenv("MERGECRAFT_WEBHOOK_SECRET", raising=False)
-    client = TestClient(create_mcp_app([]))
-    body = b'{"ok":true}'
-    github_hmac = sign_webhook_payload("github", body=body, secret="")
-    github = client.post(
-        "/webhooks/github",
-        content=body,
-        headers={
-            **github_hmac,
-            "X-GitHub-Delivery": "http-empty-secret-gh",
-            "X-GitHub-Event": "ping",
-        },
-    )
-    assert github.status_code == 401
-    assert "secret" in github.json()["error"].casefold()
-    gitlab = client.post(
-        "/webhooks/gitlab",
-        content=body,
-        headers={
-            "X-Gitlab-Token": "",
-            "X-Gitlab-Event-UUID": "http-empty-secret-gl",
-            "X-Gitlab-Event": "Push Hook",
-        },
-    )
-    assert gitlab.status_code == 401
-    assert "secret" in gitlab.json()["error"].casefold()
-
-
-def test_http_webhook_route_accepts_signed_github_and_gitlab_deliveries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """HTTP /webhooks/{provider} authenticates both providers when a secret is set."""
-    from mergecraft.mcp.server import create_mcp_app
-    from mergecraft.scm.webhooks import sign_webhook_payload
-
-    secret = "route-secret"
-    monkeypatch.setenv("MERGECRAFT_WEBHOOK_SECRET", secret)
-    client = TestClient(create_mcp_app([]))
-    body = b'{"ok":true}'
-    github = client.post(
-        "/webhooks/github",
-        content=body,
-        headers={
-            **sign_webhook_payload("github", body=body, secret=secret),
-            "X-GitHub-Delivery": "http-ok-gh",
-            "X-GitHub-Event": "ping",
-        },
-    )
-    assert github.status_code == 200
-    assert github.json()["duplicate"] is False
-    gitlab = client.post(
-        "/webhooks/gitlab",
-        content=body,
-        headers={
-            **sign_webhook_payload("gitlab", body=body, secret=secret),
-            "X-Gitlab-Event-UUID": "http-ok-gl",
-            "X-Gitlab-Event": "Push Hook",
-        },
-    )
-    assert gitlab.status_code == 200
-    assert gitlab.json()["duplicate"] is False
 
 
 def test_webhook_module_does_not_import_ci_gitlab_log_adapter() -> None:
