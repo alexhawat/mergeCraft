@@ -34,6 +34,7 @@ configuration errors naming both halves.
 | `cursor/cloud-agent` | `cursor/cloud-agent` | `cursor` | — |
 | `tokenhub/hy3` | `tokenhub/hy3` | `opencode` | — |
 | `minimax/MiniMax-M3` | `minimax/MiniMax-M3` | `opencode` | — |
+| `opencode/gpt-5.6-sol` | `opencode/gpt-5.6-sol` | `opencode` | — |
 
 ## Security-relevant slice (PR gate — `.github/workflows/e2e.yml`)
 

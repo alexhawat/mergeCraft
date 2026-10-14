@@ -254,6 +254,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="OpenCode",
             env_vars=("OPENCODE_API_KEY",),
+            managed_credentials=("OPENCODE_AUTH_JSON",),
             models={
                 "big-pickle": ModelDef(
                     display_name="Big Pickle",
@@ -366,6 +367,7 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ProviderConfig(
             display_name="OpenCode Go",
             env_vars=("OPENCODE_API_KEY",),
+            managed_credentials=("OPENCODE_AUTH_JSON",),
             models={
                 "glm-5.1": ModelDef(
                     display_name="GLM 5.1",

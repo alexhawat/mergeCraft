@@ -16,11 +16,13 @@ _AUTH_KIND_API_KEY = "api_key"
 _AUTH_KIND_OAUTH = "oauth"
 _AUTH_KIND_DEVICE_CODE = "device_code"
 _AUTH_KIND_CLOUD_CHAIN = "cloud_chain"
+_AUTH_KIND_OPENCODE_ZEN = "opencode_zen"
 
 _AUTH_KIND_PRIMARY_SUFFIX: dict[str, str] = {
     _AUTH_KIND_API_KEY: "API_KEY",
     _AUTH_KIND_OAUTH: "CLAUDE_CODE_OAUTH_TOKEN",
     _AUTH_KIND_DEVICE_CODE: "CODEX_AUTH_JSON",
+    _AUTH_KIND_OPENCODE_ZEN: "OPENCODE_AUTH_JSON",
 }
 
 _BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
@@ -65,6 +67,8 @@ _BUILTIN_LABEL_TO_HARNESS_API_KEY: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "google": "GEMINI_API_KEY",
     "cursor": "CURSOR_API_KEY",
+    "opencode": "OPENCODE_API_KEY",
+    "opencode-go": "OPENCODE_API_KEY",
 }
 
 # Seed-only default URLs for ``provider seed`` — not used at runtime (BE / D4).
@@ -289,6 +293,7 @@ def _harness_env_name_for_suffix(label: str, suffix: str) -> str | None:
         return _BUILTIN_LABEL_TO_HARNESS_API_KEY.get(label.strip().lower())
     if suffix in {
         "CODEX_AUTH_JSON",
+        "OPENCODE_AUTH_JSON",
         "CLAUDE_CODE_OAUTH_TOKEN",
         "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY",

@@ -48,11 +48,13 @@ AUTH_KIND_API_KEY = "api_key"
 AUTH_KIND_OAUTH = "oauth"
 AUTH_KIND_DEVICE_CODE = "device_code"
 AUTH_KIND_CLOUD_CHAIN = "cloud_chain"
+AUTH_KIND_OPENCODE_ZEN = "opencode_zen"
 
 AUTH_KIND_PRIMARY_SUFFIX: dict[str, str] = {
     AUTH_KIND_API_KEY: "API_KEY",
     AUTH_KIND_OAUTH: "CLAUDE_CODE_OAUTH_TOKEN",
     AUTH_KIND_DEVICE_CODE: "CODEX_AUTH_JSON",
+    AUTH_KIND_OPENCODE_ZEN: "OPENCODE_AUTH_JSON",
 }
 
 BEDROCK_CLOUD_SUFFIXES: tuple[str, ...] = (
@@ -71,6 +73,7 @@ LEGACY_API_KEY_MIGRATIONS: dict[str, tuple[str, str]] = {
     "NOUS_API_KEY": ("nous", "API_KEY"),
     "TOKENHUB_API_KEY": ("tokenhub", "API_KEY"),
     "MERGECRAFT_CUSTOM_PROVIDER_API_KEY": ("minimax", "API_KEY"),
+    "OPENCODE_API_KEY": ("opencode", "API_KEY"),
 }
 
 LEGACY_LABEL_TO_API_KEY_ENV: dict[str, str] = {
@@ -447,6 +450,7 @@ def resolve_auth_strategy(auth_kind: str) -> AuthStrategy:
         AUTH_KIND_OAUTH: _run_oauth_strategy,
         AUTH_KIND_DEVICE_CODE: _run_device_code_strategy,
         AUTH_KIND_CLOUD_CHAIN: _run_cloud_chain_strategy,
+        AUTH_KIND_OPENCODE_ZEN: _run_opencode_zen_strategy,
     }
     handler = handlers.get(normalised)
     if handler is None:
@@ -656,6 +660,30 @@ def _run_device_code_strategy(
 
     suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_DEVICE_CODE]
     _persist_indexed_credentials(entry, scope, {suffix: value}, cwd=cwd, target=target)
+
+
+def _run_opencode_zen_strategy(
+    entry: Mapping[str, Any],
+    scope: str,
+    *,
+    cwd: Path | None = None,
+    target: AuthTarget | None = None,
+) -> None:
+    from mergecraft.security.opencode_auth import build_opencode_zen_auth_json
+
+    console.print(
+        "create an API key at [cyan]https://opencode.ai/auth[/cyan] "
+        "(OpenCode Zen billing — same console for OpenCode Go), then paste it below."
+    )
+    api_key = _cancelable_getpass("OpenCode Zen API key (Enter to cancel): ")
+    if api_key is None:
+        return
+    if not api_key.strip():
+        console.print("canceled.")
+        return
+    auth_json = build_opencode_zen_auth_json(api_key)
+    suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_OPENCODE_ZEN]
+    _persist_indexed_credentials(entry, scope, {suffix: auth_json}, cwd=cwd, target=target)
 
 
 def _run_cloud_chain_strategy(

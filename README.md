@@ -493,6 +493,7 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 |----------|-----------------------------|---------|-------------------|
 | Anthropic Claude | `mergecraft provider auth anthropic --scope github` → indexed credentials | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` |
 | OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
+| OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` | `OPENCODE_API_KEY` | `opencode/gpt-5.6-sol` |
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials | `GEMINI_API_KEY` | `google/gemini-3.1-pro-preview` |
 | Nous Portal | — | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` |
 | Tencent TokenHub | — | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` |

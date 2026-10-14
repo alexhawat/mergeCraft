@@ -99,7 +99,7 @@ def test_active_provider_key_by_agent_mapping() -> None:
     assert ACTIVE_PROVIDER_KEY_BY_AGENT["claude"] == "ANTHROPIC_API_KEY"
     assert ACTIVE_PROVIDER_KEY_BY_AGENT["codex"] == "OPENAI_API_KEY"
     assert ACTIVE_PROVIDER_KEY_BY_AGENT["gemini"] == "GEMINI_API_KEY"
-    assert ACTIVE_PROVIDER_KEY_BY_AGENT["opencode"] is None
+    assert ACTIVE_PROVIDER_KEY_BY_AGENT["opencode"] == "OPENCODE_API_KEY"
 
 
 @pytest.mark.parametrize(

@@ -67,9 +67,13 @@ from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from typing import IO
 
     from mergecraft.tracing.content import ContentCapture
+
+OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
+OPENCODE_API_KEY_ENV = "OPENCODE_API_KEY"
 
 # OpenCode provider.options accepts transport keys only — generation knobs belong
 # on model entries (``limit`` / ``options``) or the primary ``build`` agent.
@@ -124,6 +128,57 @@ class ProviderTimeoutError(RuntimeError):
 def _api_key_from_env(api_key_env: str) -> str:
     """Read a provider API key from the environment at emit time (HA1 / D16)."""
     return os.environ.get(api_key_env, "").strip()
+
+
+def _opencode_data_home(ctx: AgentRunContext) -> Path:
+    """Return the XDG data root parent for this run's isolated ``auth.json``."""
+    return Path(ctx.tmpdir) / "opencode-xdg-data"
+
+
+def _with_flat_opencode_auth(env: dict[str, str], *, model: str | None) -> dict[str, str]:
+    from mergecraft.config.runtime_provider_registry import harness_env_for_active_provider
+
+    registry_resolved = any(
+        value.strip() for value in harness_env_for_active_provider(model, "opencode").values()
+    )
+    if not registry_resolved and OPENCODE_AUTH_ENV not in env:
+        flat = os.environ.get(OPENCODE_AUTH_ENV, "").strip()
+        if flat:
+            env[OPENCODE_AUTH_ENV] = flat
+    return env
+
+
+def _setup_opencode_auth(
+    ctx: AgentRunContext,
+    *,
+    data_home: Path,
+    credential_env: Mapping[str, str] | None = None,
+) -> None:
+    """Write ``auth.json`` under an isolated XDG data root for ``opencode serve``."""
+    from mergecraft.security.opencode_auth import opencode_auth_usable
+
+    source: Mapping[str, str] = credential_env if credential_env is not None else os.environ
+    raw = source.get(OPENCODE_AUTH_ENV, "").strip()
+    if raw and opencode_auth_usable(raw):
+        auth_dir = data_home / "opencode"
+        auth_dir.mkdir(parents=True, exist_ok=True)
+        auth_path = auth_dir / "auth.json"
+        auth_path.write_text(raw, encoding="utf-8")
+        os.chmod(auth_path, 0o600)
+        return
+    if raw:
+        logger.warning(
+            "{} is set but not usable OpenCode auth JSON — falling back to {} when present",
+            OPENCODE_AUTH_ENV,
+            OPENCODE_API_KEY_ENV,
+        )
+
+
+def _resolved_opencode_credentials(ctx: AgentRunContext) -> dict[str, str]:
+    return _with_flat_opencode_auth(
+        build_agent_env("opencode", model=ctx.resolved_model),
+        model=ctx.resolved_model,
+    )
 
 
 def _positive_int(value: object) -> int | None:
@@ -807,9 +862,14 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             success=False,
             error="review integrity baseline could not be captured; refusing read-only review",
         )
+    credential_env = _resolved_opencode_credentials(ctx)
+    data_home = _opencode_data_home(ctx)
+    _setup_opencode_auth(ctx, data_home=data_home, credential_env=credential_env)
+
     extras: dict[str, str] = {
         "OPENCODE_CONFIG_CONTENT": config_json,
         "OPENCODE_CONFIG": str(config_path),
+        "XDG_DATA_HOME": str(data_home),
     }
     model_s = (model or "").strip()
     bedrock_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
@@ -818,7 +878,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         extras["CLAUDE_CODE_USE_BEDROCK"] = "1"
     if vertex_id and model_s == vertex_id:
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
-    env = build_agent_env("opencode", extras)
+    env = build_agent_env("opencode", extras, model=model)
+    env.update({k: v for k, v in credential_env.items() if k not in env})
 
     # Prefer serve + HTTP when available; fall back to `opencode run`.
     #

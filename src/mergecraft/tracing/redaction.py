@@ -48,7 +48,7 @@ _CLI_SECRET_FLAG = re.compile(
     r"|refresh[-_]?token|bearer[-_]?token|client[-_]?secret|private[-_]?key"
     r"|pat|passwd|logfire[-_]?token|LOGFIRE_TOKEN|MERGECRAFT_LOGFIRE_TOKEN|GITHUB_TOKEN|GH_TOKEN"
     r"|ANTHROPIC_API_KEY|OPENAI_API_KEY"
-    r"|GEMINI_API_KEY|CODEX_AUTH_JSON|NOUS_API_KEY|TOKENHUB_API_KEY)$",
+    r"|GEMINI_API_KEY|CODEX_AUTH_JSON|OPENCODE_AUTH_JSON|OPENCODE_API_KEY|NOUS_API_KEY|TOKENHUB_API_KEY)$",
     re.IGNORECASE,
 )
 _CLI_SECRET_VALUE = re.compile(
