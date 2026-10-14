@@ -390,7 +390,7 @@ jobs:
       # Gate on this run's own review verdict rather than on the review step's
       # exit code, so agent infrastructure failures do not read as "changes
       # requested". The verdict is the last review rung's evidence packet, read
-      # through `steps.mergecraft.outputs.evidence_packet` — output only this
+      # from `steps.mergecraft.outputs.evidence_packet` — output only this
       # run can write. A `mergecraft-approval` check-run only corroborates it:
       # the check must sit on this head, be issued by an actor this repository
       # trusts (`github-actions`, or the configured App when EXPECTED_APP_ID is
@@ -413,17 +413,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          EVIDENCE_PACKET: ${{ steps.mergecraft.outputs.evidence_packet }}
+          # Only the verdict reaches the step, extracted before it starts: one
+          # environment variable holds at most 128 KiB, and a large PR's whole
+          # packet here stopped the gate from starting at all.
+          REVIEW_VERDICT: ${{ steps.mergecraft.outputs.evidence_packet != '' && fromJSON(steps.mergecraft.outputs.evidence_packet).decision.verdict || '' }}
           # Set your mergeCraft App id here when the action authenticates as a
           # GitHub App, so the gate accepts that App's approval check. Left
           # empty, the gate trusts the github-actions issuer (job-token mode).
           EXPECTED_APP_ID: ''
         run: |
           set -euo pipefail
-          verdict=""
-          if [ -n "${EVIDENCE_PACKET:-}" ]; then
-            verdict="$(printf '%s' "${EVIDENCE_PACKET}" | jq -r '.decision.verdict // empty' 2>/dev/null || true)"
-          fi
+          verdict="${REVIEW_VERDICT:-}"
 
           # Name-filtered and paged so a large CI matrix cannot push the check
           # off the first page.

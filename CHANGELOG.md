@@ -73,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The hardened example workflow's approval gate now receives only the review
+  verdict, not the whole evidence packet. On a large pull request the packet
+  exceeded the size one environment variable may hold, so the gate could not
+  start. Workflows copied from the example before this change should take the
+  new `REVIEW_VERDICT` line.
+
 - The Codex reviewer now runs in the repository it reviews. An offline review
   started from another directory failed at once, because Codex refuses to run
   outside a git repository.

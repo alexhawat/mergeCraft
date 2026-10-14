@@ -84,12 +84,20 @@ def _gate_step(target: GateTarget) -> dict[str, Any]:
     raise AssertionError(f"{target.relative}: no {_GATE_STEP!r} step in {target.job_name}")
 
 
+_PACKET_VERDICT_EXPRESSION = (
+    "steps.mergecraft.outputs.evidence_packet != '' && "
+    "fromJSON(steps.mergecraft.outputs.evidence_packet).decision.verdict || ''"
+)
+
+
 def _output_env(step: dict[str, Any]) -> tuple[str, bool]:
     """Return ``(env_key, reads_packet)`` for the step's own-output source.
 
     A gate must read the review job's output through ``env:``. The self-workflow
     exposes a bare verdict (``approval_verdict``); the hardened example and the
-    dogfood artifact read the evidence packet directly.
+    dogfood artifact extract ``decision.verdict`` from the evidence packet in the
+    expression, so only the verdict reaches the step. A whole packet in env can
+    exceed the 128 KiB one variable may hold and stop the gate from starting.
     """
     env_block = step.get("env") or {}
     assert isinstance(env_block, dict)
@@ -98,8 +106,12 @@ def _output_env(step: dict[str, Any]) -> tuple[str, bool]:
             continue
         if "needs.review.outputs.approval_verdict" in value:
             return str(key), False
-        if "outputs.evidence_packet" in value:
-            return str(key), True
+        if _PACKET_VERDICT_EXPRESSION in value:
+            return str(key), False
+        assert "outputs.evidence_packet" not in value, (
+            f"gate env {key} passes the whole evidence packet; extract the verdict "
+            "in the expression instead"
+        )
     raise AssertionError(
         "the gate does not read this run's own output through env: — it must not "
         "derive its verdict from a check-run alone"
