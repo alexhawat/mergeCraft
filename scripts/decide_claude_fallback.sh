@@ -13,7 +13,10 @@ if [ "${CODEX_OUTCOME:-}" = "success" ]; then
   need="false"
   echo "Codex step outcome=success — not spending the Claude backstop."
 else
-  packet="${CODEX_PACKET:-${NOUS_PACKET:-}}"
+  packet="$(read_packet CODEX_PACKET)"
+  if [ -z "${packet}" ]; then
+    packet="$(read_packet NOUS_PACKET)"
+  fi
   if [ -n "${packet}" ]; then
     verdict="$(verdict_from_packet "${packet}")"
     if verdict_blocks_claude_backstop "${verdict}"; then

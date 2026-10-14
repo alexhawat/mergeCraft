@@ -73,6 +73,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Codex reviewer now runs in the repository it reviews. An offline review
+  started from another directory failed at once, because Codex refuses to run
+  outside a git repository.
+
+- The self-review passes each review step's evidence packet to later steps as a
+  file. A large pull request's packet exceeded the size one environment
+  variable may hold, so the verdict step could not start and an approving
+  review was recorded as no verdict.
+
 - Both Action images replace the brace-expansion and undici copies bundled
   inside npm with their patched releases, pinned by checksum. No npm release
   ships the fixes yet, and the old copies carried three HIGH advisories.

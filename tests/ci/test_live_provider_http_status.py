@@ -154,9 +154,21 @@ def test_nous_default_model_is_the_shared_documented_constant() -> None:
     )
 
 
-def test_nous_leg_posts_the_documented_default_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _capture_nous_model(monkeypatch) == _DOCUMENTED_NOUS_MODEL
+def test_nous_leg_posts_the_served_id_of_the_documented_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The documented ``nous/...`` slug routes to Nous; the Portal serves the rest.
+
+    Posting the whole slug asked the Portal for ``nous/deepseek/deepseek-v4-flash``
+    and got a 404, while the Portal's model list serves
+    ``deepseek/deepseek-v4-flash``.
+    """
+    assert _capture_nous_model(monkeypatch) == _DOCUMENTED_NOUS_MODEL.removeprefix("nous/")
 
 
 def test_nous_leg_model_is_env_overridable(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _capture_nous_model(monkeypatch, override="custom/nous-model") == "custom/nous-model"
+
+
+def test_nous_leg_override_accepts_a_routing_slug(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _capture_nous_model(monkeypatch, override="nous/tencent/hy3") == "tencent/hy3"

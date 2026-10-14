@@ -8,6 +8,7 @@ skipped fallback candidate, or a malformed provider stream.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tomllib
 from pathlib import Path
@@ -426,6 +427,43 @@ def _run_once(
         continue_session=continue_session,
     )
     return result, captured
+
+
+def test_codex_runs_in_the_reviewed_repo_not_the_process_directory(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Codex refuses to start outside a git repo, so it gets the review's repo dir (#884)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    ctx = make_agent_run_context(tmp_path, resolved_model=None)
+    ctx.tool_state.repos[ctx.tool_state.primary_repo_key].dir = str(repo)
+    seen: dict[str, object] = {}
+
+    def _fake_spawn(cmd: list[str], **kwargs: object) -> Any:
+        seen.update(kwargs)
+        return _FakeProcess(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(codex_module, "spawn_agent_cli", _fake_spawn)
+    codex_module._run_codex_once(
+        cli="/usr/bin/codex", prompt="", ctx=ctx, mcp_config="unused", continue_session=False
+    )
+
+    assert seen.get("cwd") == str(repo)
+
+
+def test_codex_falls_back_to_the_process_directory_without_a_repo(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    ctx = make_agent_run_context(tmp_path, resolved_model=None)
+    ctx.tool_state.repos.clear()
+
+    assert codex_module._codex_working_dir(ctx) == os.getcwd()
 
 
 def test_missing_codex_binary_surfaces_the_spawn_error(

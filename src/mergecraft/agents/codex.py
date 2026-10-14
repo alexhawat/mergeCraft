@@ -297,6 +297,24 @@ def _resolved_parent_credentials(ctx: AgentRunContext) -> dict[str, str]:
     )
 
 
+def _codex_working_dir(ctx: AgentRunContext) -> str:
+    """Return the directory Codex runs in: the review's primary repo, else this process's.
+
+    ``codex exec`` refuses to start outside a git repository ("Not inside a
+    trusted directory"). In the Action the process already runs in the PR
+    checkout, so this is the same directory; an offline review started from
+    elsewhere (the image's ``/opt/mergecraft`` in the live smoke) must still
+    hand Codex the repo it reviews (#884).
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    try:
+        repo_dir = primary_repo_state(ctx.tool_state).dir
+    except RuntimeError:
+        repo_dir = ""
+    return repo_dir or os.getcwd()
+
+
 def _codex_mcp_tool_preamble() -> str:
     """Steer Codex away from the interactive GitHub *plugin* install path.
 
@@ -755,7 +773,7 @@ def _run_codex_streaming(
     )
 
     try:
-        process = spawn_agent_cli(cmd, env=_build_env(ctx))
+        process = spawn_agent_cli(cmd, env=_build_env(ctx), cwd=_codex_working_dir(ctx))
     except FileNotFoundError as err:
         return with_prompt(AgentResult(success=False, error=str(err)), prompt)
 
