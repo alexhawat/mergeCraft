@@ -849,22 +849,24 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     config_path = config_dir / "opencode.json"
     config_path.write_text(config_json, encoding="utf-8")
 
+    credential_env = _resolved_opencode_credentials(ctx)
+    data_home = _opencode_data_home(ctx)
+    _setup_opencode_auth(ctx, data_home=data_home, credential_env=credential_env)
+
     # Baseline AFTER our own writes, before the agent runs. ``_evidence_dir``
     # falls back to ``<tmpdir>/evidence`` when neither MERGECRAFT_EVIDENCE_DIR
     # nor RUNNER_TEMP is set (evidence/run_packet.py:71); when that tmpdir sits
-    # inside the checkout, hashing first would make ``opencode.json`` — a file
-    # mergeCraft itself just wrote — read as tampering, and every review would
-    # fail closed. The gate still covers the whole agent session, which is the
-    # mutation this check exists to catch.
+    # inside the checkout, hashing first would make ``opencode.json`` and the
+    # isolated ``auth.json`` under ``opencode-xdg-data`` — files mergeCraft
+    # itself just wrote — read as tampering, and every review would fail closed.
+    # The gate still covers the whole agent session, which is the mutation this
+    # check exists to catch.
     baseline = _capture_integrity_baseline(ctx)
     if baseline is None:
         return AgentResult(
             success=False,
             error="review integrity baseline could not be captured; refusing read-only review",
         )
-    credential_env = _resolved_opencode_credentials(ctx)
-    data_home = _opencode_data_home(ctx)
-    _setup_opencode_auth(ctx, data_home=data_home, credential_env=credential_env)
 
     extras: dict[str, str] = {
         "OPENCODE_CONFIG_CONTENT": config_json,

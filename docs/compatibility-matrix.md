@@ -36,7 +36,7 @@ configuration errors naming both halves.
 | `minimax/MiniMax-M3` | `minimax/MiniMax-M3` | `opencode` | — |
 | `opencode/gpt-5.6-sol` | `opencode/gpt-5.6-sol` | `opencode` | — |
 | `opencode-go/deepseek-v4-pro` | `opencode-go/deepseek-v4-pro` | `opencode` | — |
-| `opencode-go/deepseek-v4-flash` | `opencode-go/deepseek-v4-flash` | `opencode` | — |
+| `opencode-go/deepseek-v4.1-flash` | `opencode-go/deepseek-v4.1-flash` | `opencode` | — |
 
 ## Security-relevant slice (PR gate — `.github/workflows/e2e.yml`)
 

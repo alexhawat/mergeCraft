@@ -385,9 +385,9 @@ PROVIDERS: dict[str, ProviderConfig] = {
                     resolve="opencode-go/deepseek-v4-pro",
                     open_router_resolve="openrouter/deepseek/deepseek-v4-pro",
                 ),
-                "deepseek-v4-flash": ModelDef(
-                    display_name="DeepSeek V4 Flash",
-                    resolve="opencode-go/deepseek-v4-flash",
+                "deepseek-v4.1-flash": ModelDef(
+                    display_name="DeepSeek V4.1 Flash",
+                    resolve="opencode-go/deepseek-v4.1-flash",
                     open_router_resolve="openrouter/deepseek/deepseek-v4-flash",
                 ),
             },
