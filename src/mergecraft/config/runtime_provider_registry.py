@@ -79,7 +79,7 @@ _BUILTIN_LABEL_TO_HARNESS_API_KEY: dict[str, str] = {
     "google": "GEMINI_API_KEY",
     "cursor": "CURSOR_API_KEY",
     "opencode": "OPENCODE_API_KEY",
-    "opencode-go": "OPENCODE_API_KEY",
+    "opencode-go": "OPENCODE_GO_API_KEY",
 }
 
 # Seed-only default URLs for ``provider seed`` — not used at runtime (BE / D4).
