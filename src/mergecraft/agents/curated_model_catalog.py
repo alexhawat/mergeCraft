@@ -36,6 +36,7 @@ def positive_int_option(value: object) -> int | None:
         return parsed if parsed > 0 else None
     return None
 
+
 PAPERINSTRUMENTS_BASE_URL: Final[str] = "https://api.paperinstruments.com/v1"
 ULTRAMARINE_1_FLASH_SLUG: Final[str] = "paperinstruments/ultramarine-1-flash"
 
@@ -142,11 +143,7 @@ def compute_review_cost_usd(
     if entry is None:
         return None
     cached = max(0, cache_read_tokens or 0)
-    uncached = (
-        max(0, input_tokens - cached)
-        if entry.cache_read_inclusive
-        else max(0, input_tokens)
-    )
+    uncached = max(0, input_tokens - cached) if entry.cache_read_inclusive else max(0, input_tokens)
     return (
         uncached * entry.input_usd_per_mtok
         + cached * entry.cached_input_usd_per_mtok
@@ -154,7 +151,9 @@ def compute_review_cost_usd(
     ) / _MTOK
 
 
-def apply_catalog_cost_to_usage(usage: AgentUsage | None, *, model: str | None) -> AgentUsage | None:
+def apply_catalog_cost_to_usage(
+    usage: AgentUsage | None, *, model: str | None
+) -> AgentUsage | None:
     """Fill ``cost_usd`` on *usage* from the catalog when the provider omitted it."""
     if usage is None or usage.cost_usd is not None:
         return usage
