@@ -220,19 +220,40 @@ def _opencode_generation_options(extra_options: dict[str, object]) -> dict[str, 
     }
 
 
+def _resolve_opencode_output_cap(
+    config: ProviderConfig,
+    *,
+    model_slug: str | None,
+) -> int | None:
+    max_tokens = _positive_int(config.extra_options.get("max_tokens"))
+    if max_tokens is None:
+        max_tokens = _positive_int(config.extra_options.get("max_completion_tokens"))
+    if max_tokens is None and model_slug:
+        from mergecraft.agents.curated_model_catalog import effective_max_output_tokens
+
+        max_tokens = effective_max_output_tokens(model_slug, config.extra_options)
+    return max_tokens
+
+
 def _opencode_applied_model_params_from_config(
     config: ProviderConfig | None,
+    *,
+    model_slug: str | None = None,
 ) -> ModelParams | None:
     """Resolve ModelParams that the OpenCode config path actually applies (O4)."""
     if config is None or not config.extra_options:
         return None
     applied_raw: dict[str, object] = dict(_opencode_generation_options(config.extra_options))
-    max_tokens = _positive_int(config.extra_options.get("max_tokens"))
-    if max_tokens is None:
-        max_tokens = _positive_int(config.extra_options.get("max_completion_tokens"))
+    max_tokens = _resolve_opencode_output_cap(config, model_slug=model_slug)
     context = _opencode_model_context_limit(config)
     if max_tokens is not None and context is not None:
         applied_raw["max_tokens"] = max_tokens
+    elif max_tokens is not None and model_slug:
+        from mergecraft.agents.curated_model_catalog import curated_model_entry
+
+        entry = curated_model_entry(model_slug)
+        if entry is not None and entry.requires_output_cap:
+            applied_raw["max_completion_tokens"] = max_tokens
     params = model_params_from_mapping(applied_raw)
     return None if params == ModelParams() else params
 
@@ -240,7 +261,7 @@ def _opencode_applied_model_params_from_config(
 def opencode_applied_model_params(model: str | None) -> ModelParams | None:
     """Resolve applied ModelParams for a model slug."""
     config = _provider_config_for_model(model) if model else None
-    return _opencode_applied_model_params_from_config(config)
+    return _opencode_applied_model_params_from_config(config, model_slug=model)
 
 
 def _opencode_build_agent_overrides(config: ProviderConfig | None) -> dict[str, object]:
@@ -267,20 +288,37 @@ def _opencode_model_context_limit(config: ProviderConfig) -> int | None:
     return None
 
 
-def _opencode_model_entry(model_id: str, config: ProviderConfig) -> dict[str, object]:
+def _opencode_model_entry(
+    model_id: str,
+    config: ProviderConfig,
+    *,
+    model_slug: str | None = None,
+) -> dict[str, object]:
     """Build one OpenCode model table entry.
 
     OpenCode 1.18.x requires both ``limit.context`` and ``limit.output`` when a
     ``limit`` object is present; emit it only when both values are known.
+    Curated models that require a prepay output cap still receive
+    ``max_completion_tokens`` in ``options`` when context is unknown.
     """
     entry: dict[str, object] = {"name": model_id}
-    max_tokens = _positive_int(config.extra_options.get("max_tokens"))
-    if max_tokens is None:
-        max_tokens = _positive_int(config.extra_options.get("max_completion_tokens"))
+    slug = model_slug
+    if slug is None and config.provider_id:
+        slug = f"{config.provider_id}/{model_id}"
+    max_tokens = _resolve_opencode_output_cap(config, model_slug=slug)
     context = _opencode_model_context_limit(config)
+    generation_options = _opencode_generation_options(config.extra_options)
     if max_tokens is not None and context is not None:
         entry["limit"] = {"context": context, "output": max_tokens}
-    generation_options = _opencode_generation_options(config.extra_options)
+    elif max_tokens is not None and slug:
+        from mergecraft.agents.curated_model_catalog import curated_model_entry
+
+        catalog = curated_model_entry(slug)
+        if catalog is not None and catalog.requires_output_cap:
+            generation_options = {
+                **generation_options,
+                "max_completion_tokens": max_tokens,
+            }
     if generation_options:
         entry["options"] = generation_options
     return entry
@@ -291,10 +329,15 @@ def _opencode_provider_block(
     *,
     model_id: str | None = None,
     provider_name: str | None = None,
+    model_slug: str | None = None,
 ) -> dict[str, object]:
     models: dict[str, object] = {}
     if model_id:
-        models[model_id] = _opencode_model_entry(model_id, config)
+        slug = model_slug
+        if slug is None:
+            prefix = provider_name or config.provider_id
+            slug = f"{prefix}/{model_id}" if prefix else None
+        models[model_id] = _opencode_model_entry(model_id, config, model_slug=slug)
     return {
         "npm": "@ai-sdk/openai-compatible",
         "name": provider_name or config.provider_id,
@@ -343,6 +386,7 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
                 out[record.provider_id] = _opencode_provider_block(
                     record,
                     model_id=model_id,
+                    model_slug=model if record is active_record else None,
                 )
             return out
         # Fall through to legacy preset path — the active model is not in
@@ -360,6 +404,7 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
             config,
             model_id=model_id,
             provider_name=provider_key,
+            model_slug=model,
         )
     }
 

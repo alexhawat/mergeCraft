@@ -45,6 +45,7 @@ def merge_reviewer_findings(
 
     merged: dict[tuple[str, str, str], dict[str, Any]] = {}
     provenance: dict[tuple[str, str, str], list[str]] = {}
+    provenance_models: dict[tuple[str, str, str], list[str]] = {}
     for agent_name, findings in groups:
         for row in findings:
             item = dict(row)
@@ -52,6 +53,11 @@ def merge_reviewer_findings(
                 item["raised_by"] = agent_name
             key = finding_key(item)
             provenance.setdefault(key, []).append(agent_name)
+            model = item.get("raised_by_model")
+            if isinstance(model, str) and model.strip():
+                models_for_key = provenance_models.setdefault(key, [])
+                if model.strip() not in models_for_key:
+                    models_for_key.append(model.strip())
             if key not in merged:
                 merged[key] = item
                 continue
@@ -76,6 +82,9 @@ def merge_reviewer_findings(
         agents = provenance.get(key, [])
         if agents:
             enriched["raised_by"] = agents[0] if len(agents) == 1 else agents
+        models = provenance_models.get(key, [])
+        if models:
+            enriched["raised_by_model"] = models[0] if len(models) == 1 else models
         result.append(enriched)
 
     if not apply_placement:
@@ -214,15 +223,24 @@ def should_render_finding_provenance(findings: list[dict[str, Any]]) -> bool:
     return len(agents) > 1
 
 
+def _provenance_model_suffix(raised_by_model: str | list[str] | None) -> str:
+    if not raised_by_model:
+        return ""
+    if isinstance(raised_by_model, list):
+        models = ", ".join(f"`{model}`" for model in raised_by_model)
+        return f" ({models})"
+    return f" (`{raised_by_model}`)"
+
+
 def format_finding_provenance_line(
     raised_by: str | list[str] | None,
     *,
-    raised_by_model: str | None = None,
+    raised_by_model: str | list[str] | None = None,
 ) -> str | None:
     """Format one finding's ``raised_by`` for display in the review body (D8)."""
     if not raised_by:
         return None
-    model_suffix = f" (`{raised_by_model}`)" if raised_by_model else ""
+    model_suffix = _provenance_model_suffix(raised_by_model)
     if isinstance(raised_by, list):
         agents = ", ".join(f"`{agent}`" for agent in raised_by)
         return f"_Raised by: {agents}{model_suffix}_"
@@ -234,7 +252,7 @@ def enrich_finding_body_with_provenance(
     raised_by: str | list[str] | None,
     *,
     show_provenance: bool,
-    raised_by_model: str | None = None,
+    raised_by_model: str | list[str] | None = None,
 ) -> str:
     """Append a provenance line to a finding body when multi-reviewer display is active (D8)."""
     if not show_provenance:

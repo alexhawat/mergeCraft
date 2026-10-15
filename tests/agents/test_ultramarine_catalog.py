@@ -159,6 +159,38 @@ def test_multi_reviewer_merge_attributes_and_dedupes() -> None:
     raised = merged[0].get("raised_by")
     assert isinstance(raised, list)
     assert set(raised) == {"reviewer", "reviewer2"}
+    models = merged[0].get("raised_by_model")
+    assert isinstance(models, list)
+    assert set(models) == {"anthropic/claude-sonnet", ULTRAMARINE_1_FLASH_SLUG}
+
+
+def test_opencode_emits_catalog_output_cap_without_context_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.agents.conftest import make_agent_run_context
+    from tests.cli.support_provider_registry import bootstrap_opencode_gateway
+
+    slug = ULTRAMARINE_1_FLASH_SLUG
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="paperinstruments",
+        model_id="ultramarine-1-flash",
+        api_key="test-key",
+        url="https://api.paperinstruments.com/v1",
+    )
+    monkeypatch.setenv(
+        "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS_1",
+        json.dumps({"reasoning_effort": "low"}),
+    )
+    from mergecraft.agents.opencode import build_security_config
+
+    ctx = make_agent_run_context(tmp_path, resolved_model=slug)
+    config = json.loads(build_security_config(ctx, slug))
+    model_entry = config["provider"]["paperinstruments"]["models"]["ultramarine-1-flash"]
+    assert "limit" not in model_entry
+    assert model_entry["options"]["max_completion_tokens"] == 8192
 
 
 def test_provenance_line_includes_model_when_set() -> None:
