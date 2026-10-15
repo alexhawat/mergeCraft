@@ -1445,11 +1445,20 @@ async def _publish_github_review(
     show_provenance = should_render_finding_provenance(finding_rows)
     raised_by_map: dict[str, str | list[str]] = {}
     raised_by_model_map: dict[str, str] = {}
+    raised_by_models_map: dict[str, dict[str, str]] = {}
     for row in finding_rows:
         lookup_key = _raised_by_lookup_key(row)
         raised = row.get("raised_by")
         if lookup_key and raised is not None:
             raised_by_map[lookup_key] = raised
+        models = row.get("raised_by_models")
+        if lookup_key and isinstance(models, dict) and models:
+            raised_by_models_map[lookup_key] = {
+                str(agent): str(model).strip()
+                for agent, model in models.items()
+                if str(agent).strip() and isinstance(model, str) and model.strip()
+            }
+            continue
         model = row.get("raised_by_model")
         if lookup_key and isinstance(model, str) and model.strip():
             raised_by_model_map[lookup_key] = model.strip()
@@ -1484,6 +1493,7 @@ async def _publish_github_review(
             raised_by=raised_by_map.get(lookup_key or "") if lookup_key else None,
             show_provenance=show_provenance,
             raised_by_model=raised_by_model_map.get(lookup_key or "") if lookup_key else None,
+            raised_by_models=raised_by_models_map.get(lookup_key or "") if lookup_key else None,
         )
         item: dict[str, Any] = {
             "path": path,

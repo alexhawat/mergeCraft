@@ -160,10 +160,32 @@ def test_multi_reviewer_merge_attributes_and_dedupes() -> None:
     raised = merged[0].get("raised_by")
     assert isinstance(raised, list)
     assert set(raised) == {"reviewer", "reviewer2"}
-    models = merged[0].get("raised_by_model")
-    assert isinstance(models, str)
-    assert "anthropic/claude-sonnet" in models
-    assert ULTRAMARINE_1_FLASH_SLUG in models
+    by_model = merged[0].get("raised_by_models")
+    assert isinstance(by_model, dict)
+    assert by_model == {
+        "reviewer": "anthropic/claude-sonnet",
+        "reviewer2": ULTRAMARINE_1_FLASH_SLUG,
+    }
+    assert "raised_by_model" not in merged[0]
+    AgentFinding.model_validate(merged[0])
+
+
+def test_deduped_finding_omits_model_map_when_reviewer_has_no_model() -> None:
+    left = [
+        {
+            "path": "a.py",
+            "body": "bug",
+            "line": 10,
+            "severity": "Minor",
+            "raised_by_model": "anthropic/claude-sonnet",
+        }
+    ]
+    right = [{"path": "a.py", "body": "bug", "line": 10, "severity": "Minor"}]
+    merged = merge_reviewer_findings(
+        [("reviewer", left), ("reviewer2", right)],
+        apply_placement=False,
+    )
+    assert merged[0]["raised_by_models"] == {"reviewer": "anthropic/claude-sonnet"}
     AgentFinding.model_validate(merged[0])
 
 
@@ -204,3 +226,16 @@ def test_provenance_line_includes_model_when_set() -> None:
     assert line is not None
     assert "reviewer2" in line
     assert ULTRAMARINE_1_FLASH_SLUG in line
+
+
+def test_provenance_line_pairs_reviewers_with_models() -> None:
+    line = format_finding_provenance_line(
+        ["reviewer", "reviewer2"],
+        raised_by_models={
+            "reviewer": "anthropic/claude-sonnet",
+            "reviewer2": ULTRAMARINE_1_FLASH_SLUG,
+        },
+    )
+    assert line is not None
+    assert "`reviewer` (`anthropic/claude-sonnet`)" in line
+    assert "`reviewer2` (`paperinstruments/ultramarine-1-flash`)" in line
