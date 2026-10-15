@@ -17,15 +17,13 @@ from mergecraft.agents.openai_generation_params import (
     resolve_openai_generation_params,
     validate_generation_params_for_model,
 )
-from mergecraft.config.settings import RepoSettings
-from mergecraft.utils.agent_resolve import ModelFallbackPolicyError, resolve_harness
 from mergecraft.agents.shared import AgentUsage
 from mergecraft.agents.verifier import AgentFinding
+from mergecraft.config.settings import RepoSettings
 from mergecraft.review.terminal_submission import (
     format_finding_provenance_line,
     merge_reviewer_findings,
 )
-
 
 def test_curated_ultramarine_entry_is_registered() -> None:
     entry = curated_model_entry(ULTRAMARINE_1_FLASH_SLUG)

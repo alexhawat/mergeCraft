@@ -1388,14 +1388,18 @@ def _harness_supports_provider(harness: str, provider: str) -> bool:
     return native is not None and provider in native
 
 
-def _finalize_resolved_harness(slug: str, harness: str) -> str:
-    """Apply curated-model harness policy before returning a resolved harness."""
+def _raise_if_curated_requires_opencode(slug: str, harness: str) -> None:
     from mergecraft.agents.curated_model_catalog import require_opencode_harness_for_model
 
     try:
         require_opencode_harness_for_model(slug, harness)
     except ValueError as exc:
         raise ModelFallbackPolicyError(str(exc)) from exc
+
+
+def _finalize_resolved_harness(slug: str, harness: str) -> str:
+    """Apply curated-model harness policy before returning a resolved harness."""
+    _raise_if_curated_requires_opencode(slug, harness)
     return harness
 
 
@@ -1411,12 +1415,7 @@ def resolve_harness(settings: RepoSettings, slug: str) -> str:
     provider = _agent_provider_for_slug(slug)
 
     if settings.harness is not None and settings.harness != "opencode":
-        try:
-            from mergecraft.agents.curated_model_catalog import require_opencode_harness_for_model
-
-            require_opencode_harness_for_model(slug, settings.harness)
-        except ValueError as exc:
-            raise ModelFallbackPolicyError(str(exc)) from exc
+        _raise_if_curated_requires_opencode(slug, settings.harness)
 
     if settings.harness is None:
         registry_harness = registry_harness_for_provider(settings, provider)
@@ -1425,12 +1424,7 @@ def resolve_harness(settings: RepoSettings, slug: str) -> str:
                 registry_harness, provider
             ):
                 return _finalize_resolved_harness(slug, registry_harness)
-            try:
-                from mergecraft.agents.curated_model_catalog import require_opencode_harness_for_model
-
-                require_opencode_harness_for_model(slug, registry_harness)
-            except ValueError as exc:
-                raise ModelFallbackPolicyError(str(exc)) from exc
+            _raise_if_curated_requires_opencode(slug, registry_harness)
             msg = (
                 f"configuration error: harness {registry_harness!r} is incompatible with "
                 f"model {slug!r} (provider {provider!r})"
@@ -1442,12 +1436,7 @@ def resolve_harness(settings: RepoSettings, slug: str) -> str:
     if _harness_supports_provider(harness, provider):
         return _finalize_resolved_harness(slug, harness)
 
-    try:
-        from mergecraft.agents.curated_model_catalog import require_opencode_harness_for_model
-
-        require_opencode_harness_for_model(slug, harness)
-    except ValueError as exc:
-        raise ModelFallbackPolicyError(str(exc)) from exc
+    _raise_if_curated_requires_opencode(slug, harness)
     msg = (
         f"configuration error: harness {harness!r} is incompatible with "
         f"model {slug!r} (provider {provider!r})"
