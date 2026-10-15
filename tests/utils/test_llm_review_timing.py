@@ -107,6 +107,24 @@ def test_tracker_snapshots_from_llm_call_and_reviewer_end() -> None:
     assert snapshot.per_reviewer_seconds[0][0] == "mergecraft-reviewer"
 
 
+def test_null_tracer_llm_call_records_timing_when_tracing_disabled() -> None:
+    import time
+
+    from mergecraft.tracing import NullTracer
+    from mergecraft.tracing.signals import agent_run_span
+
+    tracker = bind_llm_review_timing_tracker()
+    tracer = NullTracer()
+    with tracer.start_span("llm.call"):
+        time.sleep(0.01)
+        with agent_run_span(tracer, agent_id="claude", role="reviewer"):
+            pass
+    snapshot = snapshot_llm_review_timing(tracker)
+    assert snapshot is not None
+    assert snapshot.total_llm_seconds > 0
+    assert snapshot.per_reviewer_seconds[0][0] == "claude"
+
+
 def test_cli_json_envelope_carries_llm_review_timing(capsys) -> None:
     import json
 
