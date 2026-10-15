@@ -94,7 +94,9 @@ def clear_llm_review_timing_tracker() -> None:
     _TRACKER.set(None)
 
 
-def snapshot_llm_review_timing(tracker: LlmReviewTimingTracker | None = None) -> LlmReviewTimingSnapshot | None:
+def snapshot_llm_review_timing(
+    tracker: LlmReviewTimingTracker | None = None,
+) -> LlmReviewTimingSnapshot | None:
     active = tracker if tracker is not None else get_llm_review_timing_tracker()
     if active is None:
         return None

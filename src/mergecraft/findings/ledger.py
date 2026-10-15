@@ -1283,9 +1283,7 @@ def render_deterministic_review_block(
         )
 
         snapshot = (
-            llm_review_timing
-            if isinstance(llm_review_timing, LlmReviewTimingSnapshot)
-            else None
+            llm_review_timing if isinstance(llm_review_timing, LlmReviewTimingSnapshot) else None
         )
         if snapshot is not None:
             header_lines.append(format_llm_review_timing_record(snapshot))
