@@ -37,6 +37,12 @@ class LlmReviewTimingTracker:
     wall_start: float | None = None
     wall_end: float | None = None
 
+    def note_unbound_llm_call_start(self) -> None:
+        """Record the first ``llm.call`` before ``agent_run_span`` binds an agent id."""
+        now = time.monotonic()
+        if self.wall_start is None:
+            self.wall_start = now
+
     def note_llm_call_start(self, agent_id: str) -> None:
         key = agent_id.strip() or "reviewer"
         now = time.monotonic()
@@ -53,6 +59,8 @@ class LlmReviewTimingTracker:
         now = time.monotonic()
         self.wall_end = now
         row = self.reviewers.setdefault(key, ReviewerGenerationTiming(agent_id=key))
+        if row.generation_start is None and self.wall_start is not None:
+            row.generation_start = self.wall_start
         if row.generation_end is None and row.generation_start is not None:
             row.generation_end = now
 
@@ -169,6 +177,7 @@ def note_llm_call_started(agent_id: str | None = None) -> None:
 
         resolved = (current_agent_id() or "").strip()
     if not resolved:
+        tracker.note_unbound_llm_call_start()
         return
     tracker.note_llm_call_start(resolved)
 
