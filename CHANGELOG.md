@@ -73,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A review whose agent calls `run_analyzers` on a host without a sandbox no
+  longer fails closed with "checkout integrity failure: tree changed during
+  read-only review". The gate's output in `.mergecraft/analyzer-runs/` and the
+  provisioning lock `.mergecraft/analyzers.lock` (with its `.lock` sidecar) are
+  files mergeCraft itself writes into the checkout, so the integrity hash now
+  skips those three exact paths, as it already skipped `analyzer-scratch` and
+  `prep-scratch`. Every other file under `.mergecraft/` is still covered.
 - The Action images ship OpenCode 2.x (`@opencode/cli` 2.0.29) for every model
   routed through the OpenCode harness (Nous, OpenCode Zen and Go, MiniMax,
   TokenHub, custom providers). OpenCode 2.x moved its server API, so on 2.x a
