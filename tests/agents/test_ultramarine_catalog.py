@@ -15,9 +15,11 @@ from mergecraft.agents.curated_model_catalog import (
 )
 from mergecraft.agents.openai_generation_params import (
     openai_chat_completion_body_fields,
+    openai_responses_body_fields,
     resolve_openai_generation_params,
     validate_generation_params_for_model,
 )
+from mergecraft.security.openai_generation_proxy import merge_generation_into_request_body
 from mergecraft.agents.shared import AgentUsage
 from mergecraft.agents.verifier import AgentFinding
 from mergecraft.review.terminal_submission import (
@@ -70,6 +72,24 @@ def test_apply_catalog_cost_fills_missing_usage_cost() -> None:
         or 0.0,
         rel=1e-9,
     )
+
+
+def test_responses_body_fields_include_max_output_tokens() -> None:
+    body = openai_responses_body_fields(ULTRAMARINE_1_FLASH_SLUG, {})
+    assert body["max_output_tokens"] == 8192
+    assert body["reasoning"] == {"effort": "low"}
+
+
+def test_merge_generation_into_responses_request_body() -> None:
+    raw = json.dumps({"model": "ultramarine-1-flash", "input": "hi"}).encode()
+    patched = merge_generation_into_request_body(
+        raw,
+        path="/v1/responses",
+        provider_id="paperinstruments",
+        default_model_slug=ULTRAMARINE_1_FLASH_SLUG,
+    )
+    payload = json.loads(patched)
+    assert payload["max_output_tokens"] == 8192
 
 
 def test_max_completion_tokens_maps_to_openai_body_and_defaults() -> None:
