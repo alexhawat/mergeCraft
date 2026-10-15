@@ -43,8 +43,8 @@
 # DeepSeek V4.1 Flash (`opencode-go/deepseek-v4.1-flash`) runs on OpenCode Go
 # through mergeCraft's `opencode` harness. OpenCode Go is a registered provider
 # in .mergecraft/config.yaml (label `opencode-go`, harness `opencode`, envIndex
-# 1), and the rung passes the OPENCODE_GO_API_KEY secret as
-# LLM_PROVIDER_1_API_KEY. The Nous Portal rung (Tencent HY3) was removed on
+# 9), and the rung passes the OPENCODE_GO_API_KEY secret as
+# LLM_PROVIDER_9_API_KEY. The Nous Portal rung (Tencent HY3) was removed on
 # 2026-10-16: its credits ran out and no free Nous model could run a review.
 #
 # mergeCraft reads the native GITHUB_EVENT_PATH, so the workflow just passes a
@@ -674,8 +674,8 @@ jobs:
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
           MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_opencode_go.outputs.app-slug && format('{0}[bot]', steps.app_token_opencode_go.outputs.app-slug) || '' }}
-          # OpenCode Go is registered in .mergecraft/config.yaml with envIndex 1.
-          LLM_PROVIDER_1_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          # OpenCode Go is registered in .mergecraft/config.yaml with envIndex 9.
+          LLM_PROVIDER_9_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
