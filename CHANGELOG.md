@@ -73,6 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An offline review called as a library without a findings file now asks the
+  model for structured findings, as the CLI always does. It used to ask for a
+  markdown review and then reject it as malformed findings, so any model that
+  followed the prompt failed.
+
 - The hardened example workflow's approval gate now receives only the review
   verdict, not the whole evidence packet. On a large pull request the packet
   exceeded the size one environment variable may hold, so the gate could not
