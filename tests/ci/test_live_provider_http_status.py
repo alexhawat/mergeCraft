@@ -132,18 +132,77 @@ def _capture_nous_model(monkeypatch: pytest.MonkeyPatch, *, override: str | None
         monkeypatch.setenv("MERGECRAFT_LIVE_NOUS_MODEL", override)
 
     captured: dict[str, str] = {}
-    payload = {
-        "choices": [{"message": {"content": "ping"}}],
-        "usage": {"input_tokens": 4, "output_tokens": 1},
-    }
 
     def _post(url: str, **kwargs: Any) -> _StubResponse:
         captured["model"] = kwargs["json"]["model"]
-        return _StubResponse(200, payload, url)
+        return _StubResponse(200, _NOUS_REPLY, url)
 
     monkeypatch.setattr(module.httpx, "post", _post)
     module.test_nous_minimal_completion()
     return captured["model"]
+
+
+# The shape the Nous Portal returns: OpenAI-style usage names.
+_NOUS_REPLY: dict[str, Any] = {
+    "choices": [{"message": {"content": "ping"}, "finish_reason": "stop"}],
+    "usage": {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13},
+}
+
+
+def _run_nous_leg(
+    monkeypatch: pytest.MonkeyPatch, reply: dict[str, Any]
+) -> tuple[dict[str, Any], BaseException | None]:
+    """Run the live Nous leg against a stubbed reply; return its request and any failure."""
+    module = _live_module()
+    monkeypatch.setenv("NOUS_API_KEY", _FAKE_KEY)
+    monkeypatch.delenv("NOUS_BASE_URL", raising=False)
+    monkeypatch.delenv("MERGECRAFT_LIVE_NOUS_MODEL", raising=False)
+    sent: dict[str, Any] = {}
+
+    def _post(url: str, **kwargs: Any) -> _StubResponse:
+        sent.update(kwargs["json"])
+        return _StubResponse(200, reply, url)
+
+    monkeypatch.setattr(module.httpx, "post", _post)
+    try:
+        module.test_nous_minimal_completion()
+    except BaseException as exc:  # pytest.fail raises a BaseException subclass
+        return sent, exc
+    return sent, None
+
+
+def test_nous_leg_turns_reasoning_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With reasoning on, the default model spends the whole budget thinking and answers nothing."""
+    sent, failure = _run_nous_leg(monkeypatch, _NOUS_REPLY)
+
+    assert failure is None
+    assert sent.get("reasoning") == {"enabled": False}
+
+
+def test_nous_leg_names_a_reply_cut_off_before_the_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reply = {
+        "choices": [{"message": {"content": None}, "finish_reason": "length"}],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 16},
+    }
+
+    _, failure = _run_nous_leg(monkeypatch, reply)
+
+    assert failure is not None
+    assert "finish_reason='length'" in str(failure)
+
+
+def test_nous_leg_bounds_the_reported_completion_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The token bound reads the Portal's usage names, so an oversized reply fails it."""
+    reply = {
+        "choices": [{"message": {"content": "ping"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 5000},
+    }
+
+    _, failure = _run_nous_leg(monkeypatch, reply)
+
+    assert isinstance(failure, AssertionError)
 
 
 def test_nous_default_model_is_the_shared_documented_constant() -> None:

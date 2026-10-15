@@ -201,6 +201,11 @@ def test_nous_minimal_completion() -> None:
             "model": model,
             "max_tokens": _MAX_OUTPUT_TOKENS,
             "messages": [{"role": "user", "content": "Reply with the single word ping."}],
+            # The default model reasons before it answers, and its reasoning
+            # alone fills the 16-token budget: the reply comes back with
+            # finish_reason "length" and no content. This leg checks the
+            # endpoint, the model id and the answer shape, not reasoning.
+            "reasoning": {"enabled": False},
         },
         timeout=_TIMEOUT,
     )
@@ -209,9 +214,24 @@ def test_nous_minimal_completion() -> None:
     choices = payload.get("choices")
     assert isinstance(choices, list)
     assert choices, f"Nous body is not a completion: {payload!r}"
-    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = choice.get("message")
     assert isinstance(message, dict)
     text = str(message.get("content") or "")
+    assert text.strip(), (
+        f"Nous returned no answer text (finish_reason={choice.get('finish_reason')!r}); "
+        "a 'length' finish means the output budget ran out before the answer"
+    )
+    # The Portal reports OpenAI-style usage; map it onto the accumulator's
+    # names so the token bound below measures the reply instead of reading 0.
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    payload = {
+        **payload,
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens") or usage.get("input_tokens") or 0,
+            "output_tokens": usage.get("completion_tokens") or usage.get("output_tokens") or 0,
+        },
+    }
     acc = _accumulate("nous", payload, text)
     assert acc.final_output.strip()
     assert _usage_out(acc) <= _TOKEN_BOUND
