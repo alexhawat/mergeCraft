@@ -213,6 +213,13 @@ class Span:
         """Start timing and make this span active."""
         self.ts_start_ns = time.time_ns()
         self._context_token = _ACTIVE_SPAN.set(self)
+        if self.kind == "llm.call":
+            try:
+                from mergecraft.utils.llm_review_timing import note_llm_call_started
+
+                note_llm_call_started()
+            except Exception:
+                pass
         return self
 
     def __exit__(

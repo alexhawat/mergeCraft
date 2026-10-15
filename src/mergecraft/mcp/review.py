@@ -168,6 +168,7 @@ def _deterministic_review_block(
         trust_tier=ctx.trust_tier,
         attempt_count=attempt_count,
         token_summary=token_summary,
+        llm_review_timing=tool_state.llm_review_timing,
         publication_entrypoint=tool_state.review_publication_entrypoint,
         inline_comments_demoted=tool_state.review_inline_comments_demoted,
         comment_fallback_applied=tool_state.review_comment_fallback_applied,

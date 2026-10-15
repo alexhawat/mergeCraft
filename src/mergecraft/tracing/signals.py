@@ -181,6 +181,12 @@ def agent_run_span(
                 span = None
         yield span
     finally:
+        try:
+            from mergecraft.utils.llm_review_timing import note_reviewer_generation_ended
+
+            note_reviewer_generation_ended(agent_id, role=role)
+        except Exception as exc:
+            logger.debug("llm review timing finalize failed: {}", exc)
         if span is not None:
             try:
                 span.close()

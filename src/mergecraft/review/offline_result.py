@@ -52,6 +52,7 @@ class OfflineReviewResult:
     #: Skip codes for units Jev did not screen at dispatch time. An
     #: all-skipped run must not render as a clean screen (#786).
     jev_dispatch_skips: list[str] | None = None
+    llm_review_timing: dict[str, object] | None = None
 
 
 def _offline_failure(
