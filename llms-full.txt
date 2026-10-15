@@ -499,7 +499,7 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 | OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
 | OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` | `OPENCODE_API_KEY` | Zen: `opencode/gpt-5.6-sol`; Go: `opencode-go/deepseek-v4-pro` (cheaper: `opencode-go/deepseek-v4.1-flash`) |
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials | `GEMINI_API_KEY` | `google/gemini-3.1-pro-preview` |
-| Nous Portal | — | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` |
+| Nous Portal | — | Register `nous` under `providers:` ([setup](docs/authentication.md#worked-example--nous-hosted-deepseek-v4-flash)), then `mergecraft provider auth nous --scope github` → `LLM_PROVIDER_<N>_API_KEY`; a flat `NOUS_API_KEY` still works but is deprecated | `nous/deepseek/deepseek-v4-flash` |
 | Tencent TokenHub | — | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` |
 | MiniMax | — | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` |
 | Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` |
@@ -2833,7 +2833,7 @@ run on `pull_request_target` (opened / synchronize).
 | OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
 | OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` (billing-backed API key from [opencode.ai/auth](https://opencode.ai/auth)) | `OPENCODE_API_KEY` | Zen: `opencode/gpt-5.6-sol`; Go: `opencode-go/deepseek-v4-pro` (cheaper: `opencode-go/deepseek-v4.1-flash`) — [OpenCode Go models](https://opencode.ai/docs/go/) | `opencode` |
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
-| Nous Portal | — (API key) | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` | `opencode` |
+| Nous Portal | — (API key) | Register `nous` under `providers:` (see the [worked example](#worked-example--nous-hosted-deepseek-v4-flash)), then `mergecraft provider auth nous --scope github` → `LLM_PROVIDER_<N>_API_KEY`; a flat `NOUS_API_KEY` still works but is deprecated | `nous/deepseek/deepseek-v4-flash` | `opencode` |
 | Tencent TokenHub | — (API key) | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` | `opencode` |
 | MiniMax | — (API key) | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` | `opencode` |
 | Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
@@ -2965,6 +2965,13 @@ regression-tested.
 | Singleton back-compat alias (PR #79) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `nous/...` or `tokenhub/...`) |
 | Indexed multi-provider | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1`, `_2`, `_3`, … | `provider_1`, `provider_2`, `provider_3`, … |
 
+These variables supply an endpoint and a key; they do **not** register a
+provider. The provider named by the model's prefix must be registered under
+`providers:` in `.mergecraft/config.yaml` (`mergecraft provider add`), or the
+run stops with `configuration error: provider '<id>' is not registered`. The
+one exception is Nous with a flat `NOUS_API_KEY`, which still resolves but is
+deprecated.
+
 Indexed env vars are operator-locked — both halves of each numeric pair
 must be set with non-empty values; partial pairs are silently dropped.
 Discovery enumerates every matching suffix, sorts by numeric `N`
@@ -3020,25 +3027,52 @@ full output list.
 
 #### Worked example — Nous-hosted DeepSeek V4 Flash
 
-A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via
-either harness:
+Register Nous once in `.mergecraft/config.yaml` (`mergecraft provider add
+--label nous --url https://inference-api.nousresearch.com/v1 --harness
+opencode` writes the same entry):
+
+```yaml
+providers:
+- label: nous
+  url: https://inference-api.nousresearch.com/v1
+  harness: opencode
+  envIndex: 1
+```
+
+Then pass the key through the entry's indexed slot:
 
 ```yaml
 - uses: alexhawat/mergeCraft@v0.1.0a1
   with:
-    model: nous/deepseek/deepseek-v4-flash  # raw pass-through slug
+    model: nous/deepseek/deepseek-v4-flash
   env:
-    NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}      # preset path — no MERGECRAFT_* needed
+    LLM_PROVIDER_1_API_KEY: ${{ secrets.NOUS_API_KEY }}   # envIndex 1 above
 ```
 
-The model prefix `nous` resolves against `NOUS_API_KEY` (set above) and
-`https://inference-api.nousresearch.com/v1`. The harness then registers
-the provider, sets `enabled_providers = ["nous"]`, and serves the model.
+The model prefix `nous` selects the registered entry, which supplies the
+base URL and the OpenCode harness; the harness then sets
+`enabled_providers = ["nous"]` and serves `deepseek/deepseek-v4-flash`.
+A flat `NOUS_API_KEY` without the `providers:` entry still resolves, but it
+is deprecated. `MERGECRAFT_CUSTOM_PROVIDER_*` alone does not register Nous.
 
 #### Multi-provider — Codex-side indexed pairs
 
 Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
-and Nous alongside OpenAI):
+and Nous alongside OpenAI). Each `provider_<N>` id must be registered, or the
+run stops with `provider 'provider_1' is not registered`:
+
+```yaml
+# .mergecraft/config.yaml
+providers:
+- label: provider_1
+  url: https://inference-api.nousresearch.com/v1
+  harness: codex
+  envIndex: 1
+- label: provider_2
+  url: https://api.MiniMax.io/v1
+  harness: opencode
+  envIndex: 2
+```
 
 ```yaml
 - uses: alexhawat/mergeCraft@v0.1.0a1
@@ -3082,8 +3116,8 @@ harness from the model slug (see matrix below).
 
 | Model slug (unset `harness`) | Inferred harness | Explicit override exercised by tests |
 |------------------------------|------------------|--------------------------------------|
-| `nous/deepseek-v4-flash` | `opencode` | — |
-| `nous/deepseek/deepseek-v4-flash` | `opencode` | — |
+| `nous/deepseek-v4-flash` (registered `nous`, or legacy `NOUS_API_KEY`) | `opencode` | — |
+| `nous/deepseek/deepseek-v4-flash` (registered `nous`, or legacy `NOUS_API_KEY`) | `opencode` | — |
 | `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
 | `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
 | `google/gemini-3.1-pro-preview` | `gemini` | — |

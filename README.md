@@ -495,7 +495,7 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 | OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
 | OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` | `OPENCODE_API_KEY` | Zen: `opencode/gpt-5.6-sol`; Go: `opencode-go/deepseek-v4-pro` (cheaper: `opencode-go/deepseek-v4.1-flash`) |
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials | `GEMINI_API_KEY` | `google/gemini-3.1-pro-preview` |
-| Nous Portal | — | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` |
+| Nous Portal | — | Register `nous` under `providers:` ([setup](docs/authentication.md#worked-example--nous-hosted-deepseek-v4-flash)), then `mergecraft provider auth nous --scope github` → `LLM_PROVIDER_<N>_API_KEY`; a flat `NOUS_API_KEY` still works but is deprecated | `nous/deepseek/deepseek-v4-flash` |
 | Tencent TokenHub | — | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` |
 | MiniMax | — | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` |
 | Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` |
