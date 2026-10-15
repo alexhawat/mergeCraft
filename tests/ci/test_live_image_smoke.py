@@ -80,6 +80,7 @@ def live_step_script() -> str:
     ("model", "expected_key"),
     [
         ("openai/test", "OPENAI_API_KEY"),
+        ("opencode-go/test", "LLM_PROVIDER_1_API_KEY"),
         ("anthropic/test", "ANTHROPIC_API_KEY"),
         ("google/test", "GEMINI_API_KEY"),
         ("unknown/test", None),
@@ -93,7 +94,13 @@ def test_live_container_gets_only_its_selected_credential(
     arguments = tmp_path / "arguments"
     docker.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$SMOKE_DOCKER_ARGS"\n')
     docker.chmod(0o700)
-    keys = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"}
+    keys = {
+        "OPENAI_API_KEY",
+        "OPENCODE_GO_API_KEY",
+        "LLM_PROVIDER_1_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+    }
     environment = {
         **os.environ,
         **dict.fromkeys(keys, "nonsecret-fixture"),
@@ -102,8 +109,6 @@ def test_live_container_gets_only_its_selected_credential(
         "E2E_IMAGE": "test-image",
         "MERGECRAFT_E2E_LIVE_MODEL": model,
     }
-    # The Codex subscription credential wins over OPENAI_API_KEY for `openai/*`;
-    # clear any inherited value so the API-key fallback stays deterministic.
     environment.pop("CODEX_AUTH_JSON", None)
     if model.endswith("-missing"):
         environment["OPENAI_API_KEY"] = ""
@@ -151,6 +156,8 @@ def test_unconfigured_live_slice_warns_as_unavailable(
 
 _LIVE_CREDENTIAL_KEYS = (
     "OPENAI_API_KEY",
+    "OPENCODE_GO_API_KEY",
+    "LLM_PROVIDER_1_API_KEY",
     "CODEX_AUTH_JSON",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
@@ -196,48 +203,62 @@ def _run_live_step(
     return result, arguments
 
 
-def test_codex_subscription_credential_is_selected_for_openai_models(
+def test_codex_subscription_credential_never_reaches_the_live_container(
     tmp_path: Path, live_step_script: str
 ) -> None:
-    """``openai/*`` with only ``CODEX_AUTH_JSON`` passes the subscription credential in."""
+    """The subscription rotates its refresh token on use, so the live slice never takes it (#970)."""
+    result, arguments = _run_live_step(
+        tmp_path,
+        live_step_script,
+        model="openai/gpt-5.3-codex",
+        extra_env={"CODEX_AUTH_JSON": "nonsecret-fixture", "OPENAI_API_KEY": "nonsecret-fixture"},
+    )
+    assert result.returncode == 0, result.stderr
+    passed = set(arguments.read_text(encoding="utf-8").splitlines())
+    assert "CODEX_AUTH_JSON" not in passed, f"the subscription must not pass: {passed}"
+    assert "OPENAI_API_KEY" in passed, passed
+    assert "nonsecret-fixture" not in passed, "the secret value must not ride on argv"
+
+
+def test_openai_model_with_only_the_subscription_exits_non_zero(
+    tmp_path: Path, live_step_script: str
+) -> None:
+    """Without an API key an ``openai/*`` live slice fails; it does not fall back to the subscription."""
     result, arguments = _run_live_step(
         tmp_path,
         live_step_script,
         model="openai/gpt-5.3-codex",
         extra_env={"CODEX_AUTH_JSON": "nonsecret-fixture"},
     )
-    assert result.returncode == 0, result.stderr
-    passed = set(arguments.read_text(encoding="utf-8").splitlines())
-    assert "CODEX_AUTH_JSON" in passed, f"the container must receive the subscription: {passed}"
-    assert "OPENAI_API_KEY" not in passed, f"only one credential may pass: {passed}"
-    assert "nonsecret-fixture" not in passed, "the secret value must not ride on argv"
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert not arguments.exists()
 
 
-def test_openai_model_without_api_key_or_subscription_exits_non_zero(
+def test_opencode_go_model_without_its_key_exits_non_zero(
     tmp_path: Path, live_step_script: str
 ) -> None:
-    """Neither credential set is a configured-but-broken run: fail, do not skip."""
+    """A configured-but-unkeyed live slice is a failure, not a skip."""
     result, arguments = _run_live_step(
         tmp_path,
         live_step_script,
-        model="openai/gpt-5.3-codex",
+        model="opencode-go/deepseek-v4.1-flash",
         extra_env={},
     )
     assert result.returncode != 0, result.stdout + result.stderr
     assert not arguments.exists()
 
 
-@pytest.mark.parametrize("marker", ["refresh token", "401", "invalid_grant"])
-def test_rejected_subscription_credential_reads_as_unavailable(
+@pytest.mark.parametrize("marker", ["401", "invalid_grant", "Invalid API key", "Unauthorized"])
+def test_rejected_credential_reads_as_unavailable(
     tmp_path: Path, live_step_script: str, marker: str
 ) -> None:
-    """A rejected Codex session is named unavailable, not reported as a product failure."""
+    """A rejected key is named unavailable, not reported as a product failure."""
     docker_body = f'#!/bin/bash\nprintf "codex auth error: {marker}\\n" >&2\nexit 1\n'
     result, _ = _run_live_step(
         tmp_path,
         live_step_script,
-        model="openai/gpt-5.3-codex",
-        extra_env={"CODEX_AUTH_JSON": "nonsecret-fixture"},
+        model="opencode-go/deepseek-v4.1-flash",
+        extra_env={"OPENCODE_GO_API_KEY": "nonsecret-fixture"},
         docker_body=docker_body,
     )
     output = f"{result.stdout}\n{result.stderr}".lower()
@@ -257,8 +278,8 @@ def test_product_failure_is_not_reported_as_unavailable_credential(
     result, _ = _run_live_step(
         tmp_path,
         live_step_script,
-        model="openai/gpt-5.3-codex",
-        extra_env={"CODEX_AUTH_JSON": "nonsecret-fixture"},
+        model="opencode-go/deepseek-v4.1-flash",
+        extra_env={"OPENCODE_GO_API_KEY": "nonsecret-fixture"},
         docker_body=docker_body,
     )
     output = f"{result.stdout}\n{result.stderr}".lower()
@@ -266,8 +287,8 @@ def test_product_failure_is_not_reported_as_unavailable_credential(
     assert "unavailable credential" not in output, output
 
 
-def test_live_slice_job_serializes_the_subscription_credential() -> None:
-    """Codex refresh tokens rotate, so the live-slice job must not run concurrently."""
+def test_live_slice_job_does_not_consume_the_subscription_credential() -> None:
+    """The live slice holds no ChatGPT-subscription credential and no longer serialises on it."""
     workflow = yaml.safe_load(
         (Path(__file__).resolve().parents[2] / ".github/workflows/e2e.yml").read_text()
     )
@@ -279,7 +300,53 @@ def test_live_slice_job_serializes_the_subscription_credential() -> None:
             for step in job.get("steps", [])
         )
     )
-    concurrency = live_job.get("concurrency")
-    assert isinstance(concurrency, dict), concurrency
-    assert concurrency.get("group") == "codex-subscription-auth", concurrency
-    assert concurrency.get("cancel-in-progress") is False, concurrency
+    assert "CODEX_AUTH_JSON" not in yaml.safe_dump(live_job), live_job
+    assert "CODEX_AUTH_JSON" not in (
+        (workflow.get(True) or workflow.get("on") or {}).get("workflow_call", {}).get("secrets", {})
+    )
+
+
+def test_a_registered_provider_key_registers_the_live_models_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenCode Go is refused unless registered, so the smoke registers it."""
+    from mergecraft.config.settings import load_repo_settings
+
+    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "nonsecret-fixture")
+    monkeypatch.delenv("MERGECRAFT_E2E_LIVE_PROVIDER_URL", raising=False)
+
+    written = live_image_smoke.register_live_provider(tmp_path, "opencode-go/deepseek-v4.1-flash")
+
+    assert written == tmp_path / ".mergecraft" / "config.yaml"
+    (entry,) = load_repo_settings(root=tmp_path).providers
+    assert (entry.label, entry.harness, entry.env_index, entry.url) == (
+        "opencode-go",
+        "opencode",
+        1,
+        None,
+    )
+
+
+def test_a_registered_provider_takes_its_url_when_one_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.config.settings import load_repo_settings
+
+    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "nonsecret-fixture")
+    monkeypatch.setenv(
+        "MERGECRAFT_E2E_LIVE_PROVIDER_URL", "https://inference-api.nousresearch.com/v1"
+    )
+
+    live_image_smoke.register_live_provider(tmp_path, "nous/tencent/hy3")
+
+    (entry,) = load_repo_settings(root=tmp_path).providers
+    assert (entry.label, entry.url) == ("nous", "https://inference-api.nousresearch.com/v1")
+
+
+def test_a_built_in_provider_credential_registers_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
+
+    assert live_image_smoke.register_live_provider(tmp_path, "openai/gpt-5.5") is None
+    assert not (tmp_path / ".mergecraft").exists()
