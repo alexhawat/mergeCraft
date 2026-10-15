@@ -157,6 +157,7 @@ BYOK provider keys from the model catalog (`mergecraft.models.PROVIDERS`).
 | `vertex` | Google Vertex AI | `VERTEX_SERVICE_ACCOUNT_JSON`, `GOOGLE_CLOUD_PROJECT`, `VERTEX_LOCATION`, `VERTEX_MODEL_ID` |
 | `nous` | Nous Portal | `NOUS_API_KEY`, `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` |
 | `tokenhub` | Tencent TokenHub | `TOKENHUB_API_KEY` |
+| `paperinstruments` | Paper Instruments | `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` |
 | `minimax` | MiniMax (OpenAI-compatible) | `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` |
 | `openrouter` | OpenRouter | `OPENROUTER_API_KEY` |
 
@@ -219,6 +220,7 @@ recommended-model column here.
 | `tokenhub/deepseek-v4-pro` | `tokenhub` | — |
 | `tokenhub/glm-5.2` | `tokenhub` | — |
 | `tokenhub/kimi-k3` | `tokenhub` | — |
+| `paperinstruments/ultramarine-1-flash` | `paperinstruments` | preferred |
 | `minimax/MiniMax-M3` | `minimax` | preferred |
 | `openrouter/claude-opus` | `openrouter` | preferred |
 | `openrouter/claude-sonnet` | `openrouter` | — |
