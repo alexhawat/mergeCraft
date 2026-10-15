@@ -107,3 +107,55 @@ def test_hash_tree_detects_directory_symlink_retarget(tmp_path: Path) -> None:
     link.unlink()
     link.symlink_to(target_b, target_is_directory=True)
     assert hash_tree(checkout) != before
+
+
+def test_analyzer_runtime_files_written_mid_review_keep_the_tree_unchanged(tmp_path: Path) -> None:
+    """A ``run_analyzers`` call made mid-review must not fail the integrity gate.
+
+    Unsandboxed, a gate persists output to ``.mergecraft/analyzer-runs`` and
+    provisioning writes ``.mergecraft/analyzers.lock`` under its ``.lock``
+    sidecar — all after the baseline. Seen on a live review: the only changed
+    paths were these three, and the run failed closed.
+    """
+    from mergecraft.analyzers.lockfile import LockEntry, write_lock
+    from mergecraft.analyzers.resolve import AnalyzerPlan
+    from mergecraft.analyzers.run import _run_tmpdir
+    from mergecraft.security.review_integrity import hash_tree, verify_tree_unchanged
+
+    checkout = tmp_path / "checkout"
+    (checkout / ".mergecraft").mkdir(parents=True)
+    (checkout / ".mergecraft" / "config.yaml").write_text("review: true\n", encoding="utf-8")
+    before = hash_tree(checkout)
+
+    runs = _run_tmpdir(AnalyzerPlan(manifest_id="actionlint", mode="managed", cwd=checkout))
+    (runs / "actionlint.out").write_text("ok\n", encoding="utf-8")
+    write_lock(
+        checkout / ".mergecraft" / "analyzers.lock",
+        [LockEntry("actionlint", "1.7.12", "managed", "cache", "abc123")],
+    )
+    assert runs == checkout / ".mergecraft" / "analyzer-runs"
+    assert (checkout / ".mergecraft" / "analyzers.lock.lock").exists()
+    verify_tree_unchanged(checkout, before)
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        ".mergecraft/config.yaml",
+        ".mergecraft/learnings.md",
+        ".mergecraft/analyzers.lock.bak",
+        ".mergecraft/analyzer-runs.txt",
+        "src/.mergecraft/analyzers.lock",
+    ],
+)
+def test_paths_next_to_the_analyzer_runtime_files_stay_covered(tmp_path: Path, rel: str) -> None:
+    from mergecraft.security.review_integrity import hash_tree, verify_tree_unchanged
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    before = hash_tree(checkout)
+    path = checkout / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("written mid-review\n", encoding="utf-8")
+    with pytest.raises(RuntimeError):
+        verify_tree_unchanged(checkout, before)
