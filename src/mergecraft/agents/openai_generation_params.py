@@ -1,4 +1,4 @@
-"""Map OpenAI-compatible generation knobs for OpenCode and direct HTTP paths (#983)."""
+"""Map OpenAI-compatible generation knobs for the OpenCode harness (#983)."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def normalize_generation_extra_options(
 
 @dataclass(frozen=True, slots=True)
 class OpenAIGenerationParams:
-    """Generation parameters for OpenAI-compatible chat/responses requests."""
+    """Generation parameters for OpenAI-compatible chat requests via OpenCode."""
 
     max_completion_tokens: int | None = None
     reasoning_effort: str | None = None
@@ -52,37 +52,6 @@ def resolve_openai_generation_params(
     )
 
 
-def openai_chat_completion_body_fields(
-    model: str | None,
-    extra_options: dict[str, Any],
-) -> dict[str, Any]:
-    """Build OpenAI Chat Completions fields for *model* (direct HTTP path)."""
-    params = resolve_openai_generation_params(model, extra_options)
-    body: dict[str, Any] = {}
-    if params.max_completion_tokens is not None:
-        body["max_completion_tokens"] = params.max_completion_tokens
-    elif params.max_tokens is not None:
-        body["max_tokens"] = params.max_tokens
-    if params.reasoning_effort:
-        body["reasoning_effort"] = params.reasoning_effort
-    return body
-
-
-def openai_responses_body_fields(
-    model: str | None,
-    extra_options: dict[str, Any],
-) -> dict[str, Any]:
-    """Build OpenAI Responses API fields for *model* (Codex ``wire_api`` path)."""
-    params = resolve_openai_generation_params(model, extra_options)
-    body: dict[str, Any] = {}
-    cap = params.max_completion_tokens if params.max_completion_tokens is not None else params.max_tokens
-    if cap is not None:
-        body["max_output_tokens"] = cap
-    if params.reasoning_effort:
-        body["reasoning"] = {"effort": params.reasoning_effort}
-    return body
-
-
 def validate_generation_params_for_model(model: str | None, extra_options: dict[str, Any]) -> None:
     """Validate generation params; raises ``ValueError`` when misconfigured."""
     normalized = normalize_generation_extra_options(model, extra_options)
@@ -92,8 +61,6 @@ def validate_generation_params_for_model(model: str | None, extra_options: dict[
 __all__ = [
     "OpenAIGenerationParams",
     "normalize_generation_extra_options",
-    "openai_chat_completion_body_fields",
-    "openai_responses_body_fields",
     "positive_int_option",
     "resolve_openai_generation_params",
     "validate_generation_params_for_model",

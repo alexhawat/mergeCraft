@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import subprocess
-from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
@@ -67,7 +66,6 @@ if TYPE_CHECKING:
     from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
-_active_generation_proxy_urls: dict[str, str] = {}
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
 # nested value is a table, a scalar is a key in the table that holds it.
 TomlTable: TypeAlias = dict[str, "str | bool | TomlTable"]
@@ -483,54 +481,6 @@ def _has_env(name: str) -> bool:
     return isinstance(val, str) and bool(val.strip())
 
 
-def _apply_openai_generation_overrides(config: TomlTable, model: str | None) -> None:
-    """Apply OpenAI-compatible generation knobs for curated gateway models (#983)."""
-    if not model:
-        return
-    from mergecraft.agents.openai_compatible_gateways import _provider_config_for_model
-    from mergecraft.agents.openai_generation_params import (
-        openai_chat_completion_body_fields,
-        openai_responses_body_fields,
-        validate_generation_params_for_model,
-    )
-
-    provider_config = _provider_config_for_model(model)
-    if provider_config is None:
-        return
-    extra = dict(provider_config.extra_options)
-    validate_generation_params_for_model(model, extra)
-    chat_fields = openai_chat_completion_body_fields(model, extra)
-    responses_fields = openai_responses_body_fields(model, extra)
-    effort = chat_fields.get("reasoning_effort")
-    if isinstance(effort, str) and effort.strip():
-        config["model_reasoning_effort"] = effort.strip()
-    _ = responses_fields
-
-
-def _enter_generation_proxy(stack: ExitStack, model: str | None) -> None:
-    """Start a loopback proxy so Codex direct HTTP requests carry output caps (#983)."""
-    if not model:
-        return
-    from mergecraft.agents.curated_model_catalog import curated_model_entry
-    from mergecraft.agents.openai_compatible_gateways import _provider_config_for_model
-    from mergecraft.security.openai_generation_proxy import openai_generation_proxy
-
-    entry = curated_model_entry(model)
-    if entry is None or not entry.requires_output_cap:
-        return
-    provider_config = _provider_config_for_model(model)
-    if provider_config is None:
-        return
-    handle = stack.enter_context(
-        openai_generation_proxy(
-            provider_id=provider_config.provider_id,
-            upstream_base_url=provider_config.base_url,
-            default_model_slug=model,
-        )
-    )
-    _active_generation_proxy_urls[provider_config.provider_id] = handle.base_url
-
-
 def _has_any_custom_provider_env() -> bool:
     """True when at least one ``MERGECRAFT_CUSTOM_PROVIDER_*`` env var is set.
 
@@ -571,10 +521,9 @@ def _add_custom_provider_tables(config: TomlTable) -> None:
     model_providers: TomlTable = {}
     config["model_providers"] = model_providers
     for record in resolve_gateway_endpoints().values():
-        base_url = _active_generation_proxy_urls.get(record.provider_id, record.base_url)
         model_providers[record.provider_id] = {
             "name": record.provider_id,
-            "base_url": base_url,
+            "base_url": record.base_url,
             "env_key": record.api_key_env,
             "wire_api": "responses",
         }
@@ -661,7 +610,6 @@ def write_mcp_config(
         "experimental_instructions_file": str(instructions_path),
         "model_reasoning_effort": CODEX_MODEL_REASONING_EFFORT,
     }
-    _apply_openai_generation_overrides(config, ctx.resolved_model)
     # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
     # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set.
     _add_custom_provider_tables(config)
@@ -947,9 +895,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             metadata=broker_run_record_fields(broker_session.posture),
         )
     set_broker_session(broker_session)
-    generation_stack = ExitStack()
     try:
-        _enter_generation_proxy(generation_stack, ctx.resolved_model)
         render_result = render_for_run(ctx, "codex")
         subagent_block = render_result.payload if isinstance(render_result.payload, str) else None
         mcp_config = write_mcp_config(ctx, subagent_block=subagent_block)
@@ -982,8 +928,6 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             finalized.metadata = broker_metadata
         return merge_manifest_metadata(finalized, render_result)
     finally:
-        generation_stack.close()
-        _active_generation_proxy_urls.clear()
         stop_broker_session(broker_session)
         set_broker_session(None)
 

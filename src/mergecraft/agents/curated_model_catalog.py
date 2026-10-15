@@ -117,6 +117,19 @@ def effective_max_output_tokens(slug: str | None, extra_options: dict[str, objec
     return None
 
 
+def require_opencode_harness_for_model(slug: str | None, harness: str) -> None:
+    """Fail closed when a curated slug is used outside the OpenCode harness (#983)."""
+    entry = curated_model_entry(slug)
+    if entry is None:
+        return
+    if harness != "opencode":
+        msg = (
+            f"configuration error: {entry.slug} is only supported with harness: opencode "
+            f"(got {harness!r})"
+        )
+        raise ValueError(msg)
+
+
 def require_output_cap_for_model(slug: str | None, extra_options: dict[str, object]) -> None:
     """Fail closed when a curated model that requires a cap has none configured."""
     entry = curated_model_entry(slug)
@@ -208,5 +221,6 @@ __all__ = [
     "curated_model_entry",
     "effective_max_output_tokens",
     "merge_curated_generation_defaults",
+    "require_opencode_harness_for_model",
     "require_output_cap_for_model",
 ]

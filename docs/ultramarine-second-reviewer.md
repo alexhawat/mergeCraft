@@ -7,6 +7,14 @@ deduplicates overlaps, and computes per-review cost from token usage.
 
 Review **duration** in posted messages is handled separately (not in this guide).
 
+## OpenCode harness only
+
+Ultramarine runs only through the **OpenCode** harness (`harness: opencode` on the
+provider registry row, or inferred OpenCode when the registry declares it). mergeCraft
+rejects Codex, Claude, Gemini, Cursor, and other harnesses with a configuration error
+if the model slug is `paperinstruments/ultramarine-1-flash`. Output caps and generation
+knobs are applied in OpenCode security config, not via Codex or direct OpenAI HTTP.
+
 ## Provider registry (local)
 
 Add a `providers:` row in `.mergecraft/config.local.yaml`. Put **`harness` on the
