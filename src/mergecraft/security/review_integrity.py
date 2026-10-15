@@ -6,6 +6,7 @@ duplicating checkout/config fingerprint logic.
 Exports:
     hash_tree: Fingerprint a checkout tree before agent execution.
     verify_tree_unchanged: Fail closed when the tree changed during review.
+    TreeBaseline: The run's baseline, re-pinned across ``checkout_pr``.
     assert_checkout_read_boundary: Reject paths outside the checkout read allowlist.
     scan_local_sinks_for_secrets: Return the paths of local sinks holding secrets.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -101,6 +103,40 @@ def verify_tree_unchanged(root: Path, before_digest: str) -> None:
     if current != before_digest:
         msg = f"checkout integrity failure: tree changed during read-only review ({root})"
         raise RuntimeError(msg)
+
+
+@dataclass
+class TreeBaseline:
+    """Read-only review baseline, kept on ``ToolState`` so ``checkout_pr`` can re-pin it.
+
+    ``checkout_pr`` legitimately rewrites the tree: the Action checks out the
+    merge ref and the tool switches to the PR head, so every review of a branch
+    behind its base failed closed. The tool re-pins at that one controlled
+    boundary, after first checking nothing changed since the last pin; a change
+    there (ignored files survive the tool's ``git status`` gate) marks the
+    baseline broken so the change cannot be absorbed by the re-pin.
+    """
+
+    root: Path
+    digest: str
+    broken: bool = False
+
+    def before_checkout(self) -> None:
+        if not self.broken and hash_tree(self.root) != self.digest:
+            self.broken = True
+
+    def after_checkout(self) -> None:
+        if not self.broken:
+            self.digest = hash_tree(self.root)
+
+    def verify(self) -> None:
+        if self.broken:
+            msg = (
+                "checkout integrity failure: tree changed during read-only review "
+                f"before checkout_pr ({self.root})"
+            )
+            raise RuntimeError(msg)
+        verify_tree_unchanged(self.root, self.digest)
 
 
 def assert_checkout_read_boundary(checkout: Path, paths: Sequence[Path]) -> None:

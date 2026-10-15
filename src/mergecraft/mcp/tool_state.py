@@ -418,6 +418,9 @@ class ToolState:
     autopromote_learnings: bool = False
     # Run identity (GitHub Actions run id) for provenance records.
     run_id: str | None = None
+    # Read-only review tree baseline (``security/review_integrity.TreeBaseline``);
+    # set by agents that gate on it, re-pinned by ``checkout_pr``.
+    review_tree_baseline: Any = None
     # PR number the run is acting on (None for non-PR runs).
     pr_number: int | None = None
     # Author login of the triggerer / comment author (provenance source).
