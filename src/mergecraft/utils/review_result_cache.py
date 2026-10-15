@@ -165,6 +165,14 @@ def load_review_result(key: str) -> OfflineReviewResult | None:
         scope_reduction = _load_scope_reduction(payload.get("scope_reduction"))
     except ValueError:
         return None
+    timing_raw = payload.get("llm_review_timing")
+    llm_review_timing: dict[str, object] | None
+    if timing_raw is None:
+        llm_review_timing = None
+    elif isinstance(timing_raw, dict):
+        llm_review_timing = {str(k): v for k, v in timing_raw.items()}
+    else:
+        return None
     return OfflineReviewResult(
         success=bool(payload.get("success")),
         output=payload.get("output") if isinstance(payload.get("output"), str) else None,
@@ -179,6 +187,7 @@ def load_review_result(key: str) -> OfflineReviewResult | None:
         evidence_packet_path=_existing_evidence_packet_path(payload.get("evidence_packet_path")),
         outcome=outcome,
         scope_reduction=scope_reduction,
+        llm_review_timing=llm_review_timing,
     )
 
 
@@ -194,6 +203,7 @@ def store_review_result(key: str, result: OfflineReviewResult) -> None:
         "evidence_packet_path": result.evidence_packet_path,
         "outcome": result.outcome.value if result.outcome is not None else None,
         "scope_reduction": _scope_reduction_payload(result.scope_reduction),
+        "llm_review_timing": result.llm_review_timing,
     }
     cache = _open_result_cache()
     cache.put(key, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
