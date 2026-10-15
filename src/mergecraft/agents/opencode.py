@@ -67,9 +67,10 @@ from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-    from typing import IO
+    from collections.abc import Callable, Mapping
+    from typing import IO, Any
 
+    from mergecraft.agents._stream_consumer import StreamSpanAccumulator
     from mergecraft.tracing.content import ContentCapture
 
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
@@ -479,8 +480,35 @@ async def _install(_token: str | None = None) -> str:
     path = shutil.which("opencode")
     if path:
         return path
-    msg = "opencode CLI not found on PATH. Install opencode-ai or ensure `opencode` is available."
+    msg = "opencode CLI not found on PATH. Install @opencode/cli or ensure `opencode` is available."
     raise FileNotFoundError(msg)
+
+
+# 1.x prints ``1.18.30``; 2.x prints ``opencode v2.0.29``.
+_OPENCODE_VERSION_RE: Final = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+_OPENCODE_MAJOR_CACHE: dict[str, int | None] = {}
+
+
+def _opencode_major_version(cli: str) -> int | None:
+    """Return the OpenCode CLI's major version, or ``None`` when it cannot be read.
+
+    Read once per binary path. ``None`` keeps the 1.x server path, which is
+    what every release before 2.0 needs.
+    """
+    if cli in _OPENCODE_MAJOR_CACHE:
+        return _OPENCODE_MAJOR_CACHE[cli]
+    major: int | None = None
+    try:
+        completed = subprocess.run(
+            [cli, "--version"], capture_output=True, text=True, timeout=30, check=False
+        )
+        match = _OPENCODE_VERSION_RE.search(f"{completed.stdout}\n{completed.stderr}")
+        if match:
+            major = int(match.group(1))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.debug("opencode --version failed: {}", exc)
+    _OPENCODE_MAJOR_CACHE[cli] = major
+    return major
 
 
 class _ServerHandle:
@@ -883,6 +911,16 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     env = build_agent_env("opencode", extras, model=model)
     env.update({k: v for k, v in credential_env.items() if k not in env})
 
+    # OpenCode 2.x serves a different HTTP API (``/api/session/...``); the
+    # 1.x ``POST /session`` below gets 405. Its ``run`` command keeps the JSON
+    # event stream and resumes a session by id, so 2.x reviews go through it.
+    major = await asyncio.to_thread(_opencode_major_version, cli)
+    if major is not None and major >= 2:
+        return _apply_integrity_gate(
+            await _run_v2(cli=cli, ctx=ctx, env=env, model=model),
+            baseline,
+        )
+
     # Prefer serve + HTTP when available; fall back to `opencode run`.
     #
     # Boot runs on a worker thread: it waits on a URL event with a deadline and
@@ -1009,6 +1047,63 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         handle.close()
 
 
+# One argv string may hold at most 128 KiB (Linux ``MAX_ARG_STRLEN``); a
+# longer prompt rides in an attached file instead.
+_OPENCODE_ARGV_PROMPT_LIMIT: Final = 120_000
+
+
+async def _run_v2(
+    *, cli: str, ctx: AgentRunContext, env: dict[str, str], model: str | None
+) -> AgentResult:
+    """Run one review on OpenCode 2.x through ``opencode run``.
+
+    ``--standalone`` gives the run a private server: without it 2.x attaches
+    to a shared background service that outlives the run. Follow-up prompts
+    from the post-run retry loop resume the same session with ``--session``.
+    """
+    system = ctx.instructions.system
+    user = ctx.instructions.user
+    prompt = f"{system}\n\n{user}".strip() if system else user
+    base = [cli, "run", "--standalone", "--format", "json", "--title", "mergecraft"]
+    if model:
+        base.extend(["--model", model])
+    session: dict[str, str] = {}
+
+    async def _turn(text: str, session_id: str | None = None) -> AgentResult:
+        cmd = list(base)
+        if session_id:
+            cmd.extend(["--session", session_id])
+        if len(text.encode("utf-8")) > _OPENCODE_ARGV_PROMPT_LIMIT:
+            prompt_dir = _evidence_dir(ctx)
+            prompt_dir.mkdir(parents=True, exist_ok=True)
+            prompt_path = prompt_dir / f"opencode-prompt-{time.time_ns()}.md"
+            prompt_path.write_text(text, encoding="utf-8")
+            cmd.extend(
+                ["--file", str(prompt_path), "Follow the instructions in the attached file."]
+            )
+        else:
+            cmd.append(text)
+        return await asyncio.to_thread(
+            _run_opencode_cli_streaming, cmd=cmd, ctx=ctx, env=env, session=session
+        )
+
+    initial = await _turn(prompt)
+    if not initial.success:
+        return initial
+
+    async def resume(followup: str) -> AgentResult:
+        session_id = session.get("id")
+        if not session_id:
+            return AgentResult(
+                success=False,
+                error="opencode run reported no session id; the follow-up cannot resume it",
+            )
+        return await _turn(followup, session_id)
+
+    result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
+    return await finalize_agent_result(ctx, result)
+
+
 async def _run_cli_fallback(*, cli: str, ctx: AgentRunContext, env: dict[str, str]) -> AgentResult:
     prompt = ctx.instructions.user
     if ctx.instructions.system:
@@ -1034,6 +1129,7 @@ def _run_opencode_cli_streaming(
     cmd: list[str],
     ctx: AgentRunContext,
     env: dict[str, str],
+    session: dict[str, str] | None = None,
 ) -> AgentResult:
     """Streaming read loop for ``opencode run --format json`` (W6).
 
@@ -1084,7 +1180,11 @@ def _run_opencode_cli_streaming(
                 consume_stream(
                     raw_stream=process.stdout,
                     accumulator=accumulator,
-                    handler=lambda _acc, _event: None,
+                    handler=(
+                        _session_event_handler(session)
+                        if session is not None
+                        else lambda _acc, _event: None
+                    ),
                 )
                 returncode = wait_or_kill_process_group(
                     process,
@@ -1101,13 +1201,48 @@ def _run_opencode_cli_streaming(
         pass
 
     if returncode != 0:
-        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
+        stream_error = (session or {}).get("error", "")
+        retryable = is_retryable_cli_failure(
+            returncode=returncode, stderr=f"{stream_error}\n{stderr_text}"
+        )
         return AgentResult(
             success=False,
-            error=(stderr_text or "opencode failed").strip() or f"opencode exited {returncode}",
+            error=(stderr_text or stream_error or "opencode failed").strip()
+            or f"opencode exited {returncode}",
             metadata={"retryable": True} if retryable else {},
         )
     return AgentResult(success=True, output=accumulator.final_output or None)
+
+
+def _session_event_handler(
+    session: dict[str, str],
+) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
+    """Record a 2.x ``run`` stream's session id and answer text.
+
+    Each event carries ``sessionID``; ``text`` events carry the answer in
+    ``part.text``. 2.x reports a failed turn as an ``error`` event on stdout,
+    not on stderr, so its message is kept for the failure the run returns.
+    """
+
+    def _handle(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        session_id = event.get("sessionID")
+        if isinstance(session_id, str) and session_id:
+            session.setdefault("id", session_id)
+        if event.get("type") == "error":
+            detail = event.get("error")
+            message = (
+                detail.get("message") or detail.get("data") or detail
+                if isinstance(detail, dict)
+                else detail
+            )
+            session["error"] = str(message or event)[:1000]
+        part = event.get("part")
+        if event.get("type") == "text" and isinstance(part, dict):
+            text = part.get("text")
+            if isinstance(text, str) and text:
+                accumulator.set_output(f"{accumulator.final_output or ''}{text}")
+
+    return _handle
 
 
 opencode = agent(name="opencode", install=_install, run=_run, module_file=__file__)

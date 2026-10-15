@@ -421,7 +421,7 @@ async def test_install_raises_with_an_actionable_message_when_cli_is_absent(
     with pytest.raises(FileNotFoundError) as excinfo:
         await oc._install(None)
 
-    assert "opencode-ai" in str(excinfo.value)
+    assert "@opencode/cli" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
