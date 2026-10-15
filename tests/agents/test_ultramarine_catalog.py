@@ -19,6 +19,7 @@ from mergecraft.agents.openai_generation_params import (
     validate_generation_params_for_model,
 )
 from mergecraft.agents.shared import AgentUsage
+from mergecraft.agents.verifier import AgentFinding
 from mergecraft.review.terminal_submission import (
     format_finding_provenance_line,
     merge_reviewer_findings,
@@ -160,8 +161,10 @@ def test_multi_reviewer_merge_attributes_and_dedupes() -> None:
     assert isinstance(raised, list)
     assert set(raised) == {"reviewer", "reviewer2"}
     models = merged[0].get("raised_by_model")
-    assert isinstance(models, list)
-    assert set(models) == {"anthropic/claude-sonnet", ULTRAMARINE_1_FLASH_SLUG}
+    assert isinstance(models, str)
+    assert "anthropic/claude-sonnet" in models
+    assert ULTRAMARINE_1_FLASH_SLUG in models
+    AgentFinding.model_validate(merged[0])
 
 
 def test_opencode_emits_catalog_output_cap_without_context_limit(

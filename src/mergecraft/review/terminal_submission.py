@@ -83,8 +83,10 @@ def merge_reviewer_findings(
         if agents:
             enriched["raised_by"] = agents[0] if len(agents) == 1 else agents
         models = provenance_models.get(key, [])
-        if models:
-            enriched["raised_by_model"] = models[0] if len(models) == 1 else models
+        if len(models) == 1:
+            enriched["raised_by_model"] = models[0]
+        elif len(models) > 1:
+            enriched["raised_by_model"] = ", ".join(models)
         result.append(enriched)
 
     if not apply_placement:
@@ -227,9 +229,13 @@ def _provenance_model_suffix(raised_by_model: str | list[str] | None) -> str:
     if not raised_by_model:
         return ""
     if isinstance(raised_by_model, list):
-        models = ", ".join(f"`{model}`" for model in raised_by_model)
-        return f" ({models})"
-    return f" (`{raised_by_model}`)"
+        parts = [str(model).strip() for model in raised_by_model if str(model).strip()]
+    else:
+        parts = [part.strip() for part in str(raised_by_model).split(",") if part.strip()]
+    if not parts:
+        return ""
+    models = ", ".join(f"`{part}`" for part in parts)
+    return f" ({models})"
 
 
 def format_finding_provenance_line(
