@@ -73,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Action images ship OpenCode 2.x (`@opencode/cli` 2.0.29) for every model
+  routed through the OpenCode harness (Nous, OpenCode Zen and Go, MiniMax,
+  TokenHub, custom providers). OpenCode 2.x moved its server API, so on 2.x a
+  review runs through `opencode run` in a private server per run and resumes the
+  same session for follow-up turns. OpenCode 1.x keeps the previous path.
+
 - The hardened example workflow's approval gate now receives only the review
   verdict, not the whole evidence packet. On a large pull request the packet
   exceeded the size one environment variable may hold, so the gate could not
