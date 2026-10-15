@@ -21,14 +21,15 @@ _TRACKER: ContextVar[LlmReviewTimingTracker | None] = ContextVar(
 class ReviewerGenerationTiming:
     agent_id: str
     generation_start: float | None = None
-    generation_end: float | None = None
+    accumulated_seconds: float = 0.0
 
     def llm_seconds(self) -> float | None:
-        if self.generation_start is None or self.generation_end is None:
-            if self.generation_start is not None and self.generation_end is None:
-                return max(0.0, time.monotonic() - self.generation_start)
+        total = self.accumulated_seconds
+        if self.generation_start is not None:
+            total += max(0.0, time.monotonic() - self.generation_start)
+        if total <= 0:
             return None
-        return max(0.0, self.generation_end - self.generation_start)
+        return total
 
 
 @dataclass
@@ -36,12 +37,14 @@ class LlmReviewTimingTracker:
     reviewers: dict[str, ReviewerGenerationTiming] = field(default_factory=dict)
     wall_start: float | None = None
     wall_end: float | None = None
+    pending_unbound_start: float | None = None
 
     def note_unbound_llm_call_start(self) -> None:
-        """Record the first ``llm.call`` before ``agent_run_span`` binds an agent id."""
+        """Record an ``llm.call`` that opens before ``agent_run_span`` binds an agent id."""
         now = time.monotonic()
         if self.wall_start is None:
             self.wall_start = now
+        self.pending_unbound_start = now
 
     def note_llm_call_start(self, agent_id: str) -> None:
         key = agent_id.strip() or "reviewer"
@@ -52,6 +55,17 @@ class LlmReviewTimingTracker:
         if row.generation_start is None:
             row.generation_start = now
 
+    def _accumulate_attempt(self, row: ReviewerGenerationTiming, *, end: float) -> None:
+        if row.generation_start is not None:
+            row.accumulated_seconds += max(0.0, end - row.generation_start)
+            row.generation_start = None
+            return
+        if self.pending_unbound_start is not None:
+            row.accumulated_seconds += max(0.0, end - self.pending_unbound_start)
+            return
+        if self.wall_start is not None:
+            row.accumulated_seconds += max(0.0, end - self.wall_start)
+
     def note_generation_end(self, agent_id: str, *, role: str) -> None:
         if role != "reviewer":
             return
@@ -59,18 +73,17 @@ class LlmReviewTimingTracker:
         now = time.monotonic()
         self.wall_end = now
         row = self.reviewers.setdefault(key, ReviewerGenerationTiming(agent_id=key))
-        if row.generation_start is None and self.wall_start is not None:
-            row.generation_start = self.wall_start
-        if row.generation_end is None and row.generation_start is not None:
-            row.generation_end = now
+        self._accumulate_attempt(row, end=now)
+        self.pending_unbound_start = None
 
     def finalize(self) -> None:
         now = time.monotonic()
         if self.wall_end is None:
             self.wall_end = now
         for row in self.reviewers.values():
-            if row.generation_start is not None and row.generation_end is None:
-                row.generation_end = now
+            if row.generation_start is not None:
+                self._accumulate_attempt(row, end=now)
+        self.pending_unbound_start = None
 
 
 @dataclass(frozen=True, slots=True)

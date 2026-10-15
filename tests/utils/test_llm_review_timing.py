@@ -68,6 +68,22 @@ def test_step_summary_includes_llm_review_timing() -> None:
     assert "⏱ LLM review time: 45s" in body
 
 
+def test_model_chain_fallback_accumulates_same_reviewer() -> None:
+    import time
+
+    tracker = bind_llm_review_timing_tracker()
+    tracker.note_unbound_llm_call_start()
+    time.sleep(0.01)
+    tracker.note_generation_end("claude", role="reviewer")
+    tracker.note_unbound_llm_call_start()
+    time.sleep(0.01)
+    tracker.note_generation_end("claude", role="reviewer")
+    snapshot = snapshot_llm_review_timing(tracker)
+    assert snapshot is not None
+    assert snapshot.per_reviewer_seconds == (("claude", snapshot.total_llm_seconds),)
+    assert snapshot.total_llm_seconds >= 0.02
+
+
 def test_unbound_llm_call_before_agent_run_attributes_on_reviewer_end() -> None:
     import time
 
