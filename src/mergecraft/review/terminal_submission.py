@@ -179,9 +179,7 @@ def stamped_findings_for_terminal_submission(
     settings: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Stamp ``raised_by`` from dispatch pairing before terminal merge (D7)."""
-    from mergecraft.agents.registry import AgentRole
-
-    from mergecraft.agents.registry import resolve_agent_model
+    from mergecraft.agents.registry import AgentRole, resolve_agent_model
 
     reviewers = registry.resolve_roles(AgentRole.reviewer)
     primary_id = reviewers[0].agent_id if reviewers else "reviewer"

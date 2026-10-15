@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from dataclasses import replace
 import os
 import re
 import shutil
@@ -13,6 +12,7 @@ import subprocess
 import threading
 import time
 from collections import deque
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -469,7 +469,9 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
                 config["enabled_providers"] = [model[:slash].lower()]
         provider_config = _provider_config_for_model(model)
         if provider_config is not None:
-            from mergecraft.agents.openai_generation_params import validate_generation_params_for_model
+            from mergecraft.agents.openai_generation_params import (
+                validate_generation_params_for_model,
+            )
 
             validate_generation_params_for_model(model, dict(provider_config.extra_options))
         build_overrides = _opencode_build_agent_overrides(provider_config)
