@@ -24,6 +24,8 @@ from mergecraft.review.terminal_submission import (
     format_finding_provenance_line,
     merge_reviewer_findings,
 )
+from mergecraft.utils.agent_resolve import ModelFallbackPolicyError, resolve_harness
+
 
 def test_curated_ultramarine_entry_is_registered() -> None:
     entry = curated_model_entry(ULTRAMARINE_1_FLASH_SLUG)
