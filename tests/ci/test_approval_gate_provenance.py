@@ -421,7 +421,10 @@ def test_routing_prefers_the_packet_verdict_over_a_foreign_check(
     outputs, completed = run_decide_script(
         tmp_path,
         root / "scripts/decide_codex_fallback.sh",
-        env={"NOUS_OUTCOME": "success", "NOUS_PACKET": evidence_packet(verdict="failure")},
+        env={
+            "OPENCODE_GO_OUTCOME": "success",
+            "OPENCODE_GO_PACKET": evidence_packet(verdict="failure"),
+        },
         gh_mock_dir=gh_dir,
         cwd=root,
     )
@@ -442,7 +445,7 @@ def test_routing_never_treats_a_foreign_check_as_a_verdict(tmp_path: Path) -> No
     outputs, completed = run_decide_script(
         tmp_path,
         root / "scripts/decide_codex_fallback.sh",
-        env={"NOUS_OUTCOME": "success", "NOUS_PACKET": ""},
+        env={"OPENCODE_GO_OUTCOME": "success", "OPENCODE_GO_PACKET": ""},
         gh_mock_dir=gh_dir,
         cwd=root,
     )

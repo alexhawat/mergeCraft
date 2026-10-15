@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 
 _WORKFLOW = "mergecraft.yml"
 _ENV_VALUE_CAP = 128 * 1024
-_RUNGS = ("nous", "codex", "claude")
+_RUNGS = ("opencode-go", "codex", "claude")
+_RUNG_LABELS = {"opencode-go": "OpenCode Go", "codex": "Codex", "claude": "Claude"}
 
 
 def _large_packet(verdict: str) -> str:
@@ -44,7 +45,7 @@ def _review_steps() -> list[dict[str, Any]]:
 
 
 def _persist_step(rung: str) -> dict[str, Any]:
-    name = f"Persist evidence packet ({rung.capitalize()})"
+    name = f"Persist evidence packet ({_RUNG_LABELS[rung]})"
     for step in _review_steps():
         if step.get("name") == name:
             return step
@@ -114,7 +115,7 @@ def test_a_rung_that_emitted_no_packet_persists_nothing(tmp_path: Path) -> None:
 
 def test_the_verdict_recorder_reads_the_last_rung_from_its_file(tmp_path: Path) -> None:
     files = {rung: tmp_path / f"packet-{rung}.json" for rung in _RUNGS}
-    files["nous"].write_text(_large_packet("failure"), encoding="utf-8")
+    files["opencode-go"].write_text(_large_packet("failure"), encoding="utf-8")
     files["codex"].write_text(_large_packet("success"), encoding="utf-8")
     output = tmp_path / "github_output"
     output.write_text("", encoding="utf-8")
@@ -124,7 +125,10 @@ def test_the_verdict_recorder_reads_the_last_rung_from_its_file(tmp_path: Path) 
         tmp_path,
         {
             "GITHUB_OUTPUT": str(output),
-            **{f"{rung.upper()}_PACKET_FILE": str(path) for rung, path in files.items()},
+            **{
+                f"{rung.upper().replace('-', '_')}_PACKET_FILE": str(path)
+                for rung, path in files.items()
+            },
         },
     )
 
@@ -135,13 +139,13 @@ def test_the_verdict_recorder_reads_the_last_rung_from_its_file(tmp_path: Path) 
 
 
 def test_the_codex_fallback_decision_reads_a_large_packet_file(tmp_path: Path) -> None:
-    packet = tmp_path / "packet-nous.json"
+    packet = tmp_path / "packet-opencode-go.json"
     packet.write_text(_large_packet("failure"), encoding="utf-8")
 
     outputs, _ = run_decide_script(
         tmp_path,
         decide_script("fallback"),
-        env={"NOUS_OUTCOME": "success", "NOUS_PACKET_FILE": str(packet)},
+        env={"OPENCODE_GO_OUTCOME": "success", "OPENCODE_GO_PACKET_FILE": str(packet)},
     )
 
     assert outputs.get("need") == "false"
@@ -155,10 +159,10 @@ def test_the_claude_backstop_decision_reads_a_large_packet_file(tmp_path: Path) 
         tmp_path,
         decide_script("claude_fallback"),
         env={
-            "NOUS_OUTCOME": "failure",
+            "OPENCODE_GO_OUTCOME": "failure",
             "CODEX_OUTCOME": "failure",
             "CODEX_PACKET_FILE": str(packet),
-            "NOUS_PACKET_FILE": str(tmp_path / "packet-nous.json"),
+            "OPENCODE_GO_PACKET_FILE": str(tmp_path / "packet-opencode-go.json"),
         },
     )
 

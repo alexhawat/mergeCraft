@@ -27,7 +27,7 @@ _GATE_STEP = "Fail when mergeCraft would not approve"
 PROVIDER_SECRETS = (
     "CODEX_AUTH_JSON",
     "OPENAI_API_KEY",
-    "NOUS_API_KEY",
+    "OPENCODE_GO_API_KEY",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
 )

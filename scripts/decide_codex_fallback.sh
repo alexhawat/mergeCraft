@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Decide whether to fall back from Nous to Codex after a no-verdict Nous run.
+# Decide whether to fall back from OpenCode Go to Codex after a no-verdict OpenCode Go run.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -7,26 +7,26 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "${ROOT}/scripts/lib/provider_verdict_guard.sh"
 
 need="false"
-nous_packet="$(read_packet NOUS_PACKET)"
-if [ -n "${nous_packet}" ]; then
-  verdict="$(verdict_from_packet "${nous_packet}")"
+opencode_go_packet="$(read_packet OPENCODE_GO_PACKET)"
+if [ -n "${opencode_go_packet}" ]; then
+  verdict="$(verdict_from_packet "${opencode_go_packet}")"
   if verdict_blocks_codex_fallback "${verdict}"; then
-    echo "packet decision.verdict=${verdict} — Nous review posted a verdict; not falling back to Codex."
+    echo "packet decision.verdict=${verdict} — OpenCode Go review posted a verdict; not falling back to Codex."
   else
     need="true"
-    echo "::notice title=mergecraft Codex fallback::Nous review posted no verdict in evidence packet (action outcome: ${NOUS_OUTCOME}); retrying with openai/gpt-codex."
+    echo "::notice title=mergecraft Codex fallback::OpenCode Go review posted no verdict in evidence packet (action outcome: ${OPENCODE_GO_OUTCOME}); retrying with openai/gpt-codex."
   fi
 elif [ "${EVENT_NAME}" = "pull_request_target" ]; then
   latest="$(latest_mergecraft_approval)"
   conclusion="$(discard_baseline_verdict "${latest}")"
   if verdict_blocks_codex_fallback "${conclusion}"; then
-    echo "mergecraft-approval=${conclusion} — Nous review posted a verdict; not falling back to Codex."
+    echo "mergecraft-approval=${conclusion} — OpenCode Go review posted a verdict; not falling back to Codex."
   else
     need="true"
-    echo "::notice title=mergecraft Codex fallback::Nous review posted no verdict (action outcome: ${NOUS_OUTCOME}); retrying with openai/gpt-codex."
+    echo "::notice title=mergecraft Codex fallback::OpenCode Go review posted no verdict (action outcome: ${OPENCODE_GO_OUTCOME}); retrying with openai/gpt-codex."
   fi
-elif [ "${NOUS_OUTCOME}" != "success" ]; then
+elif [ "${OPENCODE_GO_OUTCOME}" != "success" ]; then
   need="true"
-  echo "::notice title=mergecraft Codex fallback::Nous review failed; retrying with openai/gpt-codex."
+  echo "::notice title=mergecraft Codex fallback::OpenCode Go review failed; retrying with openai/gpt-codex."
 fi
 echo "need=${need}" >> "${GITHUB_OUTPUT}"

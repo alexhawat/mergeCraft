@@ -319,7 +319,9 @@ _TRUSTED_RUN_CONCLUSION = "success"
 # order the reader tries them: the last rung that ran is the one whose verdict
 # the run recorded, so it goes first.
 _EVIDENCE_ARTIFACT_PREFIX = "mergecraft-evidence-"
-_EVIDENCE_RUNGS = ("claude", "codex", "nous")
+# ``nous`` stays last so a checkpoint from a run made before the Nous rung was
+# replaced by OpenCode Go (2026-10-16) is still readable.
+_EVIDENCE_RUNGS = ("claude", "codex", "opencode-go", "nous")
 
 
 def _packet_member_for(rung: str) -> str:

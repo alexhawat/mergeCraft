@@ -654,9 +654,9 @@ def test_the_reader_knows_every_rung_the_workflow_uploads() -> None:
     uploads = _workflow_evidence_uploads()
 
     assert uploads, "mergecraft.yml uploads no mergecraft-evidence-* artefact"
-    assert {name.removeprefix("mergecraft-evidence-") for name in uploads} == set(
-        checkout_module._EVIDENCE_RUNGS
-    )
+    uploaded = {name.removeprefix("mergecraft-evidence-") for name in uploads}
+    # ``nous`` is read only from runs made before the rung was replaced.
+    assert uploaded == set(checkout_module._EVIDENCE_RUNGS) - {"nous"}
 
 
 @pytest.mark.parametrize("with_capture", [False, True])

@@ -1955,6 +1955,7 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
 
 
 _SINK_SCAN_ARTIFACT_SOURCES: tuple[str, ...] = (
+    "packet-opencode-go.json",
     "packet-nous.json",
     "packet-codex.json",
     "packet-claude.json",

@@ -8,20 +8,33 @@ credentials agree.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from tests.ci.workflow_support import job, load_workflow
+from mergecraft.config.runtime_provider_registry import indexed_env_key
+from mergecraft.config.settings import load_repo_settings
+from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
 
 _WORKFLOW = "mergecraft.yml"
 _REVIEW_JOB = "review"
 _MERGECRAFT_ACTION = "alexhawat/mergeCraft@"
 
-# Provider prefix of `with.model` -> the credential env vars that rung must carry.
+# Built-in provider prefix of `with.model` -> the credential env vars that rung
+# must carry. A provider registered in the repo config instead needs its
+# indexed slot (see `_registered_credentials`).
 _PROVIDER_CREDENTIALS: dict[str, frozenset[str]] = {
-    "nous": frozenset({"NOUS_API_KEY", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"}),
     "openai": frozenset({"OPENAI_API_KEY", "CODEX_AUTH_JSON"}),
     "anthropic": frozenset({"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"}),
 }
+
+
+def _registered_credentials() -> dict[str, frozenset[str]]:
+    """Map each provider registered in the repo config to its indexed API-key slot."""
+    settings = load_repo_settings(root=Path(REPO_ROOT))
+    return {
+        entry.label.lower(): frozenset({indexed_env_key(entry.env_index, "API_KEY")})
+        for entry in settings.providers
+    }
 
 
 def _rungs() -> list[dict[str, Any]]:
@@ -54,7 +67,7 @@ def test_every_rung_env_carries_the_credential_for_its_model() -> None:
         assert isinstance(with_block, dict)
         model = str(with_block.get("model", ""))
         provider = model.split("/", 1)[0].lower()
-        expected = _PROVIDER_CREDENTIALS.get(provider)
+        expected = _registered_credentials().get(provider) or _PROVIDER_CREDENTIALS.get(provider)
         assert expected is not None, f"unmapped provider {provider!r} in rung {rung.get('id')!r}"
         env_block = rung.get("env") or {}
         assert isinstance(env_block, dict)
@@ -62,3 +75,13 @@ def test_every_rung_env_carries_the_credential_for_its_model() -> None:
         assert present, (
             f"rung {rung.get('id')!r} runs {model!r} but its env carries none of {sorted(expected)}"
         )
+
+
+def test_the_first_rung_runs_a_provider_the_repo_config_registers() -> None:
+    """``opencode-go/...`` is refused unless registered, whatever key the env carries."""
+    first = _rungs()[0]
+    model = str((first.get("with") or {}).get("model", ""))
+    assert model == "opencode-go/deepseek-v4.1-flash", model
+    assert "opencode-go" in _registered_credentials(), (
+        "the first rung needs an `opencode-go` entry under providers:"
+    )
