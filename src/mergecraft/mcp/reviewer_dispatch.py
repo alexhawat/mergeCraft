@@ -100,10 +100,24 @@ def record_reviewer_dispatch_run_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         validated = RecordReviewerDispatchRunParams.model_validate(params)
         _validate_reviewer_agent_id(ctx, validated.agent_id)
+        from mergecraft.agents.registry import AgentRole, load_registry, resolve_agent_model
+
+        repo_root = Path(primary_repo_state(ctx.tool_state).dir)
+        settings = repo_settings_from_context(ctx)
+        registry = load_registry(settings=settings, repo_root=repo_root)
+        model_slug: str | None = None
+        for binding in registry.resolve_roles(AgentRole.reviewer):
+            if binding.agent_id == validated.agent_id:
+                try:
+                    model_slug = resolve_agent_model(binding, settings=settings).dispatched_model
+                except RuntimeError:
+                    model_slug = binding.model_chain[0] if binding.model_chain else None
+                break
         record_reviewer_dispatch_run(
             ctx.tool_state,
             agent_id=validated.agent_id,
             findings=validated.findings,
+            model_slug=model_slug,
         )
         return {
             "recorded": True,

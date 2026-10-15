@@ -48,6 +48,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [support-matrix](support-matrix.md) | consumer | Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models. |
 | [trust-policy](trust-policy.md) | consumer | Two-axis trust policy — execution vs authority, selfReview levels, mergecraft-approve.yml, base snapshot rule. |
+| [ultramarine-second-reviewer](ultramarine-second-reviewer.md) | consumer | Configure Paper Instruments Ultramarine 1 Flash as a second reviewer with cost and env wiring. |
 | [workflows](workflows.md) | consumer | Workflow examples 2–6, trust tiers, [security model](workflows.md#security-model), and pull_request_target placement gotchas. |
 | [evals README](../evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
 | [llms-full.txt](../llms-full.txt) | consumer | Concatenated LLM bundle of core consumer and contributor docs (generated). |

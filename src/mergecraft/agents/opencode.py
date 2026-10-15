@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from dataclasses import replace
 import os
 import re
 import shutil
@@ -87,7 +88,9 @@ _OPENCODE_PROVIDER_OPTION_KEYS: frozenset[str] = frozenset(
         "enterpriseUrl",
     }
 )
-_OPENCODE_LIMIT_SOURCE_KEYS: frozenset[str] = frozenset({"context_limit", "context", "max_tokens"})
+_OPENCODE_LIMIT_SOURCE_KEYS: frozenset[str] = frozenset(
+    {"context_limit", "context", "max_tokens", "max_completion_tokens"}
+)
 # OpenCode provider HTTP reads can outlast the generic 600s external-op default
 # (Nous inference hung ~10min in PR #442). Match the workflow action timeout
 # (25m) so httpx does not abort before the Action's own budget.
@@ -225,6 +228,8 @@ def _opencode_applied_model_params_from_config(
         return None
     applied_raw: dict[str, object] = dict(_opencode_generation_options(config.extra_options))
     max_tokens = _positive_int(config.extra_options.get("max_tokens"))
+    if max_tokens is None:
+        max_tokens = _positive_int(config.extra_options.get("max_completion_tokens"))
     context = _opencode_model_context_limit(config)
     if max_tokens is not None and context is not None:
         applied_raw["max_tokens"] = max_tokens
@@ -270,6 +275,8 @@ def _opencode_model_entry(model_id: str, config: ProviderConfig) -> dict[str, ob
     """
     entry: dict[str, object] = {"name": model_id}
     max_tokens = _positive_int(config.extra_options.get("max_tokens"))
+    if max_tokens is None:
+        max_tokens = _positive_int(config.extra_options.get("max_completion_tokens"))
     context = _opencode_model_context_limit(config)
     if max_tokens is not None and context is not None:
         entry["limit"] = {"context": context, "output": max_tokens}
@@ -461,6 +468,10 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
             if slash > 0:
                 config["enabled_providers"] = [model[:slash].lower()]
         provider_config = _provider_config_for_model(model)
+        if provider_config is not None:
+            from mergecraft.agents.openai_generation_params import validate_generation_params_for_model
+
+            validate_generation_params_for_model(model, dict(provider_config.extra_options))
         build_overrides = _opencode_build_agent_overrides(provider_config)
         if build_overrides and isinstance(agent_block, dict):
             agents = dict(agent_block)
@@ -729,6 +740,14 @@ async def _prompt_session(
         result = await _prompt_session_http(
             base_url=base_url, session_id=session_id, text=text, model=model
         )
+        from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
+
+        priced_usage = apply_catalog_cost_to_usage(
+            result.usage,
+            model=resolved_model or model_slug,
+        )
+        if priced_usage is not result.usage:
+            result = replace(result, usage=priced_usage)
         try:
             if result.usage is not None:
                 for key, value in usage_attrs_from_agent_usage(

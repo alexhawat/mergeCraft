@@ -604,6 +604,7 @@ def record_reviewer_dispatch_run(
     *,
     agent_id: str,
     findings: list[dict[str, Any]],
+    model_slug: str | None = None,
 ) -> None:
     """Record one reviewer subagent's findings before terminal submission (D7)."""
     from mergecraft.review.terminal_submission import ReviewerRun
@@ -613,7 +614,7 @@ def record_reviewer_dispatch_run(
         return
     stamped_findings = [dict(row) for row in findings if isinstance(row, dict)]
     tool_state.reviewer_dispatch_runs.append(
-        ReviewerRun(agent_id=key, findings=stamped_findings),
+        ReviewerRun(agent_id=key, findings=stamped_findings, model_slug=model_slug),
     )
 
 

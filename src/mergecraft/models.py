@@ -481,6 +481,25 @@ PROVIDERS: dict[str, ProviderConfig] = {
             },
         )
     ),
+    "paperinstruments": _provider(
+        ProviderConfig(
+            display_name="Paper Instruments",
+            env_vars=("MERGECRAFT_CUSTOM_PROVIDER_API_KEY",),
+            models={
+                "ultramarine-1-flash": ModelDef(
+                    display_name="Ultramarine 1 Flash",
+                    description=(
+                        "Paper Instruments Ultramarine 1 Flash via the OpenAI-compatible "
+                        "endpoint at https://api.paperinstruments.com/v1. "
+                        "Output must be capped (default 8192 completion tokens); "
+                        "reasoning_effort defaults to low."
+                    ),
+                    resolve="paperinstruments/ultramarine-1-flash",
+                    preferred=True,
+                ),
+            },
+        )
+    ),
     "minimax": _provider(
         ProviderConfig(
             display_name="MiniMax (OpenAI-compatible)",

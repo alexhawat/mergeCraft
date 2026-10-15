@@ -157,6 +157,12 @@ def _deterministic_review_block(
         tool_state.usage_entries or [],
         budget_tracker=ctx.budget_tracker,
     )
+    from mergecraft.agents.curated_model_catalog import cost_summary_from_usage_entries
+
+    cost_summary = cost_summary_from_usage_entries(
+        tool_state.usage_entries or [],
+        budget_tracker=ctx.budget_tracker,
+    )
     return render_deterministic_review_block(
         packet=packet,
         rejection_reason=rejection_reason,
@@ -168,6 +174,7 @@ def _deterministic_review_block(
         trust_tier=ctx.trust_tier,
         attempt_count=attempt_count,
         token_summary=token_summary,
+        cost_summary=cost_summary,
         publication_entrypoint=tool_state.review_publication_entrypoint,
         inline_comments_demoted=tool_state.review_inline_comments_demoted,
         comment_fallback_applied=tool_state.review_comment_fallback_applied,
@@ -1437,11 +1444,15 @@ async def _publish_github_review(
 
     show_provenance = should_render_finding_provenance(finding_rows)
     raised_by_map: dict[str, str | list[str]] = {}
+    raised_by_model_map: dict[str, str] = {}
     for row in finding_rows:
         lookup_key = _raised_by_lookup_key(row)
         raised = row.get("raised_by")
         if lookup_key and raised is not None:
             raised_by_map[lookup_key] = raised
+        model = row.get("raised_by_model")
+        if lookup_key and isinstance(model, str) and model.strip():
+            raised_by_model_map[lookup_key] = model.strip()
     anchor_index = _load_inline_anchor_index(primary)
     demoted_bodies: list[str] = []
 
@@ -1472,6 +1483,7 @@ async def _publish_github_review(
             incremental_diff_text=incremental_diff_text,
             raised_by=raised_by_map.get(lookup_key or "") if lookup_key else None,
             show_provenance=show_provenance,
+            raised_by_model=raised_by_model_map.get(lookup_key or "") if lookup_key else None,
         )
         item: dict[str, Any] = {
             "path": path,

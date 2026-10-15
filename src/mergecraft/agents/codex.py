@@ -481,6 +481,26 @@ def _has_env(name: str) -> bool:
     return isinstance(val, str) and bool(val.strip())
 
 
+def _apply_openai_generation_overrides(config: TomlTable, model: str | None) -> None:
+    """Apply OpenAI-compatible generation knobs for curated gateway models (#983)."""
+    if not model:
+        return
+    from mergecraft.agents.openai_compatible_gateways import _provider_config_for_model
+    from mergecraft.agents.openai_generation_params import (
+        resolve_openai_generation_params,
+        validate_generation_params_for_model,
+    )
+
+    provider_config = _provider_config_for_model(model)
+    if provider_config is None:
+        return
+    extra = dict(provider_config.extra_options)
+    validate_generation_params_for_model(model, extra)
+    params = resolve_openai_generation_params(model, extra)
+    if params.reasoning_effort:
+        config["model_reasoning_effort"] = params.reasoning_effort
+
+
 def _has_any_custom_provider_env() -> bool:
     """True when at least one ``MERGECRAFT_CUSTOM_PROVIDER_*`` env var is set.
 
@@ -610,6 +630,7 @@ def write_mcp_config(
         "experimental_instructions_file": str(instructions_path),
         "model_reasoning_effort": CODEX_MODEL_REASONING_EFFORT,
     }
+    _apply_openai_generation_overrides(config, ctx.resolved_model)
     # W3 / #71 — Codex passthrough for OpenAI-compatible providers. No-op
     # when no ``MERGECRAFT_CUSTOM_PROVIDER_*`` env vars are set.
     _add_custom_provider_tables(config)

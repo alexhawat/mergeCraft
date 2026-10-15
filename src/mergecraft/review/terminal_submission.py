@@ -28,6 +28,7 @@ class ReviewerRun:
     agent_id: str
     findings: list[dict[str, Any]]
     error: str | None = None
+    model_slug: str | None = None
 
 
 def merge_reviewer_findings(
@@ -139,12 +140,16 @@ def format_reviewer_degradation_summary(
 def stamp_findings_with_reviewer(
     reviewer_id: str,
     findings: list[dict[str, Any]],
+    *,
+    model_slug: str | None = None,
 ) -> list[dict[str, Any]]:
     """Stamp ``raised_by`` from dispatch pairing before flattening (D6/D7)."""
     stamped: list[dict[str, Any]] = []
     for row in findings:
         item = dict(row)
         item["raised_by"] = reviewer_id
+        if model_slug:
+            item["raised_by_model"] = model_slug
         stamped.append(item)
     return stamped
 
@@ -154,7 +159,15 @@ def reviewer_groups_from_runs(
 ) -> list[tuple[str, list[dict[str, Any]]]]:
     """Build ``(reviewer_id, findings)`` groups from dispatch runs (D7)."""
     return [
-        (run.agent_id, stamp_findings_with_reviewer(run.agent_id, run.findings)) for run in runs
+        (
+            run.agent_id,
+            stamp_findings_with_reviewer(
+                run.agent_id,
+                run.findings,
+                model_slug=run.model_slug,
+            ),
+        )
+        for run in runs
     ]
 
 
@@ -163,14 +176,30 @@ def stamped_findings_for_terminal_submission(
     registry: Registry,
     terminal_findings: list[dict[str, Any]],
     dispatch_runs: list[ReviewerRun],
+    settings: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Stamp ``raised_by`` from dispatch pairing before terminal merge (D7)."""
     from mergecraft.agents.registry import AgentRole
 
+    from mergecraft.agents.registry import resolve_agent_model
+
     reviewers = registry.resolve_roles(AgentRole.reviewer)
     primary_id = reviewers[0].agent_id if reviewers else "reviewer"
+    primary_model: str | None = None
+    if reviewers and settings is not None:
+        try:
+            primary_model = resolve_agent_model(reviewers[0], settings=settings).dispatched_model
+        except RuntimeError:
+            chain = reviewers[0].model_chain
+            primary_model = chain[0] if chain else None
     runs = list(dispatch_runs)
-    runs.append(ReviewerRun(agent_id=primary_id, findings=terminal_findings))
+    runs.append(
+        ReviewerRun(
+            agent_id=primary_id,
+            findings=terminal_findings,
+            model_slug=primary_model,
+        )
+    )
     groups = reviewer_groups_from_runs(runs)
     return [row for _, rows in groups for row in rows]
 
@@ -187,14 +216,19 @@ def should_render_finding_provenance(findings: list[dict[str, Any]]) -> bool:
     return len(agents) > 1
 
 
-def format_finding_provenance_line(raised_by: str | list[str] | None) -> str | None:
+def format_finding_provenance_line(
+    raised_by: str | list[str] | None,
+    *,
+    raised_by_model: str | None = None,
+) -> str | None:
     """Format one finding's ``raised_by`` for display in the review body (D8)."""
     if not raised_by:
         return None
+    model_suffix = f" (`{raised_by_model}`)" if raised_by_model else ""
     if isinstance(raised_by, list):
         agents = ", ".join(f"`{agent}`" for agent in raised_by)
-        return f"_Raised by: {agents}_"
-    return f"_Raised by: `{raised_by}`_"
+        return f"_Raised by: {agents}{model_suffix}_"
+    return f"_Raised by: `{raised_by}`{model_suffix}_"
 
 
 def enrich_finding_body_with_provenance(
@@ -202,11 +236,12 @@ def enrich_finding_body_with_provenance(
     raised_by: str | list[str] | None,
     *,
     show_provenance: bool,
+    raised_by_model: str | None = None,
 ) -> str:
     """Append a provenance line to a finding body when multi-reviewer display is active (D8)."""
     if not show_provenance:
         return body
-    line = format_finding_provenance_line(raised_by)
+    line = format_finding_provenance_line(raised_by, raised_by_model=raised_by_model)
     if not line or line in body:
         return body
     if not body.strip():

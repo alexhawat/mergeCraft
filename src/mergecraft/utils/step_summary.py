@@ -25,6 +25,7 @@ def render_step_summary(
     agent_summary: str | None = None,
     trust_tier: str | None = None,
     token_summary: str | None = None,
+    cost_summary: str | None = None,
     credential_degradations: Sequence[str] | None = None,
 ) -> str:
     """Render the step summary body: header table plus the W5 record sections.
@@ -101,6 +102,7 @@ def render_step_summary(
         agent_summary=agent_summary,
         trust_tier=trust_tier,
         token_summary=token_summary,
+        cost_summary=cost_summary,
         credential_degradations=credential_degradations,
         action_pin_sha=action_pin_sha,
         image_source_sha=image_source_sha,

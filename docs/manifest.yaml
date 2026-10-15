@@ -79,6 +79,12 @@ pages:
     generator: mcp-server-json
     purpose: Generated public MCP tool reference from ToolSpec schemas.
 
+  - path: docs/ultramarine-second-reviewer.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Configure Paper Instruments Ultramarine 1 Flash as a second reviewer with cost and env wiring.
+
   - path: docs/mcp.md
     audience: consumer
     template: consumer

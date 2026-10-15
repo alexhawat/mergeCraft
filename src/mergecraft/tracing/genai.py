@@ -116,11 +116,14 @@ def model_params_from_mapping(raw: dict[str, Any]) -> ModelParams:
         stop = [str(item) for item in stop_raw if str(item)]
 
     reasoning = raw.get("reasoning_effort")
+    max_tokens = _optional_int(raw.get("max_tokens"))
+    if max_tokens is None:
+        max_tokens = _optional_int(raw.get("max_completion_tokens"))
     return ModelParams(
         temperature=_optional_float(raw.get("temperature")),
         top_p=_optional_float(raw.get("top_p")),
         top_k=_optional_int(raw.get("top_k")),
-        max_tokens=_optional_int(raw.get("max_tokens")),
+        max_tokens=max_tokens,
         stop=stop,
         seed=_optional_int(raw.get("seed")),
         reasoning_effort=str(reasoning) if reasoning else None,
