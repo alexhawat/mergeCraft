@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-import typer
 from tests.cli.support_provider_registry import (
     AUTH_KIND_CLOUD_CHAIN,
     BEDROCK_LEGACY_SECRET_KEYS,
@@ -62,7 +61,7 @@ def test_plan_migration_lists_target_indexed_key_names_only(
     scaffold_mergecraft_home(tmp_path)
     monkeypatch.chdir(tmp_path)
     stub_mergecraft_env(monkeypatch, tmp_path)
-    write_env_pairs(tmp_path, {"NOUS_API_KEY": "nous-plan-secret-ABC"})
+    write_env_pairs(tmp_path, {"TOKENHUB_API_KEY": "tokenhub-plan-secret-ABC"})
 
     plan = module.plan_provider_migration(
         env_path=tmp_path / ".env",
@@ -73,7 +72,7 @@ def test_plan_migration_lists_target_indexed_key_names_only(
         key.endswith("_API_KEY") for key in target_keys
     )
     values = {step.get("value") for step in plan.env_writes}
-    assert "nous-plan-secret-ABC" not in values
+    assert "tokenhub-plan-secret-ABC" not in values
 
 
 def test_migration_secret_fingerprint_redacts_full_value() -> None:
@@ -234,49 +233,3 @@ def test_apply_provider_migration_is_idempotent(
     assert not second_plan.providers
     module.apply_provider_migration(second_plan, env_path=env_path, config_path=config_path)
     assert env_path.read_text(encoding="utf-8") == after_first
-
-
-# ── PR #498 review — migrated URLs clear the same bar as CLI-supplied ones ──
-
-
-def test_migration_stores_a_valid_nous_base_url(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    module = require_provider_migrate_symbols()
-    scaffold_mergecraft_home(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    stub_mergecraft_env(monkeypatch, tmp_path)
-    write_env_pairs(
-        tmp_path,
-        {"NOUS_API_KEY": "nous-secret", "NOUS_BASE_URL": "https://nous.example/v1"},
-    )
-
-    plan = module.plan_provider_migration(
-        env_path=tmp_path / ".env",
-        config_path=tmp_path / ".mergecraft" / "config.yaml",
-    )
-    nous = next(item for item in plan.providers if item["label"] == "nous")
-    assert nous["url"] == "https://nous.example/v1"
-
-
-# A newline cannot reach here through .env — the parser splits on it — so the
-# reachable cases are scheme and shape.
-@pytest.mark.parametrize("bad_url", ["ftp://nous.example/v1", "not-a-url", "https://"])
-def test_migration_refuses_an_unusable_nous_base_url(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-    bad_url: str,
-) -> None:
-    """A migrated URL reaches workflow YAML verbatim, so it must be validated."""
-    module = require_provider_migrate_symbols()
-    scaffold_mergecraft_home(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    stub_mergecraft_env(monkeypatch, tmp_path)
-    write_env_pairs(tmp_path, {"NOUS_API_KEY": "nous-secret", "NOUS_BASE_URL": bad_url})
-
-    with pytest.raises(typer.Exit):
-        module.plan_provider_migration(
-            env_path=tmp_path / ".env",
-            config_path=tmp_path / ".mergecraft" / "config.yaml",
-        )

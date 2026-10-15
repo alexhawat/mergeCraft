@@ -548,7 +548,7 @@ def test_provider_seed_does_not_duplicate_a_column_zero_providers_list(
     cfg_dir.mkdir(parents=True)
     config_path = cfg_dir / "config.yaml"
     config_path.write_text(
-        "# keep this note\nproviders:\n- label: nous\n  harness: opencode\n  envIndex: 1\n",
+        "# keep this note\nproviders:\n- label: tokenhub\n  harness: opencode\n  envIndex: 1\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -584,7 +584,7 @@ def test_provider_registry_does_not_read_providers_dict_at_runtime(
     seed_fn(config_path)
 
     sentinel = "__registry_sentinel__"
-    monkeypatch.setitem(PROVIDERS, sentinel, PROVIDERS["nous"])  # type: ignore[index]
+    monkeypatch.setitem(PROVIDERS, sentinel, PROVIDERS["tokenhub"])  # type: ignore[index]
 
     loaded = load_fn(config_path)
     lookup = getattr(loaded, "get", None) or getattr(loaded, "lookup", None)
@@ -611,13 +611,13 @@ def test_deleted_builtin_provider_is_not_reseeded_on_next_load(
     else:
         assert seed.exit_code == CLI_SUCCESS_EXIT_CODE, seed.stdout + seed.stderr
 
-    delete = _invoke("provider", "delete", "nous")
+    delete = _invoke("provider", "delete", "tokenhub")
     assert delete.exit_code == CLI_SUCCESS_EXIT_CODE
 
     reload = _invoke("provider", "list")
     assert reload.exit_code == CLI_SUCCESS_EXIT_CODE
     output = _plain(reload.stdout + reload.stderr)
-    assert "nous" not in output.split()
+    assert "tokenhub" not in output.split()
 
 
 def test_unknown_registry_provider_does_not_default_to_opencode(

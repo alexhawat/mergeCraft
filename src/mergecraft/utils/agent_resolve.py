@@ -195,8 +195,6 @@ def _credential_looked_for_envs(provider: str, *, settings: RepoSettings) -> tup
         and CUSTOM_PROVIDER_API_KEY_ENV not in keys
     ):
         keys.append(CUSTOM_PROVIDER_API_KEY_ENV)
-    if provider == "nous" and "NOUS_API_KEY" not in keys:
-        keys.append("NOUS_API_KEY")
     deduped: list[str] = []
     for key in keys:
         if key not in deduped:
@@ -231,10 +229,8 @@ def credential_status_for_slug(
         _has_env as _gateway_has_env,
     )
     from mergecraft.config.runtime_provider_registry import (
-        _legacy_nous_api_key_present,
         indexed_credential_for_entry,
         lookup_registry_entry,
-        warn_legacy_nous_api_key_once,
     )
 
     entry = lookup_registry_entry(settings, provider)
@@ -263,10 +259,6 @@ def credential_status_for_slug(
 
     if provider in _BUILTIN_CLI_AUTH_PROVIDERS and _cli_auth_available(provider):
         return CredentialStatus(available=True, source="cli-auth", looked_for=looked_for)
-
-    if provider == "nous" and _legacy_nous_api_key_present():
-        warn_legacy_nous_api_key_once()
-        return CredentialStatus(available=True, source="legacy-env", looked_for=looked_for)
 
     if _legacy_gateway_preset_credentials(provider):
         return CredentialStatus(available=True, source="legacy-env", looked_for=looked_for)

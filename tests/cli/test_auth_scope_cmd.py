@@ -6,9 +6,10 @@ command except ``logfire`` persists the captured credential **only** through
 ``gh secret set``, so a contributor who authenticates cannot then run the CLI
 locally — the credential exists in GitHub Actions secrets and nowhere else.
 
-D11 (plan line 183) scopes the fix to the seven provider commands that capture
-a credential the local runtime reads out of ``os.environ``: ``codex``,
-``claude``, ``gemini``, ``cursor``, ``nous``, ``tokenhub``, ``minimax``.
+D11 (plan line 183) scopes the fix to the provider commands that capture a credential
+the local runtime reads out of ``os.environ``: ``codex``, ``claude``,
+``gemini``, ``cursor``, ``tokenhub``, ``minimax`` (``nous`` was removed with
+the built-in Nous provider).
 ``logfire`` is excluded — it is the reference implementation this suite copies
 (``cli/auth_cmd.py:583-733``) and its default is ``both``, not ``github``.
 
@@ -70,7 +71,6 @@ PROVIDERS: list[tuple[str, str]] = [
     ("claude", "CLAUDE_CODE_OAUTH_TOKEN"),
     ("gemini", "GEMINI_API_KEY"),
     ("cursor", "CURSOR_API_KEY"),
-    ("nous", "NOUS_API_KEY"),
     ("tokenhub", "TOKENHUB_API_KEY"),
     ("minimax", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"),
 ]
@@ -94,7 +94,6 @@ CREDENTIALS: dict[str, str] = {
     "claude": CLAUDE_TOKEN,
     "gemini": "gemini-scope-red-key",
     "cursor": "cursor-scope-red-key",
-    "nous": "nous-scope-red-key",
     "tokenhub": "tokenhub-scope-red-key",
     "minimax": "minimax-scope-red-key",
 }
@@ -119,7 +118,6 @@ EXPECTED_VALIDATORS = frozenset(
         "_validate_gemini_api_key",
         "_validate_cursor_api_key",
         "_validate_openai_compatible_key",
-        "_validate_nous_api_key",
         "_validate_minimax_api_key",
         "_validate_logfire_token",
     }
@@ -541,11 +539,11 @@ def test_multiline_non_json_credential_bails_instead_of_writing(
     gh.install(module, monkeypatch)
     env_path = _pin_env_path(tmp_path, monkeypatch, precreate=False)
 
-    result = runner.invoke(app, ["auth", "nous", "--scope", "local"])
+    result = runner.invoke(app, ["auth", "tokenhub", "--scope", "local"])
 
     assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, _flat(result)
     output = _flat(result)
-    assert "nous_api_key" in output, output
+    assert "tokenhub_api_key" in output, output
     assert not env_path.exists(), env_path.read_text(encoding="utf-8")
 
 

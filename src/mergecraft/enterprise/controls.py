@@ -6,7 +6,7 @@ A non-empty ``allowed_regions`` fails closed via :func:`enforce_data_residency`.
 Model regions come from :data:`mergecraft.models.PROVIDERS` (per-provider
 ``data_residency``; unset means unknown and is refused). Bedrock/Vertex BYOK
 prefer ``AWS_REGION`` / ``VERTEX_LOCATION`` when set. Gateway models
-(OpenCode, OpenRouter, TokenHub, MiniMax, Nous) have no declared region.
+(OpenCode, OpenRouter, TokenHub, MiniMax) have no declared region.
 
 Exports:
     EnterpriseSettings: Nested ``enterprise:`` block on :class:`RepoSettings`.

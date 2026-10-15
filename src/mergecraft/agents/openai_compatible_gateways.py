@@ -242,23 +242,13 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     if not model_id:
         return None
 
-    from mergecraft.config.runtime_provider_registry import (
-        resolve_legacy_nous_gateway_endpoint,
-        resolve_registry_gateway_endpoint,
-    )
+    from mergecraft.config.runtime_provider_registry import resolve_registry_gateway_endpoint
     from mergecraft.config.settings_snapshot import repo_settings_for_gateway_resolvers
 
     settings = repo_settings_for_gateway_resolvers()
     registry_endpoint = resolve_registry_gateway_endpoint(model, settings=settings)
     if registry_endpoint is not None:
         return registry_endpoint
-
-    legacy_nous_endpoint = resolve_legacy_nous_gateway_endpoint(
-        provider_id,
-        settings=settings,
-    )
-    if legacy_nous_endpoint is not None:
-        return legacy_nous_endpoint
 
     custom_base = os.environ.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip()
     custom_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()

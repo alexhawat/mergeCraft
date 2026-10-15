@@ -25,7 +25,6 @@ from tests.cli.support_provider_registry import (
     BEDROCK_INDEXED_KEYS,
     CUSTOM_BASE_URL,
     LEGACY_AUTH_SUBCOMMANDS,
-    NOUS_BASE_URL,
     VERTEX_INDEXED_KEYS,
     indexed_env_key,
     read_env_file,
@@ -60,10 +59,10 @@ def _load_auth_cmd() -> Any:
         pytest.fail(f"mergecraft.cli.auth_cmd not importable: {exc}")
 
 
-def _patch_nous_validator(monkeypatch: MonkeyPatch) -> None:
-    """Stub Nous validation so provider auth tests never hit the network."""
+def _patch_api_key_validator(monkeypatch: MonkeyPatch) -> None:
+    """Stub API-key validation so provider auth tests never hit the network."""
     module = _load_auth_cmd()
-    monkeypatch.setattr(module, "_validate_nous_api_key", lambda _key: True)
+    monkeypatch.setattr(module, "_validate_openai_compatible_key", lambda **_kw: True)
 
 
 def _patch_httpx_noop(monkeypatch: MonkeyPatch) -> None:
@@ -107,32 +106,31 @@ def test_provider_auth_help_documents_scope_flag() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_provider_auth_nous_writes_indexed_api_key(
+def test_provider_auth_writes_indexed_api_key(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
     scaffold_mergecraft_home(tmp_path)
     write_provider_entry(
         tmp_path,
-        label="nous",
+        label="acme",
         env_index=1,
-        url=NOUS_BASE_URL,
+        url=CUSTOM_BASE_URL,
         auth_kind=AUTH_KIND_API_KEY,
     )
     monkeypatch.chdir(tmp_path)
     _stub_scope_local(monkeypatch, tmp_path)
-    _patch_nous_validator(monkeypatch)
+    _patch_api_key_validator(monkeypatch)
     _patch_httpx_noop(monkeypatch)
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "nous-indexed-key")
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "acme-indexed-key")
 
-    result = _invoke("provider", "auth", "nous", "--scope", "local")
+    result = _invoke("provider", "auth", "acme", "--scope", "local")
 
     output = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, output
     env = dotenv_values(tmp_path / ".env")
-    assert env.get("LLM_PROVIDER_1") == "nous"
-    assert env.get(indexed_env_key(1, "API_KEY")) == "nous-indexed-key"
-    assert "NOUS_API_KEY" not in env
+    assert env.get("LLM_PROVIDER_1") == "acme"
+    assert env.get(indexed_env_key(1, "API_KEY")) == "acme-indexed-key"
 
 
 def test_provider_auth_unknown_label_exits_nonzero(
@@ -156,23 +154,23 @@ def test_provider_auth_reauth_overwrites_indexed_key_in_place(
     scaffold_mergecraft_home(tmp_path)
     write_provider_entry(
         tmp_path,
-        label="nous",
+        label="acme",
         env_index=1,
-        url=NOUS_BASE_URL,
+        url=CUSTOM_BASE_URL,
         auth_kind=AUTH_KIND_API_KEY,
     )
     env_path = tmp_path / ".env"
     env_path.write_text(
-        f"LLM_PROVIDER_1=nous\n{indexed_env_key(1, 'API_KEY')}=old-key\n",
+        f"LLM_PROVIDER_1=acme\n{indexed_env_key(1, 'API_KEY')}=old-key\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
     _stub_scope_local(monkeypatch, tmp_path)
-    _patch_nous_validator(monkeypatch)
+    _patch_api_key_validator(monkeypatch)
     _patch_httpx_noop(monkeypatch)
     monkeypatch.setattr(getpass, "getpass", lambda _prompt: "fresh-key")
 
-    result = _invoke("provider", "auth", "nous", "--scope", "local")
+    result = _invoke("provider", "auth", "acme", "--scope", "local")
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
 
     written = env_path.read_text(encoding="utf-8")
@@ -207,7 +205,7 @@ def test_provider_auth_interactive_picker_selects_provider(
     )
     monkeypatch.chdir(tmp_path)
     _stub_scope_local(monkeypatch, tmp_path)
-    _patch_nous_validator(monkeypatch)
+    _patch_api_key_validator(monkeypatch)
     _patch_httpx_noop(monkeypatch)
     monkeypatch.setattr(getpass, "getpass", lambda _prompt: "beta-key")
 
@@ -233,9 +231,9 @@ def test_provider_auth_picker_lists_registered_labels_and_urls(
     scaffold_mergecraft_home(tmp_path)
     write_provider_entry(
         tmp_path,
-        label="nous",
+        label="acme",
         env_index=1,
-        url=NOUS_BASE_URL,
+        url=CUSTOM_BASE_URL,
         auth_kind=AUTH_KIND_API_KEY,
     )
     monkeypatch.chdir(tmp_path)
@@ -246,8 +244,8 @@ def test_provider_auth_picker_lists_registered_labels_and_urls(
 
     result = _invoke("provider", "auth", "--scope", "local")
     output = _plain(result.stdout + result.stderr).lower()
-    assert "nous" in output
-    assert "inference-api.nousresearch.com" in output or NOUS_BASE_URL in output
+    assert "acme" in output
+    assert CUSTOM_BASE_URL.lower() in output
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +284,9 @@ def test_provider_auth_picker_excludes_logfire(
     scaffold_mergecraft_home(tmp_path)
     write_provider_entry(
         tmp_path,
-        label="nous",
+        label="acme",
         env_index=1,
-        url=NOUS_BASE_URL,
+        url=CUSTOM_BASE_URL,
         auth_kind=AUTH_KIND_API_KEY,
     )
     monkeypatch.chdir(tmp_path)
@@ -442,7 +440,6 @@ def test_legacy_auth_commands_warn_and_write_indexed_secret(
     for validator_name in (
         "_validate_gemini_api_key",
         "_validate_cursor_api_key",
-        "_validate_nous_api_key",
         "_validate_tokenhub_api_key",
         "_validate_minimax_api_key",
     ):
@@ -507,16 +504,16 @@ def test_legacy_auth_warning_emitted_once_per_process(
     scaffold_mergecraft_home(tmp_path)
     write_provider_entry(
         tmp_path,
-        label="nous",
+        label="tokenhub",
         env_index=1,
-        url=NOUS_BASE_URL,
+        url=CUSTOM_BASE_URL,
         auth_kind=AUTH_KIND_API_KEY,
     )
     monkeypatch.chdir(tmp_path)
     _stub_scope_local(monkeypatch, tmp_path)
-    _patch_nous_validator(monkeypatch)
+    _patch_api_key_validator(monkeypatch)
     _patch_httpx_noop(monkeypatch)
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "nous-key")
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "tokenhub-key")
 
     warnings: list[str] = []
 
@@ -527,8 +524,8 @@ def test_legacy_auth_warning_emitted_once_per_process(
     if hasattr(module, "_warn_legacy_auth_once"):
         monkeypatch.setattr(module, "_warn_legacy_auth_once", _warn)
 
-    first = _invoke("auth", "nous", "--scope", "local")
-    second = _invoke("auth", "nous", "--scope", "local")
+    first = _invoke("auth", "tokenhub", "--scope", "local")
+    second = _invoke("auth", "tokenhub", "--scope", "local")
     assert first.exit_code == CLI_SUCCESS_EXIT_CODE
     assert second.exit_code == CLI_SUCCESS_EXIT_CODE
     assert len(warnings) <= 1

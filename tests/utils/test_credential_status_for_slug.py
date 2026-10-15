@@ -117,12 +117,12 @@ def test_credential_status_reports_source_route(
         monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY_2", "indexed-key")
         monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_2", "https://gw.example/v1")
     else:
-        bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
-        monkeypatch.delenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", raising=False)
-        monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
-        monkeypatch.delenv("LLM_PROVIDER_1", raising=False)
-        monkeypatch.setenv("NOUS_API_KEY", "legacy-key")
-    status = _credential_status(NOUS_SLUG, tmp_path=tmp_path)
+        # The flat preset env path survives only for TokenHub and MiniMax.
+        scaffold_mergecraft_home(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TOKENHUB_API_KEY", "legacy-key")
+    slug = "tokenhub/hy3" if setup == "legacy" else NOUS_SLUG
+    status = _credential_status(slug, tmp_path=tmp_path)
     assert status.available is True
     assert status.source == expected_source
 

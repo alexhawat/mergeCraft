@@ -352,7 +352,7 @@ Full rationale in the collapsible sections of
 
 ### Self-review App token and approval lifecycle
 
-Each Nous, Codex or Claude attempt mints its own repository-scoped App token
+Each OpenCode Go, Codex or Claude attempt mints its own repository-scoped App token
 when both App secrets are configured and the review is for the same repository.
 A failed mint preserves the existing job-token review path. Per-attempt minting
 avoids reusing a one-hour token throughout the 95-minute fallback cascade.

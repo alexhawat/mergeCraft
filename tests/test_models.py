@@ -33,7 +33,6 @@ def test_providers_include_expected_keys() -> None:
         "moonshotai",
         "opencode",
         "opencode-go",
-        "nous",
         "tokenhub",
         "bedrock",
         "vertex",

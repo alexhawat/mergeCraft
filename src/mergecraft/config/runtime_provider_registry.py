@@ -3,24 +3,17 @@
 from __future__ import annotations
 
 import os
-import warnings
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from mergecraft.config.settings import ProviderRegistryEntry, RepoSettings
 
-_LEGACY_NOUS_API_KEY = "NOUS_API_KEY"
-_LEGACY_NOUS_WARNED = False
-
 
 def _flat_registry_credential_env_keys(label: str) -> tuple[str, ...]:
-    """Flat workflow credential env names for *label*, excluding D7 legacy nous alias."""
+    """Flat workflow credential env names for *label*."""
     from mergecraft.workflow.auth_manifest import flat_credential_env_keys
 
-    keys = flat_credential_env_keys(label)
-    if label.strip().lower() == "nous":
-        return tuple(key for key in keys if key != _LEGACY_NOUS_API_KEY)
-    return keys
+    return flat_credential_env_keys(label)
 
 
 _AUTH_KIND_API_KEY = "api_key"
@@ -84,7 +77,6 @@ _BUILTIN_LABEL_TO_HARNESS_API_KEY: dict[str, str] = {
 
 # Seed-only default URLs for ``provider seed`` — not used at runtime (BE / D4).
 SEED_PROVIDER_URLS: dict[str, str] = {
-    "nous": "https://inference-api.nousresearch.com/v1",
     "tokenhub": "https://tokenhub-intl.tencentcloudmaas.com/v1",
     "minimax": "https://api.minimax.io/v1",
 }
@@ -217,36 +209,11 @@ def has_registry_credentials(
     entry = lookup_registry_entry(settings, provider)
     if entry is None:
         return False
-    if _indexed_credential_for_entry(entry):
-        return True
-    if provider == "nous":
-        return _legacy_nous_api_key_present()
-    return False
-
-
-def _legacy_nous_api_key_present() -> bool:
-    return bool(_read_env_value(_LEGACY_NOUS_API_KEY))
-
-
-def warn_legacy_nous_api_key_once() -> None:
-    """Emit one DeprecationWarning per process when ``NOUS_API_KEY`` is used (D7)."""
-    global _LEGACY_NOUS_WARNED
-    if _LEGACY_NOUS_WARNED:
-        return
-    _LEGACY_NOUS_WARNED = True
-    warnings.warn(
-        "NOUS_API_KEY is deprecated; use `mergecraft provider auth nous` to write "
-        "LLM_PROVIDER_<N>_API_KEY instead.",
-        DeprecationWarning,
-        stacklevel=3,
-    )
+    return bool(_indexed_credential_for_entry(entry))
 
 
 def legacy_opencode_harness_for_provider(provider: str) -> str | None:
     """Return ``opencode`` when D7 legacy env credentials exist for *provider*."""
-    if provider == "nous" and _legacy_nous_api_key_present():
-        warn_legacy_nous_api_key_once()
-        return "opencode"
     from mergecraft.agents.openai_compatible_gateways import _legacy_gateway_preset_credentials
 
     if _legacy_gateway_preset_credentials(provider):
@@ -262,26 +229,6 @@ def legacy_opencode_harness_for_unregistered_provider(
     if lookup_registry_entry(settings, provider) is not None:
         return None
     return legacy_opencode_harness_for_provider(provider)
-
-
-def resolve_legacy_nous_gateway_endpoint(
-    provider_id: str,
-    *,
-    settings: RepoSettings | None = None,
-) -> tuple[str, str, str] | None:
-    """Resolve legacy ``NOUS_API_KEY`` when no registry row exists (D7)."""
-    if provider_id != "nous":
-        return None
-    if lookup_registry_entry(settings, provider_id) is not None:
-        return None
-    api_key = _read_env_value(_LEGACY_NOUS_API_KEY)
-    if not api_key:
-        return None
-    base_url = SEED_PROVIDER_URLS.get("nous")
-    if not base_url:
-        return None
-    warn_legacy_nous_api_key_once()
-    return provider_id, base_url, api_key
 
 
 def resolve_registry_gateway_endpoint(
@@ -300,10 +247,6 @@ def resolve_registry_gateway_endpoint(
     api_key = indexed_api_key_for_entry(entry)
     if not api_key:
         api_key = _indexed_credential_for_entry(entry)
-    if not api_key and provider_id == "nous":
-        api_key = _read_env_value(_LEGACY_NOUS_API_KEY)
-        if api_key:
-            warn_legacy_nous_api_key_once()
     if not api_key:
         return None
     return provider_id, entry.url, api_key
@@ -483,7 +426,5 @@ __all__ = [
     "provider_credential_env_names",
     "provider_credential_env_suffixes",
     "registry_harness_for_provider",
-    "resolve_legacy_nous_gateway_endpoint",
     "resolve_registry_gateway_endpoint",
-    "warn_legacy_nous_api_key_once",
 ]

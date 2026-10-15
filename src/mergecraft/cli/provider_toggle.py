@@ -68,8 +68,8 @@ def _flat_secret_names(canonical: str) -> tuple[str, ...]:
     Derived from :data:`mergecraft.models.PROVIDERS`, which is the registry the
     rest of the product authenticates from — not a second list maintained here.
     A hand-kept copy had already drifted from it on six providers: ``xai``,
-    ``moonshotai``, ``opencode``, ``opencode-go``, ``openrouter`` and ``nous``
-    were missing credentials outright, and ``bedrock``'s entry named three AWS
+    ``moonshotai``, ``opencode``, ``opencode-go``, ``openrouter`` and a since-removed
+    provider were missing credentials outright, and ``bedrock``'s entry named three AWS
     keys the registry does not carry while missing all three it does. Every gap
     is the same failure: ``disable`` reports success while the provider stays
     authenticated through the key it did not clear.
@@ -129,7 +129,7 @@ class ProviderSecrets:
 
     ``github`` names Actions secrets to delete; ``local`` names ``.env`` keys to
     blank. They overlap heavily by design — a flat credential like
-    ``NOUS_API_KEY`` is both — but the indexed registry keys and the flat
+    ``TOKENHUB_API_KEY`` is both — but the indexed registry keys and the flat
     workflow-facing keys are collected together so a single disable clears the
     provider however it happened to be authenticated.
     """

@@ -9,7 +9,7 @@ invariants borrowed from the ``tracing logfire disable`` precedent:
   selected is genuinely untouched.
 - an already-absent Actions secret is success, not an error.
 - both credential shapes are cleared: the flat workflow-facing name
-  (``NOUS_API_KEY``) and the indexed registry key (``LLM_PROVIDER_<N>_API_KEY``).
+  (``TOKENHUB_API_KEY``) and the indexed registry key (``LLM_PROVIDER_<N>_API_KEY``).
 - ``auth`` subcommand aliases (``codex``, ``claude``, ``gemini``) resolve onto
   their registry labels.
 - disable clears credentials but never the registration, so ``enable`` can
@@ -102,22 +102,20 @@ def _write_env(tmp_path: Path, pairs: dict[str, str]) -> None:
 def test_resolve_covers_flat_and_indexed_names_for_a_registered_provider() -> None:
     """A registered provider yields both its flat key and its indexed key."""
     resolved = _toggle().resolve_provider_secrets(
-        "nous",
-        {"label": "nous", "envIndex": 3, "authKind": "api_key"},
+        "tokenhub",
+        {"label": "tokenhub", "envIndex": 3, "authKind": "api_key"},
     )
 
-    assert "NOUS_API_KEY" in resolved.github
+    assert "TOKENHUB_API_KEY" in resolved.github
     assert "LLM_PROVIDER_3_API_KEY" in resolved.github
-    assert resolved.label == "nous"
+    assert resolved.label == "tokenhub"
 
 
 def test_resolve_works_for_an_unregistered_builtin() -> None:
     """A provider authed before the registry existed is still resolvable."""
-    resolved = _toggle().resolve_provider_secrets("nous", None)
+    resolved = _toggle().resolve_provider_secrets("tokenhub", None)
 
-    # Nous authenticates through the custom-provider key as well; clearing
-    # only NOUS_API_KEY left it usable (mergeCraft review of #521).
-    assert resolved.github == ("NOUS_API_KEY", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY")
+    assert resolved.github == ("TOKENHUB_API_KEY",)
     assert bool(resolved) is True
 
 
@@ -159,17 +157,17 @@ def test_cloud_chain_provider_resolves_its_whole_credential_set() -> None:
 def test_disable_github_deletes_the_actions_secret(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    """The headline case from #520: turn Nous off for CI without touching YAML."""
+    """The headline case from #520: turn a provider off for CI without touching YAML."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
     deleted = _capture_secret_delete(monkeypatch)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "github", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "github", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "NOUS_API_KEY" in _deleted_names(deleted)
+    assert "TOKENHUB_API_KEY" in _deleted_names(deleted)
     assert "LLM_PROVIDER_3_API_KEY" in _deleted_names(deleted)
 
 
@@ -178,13 +176,13 @@ def test_disable_github_leaves_the_local_env_untouched(
 ) -> None:
     """``--scope github`` must not clear a working local credential."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
-    _write_env(tmp_path, {"NOUS_API_KEY": "local-key"})
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
+    _write_env(tmp_path, {"TOKENHUB_API_KEY": "local-key"})
     before = (tmp_path / ".env").read_text(encoding="utf-8")
     _capture_secret_delete(monkeypatch)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "github", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "github", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
@@ -196,12 +194,12 @@ def test_disable_treats_an_absent_secret_as_success(
 ) -> None:
     """The post-condition is "the secret is absent" — already true is still success."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
     # ``_delete_gh_secret`` already returns True for a missing secret.
     _capture_secret_delete(monkeypatch, ok=True)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "github", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "github", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
@@ -212,11 +210,11 @@ def test_disable_bails_when_every_secret_delete_fails(
 ) -> None:
     """An unreachable ``gh`` must not report a provider as disabled."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
     _capture_secret_delete(monkeypatch, ok=False)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "github", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "github", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code != 0
@@ -230,10 +228,10 @@ def test_disable_bails_when_every_secret_delete_fails(
 def test_disable_local_blanks_the_env_entries(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Local disable blanks the keys in place rather than deleting the lines."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
     _write_env(
         tmp_path,
-        {"NOUS_API_KEY": "local-key", "LLM_PROVIDER_3_API_KEY": "indexed-key"},
+        {"TOKENHUB_API_KEY": "local-key", "LLM_PROVIDER_3_API_KEY": "indexed-key"},
     )
     monkeypatch.setattr(
         "mergecraft.cli.provider_toggle.resolve_repo_slug",
@@ -241,12 +239,12 @@ def test_disable_local_blanks_the_env_entries(tmp_path: Path, monkeypatch: Monke
     )
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "local", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
     env = read_env_file(tmp_path)
-    assert env["NOUS_API_KEY"] == ""
+    assert env["TOKENHUB_API_KEY"] == ""
     assert env["LLM_PROVIDER_3_API_KEY"] == ""
 
 
@@ -255,11 +253,11 @@ def test_disable_local_never_prints_the_credential_value(
 ) -> None:
     """Disable output names keys, never values."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
-    _write_env(tmp_path, {"NOUS_API_KEY": "sk-super-secret-value"})
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
+    _write_env(tmp_path, {"TOKENHUB_API_KEY": "sk-super-secret-value"})
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "local", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
@@ -269,17 +267,17 @@ def test_disable_local_never_prints_the_credential_value(
 def test_disable_both_clears_local_and_github(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``--scope both`` is the union, not either half."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
-    _write_env(tmp_path, {"NOUS_API_KEY": "local-key"})
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
+    _write_env(tmp_path, {"TOKENHUB_API_KEY": "local-key"})
     deleted = _capture_secret_delete(monkeypatch)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "both", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "both", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert "NOUS_API_KEY" in _deleted_names(deleted)
-    assert read_env_file(tmp_path)["NOUS_API_KEY"] == ""
+    assert "TOKENHUB_API_KEY" in _deleted_names(deleted)
+    assert read_env_file(tmp_path)["TOKENHUB_API_KEY"] == ""
 
 
 # ── disable: what it must NOT do ─────────────────────────────────────────────
@@ -288,30 +286,30 @@ def test_disable_both_clears_local_and_github(tmp_path: Path, monkeypatch: Monke
 def test_disable_preserves_the_registry_entry(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Disable removes credentials, not registration — ``provider delete`` does that."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
     _capture_secret_delete(monkeypatch)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "github", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "github", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
     labels = [entry["label"] for entry in read_config(tmp_path).get("providers", [])]
-    assert "nous" in labels
+    assert "tokenhub" in labels
 
 
 def test_disable_preserves_the_env_index_label(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """The ``LLM_PROVIDER_<N>`` label is structure, not a credential — it stays."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
-    _write_env(tmp_path, {"LLM_PROVIDER_3": "nous", "LLM_PROVIDER_3_API_KEY": "key"})
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
+    _write_env(tmp_path, {"LLM_PROVIDER_3": "tokenhub", "LLM_PROVIDER_3_API_KEY": "key"})
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "local", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert read_env_file(tmp_path)["LLM_PROVIDER_3"] == "nous"
+    assert read_env_file(tmp_path)["LLM_PROVIDER_3"] == "tokenhub"
 
 
 def test_disable_rejects_an_unknown_label(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -346,7 +344,7 @@ def test_enable_delegates_to_the_existing_auth_flow(
 ) -> None:
     """``enable`` introduces no new credential-minting path (#520 requirement 1)."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
     calls: list[tuple[str, str]] = []
 
     def _fake_auth(entry: dict[str, Any], scope: str, **_kwargs: Any) -> None:
@@ -355,21 +353,21 @@ def test_enable_delegates_to_the_existing_auth_flow(
     monkeypatch.setattr("mergecraft.cli.provider_cmd.run_provider_auth", _fake_auth)
 
     result = runner.invoke(
-        app, ["provider", "enable", "nous", "--scope", "local", "--cwd", str(tmp_path)]
+        app, ["provider", "enable", "tokenhub", "--scope", "local", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert calls == [("nous", "local")]
+    assert calls == [("tokenhub", "local")]
 
 
 def test_enable_rejects_an_unregistered_label(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Enable needs a registry row — it points the operator at ``provider add``."""
     _seed_repo(tmp_path, monkeypatch)
 
-    result = runner.invoke(app, ["provider", "enable", "nous", "--cwd", str(tmp_path)])
+    result = runner.invoke(app, ["provider", "enable", "tokenhub", "--cwd", str(tmp_path)])
 
     assert result.exit_code != 0
-    assert "provider add" in (result.stdout + result.stderr)
+    assert "provider add" in " ".join((result.stdout + result.stderr).split())
 
 
 # ── round trip ───────────────────────────────────────────────────────────────
@@ -380,17 +378,19 @@ def test_disable_then_enable_reuses_the_same_env_index(
 ) -> None:
     """The point of preserving registration: re-enabling does not renumber."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
     _write_env(tmp_path, {"LLM_PROVIDER_3_API_KEY": "key"})
     seen: list[int] = []
 
     def _fake_auth(entry: dict[str, Any], _scope: str, **_kwargs: Any) -> None:
         seen.append(int(entry["envIndex"]))
 
-    runner.invoke(app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(tmp_path)])
+    runner.invoke(
+        app, ["provider", "disable", "tokenhub", "--scope", "local", "--cwd", str(tmp_path)]
+    )
     monkeypatch.setattr("mergecraft.cli.provider_cmd.run_provider_auth", _fake_auth)
     result = runner.invoke(
-        app, ["provider", "enable", "nous", "--scope", "local", "--cwd", str(tmp_path)]
+        app, ["provider", "enable", "tokenhub", "--scope", "local", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
@@ -426,9 +426,9 @@ def test_local_disable_targets_the_cwd_repo_not_the_process_cwd(
     _init_git_repo(target, origin="git@github.com:acme/target.git")
     _init_git_repo(current, origin="git@github.com:acme/current.git")
     scaffold_mergecraft_home(target)
-    write_provider_entry(target, label="nous", env_index=3)
-    (target / ".env").write_text("NOUS_API_KEY=target-key\n", encoding="utf-8")
-    (current / ".env").write_text("NOUS_API_KEY=current-key\n", encoding="utf-8")
+    write_provider_entry(target, label="tokenhub", env_index=3)
+    (target / ".env").write_text("TOKENHUB_API_KEY=target-key\n", encoding="utf-8")
+    (current / ".env").write_text("TOKENHUB_API_KEY=current-key\n", encoding="utf-8")
 
     # MERGECRAFT_ENV must be unset, or it would name the target unambiguously
     # and the bug under test could not appear.
@@ -436,13 +436,13 @@ def test_local_disable_targets_the_cwd_repo_not_the_process_cwd(
     monkeypatch.chdir(current)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(target)]
+        app, ["provider", "disable", "tokenhub", "--scope", "local", "--cwd", str(target)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
-    assert read_env_file(target)["NOUS_API_KEY"] == ""
+    assert read_env_file(target)["TOKENHUB_API_KEY"] == ""
     # The repository the operator merely happened to stand in is untouched.
-    assert read_env_file(current)["NOUS_API_KEY"] == "current-key"
+    assert read_env_file(current)["TOKENHUB_API_KEY"] == "current-key"
 
 
 def test_github_disable_targets_the_cwd_repos_origin(
@@ -454,7 +454,7 @@ def test_github_disable_targets_the_cwd_repos_origin(
     _init_git_repo(target, origin="git@github.com:acme/target.git")
     _init_git_repo(current, origin="git@github.com:acme/current.git")
     scaffold_mergecraft_home(target)
-    write_provider_entry(target, label="nous", env_index=3)
+    write_provider_entry(target, label="tokenhub", env_index=3)
     monkeypatch.delenv("MERGECRAFT_ENV", raising=False)
     monkeypatch.chdir(current)
 
@@ -469,7 +469,7 @@ def test_github_disable_targets_the_cwd_repos_origin(
     monkeypatch.setattr("mergecraft.cli.tracing_logfire_cmd._delete_gh_secret", _recorder)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "github", "--cwd", str(target)]
+        app, ["provider", "disable", "tokenhub", "--scope", "github", "--cwd", str(target)]
     )
 
     assert result.exit_code == 0, result.stdout + result.stderr
@@ -518,25 +518,25 @@ def test_mixed_scope_failure_bails_even_when_the_other_half_succeeded(
 ) -> None:
     """``--scope both`` with a good local write and a failed delete still bails."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
-    _write_env(tmp_path, {"NOUS_API_KEY": "local-key"})
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
+    _write_env(tmp_path, {"TOKENHUB_API_KEY": "local-key"})
     _capture_secret_delete(monkeypatch, ok=False)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "both", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "both", "--cwd", str(tmp_path)]
     )
 
     assert result.exit_code != 0
     # The local half still happened — the command is not transactional, and the
     # error names what is left rather than pretending nothing was cleared.
-    assert read_env_file(tmp_path)["NOUS_API_KEY"] == ""
+    assert read_env_file(tmp_path)["TOKENHUB_API_KEY"] == ""
 
 
 def test_local_partial_failure_bails(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """One unwritable ``.env`` key is enough to withhold the disabled claim."""
     _seed_repo(tmp_path, monkeypatch)
-    write_provider_entry(tmp_path, label="nous", env_index=3)
-    _write_env(tmp_path, {"NOUS_API_KEY": "k", "LLM_PROVIDER_3_API_KEY": "k"})
+    write_provider_entry(tmp_path, label="tokenhub", env_index=3)
+    _write_env(tmp_path, {"TOKENHUB_API_KEY": "k", "LLM_PROVIDER_3_API_KEY": "k"})
 
     # Patch the module OBJECT, not the dotted string: the string form resolves
     # by walking package attributes, which is not guaranteed to be the same
@@ -555,7 +555,7 @@ def test_local_partial_failure_bails(tmp_path: Path, monkeypatch: MonkeyPatch) -
     monkeypatch.setattr(auth_cmd, "_write_env_value", _flaky)
 
     result = runner.invoke(
-        app, ["provider", "disable", "nous", "--scope", "local", "--cwd", str(tmp_path)]
+        app, ["provider", "disable", "tokenhub", "--scope", "local", "--cwd", str(tmp_path)]
     )
 
     # Guard the guard: if the stub is never reached the assertion below would

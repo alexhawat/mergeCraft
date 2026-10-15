@@ -229,22 +229,6 @@ def test_singleton_still_grants_minimax_credentials(
     assert has_gateway_credentials("minimax") is True
 
 
-def test_nous_back_compat_alias_still_grants_nous_credentials(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``NOUS_API_KEY`` still grants ``nous`` credentials when registered (D7)."""
-    from tests.cli.support_provider_registry import bootstrap_nous_registry
-
-    from mergecraft.agents.openai_compatible_gateways import has_gateway_credentials
-
-    bootstrap_nous_registry(tmp_path, monkeypatch, model_id="deepseek/deepseek-v4-flash")
-    monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
-    monkeypatch.setenv("NOUS_API_KEY", "nous-key")
-
-    assert has_gateway_credentials("nous") is True
-
-
 # -- helpers -----------------------------------------------------------------
 
 

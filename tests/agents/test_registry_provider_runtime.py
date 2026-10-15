@@ -8,7 +8,6 @@ fallback, harness field respected per registry row, legacy ``NOUS_API_KEY`` shim
 
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING
 
 import pytest
@@ -25,7 +24,6 @@ from tests.cli.support_provider_registry import (
     write_registry_provider_row,
 )
 
-from mergecraft.config import runtime_provider_registry
 from mergecraft.config.settings import RepoSettings, load_repo_settings
 from mergecraft.main import _classify_error_outcome
 from mergecraft.run_outcome import RunOutcome
@@ -249,27 +247,16 @@ def test_registry_declared_harness_respected_at_runtime(
 # ── D7 — legacy NOUS_API_KEY honoured with deprecation warning ──────────────
 
 
-def test_legacy_nous_api_key_emits_deprecation_warning_once(
+def test_legacy_nous_api_key_no_longer_grants_a_registered_nous_provider(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
+    """The flat ``NOUS_API_KEY`` shim is gone; only the indexed key counts."""
     slug = bootstrap_nous_registry(tmp_path, monkeypatch, model_id=NOUS_TENCENT_HY3)
     monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
-    monkeypatch.setenv("NOUS_API_KEY", "legacy-nous-shim-key")
-    # The D7 guard is once-per-process, so any earlier test in this worker that
-    # touched the legacy shim would leave it tripped and this assertion would
-    # see zero warnings. Reset it so the count reflects only this test.
-    monkeypatch.setattr(runtime_provider_registry, "_LEGACY_NOUS_WARNED", False)
+    monkeypatch.setenv("NOUS_API_KEY", "legacy-nous-key")
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        assert has_credentials_for_slug(slug) is True
-        assert has_credentials_for_slug(slug) is True
-
-    deprecation = [item for item in caught if issubclass(item.category, DeprecationWarning)]
-    assert len(deprecation) == 1, (
-        f"expected exactly one DeprecationWarning for legacy NOUS_API_KEY, got {deprecation}"
-    )
+    assert has_credentials_for_slug(slug) is False
 
 
 # ── PR #498 review — global `harness: opencode` with a known catalog provider ──

@@ -145,7 +145,7 @@ class StreamSpanAccumulator:
         the legacy blob-parse shape that W5.7's equivalence test pins.
 
         T2 adds OpenAI ``prompt_tokens_details.cached_tokens`` /
-        ``input_tokens_details.cached_tokens`` recognition so the Nous /
+        ``input_tokens_details.cached_tokens`` recognition so the
         MiniMax / opencode Responses / Chat Completions paths populate
         ``cache_read`` alongside the Anthropic-native
         ``cache_read_input_tokens`` field. Any native Anthropic value still

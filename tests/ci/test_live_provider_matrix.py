@@ -94,10 +94,7 @@ def test_check_live_integration_contract_passes() -> None:
 
 def test_default_credential_slugs_and_github_required_set() -> None:
     """Default sweep plus github matrix leg. Deleting github must fail."""
-    assert "nous" in DEFAULT_CREDENTIAL_SLUGS, (
-        "the Nous leg stays in the default credential sweep for local runs that hold a key"
-    )
-    assert set(DEFAULT_CREDENTIAL_SLUGS) <= {"anthropic", "openai", "gemini", "nous"}
+    assert set(DEFAULT_CREDENTIAL_SLUGS) <= {"anthropic", "openai", "gemini"}
     for slug in DEFAULT_CREDENTIAL_SLUGS:
         assert slug in PROVIDER_SECRET_ENV
     assert PROVIDER_SECRET_ENV["github"] == "GITHUB_TOKEN"

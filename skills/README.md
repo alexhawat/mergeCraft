@@ -27,9 +27,10 @@ over each generated directory.
 **OpenClaw** reads `.agents/skills/` only — it does **not** read `.claude/skills/`.
 Copying to `.claude/skills/` is a common mistake and will not work.
 
-**Hermes** is a [Nous Research](https://nousresearch.com/) agent. mergeCraft already
-ships a Nous provider (`mergecraft provider auth nous`, `nous/deepseek/deepseek-v4-flash`), so a
-Hermes user can run mergeCraft entirely on Nous credentials when configured. The Hermes
+**Hermes** is a [Nous Research](https://nousresearch.com/) agent. mergeCraft has no
+built-in Nous provider, but Nous Portal is OpenAI-compatible: register it under `providers:`
+(see [`docs/authentication.md`](../docs/authentication.md)) and a Hermes user can run
+mergeCraft on Nous credentials. The Hermes
 package declares `required_environment_variables` in frontmatter so Hermes prompts for
 provider credentials securely — never paste secrets into the skill body.
 

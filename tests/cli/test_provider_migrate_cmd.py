@@ -20,7 +20,6 @@ from tests.cli.support_provider_registry import (
     BEDROCK_LEGACY_SECRET_KEYS,
     LEGACY_API_KEY_MIGRATIONS,
     LEGACY_STRUCTURE_IN_ENV,
-    NOUS_BASE_URL,
     VERTEX_LEGACY_SECRET_KEYS,
     assert_output_never_contains_secret,
     config_text,
@@ -49,7 +48,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
 
 _OPENAI_LEGACY_SECRET = "sk-openai-legacy-SECRET12345"
-_NOUS_LEGACY_SECRET = "nous-legacy-SECRET67890"
+_TOKENHUB_LEGACY_SECRET = "tokenhub-legacy-SECRET67890"
 
 
 def _plain(text: str) -> str:
@@ -164,8 +163,7 @@ def test_provider_migrate_apply_writes_provider_config_and_indexed_secrets(
         tmp_path,
         {
             "OPENAI_API_KEY": _OPENAI_LEGACY_SECRET,
-            "NOUS_API_KEY": _NOUS_LEGACY_SECRET,
-            "NOUS_BASE_URL": NOUS_BASE_URL,
+            "TOKENHUB_API_KEY": _TOKENHUB_LEGACY_SECRET,
         },
     )
 
@@ -180,20 +178,17 @@ def test_provider_migrate_apply_writes_provider_config_and_indexed_secrets(
     entries = provider_entries(config)
     labels = {str(entry.get("label", "")).lower() for entry in entries}
     assert "openai" in labels
-    assert "nous" in labels
+    assert "tokenhub" in labels
 
     env = read_env_file(tmp_path)
     assert env.get("LLM_PROVIDER_1") == "openai"
     assert env.get(indexed_env_key(1, "API_KEY")) == _OPENAI_LEGACY_SECRET
-    assert env.get("LLM_PROVIDER_2") == "nous"
-    assert env.get(indexed_env_key(2, "API_KEY")) == _NOUS_LEGACY_SECRET
-
-    nous_entry = next(entry for entry in entries if entry.get("label") == "nous")
-    assert nous_entry.get("url") == NOUS_BASE_URL
+    assert env.get("LLM_PROVIDER_2") == "tokenhub"
+    assert env.get(indexed_env_key(2, "API_KEY")) == _TOKENHUB_LEGACY_SECRET
 
     cfg_lower = config_text(tmp_path).lower()
     assert _OPENAI_LEGACY_SECRET.lower() not in cfg_lower
-    assert _NOUS_LEGACY_SECRET.lower() not in cfg_lower
+    assert _TOKENHUB_LEGACY_SECRET.lower() not in cfg_lower
 
 
 def test_provider_migrate_apply_idempotent_second_run_is_noop(
@@ -285,8 +280,7 @@ def test_provider_migrate_env_never_contains_harness_or_url_structure(
     write_env_pairs(
         tmp_path,
         {
-            "NOUS_API_KEY": _NOUS_LEGACY_SECRET,
-            "NOUS_BASE_URL": NOUS_BASE_URL,
+            "TOKENHUB_API_KEY": _TOKENHUB_LEGACY_SECRET,
         },
     )
 
@@ -297,7 +291,7 @@ def test_provider_migrate_env_never_contains_harness_or_url_structure(
     for token in LEGACY_STRUCTURE_IN_ENV:
         assert f"{token}=" not in env_blob
     assert "harness:" not in env_blob
-    assert NOUS_BASE_URL not in env_blob or "url=" not in env_blob
+    assert "url=" not in env_blob
 
 
 def test_provider_migrate_ambiguous_custom_base_url_refuses_or_prompts(

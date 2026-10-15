@@ -109,9 +109,8 @@ overlapping, modified, stale, or incompatible manifests fail before combination.
 
 ### Live slice
 
-The scheduled Integration workflow's live-provider matrix runs the two legs
-this repository can authenticate: `nous` (`NOUS_API_KEY`) and `github`
-(`GITHUB_TOKEN`). The `anthropic`, `openai` and `gemini` HTTP-API legs are
+The scheduled Integration workflow's live-provider matrix runs the one leg
+this repository can authenticate: `github` (`GITHUB_TOKEN`). The `anthropic`, `openai` and `gemini` HTTP-API legs are
 **not exercised** — no Anthropic, OpenAI or Gemini API key is configured, and a
 subscription cannot call those HTTP endpoints. Real-harness live coverage runs
 as the nightly E2E live slice on the ChatGPT/Codex subscription

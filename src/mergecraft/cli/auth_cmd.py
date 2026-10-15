@@ -42,8 +42,6 @@ OPENCODE_AUTH_SECRET = "OPENCODE_AUTH_JSON"
 CLAUDE_OAUTH_SECRET = "CLAUDE_CODE_OAUTH_TOKEN"
 GEMINI_API_SECRET = "GEMINI_API_KEY"
 CURSOR_API_SECRET = "CURSOR_API_KEY"
-NOUS_API_SECRET = "NOUS_API_KEY"
-NOUS_PORTAL_BASE_URL = "https://inference-api.nousresearch.com/v1"
 TOKENHUB_API_SECRET = "TOKENHUB_API_KEY"
 MINIMAX_API_SECRET = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 MINIMAX_BASE_URL = "https://api.minimax.io/v1"
@@ -563,70 +561,6 @@ def _validate_openai_compatible_key(*, api_key: str, base_url: str, label: str) 
         return True
 
 
-def _validate_nous_api_key(api_key: str) -> bool:
-    """Return whether ``api_key`` authenticates against the Nous Portal.
-
-    Probes ``POST {NOUS_PORTAL_BASE_URL}/chat/completions`` with a minimal
-    body (``{"model": "deepseek/deepseek-v4-flash", "messages": []}``) and a
-    ``Bearer`` auth header. Mirrors ``_validate_gemini_api_key`` semantics:
-
-    - ``200`` → accept (True)
-    - ``401`` / ``403`` → reject (False)
-    - any other status, ``httpx.HTTPError``, network/DNS/5xx → warn and accept
-      (True) so an offline operator can still save the secret locally and
-      retry later.
-
-    The probe path is ``/v1/chat/completions`` rather than ``/v1/models``
-    because the Portal's catalog endpoint is unauthenticated and would return
-    200 even for a fake bearer token (W0.4).
-    """
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(
-                f"{NOUS_PORTAL_BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={"model": "deepseek/deepseek-v4-flash", "messages": []},
-            )
-        if response.status_code == 200:
-            return True
-        if response.status_code in {401, 403}:
-            return False
-        logger.warning("nous key validation returned HTTP {} — saving anyway", response.status_code)
-        return True
-    except httpx.HTTPError as exc:
-        logger.warning("nous key validation skipped (network): {}", exc)
-        return True
-
-
-@app.command("nous")
-def auth_nous(scope: str = _SCOPE_OPTION) -> None:
-    """Save a Nous Portal API key as NOUS_API_KEY."""
-    _legacy_auth_hint("nous")
-    target = _resolve_auth_target(scope)
-    console.print(
-        "create an API key at [cyan]https://portal.nousresearch.com[/cyan], then paste it below."
-    )
-    try:
-        api_key = getpass.getpass("Nous Portal API key (Enter to cancel): ").strip()
-    except (EOFError, KeyboardInterrupt):  # fmt: skip
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE) from None
-    if not api_key:
-        console.print("canceled.")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-    if not _validate_nous_api_key(api_key):
-        cli_bail("Nous API key validation failed (401/403). Check the key and retry.")
-
-    if _legacy_auth_shim("nous", scope, {"API_KEY": api_key}, target=target):
-        return
-
-    _persist_credential(target=target, name=NOUS_API_SECRET, value=api_key)
-    console.print(
-        "use model [cyan]nous/deepseek/deepseek-v4-flash[/cyan] "
-        "(opencode harness; no MERGECRAFT_CUSTOM_PROVIDER_* required)."
-    )
-
-
 @app.command("tokenhub")
 def auth_tokenhub(scope: str = _SCOPE_OPTION) -> None:
     """Save a Tencent TokenHub API key as TOKENHUB_API_KEY."""
@@ -1007,8 +941,7 @@ def _validate_minimax_api_key(api_key: str) -> bool:
     """Probe the MiniMax OpenAI-compatible endpoint with ``api_key``.
 
     POSTs a minimal body to ``{MINIMAX_BASE_URL}/chat/completions`` with a
-    ``Bearer`` auth header — mirrors ``_validate_nous_api_key``'s pattern
-    because the unauthenticated catalog endpoint would return 200 for a
+    ``Bearer`` auth header, because the unauthenticated catalog endpoint would return 200 for a
     fake bearer token. Returns:
 
     - ``True`` on HTTP 200

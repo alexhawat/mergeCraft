@@ -11,7 +11,7 @@ scheduled nightly job covers the **broad slice** plus live providers
 |------|------------------|-------|
 | **Events** | `pull_request`, `pull_request_target`, `issue_comment` (trusted authors), `workflow_dispatch` | `pull_request_target` is always **untrusted** tier; comment triggers under target require `allow_pr_target_comments` |
 | **Agents** | `claude`, `codex`, `gemini`, `opencode`, `cursor` (API harness) | Local CLIs are lockfile-pinned in the Action image (`docker/agent-clis/`); Cursor is Cloud-only |
-| **Providers** | `anthropic`, `openai`, `google`, `nous`, `tokenhub`, custom OpenAI-compatible | BYOK — credentials via Action secrets / env allowlist (W2) |
+| **Providers** | `anthropic`, `openai`, `google`, `tokenhub`, custom OpenAI-compatible | BYOK — credentials via Action secrets / env allowlist (W2) |
 | **Shell** | `disabled`, `restricted`, `enabled` | MCP `shell` tool only under `restricted`; hooks off unless `enabled` |
 | **Push** | `disabled`, `restricted`, `enabled` | Production modes are **review-only**: mergeCraft refuses commit and push whatever the value, so no value grants write access. Default runtime resolve is `restricted`; default branch protected under `restricted` |
 | **Arch** | `linux/amd64`, `linux/arm64` | Images built multi-arch where the release pipeline publishes them; PR E2E runs on `ubuntu-latest` (amd64) |
@@ -19,15 +19,14 @@ scheduled nightly job covers the **broad slice** plus live providers
 ## Harness × model
 
 OpenCode = generic multi-provider harness · Codex = OpenAI-native harness ·
-Nous = provider · DeepSeek = model family. When `harness:` is unset in
+TokenHub = provider · DeepSeek = model family. When `harness:` is unset in
 `.mergecraft/config.yaml`, mergeCraft infers the harness from the model slug.
 Explicit `harness:` wins over inference; unsupported combinations are
 configuration errors naming both halves.
 
 | Model slug | Recommended model | `harness` unset (inferred) | Explicit override / error |
 |------------|-------------------|----------------------------|---------------------------|
-| `nous/deepseek-v4-flash` | `nous/deepseek/deepseek-v4-flash` | `opencode` | — |
-| `nous/deepseek/deepseek-v4-flash` | `nous/deepseek/deepseek-v4-flash` | `opencode` | `harness: claude` → configuration error |
+| `tokenhub/hy3` (registered provider) | `tokenhub/hy3` | `opencode` | `harness: claude` → configuration error |
 | `openai/gpt-5.3-codex` | `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
 | `anthropic/claude-sonnet` | `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
 | `google/gemini-3.1-pro-preview` | `google/gemini-3.1-pro-preview` | `gemini` | — |
@@ -61,7 +60,7 @@ provider fails the job.
 | Cell | Coverage |
 |------|----------|
 | Security slice (above) | Always |
-| Live provider coverage | `nous` and `github` in the nightly Integration workflow's live matrix; the ChatGPT/Codex subscription in this workflow's live slice. The `anthropic` / `openai` / `gemini` HTTP-API legs are not exercised — no such API key is configured |
+| Live provider coverage | `github` in the nightly Integration workflow's live matrix; the ChatGPT/Codex subscription in this workflow's live slice. The `anthropic` / `openai` / `gemini` HTTP-API legs are not exercised — no such API key is configured |
 | Arch | `ubuntu-latest` today; arm64 expansion tracked with multi-arch publish |
 
 ## Out of scope / dogfood

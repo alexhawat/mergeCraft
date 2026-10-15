@@ -1,4 +1,4 @@
-"""#466 — Nous 404 fail-over through ``run_with_model_chain`` (D5).
+"""#466 — gateway 404 fail-over through ``run_with_model_chain`` (D5).
 
 Billing/generic 404 advances the chain. Unknown-model 404 (``does not exist``)
 does not. Do not expand this file into post-run retry re-calling the provider.
@@ -18,14 +18,14 @@ from mergecraft.utils.agent_resolve import run_with_model_chain
 # job executes a real test instead of the deleted file-existence smoke.
 pytestmark = pytest.mark.hermetic_integration
 
-_NOUS_BILLING_404 = json.dumps(
+_BILLING_404 = json.dumps(
     {
         "name": "APIError",
         "data": {
             "message": (
                 "Not Found: Model 'deepseek/deepseek-v4-flash' requires available credits. "
                 "Your account balance is too low to use paid models — add credits at "
-                "https://portal.nousresearch.com or pick a free model."
+                "your provider's billing page or pick a free model."
             ),
             "statusCode": 404,
             "isRetryable": False,
@@ -51,7 +51,7 @@ _GENERIC_404 = json.dumps(
     }
 )
 
-_HEAD = "nous/deepseek/deepseek-v4-flash"
+_HEAD = "tokenhub/deepseek-v4-flash"
 _TAIL = "openai/gpt-5.3-codex"
 
 
@@ -60,10 +60,10 @@ def _settings() -> RepoSettings:
 
 
 @pytest.mark.asyncio
-async def test_nous_billing_404_advances_the_model_chain(
+async def test_billing_404_advances_the_model_chain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("NOUS_API_KEY", "sk-test")
+    monkeypatch.setenv("TOKENHUB_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
         "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
@@ -72,8 +72,8 @@ async def test_nous_billing_404_advances_the_model_chain(
 
     async def run_once(slug: str) -> AgentResult:
         attempts.append(slug)
-        if slug.startswith("nous/"):
-            return AgentResult(success=False, error=_NOUS_BILLING_404)
+        if slug.startswith("tokenhub/"):
+            return AgentResult(success=False, error=_BILLING_404)
         return AgentResult(success=True, output="ok")
 
     slug, result = await run_with_model_chain(settings=_settings(), run_once=run_once)
@@ -86,7 +86,7 @@ async def test_nous_billing_404_advances_the_model_chain(
 async def test_generic_404_that_is_not_unknown_model_advances_the_chain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("NOUS_API_KEY", "sk-test")
+    monkeypatch.setenv("TOKENHUB_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
         "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
@@ -95,7 +95,7 @@ async def test_generic_404_that_is_not_unknown_model_advances_the_chain(
 
     async def run_once(slug: str) -> AgentResult:
         attempts.append(slug)
-        if slug.startswith("nous/"):
+        if slug.startswith("tokenhub/"):
             return AgentResult(success=False, error=_GENERIC_404)
         return AgentResult(success=True, output="ok")
 
@@ -109,7 +109,7 @@ async def test_generic_404_that_is_not_unknown_model_advances_the_chain(
 async def test_unknown_model_404_does_not_fail_over(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("NOUS_API_KEY", "sk-test")
+    monkeypatch.setenv("TOKENHUB_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
         "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
