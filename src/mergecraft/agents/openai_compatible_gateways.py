@@ -462,8 +462,6 @@ def _provider_config_for_model(model: str) -> ProviderConfig | None:
         if _registry_env_index_for_provider(preset_provider_id) is not None
         else CUSTOM_PROVIDER_API_KEY_ENV
     )
-    from mergecraft.agents.openai_generation_params import normalize_generation_extra_options
-
     raw = _extra_options_for_registry_provider(preset_provider_id)
     return ProviderConfig(
         provider_id=preset_provider_id,

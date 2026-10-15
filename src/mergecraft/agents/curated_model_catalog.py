@@ -82,7 +82,7 @@ def curated_model_entry(slug: str | None) -> CuratedModelEntry | None:
     for entry in _CURATED.values():
         if entry.slug == normalized:
             return entry
-        entry_provider, entry_model = parse_model(entry.slug)
+        entry_provider, _ = parse_model(entry.slug)
         if provider == entry_provider and model_id == entry.api_model_id:
             return entry
     return None
@@ -142,16 +142,16 @@ def compute_review_cost_usd(
     if entry is None:
         return None
     cached = max(0, cache_read_tokens or 0)
-    if entry.cache_read_inclusive:
-        uncached = max(0, input_tokens - cached)
-    else:
-        uncached = max(0, input_tokens)
-    cost = (
+    uncached = (
+        max(0, input_tokens - cached)
+        if entry.cache_read_inclusive
+        else max(0, input_tokens)
+    )
+    return (
         uncached * entry.input_usd_per_mtok
         + cached * entry.cached_input_usd_per_mtok
         + output_tokens * entry.output_usd_per_mtok
     ) / _MTOK
-    return cost
 
 
 def apply_catalog_cost_to_usage(usage: AgentUsage | None, *, model: str | None) -> AgentUsage | None:
