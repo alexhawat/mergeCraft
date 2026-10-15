@@ -334,6 +334,11 @@ def _wire_run(
         return "/usr/bin/opencode-stub"
 
     monkeypatch.setattr(oc, "_install", _install)
+    # ``_run`` probes ``<cli> --version`` before choosing serve vs ``run``. The
+    # subprocess shim only swaps ``Popen``, so without this the probe would
+    # spawn the (nonexistent) stub CLI for real, adding scheduler-dependent
+    # latency before boot starts. Pin the 1.x serve path these tests exercise.
+    monkeypatch.setattr(oc, "_opencode_major_version", lambda _cli: 1)
     monkeypatch.setattr(oc, "_capture_integrity_baseline", lambda _ctx: (tmp_path, "test-digest"))
 
     def _gate(result: Any, _baseline: Any) -> Any:
@@ -351,11 +356,18 @@ def _wire_run(
     return ctx, child
 
 
-def _spy_on_boot(monkeypatch: MonkeyPatch, starts: list[float], ends: list[float]) -> None:
+def _spy_on_boot(
+    monkeypatch: MonkeyPatch,
+    starts: list[float],
+    ends: list[float],
+    started: threading.Event | None = None,
+) -> None:
     original = oc._boot_opencode_server
 
     def _spy(*args: Any, **kwargs: Any) -> Any:
         starts.append(time.monotonic())
+        if started is not None:
+            started.set()
         try:
             return original(*args, **kwargs)
         finally:
@@ -413,7 +425,8 @@ async def test_cancelling_run_mid_boot_kills_and_reaps_the_child(
     ctx, child = _wire_run(tmp_path, monkeypatch, children, _NO_NEWLINE_CHILD)
     starts: list[float] = []
     ends: list[float] = []
-    _spy_on_boot(monkeypatch, starts, ends)
+    started = threading.Event()
+    _spy_on_boot(monkeypatch, starts, ends, started)
 
     run_task = asyncio.create_task(oc._run(ctx))
     # Fail-safe: on the unfixed tree the loop is blocked and cannot be woken
@@ -422,7 +435,10 @@ async def test_cancelling_run_mid_boot_kills_and_reaps_the_child(
     timer.daemon = True
     timer.start()
     try:
-        await asyncio.sleep(0.3)
+        # Boot starts on a worker thread after ``_run``'s setup; wait with a
+        # generous deadline instead of a fixed sleep so a loaded runner cannot
+        # cancel before boot began (which would make the test vacuous).
+        await asyncio.to_thread(started.wait, _BOOT_BOUND_S)
         assert starts, "boot never started"
         cancel_at = time.monotonic()
         run_task.cancel()

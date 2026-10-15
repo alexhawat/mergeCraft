@@ -30,6 +30,14 @@ _HASH_EXCLUDE_DIRS: frozenset[str] = frozenset(
         "node_modules",
         ".mergecraft/prep-scratch",
         ".mergecraft/analyzer-scratch",
+        # Analyzer runtime files mergeCraft itself writes into the checkout when a gate
+        # runs unsandboxed (``analyzers/run.py`` SX-D13 output, ``analyzers/execution.py``
+        # provisioning lock and its ``lockfile.py`` sidecar). A ``run_analyzers`` call made
+        # mid-review lands them after the baseline, which failed every such review closed.
+        # Exact paths: a sibling such as ``.mergecraft/config.yaml`` stays covered.
+        ".mergecraft/analyzer-runs",
+        ".mergecraft/analyzers.lock",
+        ".mergecraft/analyzers.lock.lock",
         "evidence",
     }
 )
