@@ -41,18 +41,12 @@
 # endpoint now returns 202 with no body for notification-only POSTs).
 #
 # Tencent HY3 (`nous/tencent/hy3`) runs through the Nous Portal OpenAI-compatible
-# endpoint via MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + NOUS_API_KEY. It reaches
-# mergeCraft's `opencode` harness, not the Codex one: mergeCraft routes any model
-# whose provider isn't anthropic/openai/google/cursor to opencode
-# (src/mergecraft/utils/agent_resolve.py resolve_runtime_agent()), and the Codex
-# harness cannot stand in because Codex 0.146 dropped `wire_api = "chat"`
-# ("no longer supported; set wire_api = \"responses\"") while Nous Portal serves
-# only chat-completions. Both blockers are fixed upstream in
-# alexhawat/mergeCraft#79 (closes #57 and #71): the image now installs
-# `opencode-ai`, and the harness registers a custom OpenAI-compatible provider
-# from MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + MERGECRAFT_CUSTOM_PROVIDER_API_KEY.
-# The provider id comes from the model prefix, so `nous/tencent/hy3` registers
-# provider `nous` serving `tencent/hy3`.
+# endpoint. Nous is a registered provider in .mergecraft/config.yaml (label
+# `nous`, its base URL, harness `opencode`, envIndex 1), and the rung passes the
+# NOUS_API_KEY secret as LLM_PROVIDER_1_API_KEY. It runs on mergeCraft's
+# `opencode` harness, not the Codex one: Codex dropped `wire_api = "chat"`
+# while Nous Portal serves only chat-completions. The model prefix `nous/`
+# selects the registered provider, which serves `tencent/hy3`.
 #
 # mergeCraft reads the native GITHUB_EVENT_PATH, so the workflow just passes a
 # prompt — no ~mergecraft JSON payload needed.
@@ -663,8 +657,8 @@ jobs:
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
-          # Provider prefix `nous/` selects the opencode harness and names the
-          # provider registered from the MERGECRAFT_CUSTOM_PROVIDER_* env vars.
+          # Provider prefix `nous/` selects the `nous` provider registered in
+          # .mergecraft/config.yaml, which runs on the opencode harness.
           # 2026-08-23: moved off deepseek-v4-flash, which repeatedly failed to
           # reach a terminal verdict or ran out the 25m ceiling (runs
           # 32649874241, 32647074137). hy3 completed a full local review of the
@@ -686,8 +680,10 @@ jobs:
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
           MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || '' }}
-          MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
-          MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          # Nous is registered in .mergecraft/config.yaml (providers: label nous,
+          # envIndex 1), which also carries its base URL; the key rides the
+          # matching indexed slot.
+          LLM_PROVIDER_1_API_KEY: ${{ secrets.NOUS_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu

@@ -11,6 +11,15 @@
 models:
 - nous/tencent/hy3
 
+# Nous Portal is a registered provider: the self-review's Nous rung passes the
+# key as LLM_PROVIDER_1_API_KEY (from the NOUS_API_KEY secret). An unregistered
+# `nous/...` model is refused with "provider 'nous' is not registered".
+providers:
+- label: nous
+  url: https://inference-api.nousresearch.com/v1
+  harness: opencode
+  envIndex: 1
+
 prApproveEnabled: false
 
 runBounds:
