@@ -84,6 +84,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The OpenCode harness hands its isolated `XDG_DATA_HOME` tree to the
+  unprivileged agent user before `setpriv` drops privileges. The action
+  entrypoint creates `.../opencode/auth.json` as root, so the dropped CLI failed
+  with `EACCES: permission denied, mkdir '.../opencode/log'` whenever
+  `OPENCODE_AUTH_JSON` was wired.
+
+- `harness_env_for_active_provider` bridges a provider's flat workflow credential
+  to the harness env name when the indexed value is absent, so an `opencode-go`
+  run with only `OPENCODE_GO_API_KEY` set re-injects `OPENCODE_API_KEY` instead
+  of starting the CLI without a credential.
+
 - An offline review called as a library without a findings file now asks the
   model for structured findings, as the CLI always does. It used to ask for a
   markdown review and then reject it as malformed findings, so any model that
