@@ -26,16 +26,6 @@ from typing import Any
 from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.config.settings import load_repo_settings
 
-_TRACING_FLAGS = {
-    "--tracing",
-    "--no-tracing",
-    "--tracing-to",
-    "--trace-dir",
-    "--tracing-content",
-    "--tracing-export-untrusted-content",
-    "--no-tracing-export-untrusted-content",
-}
-
 
 def _flag_value(args: list[str], flag: str) -> str | None:
     """Return the value following ``flag`` in ``args``, or ``None``."""
