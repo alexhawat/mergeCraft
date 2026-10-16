@@ -67,6 +67,7 @@ def test_apply_provider_env_wiring_writes_indexed_custom_provider_keys(tmp_path:
     new = change.new_text
     assert indexed_custom_provider_base_url(1) in new
     assert indexed_custom_provider_api_key(1) in new
+    assert "LLM_PROVIDER_1: nous" in new
     assert NOUS_BASE_URL in new
     assert "${{ secrets.LLM_PROVIDER_1_API_KEY }}" in new
     parsed = yaml.safe_load(new)

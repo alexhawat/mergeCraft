@@ -124,10 +124,12 @@ def _empty_secrets_for_roster(
     workflow_path: Path,
     roster_slugs: tuple[str, ...],
     wired: frozenset[str],
+    env_to_secret: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
-    env_to_secret = {
-        env_key: secret_name for env_key, secret_name in workflow_secret_bindings(workflow_path)
-    }
+    if env_to_secret is None:
+        env_to_secret = {
+            env_key: secret_name for env_key, secret_name in workflow_secret_bindings(workflow_path)
+        }
     empty: list[str] = []
     seen: set[str] = set()
     for slug in roster_slugs:
@@ -161,6 +163,11 @@ def _secret_name_to_report(
     return env_keys[0]
 
 
+def _require_workflow_wiring_for_roster() -> bool:
+    """CI runs must match the workflow auth manifest; local CLI runs may use config.local only."""
+    return os.environ.get("GITHUB_ACTIONS", "").strip().lower() == "true"
+
+
 def validate_roster_against_auth_manifest(
     *,
     repo_root: Path,
@@ -168,6 +175,7 @@ def validate_roster_against_auth_manifest(
     roster_slugs: tuple[str, ...] | None = None,
     empty_secrets: tuple[str, ...] | None = None,
     settings: RepoSettings | None = None,
+    require_workflow_wiring: bool | None = None,
 ) -> None:
     """Fail closed when the roster names providers absent from the workflow manifest."""
     resolved_root = repo_root.resolve()
@@ -176,42 +184,75 @@ def validate_roster_against_auth_manifest(
     if not slugs and empty_secrets is None:
         return
 
-    wired = _parse_auth_manifest_or_raise(workflow_path)
     roster = load_roster(raw)
-    if roster_slugs is None:
-        try:
-            unwired = collect_unwired_roster_models(roster=roster, wired_providers=wired)
-        except ValueError as exc:
-            raise RosterAuthError(str(exc)) from exc
-        for agent_name, slot, _slug, provider_key in unwired:
-            raise RosterAuthError(
-                _format_unwired_message(agent=agent_name, slot=slot, provider=provider_key)
-            )
-    else:
-        slug_to_slots: dict[str, list[tuple[str, str]]] = {}
-        for agent_name, slot, slug in iter_roster_model_slots(roster):
-            slug_to_slots.setdefault(slug, []).append((agent_name, slot))
+    wiring_required = (
+        require_workflow_wiring
+        if require_workflow_wiring is not None
+        else _require_workflow_wiring_for_roster()
+    )
+    wired: frozenset[str] = frozenset()
+    if wiring_required:
+        wired = _parse_auth_manifest_or_raise(workflow_path)
+    if wiring_required:
+        if roster_slugs is None:
+            try:
+                unwired = collect_unwired_roster_models(roster=roster, wired_providers=wired)
+            except ValueError as exc:
+                raise RosterAuthError(str(exc)) from exc
+            for agent_name, slot, _slug, provider_key in unwired:
+                raise RosterAuthError(
+                    _format_unwired_message(agent=agent_name, slot=slot, provider=provider_key)
+                )
+        else:
+            slug_to_slots: dict[str, list[tuple[str, str]]] = {}
+            for agent_name, slot, slug in iter_roster_model_slots(roster):
+                slug_to_slots.setdefault(slug, []).append((agent_name, slot))
+            for slug in slugs:
+                try:
+                    provider, _model_id = parse_model(slug)
+                except ValueError as exc:
+                    raise RosterAuthError(str(exc)) from exc
+                provider_key = provider.lower()
+                if provider_key in wired:
+                    continue
+                slots = slug_to_slots.get(slug, [("roster", "p0")])
+                agent_name, slot = slots[0]
+                raise RosterAuthError(
+                    _format_unwired_message(agent=agent_name, slot=slot, provider=provider_key)
+                )
+
+    wired_for_secrets = wired
+    if not wiring_required and slugs:
+        providers_in_roster: set[str] = set()
         for slug in slugs:
             try:
                 provider, _model_id = parse_model(slug)
             except ValueError as exc:
                 raise RosterAuthError(str(exc)) from exc
-            provider_key = provider.lower()
-            if provider_key in wired:
-                continue
-            slots = slug_to_slots.get(slug, [("roster", "p0")])
-            agent_name, slot = slots[0]
-            raise RosterAuthError(
-                _format_unwired_message(agent=agent_name, slot=slot, provider=provider_key)
-            )
+            providers_in_roster.add(provider.lower())
+        wired_for_secrets = frozenset(providers_in_roster)
 
     resolved_empty = empty_secrets
     if resolved_empty is None and settings is not None and roster_slugs is not None:
+        if wiring_required:
+            env_to_secret = {
+                env_key: secret_name
+                for env_key, secret_name in workflow_secret_bindings(workflow_path)
+            }
+        else:
+            try:
+                env_to_secret = {
+                    env_key: secret_name
+                    for env_key, secret_name in workflow_secret_bindings(workflow_path)
+                }
+            except WorkflowAuthManifestError:
+                env_to_secret = {}
         resolved_empty = _empty_secrets_for_roster(
             settings=settings,
             workflow_path=workflow_path,
             roster_slugs=roster_slugs,
-            wired=wired,
+            wired=wired_for_secrets,
+            env_to_secret=env_to_secret,
         )
 
     if resolved_empty:
@@ -226,6 +267,7 @@ def validate_roster_at_run_start(
     *,
     snapshot: RepoSettingsSnapshot,
     workflow_path: Path | None = None,
+    require_workflow_wiring: bool | None = None,
 ) -> None:
     """Validate snapshot roster slugs against the workflow auth manifest (D9)."""
     resolved_workflow = (
@@ -239,6 +281,7 @@ def validate_roster_at_run_start(
         workflow_path=resolved_workflow,
         roster_slugs=slugs,
         settings=snapshot.settings,
+        require_workflow_wiring=require_workflow_wiring,
     )
 
 

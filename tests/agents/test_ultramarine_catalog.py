@@ -236,6 +236,119 @@ def test_provenance_line_includes_model_when_set() -> None:
     assert ULTRAMARINE_1_FLASH_SLUG in line
 
 
+def test_opencode_config_includes_both_providers_for_registry_only_dual_reviewer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registry rows alone must emit secondary provider blocks (no gateway env)."""
+    from tests.agents.conftest import make_agent_run_context
+    from tests.cli.support_provider_registry import bootstrap_opencode_gateway
+
+    primary = "opencode-go/deepseek-v4-pro"
+    secondary = ULTRAMARINE_1_FLASH_SLUG
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="opencode-go",
+        model_id="deepseek-v4-pro",
+        api_key="zen-key",
+        url="https://opencode.ai/zen/v1",
+        env_index=1,
+    )
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="paperinstruments",
+        model_id="ultramarine-1-flash",
+        api_key="pi-key",
+        url="https://api.paperinstruments.com/v1",
+        env_index=2,
+    )
+    monkeypatch.setenv("OPENCODE_API_KEY", "zen-key")
+    import yaml
+
+    cfg_path = tmp_path / ".mergecraft" / "config.yaml"
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    data["models"] = [primary, secondary]
+    data["agents"] = {
+        "reviewer": {"modelChain": [primary]},
+        "reviewer2": {"role": "reviewer", "modelChain": [secondary]},
+    }
+    cfg_path.write_text(yaml.dump(data, sort_keys=False), encoding="utf-8")
+    from mergecraft.agents.opencode import build_security_config
+
+    ctx = make_agent_run_context(tmp_path, resolved_model=primary)
+    config = json.loads(build_security_config(ctx, primary))
+    providers = config.get("provider")
+    assert isinstance(providers, dict)
+    assert "paperinstruments" in providers
+    pi_models = providers["paperinstruments"]["models"]
+    assert "ultramarine-1-flash" in pi_models
+
+
+def test_opencode_config_includes_both_providers_for_dual_reviewer_roster(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.agents.conftest import make_agent_run_context
+    from tests.cli.support_provider_registry import bootstrap_opencode_gateway
+
+    primary = "opencode-go/deepseek-v4-pro"
+    secondary = ULTRAMARINE_1_FLASH_SLUG
+    bootstrap_opencode_gateway(
+        tmp_path,
+        monkeypatch,
+        label="paperinstruments",
+        model_id="ultramarine-1-flash",
+        api_key="pi-key",
+        url="https://api.paperinstruments.com/v1",
+        env_index=2,
+    )
+    monkeypatch.setenv(
+        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_2",
+        "https://api.paperinstruments.com/v1",
+    )
+    monkeypatch.setenv("OPENCODE_API_KEY", "zen-key")
+    import yaml
+
+    cfg_path = tmp_path / ".mergecraft" / "config.yaml"
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    data["models"] = [primary, secondary]
+    data["agents"] = {
+        "reviewer": {"modelChain": [primary]},
+        "reviewer2": {"role": "reviewer", "modelChain": [secondary]},
+    }
+    cfg_path.write_text(yaml.dump(data, sort_keys=False), encoding="utf-8")
+    from mergecraft.agents.opencode import build_security_config
+
+    ctx = make_agent_run_context(tmp_path, resolved_model=primary)
+    config = json.loads(build_security_config(ctx, primary))
+    providers = config.get("provider")
+    assert isinstance(providers, dict)
+    assert "paperinstruments" in providers
+    pi_models = providers["paperinstruments"]["models"]
+    assert "ultramarine-1-flash" in pi_models
+
+
+def test_apply_catalog_cost_omits_cost_when_no_tokens_were_used() -> None:
+    usage = AgentUsage(agent="opencode", input_tokens=0, output_tokens=0)
+    enriched = apply_catalog_cost_to_usage(usage, model=ULTRAMARINE_1_FLASH_SLUG)
+    assert enriched is not None
+    assert enriched.cost_usd is None
+
+    reported = AgentUsage(
+        agent="opencode",
+        input_tokens=0,
+        output_tokens=0,
+        cost_usd=0.0057,
+    )
+    stripped = apply_catalog_cost_to_usage(reported, model=ULTRAMARINE_1_FLASH_SLUG)
+    assert stripped is not None
+    assert stripped.cost_usd is None
+
+
 def test_provenance_line_pairs_reviewers_with_models() -> None:
     line = format_finding_provenance_line(
         ["reviewer", "reviewer2"],

@@ -57,16 +57,17 @@ def test_parse_auth_manifest_counts_secret_gated_step(tmp_path: Path) -> None:
     assert "openai" in labels
 
 
-def test_agent_assign_model_bails_on_unwired_provider(
+def test_agent_assign_model_auto_wires_unwired_provider(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     bootstrap_review_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
     slug = register_nous_model(tmp_path, _invoke)
+    before = workflow_text(tmp_path)
     result = _invoke("agent", "assign-model", "reviewer", "p0", slug)
-    assert result.exit_code != 0
-    output = plain_cli_output(result.stdout + result.stderr).lower()
-    assert "nous" in output
-    assert "workflow" in output or "mergecraft.yml" in output or "provider" in output
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
+    after = workflow_text(tmp_path)
+    assert after != before
+    assert "LLM_PROVIDER_1: nous" in after or "LLM_PROVIDER_1: 'nous'" in after
 
 
 def test_agent_assign_model_allow_unwired_permits_with_warning(
@@ -78,6 +79,35 @@ def test_agent_assign_model_allow_unwired_permits_with_warning(
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
     output = plain_cli_output(result.stdout + result.stderr).lower()
     assert "warn" in output or "unwired" in output
+
+
+def test_local_run_start_without_workflow_file_when_credentials_present(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Local CLI must not require a parseable mergecraft.yml when wiring is optional."""
+    bootstrap_review_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    slug = register_nous_model(tmp_path, _invoke)
+    assign = _invoke("agent", "assign-model", "reviewer", "p0", slug, "--allow-unwired")
+    assert assign.exit_code == CLI_SUCCESS_EXIT_CODE, assign.stdout + assign.stderr
+    workflow_path = tmp_path / ".github/workflows/mergecraft.yml"
+    workflow_path.unlink()
+    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "present")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    snapshot = capture_repo_settings_snapshot(root=tmp_path)
+    validate_roster_at_run_start(snapshot=snapshot)
+
+
+def test_local_run_start_skips_unwired_workflow_check_when_credentials_present(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    bootstrap_review_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    slug = register_nous_model(tmp_path, _invoke)
+    assign = _invoke("agent", "assign-model", "reviewer", "p0", slug, "--allow-unwired")
+    assert assign.exit_code == CLI_SUCCESS_EXIT_CODE, assign.stdout + assign.stderr
+    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "present")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    snapshot = capture_repo_settings_snapshot(root=tmp_path)
+    validate_roster_at_run_start(snapshot=snapshot)
 
 
 def test_agent_local_accepts_unwired_provider(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -96,7 +126,11 @@ def test_run_start_validation_fails_closed_on_unwired_provider(
     assert assign.exit_code == CLI_SUCCESS_EXIT_CODE, assign.stdout + assign.stderr
     validate = require_roster_auth_validation()
     with pytest.raises(Exception, match=r"unwired|credential step|mergecraft\.yml|nous"):
-        validate(repo_root=tmp_path, workflow_path=tmp_path / ".github/workflows/mergecraft.yml")
+        validate(
+            repo_root=tmp_path,
+            workflow_path=tmp_path / ".github/workflows/mergecraft.yml",
+            require_workflow_wiring=True,
+        )
 
 
 def test_unwired_provider_and_empty_secret_messages_differ(
@@ -111,6 +145,7 @@ def test_unwired_provider_and_empty_secret_messages_differ(
             repo_root=tmp_path,
             workflow_path=tmp_path / ".github/workflows/mergecraft.yml",
             roster_slugs=("acme/not-wired",),
+            require_workflow_wiring=True,
         )
     except Exception as exc:
         unwired_exc = exc
