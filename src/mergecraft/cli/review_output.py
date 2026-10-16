@@ -47,18 +47,32 @@ def emit_review_json_stdout(
     review_id: str,
     findings: Sequence[Finding],
     output_text: str | None,
+    llm_review_timing: dict[str, object] | None = None,
 ) -> None:
     """Emit the review JSON envelope on stdout (root ``--format json``)."""
     records = finding_json_records(findings)
     validate_findings_export({"findings": records})
-    emit_cli_json(
-        {
-            "review_id": review_id,
-            "count": len(findings),
-            "findings": records,
-            "output": output_text,
-        }
-    )
+    payload: dict[str, object] = {
+        "review_id": review_id,
+        "count": len(findings),
+        "findings": records,
+        "output": output_text,
+    }
+    if llm_review_timing is not None:
+        payload["llm_review_timing"] = llm_review_timing
+    emit_cli_json(payload)
+
+
+def _append_timing_to_text(text: str, timing: dict[str, object] | None) -> str:
+    if not timing:
+        return text
+    line = timing.get("line")
+    if not isinstance(line, str) or not line.strip():
+        return text
+    stripped = text.rstrip()
+    if stripped:
+        return f"{stripped}\n\n{line}\n"
+    return f"{line}\n"
 
 
 def dispatch_review_output(
@@ -74,7 +88,7 @@ def dispatch_review_output(
     exit_code: int,
 ) -> None:
     """Write review artifacts after a successful run (stdout/stderr/files)."""
-    text = result.output or ""
+    text = _append_timing_to_text(result.output or "", result.llm_review_timing)
 
     if json_output is not None and findings and effective_output_format != "json":
         write_findings_json(
@@ -96,6 +110,7 @@ def dispatch_review_output(
                 review_id=review_id,
                 findings=findings,
                 output_text=text or None,
+                llm_review_timing=result.llm_review_timing,
             )
         target = json_output or output
         if target is not None and findings:

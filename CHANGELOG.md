@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Code-measured LLM review generation time in every posted review record and CLI
+  JSON/text output (`⏱ LLM review time: …`), including per-reviewer breakdown
+  when multiple reviewers run (#983).
 - `mergecraft workflow provider add` wires harness providers without a custom base
   URL using `LLM_PROVIDER_<N>: <label>` plus provider-specific credential env keys
   (for example `OPENCODE_GO_API_KEY` for `opencode-go`).

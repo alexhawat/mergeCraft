@@ -213,6 +213,13 @@ class Span:
         """Start timing and make this span active."""
         self.ts_start_ns = time.time_ns()
         self._context_token = _ACTIVE_SPAN.set(self)
+        if self.kind == "llm.call":
+            try:
+                from mergecraft.utils.llm_review_timing import note_llm_call_started
+
+                note_llm_call_started()
+            except Exception:
+                pass
         return self
 
     def __exit__(
@@ -352,8 +359,18 @@ class NullSpan:
     status = "ok"
     trace_id = ""
 
+    def __init__(self, *, kind: str = "") -> None:
+        self.kind = kind
+
     def __enter__(self) -> NullSpan:
         """Return this no-op span."""
+        if self.kind == "llm.call":
+            try:
+                from mergecraft.utils.llm_review_timing import note_llm_call_started
+
+                note_llm_call_started()
+            except Exception:
+                pass
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -410,7 +427,8 @@ class NullTracer:
         Returns:
             NullSpan: A reusable no-op span.
         """
-        return NullSpan()
+        kind = str(args[0]) if args else ""
+        return NullSpan(kind=kind)
 
 
 _ACTIVE_SPAN: ContextVar[Span | NullSpan | None] = ContextVar(

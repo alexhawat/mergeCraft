@@ -219,6 +219,32 @@ def test_store_then_load_round_trip_includes_structured_output(
     assert loaded.scope_reduction is None
 
 
+def test_store_then_load_round_trip_persists_llm_review_timing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.review.offline_result import OfflineReviewResult
+
+    _isolate_cache(tmp_path, monkeypatch)
+    key = review_result_cache_key(_DIFF, model="m")
+    timing = {
+        "per_reviewer": {"mergecraft-reviewer": 11.0},
+        "total_llm_seconds": 11.0,
+        "wall_seconds": 11.0,
+        "line": "⏱ LLM review time: 11s",
+    }
+    stored = OfflineReviewResult(
+        success=True,
+        output="review body",
+        diff_path="x.diff",
+        outcome=RunOutcome.passed,
+        llm_review_timing=timing,
+    )
+    store_review_result(key, stored)
+    loaded = load_review_result(key)
+    assert loaded is not None
+    assert loaded.llm_review_timing == timing
+
+
 def test_store_then_load_round_trip_persists_scope_reduction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
