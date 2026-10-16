@@ -19,6 +19,7 @@ from mergecraft.review_taxonomy import finding_fingerprint, stamp_finding_finger
 _PATH = "src/app.py"
 _BODY = stamp_finding_fingerprint(path=_PATH, body="Missing timeout on the retry loop.")
 _FP = next(iter(finding_fingerprints_in(_BODY)))
+_PUBLISHERS = frozenset({"mergecraft[bot]"})
 
 
 def _thread(
@@ -56,7 +57,7 @@ def _human_reply(body: str = "Not an issue, the caller already retries.") -> dic
 
 
 def test_unresolved_mergecraft_thread_carries_over() -> None:
-    findings = carryover_findings([_thread()])
+    findings = carryover_findings([_thread()], publishers=_PUBLISHERS)
 
     assert len(findings) == 1
     assert findings[0].fingerprint == _FP
@@ -68,22 +69,22 @@ def test_unresolved_mergecraft_thread_carries_over() -> None:
 def test_resolved_thread_is_dropped_unless_asked_for() -> None:
     threads = [_thread(resolved=True)]
 
-    assert carryover_findings(threads) == []
-    assert len(carryover_findings(threads, include_resolved=True)) == 1
+    assert carryover_findings(threads, publishers=_PUBLISHERS) == []
+    assert len(carryover_findings(threads, include_resolved=True, publishers=_PUBLISHERS)) == 1
 
 
 def test_human_authored_thread_is_never_carried_over() -> None:
     human = _thread(body="I think this loop is wrong.")
 
-    assert carryover_findings([human]) == []
+    assert carryover_findings([human], publishers=_PUBLISHERS) == []
 
 
 def test_thread_a_human_answered_is_left_alone_by_default() -> None:
     threads = [_thread(replies=[_human_reply()])]
 
-    assert carryover_findings(threads) == []
+    assert carryover_findings(threads, publishers=_PUBLISHERS) == []
 
-    kept = carryover_findings(threads, include_answered=True)
+    kept = carryover_findings(threads, include_answered=True, publishers=_PUBLISHERS)
     assert len(kept) == 1
     assert kept[0].answered_by == ["alex"]
 
@@ -95,14 +96,14 @@ def test_mergecraft_replying_to_itself_does_not_count_as_an_answer() -> None:
         "author": "mergecraft[bot]",
     }
 
-    findings = carryover_findings([_thread(replies=[own_reply])])
+    findings = carryover_findings([_thread(replies=[own_reply])], publishers=_PUBLISHERS)
 
     assert len(findings) == 1
     assert findings[0].answered_by == []
 
 
 def test_outdated_anchor_is_reported_rather_than_dropped() -> None:
-    findings = carryover_findings([_thread(outdated=True, line=None)])
+    findings = carryover_findings([_thread(outdated=True, line=None)], publishers=_PUBLISHERS)
 
     assert len(findings) == 1
     assert findings[0].is_outdated is True
@@ -110,7 +111,7 @@ def test_outdated_anchor_is_reported_rather_than_dropped() -> None:
 
 
 def test_body_carries_forward_without_the_marker() -> None:
-    finding = carryover_findings([_thread()])[0]
+    finding = carryover_findings([_thread()], publishers=_PUBLISHERS)[0]
 
     assert "mergecraft-finding" not in finding.body
     assert finding.body == "Missing timeout on the retry loop."
@@ -119,13 +120,13 @@ def test_body_carries_forward_without_the_marker() -> None:
 def test_unstamped_comment_gets_the_fingerprint_it_would_have_had() -> None:
     """A comment predating fingerprints still needs a stable identity."""
     text = "Legacy finding.\n\n*via mergecraft*"
-    findings = carryover_findings([_thread(body=text)])
+    findings = carryover_findings([_thread(body=text)], publishers=_PUBLISHERS)
 
     assert findings[0].fingerprint == finding_fingerprint(path=_PATH, body=text)
 
 
 def test_empty_thread_is_skipped() -> None:
-    assert carryover_findings([{"threadId": "T9", "comments": []}]) == []
+    assert carryover_findings([{"threadId": "T9", "comments": []}], publishers=_PUBLISHERS) == []
 
 
 def test_strip_marker_removes_the_finding_prefix() -> None:
@@ -135,7 +136,7 @@ def test_strip_marker_removes_the_finding_prefix() -> None:
 
 
 def test_issue_title_names_the_pr_and_the_anchor() -> None:
-    finding = carryover_findings([_thread()])[0]
+    finding = carryover_findings([_thread()], publishers=_PUBLISHERS)[0]
 
     title = issue_title(finding, pull_number=161)
 
@@ -171,7 +172,7 @@ def test_issue_title_survives_a_pathologically_long_path() -> None:
 
 
 def test_issue_body_embeds_the_fingerprint_for_the_next_run() -> None:
-    finding = carryover_findings([_thread()])[0]
+    finding = carryover_findings([_thread()], publishers=_PUBLISHERS)[0]
 
     body = issue_body(finding, pull_number=161)
 
@@ -183,7 +184,9 @@ def test_issue_body_embeds_the_fingerprint_for_the_next_run() -> None:
 
 def test_issue_body_flags_an_outdated_anchor_and_human_replies() -> None:
     finding = carryover_findings(
-        [_thread(outdated=True, replies=[_human_reply()])], include_answered=True
+        [_thread(outdated=True, replies=[_human_reply()])],
+        include_answered=True,
+        publishers=_PUBLISHERS,
     )[0]
 
     body = issue_body(finding, pull_number=7)
@@ -196,12 +199,12 @@ def test_a_thread_with_unread_comments_is_skipped_by_default() -> None:
     """Truncated comments mean a human reply could be hiding past the cap."""
     threads = [_thread() | {"commentsTruncated": True}]
 
-    assert carryover_findings(threads) == []
-    assert len(carryover_findings(threads, include_answered=True)) == 1
+    assert carryover_findings(threads, publishers=_PUBLISHERS) == []
+    assert len(carryover_findings(threads, include_answered=True, publishers=_PUBLISHERS)) == 1
 
 
 def test_issue_body_carries_a_pr_scoped_key_and_a_bare_fingerprint() -> None:
-    finding = carryover_findings([_thread()])[0]
+    finding = carryover_findings([_thread()], publishers=_PUBLISHERS)[0]
 
     body = issue_body(finding, pull_number=161)
 

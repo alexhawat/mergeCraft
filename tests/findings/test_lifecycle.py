@@ -123,7 +123,7 @@ async def test_resolved_by_change_still_works() -> None:
             "comments": thread["comments"],
         }
     ]
-    assert carryover_findings(normalized) == []
+    assert carryover_findings(normalized, publishers=frozenset({"mergecraft[bot]"})) == []
 
 
 def test_stale_finding_is_distinguishable_from_resolved() -> None:

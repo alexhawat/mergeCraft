@@ -5,9 +5,10 @@ login. In a job-token-only repo that leaves no author that proves authorship, so
 the publisher-set path resolves nothing and every self-review would be a full
 review. This suite pins the run-bound replacement:
 
-* which runs are **trusted** — runs of ``.github/workflows/mergecraft.yml`` with
-  ``event == "pull_request_target"`` and ``conclusion == "success"`` for *this*
-  PR (``pull_requests[].number``). ``pull_request_target`` always runs the
+* which runs are **trusted** — completed runs (``success`` or ``failure``) of
+  ``.github/workflows/mergecraft.yml`` with ``event == "pull_request_target"`` for
+  *this* PR (``pull_requests[].number``) that carry an evidence artefact. A run
+  that requested changes concludes ``failure`` and is still a review. ``pull_request_target`` always runs the
   default branch's definition, so a workflow added or edited on a PR branch
   cannot produce such a run.
 * what they record — each run's ``mergecraft-evidence-*`` artefact carries the
@@ -270,7 +271,7 @@ async def test_pull_request_event_failed_and_other_pr_runs_are_ignored(tmp_path:
         [trusted_new, trusted_old],
         extra_runs=[
             _run(201, event="pull_request", created_at="2026-09-29T14:00:00Z"),
-            _run(202, conclusion="failure", created_at="2026-09-29T14:00:00Z"),
+            _run(202, conclusion="cancelled", created_at="2026-09-29T14:00:00Z"),
             _run(203, pull_number=_OTHER_PR_NUMBER, created_at="2026-09-29T14:00:00Z"),
             _run(204, pull_number=None, created_at="2026-09-29T14:00:00Z"),
         ],

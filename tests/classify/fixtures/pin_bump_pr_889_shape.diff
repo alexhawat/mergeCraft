@@ -1,0 +1,27 @@
+diff --git a/.github/workflows/mergecraft.yml b/.github/workflows/mergecraft.yml
+index 3f1c2aa..9b7d4e1 100644
+--- a/.github/workflows/mergecraft.yml
++++ b/.github/workflows/mergecraft.yml
+@@ -41,7 +41,7 @@ jobs:
+       - name: Review (self)
+-        uses: alexhawat/mergeCraft@1d479f7a0123456789abcdef0123456789abcdef # self-review
++        uses: alexhawat/mergeCraft@08274ddafedcba9876543210fedcba9876543210 # self-review
+         with:
+           token: ${{ secrets.GITHUB_TOKEN }}
+@@ -88,7 +88,7 @@ jobs:
+       - name: Review (fallback)
+-        uses: alexhawat/mergeCraft@1d479f7a0123456789abcdef0123456789abcdef # self-review
++        uses: alexhawat/mergeCraft@08274ddafedcba9876543210fedcba9876543210 # self-review
+         with:
+           token: ${{ secrets.GITHUB_TOKEN }}
+@@ -130,8 +130,8 @@ jobs:
+     steps:
+-      - uses: alexhawat/mergeCraft/.github/actions/verify@1d479f7a0123456789abcdef0123456789abcdef
++      - uses: alexhawat/mergeCraft/.github/actions/verify@08274ddafedcba9876543210fedcba9876543210
+       - run: make action-pin-check
+@@ -170,6 +170,6 @@ jobs:
+     env:
+-      MERGECRAFT_ACTION_REF: 1d479f7a0123456789abcdef0123456789abcdef
++      MERGECRAFT_ACTION_REF: 08274ddafedcba9876543210fedcba9876543210
+     steps:
+       - run: echo done
