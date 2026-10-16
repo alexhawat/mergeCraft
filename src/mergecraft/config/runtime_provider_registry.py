@@ -393,6 +393,32 @@ def _read_indexed_credential_value(entry: ProviderRegistryEntry, suffix: str) ->
     return None
 
 
+def _flat_harness_credential_for_label(label: str, suffix: str) -> str | None:
+    """Read a built-in provider's flat workflow credential when no indexed one exists.
+
+    ``mergecraft provider auth <label>`` stores ``LLM_PROVIDER_<N>_API_KEY``, but
+    the generated workflow wires the *flat* name — ``OPENCODE_GO_API_KEY`` for
+    ``opencode-go``. ``_read_indexed_credential_value`` already falls back to the
+    flat spelling for ``API_KEY``; resolving it here too keeps the bridge at the
+    mapping site, so the flat value still reaches the harness name
+    ``_harness_env_name_for_suffix`` returns even if the registry-side fallback
+    changes. Only ``API_KEY`` has a flat spelling in this table.
+
+    Args:
+        label (str): Registry provider label (``opencode-go``).
+        suffix (str): Indexed credential suffix being mapped (``API_KEY``).
+
+    Returns:
+        str | None: The flat env value when present, else ``None``.
+    """
+    if suffix != "API_KEY":
+        return None
+    flat_key = _BUILTIN_LABEL_TO_HARNESS_API_KEY.get(label.strip().lower())
+    if not flat_key:
+        return None
+    return _read_env_value(flat_key)
+
+
 def harness_env_for_active_provider(
     model: str | None,
     agent_id: str,
@@ -402,6 +428,12 @@ def harness_env_for_active_provider(
     Only the active model's provider row is mapped — indexed secrets are copied
     into the env vars Codex / Claude / Gemini / Cursor subprocesses read
     (``OPENAI_API_KEY``, ``CODEX_AUTH_JSON``, ``CLAUDE_CODE_OAUTH_TOKEN``, etc.).
+    When the indexed value is absent, the provider's flat workflow credential
+    (``_flat_harness_credential_for_label``) is bridged through
+    ``_harness_env_name_for_suffix`` — for ``opencode-go`` that turns a
+    ``OPENCODE_GO_API_KEY`` env value into ``OPENCODE_API_KEY``. Providers whose
+    flat name already equals the harness name (anthropic, google, openai, …)
+    map identically.
     """
     if not model:
         return {}
@@ -422,6 +454,8 @@ def harness_env_for_active_provider(
     mapped: dict[str, str] = {}
     for suffix in _credential_suffixes_for_entry(entry):
         value = _read_indexed_credential_value(entry, suffix)
+        if not value:
+            value = _flat_harness_credential_for_label(entry.label, suffix)
         if not value:
             continue
         harness_key = _harness_env_name_for_suffix(entry.label, suffix)

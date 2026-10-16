@@ -66,6 +66,103 @@ def test_indexed_api_key_maps_to_native_harness_env(
     assert f"LLM_PROVIDER_1_{suffix}" not in env
 
 
+def test_opencode_go_flat_env_bridges_to_opencode_api_key(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """``opencode-go``'s flat workflow secret reaches the harness name the CLI reads.
+
+    ``provider auth opencode-go`` stores ``LLM_PROVIDER_10_API_KEY`` but the
+    generated workflow wires the *flat* ``OPENCODE_GO_API_KEY``. The runtime must
+    bridge that flat value to ``OPENCODE_API_KEY``, which is what the OpenCode CLI
+    reads — otherwise ``build_agent_env`` strips the credential and re-injects
+    nothing.
+    """
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    write_registry_provider_row(
+        tmp_path,
+        label="opencode-go",
+        harness="opencode",
+        env_index=10,
+        auth_kind="api_key",
+    )
+    monkeypatch.delenv("LLM_PROVIDER_10_API_KEY", raising=False)
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "flat-opencode-go-key")
+    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
+
+    slug = "opencode-go/deepseek-v4.1-flash"
+    assert harness_env_for_active_provider(slug, "opencode") == {
+        "OPENCODE_API_KEY": "flat-opencode-go-key"
+    }
+
+    env = build_agent_env("opencode", model=slug)
+    assert env.get("OPENCODE_API_KEY") == "flat-opencode-go-key"
+    assert "OPENCODE_GO_API_KEY" not in env
+
+
+def test_mapping_site_fallback_bridges_flat_name_independently(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The mapping-site fallback still bridges the flat name if the registry reader misses.
+
+    Guards the hardening in ``harness_env_for_active_provider`` itself: even with
+    the registry-side flat lookup neutralized, the flat ``OPENCODE_GO_API_KEY``
+    must still reach ``OPENCODE_API_KEY``.
+    """
+    from mergecraft.config import runtime_provider_registry as registry
+
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    write_registry_provider_row(
+        tmp_path,
+        label="opencode-go",
+        harness="opencode",
+        env_index=10,
+        auth_kind="api_key",
+    )
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "flat-opencode-go-key")
+    monkeypatch.setattr(registry, "_read_indexed_credential_value", lambda _entry, _suffix: None)
+
+    assert registry.harness_env_for_active_provider(
+        "opencode-go/deepseek-v4.1-flash", "opencode"
+    ) == {"OPENCODE_API_KEY": "flat-opencode-go-key"}
+
+
+@pytest.mark.parametrize(
+    ("label", "harness", "flat_key"),
+    [
+        ("anthropic", "claude", "ANTHROPIC_API_KEY"),
+        ("google", "gemini", "GEMINI_API_KEY"),
+        ("openai", "codex", "OPENAI_API_KEY"),
+    ],
+)
+def test_flat_credential_maps_identically_for_builtin_providers(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    label: str,
+    harness: str,
+    flat_key: str,
+) -> None:
+    """Providers whose flat name equals the harness name keep an identity mapping."""
+    scaffold_mergecraft_home(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    write_registry_provider_row(
+        tmp_path,
+        label=label,
+        harness=harness,
+        env_index=1,
+        auth_kind="api_key",
+    )
+    monkeypatch.delenv("LLM_PROVIDER_1_API_KEY", raising=False)
+    monkeypatch.setenv(flat_key, "flat-builtin-key")
+
+    slug = f"{label}/demo-model"
+    assert harness_env_for_active_provider(slug, harness) == {flat_key: "flat-builtin-key"}
+    assert build_agent_env(harness, model=slug).get(flat_key) == "flat-builtin-key"
+
+
 def test_indexed_oauth_maps_to_claude_code_oauth_token(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
