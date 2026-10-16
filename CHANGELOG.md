@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a3] — 2026-10-17
+
+### Breaking — action required
+
+- The built-in Nous Portal provider is gone: the `nous/...` catalog models,
+  `mergecraft auth nous`, and the flat `NOUS_API_KEY` credential no longer
+  exist, so a `nous/...` model now fails as an unregistered provider. **Fix:**
+  register Nous (or any OpenAI-compatible endpoint) under `providers:` in
+  `.mergecraft/config.yaml` with `url`, `harness: opencode` and an `envIndex`,
+  and pass the key as `LLM_PROVIDER_<N>_API_KEY`. See
+  [docs/authentication.md](docs/authentication.md).
+
+- An invalid `trust.agentSandbox` value (for example `off`, a bare `false`, or a
+  typo like `nevr`) now fails configuration validation instead of quietly
+  becoming `dispatch`. **Fix:** set one of `never`, `merged-only`, `dispatch`, or
+  `same-repo`; the four tiers still normalize whitespace and case.
+
+- The `model_pin` action input no longer carries a default. Leaving it unset
+  follows the repository's `modelPin` setting, and an explicit `disabled` now
+  overrides a repository `modelPin: true`. **Fix:** leave `model_pin` unset to
+  follow the repository, or set `enabled` / `disabled` explicitly; the previous
+  `disabled` default meant an unset input could never override the repository.
+
+- Settings the standalone runtime does not consume are accepted but now warn
+  once when set to a non-default value: `gates.thermostat`, `tracing.redaction`,
+  `stopScript`, `blastRadiusOverride`, `operatorPipeline`, and `autoMergeEnabled:
+  true`. **Fix:** none required — the values still parse and round-trip; remove
+  the key if the warning is unwanted.
+
+- A malformed tracing environment variable or tracing Action input — the enable
+  flag, the region, the content level, or the untrusted-content export — now
+  fails configuration instead of being ignored. A typo such as `flase` used to
+  drop the value and let a lower layer's more permissive one win; the run now
+  fails closed as a configuration error naming the variable, and never prints
+  its value. **Fix:** correct the spelling; `MERGECRAFT_TRACING_REGION` still
+  accepts `us` and `eu`.
+
+- The MCP server no longer mounts a webhook endpoint. **Fix:** none — a signed
+  delivery was verified but processed nothing, and its replay window could never
+  fire, so no review path consumed the route.
+
+- Provider circuit-breaker, health, budget and routing-eval helpers that no
+  review path called are removed. **Fix:** none — none of them was reachable
+  from a review.
+
+- Four context-retrieval modules no review path imported are removed. **Fix:**
+  none — no review path imported them.
+
+- Agent entries with `dispatch: ensemble` or `shadow` are refused as not
+  implemented instead of being accepted and ignored. **Fix:** use a `dispatch`
+  mode that is implemented; `ensemble` and `shadow` are refused.
+
+- The `sarif_upload` action input no longer declares a default, so an unset
+  input reaches `.mergecraft/config.yaml`'s `analyzers.sarifUpload` as
+  intended. **Fix:** set `sarif_upload` (or `analyzers.sarifUpload`) explicitly
+  if you relied on the implicit `disabled`.
+
+- Progress comments are recognised by the identity that published them, not by
+  any bot. When neither the expected publisher nor a trusted self-review sticky
+  id is available, the run creates a new progress comment — and with it a fresh
+  ledger — rather than adopting a comment posted by the shared Actions bot.
+  **Fix:** none required; pin the reviewer App (or the self-review workflow) if
+  you want the existing sticky adopted.
+
+- Enterprise audit events are no longer written to `.mergecraft/audit.jsonl`
+  inside the workspace by default. **Fix:** set `MERGECRAFT_AUDIT_ROOT`, or read
+  from the new default location.
+
+- Every exit under `src/mergecraft/cli/` now routes through named constants and
+  usage errors exit `2`. **Fix:** scripts that branched on exit code `1` for
+  generic CLI failures must follow the new table — most former `1` paths now
+  exit `30`; see [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md).
+
+### Known limitations
+
+- Evaluation in this release is structural replay only, not live detection, and
+  no human-adjudicated, calibrated or benchmarked result ships in it.
+
 ### Added
 
 - Code-measured LLM review generation time in every posted review record and CLI
@@ -50,41 +128,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A prepared release branch keeps `server.json`'s advertised package version in
   step with `pyproject.toml`, so the branch no longer fails its own
   `mcp-server-json-check` drift gate.
-
-### Breaking
-
-- The built-in Nous Portal provider is gone: the `nous/...` catalog models,
-  `mergecraft auth nous`, and the flat `NOUS_API_KEY` credential no longer
-  exist, so a `nous/...` model now fails as an unregistered provider. **Fix:**
-  register Nous (or any OpenAI-compatible endpoint) under `providers:` in
-  `.mergecraft/config.yaml` with `url`, `harness: opencode` and an `envIndex`,
-  and pass the key as `LLM_PROVIDER_<N>_API_KEY`. See
-  [docs/authentication.md](docs/authentication.md).
-
-- An invalid `trust.agentSandbox` value (for example `off`, a bare `false`, or a
-  typo like `nevr`) now fails configuration validation instead of quietly
-  becoming `dispatch`. **Fix:** set one of `never`, `merged-only`, `dispatch`, or
-  `same-repo`; the four tiers still normalize whitespace and case.
-
-- The `model_pin` action input no longer carries a default. Leaving it unset
-  follows the repository's `modelPin` setting, and an explicit `disabled` now
-  overrides a repository `modelPin: true`. **Fix:** leave `model_pin` unset to
-  follow the repository, or set `enabled` / `disabled` explicitly; the previous
-  `disabled` default meant an unset input could never override the repository.
-
-- Settings the standalone runtime does not consume are accepted but now warn
-  once when set to a non-default value: `gates.thermostat`, `tracing.redaction`,
-  `stopScript`, `blastRadiusOverride`, `operatorPipeline`, and `autoMergeEnabled:
-  true`. **Fix:** none required — the values still parse and round-trip; remove
-  the key if the warning is unwanted.
-
-- A malformed tracing environment variable or tracing Action input — the enable
-  flag, the region, the content level, or the untrusted-content export — now
-  fails configuration instead of being ignored. A typo such as `flase` used to
-  drop the value and let a lower layer's more permissive one win; the run now
-  fails closed as a configuration error naming the variable, and never prints
-  its value. **Fix:** correct the spelling; `MERGECRAFT_TRACING_REGION` still
-  accepts `us` and `eu`.
 
 ### Fixed
 
@@ -1699,12 +1742,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Failure-injection, soak, high-concurrency, monorepo, and large-PR harnesses now pin production SLOs for review completion, time to first finding, total review latency, and publication success, with a closed reliability error taxonomy and per-stage latency metrics (#364)
 - A mid-review provider outage degrades instead of crashing; corrupt local cache rebuilds, disk and memory preflight fail closed, giant repositories skip or partial, SCM publication is idempotent, runs resume from a checkpoint, cleanup runs on timeout/cancel/crash, and diagnostic bundles redact secrets (#365)
 - `mergecraft eval gate` now blocks a release when a prompt-injection, malicious-repository, or malicious-ticket corpus case regresses; reviewing a local path or public URL treats the tree as attacker-controlled input (#363)
-- `mergecraft memory validate` checks the learnings store; learned behaviour needs historical evidence or explicit approval; factual / policy / preference / false-positive memory stay distinct; organization memory is a pluggable backend; effectiveness metrics prove precision rises without losing recall (#360)
+- `mergecraft memory validate` checks the learnings store; learned behaviour needs historical evidence or explicit approval; factual / policy / preference / false-positive memory stay distinct; organization memory is a pluggable backend; effectiveness metrics track precision and recall together (#360)
 - `mergecraft policy effective` and `simulate` resolve the effective rule set (with the source of every rule, including symbol scope), detect same-scope enforcement conflicts, emit policy audit artifacts, and report trigger / false-positive / waiver / blocking rates (#358)
 - Shipped policy packs for security, public API, migrations, dependency changes, authentication/authorization, testing, and operational readiness; each rule keeps stable identity fields and ships should-trigger / should-not fixtures for `mergecraft policy test` (#359)
 - `mergecraft context search` and `explain` score retrieved context, allocate per-specialist token budgets, fetch lazily through controlled tools, and record omitted scope so the evidence outcome is downgraded; retrieval quality is scored separately from the model (#356)
 - Reviewed-repo instruction discovery now includes `GEMINI.md`, GitHub Copilot instructions, Windsurf rules, `SKILL.md`, and a configurable extra list; injected instruction bytes are hashed into the run manifest, competing sources record a winner, untrusted files stay inside the nonce fence, and `--context` files enforce type, size, trust, and provenance (#357)
-- Review findings are ranked by materiality (security outranks style), confidence is calibrated from benchmark hit rates, and publication/blocking floors plus per-severity, category, file, and review budgets are configurable; dismissals record a closed reason code for evaluation (not durable memory), and a release-wired corpus gate requires blocker precision above 95% (#355)
+- Review findings are ranked by materiality (security outranks style), publication and blocking floors plus per-severity, category, file, and review budgets are configurable; dismissals record a closed reason code for evaluation (not durable memory), and a release-wired corpus gate compares blocker precision against a configured floor (#355)
 - `mergecraft evidence show` and `verify` display and replay a finding's evidence packet (six verifier states, freshness, provenance hash, completeness); unverified findings do not block unless policy allows it, and a failed verifier cannot promote a finding to proven (#354)
 - `mergecraft xrepo explain` reports SHA-pinned linked-repo producer/consumer contract breakage without writing the reviewed tree; policy can require cross-repo review before a public-contract change passes (#353)
 - `mergecraft requirements inspect` and `explain` map ticket and local-spec text to requirement states without writing the reviewed tree; policy can require that evidence before a review passes (#352)
@@ -1766,7 +1809,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
 - Large-PR review engine (DG2): cluster changed paths by dependency and intent, build hierarchical diff context (map → summaries → raw hunks) with token-budget scope reduction that reserves verbatim hunks for high-risk regions, record disputed/waived/stale finding lifecycle states, and emit advisory-only PR split recommendations from independent change groups
 - Finding precision pipeline (DG1): deduplicate agent/analyzer findings before publication, apply a code-defined severity rubric at the verifier seam, require structured causality on blocking findings, suppress pre-existing analyzer hits via baseline comparison, and classify generated/minified/vendored paths for review policy
-- DG1 precision corpus gate (`evaluate_dg1_precision_corpus`) proving recall holds while corpus-confirmed precision improves over the pre-DG1 baseline
+- DG1 precision corpus gate (`evaluate_dg1_precision_corpus`) replays the corpus and compares confirmed precision against the pre-DG1 baseline
 - PR utilities (DG8): standalone describe output (`mergecraft.pr.describe`), text-only changelog/docs/test suggestions (D11), deterministic TODO scan, classifier-derived effort bands, advisory label suggestions, and `/mergecraft review` comment routing with author-association and permission gating (`mergecraft.mcp.comment_router`)
 - `mergecraft mcp serve` and `mergecraft mcp list` expose the reviewer's MCP tool surface to external clients without widening trust tier or tool-class policy (D13)
 - Named review profiles (`--profile fast|deep|security`) bundle model chain, analyzer focus, and run budgets; explicit CLI flags still win
@@ -2127,6 +2170,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [0.1.0] — 2026-08-14
+
+> **Never published.** `0.1.0` was never tagged, has no GitHub release and no
+> package upload; its entries are kept here as history. The version above,
+> `0.1.0a3`, is the pre-release cut in its place.
 
 Initial public release: mergeCraft is a standalone, BYOK GitHub Action for
 AI-powered PR review — no proprietary backend, no account, review runs
