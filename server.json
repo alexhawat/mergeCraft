@@ -2,12 +2,12 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.alexhawat/mergecraft",
   "description": "Public mergeCraft MCP: six review-only tools over completed-review IR.",
-  "version": "0.1.0a1",
+  "version": "0.1.0a3",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "merge-craft",
-      "version": "0.1.0a1",
+      "version": "0.1.0a3",
       "transport": {
         "type": "stdio"
       },
