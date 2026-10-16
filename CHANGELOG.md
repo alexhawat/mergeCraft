@@ -73,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An offline review called as a library without a findings file now asks the
+  model for structured findings, as the CLI always does. It used to ask for a
+  markdown review and then reject it as malformed findings, so any model that
+  followed the prompt failed.
 - A review whose agent calls `run_analyzers` on a host without a sandbox no
   longer fails closed with "checkout integrity failure: tree changed during
   read-only review". The gate's output in `.mergecraft/analyzer-runs/` and the
