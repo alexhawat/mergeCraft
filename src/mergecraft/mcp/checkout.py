@@ -44,10 +44,12 @@ __all__ = [
 
 
 def _rebaseline_config_after_checkout(ctx: ToolContext) -> None:
-    """Re-baseline the config hash after PR checkout (D14)."""
+    """Re-baseline the config hash and review tree hash after PR checkout (D14)."""
     from mergecraft.config.settings_snapshot import rebaseline_repo_settings_snapshot
 
     rebaseline_repo_settings_snapshot(ctx)
+    if ctx.tool_state.review_tree_baseline is not None:
+        ctx.tool_state.review_tree_baseline.after_checkout()
 
 
 def _manifest_exists_at_ref(*, cwd: str, ref: str, rel_path: str) -> bool:
@@ -886,6 +888,8 @@ def checkout_pr_tool(ctx: ToolContext):
                 f"uncommitted changes. dirty paths:\n{dirty}"
             )
             raise RuntimeError(msg)
+        if ctx.tool_state.review_tree_baseline is not None:
+            ctx.tool_state.review_tree_baseline.before_checkout()
 
         # TB-D4 — refuse a PR the run was not bound to. The bound number lives on
         # the run's **bound** event (``_resolve_credentials`` writes the fetched

@@ -19,6 +19,7 @@ from mergecraft.mcp.checkout import (
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
+from mergecraft.security.review_integrity import TreeBaseline, hash_tree
 from mergecraft.utils.github import GitHubClient
 
 
@@ -684,3 +685,41 @@ async def test_impact_path_omitted_when_operator_disables_analyzers(
     payload = await _checkout(ctx)
 
     assert "impactPath" not in payload
+
+
+def _baseline_on_base_branch(ctx: ToolContext, repo: Path) -> TreeBaseline:
+    """Pin the review baseline on the base branch, as the Action's merge-ref checkout does."""
+    _git(repo, "checkout", "-q", "base")
+    baseline = TreeBaseline(root=repo.resolve(), digest=hash_tree(repo))
+    ctx.tool_state.review_tree_baseline = baseline
+    return baseline
+
+
+@pytest.mark.asyncio
+async def test_checkout_pr_repins_the_review_tree_baseline(tmp_path: Path) -> None:
+    """A branch behind its base changes the tree on checkout; that alone must not fail the review."""
+    repo, _first, head = _pr_repo_with_two_commits(tmp_path)
+    ctx = _ctx_for(repo, _StubGitHub(head_sha=head, reviews=[]), tmp_path, mode="Review")
+    baseline = _baseline_on_base_branch(ctx, repo)
+
+    await _checkout(ctx)
+
+    baseline.verify()
+    (repo / "new.py").write_text("tampered = 1\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="checkout integrity failure"):
+        baseline.verify()
+
+
+@pytest.mark.asyncio
+async def test_checkout_pr_does_not_absorb_a_change_made_before_it(tmp_path: Path) -> None:
+    """An ignored file written before checkout_pr survives its dirty gate; the re-pin must not hide it."""
+    repo, _first, head = _pr_repo_with_two_commits(tmp_path)
+    ctx = _ctx_for(repo, _StubGitHub(head_sha=head, reviews=[]), tmp_path, mode="Review")
+    baseline = _baseline_on_base_branch(ctx, repo)
+    (repo / ".git" / "info" / "exclude").write_text("planted.py\n", encoding="utf-8")
+    (repo / "planted.py").write_text("planted = 1\n", encoding="utf-8")
+
+    await _checkout(ctx)
+
+    with pytest.raises(RuntimeError, match="before checkout_pr"):
+        baseline.verify()

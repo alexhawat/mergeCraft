@@ -42,7 +42,7 @@ from mergecraft.agents.shared import (
     with_prompt,
 )
 from mergecraft.mcp.tool_state import primary_repo_state
-from mergecraft.security.review_integrity import hash_tree, verify_tree_unchanged
+from mergecraft.security.review_integrity import TreeBaseline, hash_tree
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.genai import (
     ModelParams,
@@ -943,25 +943,26 @@ async def _prompt_session_http(
     return with_prompt(AgentResult(success=True, output=output or None, usage=usage), text)
 
 
-def _capture_integrity_baseline(ctx: AgentRunContext) -> tuple[Path, str] | None:
+def _capture_integrity_baseline(ctx: AgentRunContext) -> TreeBaseline | None:
     checkout = _checkout_root(ctx)
     try:
-        return checkout, hash_tree(checkout)
+        baseline = TreeBaseline(root=checkout, digest=hash_tree(checkout))
     except OSError as exc:
         msg = f"review integrity baseline failed for {checkout}: {exc}"
         logger.error(msg)
         return None
+    ctx.tool_state.review_tree_baseline = baseline
+    return baseline
 
 
 def _apply_integrity_gate(
     result: AgentResult,
-    baseline: tuple[Path, str] | None,
+    baseline: TreeBaseline | None,
 ) -> AgentResult:
     if baseline is None:
         return result
-    checkout, digest = baseline
     try:
-        verify_tree_unchanged(checkout, digest)
+        baseline.verify()
     except RuntimeError as exc:
         return AgentResult(success=False, error=str(exc))
     return result
