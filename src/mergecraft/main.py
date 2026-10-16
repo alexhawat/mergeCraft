@@ -491,6 +491,7 @@ async def publish_deterministic_record(
             tool_state.usage_entries,
             budget_tracker=resolved_ctx.budget_tracker,
         ),
+        llm_review_timing=tool_state.llm_review_timing,
         credential_degradations=list(tool_state.credential_degradations),
         agent_sandbox_decision=tool_state.agent_sandbox_decision,
         action_pin_sha=_action_pin_sha(),
@@ -631,6 +632,16 @@ def _token_summary(
     return token_summary_from_usage(usage_entries, budget_tracker=tracker)
 
 
+def _cost_summary(
+    usage_entries: list[Any],
+    *,
+    budget_tracker: Any | None = None,
+) -> str | None:
+    from mergecraft.agents.curated_model_catalog import cost_summary_from_usage_entries
+
+    return cost_summary_from_usage_entries(usage_entries, budget_tracker=budget_tracker)
+
+
 async def _publish(
     ctx: RunContext,
     *,
@@ -757,6 +768,11 @@ async def _publish(
                     tool_context.tool_state.usage_entries,
                     budget_tracker=tool_context.budget_tracker,
                 ),
+                cost_summary=_cost_summary(
+                    tool_context.tool_state.usage_entries,
+                    budget_tracker=tool_context.budget_tracker,
+                ),
+                llm_review_timing=tool_context.tool_state.llm_review_timing,
                 credential_degradations=list(tool_context.tool_state.credential_degradations),
             )
             append_step_summary(summary_body)
@@ -1684,6 +1700,11 @@ def _promote_and_finalize_agent_result(
         )
 
     if result.usage:
+        from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
+
+        usage = apply_catalog_cost_to_usage(result.usage, model=tool_state.model)
+        if usage is not None:
+            result = replace(result, usage=usage)
         tool_state.usage_entries.append(result.usage)
         from mergecraft.utils.run_bounds import BudgetExhausted, record_agent_usage
 
@@ -1691,6 +1712,12 @@ def _promote_and_finalize_agent_result(
             record_agent_usage(ctx.budget_tracker, result.usage, phase="reviewer_dispatch")
         except BudgetExhausted as exc:
             ctx.budget_exhaustion = exc
+
+    from mergecraft.utils.llm_review_timing import snapshot_llm_review_timing
+
+    timing_snapshot = snapshot_llm_review_timing()
+    if timing_snapshot is not None:
+        tool_state.llm_review_timing = timing_snapshot
 
     if output_schema and not tool_state.output and result.success:
         msg = (
@@ -1733,6 +1760,11 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
     output_schema = ctx.output_schema
     setup_hook_failure = ctx.setup_hook_failure
     setup_script_skip_reason = ctx.setup_script_skip_reason
+
+    if tool_state.selected_mode in {"Review", "IncrementalReview"}:
+        from mergecraft.utils.llm_review_timing import bind_llm_review_timing_tracker
+
+        bind_llm_review_timing_tracker()
 
     async def _run_agent_once(slug: str) -> AgentResult:
         attempt_model = resolve_model(slug=slug, respect_env_override=False)

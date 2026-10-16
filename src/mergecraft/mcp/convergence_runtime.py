@@ -85,6 +85,8 @@ def prepare_inline_comment_for_publish(
     incremental_diff_text: str | None = None,
     raised_by: str | list[str] | None = None,
     show_provenance: bool = False,
+    raised_by_model: str | None = None,
+    raised_by_models: dict[str, str] | None = None,
 ) -> str:
     """Apply incremental miss labelling and collateral append at publish time."""
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -120,6 +122,8 @@ def prepare_inline_comment_for_publish(
         prepared,
         raised_by,
         show_provenance=show_provenance,
+        raised_by_model=raised_by_model,
+        raised_by_models=raised_by_models,
     )
 
 

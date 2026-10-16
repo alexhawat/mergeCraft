@@ -470,6 +470,8 @@ class ToolState:
     # ``main.py``. Despite what the merge-evidence plan assumed, this is *not*
     # a tool-call log — the trajectory record (#43) keeps its own field below.
     usage_entries: list[Any] = field(default_factory=list)
+    # Code-measured LLM review generation timing (#983 task 6).
+    llm_review_timing: Any | None = None
     # Every MCP tool call this run made, in order (#43, D8). Appended by
     # ``mcp/server.py``'s ``tools/call`` handler — the single door every agent
     # tool call goes through — and read at end of run by
@@ -604,6 +606,7 @@ def record_reviewer_dispatch_run(
     *,
     agent_id: str,
     findings: list[dict[str, Any]],
+    model_slug: str | None = None,
 ) -> None:
     """Record one reviewer subagent's findings before terminal submission (D7)."""
     from mergecraft.review.terminal_submission import ReviewerRun
@@ -613,7 +616,7 @@ def record_reviewer_dispatch_run(
         return
     stamped_findings = [dict(row) for row in findings if isinstance(row, dict)]
     tool_state.reviewer_dispatch_runs.append(
-        ReviewerRun(agent_id=key, findings=stamped_findings),
+        ReviewerRun(agent_id=key, findings=stamped_findings, model_slug=model_slug),
     )
 
 

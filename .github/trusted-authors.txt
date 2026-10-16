@@ -16,3 +16,5 @@ noreply@github.com
 cursoragent@cursor.com
 49699333+dependabot[bot]@users.noreply.github.com
 41898282+github-actions[bot]@users.noreply.github.com
+# Alex's second machine (Mac mini); authored #981.
+amsterdam2@mini-ams2.tail2292ff.ts.net

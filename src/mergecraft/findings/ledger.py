@@ -1170,6 +1170,8 @@ def render_deterministic_review_block(
     trust_tier: str | None = None,
     attempt_count: int | None = None,
     token_summary: str | None = None,
+    cost_summary: str | None = None,
+    llm_review_timing: Any | None = None,
     publication_entrypoint: str | None = None,
     inline_comments_demoted: bool = False,
     comment_fallback_applied: bool = False,
@@ -1275,6 +1277,19 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Attempts:** {attempt_count}")
     if token_summary:
         header_lines.append(f"- **Tokens:** {token_summary}")
+    if cost_summary:
+        header_lines.append(f"- **Cost:** {cost_summary}")
+    if llm_review_timing is not None:
+        from mergecraft.utils.llm_review_timing import (
+            LlmReviewTimingSnapshot,
+            format_llm_review_timing_record,
+        )
+
+        snapshot = (
+            llm_review_timing if isinstance(llm_review_timing, LlmReviewTimingSnapshot) else None
+        )
+        if snapshot is not None:
+            header_lines.append(format_llm_review_timing_record(snapshot))
     if run_url:
         header_lines.append(f"- **Run:** {run_url}")
     if reviewed_sha:

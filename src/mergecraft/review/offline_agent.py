@@ -314,6 +314,12 @@ async def run_offline_agent_review(
             model=resolved_model or PINNED_MODEL,
             max_tokens=bounds.token_budget,
         )
+        from mergecraft.utils.llm_review_timing import (
+            bind_llm_review_timing_tracker,
+            snapshot_llm_review_timing,
+        )
+
+        bind_llm_review_timing_tracker()
         with bind_run_budget(provider_budget):
             winning_slug, result = await run_with_model_chain(
                 settings=settings,
@@ -342,6 +348,9 @@ async def run_offline_agent_review(
         )
         structured_output = tool_state.output
         markdown_output = result.output
+        timing_snapshot = snapshot_llm_review_timing()
+        if timing_snapshot is not None:
+            tool_state.llm_review_timing = timing_snapshot
         packet_path = await asyncio.to_thread(
             _emit_offline_packet,
             tool_context,
@@ -351,6 +360,7 @@ async def run_offline_agent_review(
             structured_output=structured_output,
             output_path=evidence_packet_path,
         )
+        timing_payload = timing_snapshot.to_dict() if timing_snapshot is not None else None
         if outcome != RunOutcome.passed:
             return OfflineReviewResult(
                 success=False,
@@ -360,6 +370,7 @@ async def run_offline_agent_review(
                 diff_path=str(materialization.path),
                 evidence_packet_path=packet_path,
                 outcome=outcome,
+                llm_review_timing=timing_payload,
             )
         return OfflineReviewResult(
             success=True,
@@ -368,6 +379,7 @@ async def run_offline_agent_review(
             diff_path=str(materialization.path),
             evidence_packet_path=packet_path,
             outcome=RunOutcome.passed,
+            llm_review_timing=timing_payload,
         )
     except ModelFallbackPolicyError as exc:
         return _offline_failure(

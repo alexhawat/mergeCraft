@@ -308,12 +308,17 @@ def _provider_config_from_env_pair(
     base_url: str,
     api_key_env: str,
     extra_options_env: str | None = None,
+    model_slug: str | None = None,
 ) -> ProviderConfig:
+    from mergecraft.agents.openai_generation_params import normalize_generation_extra_options
+
+    raw = _extra_options_for_provider(provider_id, indexed_env=extra_options_env)
+    extra_options = normalize_generation_extra_options(model_slug, raw)
     return ProviderConfig(
         provider_id=provider_id,
         base_url=base_url,
         api_key_env=api_key_env,
-        extra_options=_extra_options_for_provider(provider_id, indexed_env=extra_options_env),
+        extra_options=extra_options,
     )
 
 
@@ -363,6 +368,7 @@ def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
             base_url=base_url,
             api_key_env=api_key_env,
             extra_options_env=INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT.format(n=n),
+            model_slug=f"{provider_id}/",
         )
     return out
 
@@ -419,12 +425,23 @@ def _provider_config_for_model(model: str) -> ProviderConfig | None:
         return None
     provider_id = model[:slash].lower()
 
+    from mergecraft.agents.openai_generation_params import normalize_generation_extra_options
+
     endpoints = resolve_gateway_endpoints()
     config = endpoints.get(provider_id)
     if config is None and len(endpoints) == 1:
         config = next(iter(endpoints.values()))
     if config is not None:
-        return config
+        return ProviderConfig(
+            provider_id=config.provider_id,
+            model_id=config.model_id,
+            base_url=config.base_url,
+            api_key_env=config.api_key_env,
+            adapter=config.adapter,
+            capabilities=config.capabilities,
+            extra_options=normalize_generation_extra_options(model, dict(config.extra_options)),
+            context_limit=config.context_limit,
+        )
 
     resolved = resolve_gateway_endpoint(model)
     if resolved is None:
@@ -435,12 +452,24 @@ def _provider_config_for_model(model: str) -> ProviderConfig | None:
         if _registry_env_index_for_provider(preset_provider_id) is not None
         else CUSTOM_PROVIDER_API_KEY_ENV
     )
+    raw = _extra_options_for_registry_provider(preset_provider_id)
     return ProviderConfig(
         provider_id=preset_provider_id,
         base_url=base_url,
         api_key_env=api_key_env,
-        extra_options=_extra_options_for_provider(preset_provider_id),
+        extra_options=normalize_generation_extra_options(model, raw),
     )
+
+
+def _extra_options_for_registry_provider(provider_id: str) -> dict[str, Any]:
+    """Resolve ``extra_options`` including indexed ``…EXTRA_OPTIONS_<N>`` env."""
+    env_index = _registry_env_index_for_provider(provider_id)
+    indexed_env = (
+        INDEXED_CUSTOM_PROVIDER_EXTRA_OPTIONS_FMT.format(n=env_index)
+        if env_index is not None
+        else None
+    )
+    return _extra_options_for_provider(provider_id, indexed_env=indexed_env)
 
 
 def _registry_env_index_for_provider(provider_id: str) -> int | None:

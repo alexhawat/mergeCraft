@@ -256,3 +256,47 @@ async def test_submit_review_verdict_stamps_raised_by_from_dispatch_tool(
     assert raised_by == {"mergecraft-reviewer", "reviewer2"}
     parsed = json.loads(result.content[0]["text"])
     assert parsed.get("recorded") is True
+
+
+@pytest.mark.asyncio
+async def test_submit_review_verdict_pairs_models_on_deduped_finding(tmp_path: Any) -> None:
+    """Deduped cross-reviewer findings keep reviewer→model pairs on the wire (#983)."""
+    from mergecraft.agents.verifier import AgentFinding
+    from mergecraft.mcp.reviewer_dispatch import record_reviewer_dispatch_run_tool
+    from mergecraft.mcp.verdict import submit_review_verdict_tool
+
+    write_config(tmp_path, two_reviewer_config())
+    ctx = publication_ctx(tmp_path)
+    register_review_scope(
+        ctx.tool_state,
+        diff_path=str(tmp_path / "diff.patch"),
+        provenance="checkout",
+    )
+    shared = _finding(path="src/shared.py", body="shared defect", line=42, severity="Minor")
+    dispatch_result = await record_reviewer_dispatch_run_tool(ctx).execute(
+        {"agent_id": "reviewer2", "findings": [dict(shared)]},
+    )
+    assert dispatch_result.is_error is False
+
+    result = await submit_review_verdict_tool(ctx).execute(
+        {
+            "verdict": "approve",
+            "summary": "Duplicate finding from two reviewers.",
+            "findings": [shared],
+        }
+    )
+    assert result.is_error is False
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    assert len(submission.findings) == 1
+    row = submission.findings[0]
+    validated = AgentFinding.model_validate(
+        row.model_dump() if hasattr(row, "model_dump") else row,
+    )
+    assert isinstance(validated.raised_by, list)
+    assert set(validated.raised_by) == {"mergecraft-reviewer", "reviewer2"}
+    assert validated.raised_by_models == {
+        "mergecraft-reviewer": "anthropic/claude-sonnet",
+        "reviewer2": "openai/gpt-5.3-codex",
+    }
+    assert validated.raised_by_model is None
