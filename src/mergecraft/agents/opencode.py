@@ -149,6 +149,42 @@ def _with_flat_opencode_auth(env: dict[str, str], *, model: str | None) -> dict[
     return env
 
 
+def _hand_xdg_data_home_to_agent(data_home: Path) -> None:
+    """Chown the isolated XDG data tree to the setpriv-dropped agent user (W3.4).
+
+    ``_setup_opencode_auth`` runs inside the still-root action entrypoint, so the
+    ``opencode/`` directory and its ``auth.json`` are created root-owned even
+    though ``data_home``'s parent — the run temp dir — is already agent-owned
+    (``git_setup._prepare_temp_dir_for_agent``). Ownership follows the creating
+    process, not the parent directory's owner, so the ``setpriv``-dropped
+    ``opencode`` CLI cannot create ``.../opencode/log`` (the observed failure is
+    ``EACCES: permission denied, mkdir '.../opencode/log'``) or read the
+    ``auth.json`` it was handed. Mirror
+    ``git_setup._prepare_temp_dir_for_agent``: resolve the agent user and chown
+    the whole tree, but only when running as root. A non-root / dev host, or a
+    platform without ``pwd``, is a silent no-op — this must never raise.
+
+    Args:
+        data_home (Path): Isolated ``XDG_DATA_HOME`` root the caller just wrote
+            ``opencode/auth.json`` under.
+    """
+    if os.getuid() != 0 or not data_home.exists():
+        return
+    try:
+        import pwd
+
+        from mergecraft.utils.privilege import agent_user_name
+
+        pw = pwd.getpwnam(agent_user_name())
+    except (ImportError, KeyError):  # fmt: skip
+        return
+    for path in (data_home, *data_home.rglob("*")):
+        with contextlib.suppress(OSError):
+            if path.is_dir():
+                os.chmod(path, 0o755)  # nosec B103 — agent must traverse the auth tree
+            os.chown(path, pw.pw_uid, pw.pw_gid)
+
+
 def _setup_opencode_auth(
     ctx: AgentRunContext,
     *,
@@ -166,6 +202,7 @@ def _setup_opencode_auth(
         auth_path = auth_dir / "auth.json"
         auth_path.write_text(raw, encoding="utf-8")
         os.chmod(auth_path, 0o600)
+        _hand_xdg_data_home_to_agent(data_home)
         return
     if raw:
         logger.warning(

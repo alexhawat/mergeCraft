@@ -45,23 +45,27 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
-# Deliberately narrow: the three agent drivers that write a provider-home-like
-# directory (``$CODEX_HOME``, ``.gemini``, ``.claude``) a setpriv-dropped agent
-# CLI subprocess reads/writes afterward, plus the privilege-drop helpers
-# themselves — not every module under ``src/mergecraft/agents/`` that happens
-# to call ``.mkdir()``. A first pass scanned the whole ``agents/`` package and
-# false-positived on ``verifier.py::record_withdrawn_finding`` — it creates
-# and writes ``.mergecraft/learnings.md`` inside the *checkout* workspace,
-# which ``main.py`` already chowns whole via ``prepare_workspace_for_agent``
-# before any driver runs; no privilege boundary is crossed there, so nothing
-# to flag. Widening this list back out would need to first teach the check to
-# tell "writes into a run-tmpdir-rooted provider home" apart from "writes
-# into the already-agent-owned checkout workspace" — real dataflow, not a
+# Deliberately narrow: the agent drivers that write a provider-home-like
+# directory (``$CODEX_HOME``, ``.gemini``, ``.claude``, ``opencode-xdg-data``) a
+# setpriv-dropped agent CLI subprocess reads/writes afterward, plus the
+# privilege-drop helpers themselves — not every module under
+# ``src/mergecraft/agents/`` that happens to call ``.mkdir()``. A first pass
+# scanned the whole ``agents/`` package and false-positived on
+# ``verifier.py::record_withdrawn_finding`` — it creates and writes
+# ``.mergecraft/learnings.md`` inside the *checkout* workspace, which
+# ``main.py`` already chowns whole via ``prepare_workspace_for_agent`` before any
+# driver runs; no privilege boundary is crossed there, so nothing to flag.
+# ``opencode.py`` was added after the ``XDG_DATA_HOME`` tree it writes went
+# unchowned and the dropped CLI failed with ``EACCES`` creating
+# ``.../opencode/log``. Widening this list back out would need to first teach the
+# check to tell "writes into a run-tmpdir-rooted provider home" apart from
+# "writes into the already-agent-owned checkout workspace" — real dataflow, not a
 # mechanical AST shape — so the list stays an explicit, reviewed set instead.
 _SCOPED_FILES: tuple[Path, ...] = (
     REPO / "src" / "mergecraft" / "agents" / "claude.py",
     REPO / "src" / "mergecraft" / "agents" / "codex.py",
     REPO / "src" / "mergecraft" / "agents" / "gemini.py",
+    REPO / "src" / "mergecraft" / "agents" / "opencode.py",
     REPO / "src" / "mergecraft" / "utils" / "privilege.py",
     REPO / "src" / "mergecraft" / "utils" / "git_setup.py",
 )
