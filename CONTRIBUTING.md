@@ -199,7 +199,7 @@ Add repository secrets for Craft publish: `TWINE_USERNAME`, `TWINE_PASSWORD`.
 
 ### Cut a release
 
-1. **Prepare** (creates `release/<version>`, bumps `pyproject.toml`, cuts `CHANGELOG.md`, pushes):
+1. **Prepare** (creates `release/<version>`, bumps `pyproject.toml` and `server.json`, cuts `CHANGELOG.md`, pushes):
    ```bash
    craft prepare auto   # or: craft prepare 0.1.0
    ```
