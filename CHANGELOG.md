@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Recorded Jev transports and the canary assertion moved out of the runtime
   package into the test suite.
 
+- A prepared release branch keeps `server.json`'s advertised package version in
+  step with `pyproject.toml`, so the branch no longer fails its own
+  `mcp-server-json-check` drift gate.
+
 ### Breaking
 
 - The built-in Nous Portal provider is gone: the `nous/...` catalog models,
