@@ -105,8 +105,8 @@ def test_config_tracing_and_config_explain_agree_about_the_local_overlay(
     rendered = _config_tracing(tmp_path, monkeypatch)
 
     assert explained["layers"]["yaml"] is True
-    assert re.search(r"status\s+enabled", rendered), rendered
-    assert not re.search(r"status\s+disabled", rendered), rendered
+    assert re.search(r"status\s*│\s*enabled", rendered), rendered
+    assert not re.search(r"status\s*│\s*disabled", rendered), rendered
 
 
 def test_without_a_local_overlay_only_the_committed_file_contributes(
@@ -118,7 +118,7 @@ def test_without_a_local_overlay_only_the_committed_file_contributes(
 
     assert "config.yaml" in rendered
     assert "config.local.yaml" not in rendered
-    assert re.search(r"status\s+disabled", rendered), rendered
+    assert re.search(r"status\s*│\s*disabled", rendered), rendered
 
 
 def test_the_local_overlay_is_ignored_on_ci_like_the_loader(
@@ -132,7 +132,7 @@ def test_the_local_overlay_is_ignored_on_ci_like_the_loader(
 
     assert [path.name for path in sources.files] == ["config.yaml"]
     assert "config.local.yaml" not in rendered
-    assert re.search(r"status\s+disabled", rendered), rendered
+    assert re.search(r"status\s*│\s*disabled", rendered), rendered
 
 
 def test_a_missing_mergecraft_config_is_reported_the_way_doctor_reports_it(
@@ -179,7 +179,7 @@ def test_an_explicit_config_flag_wins_before_the_shared_resolver(
 
     assert "flagged.yaml" in rendered
     assert "config.local.yaml" not in rendered
-    assert re.search(r"status\s+disabled", rendered), rendered
+    assert re.search(r"status\s*│\s*disabled", rendered), rendered
 
 
 @pytest.mark.parametrize(

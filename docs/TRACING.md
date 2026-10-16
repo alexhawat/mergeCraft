@@ -715,6 +715,19 @@ without touching `.mergecraft/config.yaml`:
 The Action wraps `${{ secrets.LOGFIRE_TOKEN }}` into `logfire-token`
 so the secret never appears in the workflow file.
 
+A `tracing-to` value outside `local_files` / `logfire` / `otel` is a
+configuration error, like a mistyped `tracing` flag. With tracing on, the Action
+ends the run as `configuration_error` and the CLI exits with the configuration
+code, with a message naming the variable (`INPUT_TRACING_TO`,
+`MERGECRAFT_TRACING_TO` or `--tracing-to`) and the value. With tracing off the
+value changes nothing about the run, so it is ignored and a warning names it.
+
+`mergecraft config tracing` lists the config files it read, the same set
+`mergecraft doctor` and `mergecraft config explain` use (the committed
+`.mergecraft/config.yaml`, `config.local.yaml` off CI, or `MERGECRAFT_CONFIG`
+when it names an existing file), and says so when `MERGECRAFT_CONFIG` names a
+file that is missing.
+
 ## CLI surface
 
 ```text

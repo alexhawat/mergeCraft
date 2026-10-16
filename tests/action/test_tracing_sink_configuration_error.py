@@ -121,4 +121,4 @@ async def test_known_sinks_still_run(
 
     assert rec.result is not None, f"main() raised: {rec.raised!r}"
     assert rec.result.outcome is not RunOutcome.configuration_error
-    assert not [line for line in warnings if "tracing sink" in line.lower()]
+    assert not [line for line in warnings if "tracing-to sink" in line.lower()]
