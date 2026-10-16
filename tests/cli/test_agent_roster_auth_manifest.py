@@ -81,6 +81,22 @@ def test_agent_assign_model_allow_unwired_permits_with_warning(
     assert "warn" in output or "unwired" in output
 
 
+def test_local_run_start_without_workflow_file_when_credentials_present(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """Local CLI must not require a parseable mergecraft.yml when wiring is optional."""
+    bootstrap_review_repo(tmp_path, monkeypatch, workflow_body=WORKFLOW_ONE_STEP_TEMPLATE)
+    slug = register_nous_model(tmp_path, _invoke)
+    assign = _invoke("agent", "assign-model", "reviewer", "p0", slug, "--allow-unwired")
+    assert assign.exit_code == CLI_SUCCESS_EXIT_CODE, assign.stdout + assign.stderr
+    workflow_path = tmp_path / ".github/workflows/mergecraft.yml"
+    workflow_path.unlink()
+    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "present")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    snapshot = capture_repo_settings_snapshot(root=tmp_path)
+    validate_roster_at_run_start(snapshot=snapshot)
+
+
 def test_local_run_start_skips_unwired_workflow_check_when_credentials_present(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

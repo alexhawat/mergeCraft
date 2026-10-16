@@ -124,10 +124,12 @@ def _empty_secrets_for_roster(
     workflow_path: Path,
     roster_slugs: tuple[str, ...],
     wired: frozenset[str],
+    env_to_secret: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
-    env_to_secret = {
-        env_key: secret_name for env_key, secret_name in workflow_secret_bindings(workflow_path)
-    }
+    if env_to_secret is None:
+        env_to_secret = {
+            env_key: secret_name for env_key, secret_name in workflow_secret_bindings(workflow_path)
+        }
     empty: list[str] = []
     seen: set[str] = set()
     for slug in roster_slugs:
@@ -182,13 +184,15 @@ def validate_roster_against_auth_manifest(
     if not slugs and empty_secrets is None:
         return
 
-    wired = _parse_auth_manifest_or_raise(workflow_path)
     roster = load_roster(raw)
     wiring_required = (
         require_workflow_wiring
         if require_workflow_wiring is not None
         else _require_workflow_wiring_for_roster()
     )
+    wired: frozenset[str] = frozenset()
+    if wiring_required:
+        wired = _parse_auth_manifest_or_raise(workflow_path)
     if wiring_required:
         if roster_slugs is None:
             try:
@@ -230,11 +234,25 @@ def validate_roster_against_auth_manifest(
 
     resolved_empty = empty_secrets
     if resolved_empty is None and settings is not None and roster_slugs is not None:
+        if wiring_required:
+            env_to_secret = {
+                env_key: secret_name
+                for env_key, secret_name in workflow_secret_bindings(workflow_path)
+            }
+        else:
+            try:
+                env_to_secret = {
+                    env_key: secret_name
+                    for env_key, secret_name in workflow_secret_bindings(workflow_path)
+                }
+            except WorkflowAuthManifestError:
+                env_to_secret = {}
         resolved_empty = _empty_secrets_for_roster(
             settings=settings,
             workflow_path=workflow_path,
             roster_slugs=roster_slugs,
             wired=wired_for_secrets,
+            env_to_secret=env_to_secret,
         )
 
     if resolved_empty:
