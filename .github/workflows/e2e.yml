@@ -40,7 +40,7 @@ on:
         required: false
       GEMINI_API_KEY:
         required: false
-      CODEX_AUTH_JSON:
+      OPENCODE_GO_API_KEY:
         required: false
 
 permissions:
@@ -130,12 +130,9 @@ jobs:
     if: ${{ !inputs.required-security && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    # Codex rotates the ChatGPT session's refresh token during use, so two
-    # concurrent runs sharing one credential can retire each other's session.
-    # Serialize this job against other consumers of the same subscription.
-    concurrency:
-      group: codex-subscription-auth
-      cancel-in-progress: false
+    # The live slice runs on an API key, never the ChatGPT-subscription
+    # CODEX_AUTH_JSON: that credential rotates its refresh token on use, and a
+    # second consumer retires the self-review's session (#970).
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -182,7 +179,7 @@ jobs:
       - name: Live installed-harness smoke (explicit model required)
         env:
           MERGECRAFT_E2E_LIVE_MODEL: ${{ vars.MERGECRAFT_E2E_LIVE_MODEL }}
-          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -195,15 +192,13 @@ jobs:
             exit 0
           fi
           case "${MERGECRAFT_E2E_LIVE_MODEL}" in
-            openai/*)
-              # The ChatGPT/Codex subscription credential outranks the API key:
-              # both reach the same Codex harness inside the image.
-              if [[ -n "${CODEX_AUTH_JSON:-}" ]]; then
-                credential_name=CODEX_AUTH_JSON
-              else
-                credential_name=OPENAI_API_KEY
-              fi
+            opencode-go/*)
+              # OpenCode Go is a registered provider: the smoke registers it in
+              # its throwaway repo (envIndex 1), so the key rides that slot.
+              export LLM_PROVIDER_1_API_KEY="${OPENCODE_GO_API_KEY:-}"
+              credential_name=LLM_PROVIDER_1_API_KEY
               ;;
+            openai/*) credential_name=OPENAI_API_KEY ;;
             anthropic/*) credential_name=ANTHROPIC_API_KEY ;;
             google/*|gemini/*) credential_name=GEMINI_API_KEY ;;
             *) echo "unsupported live-smoke provider" >&2; exit 2 ;;
@@ -226,11 +221,11 @@ jobs:
           status="${PIPESTATUS[0]}"
           set -e
           if [[ "${status}" -ne 0 ]]; then
-            # An expired or rejected subscription credential is not a product
-            # failure: name it unable to run, so a red night is not misread as a
-            # review defect. Recovery: re-mint with `mergecraft auth codex`.
-            if grep -Eqi 'refresh token|invalid_grant|401' "$run_log"; then
-              echo "::error title=Live slice unavailable::unavailable credential — the Codex subscription credential was rejected or expired; re-mint it with 'mergecraft auth codex'"
+            # A rejected or expired credential is not a product failure: name it
+            # unable to run, so a red night is not misread as a review defect.
+            # Recovery: rotate the selected provider's secret.
+            if grep -Eqi 'invalid_grant|401|invalid api key|unauthorized' "$run_log"; then
+              echo "::error title=Live slice unavailable::unavailable credential — the provider rejected ${credential_name}; rotate that secret"
             else
               echo "::error title=Live slice failed::the live harness smoke did not produce an accepted terminal review" >&2
             fi
