@@ -109,7 +109,7 @@ RUN apt-get update -qq \
 # API-only, no CLI to pin). Installed under /opt/agent-clis with bins on PATH
 # for the unprivileged `mergecraft` runtime user.
 #
-# opencode-ai backs the `opencode` agent, which resolve_runtime_agent() picks for
+# @opencode/cli (OpenCode 2.x) backs the `opencode` agent, which resolve_runtime_agent() picks for
 # every model whose provider is not anthropic/openai/google/cursor. Without it
 # that path raised FileNotFoundError, so no third-party OpenAI-compatible
 # provider was reachable at all.

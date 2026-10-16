@@ -73,6 +73,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An offline review called as a library without a findings file now asks the
+  model for structured findings, as the CLI always does. It used to ask for a
+  markdown review and then reject it as malformed findings, so any model that
+  followed the prompt failed.
+- A review whose agent calls `run_analyzers` on a host without a sandbox no
+  longer fails closed with "checkout integrity failure: tree changed during
+  read-only review". The gate's output in `.mergecraft/analyzer-runs/` and the
+  provisioning lock `.mergecraft/analyzers.lock` (with its `.lock` sidecar) are
+  files mergeCraft itself writes into the checkout, so the integrity hash now
+  skips those three exact paths, as it already skipped `analyzer-scratch` and
+  `prep-scratch`. Every other file under `.mergecraft/` is still covered.
+- The Action images ship OpenCode 2.x (`@opencode/cli` 2.0.29) for every model
+  routed through the OpenCode harness (Nous, OpenCode Zen and Go, MiniMax,
+  TokenHub, custom providers). OpenCode 2.x moved its server API, so on 2.x a
+  review runs through `opencode run` in a private server per run and resumes the
+  same session for follow-up turns. OpenCode 1.x keeps the previous path.
+
 - The hardened example workflow's approval gate now receives only the review
   verdict, not the whole evidence packet. On a large pull request the packet
   exceeded the size one environment variable may hold, so the gate could not

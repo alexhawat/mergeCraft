@@ -898,7 +898,12 @@ class _OfflineDiffReviewRun:
                 "; ".join(limitations),
             )
 
-        output_schema = findings_output_schema() if self.json_path is not None else None
+        # Always the findings schema: the result is parsed as findings whether or
+        # not a JSON file is written. Without it, ``set_output`` took a plain
+        # string and the prompt asked for a markdown ``review``, which the
+        # findings parse then rejected, so a library caller with no
+        # ``json_path`` failed on any model that followed the prompt.
+        output_schema = findings_output_schema()
         from pydantic import ValidationError
 
         from mergecraft.verify.review import consume_verification_report
@@ -945,7 +950,7 @@ class _OfflineDiffReviewRun:
                 model=resolved_model,
                 trust_tier=self.trust_tier,
                 prompt_extra=self.prompt_extra,
-                json_mode=self.json_path is not None,
+                json_mode=output_schema is not None,
                 base_ref=self.materialization.base_ref,
                 cwd=self.cwd,
                 verification_report_digest=verification_report_cache_digest(verification_report),

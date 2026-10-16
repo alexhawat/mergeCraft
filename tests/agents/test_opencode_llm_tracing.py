@@ -18,6 +18,7 @@ import pytest
 from tests.agents.conftest import make_agent_run_context
 from tests.tracing.conftest import as_sink_value
 
+from mergecraft.agents import opencode as oc_module
 from mergecraft.agents.opencode import (
     _prompt_session,
     build_security_config,
@@ -218,30 +219,77 @@ def test_opencode_model_limit_requires_context_and_output(
     assert model_entry["limit"] == {"context": 128_000, "output": 4096}
 
 
+def _error_types_within(
+    cmd: list[str], *, env: dict[str, str], cwd: Path, seconds: float
+) -> list[str]:
+    """Run ``opencode run --format json`` for at most ``seconds``; return its error event types."""
+    process = subprocess.Popen(
+        cmd, env=env, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
+    try:
+        output, _ = process.communicate(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        output, _ = process.communicate(timeout=10)
+    types: list[str] = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "error":
+            types.append(str((event.get("error") or {}).get("type")))
+    return types
+
+
 @pytest.mark.skipif(_pinned_opencode_cli() is None, reason="pinned opencode CLI not installed")
 def test_opencode_security_config_validates_against_pinned_cli(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Generated harness config must load under the pinned OpenCode CLI schema."""
-    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "https://inference.example/v1")
+    """Generated harness config must load, and route its model, under the pinned CLI.
+
+    1.x validates the file with ``debug config``. 2.x loads config lazily and
+    its ``debug config`` only lists sources through a shared background
+    service, so the check runs the model against a closed local port: a routed
+    model fails on the connection, an unrouted one with ``provider.no-route``.
+    """
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "http://127.0.0.1:9/v1")
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "test-key")
     monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", '{"max_tokens": 4096}')
-
     ctx = make_agent_run_context(tmp_path, resolved_model="nous/deepseek-v4-flash")
     config_path = tmp_path / "opencode.json"
     config_path.write_text(build_security_config(ctx, "nous/deepseek-v4-flash"))
-
     cli = _pinned_opencode_cli()
     assert cli is not None
-    env = {**os.environ, "OPENCODE_CONFIG": str(config_path)}
-    result = subprocess.run(
-        [str(cli), "debug", "config"],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
+    isolated = {name: str(tmp_path / "xdg" / name) for name in ("config", "data", "cache", "state")}
+    env = {
+        **os.environ,
+        "OPENCODE_CONFIG": str(config_path),
+        **{f"XDG_{name.upper()}_HOME": path for name, path in isolated.items()},
+    }
+    major = oc_module._opencode_major_version(str(cli))
+    if major is None or major < 2:
+        result = subprocess.run(
+            [str(cli), "debug", "config"],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
+        return
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    cmd = [str(cli), "run", "--standalone", "--format", "json", "--model"]
+    # An unrouted model fails at once; the routed one retries the closed port.
+    unrouted = _error_types_within(
+        [*cmd, "nope/missing-model", "x"], env=env, cwd=workdir, seconds=60
     )
-    assert result.returncode == 0, result.stderr or result.stdout
+    routed = _error_types_within(
+        [*cmd, "nous/deepseek-v4-flash", "x"], env=env, cwd=workdir, seconds=15
+    )
+    assert "provider.no-route" in unrouted, unrouted
+    assert "provider.no-route" not in routed, routed
 
 
 def test_resolve_model_params_from_singleton_extra_options_env(

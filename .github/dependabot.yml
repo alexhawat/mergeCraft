@@ -80,7 +80,7 @@ updates:
 
   # Agent CLI lockfile for Dockerfile / Dockerfile.analyzers (W7 / D7).
   #
-  # These three CLIs (claude-code, opencode-ai, gemini-cli) ship several
+  # These CLIs (claude-code, @opencode/cli, gemini-cli) ship several
   # releases a week each and are the loudest source of dependency PRs in the
   # repo. They are also the ones whose bumps are least individually meaningful
   # — the pin exists so the image is reproducible, not because any one patch
