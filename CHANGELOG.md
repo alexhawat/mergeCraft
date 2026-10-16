@@ -106,6 +106,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files mergeCraft itself writes into the checkout, so the integrity hash now
   skips those three exact paths, as it already skipped `analyzer-scratch` and
   `prep-scratch`. Every other file under `.mergecraft/` is still covered.
+
+- A workspace review no longer fails closed with "checkout integrity failure:
+  tree changed during read-only review" when dependency prep creates nested
+  `node_modules`. pnpm/yarn/npm lay down `apps/api/node_modules`,
+  `packages/*/node_modules` and the like (and pnpm can drop `.pnpm-store`
+  in-tree), all after the integrity baseline, so the hash now prunes those
+  directory names at any depth instead of only at the checkout root. A nested
+  `.git` metadata directory is pruned the same way.
+
 - The Action images ship OpenCode 2.x (`@opencode/cli` 2.0.29) for every model
   routed through the OpenCode harness (Nous, OpenCode Zen and Go, MiniMax,
   TokenHub, custom providers). OpenCode 2.x moved its server API, so on 2.x a
