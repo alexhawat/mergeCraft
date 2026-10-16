@@ -6,10 +6,19 @@
 # actually wires a credential for. Left unset, the registry default falls back to
 # the synthetic `auto/efficient` AutoTier, whose `auto` provider has no credential
 # step in mergecraft.yml, so the credentialed reviewer slot was reported skipped on
-# every run. `nous/tencent/hy3` is the workflow's primary rung and NOUS_API_KEY is
-# already configured as a repo secret.
+# every run. `opencode-go/deepseek-v4.1-flash` is the workflow's primary rung;
+# OpenCode Go is registered below and its key is the OPENCODE_GO_API_KEY repo
+# secret, passed to the rung as LLM_PROVIDER_9_API_KEY.
 models:
-- nous/tencent/hy3
+- opencode-go/deepseek-v4.1-flash
+
+# An unregistered `opencode-go/...` model is refused with "provider
+# 'opencode-go' is not registered". envIndex 9, not 1: unit tests run from
+# the repo root and read this file, and their fixtures use slots 1-3.
+providers:
+- label: opencode-go
+  harness: opencode
+  envIndex: 9
 
 prApproveEnabled: false
 

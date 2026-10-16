@@ -24,7 +24,7 @@ from tests.ci.review_gate_ordering import (
     FIXTURE_FALLBACK_JOB,
     FIXTURE_GATE_JOB,
     FIXTURE_PRIMARY_JOB,
-    NOUS_REVIEW_STEP,
+    PRIMARY_REVIEW_STEP,
     approval_gate_job,
     find_step,
     gate_job_needs_attempt_jobs,
@@ -132,9 +132,9 @@ class TestScanWorkflows:
 class TestMergecraftWorkflow:
     """Integration: the real consumer workflow must satisfy D9 after W14."""
 
-    def test_review_job_still_declares_nous_and_codex_attempts(self) -> None:
+    def test_review_job_still_declares_primary_and_codex_attempts(self) -> None:
         doc = load_workflow(_MERGECRAFT_WORKFLOW)
-        assert find_step(doc, NOUS_REVIEW_STEP) is not None
+        assert find_step(doc, PRIMARY_REVIEW_STEP) is not None
         assert find_step(doc, CODEX_REVIEW_STEP) is not None
         assert find_step(doc, CODEX_FALLBACK_DECIDE_STEP) is not None
 

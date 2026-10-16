@@ -19,8 +19,8 @@ from tests.ci.workflow_support import as_list, job
 # Canonical step names in ``.github/workflows/mergecraft.yml``.
 APPROVAL_GATE_STEP = "Fail when mergeCraft would not approve"
 CODEX_REVIEW_STEP = "mergeCraft PR review (Codex)"
-NOUS_REVIEW_STEP = "mergeCraft PR review (Nous Tencent HY3)"
-CODEX_FALLBACK_DECIDE_STEP = "Decide Codex fallback after Nous"
+PRIMARY_REVIEW_STEP = "mergeCraft PR review (OpenCode Go DeepSeek V4.1 Flash)"
+CODEX_FALLBACK_DECIDE_STEP = "Decide Codex fallback after OpenCode Go"
 
 # Fixture job names (``tests/ci/fixtures/workflow_review_gate_hg/``).
 FIXTURE_PRIMARY_JOB = "primary-review"
@@ -79,9 +79,9 @@ def find_step(doc: dict[str, Any], step_name: str) -> StepRef | None:
 
 
 def review_attempt_jobs(doc: dict[str, Any]) -> set[str]:
-    """Jobs that can run a mergeCraft review attempt (Nous and/or Codex)."""
+    """Jobs that can run a mergeCraft review attempt (OpenCode Go and/or Codex)."""
     attempts: set[str] = set()
-    for step_name in (NOUS_REVIEW_STEP, CODEX_REVIEW_STEP):
+    for step_name in (PRIMARY_REVIEW_STEP, CODEX_REVIEW_STEP):
         found = find_step(doc, step_name)
         if found is not None:
             attempts.add(found.job)
@@ -174,7 +174,7 @@ __all__ = [
     "FIXTURE_FALLBACK_JOB",
     "FIXTURE_GATE_JOB",
     "FIXTURE_PRIMARY_JOB",
-    "NOUS_REVIEW_STEP",
+    "PRIMARY_REVIEW_STEP",
     "GateOrderingOffense",
     "StepRef",
     "approval_gate_job",

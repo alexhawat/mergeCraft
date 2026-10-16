@@ -135,7 +135,7 @@ def test_app_tokens_are_refreshed_per_attempt_and_fallback_is_preserved() -> Non
     job = workflow["jobs"]["review"]
     assert "head.repo.full_name == github.repository" in job["env"]["HAS_APP"]
     steps = job["steps"]
-    for provider in ("nous", "codex", "claude"):
+    for provider in ("opencode_go", "codex", "claude"):
         mint = next(step for step in steps if step.get("id") == f"app_token_{provider}")
         review = next(step for step in steps if step.get("id") == f"mergecraft_{provider}")
         assert steps.index(mint) + 1 == steps.index(review)
