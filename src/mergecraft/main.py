@@ -632,6 +632,16 @@ def _token_summary(
     return token_summary_from_usage(usage_entries, budget_tracker=tracker)
 
 
+def _cost_summary(
+    usage_entries: list[Any],
+    *,
+    budget_tracker: Any | None = None,
+) -> str | None:
+    from mergecraft.agents.curated_model_catalog import cost_summary_from_usage_entries
+
+    return cost_summary_from_usage_entries(usage_entries, budget_tracker=budget_tracker)
+
+
 async def _publish(
     ctx: RunContext,
     *,
@@ -755,6 +765,10 @@ async def _publish(
                 agent_summary=submission.summary if submission is not None else None,
                 trust_tier=tool_context.trust_tier,
                 token_summary=_token_summary(
+                    tool_context.tool_state.usage_entries,
+                    budget_tracker=tool_context.budget_tracker,
+                ),
+                cost_summary=_cost_summary(
                     tool_context.tool_state.usage_entries,
                     budget_tracker=tool_context.budget_tracker,
                 ),
@@ -1686,6 +1700,11 @@ def _promote_and_finalize_agent_result(
         )
 
     if result.usage:
+        from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
+
+        usage = apply_catalog_cost_to_usage(result.usage, model=tool_state.model)
+        if usage is not None:
+            result = replace(result, usage=usage)
         tool_state.usage_entries.append(result.usage)
         from mergecraft.utils.run_bounds import BudgetExhausted, record_agent_usage
 

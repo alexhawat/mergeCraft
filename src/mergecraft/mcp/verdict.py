@@ -940,6 +940,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
             registry=registry,
             terminal_findings=raw_findings,
             dispatch_runs=list(ctx.tool_state.reviewer_dispatch_runs),
+            settings=settings,
         )
         requested_verdict = validated.verdict
         merged_raw, prepared_verdict = prepare_terminal_submission(

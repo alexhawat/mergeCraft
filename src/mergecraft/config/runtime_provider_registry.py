@@ -87,6 +87,7 @@ SEED_PROVIDER_URLS: dict[str, str] = {
     "nous": "https://inference-api.nousresearch.com/v1",
     "tokenhub": "https://tokenhub-intl.tencentcloudmaas.com/v1",
     "minimax": "https://api.minimax.io/v1",
+    "paperinstruments": "https://api.paperinstruments.com/v1",
 }
 
 

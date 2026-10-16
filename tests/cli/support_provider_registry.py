@@ -24,7 +24,7 @@ BUILTIN_HARNESS_DEFAULTS: dict[str, str] = {
 
 NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1"
 CUSTOM_BASE_URL = "https://gateway.example.invalid/v1"
-EXPECTED_BUILTIN_PROVIDER_COUNT = 14
+EXPECTED_BUILTIN_PROVIDER_COUNT = 15
 
 # BB #478 — unified ``provider auth`` contracts (D6-D7, D10).
 

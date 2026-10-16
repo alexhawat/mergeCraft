@@ -213,6 +213,8 @@ class AgentFinding(BaseModel):
     line: int | None = None
     fingerprint: str = ""
     raised_by: str | list[str] | None = None
+    raised_by_model: str | None = None
+    raised_by_models: dict[str, str] | None = None
 
     def identity(self) -> str:
         """Return this finding's fingerprint, deriving one when absent.
