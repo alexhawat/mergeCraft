@@ -24,16 +24,37 @@ version: 2
 # deliberately NOT exempted: it already passes on bot PRs, and skipping a
 # reusable-workflow caller changes the reported check name.
 updates:
-  - package-ecosystem: pip
+  # `uv`, not `pip`: the `pip` updater rewrites `pyproject.toml` and never
+  # touches `uv.lock`, so every Python bump failed `make lockcheck` (#966).
+  # The `uv` updater re-resolves the lockfile in the same PR.
+  - package-ecosystem: uv
     directory: /
     target-branch: main
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # `logfire` caps the `opentelemetry-*` versions it accepts, so the two
+      # only move together. Batched with everything else, an OpenTelemetry bump
+      # past logfire's cap made the whole Python batch unresolvable (#966:
+      # opentelemetry-sdk 1.45.1 against logfire 5.1.1's `<1.45.0`). Their own
+      # group keeps a blocked tracing bump from holding back every other
+      # package. Dependabot puts a dependency in the first group that matches,
+      # so this group must stay above the catch-all.
+      python-tracing:
+        applies-to: version-updates
+        patterns:
+          - "logfire"
+          - "opentelemetry-*"
+        update-types:
+          - patch
+          - minor
       python-patch-minor:
         applies-to: version-updates
         patterns: ["*"]
+        exclude-patterns:
+          - "logfire"
+          - "opentelemetry-*"
         update-types:
           - patch
           - minor

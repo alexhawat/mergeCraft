@@ -138,6 +138,40 @@ def test_dependabot_groups_batch_patch_and_minor() -> None:
         )
 
 
+def _python_update() -> dict[str, Any]:
+    root = [entry for entry in _dependabot_updates() if entry.get("directory") == "/"]
+    python = [entry for entry in root if entry["package-ecosystem"] in {"pip", "uv"}]
+    assert len(python) == 1, f"expected one Python update entry at /, got {python}"
+    return python[0]
+
+
+def test_dependabot_python_updates_the_lockfile() -> None:
+    """Python bumps use the ``uv`` updater so ``uv.lock`` moves with ``pyproject.toml``.
+
+    The ``pip`` updater edits only ``pyproject.toml``; its batch (#966) failed
+    ``make lockcheck`` and every downstream job.
+    """
+    assert _python_update()["package-ecosystem"] == "uv"
+
+
+def test_dependabot_batches_tracing_apart_from_python() -> None:
+    """``logfire`` and ``opentelemetry-*`` share a group ahead of the catch-all.
+
+    logfire caps the OpenTelemetry versions it accepts, so an OpenTelemetry bump
+    past that cap is unresolvable (#966). In the catch-all batch it sinks every
+    other Python bump; in its own group it only blocks itself. Dependabot assigns
+    a dependency to the first matching group, so the order is load bearing.
+    """
+    groups = list(_python_update()["groups"].items())
+    names = [name for name, _ in groups]
+    tracing = dict(groups).get("python-tracing")
+    assert tracing is not None, f"no python-tracing group: {names}"
+    assert {"logfire", "opentelemetry-*"} <= set(tracing["patterns"])
+    assert names.index("python-tracing") < names.index("python-patch-minor"), names
+    catch_all = dict(groups)["python-patch-minor"]
+    assert {"logfire", "opentelemetry-*"} <= set(catch_all.get("exclude-patterns", []))
+
+
 def test_dependabot_never_groups_major_bumps() -> None:
     """Majors stay ungrouped so each still gets its own PR and a human read.
 
