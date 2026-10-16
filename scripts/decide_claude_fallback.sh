@@ -15,7 +15,7 @@ if [ "${CODEX_OUTCOME:-}" = "success" ]; then
 else
   packet="$(read_packet CODEX_PACKET)"
   if [ -z "${packet}" ]; then
-    packet="$(read_packet NOUS_PACKET)"
+    packet="$(read_packet OPENCODE_GO_PACKET)"
   fi
   if [ -n "${packet}" ]; then
     verdict="$(verdict_from_packet "${packet}")"
@@ -35,9 +35,9 @@ else
 fi
 if [ "${need}" = "true" ]; then
   if [ "${CODEX_OUTCOME:-}" = "failure" ]; then
-    echo "::notice title=mergecraft Claude backstop::Codex failed retryably (nous=${NOUS_OUTCOME:-skipped}) and no verdict was found in the evidence packet or mergecraft-approval check-run; retrying with anthropic/claude-sonnet."
+    echo "::notice title=mergecraft Claude backstop::Codex failed retryably (opencode-go=${OPENCODE_GO_OUTCOME:-skipped}) and no verdict was found in the evidence packet or mergecraft-approval check-run; retrying with anthropic/claude-sonnet."
   else
-    echo "::notice title=mergecraft Claude backstop::Nous failed retryably (codex=${CODEX_OUTCOME:-skipped}) and no verdict was found in the evidence packet or mergecraft-approval check-run; retrying with anthropic/claude-sonnet."
+    echo "::notice title=mergecraft Claude backstop::OpenCode Go failed retryably (codex=${CODEX_OUTCOME:-skipped}) and no verdict was found in the evidence packet or mergecraft-approval check-run; retrying with anthropic/claude-sonnet."
   fi
 fi
 echo "need=${need}" >> "${GITHUB_OUTPUT}"

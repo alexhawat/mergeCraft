@@ -95,7 +95,7 @@ def test_check_live_integration_contract_passes() -> None:
 def test_default_credential_slugs_and_github_required_set() -> None:
     """Default sweep plus github matrix leg. Deleting github must fail."""
     assert "nous" in DEFAULT_CREDENTIAL_SLUGS, (
-        "the runnable Nous leg must stay in the default credential sweep"
+        "the Nous leg stays in the default credential sweep for local runs that hold a key"
     )
     assert set(DEFAULT_CREDENTIAL_SLUGS) <= {"anthropic", "openai", "gemini", "nous"}
     for slug in DEFAULT_CREDENTIAL_SLUGS:
@@ -193,7 +193,7 @@ def test_live_matrix_contains_only_runnable_legs() -> None:
     live = job(load_workflow("integration.yml"), "integration-live")
     matrix = (live.get("strategy") or {}).get("matrix") or {}
     providers = set(matrix.get("provider") or [])
-    assert providers == {"nous", "github"}, (
+    assert providers == {"github"}, (
         f"the nightly live matrix must list only the runnable legs; found {sorted(providers)}"
     )
     for provider in providers:

@@ -491,6 +491,7 @@ async def publish_deterministic_record(
             tool_state.usage_entries,
             budget_tracker=resolved_ctx.budget_tracker,
         ),
+        llm_review_timing=tool_state.llm_review_timing,
         credential_degradations=list(tool_state.credential_degradations),
         agent_sandbox_decision=tool_state.agent_sandbox_decision,
         action_pin_sha=_action_pin_sha(),
@@ -771,6 +772,7 @@ async def _publish(
                     tool_context.tool_state.usage_entries,
                     budget_tracker=tool_context.budget_tracker,
                 ),
+                llm_review_timing=tool_context.tool_state.llm_review_timing,
                 credential_degradations=list(tool_context.tool_state.credential_degradations),
             )
             append_step_summary(summary_body)
@@ -1711,6 +1713,12 @@ def _promote_and_finalize_agent_result(
         except BudgetExhausted as exc:
             ctx.budget_exhaustion = exc
 
+    from mergecraft.utils.llm_review_timing import snapshot_llm_review_timing
+
+    timing_snapshot = snapshot_llm_review_timing()
+    if timing_snapshot is not None:
+        tool_state.llm_review_timing = timing_snapshot
+
     if output_schema and not tool_state.output and result.success:
         msg = (
             "output_schema was provided but agent did not call set_output — "
@@ -1752,6 +1760,11 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
     output_schema = ctx.output_schema
     setup_hook_failure = ctx.setup_hook_failure
     setup_script_skip_reason = ctx.setup_script_skip_reason
+
+    if tool_state.selected_mode in {"Review", "IncrementalReview"}:
+        from mergecraft.utils.llm_review_timing import bind_llm_review_timing_tracker
+
+        bind_llm_review_timing_tracker()
 
     async def _run_agent_once(slug: str) -> AgentResult:
         attempt_model = resolve_model(slug=slug, respect_env_override=False)
@@ -1974,6 +1987,7 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
 
 
 _SINK_SCAN_ARTIFACT_SOURCES: tuple[str, ...] = (
+    "packet-opencode-go.json",
     "packet-nous.json",
     "packet-codex.json",
     "packet-claude.json",

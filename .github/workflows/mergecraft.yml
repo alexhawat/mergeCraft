@@ -22,8 +22,8 @@
 # `needs:` the review-attempts job so Codex fallback can finish before the gate
 # samples check-runs (#433).
 #
-# Provider priority: Tencent HY3 via the Nous Portal is primary; OpenAI
-# (Codex) is the one-shot fallback when Nous is absent or its review posts no
+# Provider priority: DeepSeek V4.1 Flash on OpenCode Go is primary; OpenAI
+# (Codex) is the one-shot fallback when OpenCode Go is absent or its review posts no
 # verdict; Anthropic (Claude) is the cross-vendor backstop when an earlier rung
 # fails RETRYABLY (quota ceiling, timeout, transport death) without posting a
 # verdict. Claude is a failed-rung backstop only — a posted verdict (including
@@ -40,32 +40,25 @@
 # the rest of the session. Fixed upstream in alexhawat/mergeCraft#78 (the
 # endpoint now returns 202 with no body for notification-only POSTs).
 #
-# Tencent HY3 (`nous/tencent/hy3`) runs through the Nous Portal OpenAI-compatible
-# endpoint via MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + NOUS_API_KEY. It reaches
-# mergeCraft's `opencode` harness, not the Codex one: mergeCraft routes any model
-# whose provider isn't anthropic/openai/google/cursor to opencode
-# (src/mergecraft/utils/agent_resolve.py resolve_runtime_agent()), and the Codex
-# harness cannot stand in because Codex 0.146 dropped `wire_api = "chat"`
-# ("no longer supported; set wire_api = \"responses\"") while Nous Portal serves
-# only chat-completions. Both blockers are fixed upstream in
-# alexhawat/mergeCraft#79 (closes #57 and #71): the image now installs
-# `opencode-ai`, and the harness registers a custom OpenAI-compatible provider
-# from MERGECRAFT_CUSTOM_PROVIDER_BASE_URL + MERGECRAFT_CUSTOM_PROVIDER_API_KEY.
-# The provider id comes from the model prefix, so `nous/tencent/hy3` registers
-# provider `nous` serving `tencent/hy3`.
+# DeepSeek V4.1 Flash (`opencode-go/deepseek-v4.1-flash`) runs on OpenCode Go
+# through mergeCraft's `opencode` harness. OpenCode Go is a registered provider
+# in .mergecraft/config.yaml (label `opencode-go`, harness `opencode`, envIndex
+# 9), and the rung passes the OPENCODE_GO_API_KEY secret as
+# LLM_PROVIDER_9_API_KEY. The Nous Portal rung (Tencent HY3) was removed on
+# 2026-10-16: its credits ran out and no free Nous model could run a review.
 #
 # mergeCraft reads the native GITHUB_EVENT_PATH, so the workflow just passes a
 # prompt — no ~mergecraft JSON payload needed.
 #
 # Auth (same-repo only — forks skip):
-# - NOUS_API_KEY — Nous Portal API key — primary (Tencent HY3 via nous/tencent/hy3)
+# - OPENCODE_GO_API_KEY — OpenCode Go API key — primary (opencode-go/deepseek-v4.1-flash)
 # - CODEX_AUTH_JSON — ChatGPT/Codex subscription (`mergecraft auth codex`) — fallback
 # - OPENAI_API_KEY — OpenAI API key (same Codex harness as CODEX_AUTH_JSON)
 # - CLAUDE_CODE_OAUTH_TOKEN — Claude Pro/Max subscription (`mergecraft auth claude`) — backstop
 # - ANTHROPIC_API_KEY — Anthropic API key (same claude harness as CLAUDE_CODE_OAUTH_TOKEN)
 # The job skips gracefully when none are set (e.g. fork PRs). Without
-# NOUS_API_KEY the primary is inert and Codex is the only reviewer; without
-# CODEX_AUTH_JSON / OPENAI_API_KEY, Nous is the only reviewer.
+# OPENCODE_GO_API_KEY the primary is inert and Codex is the only reviewer; without
+# CODEX_AUTH_JSON / OPENAI_API_KEY, OpenCode Go is the only reviewer.
 # TYPESAFE_API_KEY (the Jev credential) IS passed to the review rungs. Static-check
 # gates now run with a default-deny environment, so a PR-authored make target
 # cannot read a secret from a rung's env. jev.enabled stays on in
@@ -160,14 +153,14 @@ permissions:
   contents: read
 
 env:
-  # Single per-attempt review budget (D8 / #465). Nous + Codex steps and the
+  # Single per-attempt review budget (D8 / #465). OpenCode Go + Codex steps and the
   # review job timeout-minutes derive from this — do not shorten per-attempt for
   # retry headroom.
   MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES: "25"
   # Single Action SHA for all three review rungs (D10 / #532). Bump here only;
   # every `uses: alexhawat/mergeCraft@…` below must match — enforced by
   # `make action-pin-check`.
-  MERGECRAFT_ACTION_SHA: "1bdb780322a77eb0f8bc4b1b8381f40d1e7ae71b"
+  MERGECRAFT_ACTION_SHA: "71dbdb74ff822c0b17cce5b865655718c80e28d2"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -319,7 +312,7 @@ jobs:
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     # > 3× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
-    # Three rungs now (Nous -> Codex -> Claude). This is a worst-case ceiling,
+    # Three rungs now (OpenCode Go -> Codex -> Claude). This is a worst-case ceiling,
     # not an expected cost: the Claude rung only runs when an earlier rung
     # failed retryably, and a rung that dies on a quota ceiling returns in
     # seconds rather than consuming its budget.
@@ -327,11 +320,11 @@ jobs:
     env:
       HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
-      # Nous/DeepSeek primary; Codex fallback when Nous auth is absent or the
-      # Nous review does not post a mergecraft-approval verdict.
+      # OpenCode Go/DeepSeek primary; Codex fallback when OpenCode Go auth is absent or the
+      # OpenCode Go review does not post a mergecraft-approval verdict.
       HAS_CODEX: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
-      HAS_NOUS: ${{ secrets.NOUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
-      # Claude is the cross-vendor backstop. Nous and Codex can go down together
+      HAS_OPENCODE_GO: ${{ secrets.OPENCODE_GO_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Claude is the cross-vendor backstop. OpenCode Go and Codex can go down together
       # for reasons that have nothing to do with this repo — a shared account
       # quota ceiling is the common one — and when they do, the cascade posts no
       # verdict and the approval gate fails closed on every PR at once. Anthropic
@@ -340,7 +333,7 @@ jobs:
       # Duplicated verbatim as `approval-gate.env.HAS_AUTH` (jobs cannot share an
       # `env` expression). Adding a provider here without updating that copy
       # fails the required gate OPEN — see the comment there.
-      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.OPENCODE_GO_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       # Review attempts use App tokens when configured, otherwise the job token.
       # Privileged approval has a separate job and authenticates the check's App,
       # workflow run and current PR head before submitting any approval.
@@ -436,7 +429,7 @@ jobs:
           if [ "${IS_SAME_REPO}" != "true" ]; then
             echo "::notice title=mergecraft skipped::Fork PR — review skipped (same as before)."
           else
-            echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, NOUS_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (mergecraft auth claude) to enable mergeCraft reviews."
+            echo "::notice title=mergecraft skipped::Configure CODEX_AUTH_JSON (mergecraft auth codex), OPENAI_API_KEY, OPENCODE_GO_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (mergecraft auth claude) to enable mergeCraft reviews."
           fi
 
       - name: Resolve PR for workflow_dispatch
@@ -526,8 +519,8 @@ jobs:
         # recency.
         #
         # Gated on HAS_AUTH rather than on a specific provider pair: the Claude
-        # rung needs this baseline even when Nous is absent, and reading it is
-        # cheap. Narrowing it to HAS_NOUS && HAS_CODEX left BASELINE_ID empty on
+        # rung needs this baseline even when OpenCode Go is absent, and reading it is
+        # cheap. Narrowing it to HAS_OPENCODE_GO && HAS_CODEX left BASELINE_ID empty on
         # a Codex-only repo, which would make a stale verdict from a previous
         # run look like a fresh one and silently skip the backstop.
         if: >-
@@ -553,9 +546,9 @@ jobs:
           echo "id=${id}" >> "${GITHUB_OUTPUT}"
 
       # Mint per attempt: the full cascade can outlive a one-hour token.
-      - name: Mint App token for Nous Tencent HY3
-        if: env.HAS_APP == 'true' && env.HAS_NOUS == 'true'
-        id: app_token_nous
+      - name: Mint App token for OpenCode Go
+        if: env.HAS_APP == 'true' && env.HAS_OPENCODE_GO == 'true'
+        id: app_token_opencode_go
         continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -569,9 +562,9 @@ jobs:
           permission-pull-requests: write
           permission-issues: write
 
-      - name: mergeCraft PR review (Nous Tencent HY3)
-        if: env.HAS_NOUS == 'true'
-        id: mergecraft_nous
+      - name: mergeCraft PR review (OpenCode Go DeepSeek V4.1 Flash)
+        if: env.HAS_OPENCODE_GO == 'true'
+        id: mergecraft_opencode_go
         continue-on-error: true
         # 2026-08-07: rolled back from 88c6f419 to 8d747f39 — Codex stdin hang regression. See PR #246.
         # 2026-08-14: re-bumped to pre-0.0.1 tip (0ab5388). The stale 8d747f39 pin predates
@@ -659,19 +652,14 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@1bdb780322a77eb0f8bc4b1b8381f40d1e7ae71b # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@71dbdb74ff822c0b17cce5b865655718c80e28d2 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
-          # Provider prefix `nous/` selects the opencode harness and names the
-          # provider registered from the MERGECRAFT_CUSTOM_PROVIDER_* env vars.
-          # 2026-08-23: moved off deepseek-v4-flash, which repeatedly failed to
-          # reach a terminal verdict or ran out the 25m ceiling (runs
-          # 32649874241, 32647074137). hy3 completed a full local review of the
-          # same diff and calls tools correctly. Both models are served by the
-          # same Nous Portal key, so no secret changes are needed.
-          model: nous/tencent/hy3
-          # Run exactly the model named above. This rung carries only the Nous
+          # Provider prefix `opencode-go/` selects the provider registered in
+          # .mergecraft/config.yaml, which runs on the opencode harness.
+          model: opencode-go/deepseek-v4.1-flash
+          # Run exactly the model named above. This rung carries only the OpenCode Go
           # credential, so a chain-preserving walk could advance into a provider
           # it cannot authenticate and report a reviewer slot it was never meant
           # to run.
@@ -680,25 +668,25 @@ jobs:
           shell: disabled
           status_checks: enabled
           # Mint failure or absent App config preserves job-token review fallback.
-          token: ${{ steps.app_token_nous.outputs.token || github.token }}
+          token: ${{ steps.app_token_opencode_go.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_nous.outputs.app-slug && format('{0}[bot]', steps.app_token_nous.outputs.app-slug) || '' }}
-          MERGECRAFT_CUSTOM_PROVIDER_BASE_URL: https://inference-api.nousresearch.com/v1
-          MERGECRAFT_CUSTOM_PROVIDER_API_KEY: ${{ secrets.NOUS_API_KEY }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_opencode_go.outputs.app-slug && format('{0}[bot]', steps.app_token_opencode_go.outputs.app-slug) || '' }}
+          # OpenCode Go is registered in .mergecraft/config.yaml with envIndex 9.
+          LLM_PROVIDER_9_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
-      - name: Persist evidence packet (Nous)
+      - name: Persist evidence packet (OpenCode Go)
         if: always()
         env:
           # Only whether the rung emitted a packet, never the packet itself: a
           # step's environment is capped at 128 KiB per variable, and a large
           # PR's packet passed here stopped the step from starting (#923).
-          RUNG_EMITTED_PACKET: ${{ steps.mergecraft_nous.outputs.evidence_packet != '' }}
+          RUNG_EMITTED_PACKET: ${{ steps.mergecraft_opencode_go.outputs.evidence_packet != '' }}
         run: |
           # A mergeCraft rung checks the PR head out into the workspace and the
           # container leaves root-owned files behind, so by now the tree holds
@@ -722,29 +710,29 @@ jobs:
             echo "::warning title=mergecraft evidence packet::the rung emitted a packet but no packet file is under $RUNNER_TEMP/mergecraft; nothing to persist"
             exit 0
           fi
-          cp "${src}" "$RUNNER_TEMP/packet-nous.json"
+          cp "${src}" "$RUNNER_TEMP/packet-opencode-go.json"
 
-      - name: Upload packet artifact (Nous)
+      - name: Upload packet artifact (OpenCode Go)
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: mergecraft-evidence-nous
+          name: mergecraft-evidence-opencode-go
           path: |
-            ${{ runner.temp }}/packet-nous.json
+            ${{ runner.temp }}/packet-opencode-go.json
             ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
 
-      - name: Decide Codex fallback after Nous
+      - name: Decide Codex fallback after OpenCode Go
         id: fallback
-        # Deliberately NOT gated on steps.mergecraft_nous.outcome. The failure
+        # Deliberately NOT gated on steps.mergecraft_opencode_go.outcome. The failure
         # this fallback exists for — mergecraft-approval=neutral, the MCP
         # handshake symptom — leaves the action exiting 0 while posting no
         # usable verdict. Gating on a non-success outcome would skip the
         # fallback in exactly that case and hand the enforce step a
         # fail-closed no-verdict. Route on the verdict itself instead.
         if: >-
-          env.HAS_NOUS == 'true' &&
+          env.HAS_OPENCODE_GO == 'true' &&
           env.HAS_CODEX == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -752,8 +740,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_NAME: ${{ github.event_name }}
           BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
-          NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
-          NOUS_PACKET_FILE: ${{ runner.temp }}/packet-nous.json
+          OPENCODE_GO_OUTCOME: ${{ steps.mergecraft_opencode_go.outcome }}
+          OPENCODE_GO_PACKET_FILE: ${{ runner.temp }}/packet-opencode-go.json
           TRUSTED_ROOT: ${{ steps.trusted_scripts.outputs.root }}
           TRUSTED_HASHES: ${{ steps.trusted_scripts.outputs.sha256 }}
         run: |
@@ -777,7 +765,7 @@ jobs:
           env.HAS_APP == 'true' &&
           env.HAS_CODEX == 'true' &&
           (
-            env.HAS_NOUS != 'true' ||
+            env.HAS_OPENCODE_GO != 'true' ||
             steps.fallback.outputs.need == 'true'
           )
         id: app_token_codex
@@ -798,7 +786,7 @@ jobs:
         if: >-
           env.HAS_CODEX == 'true' &&
           (
-            env.HAS_NOUS != 'true' ||
+            env.HAS_OPENCODE_GO != 'true' ||
             steps.fallback.outputs.need == 'true'
           )
         id: mergecraft_codex
@@ -815,9 +803,9 @@ jobs:
         # setpriv never resets $HOME, agent subprocess EACCES post-privilege-drop), then to
         # f5b070b (#194: $CODEX_HOME/.gemini/.claude also created root-owned before the
         # drop, same bug shape), then to 3bf6d7b (#204: checkout_pr fetch failure on a
-        # shared workspace when Nous falls back to Codex, fixed by detaching HEAD before
+        # shared workspace when OpenCode Go falls back to Codex, fixed by detaching HEAD before
         # the fetch), then to 0592d72 (#231: skipped Python install under `shell:
-        # disabled` must not fail prep) — see the matching comment on the Nous step
+        # disabled` must not fail prep) — see the matching comment on the OpenCode Go step
         # above for why.
         # 2026-08-23 (ninth bump, PR #457): re-bumped to 5b9ded9f so the reviewer
         # runs the provider-failover fixes it is meant to exercise — retryable
@@ -851,7 +839,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@1bdb780322a77eb0f8bc4b1b8381f40d1e7ae71b # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@71dbdb74ff822c0b17cce5b865655718c80e28d2 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -867,7 +855,7 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # Job token, not the PAT — see the matching comment on the Nous step.
+          # Job token, not the PAT — see the matching comment on the OpenCode Go step.
           token: ${{ steps.app_token_codex.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
@@ -927,15 +915,15 @@ jobs:
         id: claude_fallback
         # Gated on a RETRYABLE provider failure while Codex did not succeed.
         #
-        # Deliberately different from the Nous -> Codex fallback above: Codex
-        # routes on verdict absence (Nous can exit 0 with no usable verdict),
+        # Deliberately different from the OpenCode Go -> Codex fallback above: Codex
+        # routes on verdict absence (OpenCode Go can exit 0 with no usable verdict),
         # while Claude backs up a rung that could not review at all — quota,
         # timeout, transport death — surfaced as step `failure` under
         # continue-on-error.
         #
-        # Nous may fail after Codex already succeeded; the trigger excludes that
+        # OpenCode Go may fail after Codex already succeeded; the trigger excludes that
         # case (`mergecraft_codex.outcome != 'success'`). When Codex is absent
-        # its outcome is `skipped`, so Claude-only and Nous-only rosters are
+        # its outcome is `skipped`, so Claude-only and OpenCode Go-only rosters are
         # unchanged.
         #
         # The script defaults `need=true` and clears it when Codex succeeded,
@@ -946,7 +934,7 @@ jobs:
         if: >-
           env.HAS_CLAUDE == 'true' &&
           (
-            steps.mergecraft_nous.outcome == 'failure' ||
+            steps.mergecraft_opencode_go.outcome == 'failure' ||
             steps.mergecraft_codex.outcome == 'failure'
           ) &&
           steps.mergecraft_codex.outcome != 'success'
@@ -956,15 +944,15 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_NAME: ${{ github.event_name }}
           BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
-          NOUS_OUTCOME: ${{ steps.mergecraft_nous.outcome }}
+          OPENCODE_GO_OUTCOME: ${{ steps.mergecraft_opencode_go.outcome }}
           CODEX_OUTCOME: ${{ steps.mergecraft_codex.outcome }}
-          NOUS_PACKET_FILE: ${{ runner.temp }}/packet-nous.json
+          OPENCODE_GO_PACKET_FILE: ${{ runner.temp }}/packet-opencode-go.json
           CODEX_PACKET_FILE: ${{ runner.temp }}/packet-codex.json
           TRUSTED_ROOT: ${{ steps.trusted_scripts.outputs.root }}
           TRUSTED_HASHES: ${{ steps.trusted_scripts.outputs.sha256 }}
         run: |
           set -euo pipefail
-          # Same re-verification as the Nous -> Codex decide step: run the
+          # Same re-verification as the OpenCode Go -> Codex decide step: run the
           # trusted copy, not the workspace path a rung has since rewritten.
           while read -r hash rel; do
             [ -z "${hash}" ] && continue
@@ -983,7 +971,7 @@ jobs:
           env.HAS_CLAUDE == 'true' &&
           (
             steps.claude_fallback.outputs.need == 'true' ||
-            (env.HAS_NOUS != 'true' && env.HAS_CODEX != 'true')
+            (env.HAS_OPENCODE_GO != 'true' && env.HAS_CODEX != 'true')
           )
         id: app_token_claude
         continue-on-error: true
@@ -1009,7 +997,7 @@ jobs:
           env.HAS_CLAUDE == 'true' &&
           (
             steps.claude_fallback.outputs.need == 'true' ||
-            (env.HAS_NOUS != 'true' && env.HAS_CODEX != 'true')
+            (env.HAS_OPENCODE_GO != 'true' && env.HAS_CODEX != 'true')
           )
         id: mergecraft_claude
         continue-on-error: true
@@ -1017,7 +1005,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now 3ed2c798 (#582).
-        uses: alexhawat/mergeCraft@1bdb780322a77eb0f8bc4b1b8381f40d1e7ae71b # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@71dbdb74ff822c0b17cce5b865655718c80e28d2 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -1029,7 +1017,7 @@ jobs:
           push: disabled
           shell: disabled
           status_checks: enabled
-          # Job token, not the PAT — see the matching comment on the Nous step.
+          # Job token, not the PAT — see the matching comment on the OpenCode Go step.
           token: ${{ steps.app_token_claude.outputs.token || github.token }}
           tracing: "true"
           tracing-to: logfire
@@ -1090,17 +1078,17 @@ jobs:
           env.HAS_AUTH == 'true' &&
           (
             (
-              env.HAS_NOUS == 'true' &&
-              steps.mergecraft_nous.outcome != 'success' &&
+              env.HAS_OPENCODE_GO == 'true' &&
+              steps.mergecraft_opencode_go.outcome != 'success' &&
               steps.fallback.outputs.need != 'true'
             ) ||
             (
-              env.HAS_NOUS == 'true' &&
+              env.HAS_OPENCODE_GO == 'true' &&
               steps.fallback.outputs.need == 'true' &&
               steps.mergecraft_codex.outcome != 'success'
             ) ||
             (
-              env.HAS_NOUS != 'true' &&
+              env.HAS_OPENCODE_GO != 'true' &&
               steps.mergecraft_codex.outcome != 'success'
             )
           ) &&
@@ -1109,7 +1097,7 @@ jobs:
           echo "::notice title=mergecraft incomplete::Review step did not finish successfully (see its log — e.g. provider session limit or a runtime error). Approval enforcement in the approval-gate job will fail closed on this."
 
       # Record the terminal verdict from the last rung that produced an evidence
-      # packet. Claude runs last, then Codex, then Nous — take the first rung in
+      # packet. Claude runs last, then Codex, then OpenCode Go — take the first rung in
       # that order whose packet is present, so the running order is reflected
       # without re-deriving it from step outcomes. Only this run can write the
       # job outputs these become, which is what makes the gate's verdict
@@ -1119,7 +1107,7 @@ jobs:
         if: always()
         id: approval_verdict
         env:
-          NOUS_PACKET_FILE: ${{ runner.temp }}/packet-nous.json
+          OPENCODE_GO_PACKET_FILE: ${{ runner.temp }}/packet-opencode-go.json
           CODEX_PACKET_FILE: ${{ runner.temp }}/packet-codex.json
           CLAUDE_PACKET_FILE: ${{ runner.temp }}/packet-claude.json
         run: |
@@ -1131,8 +1119,8 @@ jobs:
             packet_file="${CLAUDE_PACKET_FILE}"; rung="claude"
           elif [ -s "${CODEX_PACKET_FILE}" ]; then
             packet_file="${CODEX_PACKET_FILE}"; rung="codex"
-          elif [ -s "${NOUS_PACKET_FILE}" ]; then
-            packet_file="${NOUS_PACKET_FILE}"; rung="nous"
+          elif [ -s "${OPENCODE_GO_PACKET_FILE}" ]; then
+            packet_file="${OPENCODE_GO_PACKET_FILE}"; rung="opencode-go"
           fi
           verdict=""
           if [ -n "${packet_file}" ]; then
@@ -1168,7 +1156,7 @@ jobs:
       # is skipped, and the required check goes green with no
       # `mergecraft-approval=success` anywhere). When adding a provider, update
       # both copies. `tests/ci/test_approval_gate_auth_predicate.py` pins them.
-      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.NOUS_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.OPENCODE_GO_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - name: Fail when mergeCraft would not approve
         # The verdict comes from this run's own review job output, which no other

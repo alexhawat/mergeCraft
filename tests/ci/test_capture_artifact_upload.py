@@ -23,7 +23,7 @@ _CAPTURE_PATH = "${{ runner.temp }}/mergecraft/judge-verdicts.jsonl"
 _EVIDENCE_PREFIX = "mergecraft-evidence-"
 _RUNG_NAMES = frozenset(
     {
-        "mergecraft-evidence-nous",
+        "mergecraft-evidence-opencode-go",
         "mergecraft-evidence-codex",
         "mergecraft-evidence-claude",
     }

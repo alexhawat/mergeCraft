@@ -164,14 +164,17 @@ def test_no_workflow_comment_claims_the_job_never_checks_out() -> None:
     [
         (
             "scripts/decide_codex_fallback.sh",
-            {"NOUS_OUTCOME": "success", "NOUS_PACKET": evidence_packet(verdict="failure")},
+            {
+                "OPENCODE_GO_OUTCOME": "success",
+                "OPENCODE_GO_PACKET": evidence_packet(verdict="failure"),
+            },
         ),
         (
             "scripts/decide_claude_fallback.sh",
             {
-                "NOUS_OUTCOME": "failure",
+                "OPENCODE_GO_OUTCOME": "failure",
                 "CODEX_OUTCOME": "failure",
-                "NOUS_PACKET": "",
+                "OPENCODE_GO_PACKET": "",
                 "CODEX_PACKET": "",
             },
         ),

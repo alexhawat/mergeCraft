@@ -8,11 +8,12 @@
 # unit-suite run with a per-run random seed (#776 / F9): a pinned seed fixes
 # the permutation of a collection, not the collection itself.
 #
-# The nightly live-provider matrix exercises `nous` and `github` only. The
-# `anthropic`, `openai` and `gemini` legs are removed and named as not
-# exercised: this repository holds no Anthropic, OpenAI or Gemini API key, and
-# a subscription cannot call those HTTP endpoints. Real-harness live coverage
-# runs in the E2E workflow's live slice on the ChatGPT/Codex subscription.
+# The nightly live-provider matrix exercises `github` only. The `anthropic`,
+# `openai` and `gemini` legs are removed and named as not exercised: this
+# repository holds no Anthropic, OpenAI or Gemini API key, and a subscription
+# cannot call those HTTP endpoints. The `nous` leg was removed on 2026-10-16:
+# the Nous Portal credits ran out and no free Nous model could answer it.
+# Real-harness live coverage runs in the E2E workflow's live slice.
 name: Integration
 
 on:
@@ -160,10 +161,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Only legs this repository can run: `nous` (NOUS_API_KEY) and
-        # `github` (GITHUB_TOKEN). The removed HTTP-API legs are named in the
-        # workflow header.
-        provider: [nous, github]
+        # Only the leg this repository can run: `github` (GITHUB_TOKEN). The
+        # removed legs are named in the workflow header.
+        provider: [github]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -177,7 +177,6 @@ jobs:
         env:
           MERGECRAFT_LIVE: "1"
           MERGECRAFT_LIVE_PROVIDER: ${{ matrix.provider }}
-          NOUS_API_KEY: ${{ matrix.provider == 'nous' && secrets.NOUS_API_KEY || '' }}
           GITHUB_TOKEN: ${{ matrix.provider == 'github' && secrets.GITHUB_TOKEN || '' }}
         run: make test-integration-live
 

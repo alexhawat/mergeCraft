@@ -26,9 +26,9 @@ def test_codex_success_with_neutral_packet_does_not_need_claude(tmp_path: Path) 
         tmp_path,
         _CLAUDE_SCRIPT,
         env={
-            "NOUS_OUTCOME": "failure",
+            "OPENCODE_GO_OUTCOME": "failure",
             "CODEX_OUTCOME": "success",
-            "NOUS_PACKET": "",
+            "OPENCODE_GO_PACKET": "",
             "CODEX_PACKET": evidence_packet(verdict="neutral"),
         },
     )
@@ -44,9 +44,9 @@ def test_codex_success_unparseable_packet_falls_through_to_neutral_check_run(
         tmp_path,
         _CLAUDE_SCRIPT,
         env={
-            "NOUS_OUTCOME": "failure",
+            "OPENCODE_GO_OUTCOME": "failure",
             "CODEX_OUTCOME": "success",
-            "NOUS_PACKET": "",
+            "OPENCODE_GO_PACKET": "",
             "CODEX_PACKET": evidence_packet(broken=True),
         },
         gh_mock_dir=gh_dir,
@@ -62,9 +62,9 @@ def test_baseline_check_run_id_is_discarded(tmp_path: Path) -> None:
         tmp_path,
         _CLAUDE_SCRIPT,
         env={
-            "NOUS_OUTCOME": "failure",
+            "OPENCODE_GO_OUTCOME": "failure",
             "CODEX_OUTCOME": "failure",
-            "NOUS_PACKET": "",
+            "OPENCODE_GO_PACKET": "",
             "CODEX_PACKET": "",
             "BASELINE_ID": baseline,
         },
@@ -79,39 +79,39 @@ def test_codex_failure_without_verdict_needs_claude(tmp_path: Path) -> None:
         tmp_path,
         _CLAUDE_SCRIPT,
         env={
-            "NOUS_OUTCOME": "skipped",
+            "OPENCODE_GO_OUTCOME": "skipped",
             "CODEX_OUTCOME": "failure",
-            "NOUS_PACKET": "",
+            "OPENCODE_GO_PACKET": "",
             "CODEX_PACKET": "",
         },
     )
     assert outputs.get("need") == "true"
 
 
-def test_nous_success_with_success_verdict_does_not_need_claude(tmp_path: Path) -> None:
-    """Codex skipped, Nous succeeded and posted ``verdict=success`` → need false."""
+def test_opencode_go_success_with_success_verdict_does_not_need_claude(tmp_path: Path) -> None:
+    """Codex skipped, OpenCode Go succeeded and posted ``verdict=success`` → need false."""
     outputs, _ = run_decide_script(
         tmp_path,
         _CLAUDE_SCRIPT,
         env={
-            "NOUS_OUTCOME": "success",
+            "OPENCODE_GO_OUTCOME": "success",
             "CODEX_OUTCOME": "skipped",
-            "NOUS_PACKET": evidence_packet(verdict="success"),
+            "OPENCODE_GO_PACKET": evidence_packet(verdict="success"),
             "CODEX_PACKET": "",
         },
     )
     assert outputs.get("need") == "false"
 
 
-def test_nous_failed_needs_claude_backstop(tmp_path: Path) -> None:
-    """Codex skipped, Nous failed, Claude configured → need true."""
+def test_opencode_go_failed_needs_claude_backstop(tmp_path: Path) -> None:
+    """Codex skipped, OpenCode Go failed, Claude configured → need true."""
     outputs, _ = run_decide_script(
         tmp_path,
         _CLAUDE_SCRIPT,
         env={
-            "NOUS_OUTCOME": "failure",
+            "OPENCODE_GO_OUTCOME": "failure",
             "CODEX_OUTCOME": "skipped",
-            "NOUS_PACKET": "",
+            "OPENCODE_GO_PACKET": "",
             "CODEX_PACKET": "",
         },
     )
@@ -119,34 +119,34 @@ def test_nous_failed_needs_claude_backstop(tmp_path: Path) -> None:
 
 
 def test_sole_claude_reviewer_clause_still_present() -> None:
-    """``HAS_NOUS != true && HAS_CODEX != true`` must still admit Claude-only repos."""
+    """``HAS_OPENCODE_GO != true && HAS_CODEX != true`` must still admit Claude-only repos."""
     expr = claude_review_if_expression()
-    assert "HAS_NOUS" in expr
+    assert "HAS_OPENCODE_GO" in expr
     assert "HAS_CODEX" in expr
     assert "HAS_CLAUDE" in expr
 
 
-def test_nous_missing_verdict_sets_codex_need_true(tmp_path: Path) -> None:
-    """D5 — Nous success without a usable verdict still routes to Codex."""
+def test_opencode_go_missing_verdict_sets_codex_need_true(tmp_path: Path) -> None:
+    """D5 — OpenCode Go success without a usable verdict still routes to Codex."""
     outputs, _ = run_decide_script(
         tmp_path,
         _CODEX_SCRIPT,
         env={
-            "NOUS_OUTCOME": "success",
-            "NOUS_PACKET": "",
+            "OPENCODE_GO_OUTCOME": "success",
+            "OPENCODE_GO_PACKET": "",
         },
     )
     assert outputs.get("need") == "true"
 
 
-def test_nous_neutral_verdict_does_not_skip_codex(tmp_path: Path) -> None:
-    """D5 — only Claude accepts ``neutral``; Nous ``neutral`` must not skip Codex."""
+def test_opencode_go_neutral_verdict_does_not_skip_codex(tmp_path: Path) -> None:
+    """D5 — only Claude accepts ``neutral``; OpenCode Go ``neutral`` must not skip Codex."""
     outputs, _ = run_decide_script(
         tmp_path,
         _CODEX_SCRIPT,
         env={
-            "NOUS_OUTCOME": "success",
-            "NOUS_PACKET": evidence_packet(verdict="neutral"),
+            "OPENCODE_GO_OUTCOME": "success",
+            "OPENCODE_GO_PACKET": evidence_packet(verdict="neutral"),
         },
     )
     assert outputs.get("need") == "true"
@@ -158,16 +158,16 @@ def test_codex_success_short_circuits_even_when_lookups_fail(tmp_path: Path) -> 
         tmp_path,
         _CLAUDE_SCRIPT,
         env={
-            "NOUS_OUTCOME": "failure",
+            "OPENCODE_GO_OUTCOME": "failure",
             "CODEX_OUTCOME": "success",
-            "NOUS_PACKET": "",
+            "OPENCODE_GO_PACKET": "",
             "CODEX_PACKET": "",
         },
     )
     assert outputs.get("need") == "false"
 
 
-def test_claude_decide_step_not_gated_on_nous_failure_when_codex_succeeded() -> None:
+def test_claude_decide_step_not_gated_on_opencode_go_failure_when_codex_succeeded() -> None:
     """W3 Step 1 — decide step must not run when Codex already succeeded."""
     expr = claude_step_if_expression()
     compact = "".join(expr.split())

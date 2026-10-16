@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Code-measured LLM review generation time in every posted review record and CLI
+  JSON/text output (`⏱ LLM review time: …`), including per-reviewer breakdown
+  when multiple reviewers run (#983).
 - `mergecraft workflow provider add` wires harness providers without a custom base
   URL using `LLM_PROVIDER_<N>: <label>` plus provider-specific credential env keys
   (for example `OPENCODE_GO_API_KEY` for `opencode-go`).
@@ -73,6 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An offline review called as a library without a findings file now asks the
+  model for structured findings, as the CLI always does. It used to ask for a
+  markdown review and then reject it as malformed findings, so any model that
+  followed the prompt failed.
 - A review whose agent calls `run_analyzers` on a host without a sandbox no
   longer fails closed with "checkout integrity failure: tree changed during
   read-only review". The gate's output in `.mergecraft/analyzer-runs/` and the
