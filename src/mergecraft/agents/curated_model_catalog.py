@@ -170,9 +170,7 @@ def apply_catalog_cost_to_usage(
     """Fill ``cost_usd`` on *usage* from the catalog when the provider omitted it."""
     if usage is None:
         return usage
-    total_tokens = (
-        usage.input_tokens + usage.output_tokens + (usage.cache_read_tokens or 0)
-    )
+    total_tokens = usage.input_tokens + usage.output_tokens + (usage.cache_read_tokens or 0)
     if total_tokens <= 0:
         if usage.cost_usd is None or usage.cost_usd <= 0:
             return usage

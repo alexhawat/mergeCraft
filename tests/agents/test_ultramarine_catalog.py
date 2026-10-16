@@ -241,7 +241,6 @@ def test_opencode_config_includes_both_providers_for_dual_reviewer_roster(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tests.agents.conftest import make_agent_run_context
-    from tests.cli.support_agent_roster import write_config
     from tests.cli.support_provider_registry import bootstrap_opencode_gateway
 
     primary = "opencode-go/deepseek-v4-pro"

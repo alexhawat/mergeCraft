@@ -737,8 +737,8 @@ async def test_non_mapping_info_field_reports_no_usage(monkeypatch: MonkeyPatch)
     assert result.usage is None
 
 
-async def test_cost_only_usage_is_still_reported(monkeypatch: MonkeyPatch) -> None:
-    """A response with cost but no token counts is a usage record."""
+async def test_cost_only_usage_without_tokens_is_ignored(monkeypatch: MonkeyPatch) -> None:
+    """Cost without token counts is not billed usage (#985 follow-up)."""
     _route(
         monkeypatch,
         {
@@ -752,10 +752,8 @@ async def test_cost_only_usage_is_still_reported(monkeypatch: MonkeyPatch) -> No
         base_url="http://127.0.0.1:1", session_id="s1", text="hi", model=None
     )
 
-    assert result.usage is not None
-    assert result.usage.agent == "opencode"
-    assert result.usage.cost_usd == pytest.approx(0.125)
-    assert result.usage.input_tokens == 0
+    assert result.success is True
+    assert result.usage is None
 
 
 async def test_model_is_forwarded_in_the_prompt_payload(monkeypatch: MonkeyPatch) -> None:

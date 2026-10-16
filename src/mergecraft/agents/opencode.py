@@ -398,6 +398,27 @@ def _merge_custom_provider_blocks(
     return merged or None
 
 
+def _provider_block_model_slugs(
+    primary: str | None,
+    roster_models: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Return slugs that need custom OpenCode provider blocks.
+
+    Indexed multi-provider deployments (issue #71) emit a block per configured
+    provider, so every roster slug is considered. Singleton back-compat env
+    (PR #79) applies only to the active orchestrator model — verifier subagents
+    such as ``auto/efficient`` must not inherit the same gateway credentials.
+    """
+    from mergecraft.agents.openai_compatible_gateways import SINGLETON_PROVIDER_ID
+
+    indexed = resolve_gateway_endpoints()
+    if indexed and not (len(indexed) == 1 and SINGLETON_PROVIDER_ID in indexed):
+        return roster_models
+    if primary and "/" in primary:
+        return (primary,)
+    return tuple(slug for slug in roster_models if slug and "/" in slug)
+
+
 def build_custom_providers_for_models(
     models: tuple[str, ...] | list[str],
 ) -> dict[str, object] | None:
@@ -406,13 +427,6 @@ def build_custom_providers_for_models(
         build_custom_provider(slug) for slug in models if slug
     ]
     return _merge_custom_provider_blocks(*blocks)
-
-
-def _custom_provider_ids_for_models(models: tuple[str, ...]) -> list[str]:
-    ids: set[str] = set()
-    for slug in models:
-        ids.update(_custom_provider_ids(slug))
-    return sorted(ids)
 
 
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
@@ -572,19 +586,18 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
         },
         "agent": agent_block,
     }
-    agent_models_source = (
-        agent_block if (model and "/" in model) else {}
-    )
+    agent_models_source = agent_block if (model and "/" in model) else {}
     roster_models = _collect_opencode_model_slugs(model, agent_models_source)
+    provider_slugs = _provider_block_model_slugs(model, roster_models)
+    provider = build_custom_providers_for_models(provider_slugs)
     if model:
         config["model"] = model
-        provider_ids = _custom_provider_ids_for_models(roster_models)
-        if provider_ids:
-            config["enabled_providers"] = provider_ids
-        else:
-            slash = model.find("/")
-            if slash > 0:
-                config["enabled_providers"] = [model[:slash].lower()]
+        enabled_ids: set[str] = set(provider.keys()) if isinstance(provider, dict) else set()
+        slash = model.find("/")
+        if slash > 0:
+            enabled_ids.add(model[:slash].lower())
+        if enabled_ids:
+            config["enabled_providers"] = sorted(enabled_ids)
         provider_config = _provider_config_for_model(model)
         if provider_config is not None:
             from mergecraft.agents.openai_generation_params import (
@@ -601,17 +614,14 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
             else:
                 agents["build"] = build_overrides
             config["agent"] = agents
-    for roster_slug in roster_models:
+    for roster_slug in provider_slugs:
         roster_config = _provider_config_for_model(roster_slug)
         if roster_config is not None:
             from mergecraft.agents.openai_generation_params import (
                 validate_generation_params_for_model,
             )
 
-            validate_generation_params_for_model(
-                roster_slug, dict(roster_config.extra_options)
-            )
-    provider = build_custom_providers_for_models(roster_models)
+            validate_generation_params_for_model(roster_slug, dict(roster_config.extra_options))
     if provider is not None:
         config["provider"] = provider
     return json.dumps(config)
@@ -981,9 +991,7 @@ async def _prompt_session_http(
                     cache_read_tokens=cache_read.reported or None,
                     cost_usd=cost_usd,
                 )
-                model_slug = (
-                    f"{model['providerID']}/{model['modelID']}" if model else None
-                )
+                model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
                 from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
 
                 usage = apply_catalog_cost_to_usage(usage, model=model_slug)
