@@ -550,7 +550,7 @@ jobs:
         if: env.HAS_APP == 'true' && env.HAS_OPENCODE_GO == 'true'
         id: app_token_opencode_go
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.MERGECRAFT_APP_ID }}
           private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
@@ -714,7 +714,7 @@ jobs:
 
       - name: Upload packet artifact (OpenCode Go)
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mergecraft-evidence-opencode-go
           path: |
@@ -770,7 +770,7 @@ jobs:
           )
         id: app_token_codex
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.MERGECRAFT_APP_ID }}
           private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
@@ -902,7 +902,7 @@ jobs:
 
       - name: Upload packet artifact (Codex)
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mergecraft-evidence-codex
           path: |
@@ -975,7 +975,7 @@ jobs:
           )
         id: app_token_claude
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.MERGECRAFT_APP_ID }}
           private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
@@ -1064,7 +1064,7 @@ jobs:
 
       - name: Upload packet artifact (Claude)
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mergecraft-evidence-claude
           path: |
