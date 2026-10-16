@@ -412,11 +412,13 @@ def _provider_block_model_slugs(
     from mergecraft.agents.openai_compatible_gateways import SINGLETON_PROVIDER_ID
 
     indexed = resolve_gateway_endpoints()
-    if indexed and not (len(indexed) == 1 and SINGLETON_PROVIDER_ID in indexed):
-        return roster_models
-    if primary and "/" in primary:
-        return (primary,)
-    return tuple(slug for slug in roster_models if slug and "/" in slug)
+    if not indexed:
+        return tuple(slug for slug in roster_models if slug and "/" in slug)
+    if len(indexed) == 1 and SINGLETON_PROVIDER_ID in indexed:
+        if primary and "/" in primary:
+            return (primary,)
+        return tuple(slug for slug in roster_models if slug and "/" in slug)
+    return roster_models
 
 
 def build_custom_providers_for_models(
