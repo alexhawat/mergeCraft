@@ -16,7 +16,7 @@ from mergecraft.cli.app import app
 
 
 def configure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registered: bool, label: str = "nous"
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registered: bool, label: str = "tokenhub"
 ) -> None:
     scaffold_mergecraft_home(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -27,7 +27,7 @@ def configure(
 
 
 @pytest.mark.parametrize(
-    "command", ["claude", "codex", "gemini", "cursor", "nous", "tokenhub", "minimax", "logfire"]
+    "command", ["claude", "codex", "gemini", "cursor", "tokenhub", "minimax", "logfire"]
 )
 @pytest.mark.parametrize("registered", [False, True])
 @pytest.mark.parametrize("scope", ["github", "both"])
@@ -110,7 +110,7 @@ def test_legacy_auth_success_reuses_preflight_target(
         return "fake-key"
 
     monkeypatch.setattr(getpass, "getpass", collect)
-    monkeypatch.setattr(auth_cmd, "_validate_nous_api_key", lambda key: True)
+    monkeypatch.setattr(auth_cmd, "_validate_openai_compatible_key", lambda **kw: True)
     writes: list[dict[str, str]] = []
 
     def save(**kwargs: str) -> bool:
@@ -118,12 +118,12 @@ def test_legacy_auth_success_reuses_preflight_target(
         return True
 
     monkeypatch.setattr(auth_cmd, "_set_gh_secret", save)
-    result = CliRunner().invoke(app, ["auth", "nous", "--scope", "github"])
+    result = CliRunner().invoke(app, ["auth", "tokenhub", "--scope", "github"])
     assert result.exit_code == 0, result.output
     assert len(calls) == 2
     assert len(writes) == 1
     assert writes[0]["repo_slug"] == "approved/project"
-    assert writes[0]["name"] == ("LLM_PROVIDER_1_API_KEY" if registered else "NOUS_API_KEY")
+    assert writes[0]["name"] == ("LLM_PROVIDER_1_API_KEY" if registered else "TOKENHUB_API_KEY")
 
 
 @pytest.mark.parametrize("registered", [False, True])
@@ -138,8 +138,8 @@ def test_legacy_auth_local_never_uses_github(
         lambda *a, **kw: pytest.fail("GitHub preflight for local scope"),
     )
     monkeypatch.setattr(getpass, "getpass", lambda *a, **kw: "fake-key")
-    monkeypatch.setattr(auth_cmd, "_validate_nous_api_key", lambda key: True)
-    result = CliRunner().invoke(app, ["auth", "nous", "--scope", "local"])
+    monkeypatch.setattr(auth_cmd, "_validate_openai_compatible_key", lambda **kw: True)
+    result = CliRunner().invoke(app, ["auth", "tokenhub", "--scope", "local"])
     assert result.exit_code == 0, result.output
-    expected = "LLM_PROVIDER_1_API_KEY" if registered else "NOUS_API_KEY"
+    expected = "LLM_PROVIDER_1_API_KEY" if registered else "TOKENHUB_API_KEY"
     assert expected in (tmp_path / ".env").read_text()

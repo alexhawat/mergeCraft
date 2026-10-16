@@ -7,7 +7,7 @@ editing:
 
 ```bash
 mergecraft init
-mergecraft provider auth anthropic    # or openai, google, nous, …
+mergecraft provider auth anthropic    # or openai, google, tokenhub, …
 mergecraft review                  # local review works now
 ```
 
@@ -34,7 +34,6 @@ run on `pull_request_target` (opened / synchronize).
 | OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
 | OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` (billing-backed API key from [opencode.ai/auth](https://opencode.ai/auth)) | `OPENCODE_API_KEY` | Zen: `opencode/gpt-5.6-sol`; Go: `opencode-go/deepseek-v4-pro` (cheaper: `opencode-go/deepseek-v4.1-flash`) — [OpenCode Go models](https://opencode.ai/docs/go/) | `opencode` |
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
-| Nous Portal | — (API key) | `mergecraft provider auth nous --scope github` → indexed credentials; `NOUS_API_KEY` remains a legacy input | `nous/deepseek/deepseek-v4-flash` | `opencode` |
 | Tencent TokenHub | — (API key) | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` | `opencode` |
 | MiniMax | — (API key) | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` | `opencode` |
 | Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
@@ -57,15 +56,15 @@ it deletes the provider's GitHub Actions secret and/or blanks its `.env` entry,
 so CI stops selecting that provider on the next run.
 
 ```bash
-mergecraft provider disable nous                  # Actions secrets (default)
-mergecraft provider disable nous --scope both     # Actions secrets + local .env
-mergecraft provider enable nous --scope both      # re-authenticate
+mergecraft provider disable tokenhub                  # Actions secrets (default)
+mergecraft provider disable tokenhub --scope both     # Actions secrets + local .env
+mergecraft provider enable tokenhub --scope both      # re-authenticate
 ```
 
 It takes the same `--scope local|github|both` as `auth` and
 `mergecraft tracing logfire disable`, and the `auth` subcommand names work as
 labels (`provider disable codex` is `provider disable openai`). Both credential
-shapes are cleared — the flat secret the workflow names (`NOUS_API_KEY`) and the
+shapes are cleared — the flat secret the workflow names (`TOKENHUB_API_KEY`) and the
 indexed registry key (`LLM_PROVIDER_<N>_API_KEY`), and every alias a provider
 recognises (`google` clears `GEMINI_API_KEY` *and*
 `GOOGLE_GENERATIVE_AI_API_KEY`) — so a provider is off however it was
@@ -137,7 +136,7 @@ Four detection routes are consulted in order (first match wins):
 | `registry-indexed` | `providers:` registry entry with a populated indexed credential env pair |
 | `gateway-singleton` | Singleton or indexed `MERGECRAFT_CUSTOM_PROVIDER_*` gateway env vars |
 | `cli-auth` | Subscription auth state for built-in providers (`claude`, `codex`, `gemini`, …) |
-| `legacy-env` | Flat per-provider secrets (`NOUS_API_KEY`, preset gateway env aliases) |
+| `legacy-env` | Flat per-provider secrets (`TOKENHUB_API_KEY`, preset gateway env aliases) |
 
 When a roster slot is skipped for missing credentials, the run record and PR
 summary name the agent, slot, provider, and the env vars from `looked_for`.
@@ -163,7 +162,7 @@ regression-tested.
 
 | Form | Example | Provider id |
 |------|---------|-------------|
-| Singleton back-compat alias (PR #79) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `nous/...` or `tokenhub/...`) |
+| Singleton back-compat alias (PR #79) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `default` (or the active model's prefix when the model is `tokenhub/...`) |
 | Indexed multi-provider | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_1` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1`, `_2`, `_3`, … | `provider_1`, `provider_2`, `provider_3`, … |
 
 Indexed env vars are operator-locked — both halves of each numeric pair
@@ -219,22 +218,25 @@ described below); the *effective* runtime default when left unset is
 See [docs/action-reference.md](action-reference.md#action-outputs) for the
 full output list.
 
-#### Worked example — Nous-hosted DeepSeek V4 Flash
+#### Worked example — Nous Portal as a registered provider
 
-A raw pass-through slug reaches Nous's OpenAI-compatible endpoint via
-either harness:
+mergeCraft has no built-in Nous provider. Nous Portal is OpenAI-compatible,
+so register it like any other endpoint in `.mergecraft/config.yaml`:
 
 ```yaml
-- uses: alexhawat/mergeCraft@v0.1.0a1
-  with:
-    model: nous/deepseek/deepseek-v4-flash  # raw pass-through slug
-  env:
-    NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}      # preset path — no MERGECRAFT_* needed
+models:
+- nous/deepseek/deepseek-v4-flash
+providers:
+- label: nous
+  url: https://inference-api.nousresearch.com/v1
+  harness: opencode
+  envIndex: 1
 ```
 
-The model prefix `nous` resolves against `NOUS_API_KEY` (set above) and
-`https://inference-api.nousresearch.com/v1`. The harness then registers
-the provider, sets `enabled_providers = ["nous"]`, and serves the model.
+Store the key as the `NOUS_API_KEY` Actions secret and pass it to the Action
+step as `LLM_PROVIDER_1_API_KEY` (the number matches `envIndex`). The model
+prefix `nous` resolves against that registry row, and the OpenCode harness
+serves the model.
 
 #### Multi-provider — Codex-side indexed pairs
 
@@ -274,22 +276,21 @@ key value — convention 7. The harness reads the env var at exec time.
 #### Which harness handles which
 
 **Harness vs provider vs model.** OpenCode is the generic multi-provider
-harness (OpenAI-compatible gateways, Nous, TokenHub, custom providers).
-Codex is the OpenAI-native harness. **Nous** is a *provider* (inference
-gateway); **DeepSeek** is a *model family* under that provider — not a
+harness (OpenAI-compatible gateways such as TokenHub, MiniMax and custom
+providers). Codex is the OpenAI-native harness. **TokenHub** is a *provider*
+(inference gateway); **DeepSeek** is a *model family* it serves — not a
 harness name. Set `harness:` in `.mergecraft/config.yaml` to pick the
 runtime independently of `model:`; when unset, mergeCraft infers the
 harness from the model slug (see matrix below).
 
 | Model slug (unset `harness`) | Inferred harness | Explicit override exercised by tests |
 |------------------------------|------------------|--------------------------------------|
-| `nous/deepseek-v4-flash` | `opencode` | — |
-| `nous/deepseek/deepseek-v4-flash` | `opencode` | — |
+| `tokenhub/hy3` (registered provider) | `opencode` | — |
 | `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
 | `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
 | `google/gemini-3.1-pro-preview` | `gemini` | — |
 | `cursor/cloud-agent` | `cursor` | — |
-| `nous/deepseek/deepseek-v4-flash` + `harness: claude` | — | **configuration error** (names both halves) |
+| `tokenhub/hy3` + `harness: claude` | — | **configuration error** (names both halves) |
 
 | Harness | Format written | Where it lives |
 |---------|----------------|----------------|

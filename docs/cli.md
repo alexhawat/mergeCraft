@@ -48,7 +48,6 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft auth gemini` | Save a Gemini API key as GEMINI_API_KEY. |
 | `mergecraft auth logfire` | Save a Logfire write token + project for the `logfire` tracing sink. |
 | `mergecraft auth minimax` | Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY. |
-| `mergecraft auth nous` | Save a Nous Portal API key as NOUS_API_KEY. |
 | `mergecraft auth opencode` | Save OpenCode Zen credentials as OPENCODE_AUTH_JSON. |
 | `mergecraft auth tokenhub` | Save a Tencent TokenHub API key as TOKENHUB_API_KEY. |
 | `mergecraft cache clear` | Remove every entry from the run cache. |

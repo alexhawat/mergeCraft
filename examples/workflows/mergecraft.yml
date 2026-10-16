@@ -80,6 +80,5 @@ jobs:
           # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}           # + model: nous/tencent/hy3
           # TOKENHUB_API_KEY: ${{ secrets.TOKENHUB_API_KEY }}   # + model: tokenhub/hy3
           # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}       # + model: google/gemini-*

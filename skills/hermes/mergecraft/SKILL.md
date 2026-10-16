@@ -10,7 +10,6 @@ required_environment_variables:
 - ANTHROPIC_API_KEY
 - OPENAI_API_KEY
 - GEMINI_API_KEY
-- NOUS_API_KEY
 - CURSOR_API_KEY
 ---
 ## Hermes install
@@ -22,9 +21,9 @@ Hermes Agent reads skills from ``~/.hermes/skills/`` or a category-nested projec
 hermes skills install https://github.com/alexhawat/mergeCraft/tree/09d441236e80a10758d4058b64e7ac60fe52925e/skills/hermes
 ```
 
-mergeCraft ships a Nous provider (``mergecraft provider auth nous --scope github``,
-``nous/deepseek/deepseek-v4-flash``) — a Hermes user can run reviews entirely on
-Nous credentials when configured.
+mergeCraft has no built-in Nous provider, but Nous Portal is OpenAI-compatible:
+register it under ``providers:`` in ``.mergecraft/config.yaml`` and a Hermes user
+can run reviews on Nous credentials.
 # mergeCraft
 
 mergeCraft is an AI-powered PR reviewer: a GitHub Action plus a Python CLI

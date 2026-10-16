@@ -70,7 +70,6 @@ LEGACY_API_KEY_MIGRATIONS: dict[str, tuple[str, str]] = {
     "GEMINI_API_KEY": ("google", "API_KEY"),
     "CURSOR_API_KEY": ("cursor", "API_KEY"),
     "DEEPSEEK_API_KEY": ("deepseek", "API_KEY"),
-    "NOUS_API_KEY": ("nous", "API_KEY"),
     "TOKENHUB_API_KEY": ("tokenhub", "API_KEY"),
     "MERGECRAFT_CUSTOM_PROVIDER_API_KEY": ("minimax", "API_KEY"),
     "OPENCODE_API_KEY": ("opencode", "API_KEY"),
@@ -80,7 +79,6 @@ LEGACY_LABEL_TO_API_KEY_ENV: dict[str, str] = {
     label: legacy_key for legacy_key, (label, _suffix) in LEGACY_API_KEY_MIGRATIONS.items()
 }
 
-NOUS_BASE_URL_ENV = "NOUS_BASE_URL"
 CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
 
 BEDROCK_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("AWS_REGION", "AWS_DEFAULT_REGION")
@@ -88,7 +86,7 @@ VERTEX_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("GOOGLE_CLOUD_PROJECT", "VERTEX_LO
 
 STRUCTURE_KEYS_IN_ENV: frozenset[str] = frozenset({"harness", "envIndex", "modelChain", "authKind"})
 
-ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset({NOUS_BASE_URL_ENV})
+ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset()
 
 CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
     "api_key",
@@ -553,14 +551,11 @@ def _validate_api_key_for_label(label: str, api_key: str, url: str | None) -> bo
         _validate_cursor_api_key,
         _validate_gemini_api_key,
         _validate_minimax_api_key,
-        _validate_nous_api_key,
         _validate_openai_compatible_key,
     )
 
     lowered = label.lower()
-    if lowered in {"nous", "google", "gemini"}:
-        if lowered == "nous":
-            return _validate_nous_api_key(api_key)
+    if lowered in {"google", "gemini"}:
         return _validate_gemini_api_key(api_key)
     if lowered == "cursor":
         return _validate_cursor_api_key(api_key)
@@ -1021,15 +1016,6 @@ def plan_provider_migration(
 
     for label in labels_to_add:
         entry = _migration_provider_template(label, next_index)
-        if label == "nous":
-            nous_url = env_map.get(NOUS_BASE_URL_ENV, "").strip()
-            if nous_url:
-                # A stored URL is emitted verbatim into workflow YAML, so a
-                # migrated one has to clear the same bar as one typed at the CLI.
-                try:
-                    entry["url"] = validate_http_url(nous_url)
-                except ValueError as exc:
-                    cli_bail(f"{NOUS_BASE_URL_ENV} is not a usable provider url: {exc}")
         if label == "bedrock":
             for region_key in BEDROCK_LEGACY_CONFIG_KEYS:
                 region_value = env_map.get(region_key, "").strip()
@@ -1157,8 +1143,6 @@ def apply_provider_migration(
         keys_to_remove = set(ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY)
         for provider_entry in plan.providers:
             label = str(provider_entry.get("label", "")).lower()
-            if label == "nous":
-                keys_to_remove.add(NOUS_BASE_URL_ENV)
             if label == "vertex" and provider_entry.get("region"):
                 keys_to_remove.add("VERTEX_LOCATION")
         if keys_to_remove and env_path.is_file():

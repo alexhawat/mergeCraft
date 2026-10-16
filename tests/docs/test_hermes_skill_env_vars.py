@@ -2,8 +2,9 @@
 
 Pins D11: Hermes ``required_environment_variables`` in ``skills/harnesses.yaml``
 and generated ``skills/hermes/mergecraft/SKILL.md`` must name secrets mergeCraft
-actually reads — ``GEMINI_API_KEY`` (not ``GOOGLE_API_KEY``) and ``NOUS_API_KEY``
-as documented in ``docs/authentication.md``. Implementation lands in W10.
+actually reads — ``GEMINI_API_KEY`` (not ``GOOGLE_API_KEY``) as documented in
+``docs/authentication.md``. ``NOUS_API_KEY`` left the list with the built-in
+Nous provider.
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ AUTH_DOC = REPO_ROOT / "docs" / "authentication.md"
 
 _HERMES_ID = "hermes"
 _GEMINI_ENV = "GEMINI_API_KEY"
-_NOUS_ENV = "NOUS_API_KEY"
 _FORBIDDEN_GOOGLE_ENV = "GOOGLE_API_KEY"
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _ENV_VAR_RE = re.compile(r"`([A-Z][A-Z0-9_]+)`")
@@ -110,7 +110,6 @@ _ENV_GETTERS: dict[str, Callable[[], list[str]]] = {
     ("env_name", "must_present"),
     [
         (_GEMINI_ENV, True),
-        (_NOUS_ENV, True),
         (_FORBIDDEN_GOOGLE_ENV, False),
     ],
 )
@@ -133,19 +132,12 @@ def test_hermes_required_env_var(
 
 
 def test_hermes_env_names_match_authentication_doc() -> None:
-    """Hermes manifest and SKILL.md env vars must include auth-doc names for Gemini and Nous."""
+    """Hermes manifest and SKILL.md env vars must include the auth-doc Gemini name."""
     gemini_envs = _auth_doc_env_names_for_provider("Google Gemini")
-    nous_envs = _auth_doc_env_names_for_provider("Nous Portal")
     assert _GEMINI_ENV in gemini_envs, "docs/authentication.md must document GEMINI_API_KEY"
-    assert _NOUS_ENV in nous_envs, "docs/authentication.md must document NOUS_API_KEY"
     for source, getter in _ENV_GETTERS.items():
         env_vars = set(getter())
-        missing = sorted(
-            name
-            for name in (_GEMINI_ENV, _NOUS_ENV)
-            if name in gemini_envs.union(nous_envs) and name not in env_vars
-        )
-        assert not missing, (
-            f"Hermes {source} required_environment_variables missing auth-doc env names: {missing}"
+        assert _GEMINI_ENV in env_vars, (
+            f"Hermes {source} required_environment_variables missing {_GEMINI_ENV}"
         )
         assert _FORBIDDEN_GOOGLE_ENV not in env_vars

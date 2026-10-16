@@ -8,7 +8,7 @@ Contracts:
 - Permanent: other 4xx and unrelated exceptions (pass through immediately).
 - Safe methods (GET/HEAD/OPTIONS) may retry; mutations never retry blindly.
 
-Model-chain / Nous taxonomy lives in ``provider_failure`` — this module
+Model-chain failure taxonomy lives in ``provider_failure`` — this module
 must not own ``ProviderFailureClass`` or re-export its classifiers.
 """
 

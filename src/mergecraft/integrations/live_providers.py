@@ -11,7 +11,6 @@ PROVIDER_SECRET_ENV: Final[dict[str, str]] = {
     "openai": "OPENAI_API_KEY",
     "codex": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
-    "nous": "NOUS_API_KEY",
     "github": "GITHUB_TOKEN",
 }
 
@@ -20,7 +19,6 @@ DEFAULT_CREDENTIAL_SLUGS: Final[tuple[str, ...]] = (
     "anthropic",
     "openai",
     "gemini",
-    "nous",
 )
 
 # Shared contract tests run on every scheduled matrix leg.
@@ -37,7 +35,6 @@ PROVIDER_LIVE_TESTS: Final[dict[str, tuple[str, ...]]] = {
     "openai": ("tests/integration/test_live_providers.py::test_openai_codex_minimal_completion",),
     "codex": ("tests/integration/test_live_providers.py::test_openai_codex_minimal_completion",),
     "gemini": ("tests/integration/test_live_providers.py::test_gemini_minimal_completion",),
-    "nous": ("tests/integration/test_live_providers.py::test_nous_minimal_completion",),
     "github": (
         "tests/integration/test_github_integration.py::test_checkout_and_status_check_roundtrip",
     ),

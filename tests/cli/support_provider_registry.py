@@ -24,7 +24,7 @@ BUILTIN_HARNESS_DEFAULTS: dict[str, str] = {
 
 NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1"
 CUSTOM_BASE_URL = "https://gateway.example.invalid/v1"
-EXPECTED_BUILTIN_PROVIDER_COUNT = 15
+EXPECTED_BUILTIN_PROVIDER_COUNT = 14
 
 # BB #478 — unified ``provider auth`` contracts (D6-D7, D10).
 
@@ -38,7 +38,6 @@ LEGACY_AUTH_SUBCOMMANDS: tuple[str, ...] = (
     "claude",
     "gemini",
     "cursor",
-    "nous",
     "tokenhub",
     "minimax",
 )
@@ -61,7 +60,6 @@ EXPECTED_SEEDED_AUTH_KINDS: dict[str, str] = {
     "anthropic": AUTH_KIND_OAUTH,
     "google": AUTH_KIND_API_KEY,
     "cursor": AUTH_KIND_API_KEY,
-    "nous": AUTH_KIND_API_KEY,
     "tokenhub": AUTH_KIND_API_KEY,
     "minimax": AUTH_KIND_API_KEY,
     "bedrock": AUTH_KIND_CLOUD_CHAIN,
@@ -429,7 +427,6 @@ LEGACY_API_KEY_MIGRATIONS: dict[str, tuple[str, str]] = {
     "GEMINI_API_KEY": ("google", "API_KEY"),
     "CURSOR_API_KEY": ("cursor", "API_KEY"),
     "DEEPSEEK_API_KEY": ("deepseek", "API_KEY"),
-    "NOUS_API_KEY": ("nous", "API_KEY"),
     "TOKENHUB_API_KEY": ("tokenhub", "API_KEY"),
     "MERGECRAFT_CUSTOM_PROVIDER_API_KEY": ("minimax", "API_KEY"),
 }

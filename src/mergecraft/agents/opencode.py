@@ -361,10 +361,10 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
     2. **Singleton back-compat alias**: ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL``
        + ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` (PR #79 / D7) emit a single
        provider block keyed by the model's prefix (``default`` for the
-       canonical ``default/...`` model, ``nous`` for ``nous/...``, etc.).
+       canonical ``default/...`` model, ``minimax`` for ``minimax/...``, etc.).
        This preserves the W1.1 single-provider regression pin's emitted
-       shape: a singleton + ``nous/...`` model still produces a
-       ``provider.nous`` block, not a ``provider.default`` one.
+       shape: a singleton + ``minimax/...`` model still produces a
+       ``provider.minimax`` block, not a ``provider.default`` one.
     3. **Registry rows**: indexed ``LLM_PROVIDER_<N>_*`` credentials plus optional
        ``MERGECRAFT_CUSTOM_PROVIDER_*`` workflow env (GHA injects secrets there).
     """

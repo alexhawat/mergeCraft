@@ -103,7 +103,7 @@ _META_MARKERS = {"integration", "hermetic_integration"}
 # The genuinely hermetic integration files: no secret, no binary, no root.
 _HERMETIC_FILES = (
     "tests/integration/test_provider_failures.py",
-    "tests/integration/test_nous_404_failover_466.py",
+    "tests/integration/test_billing_404_failover_466.py",
 )
 
 

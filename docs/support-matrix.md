@@ -155,7 +155,6 @@ BYOK provider keys from the model catalog (`mergecraft.models.PROVIDERS`).
 | `opencode-go` | OpenCode Go | `OPENCODE_GO_API_KEY` |
 | `bedrock` | Amazon Bedrock | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION`, `BEDROCK_MODEL_ID` |
 | `vertex` | Google Vertex AI | `VERTEX_SERVICE_ACCOUNT_JSON`, `GOOGLE_CLOUD_PROJECT`, `VERTEX_LOCATION`, `VERTEX_MODEL_ID` |
-| `nous` | Nous Portal | `NOUS_API_KEY`, `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` |
 | `tokenhub` | Tencent TokenHub | `TOKENHUB_API_KEY` |
 | `paperinstruments` | Paper Instruments | `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` |
 | `minimax` | MiniMax (OpenAI-compatible) | `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` |
@@ -213,8 +212,6 @@ recommended-model column here.
 | `opencode-go/deepseek-v4.1-flash` | `opencode-go` | — |
 | `bedrock/byok` | `bedrock` | — |
 | `vertex/byok` | `vertex` | — |
-| `nous/deepseek/deepseek-v4-flash` | `nous` | preferred |
-| `nous/tencent/hy3` | `nous` | preferred |
 | `tokenhub/hy3` | `tokenhub` | preferred |
 | `tokenhub/deepseek-v4-flash` | `tokenhub` | — |
 | `tokenhub/deepseek-v4-pro` | `tokenhub` | — |

@@ -8,19 +8,6 @@ Every provider test asserts the HTTP status *before* it parses the body, and
 the failure names the provider and the numeric status, echoing at most 300
 characters of the body. It never prints the request URL or a header: Gemini's
 credential rides in the query string, so a URL would leak it.
-
-The Nous leg posts the product's documented default model
-(``nous/deepseek/deepseek-v4-flash``, ``docs/authentication.md``) from
-``NOUS_DEFAULT_MODEL`` below. That model id exists only as a value inside the
-catalog mapping in ``mergecraft/models.py``, not as an importable module
-constant, so it is mirrored here; ``MERGECRAFT_LIVE_NOUS_MODEL`` overrides it
-for a one-off live probe.
-
-The documented id is a routing slug: ``nous`` selects the provider and the rest
-is the model id the Portal serves. The product sends only the served id (its
-OpenCode ``provider.nous`` block keys models by it), so the leg posts the slug
-without the ``nous/`` prefix, exactly as a review would. Posting the whole slug
-asks the Portal for a model named ``nous/...``, which it does not have.
 """
 
 from __future__ import annotations
@@ -46,15 +33,6 @@ pytestmark = [
 _MAX_OUTPUT_TOKENS = 16
 _TOKEN_BOUND = 64
 _TIMEOUT = 45.0
-
-# The product's documented Nous default; env-overridable for a one-off probe.
-NOUS_DEFAULT_MODEL = "nous/deepseek/deepseek-v4-flash"
-_NOUS_ROUTING_PREFIX = "nous/"
-
-
-def nous_served_model(slug: str) -> str:
-    """Return the model id the Nous Portal serves for a ``nous/...`` routing slug."""
-    return slug.removeprefix(_NOUS_ROUTING_PREFIX)
 
 
 def _require(name: str) -> str:
@@ -186,33 +164,6 @@ def test_gemini_minimal_completion() -> None:
             },
         }
     acc = _accumulate("gemini", payload, text)
-    assert acc.final_output.strip()
-    assert _usage_out(acc) <= _TOKEN_BOUND
-
-
-def test_nous_minimal_completion() -> None:
-    key = _require("NOUS_API_KEY")
-    base = os.environ.get("NOUS_BASE_URL", "https://inference-api.nousresearch.com/v1").rstrip("/")
-    model = nous_served_model(os.environ.get("MERGECRAFT_LIVE_NOUS_MODEL") or NOUS_DEFAULT_MODEL)
-    response = httpx.post(
-        f"{base}/chat/completions",
-        headers={"authorization": f"Bearer {key}"},
-        json={
-            "model": model,
-            "max_tokens": _MAX_OUTPUT_TOKENS,
-            "messages": [{"role": "user", "content": "Reply with the single word ping."}],
-        },
-        timeout=_TIMEOUT,
-    )
-    _fail_on_http_error(response, "nous")
-    payload = response.json()
-    choices = payload.get("choices")
-    assert isinstance(choices, list)
-    assert choices, f"Nous body is not a completion: {payload!r}"
-    message = choices[0].get("message") if isinstance(choices[0], dict) else None
-    assert isinstance(message, dict)
-    text = str(message.get("content") or "")
-    acc = _accumulate("nous", payload, text)
     assert acc.final_output.strip()
     assert _usage_out(acc) <= _TOKEN_BOUND
 

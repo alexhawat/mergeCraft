@@ -27,11 +27,8 @@ This file pins the contract for:
 - **W5.6** — Adding MiniMax catalog entries does not change the resolution
   of any pre-existing curated slug.
 
-(W5.3 Nous/DeepSeek RED suite was already shipped in PR #122 /
-``wave/issue-57-nous``; this file does NOT re-author it.)
 (W5.4 ``mergecraft models list`` detection lives at
-``tests/cli/test_models_list_minimax.py`` — split for locality with the
-existing ``test_models_list_nous.py``.)
+``tests/cli/test_models_list_minimax.py``.)
 """
 
 from __future__ import annotations
@@ -443,7 +440,6 @@ _EXISTING_SLUGS: tuple[str, ...] = (
     "opencode-go/deepseek-v4.1-flash",
     "bedrock/byok",
     "vertex/byok",
-    "nous/deepseek/deepseek-v4-flash",
     "tokenhub/hy3",
     "tokenhub/deepseek-v4-flash",
     "tokenhub/deepseek-v4-pro",

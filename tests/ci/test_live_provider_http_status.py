@@ -17,14 +17,12 @@ import httpx
 import pytest
 
 _FAKE_KEY: Final = "fake-live-key-do-not-print"
-_DOCUMENTED_NOUS_MODEL: Final = "nous/deepseek/deepseek-v4-flash"
 
 _ANTHROPIC_URL: Final = "https://api.anthropic.com/v1/messages"
 _OPENAI_URL: Final = "https://api.openai.com/v1/chat/completions"
 _GEMINI_URL: Final = (
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 )
-_NOUS_URL: Final = "https://inference-api.nousresearch.com/v1/chat/completions"
 
 _ERROR_PAYLOAD: Final = {"error": {"message": "credential rejected"}}
 
@@ -59,11 +57,8 @@ def _install_error_response(
     monkeypatch: pytest.MonkeyPatch, url: str, status: int, payload: Any
 ) -> None:
     module = _live_module()
-    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "NOUS_API_KEY"):
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.setenv(name, _FAKE_KEY)
-    monkeypatch.delenv("NOUS_BASE_URL", raising=False)
-    monkeypatch.delenv("NOUS_MODEL", raising=False)
-    monkeypatch.delenv("MERGECRAFT_LIVE_NOUS_MODEL", raising=False)
     stub = _StubResponse(status, payload, url)
     monkeypatch.setattr(module.httpx, "post", lambda *args, **kwargs: stub)
 
@@ -88,7 +83,6 @@ def _run_provider_failure(
         ("test_anthropic_minimal_completion", _ANTHROPIC_URL, 401),
         ("test_openai_codex_minimal_completion", _OPENAI_URL, 401),
         ("test_gemini_minimal_completion", _GEMINI_URL, 404),
-        ("test_nous_minimal_completion", _NOUS_URL, 404),
     ],
 )
 def test_provider_failure_names_status_without_key_or_url(
@@ -119,56 +113,3 @@ def test_provider_failure_bounds_the_body_it_echoes(monkeypatch: pytest.MonkeyPa
     assert marker not in message, (
         f"at most 300 characters of the body may be echoed, got the whole body: {message!r}"
     )
-
-
-def _capture_nous_model(monkeypatch: pytest.MonkeyPatch, *, override: str | None = None) -> str:
-    module = _live_module()
-    monkeypatch.setenv("NOUS_API_KEY", _FAKE_KEY)
-    monkeypatch.delenv("NOUS_BASE_URL", raising=False)
-    monkeypatch.delenv("NOUS_MODEL", raising=False)
-    if override is None:
-        monkeypatch.delenv("MERGECRAFT_LIVE_NOUS_MODEL", raising=False)
-    else:
-        monkeypatch.setenv("MERGECRAFT_LIVE_NOUS_MODEL", override)
-
-    captured: dict[str, str] = {}
-    payload = {
-        "choices": [{"message": {"content": "ping"}}],
-        "usage": {"input_tokens": 4, "output_tokens": 1},
-    }
-
-    def _post(url: str, **kwargs: Any) -> _StubResponse:
-        captured["model"] = kwargs["json"]["model"]
-        return _StubResponse(200, payload, url)
-
-    monkeypatch.setattr(module.httpx, "post", _post)
-    module.test_nous_minimal_completion()
-    return captured["model"]
-
-
-def test_nous_default_model_is_the_shared_documented_constant() -> None:
-    module = _live_module()
-    assert getattr(module, "NOUS_DEFAULT_MODEL", None) == _DOCUMENTED_NOUS_MODEL, (
-        "the live Nous leg must read the product's documented default model from one "
-        "shared constant, not a hard-coded legacy model"
-    )
-
-
-def test_nous_leg_posts_the_served_id_of_the_documented_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The documented ``nous/...`` slug routes to Nous; the Portal serves the rest.
-
-    Posting the whole slug asked the Portal for ``nous/deepseek/deepseek-v4-flash``
-    and got a 404, while the Portal's model list serves
-    ``deepseek/deepseek-v4-flash``.
-    """
-    assert _capture_nous_model(monkeypatch) == _DOCUMENTED_NOUS_MODEL.removeprefix("nous/")
-
-
-def test_nous_leg_model_is_env_overridable(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _capture_nous_model(monkeypatch, override="custom/nous-model") == "custom/nous-model"
-
-
-def test_nous_leg_override_accepts_a_routing_slug(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _capture_nous_model(monkeypatch, override="nous/tencent/hy3") == "tencent/hy3"

@@ -17,8 +17,8 @@ from mergecraft.models import PROVIDERS
 from mergecraft.utils import agent_resolve as ar
 
 
-def test_providers_catalog_has_fifteen_builtin_entries() -> None:
-    """Seed source ``PROVIDERS`` must expose exactly 15 built-in catalog rows."""
+def test_providers_catalog_has_fourteen_builtin_entries() -> None:
+    """Seed source ``PROVIDERS`` must expose exactly 14 built-in catalog rows."""
     assert len(PROVIDERS) == EXPECTED_BUILTIN_PROVIDER_COUNT
 
 

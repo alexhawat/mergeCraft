@@ -428,7 +428,6 @@ def test_local_entries_override_the_secret_pair_for_the_env_write(
 _VALIDATORS: list[tuple[str, str]] = [
     ("_validate_gemini_api_key", "gemini"),
     ("_validate_cursor_api_key", "cursor"),
-    ("_validate_nous_api_key", "nous"),
     ("_validate_minimax_api_key", "minimax"),
 ]
 
@@ -642,19 +641,6 @@ def test_codex_bails_when_the_login_command_fails(monkeypatch: MonkeyPatch, tmp_
     result = runner.invoke(app, ["auth", "codex", "--scope", "local"], env=_ENV_WIDE)
     assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
     assert "codex login failed (exit 7)" in result.stdout + result.stderr
-
-
-def test_nous_success_names_the_model_slug_to_configure(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    env_path = _local_env(monkeypatch, tmp_path)
-    _stub_getpass(monkeypatch, "nk-good")
-    _mock_httpx(monkeypatch, _status(200))
-    result = runner.invoke(app, ["auth", "nous", "--scope", "local"], env=_ENV_WIDE)
-    combined = result.stdout + result.stderr
-    assert result.exit_code == 0, combined
-    assert dotenv_values(env_path)["NOUS_API_KEY"] == "nk-good"
-    assert "nous/deepseek/deepseek-v4-flash" in combined
 
 
 def test_tokenhub_rejects_a_bad_key_and_keeps_the_env_untouched(

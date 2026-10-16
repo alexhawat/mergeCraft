@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- The built-in Nous Portal provider is gone: the `nous/...` catalog models,
+  `mergecraft auth nous`, and the flat `NOUS_API_KEY` credential no longer
+  exist, so a `nous/...` model now fails as an unregistered provider. **Fix:**
+  register Nous (or any OpenAI-compatible endpoint) under `providers:` in
+  `.mergecraft/config.yaml` with `url`, `harness: opencode` and an `envIndex`,
+  and pass the key as `LLM_PROVIDER_<N>_API_KEY`. See
+  [docs/authentication.md](docs/authentication.md).
+
 - An invalid `trust.agentSandbox` value (for example `off`, a bare `false`, or a
   typo like `nevr`) now fails configuration validation instead of quietly
   becoming `dispatch`. **Fix:** set one of `never`, `merged-only`, `dispatch`, or
