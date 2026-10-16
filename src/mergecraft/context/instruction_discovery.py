@@ -17,6 +17,7 @@ from urllib.parse import unquote
 
 from mergecraft.analyzers.agentsec.skill_manifest import parse_skill_file
 from mergecraft.utils.fence import SAFETY_NOTE, Fence, render_untrusted
+from mergecraft.utils.path_confinement import resolved_within_root
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -112,16 +113,11 @@ def reference_link_targets(body: str) -> list[str]:
 def _resolved_within_root(path: Path, root: Path) -> bool:
     """True when *path*'s resolved location stays inside the resolved *root*.
 
-    The same rule the skill-reference resolver uses: resolve, then
-    ``relative_to``, and treat a failure as an escape. A symlink whose target
-    lives outside the repository is not an instruction file, however its
-    target is named (U6 / TB-D8).
+    The same rule the skill-reference resolver uses; it lives in
+    :func:`mergecraft.utils.path_confinement.resolved_within_root` so the
+    agent-security scanner applies it unchanged (U6 / TB-D8).
     """
-    try:
-        path.resolve().relative_to(root)
-    except (OSError, ValueError):
-        return False
-    return True
+    return resolved_within_root(path, root)
 
 
 def _scan_instruction_candidates(
