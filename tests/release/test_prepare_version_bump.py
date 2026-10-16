@@ -146,6 +146,19 @@ def _pyproject_version(root: Path) -> str:
     return version
 
 
+def _committed_version() -> str:
+    """Return the repo's own committed ``[project].version``.
+
+    The drift gate compares the committed manifest against the committed
+    version, never against whatever distribution happens to be *installed*.
+    ``package_version()`` is ``lru_cache``d and reads the installed
+    distribution, so a premise render must pin this value in instead of
+    calling it: another module can leave that cache holding a different
+    version for the rest of a full-suite run.
+    """
+    return _pyproject_version(REPO_ROOT)
+
+
 def _server_json(root: Path) -> dict[str, Any]:
     """Return the copied ``server.json`` as a mapping."""
     data = json.loads((root / _SERVER_JSON).read_text(encoding="utf-8"))
@@ -279,6 +292,11 @@ def test_server_json_after_bump_is_byte_identical_to_the_generator_render(
     """
     root = _prepare_tree(tmp_path)
     generator = load_script_module(_GENERATOR_SCRIPT)
+    # Pin the version the generator renders for the premise. The committed
+    # manifest is the generator's render *for the committed version*, and the
+    # ambient ``package_version()`` (installed distribution, ``lru_cache``d)
+    # is process state another module can poison for the rest of the run.
+    monkeypatch.setattr(generator, "package_version", _committed_version)
     assert generator.render_server_json() == (REPO_ROOT / _SERVER_JSON).read_text(
         encoding="utf-8"
     ), "premise: the committed manifest is the generator's render for the committed version"

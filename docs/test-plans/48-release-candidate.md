@@ -52,11 +52,14 @@ reason: the shape of the RED result is 14 `failed`, 0 `error`.
 ## Why the strong pins are strong
 
 - **Byte identity (8)** is the property whose absence produced the failed
-  candidate. The test loads `scripts/gen_mcp_server_json.py` by path, checks
-  first that its unpatched render already equals the committed `server.json`
-  (so a wrong expectation cannot pass vacuously), then patches
-  `scripts.gen_mcp_server_json.package_version` to the new version and compares
-  the script's rewritten file byte for byte.
+  candidate. The test loads `scripts/gen_mcp_server_json.py` by path. The
+  premise render pins `scripts.gen_mcp_server_json.package_version` to the
+  repo's **own** committed `[project].version` (read from `pyproject.toml`) and
+  checks that render already equals the committed `server.json`, so a wrong
+  expectation cannot pass vacuously; it never consults the ambient installed
+  distribution, whose `lru_cache`d value another module can poison for the rest
+  of a full-suite run. The test then patches the same symbol to the new version
+  and compares the script's rewritten file byte for byte.
 - **Only two files change (9)** is a whole-tree byte snapshot of the throwaway
   root, with `uv.lock`, `CHANGELOG.md` and `docs/mcp-tools.md` copied in so the
   assertion has something to protect: a bump that ran `uv lock` or regenerated
