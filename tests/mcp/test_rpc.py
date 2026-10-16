@@ -13,11 +13,22 @@ from mergecraft.utils.version import package_version
 
 
 @pytest.fixture(autouse=True)
-def _clear_package_version_cache() -> None:
+def _clear_package_version_cache() -> Iterator[None]:
+    """Clear the process-global ``package_version`` cache on both sides of every test.
+
+    ``test_package_version_prefers_installed_distribution`` fills the cache with
+    a fake ``9.9.9+wheel``. Clearing only in setup left that value behind
+    whenever random ordering put the test last in the module, and any later test
+    that resolved the installed version saw a version that is not real (#1006).
+    """
+    package_version.cache_clear()
+    yield
     package_version.cache_clear()
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from _pytest.monkeypatch import MonkeyPatch
 
 
