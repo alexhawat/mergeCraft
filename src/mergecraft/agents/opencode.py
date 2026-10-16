@@ -346,6 +346,75 @@ def _opencode_provider_block(
     }
 
 
+def _collect_opencode_model_slugs(
+    primary: str | None,
+    agent_block: object,
+) -> tuple[str, ...]:
+    """Return every model slug the OpenCode config references (orchestrator + subagents)."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str | None) -> None:
+        if not raw:
+            return
+        slug = raw.strip()
+        if not slug or slug in seen or "/" not in slug:
+            return
+        seen.add(slug)
+        ordered.append(slug)
+
+    _add(primary)
+    if isinstance(agent_block, dict):
+        for entry in agent_block.values():
+            if isinstance(entry, dict):
+                model_value = entry.get("model")
+                if isinstance(model_value, str):
+                    _add(model_value)
+    return tuple(ordered)
+
+
+def _merge_custom_provider_blocks(
+    *blocks: dict[str, object] | None,
+) -> dict[str, object] | None:
+    """Merge provider tables from several :func:`build_custom_provider` calls."""
+    merged: dict[str, object] = {}
+    for block in blocks:
+        if not block:
+            continue
+        for provider_id, payload in block.items():
+            if provider_id not in merged:
+                merged[provider_id] = payload
+                continue
+            existing = merged[provider_id]
+            if not isinstance(existing, dict) or not isinstance(payload, dict):
+                merged[provider_id] = payload
+                continue
+            combined = dict(existing)
+            ex_models = existing.get("models")
+            new_models = payload.get("models")
+            if isinstance(ex_models, dict) and isinstance(new_models, dict):
+                combined["models"] = {**ex_models, **new_models}
+            merged[provider_id] = combined
+    return merged or None
+
+
+def build_custom_providers_for_models(
+    models: tuple[str, ...] | list[str],
+) -> dict[str, object] | None:
+    """Emit OpenCode provider blocks for every slug in *models* (multi-reviewer)."""
+    blocks: list[dict[str, object] | None] = [
+        build_custom_provider(slug) for slug in models if slug
+    ]
+    return _merge_custom_provider_blocks(*blocks)
+
+
+def _custom_provider_ids_for_models(models: tuple[str, ...]) -> list[str]:
+    ids: set[str] = set()
+    for slug in models:
+        ids.update(_custom_provider_ids(slug))
+    return sorted(ids)
+
+
 def build_custom_provider(model: str | None) -> dict[str, object] | None:
     """Describe an OpenAI-compatible provider (or several) for opencode.
 
@@ -503,9 +572,13 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
         },
         "agent": agent_block,
     }
+    agent_models_source = (
+        agent_block if (model and "/" in model) else {}
+    )
+    roster_models = _collect_opencode_model_slugs(model, agent_models_source)
     if model:
         config["model"] = model
-        provider_ids = _custom_provider_ids(model)
+        provider_ids = _custom_provider_ids_for_models(roster_models)
         if provider_ids:
             config["enabled_providers"] = provider_ids
         else:
@@ -528,7 +601,17 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
             else:
                 agents["build"] = build_overrides
             config["agent"] = agents
-    provider = build_custom_provider(model)
+    for roster_slug in roster_models:
+        roster_config = _provider_config_for_model(roster_slug)
+        if roster_config is not None:
+            from mergecraft.agents.openai_generation_params import (
+                validate_generation_params_for_model,
+            )
+
+            validate_generation_params_for_model(
+                roster_slug, dict(roster_config.extra_options)
+            )
+    provider = build_custom_providers_for_models(roster_models)
     if provider is not None:
         config["provider"] = provider
     return json.dumps(config)
@@ -888,20 +971,28 @@ async def _prompt_session_http(
             out = int(info.get("output_tokens") or info.get("output") or 0)
             cache_read = resolve_cache_read(info)
             cost = info.get("cost") or info.get("costUsd")
-            if inp or out or cost:
+            total_tokens = inp + out + cache_read.additive
+            if total_tokens > 0:
+                cost_usd = float(cost) if cost is not None else None
                 usage = AgentUsage(
                     agent="opencode",
                     input_tokens=inp + cache_read.additive,
                     output_tokens=out,
                     cache_read_tokens=cache_read.reported or None,
-                    cost_usd=float(cost) if cost is not None else None,
+                    cost_usd=cost_usd,
                 )
+                model_slug = (
+                    f"{model['providerID']}/{model['modelID']}" if model else None
+                )
+                from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
+
+                usage = apply_catalog_cost_to_usage(usage, model=model_slug)
                 log_token_table(
                     input_tokens=inp,
                     cache_read=0,
                     cache_write=0,
                     output=out,
-                    cost_usd=usage.cost_usd,
+                    cost_usd=usage.cost_usd if usage else None,
                 )
     return with_prompt(AgentResult(success=True, output=output or None, usage=usage), text)
 

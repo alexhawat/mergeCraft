@@ -820,8 +820,14 @@ def run(
             )
 
         if not result.success:
-            if result.output and not agent_mode:
-                console.print(result.output)
+            from mergecraft.cli.review_output import _append_timing_to_text
+
+            failed_text = _append_timing_to_text(
+                result.output or "",
+                result.llm_review_timing,
+            )
+            if failed_text and not agent_mode:
+                console.print(failed_text)
             if agent_mode and stream is not None:
                 _finish_agent_protocol(
                     stream,

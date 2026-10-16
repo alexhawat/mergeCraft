@@ -461,11 +461,25 @@ def infer_harness_for_slug(
     if legacy_harness is not None:
         return legacy_harness
 
+    if provider in {"opencode", "opencode-go"} and _opencode_zen_credentials_present():
+        return "opencode"
+
     msg = (
         f"configuration error: provider {provider!r} is not registered — "
         "add it with `mergecraft provider add`"
     )
     raise ValueError(msg)
+
+
+def _opencode_zen_credentials_present() -> bool:
+    if _read_env_value("OPENCODE_API_KEY"):
+        return True
+    raw = _read_env_value("OPENCODE_AUTH_JSON")
+    if not raw:
+        return False
+    from mergecraft.security.opencode_auth import opencode_auth_usable
+
+    return opencode_auth_usable(raw)
 
 
 __all__ = [

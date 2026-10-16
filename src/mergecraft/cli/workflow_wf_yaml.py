@@ -101,13 +101,16 @@ def _assert_provider_env_wired(
     *,
     step_identifiers: list[str],
     env_index: int,
+    label: str,
     base_url: str,
     secret_name: str,
 ) -> None:
     if not step_identifiers:
         return
+    label_key = f"LLM_PROVIDER_{env_index}"
     base_key = _indexed_base_url_key(env_index)
     api_key = _indexed_api_key_key(env_index)
+    expected_label = label.strip().lower()
     expected_api = f"${{{{ secrets.{secret_name} }}}}"
     try:
         parsed = yaml.safe_load(text)
@@ -137,6 +140,10 @@ def _assert_provider_env_wired(
             env_map = step.get("env")
             if not isinstance(env_map, dict):
                 raise WorkflowYamlError(f"mergeCraft step {step_id!r} missing env: mapping")
+            if env_map.get(label_key) != expected_label:
+                raise WorkflowYamlError(
+                    f"mergeCraft step {step_id!r} missing env.{label_key}={expected_label!r}"
+                )
             if env_map.get(base_key) != base_url:
                 raise WorkflowYamlError(
                     f"mergeCraft step {step_id!r} missing env.{base_key}={base_url!r}"
@@ -300,7 +307,9 @@ def apply_provider_env_wiring(
     validated_secret = _splice_secret(secret_name)
     base_key = _indexed_base_url_key(env_index)
     api_key = _indexed_api_key_key(env_index)
+    label_key = f"LLM_PROVIDER_{env_index}"
     env_canonical: list[tuple[str, str]] = [
+        (label_key, label.strip().lower()),
         (base_key, base_url),
         (api_key, f"${{{{ secrets.{validated_secret} }}}}"),
     ]
@@ -332,6 +341,7 @@ def apply_provider_env_wiring(
             cur_text,
             step_identifiers=step_identifiers,
             env_index=env_index,
+            label=label,
             base_url=base_url,
             secret_name=validated_secret,
         )

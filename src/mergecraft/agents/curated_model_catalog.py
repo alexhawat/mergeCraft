@@ -168,7 +168,23 @@ def apply_catalog_cost_to_usage(
     usage: AgentUsage | None, *, model: str | None
 ) -> AgentUsage | None:
     """Fill ``cost_usd`` on *usage* from the catalog when the provider omitted it."""
-    if usage is None or usage.cost_usd is not None:
+    if usage is None:
+        return usage
+    total_tokens = (
+        usage.input_tokens + usage.output_tokens + (usage.cache_read_tokens or 0)
+    )
+    if total_tokens <= 0:
+        if usage.cost_usd is None or usage.cost_usd <= 0:
+            return usage
+        return AgentUsage(
+            agent=usage.agent,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+            cost_usd=None,
+        )
+    if usage.cost_usd is not None:
         return usage
     computed = compute_review_cost_usd(
         model=model,
@@ -176,7 +192,7 @@ def apply_catalog_cost_to_usage(
         output_tokens=usage.output_tokens,
         cache_read_tokens=usage.cache_read_tokens,
     )
-    if computed is None:
+    if computed is None or computed <= 0:
         return usage
     return AgentUsage(
         agent=usage.agent,
