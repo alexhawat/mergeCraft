@@ -196,6 +196,7 @@ async def test_the_named_reason_reaches_the_check_summary_and_the_run_result(
     assert rec.result.error is not None
     assert NAMED_REASON in rec.result.error
     completion = [run for run in rec.status_check_runs if run["name"] == "mergecraft"]
+    assert completion, rec.status_check_runs
     for run in completion:
-        assert NAMED_REASON in run["summary"], run
+        assert NAMED_REASON in run["output"]["summary"], run
         assert run["conclusion"] == "neutral", run

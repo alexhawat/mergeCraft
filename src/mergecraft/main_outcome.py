@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from loguru import logger
 
+from mergecraft.agents.shared import INFRA_REASON_KEY
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.tracing.event import trace_attrs_for_mode
 
@@ -189,6 +190,12 @@ def _classify_outcome(
     non-pass branch logs a warning here so the call site only needs the tuple.
     """
     if not result.success:
+        # A driver that knows the failure is the reviewer's infrastructure (an
+        # expired credential) says so; it reads as ``infra_error`` with its named
+        # reason, not as a review that failed. Anything else is the old ``failed``.
+        if (result.metadata or {}).get(INFRA_REASON_KEY):
+            logger.warning("» agent failure mapped run to infra_error: {}", result.error)
+            return RunOutcome.infra_error, result.error
         return RunOutcome.failed, result.error
     if setup_reason and setup_policy == "fail":
         # D10 ``fail`` — operator has declared the failure is unrecoverable.

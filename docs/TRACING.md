@@ -458,7 +458,7 @@ match wins per region:
 | Pattern | Before | After |
 |---------|--------|-------|
 | Telegram bot token | `https://api.telegram.org/bot123456:ABC/sendMessage` | `https://api.telegram.org/bot<redacted>/sendMessage` |
-| Basic auth | `https://user:pass@example.com/path` | `https://user:<redacted>@example.com/path` |
+| Basic auth <!-- trufflehog:ignore --> | `https://user:pass@example.com/path` | `https://user:<redacted>@example.com/path` |
 | Query token (`api_key`, `access_token`, `token`, `key`, `secret`) | `https://example.com/v1/messages?api_key=sk-abc&x=1` | `https://example.com/v1/messages?api_key=<redacted>&x=1` |
 | Bearer header value | `Bearer ghp_longtoken123…` | `Bearer <redacted>` |
 | Embedded `sk-` / `ghp_` / `eyJ…` substring | `…sk-abc123def…` | `…<redacted>…` |
