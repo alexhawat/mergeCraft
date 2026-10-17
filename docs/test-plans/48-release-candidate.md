@@ -82,7 +82,7 @@ reason: the shape of the RED result is 14 `failed`, 0 `error`.
 ## Reproduction
 
 ```bash
-cd /Users/alex/Documents/code/sevn.bot/mc-release
+cd ../mc-release   # the release worktree, beside the primary checkout
 UV_PROJECT_ENVIRONMENT="$PWD/.venv-dev" uv run pytest tests/release -q --collect-only   # 29 collected, no errors
 UV_PROJECT_ENVIRONMENT="$PWD/.venv-dev" uv run pytest tests/release -q                 # 14 failed, 15 passed  (the RED wave)
 UV_PROJECT_ENVIRONMENT="$PWD/.venv-dev" uv run pytest tests/mcp/test_server_json.py -q  # 7 passed
