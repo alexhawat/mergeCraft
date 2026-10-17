@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.14.0`.
+The current version is `1.15.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -134,6 +134,8 @@ not move.
   state.
 - `1.14.0` — adds `coverage`: changed-line coverage, written by the
   orchestrator and defaulting to `null`.
+- `1.15.0` — adds `triage`: the tier the deterministic pre-dispatch triage
+  chose, defaulting to `null` (the fast path off).
 
 ## Top-level fields
 
@@ -233,6 +235,21 @@ the delivered diff and never read or handed back), `budget_exhausted` (as
 
 An incomplete section makes the run `inconclusive` under the default
 `review.coverage.onIncomplete: inconclusive`; blockers still win.
+
+### `triage` — `TriageSection | None` (added in 1.15.0)
+
+The tier the deterministic pre-dispatch triage (`review.fastPath`) chose.
+Written by the orchestrator when the fast path was evaluated; `null` when it is
+off, so a run with no `review.fastPath` config is unchanged.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `tier` | `str` | `skip` (no LLM review ran) or `full`. |
+| `recognizer` | `str \| null` | The recognizer behind a `skip` (`pinBump`, `prose`, `whitespace`, `generated`). |
+| `reason` | `str` | Why. |
+| `relied_on_checks` | `list[str]` | Checks that had to pass on the head SHA for a `skip`. |
+
+A `skip` run never carries a `success` decision: approval is left to a human.
 
 ### `deterministic_checks` — required (`list[DeterministicCheck]`)
 

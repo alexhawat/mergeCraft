@@ -150,6 +150,26 @@ it (`Coverage: 41/44 hunks, 3 uncovered → inconclusive`) and the packet's
 to keep the verdict and only report the gap. This proves delivery, not
 comprehension: a driver's native file reads never cross mergeCraft's wire.
 
+**Deterministic triage before dispatch (`review.fastPath`).** Off by default.
+When enabled in the operator's base-side config (a `pull_request_target`
+run — head-side config is never honoured), mergeCraft decides from the diff
+alone, before the MCP server and the agent exist, whether an LLM review is
+worth running. Four recognizers answer "is *every* change in this diff of this
+kind?": `pinBump` (each changed line pair differs only in a 40-hex SHA or
+`sha256:` digest, always the same single old → new pair), `prose` (only
+`.md` / `.txt` edits outside code fences, front matter and high-stakes
+paths, proved against the head-side text), `whitespace` (the same tokens
+before and after; indentation counts in whitespace-sensitive languages) and
+`generated` (only lockfiles or generated paths, with no manifest or generator
+config beside them). A mixed diff matches nothing and gets a full review.
+`skipLlm` opts each recognizer in; a pin bump also needs every
+`pinBump.requireChecks` check to have passed on the head SHA. A skipped run
+posts the `mergecraft` check stating `Tier: skip (pinBump) — no LLM review
+ran`, names the checks it relied on, **never grants `mergecraft-approval`**,
+and records the tier in the evidence packet and the shadow log. Any read
+failure, truncated listing or file without a patch is a full review. The PR
+title, body and labels are never inputs.
+
 **Fallback interaction.** Semantic fallback advances when
 `terminal_submission_received` is false — whether because no submission
 was recorded or because the validator rejected one. A valid

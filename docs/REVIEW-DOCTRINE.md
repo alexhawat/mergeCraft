@@ -216,6 +216,18 @@ snapshot. The packet's `coverage` section (see
 [`evidence-packet.md`](evidence-packet.md)) records the totals and every
 uncovered range with its cause.
 
+### Deterministic triage
+
+The "genuinely trivial" rule in the review modes is a decision the agent makes,
+after the tokens are spent. `review.fastPath` moves a narrow slice of it in
+front of the agent as a pure function of the unified diff: recognizers for a
+verified pin substitution, prose, whitespace and regenerated lockfiles. The
+tier is `skip` or `full`; there is no partial credit and no "probably". The
+refusals are the design: a skipped run is stated as such on the check and the
+record, never grants approval, only counts a pin bump when its verifying check
+passed on the head SHA, reads its config from the base ref only, and treats any
+failure to read the pull request as a reason to review.
+
 ### Evidence weighting
 
 What the merge-evidence packet carries, and how each signal weights:

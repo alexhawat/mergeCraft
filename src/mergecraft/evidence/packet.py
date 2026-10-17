@@ -98,7 +98,11 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   whether coverage was ``complete``. Written by the orchestrator from the run's
 #   own checkout and delivery state, never by an agent; defaults to ``None``, so a
 #   packet built before this version still validates.
-PACKET_SCHEMA_VERSION = "1.14.0"
+# - 1.15.0 — deterministic triage: the ``triage`` section records the tier
+#   (``skip`` / ``full``) the pre-dispatch gate chose, the recognizer behind a skip, why,
+#   and the checks a skip relied on. Orchestrator-written; defaults to ``None`` (the
+#   fast path off), so a packet built before this version still validates.
+PACKET_SCHEMA_VERSION = "1.15.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -290,6 +294,17 @@ class CoverageSection(BaseModel):
     complete: bool
 
 
+class TriageSection(BaseModel):
+    """The tier the deterministic pre-dispatch triage chose (``skip`` runs no LLM review)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tier: Literal["skip", "full"]
+    recognizer: str | None = None
+    reason: str
+    relied_on_checks: list[str] = Field(default_factory=list)
+
+
 class MergeEvidencePacket(BaseModel):
     """The versioned, structured record of one mergeCraft run.
 
@@ -336,6 +351,8 @@ class MergeEvidencePacket(BaseModel):
     # Changed-line coverage (#940), written by the orchestrator from the run's own
     # checkout and delivery state. ``None`` when the run had no diff to account for.
     coverage: CoverageSection | None = None
+    # Deterministic pre-dispatch triage (#890); ``None`` when ``review.fastPath`` is off.
+    triage: TriageSection | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:
@@ -397,6 +414,7 @@ __all__ = [
     "ModePromptVersion",
     "RunHealth",
     "SelfAssessment",
+    "TriageSection",
     "UncoveredCause",
     "UncoveredRange",
     "packet_output_schema",

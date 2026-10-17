@@ -131,6 +131,18 @@ def _coverage_line(ctx: ToolContext, packet: MergeEvidencePacket | None) -> str 
         return None
 
 
+def _triage_lines(packet: MergeEvidencePacket | None) -> list[str]:
+    """Return the lines that state a ``skip`` tier, so it never reads like a clean review."""
+    triage = packet.triage if packet is not None else None
+    if triage is None or triage.tier != "skip":
+        return []
+    lines = [f"Tier: skip ({triage.recognizer}) — no LLM review ran"]
+    if triage.relied_on_checks:
+        lines.append("Verified by: " + ", ".join(triage.relied_on_checks))
+    lines.append("Approval is left to a human.")
+    return lines
+
+
 def _build_completion_summary(
     *,
     run_succeeded: bool,
@@ -140,6 +152,7 @@ def _build_completion_summary(
     run_url: str | None,
     reviewed_sha: str | None,
     coverage_line: str | None = None,
+    triage_lines: list[str] | None = None,
 ) -> str:
     if run_succeeded:
         lead = "The mergeCraft run finished successfully."
@@ -148,7 +161,7 @@ def _build_completion_summary(
             failure_reason
             or "The mergeCraft run failed or timed out. See the run logs for details."
         )
-    lines = [lead, *_run_health_lines(findings)]
+    lines = [lead, *(triage_lines or []), *_run_health_lines(findings)]
     if coverage_line:
         lines.append(coverage_line)
     if catalog_banner:
@@ -193,10 +206,12 @@ def _build_approval_summary(
     run_url: str | None,
     reviewed_sha: str | None,
     coverage_line: str | None = None,
+    triage_lines: list[str] | None = None,
 ) -> str:
     from mergecraft.agents.gates import decision_summary_lines
 
     lines = [_build_approval_lead(approval_conclusion, findings, decision_reason=decision_reason)]
+    lines.extend(triage_lines or [])
     if _change_findings(findings) and _run_health_lines(findings):
         lines.extend(_run_health_lines(findings))
     if coverage_line:
@@ -327,6 +342,7 @@ async def report_status_checks(
         run_url=run_url,
         reviewed_sha=reviewed_sha,
         coverage_line=coverage_line,
+        triage_lines=_triage_lines(packet),
     )
     try:
         await _create_check_run(
@@ -449,6 +465,7 @@ async def report_status_checks(
             run_url=run_url,
             reviewed_sha=reviewed_sha,
             coverage_line=coverage_line,
+            triage_lines=_triage_lines(packet),
         )
 
         await _create_check_run(

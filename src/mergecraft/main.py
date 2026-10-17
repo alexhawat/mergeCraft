@@ -31,6 +31,7 @@ from mergecraft.analyzers.trust import (
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
 from mergecraft.config.env import EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
+from mergecraft.fast_path import decide_fast_path, load_triage_inputs
 from mergecraft.main_outcome import (
     _classify_outcome,
     _is_review_mode,
@@ -243,7 +244,7 @@ class RunContext:
 
 @dataclass(frozen=True, slots=True)
 class SkipAgentReview:
-    """Review-stage outcome when setup-script policy skips the agent loop."""
+    """Review-stage outcome when setup-script policy or the triage fast path skips the agent."""
 
     reason: str
 
@@ -1959,6 +1960,46 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
+async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
+    """Deterministic pre-dispatch triage (``review.fastPath``): skip the agent when certain.
+
+    Returns ``SkipAgentReview`` only for a ``skip`` tier. Off by default; the config is
+    honoured only when it is the operator's base-side config. The decision is recorded
+    on the run (packet, check summaries, shadow log) whenever the gate was evaluated,
+    and any doubt is ``full``. The PR's title, body, labels and head-side config are
+    never read.
+    """
+    assert ctx.settings is not None
+    assert ctx.tool_state is not None
+    config = ctx.settings.review.fast_path
+    if not config.enabled:
+        return None
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    pull = event.get("pull_request")
+    if not isinstance(pull, dict) or not isinstance(pull.get("number"), int):
+        return None
+    head = pull.get("head")
+    head_sha = str(head.get("sha") or "") if isinstance(head, dict) else ""
+    assert ctx.tool_context is not None
+    repo = ctx.tool_context.repo
+    decision = await decide_fast_path(
+        ctx.tool_context.scm,
+        repo.owner,
+        repo.name,
+        int(pull["number"]),
+        head_sha,
+        config=config,
+        operator_owned=ctx.settings_snapshot_operator_owned,
+        loader=load_triage_inputs,
+    )
+    ctx.tool_state.triage = decision
+    if decision.tier != "skip":
+        return None
+    logger.warning("» {} — {}", decision.record_line(), decision.reason)
+    gha_log.warning(decision.record_line())
+    return SkipAgentReview(reason=decision.reason)
+
+
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
@@ -2005,6 +2046,10 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         )
         # Engine publish (``_finalize``) owns completion; do not publish here.
         return SkipAgentReview(reason=skip_reason)
+
+    triage_skip = await _triage_gate(ctx)
+    if triage_skip is not None:
+        return triage_skip
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)

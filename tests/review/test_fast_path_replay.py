@@ -142,7 +142,6 @@ async def test_the_tier_is_recorded_on_the_packet(
 
 async def test_the_shadow_record_carries_the_tier() -> None:
     from mergecraft.classify.triage import TriageDecision
-
     from mergecraft.evidence.shadow import ShadowRecord, triage_shadow_row
 
     decision = TriageDecision(
@@ -164,7 +163,6 @@ async def test_a_skipped_run_writes_a_triage_row_beside_the_packet(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from mergecraft.classify.triage import TriageDecision
-
     from mergecraft.evidence.run_packet import build_run_packet, emit_run_packet
     from mergecraft.evidence.shadow import load_shadow_records
     from tests.evidence.test_run_packet import _make_ctx
@@ -181,8 +179,9 @@ async def test_a_skipped_run_writes_a_triage_row_beside_the_packet(
 
     assert written is not None
     rows = load_shadow_records(written.with_name("merge-evidence-shadow.jsonl"))
-    assert [r.policy_id for r in rows] == ["triage"]
-    assert rows[0].metadata["tier"] == "skip"
+    triage_rows = [r for r in rows if r.policy_id == "triage"]
+    assert len(triage_rows) == 1
+    assert triage_rows[0].metadata["tier"] == "skip"
 
 
 async def test_fast_path_disabled_runs_the_agent_exactly_as_before(
