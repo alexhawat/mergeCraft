@@ -221,7 +221,7 @@ the install path for Desktop and other stdio hosts.
 `mergecraft mcp serve --role public` (default `--transport http`) mounts `/mcp/public`
 on an ephemeral port and prints `MERGECRAFT_MCP_BEARER=<token>` to stderr. Every
 request needs `Authorization: Bearer …`. This is **not** the copy-paste path for
-Cursor or Claude Desktop in 0.1.0a1.
+Cursor or Claude Desktop.
 
 ---
 
