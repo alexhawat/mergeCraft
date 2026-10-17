@@ -359,11 +359,10 @@ def test_coverage_does_not_mask_an_agent_failure() -> None:
 
 def test_a_blocker_still_wins_over_incomplete_coverage() -> None:
     """Blockers are never masked: an incomplete run with a Major finding is ``failure``."""
-    from mergecraft.evidence.coverage import account_coverage
-
     from mergecraft.agents.gates import decide_approval
     from mergecraft.analyzers.finding import make_finding
     from mergecraft.evidence.build import build_packet
+    from mergecraft.evidence.coverage import account_coverage
 
     blocker = make_finding(
         tool="agent",

@@ -61,7 +61,6 @@ def test_the_fast_path_is_off_by_default() -> None:
 
 def test_missing_config_reproduces_todays_behaviour_for_every_diff() -> None:
     from mergecraft.classify.triage import triage_diff
-
     from mergecraft.config.settings import FastPathSettings
 
     decision = triage_diff(_PIN_DIFF, config=FastPathSettings(), passed_checks=[_VERIFIER])

@@ -40,7 +40,6 @@ async def test_a_files_api_diff_over_the_page_cap_is_recorded_as_truncated(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     from mergecraft.evidence.coverage import coverage_section_for_state
-
     from mergecraft.mcp import checkout as checkout_module
 
     monkeypatch.setattr(checkout_module, "_PULL_FILES_MAX_PAGES", 2)

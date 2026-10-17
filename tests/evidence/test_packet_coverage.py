@@ -173,10 +173,9 @@ def test_a_run_with_no_diff_records_no_coverage_section(tmp_path: Path) -> None:
 
 
 def test_the_policy_is_read_from_the_pinned_settings_snapshot(tmp_path: Path) -> None:
-    from mergecraft.evidence.coverage import coverage_policy
-
     from mergecraft.config.settings import RepoSettings
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
+    from mergecraft.evidence.coverage import coverage_policy
 
     ctx = _make_ctx(tmp_path, diff_text=_AUTHORITATIVE)
     assert coverage_policy(ctx) == "inconclusive"
